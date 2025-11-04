@@ -191,6 +191,11 @@ def visible_user_ids(session: Session, user) -> set[int]:
     return get_visible_user_ids(session, user)
 
 
+def visible_user_ids(session: Session, user) -> set[int]:
+    """Alias retrocompatible para código que siga usando el nombre previo."""
+    return get_visible_user_ids(session, user)
+
+
 def uploads_visible_query(session: Session, user):
     """
     Query base de Uploads visibles para el actor.
