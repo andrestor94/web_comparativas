@@ -25,6 +25,7 @@ DONE_STATUS = "done"
 # ----------------------------------------------------------------------
 ADMIN_ROLES = {"admin", "administrator", "administrador"}
 AUDITOR_ROLES = {"auditor", "visor", "viewer"}
+MANAGER_ROLES = {"gerente", "manager"}
 SUPERVISOR_ROLES = {"supervisor"}
 ANALYST_ROLES = {"analista", "analyst"}  # nombre(s) de rol para analistas
 
@@ -52,6 +53,10 @@ def _is_analyst(user) -> bool:
     return _role_of(user) in ANALYST_ROLES
 
 
+def _is_manager(user) -> bool:
+    return _role_of(user) in MANAGER_ROLES
+
+
 # ----------------------------------------------------------------------
 # Núcleo de visibilidad
 # ----------------------------------------------------------------------
@@ -60,10 +65,10 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
     Devuelve los IDs de usuarios cuyos uploads puede ver `user`:
 
       - ADMIN/AUDITOR: todos los usuarios.
-      - SUPERVISOR: todos los usuarios con rol ANALISTA de su misma unidad de negocio + él mismo.
-      - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor
+      - GERENTE/SUPERVISOR: todos los usuarios con rol ANALISTA de su misma unidad de negocio + él mismo.
+      - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor/gerente
                   que compartan su unidad de negocio.
-      - RESTO: él mismo + miembros de sus grupos, EXCLUYENDO a cualquier supervisor.
+      - RESTO: él mismo + miembros de sus grupos, EXCLUYENDO a cualquier supervisor o gerente.
     """
     if not user:
         return set()
@@ -74,8 +79,8 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
 
     me = int(user.id)
 
-    # 2) Supervisor: todos los ANALISTAS de su misma BU (+ él mismo)
-    if _is_supervisor(user):
+    # 2) Gerente / Supervisor: todos los ANALISTAS de su misma BU (+ él mismo)
+    if _is_manager(user) or _is_supervisor(user):
         ids: Set[int] = {me}
         bu_norm = _norm(getattr(user, "unit_business", None))
         if bu_norm:
@@ -100,7 +105,7 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
         if not bu_norm:
             return ids
 
-        allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES)
+        allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES | MANAGER_ROLES)
         creator_alias = aliased(User)
         group_ids = [
             int(gid)
@@ -127,7 +132,7 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
             .filter(
                 GroupMember.group_id.in_(group_ids),
                 func.lower(func.trim(User.unit_business)) == bu_norm,
-                ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)),
+                ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES | MANAGER_ROLES)),
             )
             .all()
         )
