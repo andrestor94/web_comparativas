@@ -98,12 +98,12 @@ def _get_upload(upload_id: int) -> UploadModel:
 def _commit_safe():
     try:
         db_session.commit()
-    except Exception:
+    except Exception as exc:
         try:
             db_session.rollback()
-        except Exception:
-            pass
-        db_session.commit()
+        except Exception as rollback_exc:
+            logger.error("Fallo al hacer rollback de la sesión: %s", rollback_exc)
+        raise exc
 
 def _set_status_by_id(upload_id: int, status_key: str):
     if status_key not in STEP_KEYS:

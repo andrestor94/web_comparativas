@@ -64,12 +64,11 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
     """
     Devuelve los IDs de usuarios cuyos uploads puede ver `user`:
 
-      - ADMIN/AUDITOR/GERENTE: todos los usuarios.
-      - SUPERVISOR: todos los usuarios de su unidad de negocio.
-      - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor/gerente
+      - ADMIN/AUDITOR: todos los usuarios.
+      - SUPERVISOR: todos los usuarios con rol ANALISTA de su misma unidad de negocio + él mismo.
+      - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor
                   que compartan su unidad de negocio.
-      - RESTO: él mismo + miembros de sus grupos (creados por admin/supervisor/gerente),
-               EXCLUYENDO a cualquier supervisor.
+      - RESTO: él mismo + miembros de sus grupos, EXCLUYENDO a cualquier supervisor.
     """
     if not user:
         return set()
@@ -85,23 +84,28 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
         ids: Set[int] = {me}
         bu_norm = _norm(getattr(user, "unit_business", None))
         if bu_norm:
-            same_bu_ids = (
-                session.query(User.id)
-                .filter(func.lower(func.trim(User.unit_business)) == bu_norm)
-                .all()
-            )
-            ids.update(int(uid) for (uid,) in same_bu_ids)
+            analyst_ids = [
+                uid
+                for (uid,) in (
+                    session.query(User.id)
+                    .filter(
+                        func.lower(func.trim(User.unit_business)) == bu_norm,
+                        func.lower(User.role).in_(tuple(ANALYST_ROLES)),
+                    )
+                    .all()
+                )
+            ]
+            ids.update(int(x) for x in analyst_ids)
         return ids
 
     # 3) Analista: él mismo + miembros de grupos válidos dentro de su BU
     if _is_analyst(user):
+        ids: Set[int] = {me}
         bu_norm = _norm(getattr(user, "unit_business", None))
         if not bu_norm:
-            return {me}
+            return ids
 
-        ids: Set[int] = {me}
-
-        allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES | MANAGER_ROLES)
+        allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES)
         creator_alias = aliased(User)
         group_ids = [
             int(gid)
@@ -128,6 +132,23 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
             .filter(
                 GroupMember.group_id.in_(group_ids),
                 func.lower(func.trim(User.unit_business)) == bu_norm,
+                ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)),
+            )
+            .all()
+        )
+        ids.update(int(uid) for (uid,) in member_rows)
+        return ids
+
+        if not group_ids:
+            return ids
+
+        member_rows = (
+            session.query(GroupMember.user_id)
+            .join(Group, GroupMember.group_id == Group.id)
+            .join(User, GroupMember.user_id == User.id)
+            .filter(
+                GroupMember.group_id.in_(group_ids),
+                func.lower(func.trim(User.unit_business)) == bu_norm,
                 ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES | MANAGER_ROLES)),
             )
             .all()
@@ -136,11 +157,10 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
         return ids
 
     # 4) Otros: propio usuario + compañeros de grupos válidos en su BU, excluyendo supervisores
+    ids: Set[int] = {me}
     bu_norm = _norm(getattr(user, "unit_business", None))
     if not bu_norm:
-        return {me}
-
-    ids: Set[int] = {me}
+        return ids
 
     allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES | MANAGER_ROLES)
     creator_alias = aliased(User)
@@ -157,24 +177,18 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
             )
             .all()
         )
-    ]
-
-    if not group_ids:
+        ids.update(int(uid) for (uid,) in member_rows)
         return ids
 
-    member_rows = (
-        session.query(GroupMember.user_id)
-        .join(Group, GroupMember.group_id == Group.id)
-        .join(User, GroupMember.user_id == User.id)
-        .filter(
-            GroupMember.group_id.in_(group_ids),
-            func.lower(func.trim(User.unit_business)) == bu_norm,
-            ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)),
-        )
-        .all()
-    )
-    ids.update(int(uid) for (uid,) in member_rows)
-    return ids
+    # 4) Otros (p.ej. roles custom no listados): restringido solo a su propio usuario.
+    #    Esto mantiene un comportamiento conservador si el rol no coincide
+    #    exactamente con los conocidos (evitando saltos de visibilidad inesperados).
+    return {me}
+
+
+def visible_user_ids(session: Session, user) -> set[int]:
+    """Alias retrocompatible para código que siga usando el nombre previo."""
+    return get_visible_user_ids(session, user)
 
 
 def visible_user_ids(session: Session, user) -> set[int]:
