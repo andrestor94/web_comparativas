@@ -5,11 +5,13 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, select
+from sqlalchemy.orm import aliased
 
 # Importamos solo los modelos/base de datos, no helpers de visibilidad
 from .models import (
     Upload,
     User,
+    Group,
     GroupMember,
 )
 
@@ -53,13 +55,14 @@ def _is_analyst(user) -> bool:
 # ----------------------------------------------------------------------
 # Núcleo de visibilidad
 # ----------------------------------------------------------------------
-def visible_user_ids(session: Session, user) -> set[int]:
+def get_visible_user_ids(session: Session, user) -> set[int]:
     """
     Devuelve los IDs de usuarios cuyos uploads puede ver `user`:
 
       - ADMIN/AUDITOR: todos los usuarios.
       - SUPERVISOR: todos los usuarios con rol ANALISTA de su misma unidad de negocio + él mismo.
-      - ANALISTA: **solo él mismo**.
+      - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor
+                  que compartan su unidad de negocio.
       - RESTO: él mismo + miembros de sus grupos, EXCLUYENDO a cualquier supervisor.
     """
     if not user:
@@ -81,7 +84,7 @@ def visible_user_ids(session: Session, user) -> set[int]:
                 for (uid,) in (
                     session.query(User.id)
                     .filter(
-                        func.lower(User.unit_business) == bu_norm,
+                        func.lower(func.trim(User.unit_business)) == bu_norm,
                         func.lower(User.role).in_(tuple(ANALYST_ROLES)),
                     )
                     .all()
@@ -90,51 +93,74 @@ def visible_user_ids(session: Session, user) -> set[int]:
             ids.update(int(x) for x in analyst_ids)
         return ids
 
-    # 3) Analista: **solo sus propias cargas**
+    # 3) Analista: él mismo + miembros de grupos válidos dentro de su BU
     if _is_analyst(user):
-        return {me}
+        ids: Set[int] = {me}
+        bu_norm = _norm(getattr(user, "unit_business", None))
+        if not bu_norm:
+            return ids
 
-    # 4) Otros (p.ej. roles custom no listados): propios + compañeros de grupo, EXCLUYENDO supervisores
-    ids: Set[int] = {me}
-    my_group_ids = [
-        gid
-        for (gid,) in session.query(GroupMember.group_id)
-        .filter(GroupMember.user_id == me)
-        .all()
-    ]
-    if my_group_ids:
-        members = {
-            uid
-            for (uid,) in session.query(GroupMember.user_id)
-            .filter(GroupMember.group_id.in_(my_group_ids))
-            .all()
-        }
-        supervisor_ids = {
-            uid
-            for (uid,) in session.query(User.id)
-            .filter(func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)))
-            .all()
-        }
-        ids.update(int(x) for x in (members - supervisor_ids))
+        allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES)
+        creator_alias = aliased(User)
+        group_ids = [
+            int(gid)
+            for (gid,) in (
+                session.query(GroupMember.group_id)
+                .join(Group, GroupMember.group_id == Group.id)
+                .join(creator_alias, Group.created_by_user_id == creator_alias.id)
+                .filter(
+                    GroupMember.user_id == me,
+                    func.lower(creator_alias.role).in_(allowed_roles),
+                    func.lower(func.trim(Group.business_unit)) == bu_norm,
+                )
+                .all()
+            )
+        ]
 
-    return ids
+        if not group_ids:
+            return ids
+
+        member_rows = (
+            session.query(GroupMember.user_id)
+            .join(Group, GroupMember.group_id == Group.id)
+            .join(User, GroupMember.user_id == User.id)
+            .filter(
+                GroupMember.group_id.in_(group_ids),
+                func.lower(func.trim(User.unit_business)) == bu_norm,
+                ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)),
+            )
+            .all()
+        )
+        ids.update(int(uid) for (uid,) in member_rows)
+        return ids
+
+    # 4) Otros (p.ej. roles custom no listados): restringido solo a su propio usuario.
+    #    Esto mantiene un comportamiento conservador si el rol no coincide
+    #    exactamente con los conocidos (evitando saltos de visibilidad inesperados).
+    return {me}
+
+
+def visible_user_ids(session: Session, user) -> set[int]:
+    """Alias retrocompatible para código que siga usando el nombre previo."""
+    return get_visible_user_ids(session, user)
 
 
 def uploads_visible_query(session: Session, user):
     """
     Query base de Uploads visibles para el actor.
       - Admin/Auditor: sin filtro (ve TODO).
+      - Analista: uploads de los usuarios visibles (sin fallback por 'mismo proceso').
       - Supervisor/Otros: filtra por user_ids visibles + fallback por 'mismo proceso'.
-      - Analista: **solo propios**, SIN fallback por 'mismo proceso'.
     """
     if _is_admin(user):
         return session.query(Upload)
 
     me = int(user.id)
 
-    # Regla estricta para Analista: solo sus uploads
+    # Regla para Analista: uploads de usuarios visibles (sin fallback por proceso)
     if _is_analyst(user):
-        return session.query(Upload).filter(Upload.user_id == me)
+        ids = list(visible_user_ids(session, user) or {me})
+        return session.query(Upload).filter(Upload.user_id.in_(ids))
 
     # Resto de roles: visibilidad por usuarios + fallback por mismo proceso
     ids = list(visible_user_ids(session, user)) or [me]
@@ -164,7 +190,7 @@ def can_view_upload(session: Session, user, upload: Upload) -> bool:
     """
     Chequeo puntual de permiso de lectura:
       - Admin/Auditor: siempre True
-      - Analista: **solo si es el owner** (user_id == current_user.id)
+      - Analista: True si el owner está en visible_user_ids (sin fallback por proceso).
       - Otros: True si el owner está en visible_user_ids o si cargó algún upload con el mismo proceso_key
     """
     if _is_admin(user):
@@ -172,9 +198,9 @@ def can_view_upload(session: Session, user, upload: Upload) -> bool:
 
     me = int(user.id)
 
-    # Regla estricta para Analista
+    # Regla para Analista: puede ver uploads de usuarios visibles (sin fallback)
     if _is_analyst(user):
-        return int(upload.user_id) == me
+        return int(upload.user_id) in (visible_user_ids(session, user) or {me})
 
     # Otros roles: mismo comportamiento anterior
     ids = visible_user_ids(session, user) or {me}
@@ -231,8 +257,8 @@ def visible_uploads(
     """
     Devuelve (items, total) de uploads visibles al usuario:
       - Admin/Auditor: todos
+      - Analista: propios + miembros visibles de sus grupos (sin fallback por proceso)
       - Supervisor: propios + analistas de su BU
-      - Analista: **solo propios**
       - Otros: propios + compañeros de grupo (sin supervisores)
       + Fallback por 'mismo proceso' solo para roles NO analistas.
     """
