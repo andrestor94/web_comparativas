@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% block title %}Seguimiento – Proceso{% endblock %}
+
+{% block extra_head %}
+<style>
+  .meta-row{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.5rem}
+  .badge-soft{background:rgba(82,116,206,.1);color:#2a3f7c;border:1px solid rgba(82,116,206,.2)}
+  .badge-ok{background:rgba(34,160,107,.12);color:#1d6447;border:1px solid rgba(34,160,107,.2)}
+  .badge-err{background:rgba(220,53,69,.10);color:#842029;border:1px solid rgba(220,53,69,.25)}
+  .muted{color:#6c757d}
+  .tiny{font-size:.85rem}
+  .card{border-radius:14px}
+
+  .stepper-container{position:relative;margin-top:1.5rem;padding:2rem 1rem 1rem;min-height:120px}
+  .timeline{position:absolute;left:6%;right:6%;top:52px;height:4px;background:var(--bs-gray-300);border-radius:999px;overflow:hidden}
+  .timeline .fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,#6aa5ff,#04436a);transition:width .3s ease}
+
+  .stepper{display:flex;justify-content:space-between;position:relative;z-index:2}
+  .step{text-align:center;width:100%}
+  .step .circle{width:60px;height:60px;border-radius:50%;border:3px solid var(--bs-gray-400);background:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto;transition:.2s ease}
+  .step.done .circle{border-color:#22a06b}
+  .step.current .circle{border-color:#5274ce;box-shadow:0 0 0 6px rgba(82,116,206,.15)}
+  .step .label{margin-top:.5rem;font-size:.9rem;font-weight:500;color:#333}
+
+  .btn-icon{display:inline-flex;align-items:center;gap:.5rem}
+  .alert-compact{padding:.5rem .75rem;margin-bottom:0}
+  details.debug summary{cursor:pointer}
+</style>
+{% endblock %}
+
+{% block content %}
+{% set U = upload if upload is defined else up %}
+<div class="container py-4">
+
+  {# 👇 AVISO si venís de un duplicado #}
+  {% if dup %}
+    <div class="alert alert-warning d-flex align-items-center gap-2 mb-3" role="alert" style="border-radius:12px;">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <div>
+        Este proceso ya estaba cargado. Te mostramos el que ya existía para evitar duplicados.
+      </div>
+    </div>
+  {% endif %}
+
+  <h1 class="m-0">Proceso #{{ U.proceso_nro or "—" }}</h1>
+  <div class="text-subtle">
+    Plataforma: {{ U.platform_hint or "—" }} · Apertura: {{ U.apertura_fecha or "—" }}
+  </div>
+
+  <div class="meta-row tiny">
+    <span>Estado: <span id="statusChip" class="badge badge-soft">Pendiente</span></span>
+    <span>Adapter: <span id="adapterChip" class="badge bg-light border text-muted">—</span></span>
+    <span id="normChip" class="badge bg-light border text-muted">normalized.xlsx: —</span>
+    <span class="muted">Última actualización: <span id="lastUpd">—</span> <span id="lastUpdRel" class="muted">(—)</span></span>
+  </div>
+
+  <div id="errorBanner" class="alert alert-danger alert-compact mt-3 d-none">
+    Ocurrió un error durante el procesamiento. Revisá el registro y reintentá la carga si es necesario.
+  </div>
+
+  <!-- ===== SEGUIMIENTO ===== -->
+  <div class="card p-4 mt-4">
+    <div class="stepper-container">
+      <div class="timeline"><div class="fill" id="tlFill"></div></div>
+      <div class="stepper" id="stepper"></div>
+    </div>
+
+    <div class="text-center mt-3 text-muted tiny" id="noStepsMsg" style="display:none;">
+      No se pudo obtener el progreso. Verificá si el proceso está en cola o si la API de seguimiento responde correctamente.
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-3 mt-4 justify-content-between">
+      <div class="d-flex flex-wrap gap-2">
+        <a id="btnDashboard" class="btn btn-primary btn-lg btn-icon disabled"
+           href="/tablero/{{ U.id }}" aria-disabled="true" title="Disponible según permisos">
+          Ver tablero
+        </a>
+        <a id="btnDownload" class="btn btn-outline-success btn-lg btn-icon disabled"
+           href="/descargas/{{ U.id }}" aria-disabled="true" title="Disponible según permisos">
+          Descargar normalized.xlsx
+        </a>
+        <button id="btnRefresh" type="button" class="btn btn-outline-secondary btn-lg btn-icon">
+          Refrescar <span class="tiny muted">(R)</span>
+        </button>
+      </div>
+
+      {% if user and (user.role or '').lower() == 'admin' %}
+      <div class="d-flex gap-2">
+        <button id="btnPrev" class="btn btn-outline-secondary">
+          <i class="bi bi-skip-backward-fill"></i> Retroceder
+        </button>
+        <button id="btnNext" class="btn btn-outline-primary">
+          <i class="bi bi-skip-forward-fill"></i> Avanzar
+        </button>
+      {% endif %}
+      </div>
+
+    <div class="mt-2 tiny muted">
+      Tip: agregá <code>?autoredir=1</code> a la URL para entrar al tablero automáticamente cuando esté listo.
+    </div>
+
+    <details class="mt-3 tiny muted" id="dbgBox">
+      <summary>Ver diagnóstico</summary>
+      <pre class="mt-2" id="dbgJson" style="white-space:pre-wrap"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+/* ===================== Setup y utilidades ===================== */
+const uploadId = Number({{ U.id or 0 }});
+const PROC_LABEL = {{ (U.proceso_nro or ("#" ~ U.id))|tojson }};
+const stepper = document.getElementById("stepper");
+const tlFill = document.getElementById("tlFill");
+const btnDash = document.getElementById("btnDashboard");
+const btnDown = document.getElementById("btnDownload");
+const btnRef = document.getElementById("btnRefresh");
+const statusChip = document.getElementById("statusChip");
+const adapterChip = document.getElementById("adapterChip");
+const normChip = document.getElementById("normChip");
+const lastUpd = document.getElementById("lastUpd");
+const lastUpdRel = document.getElementById("lastUpdRel");
+const errorBanner = document.getElementById("errorBanner");
+const dbgJson = document.getElementById("dbgJson");
+const noStepsMsg = document.getElementById("noStepsMsg");
+
+const btnPrev = document.getElementById("btnPrev");
+const btnNext = document.getElementById("btnNext");
+
+const params = new URLSearchParams(location.search);
+const AUTO_REDIR = params.get("autoredir") === "1";
+
+const STATUS_LABEL = {
+  pending: "Pendiente",
+  classifying: "Validado y clasificado",
+  processing: "Procesando",
+  reviewing: "En revisión",
+  dashboard: "Tablero",
+  done: "Finalizado",
+  error: "Error"
+};
+
+const FALLBACK_STEPS = [
+  {key:"pending",label:"Pendiente"},
+  {key:"classifying",label:"Validado y clasificado"},
+  {key:"processing",label:"Procesando"},
+  {key:"reviewing",label:"En revisión"},
+  {key:"dashboard",label:"Tablero"},
+  {key:"done",label:"Finalizado"}
+];
+
+function setStatusBadge(key){
+  const label = STATUS_LABEL[key] || key || "—";
+  statusChip.textContent = label;
+  statusChip.className = "badge";
+  if (key === "error") statusChip.classList.add("badge-err");
+  else if (["dashboard","done"].includes(key)) statusChip.classList.add("badge-ok");
+  else if (["processing","classifying","reviewing"].includes(key)) statusChip.classList.add("badge-soft");
+  else statusChip.classList.add("bg-light","border","text-muted");
+}
+function setAdapterBadge(adapter){
+  adapterChip.textContent = adapter || "—";
+  adapterChip.className = "badge " + (adapter ? "badge-soft" : "bg-light border text-muted");
+}
+function setNormalized(isReady, allowed){
+  const allow = (typeof allowed === "boolean") ? allowed : !!isReady;
+  let label = "normalized.xlsx: " + (isReady ? "listo" : "—");
+  if (isReady && !allow) label += " (bloqueado)";
+  normChip.textContent = label;
+  normChip.className = "badge " + (isReady ? "badge-ok" : "bg-light border text-muted");
+
+  if (allow) {
+    btnDown.classList.remove("disabled");
+    btnDown.removeAttribute("aria-disabled");
+    btnDown.title = "Descargar normalized.xlsx";
+  } else {
+    btnDown.classList.add("disabled");
+    btnDown.setAttribute("aria-disabled","true");
+    btnDown.title = isReady ? "Disponible cuando el admin finalice el proceso" : "Aún no generado";
+  }
+}
+function fmtRel(d){
+  const s = Math.max(0, ((Date.now()-d)/1000)|0);
+  if (s<5) return "justo ahora";
+  if (s<60) return `${s}s`;
+  const m = (s/60)|0; if (m<60) return `${m}m`;
+  const h = (m/60)|0; if (h<24) return `${h}h`;
+  const dd = (h/24)|0; return `${dd}d`;
+}
+let lastUpdateTs=null;
+function setLastUpd(){
+  const d=new Date();
+  lastUpdateTs=d;
+  lastUpd.textContent=d.toLocaleTimeString();
+  lastUpdRel.textContent=`(${fmtRel(d)})`;
+}
+setInterval(()=>{if(lastUpdateTs) lastUpdRel.textContent=`(${fmtRel(lastUpdateTs)})`;},5000);
+function toggleError(show){errorBanner.classList.toggle("d-none",!show);}
+
+/* ===================== Estado/Stepper ===================== */
+let lastState = {steps:FALLBACK_STEPS,index:0,status:"pending",total:FALLBACK_STEPS.length};
+
+function renderSteps(data){
+  lastState = data && data.ok ? data : (data || lastState);
+
+  stepper.innerHTML = "";
+  const steps = (lastState.steps && lastState.steps.length) ? lastState.steps : FALLBACK_STEPS;
+  noStepsMsg.style.display = (lastState.steps && lastState.steps.length) ? "none" : "block";
+
+  steps.forEach((s,i)=>{
+    const el=document.createElement("div");
+    const done=s.done===true||(lastState.index!=null&&i<=Number(lastState.index));
+    const current=s.current===true||(lastState.index!=null&&i===Number(lastState.index));
+    el.className="step"+(done?" done":"")+(current?" current":"");
+    el.innerHTML=`<div class="circle" title="${s.label||s.key}">${i+1}</div><div class="label">${s.label||s.key}</div>`;
+    stepper.appendChild(el);
+  });
+
+  const idx = Number((lastState.index!=null?lastState.index:0));
+  const total = Number((lastState.total!=null?lastState.total:(steps.length||1)));
+  const pct = Math.max(0,Math.min(100,Math.round((idx/Math.max(1,total-1))*100)));
+  tlFill.style.width = pct + "%";
+
+  if(lastState.can_open_dashboard){
+    btnDash.classList.remove("disabled");
+    btnDash.removeAttribute("aria-disabled");
+    btnDash.title = "Ver tablero";
+    if(AUTO_REDIR&&lastState.dashboard_url){window.location.replace(lastState.dashboard_url);}
+  }else{
+    btnDash.classList.add("disabled");
+    btnDash.setAttribute("aria-disabled","true");
+    btnDash.title = "Disponible cuando el admin lo habilite";
+  }
+
+  setNormalized(!!lastState.normalized_ready, !!lastState.can_download_normalized);
+
+  const idxNum = Number((lastState.index!=null?lastState.index:0));
+  const totalNum = Number((lastState.total!=null?lastState.total:(steps.length||1)));
+  if (btnPrev) btnPrev.disabled = (idxNum <= 0);
+  if (btnNext) btnNext.disabled = (idxNum >= totalNum - 1);
+
+  setStatusBadge(lastState.status);
+  setAdapterBadge(lastState.adapter || "—");
+  setLastUpd();
+  toggleError(String(lastState.status||"").toLowerCase()==="error");
+}
+
+/* ===================== Notificaciones (UI) ===================== */
+let firstPaint = true;
+let currentBanner = null;
+
+function showBanner(msg, type="info", sticky=true){
+  if (!window.Notify || typeof window.Notify.banner!=="function") return;
+  try { if (currentBanner && currentBanner.remove) currentBanner.remove(); } catch {}
+  currentBanner = window.Notify.banner({ message: msg, type, sticky });
+}
+function clearBanner(){
+  try { if (currentBanner && currentBanner.remove) currentBanner.remove(); } catch {}
+  currentBanner = null;
+}
+
+function handleNotify(prevStatus, newStatus, data, isFirst){
+  if (!window.Notify) return;
+  const s = String(newStatus||"").toLowerCase();
+  const total = (data && data.total!=null) ? Number(data.total) :
+                (data && data.steps ? data.steps.length : FALLBACK_STEPS.length);
+  const idx = (data && data.index!=null) ? Number(data.index)+1 : null;
+  const stepText = (idx && total) ? ` · Paso ${idx}/${total}` : "";
+  const human = STATUS_LABEL[s] || s;
+
+  if (s === "done" || s === "dashboard") {
+    clearBanner();
+    const url = (data && data.dashboard_url) ? data.dashboard_url : (`/tablero/${uploadId}`);
+    window.Notify.toast({
+      type: "success",
+      title: "¡Finalizado!",
+      message: `${PROC_LABEL} listo. Ya podés ver el tablero.`,
+      actionText: "Abrir tablero",
+      onAction: () => location.href = url
+    });
+    return;
+  }
+  if (s === "error") {
+    clearBanner();
+    window.Notify.toast({
+      type: "error",
+      title: "Error en el proceso",
+      message: `${PROC_LABEL}: ocurrió un error. Revisá el estado o intentá nuevamente.`,
+      actionText: "Ver estado",
+      onAction: () => location.reload()
+    });
+    return;
+  }
+
+  // Estados intermedios: banner superior
+  const t = (s==="processing" || s==="reviewing") ? "warning" : "info";
+  const msg = `${PROC_LABEL} está en “${human}”${stepText}.`;
+  if (isFirst) {
+    showBanner(msg, t, true);
+  } else if (String(prevStatus||"").toLowerCase() !== s) {
+    showBanner(msg, t, true);
+  }
+}
+
+/* ===================== Polling ===================== */
+let delay=600,maxDelay=2500,stopped=false;
+renderSteps({steps:FALLBACK_STEPS,index:0,status:"pending",total:FALLBACK_STEPS.length});
+
+async function fetchStatusAndRender(){
+  try{
+    const r=await fetch(`/api/cargas/${uploadId}/status`,{cache:"no-store"});
+    if(r.ok){
+      const j=await r.json();
+      if(j&&j.ok){
+        const prev = lastState.status;
+        renderSteps(j);
+        dbgJson.textContent=JSON.stringify(j,null,2);
+        const s=String(j.status||"").toLowerCase();
+        handleNotify(prev, s, j, firstPaint);
+        firstPaint = false;
+
+        if(["done","dashboard","error"].includes(s)){stopped=true;return;}
+        delay=600;
+      }else{
+        delay=Math.min(maxDelay,delay+300);
+      }
+    }else{
+      delay=Math.min(maxDelay,delay+400);
+    }
+  }catch(e){
+    console.error(e);
+    delay=Math.min(maxDelay,delay+500);
+  }
+}
+
+async function tick(){
+  await fetchStatusAndRender();
+  if(!stopped){
+    const eff=document.hidden?Math.max(delay,2000):delay;
+    setTimeout(tick,eff);
+  }
+}
+
+btnRef.addEventListener("click",()=>{delay=0;stopped=false;tick();});
+document.addEventListener("keydown",(ev)=>{if(ev.key.toLowerCase()==="r"){ev.preventDefault();btnRef.click();}});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)delay=600;});
+
+/* ===== Fallback inteligente ante 409 ===== */
+async function goBackToProcessing() {
+  const cur = (lastState && typeof lastState.index==='number') ? lastState.index : 0;
+  const keys = (lastState && lastState.steps) ? lastState.steps.map(s=>s.key) : FALLBACK_STEPS.map(s=>s.key);
+  const processingIdx = Math.max(0, keys.indexOf('processing'));
+
+  let times = Math.max(0, cur - processingIdx);
+  while (times-- > 0) {
+    const fd = new FormData();
+    fd.append("action","prev");
+    await fetch(`/api/cargas/${uploadId}/avance`, { method:"POST", body: fd }).catch(()=>{});
+  }
+  await fetchStatusAndRender();
+}
+
+/* ===== Botones admin (si hay) ===== */
+async function move(action){
+  try{
+    const fd = new FormData();
+    fd.append("action", action);
+    const r = await fetch(`/api/cargas/${uploadId}/avance`, {
+      method: "POST",
+      body: fd
+    });
+
+    if (r.status === 409) {
+      await goBackToProcessing();
+      delay = 0; stopped = false; tick();
+      return;
+    }
+
+    const j = await r.json().catch(()=>null);
+    if(!r.ok || !j || !j.ok){
+      const msg = (j && (j.msg||j.error)) || `Error HTTP ${r.status}`;
+      console.warn("No se pudo cambiar de estado:", msg);
+      return;
+    }
+    await fetchStatusAndRender();
+  }catch(e){ console.error(e); }
+}
+if(btnPrev){ btnPrev.addEventListener("click", ()=> move("prev")); }
+if(btnNext){ btnNext.addEventListener("click", ()=> move("next")); }
+
+window.addEventListener("DOMContentLoaded", async () => {
+  await fetchStatusAndRender();
+  tick();
+});
+</script>
+{% endblock %}

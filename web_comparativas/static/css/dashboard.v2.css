@@ -1,0 +1,264 @@
+/* ===== Dashboard v2 (moderno, compacto, brand) ===== */
+:root{
+  /* Brand */
+  --sa-azul:#064066;
+  --sa-azul-alt:#5274ce;
+  --sa-azul-alt-claro:#6886c4;
+  --sa-amarillo:#eeede8;
+  --sa-text:#064066;
+  --sa-blanco:#ffffff;
+
+  /* Neutros */
+  --sa-gris-50:#f8fafc;
+  --sa-gris-75:#f3f5f9;
+  --sa-gris-100:#eef2f7;
+  --sa-gris-200:#e5e7eb;
+  --sa-gris-300:#d7dcea;
+
+  /* Tokens de UI */
+  --radius:14px;
+  --radius-sm:10px;
+  --shadow-1:0 3px 14px rgba(6,64,102,.06);
+  --shadow-2:0 10px 32px rgba(6,64,102,.10);
+  --font-ui:"Outfit", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+
+  /* Alturas de charts */
+  --chart-bar-h:300px;
+  --chart-donut-h:260px;
+  --chart-tree-h:340px;
+  --chart-half-h:260px;
+
+  /* Tabla */
+  --desc-col-w:200px;
+  --col-nro-w:52px;
+  --cant-col-w:92px;
+  --w-price:120px;
+  --w-rel:120px; /* ↑ antes 90px: evita recortes en “Relación” e input % máx. */
+  --w-asig:90px;
+  --w-prov:200px;
+
+  /* Head sticky fila 2 (JS la ajusta) */
+  --head-row1-h:44px;
+
+  /* Tarjetas planas */
+  --sa-card-bg:#f3f6fb;
+}
+
+/* Densidad compacta */
+#fitContainer.compact{
+  --chart-bar-h:220px;
+  --chart-donut-h:200px;
+  --chart-tree-h:260px;
+  --chart-half-h:200px;
+}
+
+/* ===== Base ===== */
+html,body{height:100%}
+body{
+  font-family:var(--font-ui);
+  color:var(--sa-text);
+  background:
+    radial-gradient(1200px 600px at 20% -10%, #f0f6ff, transparent 60%),
+    linear-gradient(180deg,#fbfdff 0%,#f7f9fc 100%);
+}
+h1,h2,h3,h4{color:var(--sa-azul);letter-spacing:.02em}
+
+/* Botones brand (sobrios) */
+.btn-primary{
+  background:var(--sa-azul-alt)!important;border-color:var(--sa-azul-alt)!important;color:#fff!important;
+  transition:transform .08s ease, box-shadow .2s ease, background .2s ease;
+  box-shadow:0 2px 8px rgba(82,116,206,.2);
+}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(82,116,206,.28)}
+.btn-outline-secondary{border-color:var(--sa-azul-alt-claro);color:var(--sa-azul)}
+.btn-outline-secondary:hover{background:#fff;border-color:var(--sa-azul-alt);color:var(--sa-azul)}
+
+/* Toggles/Chips — estilo pill */
+.mini-toggle,.segmented,.pos-cols{
+  background:#fff;border:1px solid var(--sa-gris-200);border-radius:999px;padding:.18rem;
+  display:inline-flex;gap:.18rem;
+}
+.mini-toggle .mini-btn,.segmented .seg-btn,.pos-cols .pos-chip{
+  border:0;background:transparent;padding:.28rem .6rem;border-radius:999px;
+  font-size:.82rem;color:var(--sa-azul);cursor:pointer;
+}
+.mini-toggle .mini-btn.active,.segmented .seg-btn.active,.pos-cols .pos-chip.active{
+  background:var(--sa-gris-100);
+}
+
+/* ===== Encabezado del proceso (compacto) ===== */
+.process-header{
+  position:relative;
+  background:#fff;border:1px solid var(--sa-gris-200);border-radius:var(--radius);
+  box-shadow:var(--shadow-1);
+  padding:.55rem .8rem .65rem;
+  display:grid;grid-template-columns:1fr;gap:.5rem .75rem;align-items:start;
+  margin-top:.25rem;
+
+  /* Reservo espacio a la derecha para Vistas/Descargar */
+  padding-right:230px;
+}
+.ph-left{min-width:0}
+.ph-title{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.ph-title .label{font-size:.9rem;font-weight:800;text-transform:uppercase;color:var(--sa-azul)}
+.ph-title .nro{font-weight:700;font-size:.95rem}
+
+/* Botonera, centrada verticalmente al costado derecho */
+.ph-right{
+  position:absolute; right:.5rem; top:50%; transform:translateY(-50%);
+  display:flex; gap:.5rem;
+}
+.ph-actions .btn{padding:.28rem .55rem;font-size:.8rem;border-radius:999px}
+
+.ph-meta-grid{
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:.2rem .5rem;margin-top:.15rem;
+}
+@media (max-width:1200px){ .ph-meta-grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:768px){ .ph-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+.ph-kv{display:flex;flex-direction:column;background:#fff;border:1px solid var(--sa-gris-200);border-radius:10px;padding:.45rem .55rem}
+.ph-kv .k{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--sa-azul);font-weight:800;margin-bottom:.08rem}
+.ph-kv .v{font-size:.85rem;color:#133245}
+
+/* ===== KPI cards ===== */
+.kpi-group{
+  background:#fff;border:1px solid var(--sa-gris-200);border-radius:var(--radius);box-shadow:var(--shadow-1);
+  padding:.6rem .8rem;
+}
+.kpi-group .group-title{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--sa-azul);margin:.1rem .2rem .35rem}
+.kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}
+.kpi-card{
+  background:var(--sa-card-bg)!important;border:1px solid var(--sa-gris-200);border-radius:var(--radius-sm);
+  padding:.55rem .7rem;
+}
+.kpi-label{font-size:.72rem;text-transform:uppercase;font-weight:700;color:#365b7a}
+.kpi-value{font-size:1.08rem;font-weight:500;color:#0d3551}
+
+/* ===== Gráficos ===== */
+.chart-box{
+  background:#fff;border:1px solid var(--sa-gris-200);border-radius:var(--radius);box-shadow:var(--shadow-1);
+  padding:.6rem .8rem;height:100%;display:flex;flex-direction:column;
+}
+.chart-box .title{font-size:.88rem;font-weight:800;color:var(--sa-azul);display:flex;align-items:center;justify-content:space-between;margin-bottom:.45rem}
+.chart-donut{height:var(--chart-donut-h)}
+.chart-bar{height:var(--chart-bar-h)}
+.chart-treemap{height:var(--chart-tree-h)}
+.chart-donut>canvas,.chart-bar>canvas,.chart-treemap>canvas{width:100%!important;height:100%!important;display:block}
+
+/* ===== Grid principal ===== */
+.dashboard-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1rem}
+.pane{display:flex;flex-direction:column;gap:1rem}
+.span-6{grid-column:span 6}
+
+/* ===== Tabla ===== */
+.table-wrap{
+  background:#fff;border:1px solid var(--sa-gris-200);border-radius:var(--radius);box-shadow:var(--shadow-1);
+  padding:.35rem .5rem; display:block; overflow:hidden;
+}
+
+/* 👇 Scroll horizontal SOLO dentro de la tabla */
+.dash-v2 .table-responsive{
+  display:block; width:100%; max-width:100%;
+  overflow-x:auto;                 /* <- horizontal aquí */
+  overflow-y:auto;                 /* y vertical aquí */
+  max-height:66vh;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-gutter:stable both-edges;
+  contain:content;
+  isolation:isolate;
+}
+
+/* La tabla puede ser más ancha que el contenedor, pero NO ensancha la página */
+.dash-v2 #rankTable{
+  table-layout:fixed !important;
+  width:max-content !important;    /* crece hacia adentro del scroller */
+  min-width:100% !important;       /* base = ancho contenedor */
+}
+
+/* Evita desbordes horizontales del layout externo */
+#fitContainer, body, .main{ overflow-x:hidden; }
+
+/* Cabezal doble sticky */
+.table thead th{position:sticky;background:linear-gradient(180deg,#f6f9fc 0%,#ffffff 85%);z-index:6}
+.table thead tr:nth-child(1) th{top:0;font-size:.88rem;font-weight:800;color:var(--sa-azul);text-align:center}
+.table thead tr:nth-child(2) th{top:var(--head-row1-h);font-weight:700;color:var(--sa-azul)}
+.filters-row{display:table-row;background:var(--sa-gris-100)}
+.filters-row th{background:var(--sa-gris-100);position:static}
+
+/* Columnas fijas */
+#rankTable th.col-nro,#rankTable td.col-nro{
+  width:var(--col-nro-w);min-width:var(--col-nro-w);max-width:var(--col-nro-w);
+  position:sticky;left:0;background:#fff;z-index:8;box-shadow:1px 0 0 var(--sa-gris-200);
+}
+#rankTable th.col-desc,#rankTable td.col-desc{
+  width:var(--desc-col-w);max-width:var(--desc-col-w);
+  position:sticky;left:var(--col-nro-w);background:#fff;z-index:8;box-shadow:1px 0 0 var(--sa-gris-200);
+}
+#rankTable th.col-cant,#rankTable td.col-cant{
+  width:var(--cant-col-w);min-width:var(--cant-col-w);max-width:var(--cant-col-w);
+  position:sticky;left:calc(var(--col-nro-w) + var(--desc-col-w));background:#fff;z-index:8;box-shadow:1px 0 0 var(--sa-gris-200);
+}
+#rankTable td.col-desc:hover{z-index:30}
+
+/* Subcolumnas */
+#rankTable th.c-price,#rankTable td.c-price{width:var(--w-price);min-width:var(--w-price)}
+#rankTable th.c-rel,#rankTable td.c-rel{width:var(--w-rel);min-width:var(--w-rel)}
+#rankTable th.c-asig,#rankTable td.c-asig{width:var(--w-asig);min-width:var(--w-asig)}
+#rankTable th.c-prov,#rankTable td.c-prov{width:var(--w-prov);min-width:var(--w-prov);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#rankTable th.g-start,#rankTable td.g-start{border-left:2px solid var(--sa-gris-200)}
+#rankTable th.pos-group-head{background:linear-gradient(180deg,#f6f9fc 0%, #ffffff 85%)}
+
+/* Filtros compactos */
+.f-mini{width:100%;max-width:180px;font-size:.8rem}
+.f-range{width:calc(var(--w-rel) - 16px)} /* ↔ ajusta al nuevo ancho de “Relación” */
+
+/* Relación con semáforo suave */
+.rel-cell{white-space:nowrap;font-weight:700;border-radius:6px;display:inline-block}
+.rel-pos-1{background:#e9fff4}
+.rel-pos-2{background:#fff8d6}
+.rel-pos-3{background:#ffe8e8}
+
+/* Asignación badges */
+.asignada-badge{display:inline-block;padding:.18rem .48rem;border-radius:999px;font-weight:700;font-size:.75rem;line-height:1}
+.asignada-full{background:#e8f7ec;border:1px solid #22c55e;color:#14532d}
+.asignada-partial{background:#fff6e6;border:1px solid #f59e0b;color:#7c2d12}
+.asignada-na{background:#f1f5f9;border:1px solid #cbd5e1;color:#475569}
+
+/* Descripción con burbuja */
+.desc-wrap{position:relative}
+.desc-trunc{max-width:var(--desc-col-w);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.desc-tip{
+  display:none;position:absolute;left:calc(100% + .5rem);top:50%;transform:translateY(-50%);
+  z-index:9999;min-width:420px;max-width:min(70vw,900px);padding:.55rem .7rem;background:var(--sa-amarillo);
+  border:1px solid #d6d2c9;border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.12);color:#2a2a2a;font-size:.9rem;line-height:1.25rem;white-space:normal;
+}
+.desc-wrap:hover .desc-tip{display:block}
+
+/* Búsqueda y chips */
+.search{min-width:260px}
+.cell-prov{cursor:pointer;text-decoration:underline dotted}
+
+/* Hover table */
+.table tbody tr:hover td{background:#fafcff}
+
+/* “Fit to screen” */
+#fitContainer{transform-origin:top left}
+#fitContainer.scaled{transform:scale(var(--fit-scale,1));width:calc(100%/var(--fit-scale,1))}
+
+/* Accesibilidad */
+:focus-visible{outline:2px solid var(--sa-azul-alt);outline-offset:2px}
+
+/* ===== Utilidad: texto blanco cuando el fondo es azul ===== */
+.bg-sa-azul{background:var(--sa-azul)!important;color:#fff!important}
+.bg-sa-azul .k,.bg-sa-azul .v,.bg-sa-azul .group-title,.bg-sa-azul .mini-btn{color:#fff!important}
+
+/* ======= FIX: filtros de las 3 primeras columnas pegados a la izquierda ======= */
+#rankTable .filters-row th.col-nro{
+  position: sticky; left: 0; z-index: 9; background: var(--sa-gris-100); box-shadow:1px 0 0 var(--sa-gris-200);
+}
+#rankTable .filters-row th.col-desc{
+  position: sticky; left: var(--col-nro-w); z-index: 9; background: var(--sa-gris-100); box-shadow:1px 0 0 var(--sa-gris-200);
+}
+#rankTable .filters-row th.col-cant{
+  position: sticky; left: calc(var(--col-nro-w) + var(--desc-col-w)); z-index: 9; background: var(--sa-gris-100); box-shadow:1px 0 0 var(--sa-gris-200);
+}

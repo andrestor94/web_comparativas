@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Nueva carga – Web Comparativas{% endblock %}
+{% block header_title %}Nueva carga{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-center align-items-start py-4">
+  <div class="card shadow-sm" style="max-width:900px; width:100%;">
+    <div class="card-body">
+      <h2 class="mb-4 fw-semibold text-primary">Cargar archivo para normalizar</h2>
+
+      <form action="/cargas" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">N° de proceso</label>
+          <input name="proceso_nro" class="form-control" placeholder="Ej. 45/356" required />
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Fecha de apertura</label>
+          <input name="apertura_fecha" type="date" class="form-control" required />
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">N° de cuenta</label>
+          <input name="cuenta_nro" id="n_cuenta" class="form-control" placeholder="Opcional" />
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Plataforma</label>
+          <select name="plataforma" id="plataformaSel" class="form-select">
+            <option value="">— Seleccionar —</option>
+            <option value="BAC">BAC</option>
+            <option value="COMPRAR">COMPRAR</option>
+            <option value="PBAC">PBAC</option>
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Comprador</label>
+          <input name="comprador" id="compradorInp" class="form-control" placeholder="Ej. HTAL. RAMON SARDA" />
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Provincia/Municipio</label>
+          <input name="provincia" id="provinciaInp" class="form-control" placeholder="Ej. Buenos Aires" />
+        </div>
+
+        <div class="col-12">
+          <label class="form-label fw-semibold">Archivo</label>
+          <input type="file" name="file" id="fileInput" class="form-control" accept=".pdf,.xls,.xlsx,.zip" required />
+          <div class="form-text">Formatos admitidos: PDF, Excel o ZIP.</div>
+        </div>
+
+        <input type="hidden" name="platform_hint" id="platform_hint" />
+        <input type="hidden" name="buyer_hint" id="buyer_hint" />
+        <input type="hidden" name="province_hint" id="province_hint" />
+
+        <div class="col-12 d-grid mt-3">
+          <button class="btn btn-primary btn-lg">
+            <i class="bi bi-upload"></i> Procesar y normalizar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Script principal -->
+<script>
+  (function(){
+    const form       = document.getElementById('uploadForm');
+    const plataforma = document.getElementById('plataformaSel');
+    const comprador  = document.getElementById('compradorInp');
+    const provincia  = document.getElementById('provinciaInp');
+    const cuenta     = document.getElementById('n_cuenta');
+    const fileInput  = document.getElementById('fileInput');
+
+    const hPlatform  = document.getElementById('platform_hint');
+    const hBuyer     = document.getElementById('buyer_hint');
+    const hProvince  = document.getElementById('province_hint');
+
+    // --- Validación del archivo antes del envío ---
+    if (form && fileInput) {
+      form.addEventListener('submit', function (e) {
+        const file = fileInput.files[0];
+        if (!file) return; // si no seleccionó nada, el required del input ya se encarga
+
+        const validExt = ['pdf', 'xls', 'xlsx', 'zip'];
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        if (!validExt.includes(ext)) {
+          e.preventDefault(); // bloquea el envío
+          alert(`⚠️ Archivo no permitido: "${file.name}".\n\nSolo se admiten formatos PDF, Excel (.xls/.xlsx) o ZIP.`);
+          fileInput.value = ''; // limpia el input
+          return false;
+        }
+
+        // opcional: tamaño máximo (ejemplo 25MB)
+        const maxSizeMB = 25;
+        if (file.size > maxSizeMB * 1024 * 1024) {
+          e.preventDefault();
+          alert(`⚠️ El archivo supera el tamaño máximo permitido (${maxSizeMB} MB).`);
+          fileInput.value = '';
+          return false;
+        }
+      });
+    }
+
+    // --- Sincronización de hints (igual que antes) ---
+    function syncHints(){
+      hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
+      hBuyer.value    = (comprador  && comprador.value  ? comprador.value  : '').trim();
+      hProvince.value = (provincia  && provincia.value  ? provincia.value  : '').trim();
+    }
+
+    if (plataforma) plataforma.addEventListener('change', syncHints);
+    if (comprador)  comprador .addEventListener('input',  syncHints);
+    if (provincia)  provincia .addEventListener('input',  syncHints);
+    window.addEventListener('DOMContentLoaded', syncHints);
+    if (form) form.addEventListener('submit', function(){ syncHints(); });
+
+    // --- Autocompletar por N° de cuenta ---
+    if (cuenta) {
+      let ultimoBuscado = "";
+
+      async function buscarCliente(nro) {
+        try {
+          const resp = await fetch(`/api/clientes/${encodeURIComponent(nro)}`);
+          if (!resp.ok) return { ok:false };
+          return await resp.json();
+        } catch (err) {
+          console.warn("Error consultando cliente:", err);
+          return { ok:false };
+        }
+      }
+
+      function rellenarCampos(data) {
+        if (!data) return;
+        if (comprador && data.comprador) comprador.value = data.comprador;
+        if (provincia && data.provincia) provincia.value = data.provincia;
+        syncHints();
+      }
+
+      function limpiarCamposAutocompletados() {
+        if (comprador) comprador.value = "";
+        if (provincia) provincia.value = "";
+        syncHints();
+      }
+
+      async function manejarCuenta() {
+        const valor = (cuenta.value || "").trim();
+        if (!valor) { limpiarCamposAutocompletados(); ultimoBuscado = ""; return; }
+        if (valor === ultimoBuscado) return;
+        ultimoBuscado = valor;
+
+        const res = await buscarCliente(valor);
+        if (res && res.ok && res.data) {
+          rellenarCampos(res.data);
+        } else {
+          limpiarCamposAutocompletados();
+        }
+      }
+
+      cuenta.addEventListener('blur', manejarCuenta);
+      cuenta.addEventListener('change', manejarCuenta);
+      cuenta.addEventListener('keyup', function(ev){
+        const valor = (cuenta.value || "").trim();
+        if (ev.key === "Enter") manejarCuenta();
+        else if (valor.length >= 4) manejarCuenta();
+      });
+    }
+
+  })();
+</script>
+{% endblock %}

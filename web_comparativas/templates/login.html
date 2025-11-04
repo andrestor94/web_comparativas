@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Ingresar – Web Comparativas{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-center align-items-center" style="min-height: 70vh;">
+  <div class="card" style="max-width:420px; width:100%;">
+    <div class="card-body">
+      <h2 class="mb-4">Ingresar</h2>
+
+      {% if error %}
+        <div class="alert alert-danger mb-3">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/login">
+        <div class="mb-3">
+          <label class="form-label">Email</label>
+          <input name="email" type="email" class="input form-control" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Contraseña</label>
+          <input name="password" type="password" class="input form-control" required>
+        </div>
+        <div class="mb-3">
+          <a href="/password/olvido" class="small">¿Olvidaste tu contraseña?</a>
+        </div>
+        <button class="btn btn-primary w-100">Entrar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

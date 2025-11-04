@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Comentarios – Web Comparativas{% endblock %}
+{% block header_title %}Comentarios{% endblock %}
+
+{% block extra_head %}
+<style>
+  :root{
+    --sa-azul:#064066; --sa-azul-alt:#5274ce; --sa-amarillo:#eeede8; --sa-blanco:#fff;
+    --sa-gris-50:#f8fafc; --sa-gris-75:#f3f6fb; --sa-gris-100:#eef2f7; --sa-gris-200:#e5e7eb; --sa-text:#064066;
+  }
+
+  /* Botones estilo Suizo */
+  .btn-primary-sa{background:var(--sa-azul-alt);border-color:var(--sa-azul-alt);color:#fff}
+  .btn-primary-sa:hover{filter:brightness(0.95)}
+  .btn-outline-sa{border-color:var(--sa-azul-alt);color:var(--sa-azul-alt);background:#fff}
+  .btn-outline-sa:hover{background:var(--sa-azul-alt);color:#fff}
+  .btn-ghost-sa{background:var(--sa-gris-75);border:1px solid var(--sa-gris-200);color:var(--sa-text)}
+  .btn-ghost-sa:hover{background:#e9eef9}
+
+  .badge-sa-abierto{background:#fef3c7;color:#92400e;border:1px solid #f59e0b;padding:.35rem .6rem;border-radius:999px}
+  .badge-sa-resuelto{background:#d1fae5;color:#065f46;border:1px solid #10b981;padding:.35rem .6rem;border-radius:999px}
+
+  .cm-actions{display:inline-flex;gap:.45rem;align-items:center;flex-wrap:wrap}
+  .cm-actions a.btn-link:not(.text-danger){
+    background: var(--sa-azul); color:#fff !important; border:1px solid var(--sa-azul);
+    border-radius:10px; padding:.38rem .65rem; font-weight:600; line-height:1;
+  }
+  .cm-actions .btn-outline-primary{
+    background:#fff; color:var(--sa-azul) !important; border:1px solid var(--sa-azul-alt) !important;
+    border-radius:10px; padding:.38rem .65rem; font-weight:600; line-height:1;
+  }
+  .cm-actions .btn-success{
+    border-radius:10px; padding:.38rem .65rem; font-weight:600; line-height:1;
+  }
+
+  .cm-meta{font-size:.85rem;color:#6b7280}
+  .code-pill{
+    display:inline-flex; align-items:center; gap:.4rem;
+    background:var(--sa-gris-100); border:1px solid var(--sa-gris-200);
+    color:var(--sa-text); border-radius:999px; padding:.15rem .55rem; font-weight:700;
+    white-space:nowrap;
+  }
+  .code-pill small{font-weight:500; color:#475569}
+
+  /* Tabla */
+  .table thead th{white-space:nowrap}
+  .cm-col-proceso{width:200px}
+  .cm-col-fecha{width:150px}
+  .cm-col-autor{width:180px}
+  .cm-col-estado{width:120px}
+  .cm-col-acciones{width:360px}
+
+  /* Offcanvas detalle */
+  .cm-thread-head{
+    display:flex; flex-wrap:wrap; gap:.5rem .75rem; align-items:center;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-lg-2">
+        <label class="form-label mb-0">Estado</label>
+        <select id="fStatus" class="form-select form-select-sm">
+          <option value="open" selected>Abiertos</option>
+          <option value="resolved">Resueltos</option>
+          <option value="all">Todos</option>
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label mb-0">Proceso (upload_id)</label>
+        <input id="fUpload" class="form-control form-control-sm" placeholder="p.ej. 30">
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label mb-0">Código de proceso</label>
+        <input id="fCode" class="form-control form-control-sm" placeholder="p.ej. 434-1356-LPU25">
+      </div>
+      <div class="col-12 col-lg-2">
+        <label class="form-label mb-0">Autor</label>
+        <input id="fAuthor" class="form-control form-control-sm" placeholder="admin…">
+      </div>
+      <div class="col-12 col-lg-2">
+        <label class="form-label mb-0">Buscar texto</label>
+        <input id="fText" class="form-control form-control-sm" placeholder="contenido del comentario…">
+      </div>
+      <div class="col-6 col-lg-1">
+        <label class="form-label mb-0">Desde</label>
+        <input id="fFrom" type="datetime-local" class="form-control form-control-sm">
+      </div>
+      <div class="col-6 col-lg-1">
+        <label class="form-label mb-0">Hasta</label>
+        <input id="fTo" type="datetime-local" class="form-control form-select-sm form-control-sm">
+      </div>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 mt-3 flex-wrap">
+      <div class="d-flex align-items-center gap-2">
+        <button id="btnSearch" class="btn btn-primary-sa btn-sm">Buscar</button>
+        <button id="btnRefresh" class="btn btn-ghost-sa btn-sm">Refrescar</button>
+        <button id="btnExport" class="btn btn-outline-sa btn-sm">Exportar CSV</button>
+      </div>
+      <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" value="" id="fMine">
+        <label class="form-check-label small" for="fMine">Solo mis hilos</label>
+      </div>
+      <div class="ms-auto small text-muted" id="cmCounters">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive mt-3">
+  <table class="table align-middle">
+    <thead class="table-light">
+      <tr>
+        <th class="cm-col-fecha">Fecha</th>
+        <th class="cm-col-proceso">Proceso (ID / Código)</th>
+        <th class="cm-col-autor">Autor</th>
+        <th>Comentario</th>
+        <th class="text-center cm-col-estado">Estado</th>
+        <th class="cm-col-acciones">Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="cmTBody">
+      <tr><td colspan="6" class="text-center text-muted py-4">Cargando…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="d-flex align-items-center gap-2">
+  <label class="small text-muted">Filas</label>
+  <select id="cmPageSize" class="form-select form-select-sm" style="width:80px">
+    <option>20</option><option selected>50</option><option>100</option>
+  </select>
+  <div class="ms-auto">
+    <button id="cmPrev" class="btn btn-sm btn-outline-sa">‹</button>
+    <span id="cmPageInfo" class="mx-2 small text-muted">Página 1</span>
+    <button id="cmNext" class="btn btn-sm btn-outline-sa">›</button>
+  </div>
+</div>
+
+<!-- Offcanvas: Hilo de respuestas -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="cmThreadCanvas" aria-labelledby="cmThreadTitle">
+  <div class="offcanvas-header">
+    <div class="cm-thread-head">
+      <h5 class="offcanvas-title m-0" id="cmThreadTitle">Hilo de comentarios</h5>
+      <span id="cmThreadChip" class="code-pill"><span>#—</span> <small>· —</small></span>
+      <span id="cmThreadStatus" class="badge-sa-abierto">Abierto</span>
+    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Cerrar"></button>
+  </div>
+
+  <div class="offcanvas-body d-flex flex-column">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <div class="small text-muted" id="cmThreadMeta">—</div>
+      <div class="d-flex align-items-center gap-2">
+        <button id="cmResolveToggle" class="btn btn-outline-sa btn-sm">Marcar resuelto</button>
+        <button id="cmCopyLink" class="btn btn-ghost-sa btn-sm">Copiar enlace</button>
+      </div>
+    </div>
+
+    <div id="cmThreadList" class="flex-grow-1 overflow-auto border rounded p-2" style="background:#fff"></div>
+
+    <form id="cmReplyForm" class="mt-3" autocomplete="off">
+      <textarea id="cmReplyBody" class="form-control" rows="3"
+        placeholder="Escribe una respuesta… (Enter para enviar, Shift+Enter salto)"></textarea>
+      <div class="text-end mt-2">
+        <button class="btn btn-primary-sa btn-sm" type="submit">Enviar respuesta</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% set _u = user or {} %}
+{% set _role = _u.role|default(_u.rol)|default('analista') %}
+{% set _display = _u.name|default(_u.full_name)|default(_u.nombre)|default(_u.email)|default('') %}
+
+<script>
+  (function(){
+    document.body.dataset.userRole = "{{ _role|string|lower|e }}";
+    document.body.dataset.userDisplay = "{{ _display|string|e }}";
+    document.body.dataset.cmApi = "/api/comments/inbox";
+
+    // 👇 PARCHE: si el JS pide /api/uploads/:id, lo reenviamos a /cargas/:id
+    const origFetch = window.fetch;
+    const FALLBACK_UPLOAD_BASE = "/cargas";   // <-- ahora sí, en castellano
+    window.fetch = function(input, init) {
+      try {
+        if (typeof input === "string" && input.startsWith("/api/uploads/")) {
+          const idPart = input.substring("/api/uploads/".length);
+          return origFetch(`${FALLBACK_UPLOAD_BASE}/${idPart}`, init);
+        }
+      } catch (e) {
+        console.warn("[cm] rewrite fetch error", e);
+      }
+      return origFetch(input, init);
+    };
+  })();
+</script>
+
+<script src="{{ url_for('static', path='js/comments_inbox.js') }}?v=10"></script>
+{% endblock %}
