@@ -134,6 +134,30 @@ def visible_user_ids(session: Session, user) -> set[int]:
         ids.update(int(uid) for (uid,) in member_rows)
         return ids
 
+    # 4) Otros (p.ej. roles custom no listados): propios + compañeros de grupo, EXCLUYENDO supervisores
+    ids: Set[int] = {me}
+    my_group_ids = [
+        gid
+        for (gid,) in session.query(GroupMember.group_id)
+        .filter(GroupMember.user_id == me)
+        .all()
+    ]
+    if my_group_ids:
+        members = {
+            uid
+            for (uid,) in session.query(GroupMember.user_id)
+            .filter(GroupMember.group_id.in_(my_group_ids))
+            .all()
+        }
+        supervisor_ids = {
+            uid
+            for (uid,) in session.query(User.id)
+            .filter(func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)))
+            .all()
+        )
+        ids.update(int(uid) for (uid,) in member_rows)
+        return ids
+
     # 4) Otros (p.ej. roles custom no listados): restringido solo a su propio usuario.
     #    Esto mantiene un comportamiento conservador si el rol no coincide
     #    exactamente con los conocidos (evitando saltos de visibilidad inesperados).
