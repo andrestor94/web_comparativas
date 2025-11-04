@@ -154,10 +154,14 @@ def visible_user_ids(session: Session, user) -> set[int]:
             for (uid,) in session.query(User.id)
             .filter(func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)))
             .all()
-        }
-        ids.update(int(x) for x in (members - supervisor_ids))
+        )
+        ids.update(int(uid) for (uid,) in member_rows)
+        return ids
 
-    return ids
+    # 4) Otros (p.ej. roles custom no listados): restringido solo a su propio usuario.
+    #    Esto mantiene un comportamiento conservador si el rol no coincide
+    #    exactamente con los conocidos (evitando saltos de visibilidad inesperados).
+    return {me}
 
 
 def uploads_visible_query(session: Session, user):
