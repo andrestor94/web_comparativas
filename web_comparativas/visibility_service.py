@@ -64,38 +64,33 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
     """
     Devuelve los IDs de usuarios cuyos uploads puede ver `user`:
 
-      - ADMIN/AUDITOR: todos los usuarios.
-      - GERENTE/SUPERVISOR: todos los usuarios con rol ANALISTA de su misma unidad de negocio + él mismo.
+      - ADMIN/AUDITOR/GERENTE: todos los usuarios.
+      - SUPERVISOR: todos los usuarios de su unidad de negocio.
       - ANALISTA: él mismo + miembros de sus grupos creados por admin/supervisor/gerente
                   que compartan su unidad de negocio.
-      - RESTO: él mismo + miembros de sus grupos, EXCLUYENDO a cualquier supervisor o gerente.
+      - RESTO: él mismo + miembros de sus grupos (creados por admin/supervisor/gerente),
+               EXCLUYENDO a cualquier supervisor.
     """
     if not user:
         return set()
 
-    # 1) Admin/Auditor: ve a todos
-    if _is_admin(user):
+    # 1) Admin/Auditor/Gerente: ve a todos
+    if _is_admin(user) or _is_manager(user):
         return {uid for (uid,) in session.query(User.id).all()}
 
     me = int(user.id)
 
-    # 2) Gerente / Supervisor: todos los ANALISTAS de su misma BU (+ él mismo)
-    if _is_manager(user) or _is_supervisor(user):
+    # 2) Supervisor: todos los usuarios de su misma BU (+ él mismo)
+    if _is_supervisor(user):
         ids: Set[int] = {me}
         bu_norm = _norm(getattr(user, "unit_business", None))
         if bu_norm:
-            analyst_ids = [
-                uid
-                for (uid,) in (
-                    session.query(User.id)
-                    .filter(
-                        func.lower(func.trim(User.unit_business)) == bu_norm,
-                        func.lower(User.role).in_(tuple(ANALYST_ROLES)),
-                    )
-                    .all()
-                )
-            ]
-            ids.update(int(x) for x in analyst_ids)
+            same_bu_ids = (
+                session.query(User.id)
+                .filter(func.lower(func.trim(User.unit_business)) == bu_norm)
+                .all()
+            )
+            ids.update(int(uid) for (uid,) in same_bu_ids)
         return ids
 
     # 3) Analista: él mismo + miembros de grupos válidos dentro de su BU
@@ -139,10 +134,45 @@ def get_visible_user_ids(session: Session, user) -> set[int]:
         ids.update(int(uid) for (uid,) in member_rows)
         return ids
 
-    # 4) Otros (p.ej. roles custom no listados): restringido solo a su propio usuario.
-    #    Esto mantiene un comportamiento conservador si el rol no coincide
-    #    exactamente con los conocidos (evitando saltos de visibilidad inesperados).
-    return {me}
+    # 4) Otros: propio usuario + compañeros de grupos válidos en su BU, excluyendo supervisores
+    ids: Set[int] = {me}
+    bu_norm = _norm(getattr(user, "unit_business", None))
+    if not bu_norm:
+        return ids
+
+    allowed_roles = tuple(ADMIN_ROLES | SUPERVISOR_ROLES | MANAGER_ROLES)
+    creator_alias = aliased(User)
+    group_ids = [
+        int(gid)
+        for (gid,) in (
+            session.query(GroupMember.group_id)
+            .join(Group, GroupMember.group_id == Group.id)
+            .join(creator_alias, Group.created_by_user_id == creator_alias.id)
+            .filter(
+                GroupMember.user_id == me,
+                func.lower(creator_alias.role).in_(allowed_roles),
+                func.lower(func.trim(Group.business_unit)) == bu_norm,
+            )
+            .all()
+        )
+    ]
+
+    if not group_ids:
+        return ids
+
+    member_rows = (
+        session.query(GroupMember.user_id)
+        .join(Group, GroupMember.group_id == Group.id)
+        .join(User, GroupMember.user_id == User.id)
+        .filter(
+            GroupMember.group_id.in_(group_ids),
+            func.lower(func.trim(User.unit_business)) == bu_norm,
+            ~func.lower(User.role).in_(tuple(SUPERVISOR_ROLES)),
+        )
+        .all()
+    )
+    ids.update(int(uid) for (uid,) in member_rows)
+    return ids
 
 
 def visible_user_ids(session: Session, user) -> set[int]:
