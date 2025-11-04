@@ -11,7 +11,7 @@ from sqlalchemy import (
     UniqueConstraint, select, Boolean, JSON, Text, func, or_   # <-- incluye or_
 )
 from sqlalchemy.orm import (
-    declarative_base, relationship, sessionmaker, scoped_session
+    declarative_base, relationship, sessionmaker, scoped_session, aliased
 )
 from sqlalchemy.orm import foreign  # <-- para relación sin FK físico
 from sqlalchemy import inspect  # para introspección de columnas
@@ -441,7 +441,8 @@ def visible_user_ids(session, user: User) -> Set[int]:
     Devuelve el set de user_id cuyos uploads puede ver `user`:
       - ADMIN/AUDITOR: todos
       - SUPERVISOR: él mismo + todos los ANALISTAS de su misma unidad de negocio
-      - ANALISTA: SOLO él mismo  ← (cambio)
+      - ANALISTA: él mismo + miembros de grupos creados por admin/supervisor
+                  que compartan su unidad de negocio
       - RESTO: iguales a 'solo él mismo'
     """
     if not user:
@@ -461,28 +462,53 @@ def visible_user_ids(session, user: User) -> Set[int]:
         if bu:
             analyst_ids = session.execute(
                 select(User.id).where(
-                    func.lower(User.unit_business) == bu,
+                    func.lower(func.trim(User.unit_business)) == bu,
                     func.lower(User.role).in_(tuple(_ANALYST_ROLES)),
                 )
             ).scalars().all()
             ids.update(int(x) for x in analyst_ids)
         return ids
 
-    # Analista (y otros roles no listados): SOLO lo propio
+    if r in _ANALYST_ROLES:
+        ids: Set[int] = {my_id}
+        bu = _norm(user.unit_business)
+        if not bu:
+            return ids
+
+        allowed_roles = tuple(_ADMIN_ROLES | _SUPERVISOR_ROLES)
+        creator_alias = aliased(User)
+        group_ids = [
+            int(gid)
+            for gid in session.execute(
+                select(GroupMember.group_id)
+                .join(Group, GroupMember.group_id == Group.id)
+                .join(creator_alias, Group.created_by_user_id == creator_alias.id)
+                .where(
+                    GroupMember.user_id == my_id,
+                    func.lower(creator_alias.role).in_(allowed_roles),
+                    func.lower(func.trim(Group.business_unit)) == bu,
+                )
+            ).scalars().all()
+        ]
+
+        if not group_ids:
+            return ids
+
+        member_ids = session.execute(
+            select(GroupMember.user_id)
+            .join(Group, GroupMember.group_id == Group.id)
+            .join(User, GroupMember.user_id == User.id)
+            .where(
+                GroupMember.group_id.in_(group_ids),
+                func.lower(func.trim(User.unit_business)) == bu,
+                ~func.lower(User.role).in_(tuple(_SUPERVISOR_ROLES)),
+            )
+        ).scalars().all()
+        ids.update(int(x) for x in member_ids)
+        return ids
+
+    # Otros roles no listados: SOLO lo propio
     return {my_id}
-
-    # No supervisor: grupos míos, pero excluyendo usuarios con rol supervisor
-    group_ids_stmt = select(GroupMember.group_id).where(GroupMember.user_id == my_id)
-    members_ids = set(int(x) for x in session.execute(
-        select(GroupMember.user_id).where(GroupMember.group_id.in_(group_ids_stmt))
-    ).scalars().all())
-
-    supervisor_ids = set(int(x) for x in session.execute(
-        select(User.id).where(func.lower(User.role).in_(tuple(_SUPERVISOR_ROLES)))
-    ).scalars().all())
-
-    ids.update(members_ids - supervisor_ids)
-    return ids
 
 
 def uploads_visible_query(session, user: User):
@@ -490,16 +516,17 @@ def uploads_visible_query(session, user: User):
     Query utilitario para listar historial 'visible' al usuario:
     - Admin/Auditor: TODOS.
     - Supervisor: propios + analistas de su BU.
-    - Analista: SOLO propios.  ← (cambio)
-    - Regla 'mismo proceso_key' SOLO aplica a NO-analistas.  ← (cambio)
+    - Analista: propios + miembros visibles de sus grupos (sin fallback por proceso).
+    - Regla 'mismo proceso_key' SOLO aplica a NO-analistas.
     """
     r = _role_of(user)
     if r in _ADMIN_ROLES or r in _AUDITOR_ROLES:
         return session.query(Upload)
 
-    # Analista: solo sus uploads
+    # Analista: uploads de usuarios visibles (sin fallback por proceso)
     if r in _ANALYST_ROLES:
-        return session.query(Upload).filter(Upload.user_id == int(user.id))
+        ids = list(visible_user_ids(session, user) or {int(user.id)})
+        return session.query(Upload).filter(Upload.user_id.in_(ids))
 
     # Supervisor (y otros no-analistas con visibilidad extendida)
     ids = visible_user_ids(session, user) or {int(user.id)}
@@ -539,7 +566,7 @@ def can_view_upload(session, user: User, upload: Upload) -> bool:
     Chequeo puntual de autorización para abrir el tablero:
       - Admin/Auditor: True
       - Supervisor: reglas de visible_user_ids + 'mismo proceso_key'
-      - Analista: SOLO si es el owner (upload.user_id == user.id).  ← (cambio)
+      - Analista: True si el owner está en sus usuarios visibles (sin fallback por proceso).
     """
     if user is None or upload is None:
         return False
@@ -548,9 +575,9 @@ def can_view_upload(session, user: User, upload: Upload) -> bool:
     if r in _ADMIN_ROLES or r in _AUDITOR_ROLES:
         return True
 
-    # Analista: estrictamente lo propio
+    # Analista: solo uploads de usuarios visibles (sin fallback)
     if r in _ANALYST_ROLES:
-        return int(upload.user_id) == int(user.id)
+        return int(upload.user_id) in (visible_user_ids(session, user) or {int(user.id)})
 
     # Supervisores (u otros no-analistas): reglas ampliadas
     if int(upload.user_id) in (visible_user_ids(session, user) or {int(user.id)}):
