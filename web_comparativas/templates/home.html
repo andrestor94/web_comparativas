@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}Inicio – Web Comparativas{% endblock %}
+
+{# Normalizo el rol una sola vez #}
+{% set r = (user.role or user.rol or '')|lower %}
+
+{# Acciones rápidas en el header (únicas) #}
+{% block toolbar_actions %}
+  {% if r in ['admin','analista','supervisor'] %}
+    <a class="btn btn-sm btn-primary" href="/cargas/nueva">+ Nueva carga</a>
+  {% endif %}
+  <a class="btn btn-sm btn-outline-secondary" href="/cargas/historial">Ver historial</a>
+  {% if r == 'admin' %}
+    <a class="btn btn-sm btn-ghost" href="/usuarios">Usuarios</a>
+  {% endif %}
+{% endblock %}
+
+{# Avisos compactos en el top #}
+{% block notifications %}
+  {% if recent_done and recent_done|length > 0 %}
+    <div class="alert alert-success alert-dismissible fade show mt-2" role="alert">
+      <strong>Listos recientemente:</strong>
+      {% for up in recent_done[:3] %}
+        <span class="ms-2">• <a href="/tablero/{{ up.id }}" class="alert-link">
+          {{ up.proceso_nro or up.id }}
+        </a></span>
+      {% endfor %}
+      {% if recent_done|length > 3 %}
+        <span class="ms-2">… <a href="#notificaciones" class="alert-link">ver todas</a></span>
+      {% endif %}
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<!-- ======= PANEL INICIAL ======= -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="m-0">Panel inicial</h2>
+</div>
+
+<!-- ======= TARJETAS HORIZONTALES ======= -->
+<style>
+  .kpi-card {
+    flex: 1;
+    min-width: 200px;
+    background: var(--bs-card-bg);
+    border-radius: 0.75rem;
+    box-shadow: var(--bs-box-shadow-sm);
+    padding: 1rem 1.25rem;
+    transition: 0.2s ease;
+  }
+  .kpi-card:hover { transform: translateY(-2px); }
+  .kpi-grid { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem; }
+  .kpi-title { font-size: 0.875rem; color: var(--bs-secondary); }
+  .kpi-value { font-size: 2rem; font-weight: 700; }
+  .kpi-sub { font-size: 0.875rem; color: var(--bs-secondary); }
+
+  .action-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
+</style>
+
+<div class="kpi-grid">
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Pendientes</div>
+    <div class="kpi-value">{{ total_pending }}</div>
+    <div class="kpi-sub">Procesos por terminar o revisar</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Completados</div>
+    <div class="kpi-value text-success">{{ total_done }}</div>
+    <div class="kpi-sub">Procesos listos</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Total cargas</div>
+    <div class="kpi-value text-primary">{{ total_all }}</div>
+    <div class="kpi-sub">Historial completo</div>
+  </div>
+</div>
+<!-- ======= FIN TARJETAS ======= -->
+
+<div class="grid" style="gap: 16px; grid-template-columns: repeat(12,1fr);">
+  <div class="span-12 span-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="m-0">Últimos procesados</h5>
+          <a class="btn btn-sm btn-ghost" href="/cargas/historial">Ver todos</a>
+        </div>
+
+        {% if not last_done or last_done|length == 0 %}
+          <div class="text-subtle py-3">Aún no hay cargas completadas.</div>
+        {% else %}
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th style="width:90px">ID</th>
+                  <th>Proceso</th>
+                  <th>Archivo</th>
+                  <th style="width:130px">Estado</th>
+                  <th class="text-end" style="width:180px">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for up in last_done %}
+                  {% set st = (up.status or '')|lower %}
+                  <tr>
+                    <td>{{ up.id }}</td>
+                    <td>
+                      <div class="fw-semibold">{{ up.proceso_nro or '—' }}</div>
+                      <div class="text-subtle small">
+                        {{ up.platform_hint or '' }} {% if up.buyer_hint %}· {{ up.buyer_hint }}{% endif %}
+                      </div>
+                    </td>
+                    <td class="text-truncate" title="{{ up.original_filename }}">{{ up.original_filename or '—' }}</td>
+                    <td>
+                      <span class="badge bg-success-subtle text-success">
+                        {{ step_labels.get(st, 'Listo')|capitalize }}
+                      </span>
+                    </td>
+                    <td class="text-end">
+                      <div class="action-buttons">
+                        <a class="btn btn-sm btn-primary" href="/tablero/{{ up.id }}">Abrir tablero</a>
+                        <a class="btn btn-sm btn-outline-secondary" href="/cargas/{{ up.id }}">Ver estado</a>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Pendientes/por revisar #}
+  <div class="span-12 span-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="m-0">Pendientes / en proceso</h5>
+          <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-ghost" href="/cargas/historial?status=pending">Solo pendientes</a>
+            <a class="btn btn-sm btn-ghost" href="/cargas/historial">Ver más</a>
+          </div>
+        </div>
+
+        {% if not pending or pending|length == 0 %}
+          <div class="text-subtle py-3">No hay procesos pendientes en este momento.</div>
+        {% else %}
+          <ul class="list-unstyled m-0">
+            {% for up in pending %}
+              {% set st = (up.status or '')|lower %}
+              <li class="d-flex align-items-start justify-content-between py-2 border-bottom">
+                <div class="me-3">
+                  <div class="fw-semibold">{{ up.proceso_nro or '—' }}</div>
+                  <div class="text-subtle small">
+                    {{ up.platform_hint or '' }} {% if up.buyer_hint %}· {{ up.buyer_hint }}{% endif %}
+                    {% if up.status %}
+                      · <span class="badge bg-warning-subtle text-warning">
+                          {{ step_labels.get(st, up.status)|capitalize }}
+                        </span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="flex-shrink-0">
+                  <a class="btn btn-sm btn-ghost" href="/cargas/{{ up.id }}">Seguir</a>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Notificaciones (completados en últimas 24h) #}
+  <div class="span-12" id="notificaciones">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="m-0">Notificaciones</h5>
+          <a class="btn btn-sm btn-ghost" href="/cargas/historial">Historial</a>
+        </div>
+        {% if not recent_done or recent_done|length == 0 %}
+          <div class="text-subtle py-2">Sin notificaciones recientes.</div>
+        {% else %}
+          <ul class="list-unstyled m-0">
+            {% for up in recent_done %}
+              <li class="py-2 border-bottom">
+                ✅ Proceso <strong>{{ up.proceso_nro or up.id }}</strong> finalizado.
+                <a href="/tablero/{{ up.id }}" class="ms-2">Abrir tablero</a>
+                <span class="text-subtle small ms-2">{{ up.original_filename or '' }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if (total_all|int == 0) %}
+  <div class="alert alert-info mt-3" role="alert">
+    {% if r in ['admin','analista','supervisor'] %}
+      ¡Bienvenido! Aún no hay cargas. Comenzá con tu primera
+      <a href="/cargas/nueva" class="alert-link">Nueva carga</a>.
+    {% else %}
+      ¡Bienvenido! Aún no hay cargas disponibles para mostrar en tu cuenta.
+      Accedé al <a href="/cargas/historial" class="alert-link">Historial</a> para ver procesos cuando existan.
+    {% endif %}
+  </div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,22 @@
+sources:
+  - id: BAC
+    when:
+      platform: ['BAC']
+      filename_regex: '.*\.(xlsx|xls|xlsb|csv)$'
+    handler: 'web_comparativas.adapters.portales:normalize_bac'
+
+  - id: PBAC
+    when:
+      platform: ['PBAC']
+      filename_regex: '.*\.(xlsx|xls|xlsb|csv)$'
+    handler: 'web_comparativas.adapters.portales:normalize_pbac'
+
+  - id: COMPRAR
+    when:
+      platform: ['COMPRAR']
+      filename_regex: '.*\.(xlsx|xls|xlsb|csv)$'
+    handler: 'web_comparativas.adapters.portales:normalize_comprar'
+
+  - id: DEFAULT
+    when: {}
+    handler: 'web_comparativas.adapters.portales:normalize_bac'

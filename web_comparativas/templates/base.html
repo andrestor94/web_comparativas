@@ -1,0 +1,361 @@
+<!doctype html>
+{% if user %}
+  {% set _display_name = (user.name or user.full_name or user.nombre) %}
+  {% if not _display_name %}
+    {% set _email = user.email|default('') %}
+    {% set parts = _email|split('@') %}
+    {% set _alias = (parts[0] if parts|length > 0 else '') %}
+    {% set _alias = _alias|replace('.',' ')|replace('_',' ')|replace('-',' ') %}
+    {% set _display_name = _alias|title %}
+  {% endif %}
+{% else %}
+  {% set _display_name = '' %}
+{% endif %}
+<html lang="es"
+      data-user-role="{{ (user and (user.role or ''))|lower }}"
+      data-user-display="{{ _display_name or 'Yo' }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#eeede8" />
+  <title>{% block title %}Web Comparativas{% endblock %}</title>
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+
+  <!-- Tema personalizado (global) + cache-busting -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=20251028-1">
+
+  <!-- ========== Notificaciones SA (UI) ========== -->
+  <style>
+    /* ===== pill del usuario (header, arriba a la derecha) ===== */
+    .top-user-pill{
+      background-color: #6886c4;
+      color: #ffffff;
+      border-radius: 9999px;
+      padding: 3px 12px 4px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+    .top-user-pill span,
+    .top-user-pill i,
+    .top-user-pill svg {
+      color: #ffffff;
+    }
+
+    /* ===== Notificaciones SA ===== */
+    #toast-root{
+      position:fixed; right:16px; bottom:16px; z-index:4000;
+      display:flex; flex-direction:column; gap:10px; pointer-events:none;
+    }
+    .sa-toast{
+      pointer-events:auto; background:var(--sa-blanco,#fff); color:var(--sa-text,#064066);
+      border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px;
+      box-shadow:var(--shadow-2,0 10px 32px rgba(6,64,102,.12));
+      padding:12px 14px 10px; width:min(360px, 90vw); transform:translateY(8px);
+      animation:sa-toast-in .18s ease-out both;
+    }
+    .sa-toast--out{ animation:sa-toast-out .18s ease-in both; }
+    .sa-toast__head{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .sa-toast__title{ font-weight:700; font-size:15px; }
+    .sa-toast__body{ font-size:14px; margin-top:4px; }
+    .sa-toast__footer{ margin-top:8px; }
+    .sa-toast__action{
+      background:#eef2f7; border:1px solid #e5e7eb; border-radius:8px;
+      padding:6px 10px; font-weight:600; cursor:pointer;
+    }
+    .sa-toast__close{
+      background:transparent; border:0; font-size:18px; line-height:1; cursor:pointer; color:#64748b;
+    }
+    .sa-toast__bar{
+      height:3px; width:100%; margin-top:8px; transform-origin:left center; transform:scaleX(1);
+      border-radius:2px; opacity:.9;
+    }
+    @keyframes sa-toast-in{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)}}
+    @keyframes sa-toast-out{ from{opacity:1; transform:translateY(0)} to{opacity:0; transform:translateY(6px)}}
+
+    #banner-root{
+      position:fixed; top:70px; left:50%; transform:translateX(-50%);
+      z-index:3500; display:flex; flex-direction:column; gap:8px; width:min(820px,94vw);
+    }
+    .sa-banner{
+      display:flex; align-items:center; gap:10px; background:var(--sa-gris-soft,#eef2f7);
+      border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px; padding:10px 12px;
+      box-shadow:var(--shadow-1,0 3px 14px rgba(6,64,102,.06));
+    }
+    .sa-banner__dot{ width:10px; height:10px; border-radius:999px; flex:0 0 auto; }
+    .sa-banner__msg{ color:var(--sa-text,#064066); font-size:14px; }
+    .sa-banner__close{ margin-left:auto; background:transparent; border:0; font-size:18px; cursor:pointer; color:#64748b; }
+  </style>
+  <!-- ========== /Notificaciones SA (UI) ========== -->
+
+  {% block extra_head %}{% endblock %}
+  {% block page_skin %}{% endblock %}
+</head>
+<body>
+  <div class="app d-flex" style="min-height:100vh">
+    <!-- Sidebar -->
+    <aside class="sidebar" role="navigation" aria-label="Menú lateral">
+      <div class="brand px-3 py-3 fw-semibold border-bottom">Web Comparativas</div>
+
+      {% if user %}
+        {% set r = (user.role or user.rol or '')|lower %}
+      {% else %}
+        {% set r = '' %}
+      {% endif %}
+
+      {% set _pending = total_pending|default(None) %}
+      {% set _done = total_done|default(None) %}
+
+      <nav class="nav flex-column px-3 py-2 gap-1">
+        <a href="/"
+           class="nav-link {% if request.url.path == '/' or request.url.path.startswith('/inicio') or request.url.path.startswith('/home') %}active{% endif %}">
+           Inicio
+        </a>
+
+        {% if user and r in ['admin','analista','supervisor'] %}
+          <a href="/cargas/nueva"
+             class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
+             <span>Nueva carga</span>
+          </a>
+        {% endif %}
+
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          {% set is_hist = request.url.path.startswith('/cargas/historial') or request.url.path == '/historial'
+                            or request.url.path.startswith('/cargas/') or request.url.path.startswith('/tablero/') %}
+          <a href="/cargas/historial"
+             class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
+             <span>Historial</span>
+             <span class="ms-2">
+               {% if _pending is not none and _pending|int > 0 %}
+                 <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
+               {% endif %}
+               {% if _done is not none and _done|int > 0 %}
+                 <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
+               {% endif %}
+             </span>
+          </a>
+        {% endif %}
+
+        {# 👉 AQUÍ está el cambio: agregamos 'auditor' #}
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          {% set is_comments = request.url.path.startswith('/comentarios') %}
+          <a href="/comentarios"
+             class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
+             id="cmMenuLink" title="Mesa de ayuda">
+            <span>Mesa de ayuda</span>
+            <span class="ms-2">
+              <span id="cmMenuBadge" class="badge rounded-pill bg-primary-subtle text-primary" style="display:none">0</span>
+            </span>
+          </a>
+        {% endif %}
+
+        {% if user and r in ['admin','supervisor'] %}
+          {% set is_groups = request.url.path.startswith('/grupos') %}
+          <a href="/grupos"
+             class="nav-link {% if is_groups %}active{% endif %}">
+             Grupos
+          </a>
+        {% endif %}
+
+        {% if user and r == 'admin' %}
+          <a href="/usuarios"
+             class="nav-link {% if 'usuarios' in request.url.path %}active{% endif %}">
+             Usuarios
+          </a>
+        {% endif %}
+
+        {% if user %}
+          <a href="/mi/password"
+             class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+             Mi contraseña
+          </a>
+        {% endif %}
+      </nav>
+
+      <div class="signout mt-auto px-3 py-3 border-top">
+        {% if user %}
+          <a class="btn btn-outline-danger w-100" href="/logout">Salir</a>
+        {% else %}
+          <a class="btn btn-primary w-100" href="/login">Ingresar</a>
+        {% endif %}
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main flex-fill">
+      <!-- Header -->
+      <header class="header d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-white">
+        <div class="title h5 m-0">{% block header_title %}Panel{% endblock %}</div>
+
+        <div class="d-none d-md-flex align-items-center gap-2">
+          {% block toolbar_actions %}
+            {% if user and (user.role or '')|lower in ['admin','supervisor']
+                  and request.url.path.startswith('/grupos')
+                  and request.url.path != '/grupos/nuevo' %}
+              <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
+            {% endif %}
+          {% endblock %}
+        </div>
+
+        <div class="ms-auto d-flex align-items-center gap-3">
+          <form class="search position-relative" role="search" aria-label="Buscar en historial" id="app-search-form">
+            <input class="form-control form-control-sm pe-5" id="app-search-input"
+                   type="search" placeholder="Buscar…" aria-label="Buscar"
+                   value="{{ q|default('') }}" />
+            <span class="position-absolute top-50 end-0 translate-middle-y pe-2 text-muted">🔎</span>
+          </form>
+
+          <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
+            {% if user %}
+              {% if user_display is defined %}
+                <span>{{ user_display(user) }}</span>
+              {% else %}
+                <span>{{ _display_name or '—' }}</span>
+              {% endif %}
+
+              <!-- pill de rol -->
+              <span class="top-user-pill">
+                {{ (r or '')|capitalize }}
+              </span>
+
+              <a href="/mi/password"
+                 class="text-decoration-none small {% if request.url.path.startswith('/mi/password') %}fw-semibold text-primary{% else %}text-muted{% endif %}">
+                 Cambiar contraseña
+              </a>
+            {% else %}
+              Invitado
+            {% endif %}
+          </div>
+        </div>
+      </header>
+
+      <div id="flash-container" class="px-3 pt-3"></div>
+
+      <div class="px-3">
+        {% block notifications %}{% endblock %}
+      </div>
+
+      <div class="px-3 py-3">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <!-- Contenedores de notificaciones -->
+  <div id="banner-root" aria-live="polite" aria-atomic="true"></div>
+  <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Notify (UI de toasts/banners) -->
+  <script src="{{ url_for('static', path='js/notify.js') }}" defer></script>
+
+  <script>
+    // ====== Usuario (expuesto a JS global + data-attrs en <html>) ======
+    (function(){
+      const APP_USER = {
+        role: {{ ((user and (user.role or user.rol or ''))|lower)|tojson }},
+        display: {{ (_display_name or 'Yo')|tojson }},
+        email: {{ (user and user.email or '')|tojson }}
+      };
+      window.APP_USER = APP_USER;
+
+      const rootEl = document.documentElement;
+      if (!rootEl.dataset.userRole)    rootEl.dataset.userRole = APP_USER.role || '';
+      if (!rootEl.dataset.userDisplay) rootEl.dataset.userDisplay = APP_USER.display || 'Yo';
+
+      const wc = document.getElementById('wc-comments-panel');
+      if (wc) {
+        if (!wc.dataset.userRole)    wc.dataset.userRole = APP_USER.role || '';
+        if (!wc.dataset.userDisplay) wc.dataset.userDisplay = APP_USER.display || 'Yo';
+      }
+    })();
+
+    // ====== Buscador superior → historial ======
+    (function () {
+      const form = document.getElementById('app-search-form');
+      const input = document.getElementById('app-search-input');
+      if (!form || !input) return;
+
+      function go() {
+        const q = (input.value || '').trim();
+        const url = q ? `/cargas/historial?q=${encodeURIComponent(q)}` : '/cargas/historial';
+        window.location.href = url;
+      }
+
+      form.addEventListener('submit', function (e) { e.preventDefault(); go(); });
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    })();
+
+    // ====== Badge "Mesa de ayuda" (abiertos) ======
+    (function () {
+      const badge = document.getElementById('cmMenuBadge');
+      const link  = document.getElementById('cmMenuLink');
+      if (!badge || !link) return;
+
+      async function refresh() {
+        try {
+          const r = await fetch('/api/comments/inbox?status=open&page=1&page_size=1', {
+            headers: { 'accept': 'application/json' }
+          });
+          if (!r.ok) return;
+          const data = await r.json();
+
+          const open = (data && typeof data.total === 'number')
+            ? data.total
+            : (Array.isArray(data) ? data.length : 0);
+
+          if (open > 0) {
+            badge.textContent = String(open);
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+          link.title = `Mesa de ayuda · Abiertos: ${open}`;
+        } catch {}
+      }
+
+      refresh();
+      setInterval(refresh, 60000);
+    })();
+
+    // ====== Helper global: Enter = enviar / Shift+Enter = salto ======
+    (function(){
+      function bindEnterSubmit(textarea, form){
+        if (!textarea || !form || textarea.dataset._enterBound) return;
+        textarea.addEventListener('keydown', function(e){
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            const txt = (textarea.value || '').trim();
+            if (!txt) return;
+            if (typeof form.requestSubmit === 'function') form.requestSubmit();
+            else form.submit();
+          }
+        });
+        textarea.dataset._enterBound = '1';
+      }
+      window.bindEnterSubmit = bindEnterSubmit;
+
+      const ta = document.getElementById('cmReplyBody');
+      const fm = document.getElementById('cmReplyForm');
+      if (ta && fm) bindEnterSubmit(ta, fm);
+
+      document.addEventListener('shown.bs.offcanvas', function(){
+        const t = document.getElementById('cmReplyBody');
+        const f = document.getElementById('cmReplyForm');
+        if (t && f) bindEnterSubmit(t, f);
+      });
+    })();
+  </script>
+
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

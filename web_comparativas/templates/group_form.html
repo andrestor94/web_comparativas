@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Nuevo Grupo – Web Comparativas{% endblock %}
+{% block header_title %}Nuevo grupo{% endblock %}
+
+{% block content %}
+<form method="post" action="/grupos/nuevo" class="card p-3" style="max-width:640px">
+  <div class="mb-3">
+    <label class="form-label">Nombre del grupo</label>
+    <input name="name" type="text" class="form-control" placeholder="Ej: Equipo Productos H." required>
+    <div class="form-text">Debe ser único.</div>
+  </div>
+
+  {% set role = (user.role or '')|lower %}
+  {% if role == 'admin' %}
+    <div class="mb-3">
+      <label class="form-label">Unidad de negocio</label>
+      <select name="business_unit" class="form-select">
+        <option value="">— Sin especificar —</option>
+        {% for bu in business_units %}
+          <option value="{{ bu }}">{{ bu }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Como Admin, puedes dejarlo vacío o elegir una unidad.</div>
+    </div>
+  {% else %}
+    <div class="mb-3">
+      <label class="form-label">Unidad de negocio</label>
+      <input type="text" class="form-control" value="{{ default_bu }}" disabled>
+      <input type="hidden" name="business_unit" value="{{ default_bu }}">
+      <div class="form-text">Como Supervisor, el grupo se crea dentro de tu unidad.</div>
+    </div>
+  {% endif %}
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary" type="submit">Crear grupo</button>
+    <a class="btn btn-outline-secondary" href="/grupos">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

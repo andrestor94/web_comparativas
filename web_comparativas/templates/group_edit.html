@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Editar grupo – Web Comparativas{% endblock %}
+{% block header_title %}Editar grupo{% endblock %}
+
+{% block content %}
+{% if ok %}<div class="alert alert-success py-2">OK: {{ ok }}</div>{% endif %}
+{% if err %}<div class="alert alert-danger py-2">Error: {{ err }}</div>{% endif %}
+
+<div class="row g-3">
+  <!-- Datos del grupo -->
+  <div class="col-12 col-lg-5">
+    <form method="post" action="/grupos/{{ group.id }}/actualizar" class="card p-3">
+      <h6 class="mb-3">Datos del grupo</h6>
+      <div class="mb-3">
+        <label class="form-label">Nombre</label>
+        <input name="name" type="text" class="form-control" value="{{ group.name }}" required>
+      </div>
+
+      {% set r = (user.role or '')|lower %}
+      {% if r == 'admin' %}
+        <div class="mb-3">
+          <label class="form-label">Unidad de negocio</label>
+          <select name="business_unit" class="form-select">
+            <option value="" {% if not group.business_unit %}selected{% endif %}>— Sin especificar —</option>
+            {% for bu in business_units %}
+              <option value="{{ bu }}" {% if group.business_unit == bu %}selected{% endif %}>{{ bu }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Solo el Admin puede modificar la unidad del grupo.</div>
+        </div>
+      {% else %}
+        <div class="mb-3">
+          <label class="form-label">Unidad de negocio</label>
+          <!-- Para supervisor: mostrar SU unidad (no editable) -->
+          <input class="form-control" value="{{ user.unit_business or '—' }}" disabled>
+          <div class="form-text">Como Supervisor, tu unidad define a quién podés agregar al grupo.</div>
+        </div>
+      {% endif %}
+
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a class="btn btn-outline-secondary" href="/grupos">Volver</a>
+        <a class="btn btn-outline-danger ms-auto" href="/grupos/{{ group.id }}/eliminar"
+           onclick="return confirm('¿Eliminar el grupo {{ group.name }}?');">Eliminar grupo</a>
+      </div>
+    </form>
+
+    <!-- Agregar miembros -->
+    <form method="post" action="/grupos/{{ group.id }}/miembros/agregar" class="card p-3 mt-3">
+      <h6 class="mb-3">Agregar miembros</h6>
+      <div class="mb-3">
+        <label class="form-label">Usuarios</label>
+        <select name="user_ids" class="form-select" multiple size="10">
+          {% for u in available_users %}
+            <option value="{{ u.id }}">{{ u.name or u.full_name or u.email }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Podés seleccionar uno o varios.</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Rol en el grupo</label>
+        <select name="role_in_group" class="form-select">
+          {# solo mostramos los roles permitidos #}
+          {% for k in roles %}
+            {% if k != 'supervisor' and k != 'visor' %}
+              <option value="{{ k }}">{{ role_labels[k] }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+
+      <button class="btn btn-primary" type="submit">Agregar</button>
+    </form>
+  </div>
+
+  <!-- Miembros actuales -->
+  <div class="col-12 col-lg-7">
+    <div class="card p-3">
+      <h6 class="mb-3">Miembros ({{ memberships|length }})</h6>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Rol</th>
+              <th class="text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in memberships %}
+              <tr>
+                <td>{{ m.user.name or m.user.full_name or m.user.email }}</td>
+                <td>
+                  <form method="post" action="/grupos/{{ group.id }}/miembros/{{ m.id }}/rol" class="d-flex gap-2">
+                    <select name="role_in_group" class="form-select form-select-sm" style="max-width:220px">
+                      {# también acá filtramos supervisor y visor #}
+                      {% for k in roles %}
+                        {% if k != 'supervisor' and k != 'visor' %}
+                          <option value="{{ k }}" {% if m.role_in_group==k %}selected{% endif %}>{{ role_labels[k] }}</option>
+                        {% endif %}
+                      {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Actualizar</button>
+                  </form>
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-danger"
+                     href="/grupos/{{ group.id }}/miembros/{{ m.id }}/eliminar"
+                     onclick="return confirm('Quitar a {{ m.user.name or m.user.email }} del grupo?');">
+                    Quitar
+                  </a>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="3" class="text-muted">Aún no hay miembros.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

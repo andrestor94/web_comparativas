@@ -1,0 +1,519 @@
+/* =========================================================
+   app.theme.css — UI base estilo "dashboard celeste"
+   ========================================================= */
+
+/* ---------- Variables de diseño ---------- */
+:root{
+  /* Paleta principal (gradiente de fondo) */
+  --bg-start: #00C6FF;
+  --bg-end:   #0072FF;
+
+  /* Escala neutrales / textos */
+  --ink-900: #1E2A32;   /* títulos oscuros */
+  --ink-700: #2E3A43;
+  --ink-500: #6B7A86;   /* secundarios */
+  --ink-300: #A8B3BD;   /* labels */
+  --ink-100: #E6ECF1;   /* bordes suaves */
+  --ink-050: #F4F7FA;   /* fondos de cards claras */
+
+  /* Acentos */
+  --accent-500: #1EA7FF;    /* azul eléctrico */
+  --accent-600: #0F8EE6;
+  --teal-400:   #43D0F9;
+  --violet-400: #8E7CFF;
+
+  /* Semánticos (opcionales) */
+  --ok-500:    #16B364;
+  --warn-500:  #F59E0B;
+  --danger-500:#EF4444;
+
+  /* Efectos y layout */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  --shadow-1: 0 6px 18px rgba(15, 45, 80, 0.12);
+  --shadow-2: 0 10px 30px rgba(15, 45, 80, 0.16);
+
+  --gap-1: .5rem;
+  --gap-2: 1rem;
+  --gap-3: 1.5rem;
+  --gap-4: 2rem;
+
+  --kpi-font: clamp(28px, 4vw, 44px);
+}
+
+/* ---------- Reset suave ---------- */
+*{ box-sizing: border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  font-family: "Outfit", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  color: #fff;
+  background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+  background-attachment: fixed;
+  line-height: 1.35;
+}
+
+/* Limpiar links por defecto */
+a{ color: inherit; text-decoration: none; }
+a:hover{ opacity: .92; }
+
+/* ---------- Layout base: sidebar + main ---------- */
+.app{
+  display:grid;
+  grid-template-columns: 260px 1fr;
+  min-height:100vh;
+}
+
+/* Sidebar */
+.sidebar{
+  background: linear-gradient(180deg, rgba(0,32,80,.25), rgba(8,16,40,.55));
+  backdrop-filter: blur(8px);
+  padding: var(--gap-4) var(--gap-2);
+  border-right: 1px solid rgba(255,255,255,.08);
+}
+.sidebar .brand{
+  font-weight:700; letter-spacing:.3px; margin-bottom: var(--gap-3);
+  color:#EAF6FF;
+}
+.nav{
+  display:flex; flex-direction:column; gap:.25rem; margin-top: var(--gap-2);
+}
+.nav a{
+  padding:.7rem .9rem;
+  border-radius: var(--radius-sm);
+  color:#E5F2FF;
+  opacity:.9;
+}
+.nav a:hover{ background: rgba(255,255,255,.08); opacity:1; }
+.nav a.active{
+  background: linear-gradient(90deg, rgba(255,255,255,.16), rgba(255,255,255,.06));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+  font-weight:600;
+}
+.sidebar .signout{
+  margin-top:auto;
+  margin-bottom:.5rem;
+}
+.btn-signout{
+  display:block; text-align:center;
+  padding:.65rem .9rem; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.1);
+  box-shadow: var(--shadow-1);
+  color:#EAF6FF; font-weight:600;
+}
+.btn-signout:hover{ background: rgba(255,255,255,.18); }
+
+/* Main */
+.main{
+  padding: var(--gap-4);
+}
+
+/* ---------- Header minimal ---------- */
+.header{
+  display:grid;
+  grid-template-columns: 1fr minmax(320px, 560px) 1fr;
+  align-items:center;
+  gap: var(--gap-3);
+  margin-bottom: var(--gap-3);
+}
+.header .title{
+  font-weight:700; font-size: 18px; color:#F8FBFF;
+}
+.search{
+  position:relative;
+}
+.search input{
+  width:100%;
+  padding: .85rem 3rem .85rem 1rem;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.16);
+  color:#fff;
+  border-radius: 999px;
+  outline:none;
+}
+.search .icon{
+  position:absolute; right:.9rem; top:50%; transform:translateY(-50%);
+  opacity:.85;
+}
+.header .meta{
+  text-align:right; color:#D9ECFF; font-weight:500;
+}
+
+/* ---------- Grid de contenido ---------- */
+.grid{
+  display:grid;
+  gap: var(--gap-3);
+}
+.grid.kpis{
+  grid-template-columns: repeat(12, 1fr);
+}
+.kpi{ grid-column: span 3; }
+@media (max-width: 1100px){
+  .kpi{ grid-column: span 6; }
+}
+@media (max-width: 720px){
+  .app{ grid-template-columns: 1fr; }
+  .sidebar{ position: sticky; top:0; z-index:10; }
+  .grid.kpis{ grid-template-columns: repeat(2,1fr); }
+  .kpi{ grid-column: auto; }
+}
+
+/* ---------- Cards / superficies ---------- */
+.card{
+  background: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,.78));
+  color: var(--ink-900);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  border: 1px solid rgba(10,40,80,.06);
+  overflow:hidden;
+}
+.card-header{ padding: .9rem 1rem; border-bottom:1px solid var(--ink-100); color: var(--ink-700); font-weight:600; }
+.card-body{ padding: 1rem; }
+.card-muted{ background: rgba(255,255,255,.65); }
+
+/* ---------- KPIs ---------- */
+.kpi-card{
+  background: linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.78));
+  border-radius: var(--radius-md);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow-1);
+  border: 1px solid rgba(10,40,80,.06);
+  display:flex; flex-direction:column; gap:.25rem;
+}
+.kpi-label{
+  color: var(--ink-300);
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: .12em;
+}
+.kpi-value{
+  font-weight: 800;
+  font-size: var(--kpi-font);
+  color: var(--ink-900);
+}
+.kpi-accent{
+  background: linear-gradient(135deg, var(--teal-400), var(--accent-500));
+  color:#fff;
+}
+.kpi-accent .kpi-label{ color: rgba(255,255,255,.85); }
+.kpi-accent .kpi-value{ color: #fff; }
+
+/* ---------- Contenedor de gráfico ---------- */
+.chart-box{
+  background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.85));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  border: 1px solid rgba(10,40,80,.06);
+  padding: 1rem;
+}
+.chart-box .title{
+  font-weight:600; color: var(--ink-700); margin-bottom:.5rem;
+}
+
+/* ---------- Switch (estilo iOS) ---------- */
+.switch{
+  position:relative; display:inline-block; width:44px; height:24px;
+}
+.switch input{ opacity:0; width:0; height:0; }
+.slider{
+  position:absolute; cursor:pointer; inset:0;
+  background:#CFD8E3;
+  transition:.25s;
+  border-radius:999px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.12);
+}
+.slider:before{
+  content:"";
+  position:absolute; height:18px; width:18px; left:3px; top:3px;
+  background:white; border-radius:50%; transition:.25s; box-shadow: 0 2px 6px rgba(0,0,0,.18);
+}
+.switch input:checked + .slider{
+  background: linear-gradient(135deg, var(--accent-500), var(--violet-400));
+}
+.switch input:checked + .slider:before{ transform: translateX(20px); }
+
+/* ---------- Botones ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+  padding:.65rem .95rem; border-radius: var(--radius-sm);
+  font-weight:600; border:1px solid transparent; cursor:pointer;
+  transition: .2s ease;
+}
+.btn-primary{
+  background: linear-gradient(135deg, var(--accent-500), var(--violet-400));
+  color:#fff; box-shadow: var(--shadow-1);
+}
+.btn-primary:hover{ filter: brightness(1.05); }
+.btn-ghost{
+  background: transparent; color:#fff; border-color: rgba(255,255,255,.35);
+}
+.btn-ghost:hover{ background: rgba(255,255,255,.12); }
+
+/* ---------- Badges / Pills ---------- */
+.badge{
+  display:inline-block; padding:.25rem .55rem; border-radius:999px;
+  background: rgba(255,255,255,.18); color:#fff; font-size:.78rem; font-weight:600;
+}
+
+/* ---------- Tabla (normalized.xlsx) ---------- */
+.table-wrap{
+  background: rgba(255,255,255,.92);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  border:1px solid var(--ink-100);
+  overflow: hidden;
+}
+.table{
+  width:100%; border-collapse: collapse; color: var(--ink-900);
+}
+.table th, .table td{
+  padding:.8rem .9rem; border-bottom:1px solid var(--ink-100);
+  background:#fff;
+}
+.table th{
+  background: linear-gradient(180deg, #F9FBFE, #F1F6FB);
+  text-align:left; font-weight:700; color: var(--ink-700);
+  position: sticky; top:0; z-index:1;
+}
+.table tr:hover td{ background:#F7FAFF; }
+
+/* ---------- Formularios ---------- */
+.input, .select{
+  width:100%; padding:.7rem .9rem; border-radius: var(--radius-sm);
+  border:1px solid rgba(10,40,80,.15);
+  background: rgba(255,255,255,.95); color: var(--ink-900);
+  outline: none;
+}
+.input:focus, .select:focus{ border-color: var(--accent-500); box-shadow: 0 0 0 3px rgba(30,167,255,.18); }
+
+/* ---------- Utilidades ---------- */
+.m-0{ margin:0; } .mb-1{ margin-bottom:.25rem; } .mb-2{ margin-bottom:.5rem; }
+.mb-3{ margin-bottom:1rem; } .mb-4{ margin-bottom:1.5rem; } .mt-3{ margin-top:1rem; }
+.p-0{ padding:0; } .p-2{ padding:.5rem; } .p-3{ padding:1rem; } .p-4{ padding:1.5rem; }
+.text-subtle{ color: var(--ink-500); }
+.text-muted{ color: var(--ink-300); }
+.card-row{ display:grid; grid-template-columns: repeat(12,1fr); gap: var(--gap-3); }
+.span-12{ grid-column: span 12; } .span-8{ grid-column: span 8; } .span-4{ grid-column: span 4; }
+.span-6{ grid-column: span 6; } .span-3{ grid-column: span 3; }
+
+/* ---------- Dark overlay para modales (si usás) ---------- */
+.modal-backdrop{
+  position:fixed; inset:0; background:rgba(10,25,50,.55); backdrop-filter: blur(2px);
+}
+
+/* ---------- Chart.js (tipografías y tooltips más sutiles) ---------- */
+:root{
+  --chart-grid: rgba(30,60,90,.12);
+}
+canvas{ background: transparent; }
+
+/* =========================================================
+   SUÍZO ARGENTINA – Override de colores corporativos (actualizado)
+   ========================================================= */
+:root{
+  /* Paleta corporativa exacta */
+  --brand-azul: #064066;           /* Azul principal */
+  --brand-azul-2: #5274ce;         /* Azul alternativo */
+  --brand-azul-claro: #6886c4;     /* Azul alternativo claro */
+  --brand-amarillo: #eeede8;       /* Neutro institucional */
+  --brand-blanco: #ffffff;
+
+  /* Fondo general institucional */
+  --bg-start: var(--brand-blanco);
+  --bg-end:   var(--brand-amarillo);
+
+  /* Neutrales / textos reajustados */
+  --ink-900: #0f2533;
+  --ink-700: #1e3a4a;
+  --ink-500: #5a6b78;
+  --ink-300: #91A1AE;
+  --ink-100: #E2E8F0;
+  --ink-050: #F6F7FA;
+
+  /* Acentos a marca */
+  --accent-500: var(--brand-azul-2);
+  --accent-600: #4b73db;
+  --teal-400:   var(--brand-azul-2);
+  --violet-400: var(--brand-azul);
+
+  /* Sombras frías suaves */
+  --shadow-1: 0 6px 18px rgba(6, 64, 102, 0.10);
+  --shadow-2: 0 10px 30px rgba(6, 64, 102, 0.14);
+}
+
+/* Fondo del body con degradado blanco -> gris claro institucional */
+body{
+  background: linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
+  color: var(--ink-900);
+}
+
+/* Sidebar con azul corporativo */
+.sidebar{
+  background: linear-gradient(180deg, rgba(6,64,102,0.96), rgba(6,64,102,0.88));
+  border-right: 1px solid rgba(255,255,255,.10);
+}
+.sidebar .brand{ color:#EAF4FF; }
+.nav a{ color: #D6E6F5; }
+.nav a.active{
+  background: rgba(255,255,255,0.14);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+}
+
+/* Superficies claras para contraste con el fondo institucional */
+.card,
+.kpi-card,
+.chart-box,
+.table-wrap{
+  background: linear-gradient(180deg, #ffffff, #FAFBFD);
+  border: 1px solid #E6EDF5;
+}
+
+/* KPI destacado con los dos azules de marca */
+.kpi-accent{
+  background: linear-gradient(135deg, var(--brand-azul-2), var(--brand-azul));
+  color:#fff;
+}
+.kpi-accent .kpi-label{ color: rgba(255,255,255,.9); }
+.kpi-accent .kpi-value{ color:#fff; }
+
+/* Botón primario a marca */
+.btn-primary{
+  background: linear-gradient(135deg, var(--brand-azul-2), var(--brand-azul));
+  color:#fff;
+}
+.btn-primary:hover{ filter: brightness(1.05); }
+
+/* Botón ghost: texto azul corporativo cuando se usa sobre fondos claros */
+.btn-ghost{
+  color: var(--brand-azul);
+  border-color: rgba(6,64,102,.35);
+}
+.btn-ghost:hover{ background: rgba(6,64,102,.08); }
+
+/* Badges con tono azul suave */
+.badge{
+  background: rgba(6,64,102,0.10);
+  color: var(--brand-azul);
+}
+
+/* Inputs / selects: borde azul secundario en focus */
+.input:focus, .select:focus{
+  border-color: var(--brand-azul-2);
+  box-shadow: 0 0 0 3px rgba(82,116,206,.22);
+}
+
+/* Switch activado en azul de marca */
+.switch input:checked + .slider{
+  background: linear-gradient(135deg, var(--brand-azul-2), var(--brand-azul));
+}
+
+/* Encabezados y títulos */
+.header .title{ color: var(--brand-azul); }
+.chart-box .title{ color: var(--ink-700); }
+
+/* Tabla: cabecera con franja azul muy clara */
+.table th{
+  background: linear-gradient(180deg, #F2F6FF, #E8EFFE);
+  color: var(--ink-700);
+}
+.table tr:hover td{ background:#F7FAFF; }
+/* WC: estilado de acciones en Comentarios */
+.wc-action-group{
+  display:inline-flex;
+  gap:.45rem;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.wc-btn{
+  appearance:none;
+  border:1px solid transparent;
+  border-radius: var(--radius-sm, 10px);
+  padding:.38rem .65rem;
+  font-weight:600;
+  line-height:1;
+  cursor:pointer;
+  transition: transform .04s ease, background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.wc-btn:hover{ transform: translateY(-1px); }
+
+/* Abrir tablero: botón primario */
+.wc-btn.is-open{
+  background: var(--sa-azul, #064066);
+  color:#fff;
+}
+
+/* Responder: botón secundario/contorno */
+.wc-btn.is-reply{
+  background:#fff;
+  color: var(--sa-azul, #064066);
+  border-color: var(--sa-azul-alt, #5274ce);
+}
+
+/* Borrar: botón de peligro suave */
+.wc-btn.is-delete{
+  background:#fff;
+  color:#b42318;
+  border-color:#f3b4af;
+}
+.wc-btn.is-delete:hover{
+  background:#ffe3e0;
+}
+/* === WC | Comentarios: ocultar Resolver/Resuelto y ordenar/estilar 3 acciones === */
+
+/* 1) Ocultar "Resolver", "Reabrir" y el botón gris "Resuelto" (deshabilitado) */
+.cm-actions .cm-act[data-act="resolve"],
+.cm-actions .cm-act[data-act="reopen"],
+.cm-actions .btn.btn-outline-secondary[disabled]{
+  display: none !important;
+}
+
+/* 2) Poner las acciones que quedan en línea con separación */
+.cm-actions{
+  display: inline-flex;
+  gap: .45rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 3) Estilos por tipo, respetando colores de Suizo */
+
+/* Abrir tablero (enlace .btn-link normal, NO .text-danger) -> primario azul */
+.cm-actions a.btn-link:not(.text-danger){
+  background: var(--sa-azul, #064066);
+  color: #fff !important;
+  border: 1px solid var(--sa-azul, #064066);
+  border-radius: var(--radius-sm, 10px);
+  padding: .38rem .65rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Responder (suele venir como .btn-outline-primary) -> borde azul secundario */
+.cm-actions .btn-outline-primary{
+  background: #fff;
+  color: var(--sa-azul, #064066) !important;
+  border-color: var(--sa-azul-alt, #5274ce) !important;
+  border-radius: var(--radius-sm, 10px);
+  padding: .38rem .65rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Borrar (enlace .btn-link.text-danger) -> estilo peligro suave */
+.cm-actions a.btn-link.text-danger{
+  background: #fff;
+  color: #b42318 !important;
+  border: 1px solid #f3b4af;
+  border-radius: var(--radius-sm, 10px);
+  padding: .38rem .65rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.cm-actions a.btn-link.text-danger:hover{
+  background: #ffe3e0;
+}
+

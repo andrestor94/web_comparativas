@@ -1,0 +1,190 @@
+/* ========= SKIN MODERNO – Suizo =========
+   Colores y tipografía pedidos:
+   - Azul principal: #064066
+   - Azul alternativo: #5274ce
+   - Azul alternativo claro: #6886c4
+   - Amarillo (neutro claro): #eeede8
+   - Tipografía: Outfit
+   Este skin SOLO cambia estética (cards, bordes, sombras, header de tabla, controles).
+   Está **scopeado** a .dash-v2 para no afectar otras pantallas.
+========================================= */
+
+:root{
+  --brand-azul: #064066;
+  --brand-azul-alt: #5274ce;
+  --brand-azul-claro: #6886c4;
+  --brand-amarillo: #eeede8;
+
+  --bg-soft: #f6f8fb;
+  --card-bg: #ffffff;
+  --stroke: #e6e9f2;
+  --muted: #64748b;
+
+  --radius-lg: 14px;
+  --radius-md: 12px;
+  --shadow-sm: 0 4px 10px rgba(6,64,102,.05);
+  --shadow-md: 0 10px 20px rgba(6,64,102,.08);
+
+  /* ajustar sutilmente la grilla */
+  --gap: 1rem;
+}
+
+/* Tipografía y color base dentro del tablero */
+.dash-v2{
+  color: var(--brand-azul);
+  font-family: "Outfit", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* ====== Tarjetas principales ====== */
+.dash-v2 .process-header,
+.dash-v2 .kpi-group,
+.dash-v2 .chart-box,
+.dash-v2 .table-wrap{
+  background: var(--card-bg);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+/* encabezado del proceso */
+.dash-v2 .process-header{
+  background: linear-gradient(180deg,#f7fbff 0%, #ffffff 65%);
+}
+
+/* Títulos de secciones */
+.dash-v2 .group-title,
+.dash-v2 .chart-box .title{
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: var(--brand-azul);
+}
+
+/* KPI cards */
+.dash-v2 .kpi-grid{ gap: .75rem; }
+.dash-v2 .kpi-grid .kpi-card{
+  background: linear-gradient(180deg,#f7f9ff 0%, #ffffff 70%);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.dash-v2 .kpi-grid .kpi-label{
+  text-transform: uppercase;
+  font-size: .78rem;
+  color: var(--muted);
+  letter-spacing: .05em;
+  font-weight: 700;
+}
+.dash-v2 .kpi-grid .kpi-value{
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--brand-azul);
+}
+
+/* ====== Controles (toggles, chips, inputs) ====== */
+.dash-v2 .mini-toggle,
+.dash-v2 .segmented,
+.dash-v2 .pos-cols{
+  background: #f3f5fb;
+  border: 1px solid var(--stroke);
+  border-radius: .6rem;
+  box-shadow: var(--shadow-sm);
+}
+.dash-v2 .mini-toggle .mini-btn,
+.dash-v2 .segmented .seg-btn,
+.dash-v2 .pos-chip{
+  transition: all .15s ease;
+}
+.dash-v2 .mini-toggle .mini-btn.active,
+.dash-v2 .segmented .seg-btn.active,
+.dash-v2 .pos-chip.active{
+  background: #ffffff;
+  color: var(--brand-azul);
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+
+/* Botones */
+.dash-v2 .btn-primary{
+  background: var(--brand-azul-alt) !important;
+  border-color: var(--brand-azul-alt) !important;
+}
+.dash-v2 .btn-outline-secondary{
+  color: var(--brand-azul) !important;
+  border-color: var(--stroke) !important;
+}
+
+/* Inputs compactos y prolijos */
+.dash-v2 .form-control,
+.dash-v2 .form-select{
+  border-radius: .55rem;
+  border-color: var(--stroke);
+  box-shadow: none;
+}
+.dash-v2 .form-control:focus,
+.dash-v2 .form-select:focus{
+  border-color: var(--brand-azul-claro);
+  box-shadow: 0 0 0 .15rem rgba(104,134,196,.15);
+}
+
+/* ====== Gráficos ====== */
+.dash-v2 .chart-donut>canvas,
+.dash-v2 .chart-bar>canvas,
+.dash-v2 .chart-treemap>canvas{
+  border-radius: 10px;
+}
+
+/* ====== Tabla ====== */
+.dash-v2 #rankTable{ border-collapse: separate; border-spacing: 0; }
+.dash-v2 .table thead th{
+  background: linear-gradient(180deg,#f7f9ff 0%, #ffffff 70%);
+  border-bottom: 1px solid var(--stroke) !important;
+}
+.dash-v2 #rankTable th.pos-group-head{
+  background: linear-gradient(180deg,#eff4ff 0%, #ffffff 85%);
+  color: var(--brand-azul);
+  font-weight: 800;
+}
+.dash-v2 .table tbody td{
+  border-top-color: var(--stroke) !important;
+}
+.dash-v2 .table tbody tr:hover{
+  background: #f8fbff;
+}
+
+/* columnas fijas con leve elevación */
+.dash-v2 #rankTable th.col-nro,
+.dash-v2 #rankTable td.col-nro,
+.dash-v2 #rankTable th.col-desc,
+.dash-v2 #rankTable td.col-desc,
+.dash-v2 #rankTable th.col-cant,
+.dash-v2 #rankTable td.col-cant{
+  box-shadow: 4px 0 0 rgba(255,255,255,1), 6px 0 10px rgba(6,64,102,.05);
+}
+
+/* Chips de relación/asignación (ya venían) – solo afinamos colores */
+.dash-v2 .rel-pos-1{ background:#d1fae5; }
+.dash-v2 .rel-pos-2{ background:#fef9c3; }
+.dash-v2 .rel-pos-3{ background:#fee2e2; }
+.dash-v2 .asignada-full{ background:#e8f7ec; border:1px solid #22c55e; color:#14532d; }
+.dash-v2 .asignada-partial{ background:#fff6e6; border:1px solid #f59e0b; color:#7c2d12; }
+.dash-v2 .asignada-na{ background:#f1f5f9; border:1px solid #cbd5e1; color:#475569; }
+
+/* ====== Tooltip descripción ====== */
+.dash-v2 .desc-tip{
+  background: var(--brand-amarillo);
+  border-color: #d6d2c9;
+  box-shadow: 0 10px 24px rgba(0,0,0,.15);
+}
+
+/* ====== Modal de Vistas ====== */
+.dash-v2 .views-modal{
+  border-radius: var(--radius-lg);
+  border-color: var(--stroke);
+  box-shadow: 0 24px 64px rgba(0,0,0,.25);
+}
+.dash-v2 .views-list .row{
+  background: #fafbfe;
+  border-top: 1px dashed #dfe5f3;
+}
+.dash-v2 .views-list .row .act button{
+  color: var(--brand-azul);
+}

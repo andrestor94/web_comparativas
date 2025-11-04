@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Usuarios – Web Comparativas{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="m-0">Usuarios</h2>
+  <a class="btn btn-primary" href="/usuarios/nuevo">+ Nuevo usuario</a>
+</div>
+
+{# ====== Alertas de feedback ====== #}
+{% if ok == 'created' %}
+  <div class="alert alert-success">Usuario creado correctamente.</div>
+{% elif ok == 'updated' %}
+  <div class="alert alert-success">Usuario actualizado correctamente.</div>
+{% elif ok == 'deleted' %}
+  <div class="alert alert-success">Usuario eliminado.</div>
+{% endif %}
+
+{% if err == 'not_found' %}
+  <div class="alert alert-warning">Usuario no encontrado.</div>
+{% elif err == 'cannot_self' %}
+  <div class="alert alert-warning">No puedes eliminarte a ti mismo.</div>
+{% elif err == 'last_admin' %}
+  <div class="alert alert-warning">No puedes eliminar el último administrador.</div>
+{% elif err == 'delete_failed' %}
+  <div class="alert alert-danger">Ocurrió un error al eliminar el usuario.</div>
+{% elif err %}
+  <div class="alert alert-danger">Ocurrió un error: {{ err }}</div>
+{% endif %}
+
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+
+    {% if not users or users|length == 0 %}
+      <div class="text-center text-subtle py-4">
+        No hay usuarios cargados todavía.
+        <a href="/usuarios/nuevo" class="ms-1">Crear el primero</a>.
+      </div>
+    {% else %}
+
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th style="width:80px">ID</th>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th style="width:140px">Rol</th>
+          <th style="width:180px">Creado</th>
+          <th class="text-end" style="width:240px">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        {# --- Normalización de nombre (name/nombre) con fallback a alias del email --- #}
+        {% set _n = (u.name if u.name else (u.full_name if u.full_name else (u.nombre if u.nombre else ''))) %}
+        {% set _n = _n.strip() if _n else '' %}
+        {% if not _n %}
+          {% set _alias = (u.email.split('@')[0] if u.email else '') %}
+          {% set _alias = _alias.replace('.', ' ').replace('_', ' ').replace('-', ' ') %}
+          {% set _n = _alias.title() %}
+        {% endif %}
+
+        {# --- Rol normalizado --- #}
+        {% set _rol = (u.role if u.role else (u.rol if u.rol else ''))|trim|lower %}
+        {% if _rol == 'visor' %}{% set _rol = 'auditor' %}{% endif %}
+
+        {# --- Badge según rol --- #}
+        {% if _rol == 'admin' %}
+          {% set rol_badge_class = 'badge bg-danger-subtle text-danger' %}
+        {% elif _rol == 'supervisor' %}
+          {% set rol_badge_class = 'badge bg-purple-subtle text-purple' %}
+        {% elif _rol == 'analista' %}
+          {% set rol_badge_class = 'badge bg-primary-subtle text-primary' %}
+        {% elif _rol == 'auditor' %}
+          {% set rol_badge_class = 'badge bg-secondary-subtle text-secondary' %}
+        {% else %}
+          {% set rol_badge_class = 'badge bg-light text-dark' %}
+        {% endif %}
+
+        <tr>
+          <td>{{ u.id }}</td>
+          <td>{{ _n or '—' }}</td>
+          <td>{{ u.email or '—' }}</td>
+          <td><span class="{{ rol_badge_class }}">{{ _rol|capitalize }}</span></td>
+          <td>
+            {% if u.created_at %}
+              {% if u.created_at is string %}
+                {{ u.created_at }}
+              {% else %}
+                {{ u.created_at.strftime('%Y-%m-%d %H:%M') }}
+              {% endif %}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-secondary" href="/usuarios/{{ u.id }}/editar">Editar</a>
+            {% if u.id == user.id %}
+              <span class="text-subtle ms-2 small">No puedes eliminarte a ti mismo</span>
+            {% else %}
+              <a class="btn btn-sm btn-danger ms-1"
+                 href="/usuarios/{{ u.id }}/borrar"
+                 onclick="return confirm('¿Eliminar usuario {{ u.email }}?');">
+                 Eliminar
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="text-subtle mt-2">Total: {{ users|length }} usuario(s).</div>
+
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
