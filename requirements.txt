@@ -23,9 +23,10 @@ reportlab==4.2.5
 
 # --- Formularios, uploads y sesiones ---
 python-multipart==0.0.9
-itsdangerous==2.1.2
-passlib[bcrypt]==1.7.4
-sse-starlette==1.6.1
+itsdangerous==2.2.0
+passlib==1.7.4
+bcrypt==4.0.1
+sse-starlette==1.6.5
 
 # --- Email y notificaciones ---
 jinja2==3.1.3
@@ -35,5 +36,3 @@ python-dotenv==1.0.1
 requests==2.32.3
 aiofiles==23.2.1
 typing_extensions==4.12.2
-bcrypt==4.0.1
-
