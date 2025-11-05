@@ -31,7 +31,13 @@ BUSINESS_UNITS = [
 # ----------------------------------------------------------------------
 if os.getenv("RENDER") == "true" or "render" in os.getenv("RENDER_EXTERNAL_HOSTNAME", "").lower():
     # En modo Render (producción real)
-    BASE_DIR = Path("/opt/render/project/data")
+    BASE_DIR = Path("/opt/render/project/src")  # ✅ carpeta correcta
+else:
+    # En entorno local (PC de desarrollo)
+    BASE_DIR = Path(__file__).resolve().parent
+
+DB_FILE = BASE_DIR / "app.db"  # ✅ usa la misma base en ambos entornos
+
 else:
     # En entorno local (PC de desarrollo)
     BASE_DIR = Path(__file__).resolve().parent
