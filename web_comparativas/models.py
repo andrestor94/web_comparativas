@@ -27,9 +27,15 @@ BUSINESS_UNITS = [
 ]
 
 # ----------------------------------------------------------------------
-# Ubicación estable de la DB: siempre junto a este archivo (ruta absoluta)
+# Ubicación estable de la DB (local o producción)
 # ----------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
+if os.getenv("RENDER") == "true" or "render" in os.getenv("RENDER_EXTERNAL_HOSTNAME", "").lower():
+    # En modo Render (producción real)
+    BASE_DIR = Path("/opt/render/project/data")
+else:
+    # En entorno local (PC de desarrollo)
+    BASE_DIR = Path(__file__).resolve().parent
+
 DB_FILE = BASE_DIR / "app.db"
 
 # Permitir override por env; si es sqlite relativo, lo hacemos absoluto.
