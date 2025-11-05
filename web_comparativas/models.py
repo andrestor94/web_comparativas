@@ -35,7 +35,6 @@ if os.getenv("RENDER") == "true" or "render" in os.getenv("RENDER_EXTERNAL_HOSTN
 else:
     # En entorno local (PC de desarrollo)
     BASE_DIR = Path(__file__).resolve().parent
-
 DB_FILE = Path("/opt/render/project/data/app.db")
 
 # Permitir override por env; si es sqlite relativo, lo hacemos absoluto.
