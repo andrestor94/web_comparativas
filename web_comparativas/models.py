@@ -36,7 +36,7 @@ else:
     # En entorno local (PC de desarrollo)
     BASE_DIR = Path(__file__).resolve().parent
 
-DB_FILE = BASE_DIR / "app.db"
+DB_FILE = Path("/opt/render/project/data/app.db")
 
 # Permitir override por env; si es sqlite relativo, lo hacemos absoluto.
 _db_url = os.getenv("DATABASE_URL")
