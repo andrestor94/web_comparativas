@@ -5,10 +5,11 @@ import os
 import datetime as dt
 from typing import Iterable, Set, List
 import re  # <-- para normalizar procesos
+import logging
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey, Float, event, text,
-    UniqueConstraint, select, Boolean, JSON, Text, func, or_   # <-- incluye or_
+    UniqueConstraint, select, Boolean, JSON, Text, func, or_
 )
 from sqlalchemy.orm import (
     declarative_base, relationship, sessionmaker, scoped_session, aliased
@@ -27,40 +28,26 @@ BUSINESS_UNITS = [
 ]
 
 # ----------------------------------------------------------------------
-# Ubicación estable de la DB (local o producción)
+# Configuración de la DB (local o Render)
 # ----------------------------------------------------------------------
-if os.getenv("RENDER") == "true" or "render" in os.getenv("RENDER_EXTERNAL_HOSTNAME", "").lower():
-    # En modo Render (producción real)
-    BASE_DIR = Path("/opt/render/project/src")  # ✅ carpeta correcta
+RENDER_MODE = os.getenv("RENDER") == "true" or "render" in os.getenv("RENDER_EXTERNAL_HOSTNAME", "").lower()
+
+# En Render usamos el path del proyecto, en local el del paquete
+BASE_DIR = Path("/opt/render/project/src") if RENDER_MODE else Path(__file__).resolve().parent
+
+# Por defecto, SQLite en web_comparativas/app.db
+DB_FILE = BASE_DIR / "app.db"
+
+# Si hay DATABASE_URL, la usamos (y normalizamos postgres:// -> postgresql://)
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+if DATABASE_URL:
+    SQLALCHEMY_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://")
 else:
-    # En entorno local (PC de desarrollo)
-    BASE_DIR = Path(__file__).resolve().parent
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE.as_posix()}"
 
-DB_FILE = BASE_DIR / "app.db"  # ✅ usa la misma base en ambos entornos
-
-else:
-    # En entorno local (PC de desarrollo)
-    BASE_DIR = Path(__file__).resolve().parent
-DB_FILE = Path("/opt/render/project/data/app.db")
-
-# Permitir override por env; si es sqlite relativo, lo hacemos absoluto.
-_db_url = os.getenv("DATABASE_URL")
-if _db_url:
-    if _db_url.startswith("sqlite:///") and not _db_url.startswith("sqlite:////"):
-        # p.ej. "sqlite:///app.db" -> absoluto anclado a BASE_DIR
-        rel = _db_url.replace("sqlite:///", "")
-        DB_URL = f"sqlite:///{(BASE_DIR / rel).as_posix()}"
-    else:
-        DB_URL = _db_url
-else:
-    DB_URL = f"sqlite:///{DB_FILE.as_posix()}"
-
-# Engine: SQLite con check_same_thread y futuras APIs activadas
-engine = create_engine(
-    DB_URL,
-    connect_args={"check_same_thread": False} if DB_URL.startswith("sqlite") else {},
-    future=True,
-)
+# Engine
+connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args=connect_args, future=True)
 
 # Activar foreign keys en SQLite
 @event.listens_for(engine, "connect")
@@ -70,10 +57,8 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-# Session factory + scoped_session (compatible con tu middleware .remove())
-SessionLocal = sessionmaker(
-    bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True
-)
+# Session factory + scoped_session
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
 db_session = scoped_session(SessionLocal)
 
 Base = declarative_base()
@@ -91,8 +76,7 @@ def normalize_proceso_nro(value: str | None) -> str | None:
     if not value:
         return None
     s = str(value).strip().upper()
-    # reemplazar múltiples espacios/saltos por uno
-    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\s+", " ", s)  # reemplazar múltiples espacios/saltos por uno
     return s or None
 
 # ----------------------------------------------------------------------
@@ -169,10 +153,7 @@ class User(Base):
         return self.full_name or self.name or self.email
 
     def __repr__(self) -> str:
-        return (
-            f"<User id={self.id} email={self.email!r} role={self.role!r} "
-            f"bu={self.unit_business!r}>"
-        )
+        return f"<User id={self.id} email={self.email!r} role={self.role!r} bu={self.unit_business!r}>"
 
 # Hacemos accesible la lista desde la clase (lo usa main/users_form)
 User.BUSINESS_UNITS = BUSINESS_UNITS
@@ -681,7 +662,6 @@ def find_self_duplicate_upload(session, *, user_id: int, proceso_nro: str | None
     )
 
 
-
 # ----------------------------------------------------------------------
 # Inicialización de la base y migraciones simples
 # ----------------------------------------------------------------------
@@ -904,6 +884,41 @@ def _ensure_upload_uploader_snapshot_columns():
         pass
 
 
+# --------- Bootstrap de admin desde variables de entorno ---------
+def _bootstrap_admin_from_env():
+    """
+    Crea un usuario admin si ADMIN_EMAIL y ADMIN_PASSWORD están seteados
+    y no existe ya un usuario con ese email.
+    CONTRASEÑA: se guarda en password_hash tal cual.
+    Si tu login usa hash, pasame el handler y adapto la asignación en 1 línea.
+    """
+    admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+    admin_password = (os.getenv("ADMIN_PASSWORD") or "").strip()
+    if not admin_email or not admin_password:
+        return
+    s = db_session()
+    try:
+        exists = s.query(User).filter(func.lower(User.email) == admin_email).first()
+        if exists:
+            return
+        u = User(
+            email=admin_email,
+            name="Administrador",
+            role="admin",
+            unit_business=None,
+            created_at=dt.datetime.utcnow(),
+        )
+        u.password_hash = admin_password  # <-- ajustar si tu login usa hash
+        s.add(u)
+        s.commit()
+        logging.getLogger("bootstrap").info("[bootstrap] Admin creado: %s", admin_email)
+    except Exception:
+        s.rollback()
+        logging.getLogger("bootstrap").exception("[bootstrap] Error creando admin")
+    finally:
+        s.close()
+
+
 def init_db():
     """Crea tablas si no existen y asegura columnas nuevas e índices básicos."""
     Base.metadata.create_all(bind=engine)
@@ -917,6 +932,7 @@ def init_db():
     _ensure_comments_indexes()
     _ensure_email_notifications_indexes()
     _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
+    _bootstrap_admin_from_env()  # <-- crea admin si tenés ADMIN_EMAIL/PASSWORD
 
 
 # ----------------------------------------------------------------------
