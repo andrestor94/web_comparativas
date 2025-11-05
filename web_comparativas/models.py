@@ -173,7 +173,11 @@ class Upload(Base):
 
     id = Column(Integer, primary_key=True)
     # mantenemos sin FK físico para evitar migración; relación read-only debajo
-    user_id = Column(Integer, index=True)
+    user_id = Column(Integer, index=True, nullable=True)
+
+    # Snapshot del cargador (permite auditoría aunque se elimine el User)
+    uploaded_by_name = Column(String(120), nullable=True)   # ej: "Juan Pérez"
+    uploaded_by_email = Column(String(255), nullable=True)  # ej: "juan@acme.com"
 
     # Metadatos visibles del proceso
     proceso_nro = Column(String, index=True)
@@ -222,6 +226,29 @@ class Upload(Base):
         lazy="joined",
     )
 
+    # ---- Helpers de UI / auditoría ----
+    @property
+    def uploader_name(self) -> str | None:
+        """
+        Nombre estable del cargador:
+        1) snapshot (uploaded_by_name)
+        2) si existe el User, usa full_name/name/email
+        3) si todo falla, usa uploaded_by_email
+        """
+        if self.uploaded_by_name:
+            return self.uploaded_by_name
+        if self.user:
+            return self.user.full_name or self.user.name or self.user.email
+        return self.uploaded_by_email
+
+    @property
+    def uploader_email(self) -> str | None:
+        if self.uploaded_by_email:
+            return self.uploaded_by_email
+        if self.user:
+            return self.user.email
+        return None
+
     def __repr__(self) -> str:
         return f"<Upload id={self.id} status={self.status!r}>"
 
@@ -239,7 +266,25 @@ class Upload(Base):
 # listeners para que siempre se complete proceso_key
 @event.listens_for(Upload, "before_insert")
 def _upload_before_insert(mapper, connection, target: Upload):
+    # proceso_key
     target.proceso_key = normalize_proceso_nro(target.proceso_nro)
+    # snapshot del cargador si no vino seteado
+    try:
+        if (not getattr(target, "uploaded_by_name", None) or not getattr(target, "uploaded_by_email", None)) and getattr(target, "user_id", None):
+            row = connection.execute(
+                text("SELECT full_name, name, email FROM users WHERE id = :uid"),
+                {"uid": int(target.user_id)},
+            ).fetchone()
+            if row:
+                full_name, name, email = row[0], row[1], row[2]
+                name_pref = (full_name or "") or (name or "") or (email or "")
+                if not target.uploaded_by_name and name_pref:
+                    target.uploaded_by_name = name_pref
+                if not target.uploaded_by_email and email:
+                    target.uploaded_by_email = email
+    except Exception:
+        # no bloquear inserción si algo falla
+        pass
 
 
 @event.listens_for(Upload, "before_update")
@@ -247,6 +292,22 @@ def _upload_before_update(mapper, connection, target: Upload):
     # Recalcular siempre si hay proceso_nro; evita quedar desincronizado
     if target.proceso_nro:
         target.proceso_key = normalize_proceso_nro(target.proceso_nro)
+    # completar snapshot si sigue vacío y tenemos user_id
+    try:
+        if (not getattr(target, "uploaded_by_name", None) or not getattr(target, "uploaded_by_email", None)) and getattr(target, "user_id", None):
+            row = connection.execute(
+                text("SELECT full_name, name, email FROM users WHERE id = :uid"),
+                {"uid": int(target.user_id)},
+            ).fetchone()
+            if row:
+                full_name, name, email = row[0], row[1], row[2]
+                name_pref = (full_name or "") or (name or "") or (email or "")
+                if not target.uploaded_by_name and name_pref:
+                    target.uploaded_by_name = name_pref
+                if not target.uploaded_by_email and email:
+                    target.uploaded_by_email = email
+    except Exception:
+        pass
 
 
 # ---------- Runs del procesamiento ----------
@@ -355,7 +416,7 @@ class GroupMember(Base):
         return f"<GroupMember g={self.group_id} u={self.user_id} role={self.role_in_group!r}>"
 
 
-# ---------- Vistas guardadas por usuario (personalización de tablero) ----------
+# ---------- Vistas guardadas por usuario ----------
 class SavedView(Base):
     """
     Preferencias guardadas por usuario para una vista concreta (p.ej. 'dashboard').
@@ -811,6 +872,27 @@ def _ensure_email_notifications_indexes():
         pass
 
 
+def _ensure_upload_uploader_snapshot_columns():
+    """
+    Añade uploaded_by_name / uploaded_by_email si faltan (por compatibilidad
+    con bases ya creadas). Tu script externo también las crea; esto es idempotente.
+    """
+    try:
+        insp = inspect(engine)
+        cols = [c["name"] for c in insp.get_columns("uploads")]
+        ddls = []
+        if "uploaded_by_name" not in cols:
+            ddls.append("ALTER TABLE uploads ADD COLUMN uploaded_by_name TEXT")
+        if "uploaded_by_email" not in cols:
+            ddls.append("ALTER TABLE uploads ADD COLUMN uploaded_by_email TEXT")
+        with engine.begin() as conn:
+            for ddl in ddls:
+                conn.execute(text(ddl))
+    except Exception:
+        # no bloquear arranque si falla
+        pass
+
+
 def init_db():
     """Crea tablas si no existen y asegura columnas nuevas e índices básicos."""
     Base.metadata.create_all(bind=engine)
@@ -823,6 +905,7 @@ def init_db():
     _ensure_saved_views_indexes()
     _ensure_comments_indexes()
     _ensure_email_notifications_indexes()
+    _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
 
 
 # ----------------------------------------------------------------------

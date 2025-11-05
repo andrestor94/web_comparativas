@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import yaml
 import pandas as pd
 
-from .models import db_session, Upload as UploadModel, SavedView  # <-- NUEVO: SavedView
+from .models import db_session, Upload as UploadModel, SavedView, User  # <-- NUEVO: User
 
 # ------------------------------------------------------------
 # Logger
@@ -134,6 +134,71 @@ def _resolve_original_path(up: UploadModel, base_dir_abs: Path) -> Path | None:
             return candidates[0]
     return None
 
+# --- NUEVO: helpers para snapshot de uploader --------------------------------
+def _ensure_uploader_snapshot(up: UploadModel) -> None:
+    """
+    Garantiza uploaded_by_name / uploaded_by_email.
+    Si faltan y existe user_id -> busca el User y completa.
+    Idempotente y seguro para ejecutar muchas veces.
+    """
+    need_name = not getattr(up, "uploaded_by_name", None)
+    need_mail = not getattr(up, "uploaded_by_email", None)
+    if not (need_name or need_mail):
+        return
+
+    user = getattr(up, "user", None)
+    if not user and getattr(up, "user_id", None):
+        try:
+            user = db_session.get(User, int(up.user_id))
+        except Exception:
+            user = None
+
+    if user:
+        name_pref = (user.full_name or user.name or user.email or "").strip()
+        if need_name and name_pref:
+            up.uploaded_by_name = name_pref
+        if need_mail and user.email:
+            up.uploaded_by_email = user.email
+
+        db_session.add(up)
+        try:
+            _commit_safe()
+            logger.info(f"Snapshot de uploader completado para upload {up.id}")
+        except Exception as e:
+            logger.warning(f"No se pudo guardar snapshot para upload {up.id}: {e}")
+
+def set_upload_uploader_snapshot(upload_id: int) -> bool:
+    """
+    Utilitario público: fuerza completar el snapshot de un upload puntual.
+    Devuelve True si quedó con nombre o email seteado.
+    """
+    up = _get_upload(upload_id)
+    _ensure_uploader_snapshot(up)
+    return bool(up.uploaded_by_name or up.uploaded_by_email)
+
+def backfill_uploader_snapshots(limit: int | None = None) -> int:
+    """
+    Rellena snapshots faltantes en uploads históricos.
+    Si 'limit' se indica, procesa hasta esa cantidad.
+    Devuelve la cantidad de filas actualizadas.
+    """
+    q = db_session.query(UploadModel).filter(
+        (UploadModel.uploaded_by_name.is_(None)) | (UploadModel.uploaded_by_email.is_(None)),
+        UploadModel.user_id.isnot(None),
+    ).order_by(UploadModel.id.asc())
+
+    if limit:
+        q = q.limit(int(limit))
+
+    updated = 0
+    for up in q.all():
+        before = (up.uploaded_by_name, up.uploaded_by_email)
+        _ensure_uploader_snapshot(up)
+        after = (up.uploaded_by_name, up.uploaded_by_email)
+        if before != after:
+            updated += 1
+    return updated
+
 # --- NUEVO: helpers para normalized.xlsx -------------------------------------
 def get_normalized_path(upload: UploadModel) -> Path | None:
     p = getattr(upload, "normalized_path", None)
@@ -229,6 +294,8 @@ def _count_renglones_unicos(df: pd.DataFrame) -> int:
 # ------------------------------------------------------------
 def get_status(upload_id: int) -> dict:
     up = _get_upload(upload_id)
+    # Asegura snapshot por si el registro es viejo y nunca se llenó
+    _ensure_uploader_snapshot(up)
     flags = refresh_flags(up)
     return {
         "status": up.status,
@@ -257,6 +324,10 @@ def advance_status(upload_id: int, *, force: bool = False) -> str:
 # ------------------------------------------------------------
 def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool = False):
     up = _get_upload(upload_id)
+
+    # NUEVO: asegurar snapshot del cargador al entrar al pipeline
+    _ensure_uploader_snapshot(up)
+
     base_dir_abs = _abs_path(getattr(up, "base_dir", None)) or (PROJECT_ROOT / "data" / "uploads")
     out_dir = base_dir_abs / "processed"
     out_dir.mkdir(parents=True, exist_ok=True)
