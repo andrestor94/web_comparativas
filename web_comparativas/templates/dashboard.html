@@ -805,11 +805,11 @@
 
           <div class="charts-row">
             <section class="chart-box" aria-labelledby="donutTitle">
-              <div class="title" id="donutTitle">Participación Suizo</div>
-              <div class="chart-donut" role="img" aria-label="Participación de Suizo vs Otros">
-                <canvas id="donutSuizo"></canvas>
-              </div>
-            </section>
+  <div class="title" id="donutTitle">Efectividad Suizo</div>
+  <div class="chart-donut" role="img" aria-label="Efectividad Suizo (Adjudicado vs No adjudicado)">
+    <canvas id="donutSuizo"></canvas>
+  </div>
+</section>
 
             <section class="chart-box" aria-labelledby="barTitle">
               <div class="title" id="barTitle">Posiciones</div>
@@ -1360,35 +1360,39 @@ const esc = function (s) {
         if(!window.Chart) return;
 
         if(!chartDonutSuizo){
-          const c = document.getElementById('donutSuizo');
-          if (!c) return;
-          chartDonutSuizo = new Chart(c.getContext('2d'),{
-            type:'doughnut',
-            data:{
-              labels:['Suizo','Otros'],
-              datasets:[{
-                data:[0,0],
-                backgroundColor:['#064066','#dce3ee'],
-                borderColor:'#ffffff',
-                borderWidth:2
-              }]
-            },
-            options:{
-              cutout:'55%',
-              plugins:{
-                legend:{ position:'bottom' },
-                centerPercent:{ focusIndex:0 }
-              },
-              onClick:(_,els)=>{
-                if(!els?.length) return;
-                const i=els[0].index;
-                if(i===0) setMode('suizo');
-                else setMode('otros');
-              }
-            },
-            plugins:[CenterPercent]
-          });
+  const c = document.getElementById('donutSuizo');
+  if (!c) return;
+  chartDonutSuizo = new Chart(c.getContext('2d'),{
+    type:'doughnut',
+    data:{
+      labels:['Adjudicado','No adjudicado'],
+      datasets:[{
+        data:[0,0],
+        backgroundColor:['#064066','#dce3ee'],
+        borderColor:'#ffffff',
+        borderWidth:2
+      }]
+    },
+    options:{
+      cutout:'55%',
+      plugins:{
+        legend:{ position:'bottom' },
+        // El plugin del centro mostrará el % del primer segmento (Adjudicado)
+        centerPercent:{ focusIndex:0 },
+        tooltip:{
+          callbacks:{
+            label:(ctx)=> {
+              const v = +ctx.raw || 0;
+              return `${ctx.label}: ${new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(v)}`;
+            }
+          }
         }
+      }
+      // ← quitamos el onClick que antes cambiaba de Suizo/Otros
+    },
+    plugins:[CenterPercent]
+  });
+}
 
         if(!chartBarPos){
           const c = document.getElementById('barPosAgg');
@@ -1893,28 +1897,31 @@ const esc = function (s) {
         ensureCharts();
         const rows = filteredRows();
 
-        // Donut
-        let suizoAdj = 0, otrosAdj = 0;
-        rows.forEach(r=>{
-          (r.positions || []).forEach(p=>{
-            if(!showOfferByMode(p)) return;
-            const qAdj = effectiveQty(r,p);
-            if(qAdj > 0){
-              const val = unitPriceOf(p) * qAdj;
-              if(isSuizo(p.proveedor)) suizoAdj += val;
-              else otrosAdj += val;
-            }
-          });
-        });
+        // Donut (Efectividad Suizo: Adjudicado vs No adjudicado)
+let montoOferSuizo = 0, montoAdjSuizo = 0;
 
-        let donutData;
-        if (MODE === 'suizo') {
-          donutData = [suizoAdj, 0];
-        } else if (MODE === 'otros') {
-          donutData = [0, otrosAdj];
-        } else {
-          donutData = [suizoAdj, otrosAdj];
-        }
+rows.forEach(r=>{
+  const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+  if(!suizo) return;
+
+  // Ofertado de Suizo (precio * cantidad ofertada o estimada)
+  montoOferSuizo += offerValue(r, suizo);
+
+  // Adjudicado efectivo a Suizo (considera asignación total/parcial)
+  const qAdj = effectiveQty(r, suizo);
+  if (qAdj > 0) montoAdjSuizo += unitPriceOf(suizo) * qAdj;
+});
+
+const noAdj = Math.max(0, (montoOferSuizo || 0) - (montoAdjSuizo || 0));
+const donutData = [montoAdjSuizo, noAdj];
+
+if (chartDonutSuizo){
+  // El % del centro es (Adjudicado / (Adjudicado + No adjudicado)) = Adjudicado/Ofertado
+  chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };
+  chartDonutSuizo.data.labels = ['Adjudicado','No adjudicado'];
+  chartDonutSuizo.data.datasets[0].data = donutData;
+  chartDonutSuizo.update('none');
+}
 
         if (chartDonutSuizo){
           chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };

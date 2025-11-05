@@ -57,7 +57,7 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from starlette.middleware.sessions import SessionMiddleware
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
