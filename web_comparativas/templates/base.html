@@ -102,7 +102,7 @@
   <div class="app d-flex" style="min-height:100vh">
     <!-- Sidebar -->
     <aside class="sidebar" role="navigation" aria-label="Menú lateral">
-      <div class="brand px-3 py-3 fw-semibold border-bottom">Web Comparativas</div>
+      <div class="brand px-3 py-3 fw-semibold border-bottom">Mercado Público</div>
 
       {% if user %}
         {% set r = (user.role or user.rol or '')|lower %}
@@ -114,23 +114,36 @@
       {% set _done = total_done|default(None) %}
 
       <nav class="nav flex-column px-3 py-2 gap-1">
-        <a href="/"
-           class="nav-link {% if request.url.path == '/' or request.url.path.startswith('/inicio') or request.url.path.startswith('/home') %}active{% endif %}">
-           Inicio
+
+        <!-- Home Mercado Público -->
+        <a href="/mercado-publico"
+           class="nav-link {% if request.url.path == '/mercado-publico' %}active{% endif %}">
+           Home
+        </a>
+
+        <!-- Sección Web Comparativas -->
+        <div class="text-uppercase text-white-50 small mt-3 mb-1">Web Comparativas</div>
+
+        <!-- Panel Web Comparativas -->
+        <a href="/mercado-publico/web-comparativas"
+           class="nav-link {% if request.url.path.startswith('/mercado-publico/web-comparativas') %}active{% endif %}">
+           Panel Web Comparativas
         </a>
 
         {% if user and r in ['admin','analista','supervisor'] %}
           <a href="/cargas/nueva"
-             class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
-             <span>Nueva carga</span>
+             class="nav-link ps-4 {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
+             Nueva carga
           </a>
         {% endif %}
 
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {% set is_hist = request.url.path.startswith('/cargas/historial') or request.url.path == '/historial'
-                            or request.url.path.startswith('/cargas/') or request.url.path.startswith('/tablero/') %}
+          {% set is_hist = request.url.path.startswith('/cargas/historial')
+                            or request.url.path == '/historial'
+                            or request.url.path.startswith('/cargas/')
+                            or request.url.path.startswith('/tablero/') %}
           <a href="/cargas/historial"
-             class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
+             class="nav-link ps-4 d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
              <span>Historial</span>
              <span class="ms-2">
                {% if _pending is not none and _pending|int > 0 %}
@@ -143,9 +156,34 @@
           </a>
         {% endif %}
 
-        {# 👉 AQUÍ está el cambio: agregamos 'auditor' #}
+        {% if user and r in ['admin','supervisor'] %}
+          {% set is_groups = request.url.path.startswith('/grupos') %}
+          <a href="/grupos"
+             class="nav-link ps-4 {% if is_groups %}active{% endif %}">
+             Grupos
+          </a>
+        {% endif %}
+
+        <!-- Oportunidades -->
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {% set is_comments = request.url.path.startswith('/comentarios') %}
+          <a href="/mercado-publico/oportunidades"
+             class="nav-link {% if request.url.path.startswith('/mercado-publico/oportunidades') %}active{% endif %}">
+             Oportunidades
+          </a>
+        {% endif %}
+
+        <!-- Reporte perfiles -->
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          <a href="/mercado-publico/reporte-perfiles"
+             class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
+             Reporte perfiles
+          </a>
+        {% endif %}
+
+        <!-- Mesa de ayuda -->
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          {% set is_comments = request.url.path.startswith('/comentarios')
+                               or request.url.path.startswith('/api/comments') %}
           <a href="/comentarios"
              class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
              id="cmMenuLink" title="Mesa de ayuda">
@@ -156,21 +194,15 @@
           </a>
         {% endif %}
 
-        {% if user and r in ['admin','supervisor'] %}
-          {% set is_groups = request.url.path.startswith('/grupos') %}
-          <a href="/grupos"
-             class="nav-link {% if is_groups %}active{% endif %}">
-             Grupos
-          </a>
-        {% endif %}
-
+        <!-- Usuarios (solo admin) -->
         {% if user and r == 'admin' %}
           <a href="/usuarios"
-             class="nav-link {% if 'usuarios' in request.url.path %}active{% endif %}">
+             class="nav-link {% if request.url.path.startswith('/usuarios') %}active{% endif %}">
              Usuarios
           </a>
         {% endif %}
 
+        <!-- Mi contraseña -->
         {% if user %}
           <a href="/mi/password"
              class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">

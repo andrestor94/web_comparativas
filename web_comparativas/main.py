@@ -1199,18 +1199,12 @@ def mercado_privado_placeholder(
     )
 
 # ======================================================================
-# HOME: vista principal (Mercado Público / Web Comparativas)
+# MERCADO PÚBLICO: helpers comunes
 # ======================================================================
-@app.get("/mercado-publico/web-comparativas", response_class=HTMLResponse)
-def home(
-    request: Request,
-    user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
-    ),
-):
+def _render_mercado_publico_home(request: Request, user: User):
     """
-    Página de inicio de Web Comparativas dentro de Mercado Público.
-    (Antes estaba en "/")
+    Panel principal del Mercado Público.
+    Por ahora muestra el resumen de Web Comparativas.
     """
     data = _home_collect(user)
 
@@ -1231,6 +1225,70 @@ def home(
         **data,
     }
     return templates.TemplateResponse("home.html", ctx)
+
+
+# ======================================================================
+# MERCADO PÚBLICO: rutas principales
+# ======================================================================
+@app.get("/mercado-publico", response_class=HTMLResponse)
+def mercado_publico_home(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Home (panel principal) del Mercado Público.
+    """
+    return _render_mercado_publico_home(request, user)
+
+
+@app.get("/mercado-publico/web-comparativas", response_class=HTMLResponse)
+def mercado_publico_web_comparativas(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Home específico de Web Comparativas dentro de Mercado Público.
+    Reutiliza el mismo panel principal.
+    """
+    return _render_mercado_publico_home(request, user)
+
+
+@app.get("/mercado-publico/oportunidades", response_class=HTMLResponse)
+def mercado_publico_oportunidades(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Oportunidades (placeholder).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("oportunidades.html", ctx)
+
+
+@app.get("/mercado-publico/reporte-perfiles", response_class=HTMLResponse)
+def mercado_publico_reporte_perfiles(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Reporte de Perfiles (placeholder).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("reporte_perfiles.html", ctx)
 
 
 # ======================================================================
