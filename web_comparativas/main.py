@@ -1157,11 +1157,51 @@ def _home_collect(user: User):
         "total_done": int(kpis.get("done", 0)),
     }
 
-
 # ======================================================================
-# HOME: vista principal
+# HOME: selección de Mercado (Menú principal)
 # ======================================================================
 @app.get("/", response_class=HTMLResponse)
+def markets_home(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Pantalla principal: permite elegir Mercado Público o Mercado Privado.
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("markets_home.html", ctx)
+
+
+# ======================================================================
+# MERCADO PRIVADO (placeholder)
+# ======================================================================
+@app.get("/mercado-privado", response_class=HTMLResponse)
+def mercado_privado_placeholder(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Placeholder temporal para Mercado Privado.
+    Más adelante se reemplaza por el módulo real.
+    """
+    return HTMLResponse(
+        "<div style='font-family:system-ui;padding:32px;'>"
+        "<h2>Módulo Mercado Privado en construcción</h2>"
+        "<p>Próximamente vas a poder acceder a las herramientas del mercado privado desde aquí.</p>"
+        "</div>"
+    )
+
+# ======================================================================
+# HOME: vista principal (Mercado Público / Web Comparativas)
+# ======================================================================
+@app.get("/mercado-publico/web-comparativas", response_class=HTMLResponse)
 def home(
     request: Request,
     user: User = Depends(
@@ -1169,8 +1209,8 @@ def home(
     ),
 ):
     """
-    Página de inicio: muestra el resumen de cargas (pendientes, en proceso, finalizadas),
-    **restringido por visibilidad de grupos**.
+    Página de inicio de Web Comparativas dentro de Mercado Público.
+    (Antes estaba en "/")
     """
     data = _home_collect(user)
 
