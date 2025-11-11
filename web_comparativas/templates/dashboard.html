@@ -1645,24 +1645,34 @@ const esc = function (s) {
         const baseIncluded = (MODE==='otros');
         const basePrice = cheapestPrice(row, {includedOnly: baseIncluded}) || 0;
 
-        for(const [posStr,conf] of Object.entries(FILTERS.header)){
-          if(['nro','desc','cant'].includes(posStr)) continue;
-          const pos=+posStr;
-          if(!FILTERS.visCols.has(pos)) continue;
-          const p=(row.positions||[]).find(x=>+x.pos===pos);
-          if(!p) return false;
-          if(conf.prov && !String(p.proveedor||'').toLowerCase().includes(String(conf.prov).toLowerCase())) return false;
-          if(conf.relmax){
-            const [mn,mx]=parseRange(conf.relmax,true);
-            const maxOnly=(mx??mn);
-            const rel=basePrice>0?(unitPriceOf(p)/basePrice - 1):0;
-            if(maxOnly!=null && !(rel<=maxOnly)) return false;
-          }
-        }
+          for (const [posStr, confRaw] of Object.entries(FILTERS.header)) {
+    if (['nro','desc','cant'].includes(posStr)) continue;
 
-        return true;
-      }
+    const pos = +posStr;
+    if (!FILTERS.visCols.has(pos)) continue;
 
+    const conf = confRaw || {};
+    const hasProv = !!String(conf.prov || '').trim();
+    const hasRel  = !!String(conf.relmax || '').trim();
+
+    const p = (row.positions || []).find(x => +x.pos === pos);
+
+    // Si NO hay filtros para esa posición, NO descartamos la fila aunque la posición no exista
+    if (!p) {
+      if (hasProv || hasRel) return false; // hay filtro para la pos. pero la pos. no existe en la fila
+      continue; // sin filtros -> no condiciona
+    }
+
+    if (hasProv && !String(p.proveedor || '').toLowerCase().includes(String(conf.prov).toLowerCase()))
+      return false;
+
+    if (hasRel) {
+      const [mn, mx] = parseRange(conf.relmax, true);
+      const maxOnly = (mx ?? mn);
+      const rel = basePrice > 0 ? (unitPriceOf(p) / basePrice - 1) : 0;
+      if (maxOnly != null && !(rel <= maxOnly)) return false;
+    }
+  }
       function filteredRows(){
         const ql=(QUERY||'').trim().toLowerCase();
         return (DATA.rows||[]).filter(r=>{
