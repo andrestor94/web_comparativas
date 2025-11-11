@@ -2563,382 +2563,404 @@ if (chartDonutSuizo){
     })();
   </script>
 
-  <!-- 4) Vistas guardadas (igual que lo tenías) -->
-  <script>
-    (function () {
-      const VIEWS_API = '/api/views';
-      const VIEW_ID = 'dashboard';
-      const CONTEXT_ID = String({{ upload_id|tojson }});
-      const LS_KEY = `views:${VIEW_ID}:${CONTEXT_ID}`;
+  <!-- 4) Vistas guardadas (actualizado: sólo front/localStorage) -->
+<script>
+(function () {
+  // Identificadores de este tablero (por proceso)
+  const VIEW_ID = 'dashboard';
+  const CONTEXT_ID = String({{ upload_id|tojson }});
+  const LS_KEY = `views:${VIEW_ID}:${CONTEXT_ID}`;
 
-      const $ = (sel, root=document) => root.querySelector(sel);
-      const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-      const waitUntil = (testFn, {tries=40, every=200}={}) => new Promise(resolve=>{
-        (function loop(n){
-          if (testFn()) return resolve(true);
-          if (n<=0) return resolve(false);
-          setTimeout(()=>loop(n-1), every);
-        })(tries);
+  // Espera utilitaria (para asegurarnos que la tabla/filtros existen antes de aplicar una vista)
+  const waitUntil = (testFn, { tries = 40, every = 200 } = {}) =>
+    new Promise(resolve => {
+      (function loop(n) {
+        if (testFn()) return resolve(true);
+        if (n <= 0) return resolve(false);
+        setTimeout(() => loop(n - 1), every);
+      })(tries);
+    });
+
+  const dispatchInput = (el, type = 'input') => {
+    if (!el) return;
+    el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+  };
+
+  // ====== CRUD en localStorage ======
+  function readViews() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeViews(list) {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(list || []));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function saveViewLS({ id = null, name, is_default = false, payload }) {
+    const list = readViews();
+    const now = new Date().toISOString();
+
+    if (!id) {
+      id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      list.push({ id, name, is_default, payload, updated_at: now });
+    } else {
+      const idx = list.findIndex(v => v.id === id);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], name, is_default, payload, updated_at: now };
+      } else {
+        list.push({ id, name, is_default, payload, updated_at: now });
+      }
+    }
+
+    if (is_default) {
+      list.forEach(v => { if (v.id !== id) v.is_default = false; });
+    }
+
+    writeViews(list);
+    return list.find(v => v.id === id);
+  }
+
+  function deleteViewLS(id) {
+    const list = readViews().filter(v => v.id !== id);
+    writeViews(list);
+  }
+
+  function setDefaultLS(id) {
+    const list = readViews().map(v => ({ ...v, is_default: v.id === id }));
+    writeViews(list);
+  }
+
+  function clearDefaultLS(id) {
+    const list = readViews().map(v => ({ ...v, is_default: v.id === id ? false : v.is_default }));
+    writeViews(list);
+  }
+
+  function getDefaultLS() {
+    return readViews().find(v => v.is_default) || null;
+  }
+
+  // ====== Referencias del modal ======
+  const btnViews   = $('#btnViews');
+  const mod        = $('#viewsModal');
+  const bd         = $('#viewsBackdrop');
+  const btnClose   = $('#vmClose');
+  const btnClose2  = $('#vmClose2');
+  const btnSave    = $('#vmSave');
+  const btnRefresh = $('#vmRefresh');
+  const inputName  = $('#vmName');
+  const inputDefault = $('#vmDefault');
+  const listBox    = $('#viewsList');
+
+  // ====== Capturar estado actual del tablero ======
+  function collectCurrentView() {
+    const supplier_filter =
+      $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
+
+    const fitBtn = $('#viewToggle .mini-btn.active');
+    const fit_mode = fitBtn && fitBtn.dataset.view === 'fit' ? 'fit' : 'normal';
+
+    const densBtn = $('#densityToggle .mini-btn.active');
+    const density = densBtn?.dataset.density || 'normal';
+
+    const search_query = $('#search')?.value || '';
+    const page_size = Number($('#pageSize')?.value || 50) || 50;
+
+    // Columnas visibles (posiciones) según encabezado
+    const vis_cols = $$('#rankHead .pos-group-head')
+      .map(th => +th.dataset.pos)
+      .filter(n => Number.isFinite(n));
+
+    // Buckets activos (chips 1°,2°, etc.)
+    const pos_buckets = $$('#posCols .pos-chip.active')
+      .map(b => b.dataset.pos);
+
+    // Filtros de encabezado
+    const header_filters = {
+      nro:  $('#f_nro')?.value || '',
+      desc: $('#f_desc')?.value || '',
+      cant: $('#f_cant')?.value || ''
+    };
+    vis_cols.forEach(pos => {
+      const rel = $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '';
+      const prov = $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || '';
+      header_filters[pos] = { relmax: rel, prov: prov };
+    });
+
+    // Filtro por proveedor (lo leemos del chip si existe)
+    let provider = null;
+    const provChip = $('#selectionChip .sel-chip[data-key="provider"]');
+    if (provChip) {
+      provider = (provChip.textContent || '').replace('×', '').trim();
+    }
+
+    return {
+      supplier_filter,
+      fit_mode,
+      density,
+      vis_cols,
+      pos_buckets,
+      header_filters,
+      provider,
+      search_query,
+      page_size
+    };
+  }
+
+  // ====== Aplicar una vista guardada al tablero ======
+  async function applyViewPayload(payload) {
+    if (!payload || typeof payload !== 'object') return;
+
+    // Esperar a que la tabla y controles existan
+    const ok = await waitUntil(() => $('#rankHead') && $('#posCols'));
+    if (!ok) return;
+    await waitUntil(() => $('#rankHead input#f_desc'));
+
+    // 1) Modo Suizo / Otros / Todos
+    if (payload.supplier_filter === 'suizo') {
+      $('#tabSuizo')?.click();
+    } else if (payload.supplier_filter === 'otros') {
+      $('#tabOtros')?.click();
+    } else {
+      $('#tabTodos')?.click();
+    }
+
+    // 2) Zoom tablero
+    if (payload.fit_mode === 'fit') {
+      $('#viewToggle .mini-btn[data-view="fit"]')?.click();
+    } else {
+      $('#viewToggle .mini-btn[data-view="normal"]')?.click();
+    }
+
+    // 3) Densidad
+    if (payload.density === 'compact') {
+      $('#densityToggle .mini-btn[data-density="compact"]')?.click();
+    } else {
+      $('#densityToggle .mini-btn[data-density="normal"]')?.click();
+    }
+
+    // 4) Page size
+    if ($('#pageSize') && payload.page_size) {
+      $('#pageSize').value = String(payload.page_size);
+      dispatchInput($('#pageSize'), 'change');
+    }
+
+    // 5) Columnas visibles (alt+click para sólo mostrar/ocultar)
+    if (Array.isArray(payload.vis_cols) && payload.vis_cols.length) {
+      const want = new Set(payload.vis_cols.map(String));
+      await waitUntil(() => $$('#posCols .pos-chip').length > 0);
+
+      $$('#posCols .pos-chip').forEach(chip => {
+        const pos = chip.dataset.pos;
+        const headExists = !!document.querySelector(
+          `#rankHead .pos-group-head[data-pos="${pos}"]`
+        );
+        const shouldBeVisible = want.has(pos);
+        if (headExists !== shouldBeVisible) {
+          chip.dispatchEvent(
+            new MouseEvent('click', { bubbles: true, altKey: true })
+          );
+        }
       });
+    }
 
-      const dispatch = (el, type, opts={}) =>
-        el && el.dispatchEvent(new (type.startsWith('mouse')?'MouseEvent':'Event')(type, {bubbles:true, cancelable:true, ...opts}));
+    // 6) Buckets de posiciones (1°,2°, etc.)
+    if (Array.isArray(payload.pos_buckets)) {
+      const wantBuckets = new Set(payload.pos_buckets.map(String));
+      await waitUntil(() => $$('#posCols .pos-chip').length > 0);
 
-      const btnViews = document.getElementById('btnViews');
-      const mod = document.getElementById('viewsModal');
-      const bd = document.getElementById('viewsBackdrop');
-      const btnClose = document.getElementById('vmClose');
-      const btnClose2 = document.getElementById('vmClose2');
-      const btnSave = document.getElementById('vmSave');
-      const btnRefresh = document.getElementById('vmRefresh');
-      const inputName = document.getElementById('vmName');
-      const inputDefault = document.getElementById('vmDefault');
-      const listBox = document.getElementById('viewsList');
-
-      async function api(method, path, body){
-        try{
-          const res = await fetch(path, {
-            method,
-            headers: {'content-type':'application/json','accept':'application/json'},
-            body: body?JSON.stringify(body):undefined
-          });
-          if(!res.ok) throw new Error(String(res.status));
-          const ct=res.headers.get('content-type')||'';
-          return ct.includes('json') ? await res.json() : await res.text();
-        }catch(_){
-          return null;
+      $$('#posCols .pos-chip').forEach(chip => {
+        const pos = chip.dataset.pos;
+        const isActive = chip.classList.contains('active');
+        const shouldBeActive = wantBuckets.has(pos);
+        if (isActive !== shouldBeActive) {
+          chip.click(); // handler ya actualiza filtros internos
         }
-      }
+      });
+    }
 
-      function lsList(){
-        try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }
-        catch(_){ return []; }
-      }
-      function lsWrite(arr){
-        localStorage.setItem(LS_KEY, JSON.stringify(arr));
-      }
-      function lsSave({id, name, is_default=false, payload}){
-        const arr = lsList();
-        if(!id){
-          id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-          arr.push({id, name, is_default, payload, updated_at: new Date().toISOString()});
-        }else{
-          const i = arr.findIndex(v=>v.id===id);
-          if(i>=0) arr[i] = {...arr[i], name, is_default, payload, updated_at:new Date().toISOString()};
-          else arr.push({id, name, is_default, payload, updated_at:new Date().toISOString()});
+    // 7) Filtros de encabezado
+    const H = payload.header_filters || {};
+    if ($('#f_nro') && H.nro != null) {
+      $('#f_nro').value = H.nro;
+      dispatchInput($('#f_nro'));
+    }
+    if ($('#f_desc') && H.desc != null) {
+      $('#f_desc').value = H.desc;
+      dispatchInput($('#f_desc'));
+    }
+    if ($('#f_cant') && H.cant != null) {
+      $('#f_cant').value = H.cant;
+      dispatchInput($('#f_cant'));
+    }
+
+    if (Array.isArray(payload.vis_cols)) {
+      payload.vis_cols.forEach(pos => {
+        const conf = H[pos] || {};
+        const r = document.querySelector(
+          `#rankHead [data-pos="${pos}"][data-ft="relmax"]`
+        );
+        const p = document.querySelector(
+          `#rankHead [data-pos="${pos}"][data-ft="prov"]`
+        );
+        if (r) {
+          r.value = conf.relmax || '';
+          dispatchInput(r);
         }
-        if(is_default){
-          arr.forEach(v=>{ if(v.id!==id) v.is_default=false; });
+        if (p) {
+          p.value = conf.prov || '';
+          dispatchInput(p);
         }
-        lsWrite(arr);
-        return arr.find(v=>v.id===id);
-      }
-      function lsDelete(id){
-        const arr = lsList().filter(v=>v.id!==id);
-        lsWrite(arr);
-      }
-      function lsSetDefault(id){
-        const arr = lsList().map(v=>({...v, is_default: v.id===id}));
-        lsWrite(arr);
-      }
-      function lsGetDefault(){
-        return lsList().find(v=>v.is_default) || null;
-      }
+      });
+    }
 
-      async function listViews(){
-        const q = `?view_id=${encodeURIComponent(VIEW_ID)}&context_id=${encodeURIComponent(CONTEXT_ID)}`;
-        const data = await api('GET', `${VIEWS_API}${q}`);
-        if (data && Array.isArray(data)) return data;
-        return lsList();
-      }
+    // 8) Filtro por proveedor
+    if (payload.provider && typeof window.setFilter === 'function') {
+      window.setFilter('provider', payload.provider);
+    } else {
+      const clearProv = $('#selectionChip .sel-chip[data-key="provider"] button');
+      if (clearProv) clearProv.click();
+    }
 
-      async function saveView({name, is_default, payload}){
-        const body = {view_id:VIEW_ID, context_id:CONTEXT_ID, name, is_default, payload};
-        const saved = await api('POST', VIEWS_API, body);
-        if (saved && saved.id) return saved;
-        return lsSave({name, is_default, payload});
-      }
+    // 9) Búsqueda
+    if ($('#search')) {
+      $('#search').value = payload.search_query || '';
+      dispatchInput($('#search'));
+    }
+  }
 
-      async function deleteView(id){
-        const ok = await api('DELETE', `${VIEWS_API}/${encodeURIComponent(id)}`);
-        if (ok!==null) return true;
-        lsDelete(id);
-        return true;
-      }
+  // ====== Render lista en el modal ======
+  function renderViewsList(views) {
+    if (!Array.isArray(views) || views.length === 0) {
+      listBox.innerHTML =
+        '<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>';
+      return;
+    }
 
-      async function setDefaultView(id){
-        const ok = await api('POST', `${VIEWS_API}/${encodeURIComponent(id)}/default`, {});
-        if (ok!==null) return true;
-        lsSetDefault(id);
-        return true;
-      }
+    listBox.innerHTML = views.map(v => `
+      <div class="row" data-id="${v.id}">
+        <div>
+          <span class="nm">${v.name || 'Sin nombre'}</span>
+          ${v.is_default ? '<span class="tag">por defecto</span>' : ''}
+          ${v.updated_at
+            ? `<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`
+            : ''}
+        </div>
+        <div class="act">
+          <button data-act="apply">Aplicar</button>
+          ${v.is_default
+            ? '<button data-act="nodefault">Quitar defecto</button>'
+            : '<button data-act="default">Establecer por defecto</button>'}
+          <button data-act="delete" style="color:#b91c1c">Eliminar</button>
+        </div>
+      </div>
+    `).join('');
+  }
 
-      async function getDefaultView(){
-        const q = `?view_id=${encodeURIComponent(VIEW_ID)}&context_id=${encodeURIComponent(CONTEXT_ID)}&only_default=1`;
-        const data = await api('GET', `${VIEWS_API}${q}`);
-        if (data && data.payload) return data;
-        return lsGetDefault();
-      }
+  function refreshList() {
+    renderViewsList(readViews());
+  }
 
-      function collectCurrentView(){
-        const supplier_filter = $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
-        const fit_mode = $('#viewToggle .mini-btn.active')?.dataset.view === 'fit' ? 'ajustar' : '100';
-        const density = $('#densityToggle .mini-btn.active')?.dataset.density || 'normal';
-        const search_query = $('#search')?.value || '';
-        const page_size = Number($('#pageSize')?.value || 50);
-        const vis_cols = $$('#rankHead .pos-group-head').map(th=>+th.dataset.pos).filter(n=>Number.isFinite(n));
-        const header_filters = {
-          nro: $('#f_nro')?.value || '',
-          desc: $('#f_desc')?.value || '',
-          cant: $('#f_cant')?.value || ''
-        };
-        vis_cols.forEach(pos=>{
-          header_filters[pos] = {
-            relmax: $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '',
-            prov: $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || ''
-          };
-        });
-        let provider = null;
-        const chipProv = $('#selectionChip .sel-chip[data-key="provider"]');
-        if (chipProv){
-          provider = chipProv.textContent.replace('×','').trim();
-        }
-        const pos_buckets = $$('#posCols .pos-chip.active').map(b=>b.dataset.pos);
+  // ====== Abrir / cerrar modal ======
+  function openModal() {
+    refreshList();
+    mod.hidden = false;
+    bd.hidden = false;
+  }
 
-        return {
-          supplier_filter,
-          fit_mode,
-          density,
-          vis_cols,
-          pos_buckets,
-          header_filters,
-          provider,
-          search_query,
-          page_size
-        };
-      }
+  function closeModal() {
+    mod.hidden = true;
+    bd.hidden = true;
+    inputName.value = '';
+    inputDefault.checked = false;
+  }
 
-      async function applyViewPayload(payload){
-        if(!payload || typeof payload!=='object') return;
+  btnViews && btnViews.addEventListener('click', openModal);
+  btnClose && btnClose.addEventListener('click', closeModal);
+  btnClose2 && btnClose2.addEventListener('click', closeModal);
+  bd && bd.addEventListener('click', closeModal);
+  btnRefresh && btnRefresh.addEventListener('click', refreshList);
 
-        if (payload.supplier_filter === 'suizo') $('#tabSuizo')?.click();
-        else if (payload.supplier_filter === 'otros') $('#tabOtros')?.click();
-        else $('#tabTodos')?.click();
+  // ====== Guardar vista ======
+  btnSave && btnSave.addEventListener('click', async () => {
+    const name = (inputName.value || '').trim() || 'Mi vista';
+    const is_default = !!inputDefault.checked;
 
-        if (payload.fit_mode === 'ajustar'){
-          const b = $('#viewToggle .mini-btn[data-view="fit"]');
-          b && b.click();
-        } else {
-          const b = $('#viewToggle .mini-btn[data-view="normal"]');
-          b && b.click();
-        }
+    await waitUntil(() => $('#rankHead tr.filters-row'));
 
-        if (payload.density === 'compact'){
-          const b = $('#densityToggle .mini-btn[data-density="compact"]');
-          b && b.click();
-        } else {
-          const b = $('#densityToggle .mini-btn[data-density="normal"]');
-          b && b.click();
-        }
+    const payload = collectCurrentView();
+    saveViewLS({ name, is_default, payload });
 
-        if ($('#pageSize') && payload.page_size){
-          $('#pageSize').value = String(payload.page_size);
-          dispatch($('#pageSize'), 'change');
-        }
+    refreshList();
+    inputName.value = '';
+    inputDefault.checked = false;
+  });
 
-        if (Array.isArray(payload.vis_cols) && payload.vis_cols.length){
-          await waitUntil(()=> $$('#posCols .pos-chip').length > 0);
-          const want = new Set(payload.vis_cols.map(n=>String(n)));
-          $$('#posCols .pos-chip').forEach(chip=>{
-            const pos = chip.dataset.pos;
-            const isVisible = !!document.querySelector(`#rankHead .pos-group-head[data-pos="${pos}"]`);
-            const shouldBeVisible = want.has(pos);
-            if (isVisible !== shouldBeVisible){
-              chip.dispatchEvent(new MouseEvent('click',{bubbles:true, altKey:true}));
-            }
-          });
-        }
+  // ====== Acciones sobre cada vista ======
+  listBox && listBox.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
 
-        const H = payload.header_filters || {};
-        if ($('#f_nro') && H.nro != null){
-          $('#f_nro').value = H.nro;
-          dispatch($('#f_nro'),'input');
-        }
-        if ($('#f_desc') && H.desc != null){
-          $('#f_desc').value = H.desc;
-          dispatch($('#f_desc'),'input');
-        }
-        if ($('#f_cant') && H.cant != null){
-          $('#f_cant').value = H.cant;
-          dispatch($('#f_cant'),'input');
-        }
+    const row = btn.closest('.row');
+    const id = row?.dataset.id;
+    if (!id) return;
 
-        if (Array.isArray(payload.vis_cols)){
-          payload.vis_cols.forEach(pos=>{
-            const conf = H[pos] || {};
-            const r = document.querySelector(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`);
-            const p = document.querySelector(`#rankHead [data-pos="${pos}"][data-ft="prov"]`);
-            if (r){
-              r.value = conf.relmax || '';
-              dispatch(r,'input');
-            }
-            if (p){
-              p.value = conf.prov || '';
-              dispatch(p,'input');
-            }
-          });
-        }
+    const act = btn.dataset.act;
+    const all = readViews();
+    const item = all.find(v => v.id === id);
+    if (!item) return;
 
-        if (Array.isArray(payload.pos_buckets)){
-          await waitUntil(()=> $$('#posCols .pos-chip').length > 0);
-          const want = new Set(payload.pos_buckets.map(String));
-          $$('#posCols .pos-chip').forEach(chip=>{
-            const pos = chip.dataset.pos;
-            const isActive = chip.classList.contains('active');
-            const shouldBeActive = want.has(pos);
-            if (isActive !== shouldBeActive){
-              chip.click();
-            }
-          });
+    if (act === 'apply') {
+      await applyViewPayload(item.payload || {});
+      closeModal();
+    }
 
-          if (Array.isArray(payload.vis_cols)){
-            const wantV = new Set(payload.vis_cols.map(String));
-            $$('#posCols .pos-chip').forEach(chip=>{
-              const pos = chip.dataset.pos;
-              const isVisible = !!document.querySelector(`#rankHead .pos-group-head[data-pos="${pos}"]`);
-              const shouldBeVisible = wantV.has(pos);
-              if (isVisible !== shouldBeVisible){
-                chip.dispatchEvent(new MouseEvent('click',{bubbles:true, altKey:true}));
-              }
-            });
-          }
-        }
-
-        if (payload.provider){
-          if (typeof window.setFilter === 'function'){
-            window.setFilter('provider', payload.provider);
-          }
-        } else {
-          const x = $('#selectionChip .sel-chip[data-key="provider"] button');
-          if (x) x.click();
-        }
-
-        if ($('#search')){
-          $('#search').value = payload.search_query || '';
-          dispatch($('#search'), 'input');
-        }
-      }
-
-      function renderViewsList(views){
-        if (!Array.isArray(views) || views.length===0){
-          listBox.innerHTML =
-            `<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>`;
-          return;
-        }
-        listBox.innerHTML = views.map(v=>
-          `<div class="row" data-id="${v.id}">
-            <div>
-              <span class="nm">${(v.name||'Sin nombre')}</span>
-              ${v.is_default?'<span class="tag">por defecto</span>':''}
-              ${v.updated_at?`<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`:''}
-            </div>
-            <div class="act">
-              <button data-act="apply">Aplicar</button>
-              ${v.is_default?'<button data-act="nodefault">Quitar defecto</button>':'<button data-act="default">Establecer por defecto</button>'}
-              <button data-act="delete" style="color:#b91c1c">Eliminar</button>
-            </div>
-          </div>`
-        ).join('');
-      }
-
-      async function refreshList(){
-        const views = await listViews();
-        renderViewsList(views);
-      }
-
-      function openModal(){
-        mod.hidden=false;
-        bd.hidden=false;
-        mod.style.display='block';
-        bd.style.display='block';
+    if (act === 'delete') {
+      if (confirm('¿Eliminar esta vista?')) {
+        deleteViewLS(id);
         refreshList();
       }
-      function closeModal(){
-        mod.hidden=true;
-        bd.hidden=true;
-        mod.style.display='none';
-        bd.style.display='none';
-        inputName.value='';
-        inputDefault.checked=false;
-      }
+    }
 
-      btnViews?.addEventListener('click', openModal);
-      btnClose?.addEventListener('click', closeModal);
-      btnClose2?.addEventListener('click', closeModal);
-      bd?.addEventListener('click', closeModal);
-      btnRefresh?.addEventListener('click', refreshList);
+    if (act === 'default') {
+      setDefaultLS(id);
+      refreshList();
+    }
 
-      btnSave?.addEventListener('click', async ()=>{
-        const name = (inputName.value||'').trim() || 'Mi vista';
-        const is_default = !!inputDefault.checked;
-        await waitUntil(()=> $('#rankHead tr.filters-row'));
-        const payload = collectCurrentView();
-        await saveView({name, is_default, payload});
-        await refreshList();
-      });
+    if (act === 'nodefault') {
+      clearDefaultLS(id);
+      refreshList();
+    }
+  });
 
-      listBox?.addEventListener('click', async (e)=>{
-        const btn = e.target.closest('button[data-act]');
-        if(!btn) return;
-        const row = e.target.closest('.row');
-        const id = row?.dataset.id;
-        if(!id) return;
-        const act = btn.dataset.act;
-        const all = await listViews();
-        const item = all.find(v=>v.id===id);
-        if(!item) return;
+  // ====== Aplicar automáticamente la vista por defecto (si existe) ======
+  (async function autoApplyDefault() {
+    const def = getDefaultLS();
+    if (!def) return;
 
-        if (act==='apply'){
-          const payload = item.payload && typeof item.payload==='string' ? JSON.parse(item.payload) : item.payload;
-          await waitUntil(()=> $('#rankHead .pos-group-head') || $('#posCols .pos-chip'));
-          applyViewPayload(payload||{});
-          closeModal();
-        }
+    const ok = await waitUntil(() => $('#rankHead') && $('#posCols'));
+    if (!ok) return;
 
-        if (act==='delete'){
-          if (confirm('¿Eliminar esta vista?')){
-            await deleteView(id);
-            await refreshList();
-          }
-        }
+    await applyViewPayload(def.payload || {});
+  })();
 
-        if (act==='default'){
-          await setDefaultView(id);
-          await refreshList();
-        }
-
-        if (act==='nodefault'){
-          const arr = lsList().map(v=>({...v, is_default: v.id===id ? false : v.is_default}));
-          localStorage.setItem(LS_KEY, JSON.stringify(arr));
-          await refreshList();
-        }
-      });
-
-      (async function autoApply(){
-        const ok = await waitUntil(()=> $('#rankHead') && $('#posCols'));
-        if(!ok) return;
-        await waitUntil(()=> $('#rankHead input#f_desc'));
-        const def = await getDefaultView();
-        if (!def) return;
-        const payload = def.payload && typeof def.payload==='string' ? JSON.parse(def.payload) : def.payload;
-        applyViewPayload(payload||{});
-      })();
-
-      window.__collectView = collectCurrentView;
-      window.__applyView = applyViewPayload;
-    })();
-  </script>
+  // Para debug manual en consola
+  window.__collectView = collectCurrentView;
+  window.__applyView = applyViewPayload;
+})();
+</script>
 
   <!-- Comments JS -->
   <script defer src="{{ url_for('static', path='js/comments.js') }}?v=2025-10-27-2"></script>
