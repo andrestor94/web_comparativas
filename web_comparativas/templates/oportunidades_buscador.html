@@ -1,57 +1,124 @@
 {% extends "base.html" %}
-
-{% block title %}Oportunidades · Buscador{% endblock %}
+{% block title %}Oportunidades – Buscador{% endblock %}
 
 {% block extra_head %}
 <style>
-  .card { background: var(--sa-blanco, #fff); border: 1px solid var(--sa-gris-borde,#e5e7eb); border-radius: 14px; padding: 16px; }
-  .upload-box { border: 1px dashed var(--sa-azul-btn,#5274ce); border-radius: 12px; padding: 16px; }
-  .btn-primary { background: var(--sa-azul-btn,#5274ce); color: #fff; border: none; border-radius: 10px; padding: 8px 14px; }
-  .meta { font-size: 0.95rem; color: #334155; }
-  .badge { display:inline-block; padding:4px 10px; border-radius:999px; background:#eef2f7; border:1px solid #e5e7eb; }
-  .mt-2{margin-top:.5rem}.mt-3{margin-top:1rem}.mt-4{margin-top:1.25rem}
+  .kpis { display:grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap:12px; }
+  .kpi { background: var(--sa-blanco,#fff); border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px; padding:14px; }
+  .kpi h4 { margin:0; font-size:12px; color:#446; opacity:.8; }
+  .kpi .v { font-size:22px; font-weight:700; margin-top:4px; color: var(--sa-text,#064066);}
+  .card { background: var(--sa-blanco,#fff); border:1px dashed #c7d2fe; border-radius:12px; padding:18px; }
+  .filters { display:grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap:10px; }
+  .table { width:100%; border-collapse:collapse; }
+  .table th, .table td { border-bottom:1px solid var(--sa-gris-borde,#e5e7eb); padding:8px 10px; vertical-align:top; }
+  .table th { background:#f8fafc; position:sticky; top:0; z-index:1; text-align:left; }
+  .muted { color:#6b7280; }
+  .badges > span{ display:inline-block; background:#eef2f7; border:1px solid #e5e7eb; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px;}
+  .btn { background: var(--sa-azul-btn,#5274ce); color:#fff; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed;}
+  .btn-link { background:transparent; border:0; color:var(--sa-azul-btn,#5274ce); cursor:pointer; }
+  .stack{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .field input { width:100%; border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; }
 </style>
 {% endblock %}
 
 {% block content %}
-
+<div class="container-xxl py-4">
   <h1 class="mb-3">Oportunidades · Buscador</h1>
-  <p class="meta">Primero cargá el archivo maestro (Excel). Cada carga <strong>reemplaza</strong> el anterior.</p>
+  <p class="muted">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
 
   {% if toast %}
-    <div class="card" style="border-left:4px solid #16a34a;">
-      ✅ {{ toast }}
-    </div>
+  <div style="border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
+    ✅ {{ toast }}
+  </div>
   {% endif %}
 
-  <div class="card mt-3">
-    <form class="upload-box" method="post"
-          action="{{ request.url_for('oportunidades_buscador_upload') }}"
-          enctype="multipart/form-data">
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <input type="file" name="file" accept=".xlsx,.xls" required>
-        <button class="btn-primary" type="submit">Subir y reemplazar</button>
+  <!-- Upload -->
+  <div class="card mb-4">
+    <form class="stack" action="/oportunidades/buscador/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx,.xls" />
+      <button class="btn" type="submit">Subir y reemplazar</button>
+      <div class="badges">
         {% if opp.has_file %}
-          <span class="badge">Última act.: {{ opp.last_updated_str }}</span>
-          <span class="badge">Filas: {{ opp.rows if opp.rows is not none else 'N/D' }}</span>
+          <span>Última act.: {{ opp.last_updated_str }}</span>
+          {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
         {% else %}
-          <span class="badge">No hay archivo cargado</span>
+          <span>Sin archivo</span>
         {% endif %}
       </div>
-      <div class="mt-2" style="font-size:.9rem; color:#475569;">
-        Solo .xlsx/.xls. Al subir, el archivo anterior se elimina y se usa el nuevo como fuente del dashboard.
+    </form>
+    <p class="muted" style="margin:8px 0 0;">Solo .xlsx/.xls. Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
+  </div>
+
+  <!-- Dashboard -->
+  <div class="card" style="border-style:solid;">
+    <h2 class="mb-3">Dashboard</h2>
+
+    <!-- KPIs -->
+    <div class="kpis mb-3">
+      <div class="kpi"><h4>Total oportunidades</h4><div class="v">{{ kpis.total_rows }}</div></div>
+      <div class="kpi"><h4>Compradores</h4><div class="v">{{ kpis.buyers }}</div></div>
+      <div class="kpi"><h4>Plataformas</h4><div class="v">{{ kpis.platforms }}</div></div>
+      <div class="kpi"><h4>Provincias/Municipios</h4><div class="v">{{ kpis.provinces }}</div></div>
+      <div class="kpi"><h4>Presupuesto total</h4><div class="v">$ {{ "{:,.2f}".format(kpis.budget_total).replace(",", "X").replace(".", ",").replace("X", ".") }}</div></div>
+      <div class="kpi"><h4>Rango de fechas</h4><div class="v">{{ kpis.date_min }}–{{ kpis.date_max }}</div></div>
+    </div>
+
+    <!-- Filtros -->
+    <form class="filters mb-3" method="get" action="/oportunidades/buscador">
+      <div class="field"><input name="q" value="{{ filters.q }}" placeholder="Buscar (proceso, objeto, comprador…)" /></div>
+      <div class="field"><input name="buyer" value="{{ filters.buyer }}" placeholder="Comprador" /></div>
+      <div class="field"><input name="platform" value="{{ filters.platform }}" placeholder="Plataforma" /></div>
+      <div class="field"><input name="province" value="{{ filters.province }}" placeholder="Provincia/Municipio" /></div>
+      <div class="field"><input name="date_from" value="{{ filters.date_from }}" placeholder="Desde (AAAA-MM-DD o DD/MM/AAAA)" /></div>
+      <div class="field"><input name="date_to" value="{{ filters.date_to }}" placeholder="Hasta (AAAA-MM-DD o DD/MM/AAAA)" /></div>
+      <div class="field" style="grid-column: span 6; display:flex; justify-content:flex-end; gap:8px; margin-top:6px;">
+        <input type="hidden" name="page_size" value="{{ page_size }}">
+        <button class="btn" type="submit">Aplicar filtros</button>
+        <a class="btn-link" href="/oportunidades/buscador">Limpiar</a>
       </div>
     </form>
-  </div>
 
-  <!-- Placeholder del tablero (lo completamos en el Paso 2) -->
-  <div class="card mt-4">
-    <h3 style="margin:0 0 8px 0;">Dashboard (en construcción)</h3>
-    {% if not opp.has_file %}
-      <p class="meta">Subí un Excel para ver los indicadores.</p>
-    {% else %}
-      <p class="meta">Fuente lista. En el siguiente paso dibujamos filtros, KPIs y tabla.</p>
-    {% endif %}
-  </div>
+    <!-- Tabla -->
+    <div style="overflow:auto; max-height: 55vh; border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:10px;">
+      <table class="table">
+        <thead>
+          <tr>
+            {% for c in table_cols %}<th>{{ c }}</th>{% endfor %}
+            {% if not table_cols %}<th class="muted">No hay columnas detectadas</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table_rows %}
+            <tr>
+              {% for c in table_cols %}<td>{{ row.get(c, "") }}</td>{% endfor %}
+            </tr>
+          {% endfor %}
+          {% if table_rows|length == 0 %}
+            <tr><td class="muted" colspan="10">Sin resultados para los filtros actuales.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
 
+    <!-- Paginación -->
+    <div class="stack" style="justify-content:space-between; margin-top:10px;">
+      <div class="muted">
+        Mostrando {{ showing_from }}–{{ showing_to }} de {{ total }}
+      </div>
+      {% set qs = "q=" ~ (filters.q|urlencode) ~
+                  "&buyer=" ~ (filters.buyer|urlencode) ~
+                  "&platform=" ~ (filters.platform|urlencode) ~
+                  "&province=" ~ (filters.province|urlencode) ~
+                  "&date_from=" ~ (filters.date_from|urlencode) ~
+                  "&date_to=" ~ (filters.date_to|urlencode) ~
+                  "&page_size=" ~ page_size %}
+      <div class="stack">
+        <a class="btn" href="/oportunidades/buscador?{{ qs }}&page={{ page-1 }}" {% if page<=1 %}style="pointer-events:none;opacity:.5;"{% endif %}>Anterior</a>
+        <span class="muted">Página {{ page }} / {{ pages }}</span>
+        <a class="btn" href="/oportunidades/buscador?{{ qs }}&page={{ page+1 }}" {% if page>=pages %}style="pointer-events:none;opacity:.5;"{% endif %}>Siguiente</a>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}

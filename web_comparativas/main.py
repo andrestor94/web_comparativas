@@ -225,6 +225,151 @@ def _oportunidades_status() -> dict:
 # Estados que consideramos “finalizados” para habilitar tablero/descarga a no-admin
 FINAL_STATES = {"done", "finalizado", "dashboard", "tablero"}
 
+# === [Oportunidades - Helpers de dashboard] ==============================
+def _opp_norm(s: str) -> str:
+    s = unicodedata.normalize("NFD", str(s or ""))
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[\s._/\-]+", "", s.strip().lower())
+
+def _opp_pick(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    cols = {_opp_norm(c): c for c in df.columns}
+    for cand in candidates:
+        c = cols.get(_opp_norm(cand))
+        if c:
+            return c
+    return None
+
+def _opp_parse_number(x) -> float:
+    if x is None:
+        return 0.0
+    s = str(x).strip()
+    if not s:
+        return 0.0
+    # quita miles con punto, acepta coma como decimal
+    s = re.sub(r"\.(?=\d{3}(\D|$))", "", s)
+    s = s.replace(",", ".")
+    try:
+        v = float(s)
+        return v if np.isfinite(v) else 0.0
+    except Exception:
+        return 0.0
+
+def _opp_parse_date(s) -> dt.date | None:
+    if s is None:
+        return None
+    t = str(s).strip()
+    if not t:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return dt.datetime.strptime(t, fmt).date()
+        except Exception:
+            pass
+    try:
+        return dt.datetime.fromisoformat(t).date()
+    except Exception:
+        return None
+
+def _opp_load_df() -> pd.DataFrame | None:
+    if not OPP_FILE.exists():
+        return None
+    try:
+        df = pd.read_excel(OPP_FILE, dtype=str).fillna("")
+        # normaliza encabezados visuales (conservamos los originales)
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception as e:
+        print("[_opp_load_df] Error:", e)
+        return None
+
+def _opp_apply_filters(df: pd.DataFrame, q: str, buyer: str, platform: str,
+                       province: str, date_from: str, date_to: str) -> pd.DataFrame:
+    out = df.copy()
+
+    # columnas candidatas
+    buyer_col = _opp_pick(out, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    platf_col = _opp_pick(out, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    prov_col  = _opp_pick(out, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    fecha_col = _opp_pick(out, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    desc_col  = _opp_pick(out, ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"])
+    proc_col  = _opp_pick(out, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
+    cuenta_col = _opp_pick(out, ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro"])
+
+    # búsqueda libre
+    if q.strip():
+        like = q.strip().lower()
+        cols_buscar = [c for c in [desc_col, buyer_col, platf_col, prov_col, proc_col, cuenta_col] if c]
+        if cols_buscar:
+            m = False
+            for c in cols_buscar:
+                m = m | out[c].astype(str).str.lower().str.contains(like, na=False)
+            out = out[m]
+
+    # filtros por campo
+    if buyer.strip() and buyer_col:
+        out = out[out[buyer_col].astype(str).str.contains(buyer.strip(), case=False, na=False)]
+    if platform.strip() and platf_col:
+        out = out[out[platf_col].astype(str).str.contains(platform.strip(), case=False, na=False)]
+    if province.strip() and prov_col:
+        out = out[out[prov_col].astype(str).str.contains(province.strip(), case=False, na=False)]
+
+    # rango de fechas
+    if fecha_col and (date_from.strip() or date_to.strip()):
+        dates = out[fecha_col].apply(_opp_parse_date)
+        if date_from.strip():
+            dfm = _opp_parse_date(date_from.strip())
+            if dfm:
+                out = out[dates >= dfm]
+        if date_to.strip():
+            dtm = _opp_parse_date(date_to.strip())
+            if dtm:
+                out = out[dates <= dtm]
+
+    return out
+
+def _opp_compute_kpis(df: pd.DataFrame) -> dict:
+    if df is None or df.empty:
+        return {
+            "total_rows": 0,
+            "buyers": 0,
+            "platforms": 0,
+            "provinces": 0,
+            "budget_total": 0.0,
+            "date_min": "",
+            "date_max": "",
+        }
+
+    buyer_col = _opp_pick(df, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    platf_col = _opp_pick(df, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    prov_col  = _opp_pick(df, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    fecha_col = _opp_pick(df, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    presu_col = _opp_pick(df, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
+
+    k = {
+        "total_rows": int(len(df)),
+        "buyers": int(df[buyer_col].astype(str).str.strip().str.lower().nunique()) if buyer_col else 0,
+        "platforms": int(df[platf_col].astype(str).str.strip().str.lower().nunique()) if platf_col else 0,
+        "provinces": int(df[prov_col].astype(str).str.strip().str.lower().nunique()) if prov_col else 0,
+        "budget_total": 0.0,
+        "date_min": "",
+        "date_max": "",
+    }
+
+    if presu_col:
+        k["budget_total"] = float(pd.Series(df[presu_col]).map(_opp_parse_number).sum())
+
+    if fecha_col:
+        fechas = pd.Series(df[fecha_col]).map(_opp_parse_date)
+        try:
+            fmin = fechas.dropna().min()
+            fmax = fechas.dropna().max()
+            k["date_min"] = fmin.strftime("%d/%m/%Y") if isinstance(fmin, dt.date) else ""
+            k["date_max"] = fmax.strftime("%d/%m/%Y") if isinstance(fmax, dt.date) else ""
+        except Exception:
+            pass
+
+    return k
+
 
 # === Helper de render: usa plantilla si existe, sino cae a HTML simple ===
 def _render_or_fallback(template_name: str, ctx: dict, fallback_html: str):
@@ -1350,21 +1495,137 @@ def mercado_publico_reporte_perfiles(
 @app.get("/oportunidades/buscador", response_class=HTMLResponse)
 def oportunidades_buscador(
     request: Request,
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=10, le=200),
     user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
 ):
     """
-    Vista principal del Buscador de Oportunidades.
+    Vista principal del Buscador de Oportunidades con KPIs + tabla.
     """
+    opp_info = _oportunidades_status()
+    df_all = _opp_load_df()
+
+    # si no hay archivo, render simple
+    if df_all is None or df_all.empty:
+        ctx = {
+            "request": request,
+            "user": user,
+            "opp": opp_info,
+            "toast": None,
+            "kpis": {"total_rows": 0, "buyers": 0, "platforms": 0, "provinces": 0, "budget_total": 0.0, "date_min": "", "date_max": ""},
+            "filters": {"q": q, "buyer": buyer, "platform": platform, "province": province, "date_from": date_from, "date_to": date_to},
+            "table_cols": [],
+            "table_rows": [],
+            "total": 0,
+            "page": 1,
+            "pages": 1,
+            "page_size": page_size,
+            "showing_from": 0,
+            "showing_to": 0,
+        }
+        fallback_html = (
+            "<div style='font-family:system-ui;padding:32px;'>"
+            "<h2>Oportunidades · Buscador</h2>"
+            "<p>No hay archivo maestro aún. Subí un Excel para habilitar el dashboard.</p>"
+            "</div>"
+        )
+        return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+    # aplicar filtros
+    df_filtered = _opp_apply_filters(df_all, q, buyer, platform, province, date_from, date_to)
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas para mostrar
+    proc_col   = _opp_pick(df_filtered, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
+    fecha_col  = _opp_pick(df_filtered, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    buyer_col  = _opp_pick(df_filtered, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    prov_col   = _opp_pick(df_filtered, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    platf_col  = _opp_pick(df_filtered, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
+    desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
+
+    # mapeo label -> columna real presente
+    colmap = []
+    for label, col in [
+        ("Proceso", proc_col),
+        ("Fecha", fecha_col),
+        ("Comprador", buyer_col),
+        ("Provincia/Municipio", prov_col),
+        ("Plataforma", platf_col),
+        ("Presupuesto", presu_col),
+        ("Objeto / Descripción", desc_col),
+    ]:
+        if col:
+            colmap.append((label, col))
+
+    # paginación
+    total = int(len(df_filtered))
+    pages = max(1, int(np.ceil(total / page_size)))
+    if page > pages:
+        page = pages
+    start = (page - 1) * page_size
+    end = min(total, start + page_size)
+    df_page = df_filtered.iloc[start:end].copy()
+
+    # construir filas sanas (sin HTML peligroso)
+    def _san(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v)
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    table_cols = [lbl for (lbl, _) in colmap]
+    table_rows = []
+    for _, rec in df_page.iterrows():
+        row = {}
+        for (lbl, col) in colmap:
+            val = rec.get(col, "")
+            if col == "Presupuesto" or _opp_norm(lbl).startswith("presupuesto"):
+                val = _opp_parse_number(val)
+                row[lbl] = f"$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            elif _opp_norm(lbl) in {"fecha"}:
+                d = _opp_parse_date(val)
+                row[lbl] = d.strftime("%d/%m/%Y") if d else _san(val)
+            else:
+                row[lbl] = _san(val)
+        table_rows.append(row)
+
     ctx = {
         "request": request,
         "user": user,
-        "opp": _oportunidades_status(),  # <- pasa estado del archivo
-        "toast": None,                   # <- placeholder de mensaje
+        "opp": opp_info,
+        "toast": None,
+        "kpis": kpis,
+        "filters": {
+            "q": q or "",
+            "buyer": buyer or "",
+            "platform": platform or "",
+            "province": province or "",
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+        },
+        "table_cols": table_cols,
+        "table_rows": table_rows,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "page_size": page_size,
+        "showing_from": 0 if total == 0 else (start + 1),
+        "showing_to": end,
     }
     fallback_html = (
         "<div style='font-family:system-ui;padding:32px;'>"
         "<h2>Oportunidades · Buscador</h2>"
-        "<p>Pantalla en construcción. Aquí irá el buscador + upload y el dashboard de Oportunidades.</p>"
+        "<p>Dashboard cargado.</p>"
         "</div>"
     )
     return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
