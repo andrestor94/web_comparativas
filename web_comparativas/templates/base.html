@@ -118,13 +118,17 @@
       {% set _pending = total_pending|default(None) %}
       {% set _done = total_done|default(None) %}
 
-      {# --- Abrir automáticamente el submenú si estamos en alguna de sus rutas --- #}
+      {# --- Abrir automáticamente los submenús si estamos en alguna de sus rutas --- #}
       {% set wc_expand =
           request.url.path.startswith('/mercado-publico/web-comparativas')
           or request.url.path.startswith('/cargas')
           or request.url.path == '/historial'
           or request.url.path.startswith('/tablero')
           or request.url.path.startswith('/grupos') %}
+
+      {% set op_expand =
+          request.url.path.startswith('/oportunidades')
+          or request.url.path.startswith('/mercado-publico/oportunidades') %}
 
       <nav class="nav flex-column px-3 py-2 gap-1">
 
@@ -134,7 +138,7 @@
            Home
         </a>
 
-        <!-- ====== Web Comparativa (único ítem con submenú colapsable) ====== -->
+        <!-- ====== Web Comparativa (submenú colapsable) ====== -->
         <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
            data-bs-toggle="collapse"
            href="#wcMenu"
@@ -182,13 +186,30 @@
         </div>
         <!-- ====== /Web Comparativa ====== -->
 
-        <!-- Oportunidades -->
+        <!-- ====== Oportunidades (submenú colapsable) ====== -->
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          <a href="/mercado-publico/oportunidades"
-             class="nav-link {% if request.url.path.startswith('/mercado-publico/oportunidades') %}active{% endif %}">
-             Oportunidades
+          <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+             data-bs-toggle="collapse"
+             href="#opMenu"
+             role="button"
+             aria-expanded="{{ 'true' if op_expand else 'false' }}"
+             aria-controls="opMenu">
+            <span>Oportunidades</span>
+            <span class="caret">▸</span>
           </a>
+
+          <div id="opMenu" class="collapse submenu {% if op_expand %}show{% endif %}">
+            <a href="/oportunidades/buscador"
+               class="nav-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
+               Buscador
+            </a>
+            <a href="/oportunidades/dimensiones"
+               class="nav-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
+               Dimensiones
+            </a>
+          </div>
         {% endif %}
+        <!-- ====== /Oportunidades ====== -->
 
         <!-- Reporte perfiles -->
         {% if user and r in ['admin','analista','supervisor','auditor'] %}

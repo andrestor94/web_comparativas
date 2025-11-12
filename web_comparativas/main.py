@@ -180,6 +180,13 @@ app = FastAPI()
 FINAL_STATES = {"done", "finalizado", "dashboard", "tablero"}
 
 
+# === Helper de render: usa plantilla si existe, sino cae a HTML simple ===
+def _render_or_fallback(template_name: str, ctx: dict, fallback_html: str):
+    tpath = BASE_DIR / "templates" / template_name
+    if tpath.exists():
+        return templates.TemplateResponse(template_name, ctx)
+    return HTMLResponse(fallback_html)
+
 # ======================================================================
 # PDF / REPORTES – CONFIG
 # ======================================================================
@@ -1289,6 +1296,46 @@ def mercado_publico_reporte_perfiles(
         "user": user,
     }
     return templates.TemplateResponse("reporte_perfiles.html", ctx)
+
+# ======================================================================
+# OPORTUNIDADES: Buscador & Dimensiones
+# ======================================================================
+
+@app.get("/oportunidades/buscador", response_class=HTMLResponse)
+def oportunidades_buscador(
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Vista principal del Buscador de Oportunidades.
+    (Luego acá incorporamos: upload + dashboard específicos del Buscador)
+    """
+    ctx = {"request": request, "user": user}
+    fallback_html = (
+        "<div style='font-family:system-ui;padding:32px;'>"
+        "<h2>Oportunidades · Buscador</h2>"
+        "<p>Pantalla en construcción. Aquí irá el buscador + upload y el dashboard de Oportunidades.</p>"
+        "</div>"
+    )
+    return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+
+@app.get("/oportunidades/dimensiones", response_class=HTMLResponse)
+def oportunidades_dimensiones(
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Vista de Dimensiones (análisis por ejes: región, comprador, cuenta, plataforma, etc.).
+    """
+    ctx = {"request": request, "user": user}
+    fallback_html = (
+        "<div style='font-family:system-ui;padding:32px;'>"
+        "<h2>Oportunidades · Dimensiones</h2>"
+        "<p>Pantalla en construcción. Aquí armamos tableros por ejes/dimensiones (comprador, provincia, plataforma, etc.).</p>"
+        "</div>"
+    )
+    return _render_or_fallback("oportunidades_dimensiones.html", ctx, fallback_html)
 
 
 # ======================================================================
