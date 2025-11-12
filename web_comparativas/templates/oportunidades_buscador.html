@@ -3,22 +3,54 @@
 
 {% block extra_head %}
 <style>
-  .kpis { display:grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap:12px; }
-  .kpi { background: var(--sa-blanco,#fff); border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px; padding:14px; }
-  .kpi h4 { margin:0; font-size:12px; color:#446; opacity:.8; }
-  .kpi .v { font-size:22px; font-weight:700; margin-top:4px; color: var(--sa-text,#064066);}
-  .card { background: var(--sa-blanco,#fff); border:1px dashed #c7d2fe; border-radius:12px; padding:18px; }
-  .filters { display:grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap:10px; }
-  .table { width:100%; border-collapse:collapse; }
-  .table th, .table td { border-bottom:1px solid var(--sa-gris-borde,#e5e7eb); padding:8px 10px; vertical-align:top; }
-  .table th { background:#f8fafc; position:sticky; top:0; z-index:1; text-align:left; }
-  .muted { color:#6b7280; }
-  .badges > span{ display:inline-block; background:#eef2f7; border:1px solid #e5e7eb; padding:4px 8px; border-radius:999px; font-size:12px; margin-left:6px;}
-  .btn { background: var(--sa-azul-btn,#5274ce); color:#fff; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
-  .btn:disabled{ opacity:.5; cursor:not-allowed;}
-  .btn-link { background:transparent; border:0; color:var(--sa-azul-btn,#5274ce); cursor:pointer; }
-  .stack{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  .field input { width:100%; border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; }
+  /* ====== Layout & tokens ====== */
+  .muted{color:#6b7280}
+  .card{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:18px}
+  .btn{background:var(--sa-azul-btn,#5274ce);color:#fff;border:0;border-radius:10px;padding:8px 14px;cursor:pointer}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-link{background:transparent;border:0;color:var(--sa-azul-btn,#5274ce);cursor:pointer}
+  .stack{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .field input,.field select{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:9px 10px;background:#fff}
+  .badges>span{display:inline-block;background:#eef2f7;border:1px solid #e5e7eb;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:6px}
+
+  /* ====== KPIs ====== */
+  .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+  .kpi{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:14px}
+  .kpi h4{margin:0;font-size:12px;color:#446;opacity:.8}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;color:var(--sa-text,#064066)}
+
+  /* ====== Filtros estilo “tarjetas” ====== */
+  .filters-grid{display:grid;grid-template-columns:320px repeat(4,minmax(0,1fr));gap:12px}
+  .filter-card{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:12px}
+  .filter-card h5{font-size:12px;margin:0 0 6px;color:#4b5563}
+  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 140px;gap:10px}
+  .searchbox{position:relative}
+  .searchbox input{width:100%;padding:10px 38px 10px 36px;border:1px solid #e5e7eb;border-radius:12px}
+  .searchbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.55}
+  .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;opacity:.65}
+
+  /* ====== Slider de fechas (dos manijas) ====== */
+  .range-wrap{position:relative;height:36px}
+  .range-wrap input[type=range]{position:absolute;left:0;right:0;top:12px;width:100%;pointer-events:none;background:transparent;-webkit-appearance:none}
+  .range-wrap input[type=range]::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;height:16px;width:16px;border-radius:50%;background:var(--sa-azul-btn,#5274ce);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+  .range-wrap input[type=range]::-moz-range-thumb{pointer-events:auto;height:16px;width:16px;border:0;border-radius:50%;background:var(--sa-azul-btn,#5274ce)}
+  .range-track{position:absolute;left:0;right:0;top:19px;height:4px;background:#e5e7eb;border-radius:999px}
+  .range-fill{position:absolute;top:19px;height:4px;background:#c7d2fe;border-radius:999px}
+
+  /* ====== Tabla ====== */
+  .table-wrap{overflow:auto;max-height:55vh;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px}
+  table.table{width:100%;border-collapse:collapse}
+  .table th,.table td{border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);padding:9px 10px;vertical-align:top}
+  .table th{background:#f8fafc;position:sticky;top:0;z-index:1;text-align:left}
+  .link-ico{text-decoration:none}
+  .link-ico:hover{text-decoration:underline}
+
+  /* ====== Paginación/estado ====== */
+  .pager{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+  .pill{display:inline-block;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:4px 10px;font-size:12px}
+  @media (max-width:1200px){
+    .filters-grid{grid-template-columns:1fr 1fr}
+  }
 </style>
 {% endblock %}
 
@@ -51,7 +83,7 @@
   </div>
 
   <!-- Dashboard -->
-  <div class="card" style="border-style:solid;">
+  <div class="card" style="border-color:#c7d2fe;">
     <h2 class="mb-3">Dashboard</h2>
 
     <!-- KPIs -->
@@ -64,61 +96,134 @@
       <div class="kpi"><h4>Rango de fechas</h4><div class="v">{{ kpis.date_min }}–{{ kpis.date_max }}</div></div>
     </div>
 
-    <!-- Filtros -->
-    <form class="filters mb-3" method="get" action="/oportunidades/buscador">
-      <div class="field"><input name="q" value="{{ filters.q }}" placeholder="Buscar (proceso, objeto, comprador…)" /></div>
-      <div class="field"><input name="buyer" value="{{ filters.buyer }}" placeholder="Comprador" /></div>
-      <div class="field"><input name="platform" value="{{ filters.platform }}" placeholder="Plataforma" /></div>
-      <div class="field"><input name="province" value="{{ filters.province }}" placeholder="Provincia/Municipio" /></div>
-      <div class="field"><input name="date_from" value="{{ filters.date_from }}" placeholder="Desde (AAAA-MM-DD o DD/MM/AAAA)" /></div>
-      <div class="field"><input name="date_to" value="{{ filters.date_to }}" placeholder="Hasta (AAAA-MM-DD o DD/MM/AAAA)" /></div>
-      <div class="field" style="grid-column: span 6; display:flex; justify-content:flex-end; gap:8px; margin-top:6px;">
-        <input type="hidden" name="page_size" value="{{ page_size }}">
-        <button class="btn" type="submit">Aplicar filtros</button>
-        <a class="btn-link" href="/oportunidades/buscador">Limpiar</a>
+    <!-- FILTROS “original” -->
+    <div class="filters-grid mb-3">
+      <!-- Fecha: doble manija -->
+      <div class="filter-card">
+        <h5>Fecha</h5>
+        <div class="stack" style="justify-content:space-between">
+          <input id="fDateFrom" type="date" style="width:48%">
+          <input id="fDateTo" type="date" style="width:48%">
+        </div>
+        <div class="range-wrap" style="margin-top:8px">
+          <div class="range-track"></div>
+          <div class="range-fill" id="dateFill"></div>
+          <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1">
+          <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1">
+        </div>
+        <div class="stack" style="justify-content:space-between;margin-top:6px">
+          <span class="pill" id="lblFrom">—</span>
+          <span class="pill" id="lblTo">—</span>
+        </div>
       </div>
-    </form>
 
-    <!-- Tabla -->
-    <div style="overflow:auto; max-height: 55vh; border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:10px;">
-      <table class="table">
+      <!-- Plataforma -->
+      <div class="filter-card">
+        <h5>Plataforma</h5>
+        <div class="field"><select id="fPlataforma"><option value="">Todas</option></select></div>
+      </div>
+
+      <!-- Operador -->
+      <div class="filter-card">
+        <h5>Operador</h5>
+        <div class="field"><select id="fOperador"><option value="">Todos</option></select></div>
+      </div>
+
+      <!-- Cuenta (N° UAPE) -->
+      <div class="filter-card">
+        <h5>Cuenta</h5>
+        <div class="field"><select id="fCuenta"><option value="">Todas</option></select></div>
+      </div>
+
+      <!-- Repartición -->
+      <div class="filter-card">
+        <h5>Repartición</h5>
+        <div class="field"><select id="fReparticion"><option value="">Todas</option></select></div>
+      </div>
+
+      <!-- Buscar por Objeto -->
+      <div class="filter-card search-card">
+        <div class="searchbox">
+          <span class="ico">🔎</span>
+          <input id="fBuscar" placeholder="Buscar por objeto…">
+          <button class="clear" id="fClear" title="Limpiar">✕</button>
+        </div>
+        <div class="stack" style="justify-content:flex-end">
+          <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
+          <button class="btn-link" id="btnLimpiar" type="button">Limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABLA -->
+    <div class="table-wrap">
+      <table class="table" id="oppTable">
         <thead>
           <tr>
-            {% for c in table_cols %}<th>{{ c }}</th>{% endfor %}
-            {% if not table_cols %}<th class="muted">No hay columnas detectadas</th>{% endif %}
+            <th>Número</th>
+            <th>Repartición</th>
+            <th>Objeto</th>
+            <th>Apertura</th>
+            <th>Tipo</th>
+            <th>Enlace de pliego</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="oppTBody">
           {% for row in table_rows %}
-            <tr>
-              {% for c in table_cols %}<td>{{ row.get(c, "") }}</td>{% endfor %}
-            </tr>
+          <tr
+            data-numero="{{ row.get('Número','')|e }}"
+            data-reparticion="{{ row.get('Repartición','')|e }}"
+            data-objeto="{{ row.get('Objeto','')|e }}"
+            data-apertura="{{ row.get('Apertura','')|e }}"
+            data-tipo="{{ row.get('Tipo','')|e }}"
+            data-plataforma="{{ row.get('Plataforma','')|e }}"
+            data-operador="{{ row.get('Operador','')|e }}"
+            data-cuenta="{{ row.get('N° UAPE','')|e }}"
+          >
+            <td>{{ row.get('Número','') }}</td>
+            <td>{{ row.get('Repartición','') }}</td>
+            <td>{{ row.get('Objeto','') }}</td>
+            <td>{{ row.get('Apertura','') }}</td>
+            <td>{{ row.get('Tipo','') }}</td>
+            <td>
+              {% set link = row.get('Enlace de pliego','') %}
+              {% if link %}
+                <a class="link-ico" href="{{ link }}" target="_blank" rel="noopener">🔗</a>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
           {% endfor %}
           {% if table_rows|length == 0 %}
-            <tr><td class="muted" colspan="10">Sin resultados para los filtros actuales.</td></tr>
+            <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
           {% endif %}
         </tbody>
       </table>
     </div>
 
-    <!-- Paginación -->
-    <div class="stack" style="justify-content:space-between; margin-top:10px;">
+    <!-- PAGINACIÓN / ESTADO -->
+    <div class="pager">
       <div class="muted">
-        Mostrando {{ showing_from }}–{{ showing_to }} de {{ total }}
+        Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
       </div>
-      {% set qs = "q=" ~ (filters.q|urlencode) ~
-                  "&buyer=" ~ (filters.buyer|urlencode) ~
-                  "&platform=" ~ (filters.platform|urlencode) ~
-                  "&province=" ~ (filters.province|urlencode) ~
-                  "&date_from=" ~ (filters.date_from|urlencode) ~
-                  "&date_to=" ~ (filters.date_to|urlencode) ~
-                  "&page_size=" ~ page_size %}
       <div class="stack">
-        <a class="btn" href="/oportunidades/buscador?{{ qs }}&page={{ page-1 }}" {% if page<=1 %}style="pointer-events:none;opacity:.5;"{% endif %}>Anterior</a>
-        <span class="muted">Página {{ page }} / {{ pages }}</span>
-        <a class="btn" href="/oportunidades/buscador?{{ qs }}&page={{ page+1 }}" {% if page>=pages %}style="pointer-events:none;opacity:.5;"{% endif %}>Siguiente</a>
+        <button class="btn" id="prevPage" type="button">Anterior</button>
+        <span class="muted">Página <span id="curPage">1</span> / <span id="maxPage">1</span></span>
+        <button class="btn" id="nextPage" type="button">Siguiente</button>
       </div>
     </div>
   </div>
 </div>
+
+<!-- Config inicial para el JS -->
+<script>
+  window.OPP_UI = {
+    pageSize: {{ page_size or 20 }},
+    // Si querés forzar un rango inicial, podés completar estas dos líneas:
+    initialDateFrom: null,
+    initialDateTo: null
+  };
+</script>
+<script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}"></script>
 {% endblock %}
