@@ -45,9 +45,7 @@
     }
     .top-user-pill span,
     .top-user-pill i,
-    .top-user-pill svg {
-      color: #ffffff;
-    }
+    .top-user-pill svg { color: #ffffff; }
 
     /* ===== Notificaciones SA ===== */
     #toast-root{
@@ -93,21 +91,13 @@
     .sa-banner__msg{ color:var(--sa-text,#064066); font-size:14px; }
     .sa-banner__close{ margin-left:auto; background:transparent; border:0; font-size:18px; cursor:pointer; color:#64748b; }
 
-    /* ====== Sidebar: toggler con caret ====== */
-.nav-link-toggle{
-  cursor: pointer;
-  background: transparent;   /* que no tenga fondo */
-  border: 0;                 /* sin borde de botón */
-  color: inherit;            /* mismo color que el resto */
-  width: 100%;
-  text-align: left;
-  padding: .375rem .75rem;   /* igual que .nav-link */
-  border-radius: .375rem;    /* igual que .nav-link */
-}
-.nav-link-toggle .caret { font-size:.9rem; transition: transform .18s ease; }
-.nav-link-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
-/* Submenú con sangría */
-.nav .submenu a.nav-link { padding-left: 1.75rem; }
+    /* ====== Sidebar: toggler con caret (seguro) ====== */
+    .nav-link-toggle{ cursor:pointer; background:transparent; color:inherit; border:0; text-align:left; width:100%; padding:.375rem .75rem; border-radius:.375rem; }
+    .nav-link-toggle .caret{ font-size:.9rem; transition:transform .18s ease; }
+    .nav-link-toggle[aria-expanded="true"] .caret{ transform:rotate(90deg); }
+    /* submenú con sangría */
+    .nav .submenu a.nav-link{ padding-left:1.75rem; }
+  </style>
   <!-- ========== /Notificaciones SA (UI) ========== -->
 
   {% block extra_head %}{% endblock %}
@@ -145,15 +135,15 @@
         </a>
 
         <!-- ====== Web Comparativa (único ítem con submenú colapsable) ====== -->
-        <button class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#wcMenu"
-                aria-expanded="{{ 'true' if wc_expand else 'false' }}"
-                aria-controls="wcMenu">
+        <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+           data-bs-toggle="collapse"
+           href="#wcMenu"
+           role="button"
+           aria-expanded="{{ 'true' if wc_expand else 'false' }}"
+           aria-controls="wcMenu">
           <span>Web Comparativa</span>
           <span class="caret">▸</span>
-        </button>
+        </a>
 
         <div id="wcMenu" class="collapse submenu {% if wc_expand %}show{% endif %}">
           {% if user and r in ['admin','analista','supervisor'] %}
