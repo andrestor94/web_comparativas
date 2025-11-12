@@ -182,25 +182,16 @@ OPP_DIR.mkdir(parents=True, exist_ok=True)
 OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
 
 def _save_oportunidades_excel(file: UploadFile) -> int:
-    """
-    Guarda el Excel recibido reemplazando el anterior de forma atómica.
-    Devuelve la cantidad de filas del Excel guardado (o -1 si no se pudo leer).
-    """
     name = (file.filename or "").lower()
     if not name.endswith(".xlsx"):
-    raise HTTPException(
-        status_code=400,
-        detail="Formato no permitido. Subí un Excel .xlsx (no .xls)"
-    )
-
+        raise HTTPException(
+            status_code=400,
+            detail="Formato no permitido. Subí un Excel .xlsx (no .xls)"
+        )
     tmp_path = OPP_DIR / f"tmp_{uuid.uuid4().hex}.xlsx"
     with tmp_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
-
-    # Reemplazo atómico del anterior
     tmp_path.replace(OPP_FILE)
-
-    # Intento leer para devolver un conteo (sirve como chequeo rápido)
     try:
         df = pd.read_excel(OPP_FILE, dtype=str, engine="openpyxl")
         return int(len(df))
