@@ -187,8 +187,11 @@ def _save_oportunidades_excel(file: UploadFile) -> int:
     Devuelve la cantidad de filas del Excel guardado (o -1 si no se pudo leer).
     """
     name = (file.filename or "").lower()
-    if not (name.endswith(".xlsx") or name.endswith(".xls")):
-        raise HTTPException(status_code=400, detail="Formato no permitido. Subí un Excel (.xlsx)")
+    if not name.endswith(".xlsx"):
+    raise HTTPException(
+        status_code=400,
+        detail="Formato no permitido. Subí un Excel .xlsx (no .xls)"
+    )
 
     tmp_path = OPP_DIR / f"tmp_{uuid.uuid4().hex}.xlsx"
     with tmp_path.open("wb") as f:
@@ -199,7 +202,7 @@ def _save_oportunidades_excel(file: UploadFile) -> int:
 
     # Intento leer para devolver un conteo (sirve como chequeo rápido)
     try:
-        df = pd.read_excel(OPP_FILE)
+        df = pd.read_excel(OPP_FILE, dtype=str, engine="openpyxl")
         return int(len(df))
     except Exception:
         return -1
@@ -274,7 +277,7 @@ def _opp_load_df() -> pd.DataFrame | None:
     if not OPP_FILE.exists():
         return None
     try:
-        df = pd.read_excel(OPP_FILE, dtype=str).fillna("")
+        df = pd.read_excel(OPP_FILE, dtype=str, engine="openpyxl").fillna("")
         # normaliza encabezados visuales (conservamos los originales)
         df.columns = [str(c).strip() for c in df.columns]
         return df

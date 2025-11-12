@@ -21,11 +21,15 @@
   .filters-grid{display:grid;grid-template-columns:280px repeat(4,minmax(0,1fr));gap:10px}
   .filter-card{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:10px}
   .filter-card h5{font-size:12px;margin:0 0 6px;color:#4b5563}
-  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 160px;gap:10px}
+  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 220px;gap:10px}
   .searchbox{position:relative}
   .searchbox input{width:100%;padding:10px 38px 10px 36px;border:1px solid #e5e7eb;border-radius:12px}
   .searchbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.55}
   .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;opacity:.65}
+
+  /* Zona drag-and-drop (opcional, manejado por tu JS) */
+  .dropzone{border:1px dashed #c7d2fe;background:#f8fafc;border-radius:12px;padding:10px}
+  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
   .range-wrap{position:relative;height:32px}
@@ -35,7 +39,7 @@
   .range-track{position:absolute;left:0;right:0;top:16px;height:4px;background:#e5e7eb;border-radius:999px}
   .range-fill{position:absolute;top:16px;height:4px;background:#c7d2fe;border-radius:999px}
 
-  /* Switches (botonera de 3 estados) */
+  /* Chips (switches) */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer}
   .chip.is-on{background:#e0e7ff;border-color:#c7d2fe;color:#1f3a8a}
@@ -48,9 +52,19 @@
   .link-ico{text-decoration:none}
   .link-ico:hover{text-decoration:underline}
 
+  /* Paginación */
   .pager{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
   .pill{display:inline-block;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:3px 8px;font-size:12px}
-  @media (max-width:1200px){.topbar{grid-template-columns:1fr}.filters-grid{grid-template-columns:1fr 1fr}}
+
+  /* Estado de carga */
+  .loading{display:none;align-items:center;gap:8px;font-size:14px;color:#374151}
+  .loading.show{display:flex}
+
+  @media (max-width:1200px){
+    .topbar{grid-template-columns:1fr}
+    .filters-grid{grid-template-columns:1fr 1fr}
+    .search-card{grid-template-columns:1fr}
+  }
 </style>
 {% endblock %}
 
@@ -59,18 +73,29 @@
   <h1 class="mb-3">Oportunidades · Buscador</h1>
   <p class="muted">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
 
-  {% if toast %}
-  <div style="border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
-    ✅ {{ toast }}
+  <!-- Región de avisos accesible -->
+  <div aria-live="polite" aria-atomic="true">
+    {% if toast %}
+    <div style="border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
+      ✅ {{ toast }}
+    </div>
+    {% endif %}
   </div>
-  {% endif %}
 
   <!-- Upload -->
   <div class="card mb-4">
-    <form class="stack" action="/oportunidades/buscador/upload" method="post" enctype="multipart/form-data">
-      <input type="file" name="file" accept=".xlsx,.xls" />
-      <button class="btn" type="submit">Subir y reemplazar</button>
-      <div class="badges">
+    <form class="stack" action="/oportunidades/buscador/upload" method="post" enctype="multipart/form-data" aria-label="Cargar archivo maestro de oportunidades">
+      <div class="dropzone" id="oppDrop" aria-hidden="true">
+        <small class="muted">Podés arrastrar y soltar el Excel aquí</small>
+      </div>
+      <label for="oppFile" class="muted" style="font-weight:600">Archivo (.xlsx / .xls)</label>
+      <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
+      <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
+      <div class="loading" id="upLoading" role="status" aria-live="polite">
+        <span>Procesando…</span>
+      </div>
+
+      <div class="badges" aria-label="Estado del maestro">
         {% if opp.has_file %}
           <span>Última act.: {{ opp.last_updated_str }}</span>
           {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
@@ -78,34 +103,36 @@
           <span>Sin archivo</span>
         {% endif %}
       </div>
+      <!-- Gancho para exportar/descargar (tu JS puede habilitarlo) -->
+      <button class="btn-link" type="button" id="btnDownloadCurrent" title="Descargar maestro actual" hidden>Descargar actual</button>
     </form>
-    <p class="muted" style="margin:8px 0 0;">Solo .xlsx/.xls. Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
+    <p class="muted" style="margin:8px 0 0;">Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
   </div>
 
   <!-- Dashboard: sin KPIs. Procesos + Filtros compactos -->
   <div class="card" style="border-color:#c7d2fe;">
     <div class="topbar mb-3">
       <!-- KPI Procesos (únicos N° UAPE del conjunto filtrado) -->
-      <div class="mini-kpi">
+      <div class="mini-kpi" role="status" aria-live="polite" aria-label="Cantidad de procesos filtrados">
         <h4>Procesos</h4>
         <div class="v" id="kProcesos">0</div>
       </div>
 
       <!-- Filtros -->
       <div>
-        <div class="filters-grid">
+        <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
           <!-- Fecha -->
-          <div class="filter-card">
-            <h5>Fecha</h5>
+          <div class="filter-card" aria-labelledby="lblFecha">
+            <h5 id="lblFecha">Fecha</h5>
             <div class="stack" style="justify-content:space-between">
-              <input id="fDateFrom" type="date" style="width:48%">
-              <input id="fDateTo" type="date" style="width:48%">
+              <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
+              <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
             </div>
-            <div class="range-wrap" style="margin-top:6px">
+            <div class="range-wrap" style="margin-top:6px" aria-hidden="false" aria-label="Rango de fechas (slider)">
               <div class="range-track"></div>
               <div class="range-fill" id="dateFill"></div>
-              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1">
-              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1">
+              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
+              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
             </div>
             <div class="stack" style="justify-content:space-between;margin-top:6px">
               <span class="pill" id="lblFrom">—</span>
@@ -115,40 +142,56 @@
 
           <div class="filter-card">
             <h5>Plataforma</h5>
-            <div class="field"><select id="fPlataforma"><option value="">Todas</option></select></div>
+            <div class="field">
+              <select id="fPlataforma" aria-label="Filtrar por plataforma">
+                <option value="">Todas</option>
+              </select>
+            </div>
           </div>
 
           <div class="filter-card">
             <h5>Operador</h5>
-            <div class="field"><select id="fOperador"><option value="">Todos</option></select></div>
+            <div class="field">
+              <select id="fOperador" aria-label="Filtrar por operador">
+                <option value="">Todos</option>
+              </select>
+            </div>
           </div>
 
           <div class="filter-card">
             <h5>Cuenta</h5>
-            <div class="field"><select id="fCuenta"><option value="">Todas</option></select></div>
+            <div class="field">
+              <select id="fCuenta" aria-label="Filtrar por cuenta">
+                <option value="">Todas</option>
+              </select>
+            </div>
           </div>
 
           <div class="filter-card">
             <h5>Repartición</h5>
-            <div class="field"><select id="fReparticion"><option value="">Todas</option></select></div>
+            <div class="field">
+              <select id="fReparticion" aria-label="Filtrar por repartición">
+                <option value="">Todas</option>
+              </select>
+            </div>
           </div>
 
           <!-- Switches -->
           <div class="filter-card" style="grid-column:1 / span 2">
             <h5>Repartición: PAMI u Otras</h5>
-            <div class="chips" id="swPAMI">
-              <button type="button" class="chip is-on" data-val="todos">Todos</button>
-              <button type="button" class="chip" data-val="pami">PAMI</button>
-              <button type="button" class="chip" data-val="otras">Otras</button>
+            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
+              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
             </div>
           </div>
 
           <div class="filter-card" style="grid-column:3 / span 2">
             <h5>Estado</h5>
-            <div class="chips" id="swEstado">
-              <button type="button" class="chip is-on" data-val="todos">Todos</button>
-              <button type="button" class="chip" data-val="emergencia">Emergencia</button>
-              <button type="button" class="chip" data-val="regular">Regular</button>
+            <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
+              <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
             </div>
           </div>
         </div>
@@ -156,29 +199,30 @@
         <!-- Buscar -->
         <div class="filter-card search-card" style="margin-top:10px">
           <div class="searchbox">
-            <span class="ico">🔎</span>
-            <input id="fBuscar" placeholder="Buscar por objeto…">
-            <button class="clear" id="fClear" title="Limpiar">✕</button>
+            <span class="ico" aria-hidden="true">🔎</span>
+            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
+            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
           </div>
           <div class="stack" style="justify-content:flex-end">
             <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-            <button class="btn-link" id="btnLimpiar" type="button">Limpiar</button>
+            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
+            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Tabla -->
-    <div class="table-wrap">
-      <table class="table" id="oppTable">
+    <div class="table-wrap" role="region" aria-label="Resultados de oportunidades">
+      <table class="table" id="oppTable" role="table">
         <thead>
-          <tr>
-            <th>Número</th>
-            <th>Repartición</th>
-            <th>Objeto</th>
-            <th>Apertura</th>
-            <th>Tipo</th>
-            <th>Enlace de pliego</th>
+          <tr role="row">
+            <th scope="col">Número</th>
+            <th scope="col">Repartición</th>
+            <th scope="col">Objeto</th>
+            <th scope="col">Apertura</th>
+            <th scope="col">Tipo</th>
+            <th scope="col">Enlace de pliego</th>
           </tr>
         </thead>
         <tbody id="oppTBody">
@@ -202,7 +246,7 @@
             <td>
               {% set link = row.get('Enlace de pliego','') %}
               {% if link %}
-                <a class="link-ico" href="{{ link }}" target="_blank" rel="noopener">🔗</a>
+                <a class="link-ico" href="{{ link }}" target="_blank" rel="noopener noreferrer" title="Abrir pliego en nueva pestaña">🔗</a>
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
@@ -217,14 +261,14 @@
     </div>
 
     <!-- Paginación -->
-    <div class="pager">
+    <div class="pager" role="navigation" aria-label="Paginación">
       <div class="muted">
         Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
       </div>
       <div class="stack">
-        <button class="btn" id="prevPage" type="button">Anterior</button>
+        <button class="btn" id="prevPage" type="button" disabled>Anterior</button>
         <span class="muted">Página <span id="curPage">1</span> / <span id="maxPage">1</span></span>
-        <button class="btn" id="nextPage" type="button">Siguiente</button>
+        <button class="btn" id="nextPage" type="button" disabled>Siguiente</button>
       </div>
     </div>
   </div>
@@ -235,8 +279,44 @@
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
     initialDateFrom: null,
-    initialDateTo: null
+    initialDateTo: null,
+    /** IDs de elementos para que tu JS no haga querySelectores frágiles */
+    els: {
+      file: 'oppFile',
+      drop: 'oppDrop',
+      btnUpload: 'btnUpload',
+      upLoading: 'upLoading',
+      buscar: 'fBuscar',
+      clear: 'fClear',
+      aplicar: 'btnAplicar',
+      limpiar: 'btnLimpiar',
+      export: 'btnExport',
+      downloadCurrent: 'btnDownloadCurrent',
+      plataforma: 'fPlataforma',
+      operador: 'fOperador',
+      cuenta: 'fCuenta',
+      reparticion: 'fReparticion',
+      swPAMI: 'swPAMI',
+      swEstado: 'swEstado',
+      dateFrom: 'fDateFrom',
+      dateTo: 'fDateTo',
+      rMin: 'fRangeMin',
+      rMax: 'fRangeMax',
+      rFill: 'dateFill',
+      lblFrom: 'lblFrom',
+      lblTo: 'lblTo',
+      kProcesos: 'kProcesos',
+      table: 'oppTable',
+      tbody: 'oppTBody',
+      pagerPrev: 'prevPage',
+      pagerNext: 'nextPage',
+      showFrom: 'showFrom',
+      showTo: 'showTo',
+      totalFound: 'totalFound',
+      curPage: 'curPage',
+      maxPage: 'maxPage'
+    }
   };
 </script>
-<script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}"></script>
+<script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}" defer></script>
 {% endblock %}
