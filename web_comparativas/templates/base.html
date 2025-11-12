@@ -92,6 +92,12 @@
     .sa-banner__dot{ width:10px; height:10px; border-radius:999px; flex:0 0 auto; }
     .sa-banner__msg{ color:var(--sa-text,#064066); font-size:14px; }
     .sa-banner__close{ margin-left:auto; background:transparent; border:0; font-size:18px; cursor:pointer; color:#64748b; }
+
+    /* ====== Sidebar: toggler con caret ====== */
+    .nav-link-toggle { cursor: pointer; }
+    .nav-link-toggle .caret { font-size: .9rem; transition: transform .18s ease; }
+    .nav-link-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
+    .nav .submenu a.nav-link { padding-left: 1.75rem; }
   </style>
   <!-- ========== /Notificaciones SA (UI) ========== -->
 
@@ -113,6 +119,14 @@
       {% set _pending = total_pending|default(None) %}
       {% set _done = total_done|default(None) %}
 
+      {# --- Abrir automáticamente el submenú si estamos en alguna de sus rutas --- #}
+      {% set wc_expand =
+          request.url.path.startswith('/mercado-publico/web-comparativas')
+          or request.url.path.startswith('/cargas')
+          or request.url.path == '/historial'
+          or request.url.path.startswith('/tablero')
+          or request.url.path.startswith('/grupos') %}
+
       <nav class="nav flex-column px-3 py-2 gap-1">
 
         <!-- Home Mercado Público -->
@@ -121,48 +135,53 @@
            Home
         </a>
 
-        <!-- Sección Web Comparativas -->
-        <div class="text-uppercase text-white-50 small mt-3 mb-1">Web Comparativas</div>
+        <!-- ====== Web Comparativa (único ítem con submenú colapsable) ====== -->
+        <button class="nav-link nav-link-toggle d-flex align-items-center justify-content-between {% if wc_expand %}active{% endif %}"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#wcMenu"
+                aria-expanded="{{ 'true' if wc_expand else 'false' }}"
+                aria-controls="wcMenu">
+          <span>Web Comparativa</span>
+          <span class="caret">▸</span>
+        </button>
 
-        <!-- Panel Web Comparativas -->
-        <a href="/mercado-publico/web-comparativas"
-           class="nav-link {% if request.url.path.startswith('/mercado-publico/web-comparativas') %}active{% endif %}">
-           Panel Web Comparativas
-        </a>
+        <div id="wcMenu" class="collapse submenu {% if wc_expand %}show{% endif %}">
+          {% if user and r in ['admin','analista','supervisor'] %}
+            <a href="/cargas/nueva"
+               class="nav-link {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
+               Nueva carga
+            </a>
+          {% endif %}
 
-        {% if user and r in ['admin','analista','supervisor'] %}
-          <a href="/cargas/nueva"
-             class="nav-link ps-4 {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
-             Nueva carga
-          </a>
-        {% endif %}
+          {% if user and r in ['admin','analista','supervisor','auditor'] %}
+            {% set is_hist = request.url.path.startswith('/cargas/historial')
+                              or request.url.path == '/historial'
+                              or request.url.path.startswith('/cargas/')
+                              or request.url.path.startswith('/tablero/') %}
+            <a href="/cargas/historial"
+               class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
+               <span>Historial</span>
+               <span class="ms-2">
+                 {% if _pending is not none and _pending|int > 0 %}
+                   <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
+                 {% endif %}
+                 {% if _done is not none and _done|int > 0 %}
+                   <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
+                 {% endif %}
+               </span>
+            </a>
+          {% endif %}
 
-        {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {% set is_hist = request.url.path.startswith('/cargas/historial')
-                            or request.url.path == '/historial'
-                            or request.url.path.startswith('/cargas/')
-                            or request.url.path.startswith('/tablero/') %}
-          <a href="/cargas/historial"
-             class="nav-link ps-4 d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
-             <span>Historial</span>
-             <span class="ms-2">
-               {% if _pending is not none and _pending|int > 0 %}
-                 <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
-               {% endif %}
-               {% if _done is not none and _done|int > 0 %}
-                 <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
-               {% endif %}
-             </span>
-          </a>
-        {% endif %}
-
-        {% if user and r in ['admin','supervisor'] %}
-          {% set is_groups = request.url.path.startswith('/grupos') %}
-          <a href="/grupos"
-             class="nav-link ps-4 {% if is_groups %}active{% endif %}">
-             Grupos
-          </a>
-        {% endif %}
+          {% if user and r in ['admin','supervisor'] %}
+            {% set is_groups = request.url.path.startswith('/grupos') %}
+            <a href="/grupos"
+               class="nav-link {% if is_groups %}active{% endif %}">
+               Grupos
+            </a>
+          {% endif %}
+        </div>
+        <!-- ====== /Web Comparativa ====== -->
 
         <!-- Oportunidades -->
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
