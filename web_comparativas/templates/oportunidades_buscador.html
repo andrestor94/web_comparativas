@@ -1,9 +1,57 @@
 {% extends "base.html" %}
+
 {% block title %}Oportunidades · Buscador{% endblock %}
 
+{% block extra_head %}
+<style>
+  .card { background: var(--sa-blanco, #fff); border: 1px solid var(--sa-gris-borde,#e5e7eb); border-radius: 14px; padding: 16px; }
+  .upload-box { border: 1px dashed var(--sa-azul-btn,#5274ce); border-radius: 12px; padding: 16px; }
+  .btn-primary { background: var(--sa-azul-btn,#5274ce); color: #fff; border: none; border-radius: 10px; padding: 8px 14px; }
+  .meta { font-size: 0.95rem; color: #334155; }
+  .badge { display:inline-block; padding:4px 10px; border-radius:999px; background:#eef2f7; border:1px solid #e5e7eb; }
+  .mt-2{margin-top:.5rem}.mt-3{margin-top:1rem}.mt-4{margin-top:1.25rem}
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container-fluid">
+
   <h1 class="mb-3">Oportunidades · Buscador</h1>
-  <p class="text-muted">Estructura lista. En el próximo paso agregamos el cargador de archivo y el dashboard.</p>
-</div>
+  <p class="meta">Primero cargá el archivo maestro (Excel). Cada carga <strong>reemplaza</strong> el anterior.</p>
+
+  {% if toast %}
+    <div class="card" style="border-left:4px solid #16a34a;">
+      ✅ {{ toast }}
+    </div>
+  {% endif %}
+
+  <div class="card mt-3">
+    <form class="upload-box" method="post"
+          action="{{ request.url_for('oportunidades_buscador_upload') }}"
+          enctype="multipart/form-data">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <input type="file" name="file" accept=".xlsx,.xls" required>
+        <button class="btn-primary" type="submit">Subir y reemplazar</button>
+        {% if opp.has_file %}
+          <span class="badge">Última act.: {{ opp.last_updated_str }}</span>
+          <span class="badge">Filas: {{ opp.rows if opp.rows is not none else 'N/D' }}</span>
+        {% else %}
+          <span class="badge">No hay archivo cargado</span>
+        {% endif %}
+      </div>
+      <div class="mt-2" style="font-size:.9rem; color:#475569;">
+        Solo .xlsx/.xls. Al subir, el archivo anterior se elimina y se usa el nuevo como fuente del dashboard.
+      </div>
+    </form>
+  </div>
+
+  <!-- Placeholder del tablero (lo completamos en el Paso 2) -->
+  <div class="card mt-4">
+    <h3 style="margin:0 0 8px 0;">Dashboard (en construcción)</h3>
+    {% if not opp.has_file %}
+      <p class="meta">Subí un Excel para ver los indicadores.</p>
+    {% else %}
+      <p class="meta">Fuente lista. En el siguiente paso dibujamos filtros, KPIs y tabla.</p>
+    {% endif %}
+  </div>
+
 {% endblock %}

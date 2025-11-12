@@ -176,6 +176,52 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI()
 
+# === [Oportunidades - Buscador] ===
+OPP_DIR  = BASE_DIR / "data" / "oportunidades"
+OPP_DIR.mkdir(parents=True, exist_ok=True)
+OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
+
+def _save_oportunidades_excel(file: UploadFile) -> int:
+    """
+    Guarda el Excel recibido reemplazando el anterior de forma atómica.
+    Devuelve la cantidad de filas del Excel guardado (o -1 si no se pudo leer).
+    """
+    name = (file.filename or "").lower()
+    if not (name.endswith(".xlsx") or name.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="Formato no permitido. Subí un Excel (.xlsx)")
+
+    tmp_path = OPP_DIR / f"tmp_{uuid.uuid4().hex}.xlsx"
+    with tmp_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Reemplazo atómico del anterior
+    tmp_path.replace(OPP_FILE)
+
+    # Intento leer para devolver un conteo (sirve como chequeo rápido)
+    try:
+        df = pd.read_excel(OPP_FILE)
+        return int(len(df))
+    except Exception:
+        return -1
+
+
+def _oportunidades_status() -> dict:
+    """
+    Devuelve metadata para la vista (si hay archivo, filas, última actualización).
+    """
+    info = {"has_file": False, "rows": None, "last_updated_str": None}
+    if OPP_FILE.exists():
+        info["has_file"] = True
+        try:
+            df = pd.read_excel(OPP_FILE, dtype=str)
+            info["rows"] = int(len(df))
+        except Exception:
+            info["rows"] = None
+
+        mtime = dt.datetime.fromtimestamp(OPP_FILE.stat().st_mtime)
+        info["last_updated_str"] = mtime.strftime("%d/%m/%Y %H:%M")
+    return info
+
 # Estados que consideramos “finalizados” para habilitar tablero/descarga a no-admin
 FINAL_STATES = {"done", "finalizado", "dashboard", "tablero"}
 
@@ -1308,9 +1354,13 @@ def oportunidades_buscador(
 ):
     """
     Vista principal del Buscador de Oportunidades.
-    (Luego acá incorporamos: upload + dashboard específicos del Buscador)
     """
-    ctx = {"request": request, "user": user}
+    ctx = {
+        "request": request,
+        "user": user,
+        "opp": _oportunidades_status(),  # <- pasa estado del archivo
+        "toast": None,                   # <- placeholder de mensaje
+    }
     fallback_html = (
         "<div style='font-family:system-ui;padding:32px;'>"
         "<h2>Oportunidades · Buscador</h2>"
@@ -1318,6 +1368,24 @@ def oportunidades_buscador(
         "</div>"
     )
     return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+@app.post("/oportunidades/buscador/upload", response_class=HTMLResponse)
+async def oportunidades_buscador_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Recibe un Excel y reemplaza el archivo canónico del Buscador.
+    """
+    rows = _save_oportunidades_excel(file)
+    ctx = {
+        "request": request,
+        "user": user,
+        "opp": _oportunidades_status(),
+        "toast": f"Archivo cargado correctamente. Filas: {rows if rows>=0 else 'N/D'}",
+    }
+    return templates.TemplateResponse("oportunidades_buscador.html", ctx)
 
 
 @app.get("/oportunidades/dimensiones", response_class=HTMLResponse)
