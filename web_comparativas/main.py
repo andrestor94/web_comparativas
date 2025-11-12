@@ -1503,21 +1503,23 @@ def oportunidades_buscador(
     date_to: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=10, le=200),
+    uploaded: int = Query(0),  # <--- NUEVO: para mostrar toast tras subir
     user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
 ):
-    """
-    Vista principal del Buscador de Oportunidades con KPIs + tabla.
-    """
     opp_info = _oportunidades_status()
+    toast_msg = None
+    if uploaded:
+        filas = opp_info.get("rows")
+        toast_msg = f"Archivo cargado correctamente. Filas: {filas}" if filas is not None else "Archivo cargado correctamente."
+
     df_all = _opp_load_df()
 
-    # si no hay archivo, render simple
     if df_all is None or df_all.empty:
         ctx = {
             "request": request,
             "user": user,
             "opp": opp_info,
-            "toast": None,
+            "toast": toast_msg,   # <--- usar el toast aquí
             "kpis": {"total_rows": 0, "buyers": 0, "platforms": 0, "provinces": 0, "budget_total": 0.0, "date_min": "", "date_max": ""},
             "filters": {"q": q, "buyer": buyer, "platform": platform, "province": province, "date_from": date_from, "date_to": date_to},
             "table_cols": [],
@@ -1537,11 +1539,9 @@ def oportunidades_buscador(
         )
         return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
 
-    # aplicar filtros
     df_filtered = _opp_apply_filters(df_all, q, buyer, platform, province, date_from, date_to)
     kpis = _opp_compute_kpis(df_filtered)
 
-    # columnas para mostrar
     proc_col   = _opp_pick(df_filtered, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
     fecha_col  = _opp_pick(df_filtered, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
     buyer_col  = _opp_pick(df_filtered, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
@@ -1550,7 +1550,6 @@ def oportunidades_buscador(
     presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
     desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
 
-    # mapeo label -> columna real presente
     colmap = []
     for label, col in [
         ("Proceso", proc_col),
@@ -1564,7 +1563,6 @@ def oportunidades_buscador(
         if col:
             colmap.append((label, col))
 
-    # paginación
     total = int(len(df_filtered))
     pages = max(1, int(np.ceil(total / page_size)))
     if page > pages:
@@ -1573,7 +1571,6 @@ def oportunidades_buscador(
     end = min(total, start + page_size)
     df_page = df_filtered.iloc[start:end].copy()
 
-    # construir filas sanas (sin HTML peligroso)
     def _san(v):
         try:
             if pd.isna(v):
@@ -1589,10 +1586,10 @@ def oportunidades_buscador(
         row = {}
         for (lbl, col) in colmap:
             val = rec.get(col, "")
-            if col == "Presupuesto" or _opp_norm(lbl).startswith("presupuesto"):
+            if _opp_norm(lbl).startswith("presupuesto"):
                 val = _opp_parse_number(val)
                 row[lbl] = f"$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            elif _opp_norm(lbl) in {"fecha"}:
+            elif _opp_norm(lbl) == "fecha":
                 d = _opp_parse_date(val)
                 row[lbl] = d.strftime("%d/%m/%Y") if d else _san(val)
             else:
@@ -1603,7 +1600,7 @@ def oportunidades_buscador(
         "request": request,
         "user": user,
         "opp": opp_info,
-        "toast": None,
+        "toast": toast_msg,  # <--- usar el toast aquí también
         "kpis": kpis,
         "filters": {
             "q": q or "",
@@ -1630,23 +1627,18 @@ def oportunidades_buscador(
     )
     return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
 
-@app.post("/oportunidades/buscador/upload", response_class=HTMLResponse)
+@app.post("/oportunidades/buscador/upload")
 async def oportunidades_buscador_upload(
     request: Request,
     file: UploadFile = File(...),
     user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
 ):
-    """
-    Recibe un Excel y reemplaza el archivo canónico del Buscador.
-    """
+    # guarda y calcula filas
     rows = _save_oportunidades_excel(file)
-    ctx = {
-        "request": request,
-        "user": user,
-        "opp": _oportunidades_status(),
-        "toast": f"Archivo cargado correctamente. Filas: {rows if rows>=0 else 'N/D'}",
-    }
-    return templates.TemplateResponse("oportunidades_buscador.html", ctx)
+    # redirige al GET que arma KPIs/tabla (evita 'kpis undefined')
+    url = request.url_for("oportunidades_buscador")
+    url = str(url) + "?uploaded=1"
+    return RedirectResponse(url, status_code=303)
 
 
 @app.get("/oportunidades/dimensiones", response_class=HTMLResponse)
