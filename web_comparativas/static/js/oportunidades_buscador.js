@@ -6,7 +6,7 @@
   const tbody = $("#oppTBody");
   if (!tbody) return;
 
-  // UI refs
+  // ---- UI refs
   const selPlataforma = $("#fPlataforma");
   const selOperador = $("#fOperador");
   const selCuenta = $("#fCuenta");
@@ -24,6 +24,11 @@
   const lblFrom = $("#lblFrom");
   const lblTo = $("#lblTo");
 
+  const swPAMI = $("#swPAMI");
+  const swEstado = $("#swEstado");
+
+  const kProcesos = $("#kProcesos");
+
   const showFrom = $("#showFrom");
   const showTo = $("#showTo");
   const totalFound = $("#totalFound");
@@ -34,7 +39,7 @@
 
   const PAGE_SIZE = (window.OPP_UI && window.OPP_UI.pageSize) || 20;
 
-  // ---------------------- Helpers ----------------------
+  // ---- Helpers
   const normalize = (s) =>
     (s || "")
       .toString()
@@ -44,55 +49,32 @@
       .trim();
 
   const pad = (n) => (n < 10 ? "0" + n : "" + n);
+  const toISODate = (d) => (d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "");
+  const toDDMMYYYY = (d) => (d ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}` : "—");
 
-  const toISODate = (d) =>
-    d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "";
-
-  const toDDMMYYYY = (d) =>
-    d ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}` : "—";
-
-  // Parsea fechas en formatos: "DD/MM/YYYY HH:MM", "YYYY-MM-DD HH:MM", "DD-MM-YYYY", etc.
   function parseApertura(str) {
     if (!str) return null;
     const s = String(str).trim();
-
-    // Intenta ISO directo
     const iso = Date.parse(s);
     if (!Number.isNaN(iso)) return new Date(iso);
 
-    // Separa fecha y hora
     const [fecha, hora] = s.split(/\s+/);
     if (!fecha) return null;
-
     const sep = fecha.includes("/") ? "/" : fecha.includes("-") ? "-" : null;
     if (!sep) return null;
-
-    const parts = fecha.split(sep).map((x) => x.trim());
-    if (parts.length !== 3) return null;
+    const p = fecha.split(sep).map((x) => x.trim());
+    if (p.length !== 3) return null;
 
     let dd, mm, yyyy;
-    // Detecta si arranca con año o con día
-    if (parts[0].length === 4) {
-      // YYYY-MM-DD
-      yyyy = +parts[0];
-      mm = +parts[1];
-      dd = +parts[2];
+    if (p[0].length === 4) {
+      yyyy = +p[0]; mm = +p[1]; dd = +p[2];
     } else {
-      // DD/MM/YYYY
-      dd = +parts[0];
-      mm = +parts[1];
-      yyyy = +parts[2];
+      dd = +p[0]; mm = +p[1]; yyyy = +p[2];
     }
-    if (!yyyy || !mm || !dd) return null;
-
-    let HH = 0,
-      MM = 0;
+    let HH = 0, MM = 0;
     if (hora) {
-      const hparts = hora.split(":");
-      if (hparts.length >= 2) {
-        HH = +hparts[0] || 0;
-        MM = +hparts[1] || 0;
-      }
+      const h = hora.split(":");
+      if (h.length >= 2) { HH = +h[0] || 0; MM = +h[1] || 0; }
     }
     const d = new Date(yyyy, mm - 1, dd, HH, MM, 0, 0);
     return Number.isNaN(d.getTime()) ? null : d;
@@ -100,38 +82,39 @@
 
   function uniqSorted(list, numeric = false) {
     const set = new Set();
-    for (const v of list) {
-      if (v === null || v === undefined) continue;
-      const s = String(v).trim();
-      if (s !== "") set.add(s);
-    }
+    for (const v of list) { if (v === null || v === undefined) continue; const s = String(v).trim(); if (s !== "") set.add(s); }
     const arr = Array.from(set);
-    if (numeric) {
-      arr.sort((a, b) => Number(a) - Number(b));
-    } else {
-      arr.sort((a, b) => normalize(a).localeCompare(normalize(b)));
-    }
+    if (numeric) arr.sort((a, b) => Number(a) - Number(b));
+    else arr.sort((a, b) => normalize(a).localeCompare(normalize(b)));
     return arr;
   }
 
-  // ---------------------- Dataset desde DOM ----------------------
+  // ---- Dataset desde DOM (con fallback a celdas)
   const originalRows = $$("#oppTBody tr");
   const DATA = originalRows.map((tr) => {
-    const linkEl = tr.querySelector("td:nth-child(6) a");
-    const aperturaTxt = tr.dataset.apertura || "";
+    const tds = tr.children;
+    const td = (i) => (tds[i] ? tds[i].textContent.trim() : "");
+
+    // Preferimos data-*, pero si están vacíos, usamos texto de celdas
+    const numero = tr.dataset.numero || td(0);
+    const reparticion = tr.dataset.reparticion || td(1);
+    const objeto = tr.dataset.objeto || td(2);
+    const aperturaTxt = tr.dataset.apertura || td(3);
+    const tipo = tr.dataset.tipo || td(4);
+    const plataforma = tr.dataset.plataforma || "";
+    const operador = tr.dataset.operador || "";
+    const cuenta = tr.dataset.cuenta || "";
+    const estadoRaw = tr.dataset.estado || ""; // columna "Estado"
+    const enlaceEl = tr.querySelector("td:nth-child(6) a");
+    const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
+
     const aperturaDate = parseApertura(aperturaTxt);
+    const estadoNorm = normalize(estadoRaw).includes("emerg") ? "emergencia" : "regular";
 
     return {
-      numero: tr.dataset.numero || "",
-      reparticion: tr.dataset.reparticion || "",
-      objeto: tr.dataset.objeto || "",
-      aperturaTxt,
-      apertura: aperturaDate ? aperturaDate.getTime() : null, // ms epoch
-      tipo: tr.dataset.tipo || "",
-      plataforma: tr.dataset.plataforma || "",
-      operador: tr.dataset.operador || "",
-      cuenta: tr.dataset.cuenta || "",
-      enlace: linkEl ? linkEl.getAttribute("href") : "",
+      numero, reparticion, objeto, aperturaTxt,
+      apertura: aperturaDate ? aperturaDate.getTime() : null,
+      tipo, plataforma, operador, cuenta, estado: estadoNorm, enlace
     };
   });
 
@@ -140,42 +123,22 @@
   const DOMAIN_MIN = dates.length ? Math.min(...dates) : null;
   const DOMAIN_MAX = dates.length ? Math.max(...dates) : null;
 
-  // ---------------------- Inicializar selects ----------------------
-  function initSelect(selectEl, values, placeholder) {
+  // ---- Selects
+  function initSelect(selectEl, values) {
     if (!selectEl) return;
-    // Mantiene primer option ("Todas/Todos")
     const first = selectEl.firstElementChild;
-    selectEl.innerHTML = "";
-    if (first) selectEl.appendChild(first);
-
+    selectEl.innerHTML = ""; if (first) selectEl.appendChild(first.cloneNode(true));
     const frag = document.createDocumentFragment();
-    for (const val of values) {
-      const opt = document.createElement("option");
-      opt.value = val;
-      opt.textContent = val;
-      frag.appendChild(opt);
-    }
+    for (const val of values) { const opt = document.createElement("option"); opt.value = val; opt.textContent = val; frag.appendChild(opt); }
     selectEl.appendChild(frag);
   }
 
-  initSelect(
-    selPlataforma,
-    uniqSorted(DATA.map((d) => d.plataforma)),
-    "Todas"
-  );
-  initSelect(selOperador, uniqSorted(DATA.map((d) => d.operador)), "Todos");
-  initSelect(
-    selCuenta,
-    uniqSorted(DATA.map((d) => d.cuenta), true /* numeric-ish */),
-    "Todas"
-  );
-  initSelect(
-    selReparticion,
-    uniqSorted(DATA.map((d) => d.reparticion)),
-    "Todas"
-  );
+  initSelect(selPlataforma, uniqSorted(DATA.map((d) => d.plataforma)));
+  initSelect(selOperador, uniqSorted(DATA.map((d) => d.operador)));
+  initSelect(selCuenta, uniqSorted(DATA.map((d) => d.cuenta), true));
+  initSelect(selReparticion, uniqSorted(DATA.map((d) => d.reparticion)));
 
-  // ---------------------- Slider & fechas ----------------------
+  // ---- Slider & fechas
   function percentFromEpoch(ms) {
     if (DOMAIN_MIN === null || DOMAIN_MAX === null) return 0;
     if (DOMAIN_MAX === DOMAIN_MIN) return 100;
@@ -187,7 +150,6 @@
     return Math.round(DOMAIN_MIN + (DOMAIN_MAX - DOMAIN_MIN) * (clamped / 100));
   }
 
-  // Valores iniciales
   const initFrom =
     (window.OPP_UI && window.OPP_UI.initialDateFrom && parseApertura(window.OPP_UI.initialDateFrom)) ||
     (DOMAIN_MIN ? new Date(DOMAIN_MIN) : null);
@@ -196,69 +158,72 @@
     (DOMAIN_MAX ? new Date(DOMAIN_MAX) : null);
 
   function setSliderFromDates(d1, d2) {
-    if (DOMAIN_MIN === null || DOMAIN_MAX === null) {
-      rMin.value = 0;
-      rMax.value = 100;
-      updateFill();
-      return;
-    }
+    if (DOMAIN_MIN === null || DOMAIN_MAX === null) { rMin.value = 0; rMax.value = 100; updateFill(); return; }
     const p1 = percentFromEpoch(d1 ? d1.getTime() : DOMAIN_MIN);
     const p2 = percentFromEpoch(d2 ? d2.getTime() : DOMAIN_MAX);
-    rMin.value = Math.max(0, Math.min(100, Math.floor(Math.min(p1, p2))));
-    rMax.value = Math.max(0, Math.min(100, Math.floor(Math.max(p1, p2))));
-    updateFill();
+    rMin.value = Math.floor(Math.min(p1, p2)); rMax.value = Math.floor(Math.max(p1, p2)); updateFill();
   }
-
   function setDatesFromSlider() {
-    const v1 = Number(rMin.value);
-    const v2 = Number(rMax.value);
+    const v1 = Number(rMin.value), v2 = Number(rMax.value);
     const e1 = epochFromPercent(Math.min(v1, v2));
     const e2 = epochFromPercent(Math.max(v1, v2));
-    const d1 = e1 ? new Date(e1) : null;
-    const d2 = e2 ? new Date(e2) : null;
+    const d1 = e1 ? new Date(e1) : null, d2 = e2 ? new Date(e2) : null;
     if (dateFrom) dateFrom.value = d1 ? toISODate(d1) : "";
     if (dateTo) dateTo.value = d2 ? toISODate(d2) : "";
     if (lblFrom) lblFrom.textContent = d1 ? toDDMMYYYY(d1) : "—";
     if (lblTo) lblTo.textContent = d2 ? toDDMMYYYY(d2) : "—";
   }
-
   function updateFill() {
-    const a = Number(rMin.value);
-    const b = Number(rMax.value);
-    const left = Math.min(a, b);
-    const right = Math.max(a, b);
-    if (fill) {
-      fill.style.left = left + "%";
-      fill.style.width = Math.max(0, right - left) + "%";
-    }
+    const a = Number(rMin.value), b = Number(rMax.value);
+    const left = Math.min(a, b), right = Math.max(a, b);
+    if (fill) { fill.style.left = left + "%"; fill.style.width = Math.max(0, right - left) + "%"; }
     setDatesFromSlider();
   }
 
-  // Inicializar rango y fechas visibles
   setSliderFromDates(initFrom, initTo);
-
-  // Si hay inputs date, sincronizar con slider
-  if (dateFrom && dateTo) {
-    if (initFrom) dateFrom.value = toISODate(initFrom);
-    if (initTo) dateTo.value = toISODate(initTo);
-  }
+  if (dateFrom && initFrom) dateFrom.value = toISODate(initFrom);
+  if (dateTo && initTo) dateTo.value = toISODate(initTo);
   setDatesFromSlider();
-
   rMin.addEventListener("input", updateFill);
   rMax.addEventListener("input", updateFill);
-
   function syncSliderWithDates() {
     const d1 = dateFrom && dateFrom.value ? new Date(dateFrom.value) : initFrom;
     const d2 = dateTo && dateTo.value ? new Date(dateTo.value) : initTo;
-    setSliderFromDates(d1, d2);
-    setDatesFromSlider();
+    setSliderFromDates(d1, d2); setDatesFromSlider();
   }
   if (dateFrom) dateFrom.addEventListener("change", syncSliderWithDates);
   if (dateTo) dateTo.addEventListener("change", syncSliderWithDates);
 
-  // ---------------------- Filtrado + render ----------------------
+  // ---- Switches (PAMI/Otras y Estado)
+  function setChipGroup(groupEl, value) {
+    if (!groupEl) return;
+    $$(".chip", groupEl).forEach((b) => b.classList.toggle("is-on", b.dataset.val === value));
+  }
+  function getChipGroup(groupEl) {
+    const on = $$(".chip.is-on", groupEl)[0];
+    return on ? on.dataset.val : "todos";
+  }
+  if (swPAMI) {
+    swPAMI.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip"); if (!btn) return;
+      setChipGroup(swPAMI, btn.dataset.val); applyFilters();
+    });
+  }
+  if (swEstado) {
+    swEstado.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip"); if (!btn) return;
+      setChipGroup(swEstado, btn.dataset.val); applyFilters();
+    });
+  }
+
+  // ---- Filtrado + render
   let CUR_PAGE = 1;
   let FILTERED = DATA;
+
+  function isPAMIName(rep) {
+    const r = normalize(rep);
+    return r.includes("instituto nacional de servicios sociales para jubilados y pensionados");
+  }
 
   function applyFilters() {
     const q = normalize(inpBuscar && inpBuscar.value);
@@ -268,29 +233,33 @@
     const vCta = selCuenta && selCuenta.value ? selCuenta.value : "";
     const vRep = selReparticion && selReparticion.value ? selReparticion.value : "";
 
-    // Rango por fechas
-    let dFrom = null,
-      dTo = null;
+    const vGrp = getChipGroup(swPAMI);      // todos | pami | otras
+    const vEst = getChipGroup(swEstado);    // todos | emergencia | regular
+
+    // Fechas
+    let dFrom = null, dTo = null;
     if (dateFrom && dateFrom.value) dFrom = new Date(dateFrom.value);
     if (dateTo && dateTo.value) dTo = new Date(dateTo.value);
-
     const fromMs = dFrom ? new Date(dFrom.getFullYear(), dFrom.getMonth(), dFrom.getDate(), 0, 0, 0, 0).getTime() : null;
     const toMs = dTo ? new Date(dTo.getFullYear(), dTo.getMonth(), dTo.getDate(), 23, 59, 59, 999).getTime() : null;
 
     FILTERED = DATA.filter((r) => {
-      // Texto en Objeto (accent-insensitive)
-      if (q) {
-        if (!normalize(r.objeto).includes(q)) return false;
-      }
-      // Selects exactos (si hay valor)
+      if (q && !normalize(r.objeto).includes(q)) return false;
       if (vPlat && r.plataforma !== vPlat) return false;
       if (vOper && r.operador !== vOper) return false;
       if (vCta && r.cuenta !== vCta) return false;
       if (vRep && r.reparticion !== vRep) return false;
 
-      // Rango de fechas (si hay una o ambas puntas)
+      // Switch PAMI/Otras
+      if (vGrp === "pami" && !isPAMIName(r.reparticion)) return false;
+      if (vGrp === "otras" && isPAMIName(r.reparticion)) return false;
+
+      // Switch Estado
+      if (vEst !== "todos" && r.estado !== vEst) return false;
+
+      // Rango fechas
       if (fromMs !== null || toMs !== null) {
-        if (r.apertura === null) return false; // si no tiene fecha, lo excluimos cuando se filtra por fecha
+        if (r.apertura === null) return false;
         if (fromMs !== null && r.apertura < fromMs) return false;
         if (toMs !== null && r.apertura > toMs) return false;
       }
@@ -301,6 +270,12 @@
     render();
   }
 
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function safeText(s) { return escapeHtml(s).replace(/\n/g, "<br>"); }
+
   function render() {
     const total = FILTERED.length;
     const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -310,104 +285,73 @@
     const end = Math.min(total, start + PAGE_SIZE);
     const slice = FILTERED.slice(start, end);
 
-    const rowsHtml = slice
-      .map((r) => {
-        const linkHtml = r.enlace
-          ? `<a class="link-ico" href="${r.enlace}" target="_blank" rel="noopener">🔗</a>`
-          : `<span class="muted">—</span>`;
-        return `
-          <tr
-            data-numero="${escapeHtml(r.numero)}"
-            data-reparticion="${escapeHtml(r.reparticion)}"
-            data-objeto="${escapeHtml(r.objeto)}"
-            data-apertura="${escapeHtml(r.aperturaTxt)}"
-            data-tipo="${escapeHtml(r.tipo)}"
-            data-plataforma="${escapeHtml(r.plataforma)}"
-            data-operador="${escapeHtml(r.operador)}"
-            data-cuenta="${escapeHtml(r.cuenta)}"
-          >
-            <td>${safeText(r.numero)}</td>
-            <td>${safeText(r.reparticion)}</td>
-            <td>${safeText(r.objeto)}</td>
-            <td>${safeText(r.aperturaTxt)}</td>
-            <td>${safeText(r.tipo)}</td>
-            <td>${linkHtml}</td>
-          </tr>
-        `;
-      })
-      .join("");
+    const rowsHtml = slice.map((r) => {
+      const linkHtml = r.enlace ? `<a class="link-ico" href="${r.enlace}" target="_blank" rel="noopener">🔗</a>` : `<span class="muted">—</span>`;
+      return `
+        <tr
+          data-numero="${escapeHtml(r.numero)}"
+          data-reparticion="${escapeHtml(r.reparticion)}"
+          data-objeto="${escapeHtml(r.objeto)}"
+          data-apertura="${escapeHtml(r.aperturaTxt)}"
+          data-tipo="${escapeHtml(r.tipo)}"
+          data-plataforma="${escapeHtml(r.plataforma)}"
+          data-operador="${escapeHtml(r.operador)}"
+          data-cuenta="${escapeHtml(r.cuenta)}"
+          data-estado="${escapeHtml(r.estado)}"
+        >
+          <td>${safeText(r.numero)}</td>
+          <td>${safeText(r.reparticion)}</td>
+          <td>${safeText(r.objeto)}</td>
+          <td>${safeText(r.aperturaTxt)}</td>
+          <td>${safeText(r.tipo)}</td>
+          <td>${linkHtml}</td>
+        </tr>`;
+    }).join("");
 
     tbody.innerHTML = rowsHtml || `<tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>`;
 
-    // Estado/paginación
+    // Paginación
     if (totalFound) totalFound.textContent = String(total);
     if (showFrom) showFrom.textContent = String(total ? start + 1 : 0);
     if (showTo) showTo.textContent = String(end);
     if (curPage) curPage.textContent = String(CUR_PAGE);
     if (maxPage) maxPage.textContent = String(pages);
-
     prevBtn.disabled = CUR_PAGE <= 1;
     nextBtn.disabled = CUR_PAGE >= pages;
+
+    // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
+    if (kProcesos) {
+      const uniq = new Set(slice.length === FILTERED.length ? FILTERED.map(r => r.cuenta) : FILTERED.map(r => r.cuenta));
+      // mostramos del conjunto filtrado completo, no solo la página
+      kProcesos.textContent = String(uniq.size);
+    }
   }
 
-  // Escapes simples para HTML
-  function escapeHtml(s) {
-    return String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-  function safeText(s) {
-    return escapeHtml(s).replace(/\n/g, "<br>");
-  }
-
-  // ---------------------- Eventos ----------------------
+  // Eventos
   btnAplicar && btnAplicar.addEventListener("click", applyFilters);
-  btnLimpiar &&
-    btnLimpiar.addEventListener("click", () => {
-      if (selPlataforma) selPlataforma.value = "";
-      if (selOperador) selOperador.value = "";
-      if (selCuenta) selCuenta.value = "";
-      if (selReparticion) selReparticion.value = "";
-      if (inpBuscar) inpBuscar.value = "";
-      if (dateFrom) dateFrom.value = initFrom ? toISODate(initFrom) : "";
-      if (dateTo) dateTo.value = initTo ? toISODate(initTo) : "";
-      setSliderFromDates(initFrom, initTo);
-      setDatesFromSlider();
-      applyFilters();
-    });
+  btnLimpiar && btnLimpiar.addEventListener("click", () => {
+    if (selPlataforma) selPlataforma.value = "";
+    if (selOperador) selOperador.value = "";
+    if (selCuenta) selCuenta.value = "";
+    if (selReparticion) selReparticion.value = "";
+    if (inpBuscar) inpBuscar.value = "";
+    if (dateFrom) dateFrom.value = initFrom ? toISODate(initFrom) : "";
+    if (dateTo) dateTo.value = initTo ? toISODate(initTo) : "";
+    setChipGroup(swPAMI, "todos");
+    setChipGroup(swEstado, "todos");
+    setSliderFromDates(initFrom, initTo);
+    setDatesFromSlider();
+    applyFilters();
+  });
+  btnClear && btnClear.addEventListener("click", (e) => { e.preventDefault(); if (inpBuscar) inpBuscar.value = ""; });
 
-  btnClear &&
-    btnClear.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (inpBuscar) inpBuscar.value = "";
-    });
+  inpBuscar && inpBuscar.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyFilters(); } });
 
-  // Enter en el buscador aplica
-  inpBuscar &&
-    inpBuscar.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        applyFilters();
-      }
-    });
-
-  prevBtn &&
-    prevBtn.addEventListener("click", () => {
-      if (CUR_PAGE > 1) {
-        CUR_PAGE--;
-        render();
-      }
-    });
-  nextBtn &&
-    nextBtn.addEventListener("click", () => {
-      const pages = Math.max(1, Math.ceil(FILTERED.length / PAGE_SIZE));
-      if (CUR_PAGE < pages) {
-        CUR_PAGE++;
-        render();
-      }
-    });
+  prevBtn && prevBtn.addEventListener("click", () => { if (CUR_PAGE > 1) { CUR_PAGE--; render(); } });
+  nextBtn && nextBtn.addEventListener("click", () => {
+    const pages = Math.max(1, Math.ceil(FILTERED.length / PAGE_SIZE));
+    if (CUR_PAGE < pages) { CUR_PAGE++; render(); }
+  });
 
   // Render inicial
   applyFilters();

@@ -3,54 +3,54 @@
 
 {% block extra_head %}
 <style>
-  /* ====== Layout & tokens ====== */
   .muted{color:#6b7280}
-  .card{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:18px}
-  .btn{background:var(--sa-azul-btn,#5274ce);color:#fff;border:0;border-radius:10px;padding:8px 14px;cursor:pointer}
+  .card{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:16px}
+  .btn{background:var(--sa-azul-btn,#5274ce);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn-link{background:transparent;border:0;color:var(--sa-azul-btn,#5274ce);cursor:pointer}
-  .stack{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .field input,.field select{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:9px 10px;background:#fff}
+  .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .field input,.field select{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;background:#fff}
   .badges>span{display:inline-block;background:#eef2f7;border:1px solid #e5e7eb;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:6px}
 
-  /* ====== KPIs ====== */
-  .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
-  .kpi{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:14px}
-  .kpi h4{margin:0;font-size:12px;color:#446;opacity:.8}
-  .kpi .v{font-size:22px;font-weight:700;margin-top:4px;color:var(--sa-text,#064066)}
+  /* Barra superior: Procesos + filtros compactos */
+  .topbar{display:grid;grid-template-columns:160px 1fr;gap:12px}
+  .mini-kpi{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:10px}
+  .mini-kpi h4{margin:0 0 4px;font-size:12px;color:#4b5563}
+  .mini-kpi .v{font-weight:800;font-size:22px;color:var(--sa-text,#064066)}
 
-  /* ====== Filtros estilo “tarjetas” ====== */
-  .filters-grid{display:grid;grid-template-columns:320px repeat(4,minmax(0,1fr));gap:12px}
-  .filter-card{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:12px}
+  .filters-grid{display:grid;grid-template-columns:280px repeat(4,minmax(0,1fr));gap:10px}
+  .filter-card{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:10px}
   .filter-card h5{font-size:12px;margin:0 0 6px;color:#4b5563}
-  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 140px;gap:10px}
+  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 160px;gap:10px}
   .searchbox{position:relative}
   .searchbox input{width:100%;padding:10px 38px 10px 36px;border:1px solid #e5e7eb;border-radius:12px}
   .searchbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.55}
   .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;opacity:.65}
 
-  /* ====== Slider de fechas (dos manijas) ====== */
-  .range-wrap{position:relative;height:36px}
-  .range-wrap input[type=range]{position:absolute;left:0;right:0;top:12px;width:100%;pointer-events:none;background:transparent;-webkit-appearance:none}
-  .range-wrap input[type=range]::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;height:16px;width:16px;border-radius:50%;background:var(--sa-azul-btn,#5274ce);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
-  .range-wrap input[type=range]::-moz-range-thumb{pointer-events:auto;height:16px;width:16px;border:0;border-radius:50%;background:var(--sa-azul-btn,#5274ce)}
-  .range-track{position:absolute;left:0;right:0;top:19px;height:4px;background:#e5e7eb;border-radius:999px}
-  .range-fill{position:absolute;top:19px;height:4px;background:#c7d2fe;border-radius:999px}
+  /* Slider doble compacto */
+  .range-wrap{position:relative;height:32px}
+  .range-wrap input[type=range]{position:absolute;left:0;right:0;top:10px;width:100%;pointer-events:none;background:transparent;-webkit-appearance:none}
+  .range-wrap input[type=range]::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;height:14px;width:14px;border-radius:50%;background:var(--sa-azul-btn,#5274ce);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+  .range-wrap input[type=range]::-moz-range-thumb{pointer-events:auto;height:14px;width:14px;border:0;border-radius:50%;background:var(--sa-azul-btn,#5274ce)}
+  .range-track{position:absolute;left:0;right:0;top:16px;height:4px;background:#e5e7eb;border-radius:999px}
+  .range-fill{position:absolute;top:16px;height:4px;background:#c7d2fe;border-radius:999px}
 
-  /* ====== Tabla ====== */
+  /* Switches (botonera de 3 estados) */
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer}
+  .chip.is-on{background:#e0e7ff;border-color:#c7d2fe;color:#1f3a8a}
+
+  /* Tabla */
   .table-wrap{overflow:auto;max-height:55vh;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px}
   table.table{width:100%;border-collapse:collapse}
-  .table th,.table td{border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);padding:9px 10px;vertical-align:top}
+  .table th,.table td{border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);padding:8px 10px;vertical-align:top}
   .table th{background:#f8fafc;position:sticky;top:0;z-index:1;text-align:left}
   .link-ico{text-decoration:none}
   .link-ico:hover{text-decoration:underline}
 
-  /* ====== Paginación/estado ====== */
   .pager{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
-  .pill{display:inline-block;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:4px 10px;font-size:12px}
-  @media (max-width:1200px){
-    .filters-grid{grid-template-columns:1fr 1fr}
-  }
+  .pill{display:inline-block;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:3px 8px;font-size:12px}
+  @media (max-width:1200px){.topbar{grid-template-columns:1fr}.filters-grid{grid-template-columns:1fr 1fr}}
 </style>
 {% endblock %}
 
@@ -82,80 +82,93 @@
     <p class="muted" style="margin:8px 0 0;">Solo .xlsx/.xls. Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
   </div>
 
-  <!-- Dashboard -->
+  <!-- Dashboard: sin KPIs. Procesos + Filtros compactos -->
   <div class="card" style="border-color:#c7d2fe;">
-    <h2 class="mb-3">Dashboard</h2>
+    <div class="topbar mb-3">
+      <!-- KPI Procesos (únicos N° UAPE del conjunto filtrado) -->
+      <div class="mini-kpi">
+        <h4>Procesos</h4>
+        <div class="v" id="kProcesos">0</div>
+      </div>
 
-    <!-- KPIs -->
-    <div class="kpis mb-3">
-      <div class="kpi"><h4>Total oportunidades</h4><div class="v">{{ kpis.total_rows }}</div></div>
-      <div class="kpi"><h4>Compradores</h4><div class="v">{{ kpis.buyers }}</div></div>
-      <div class="kpi"><h4>Plataformas</h4><div class="v">{{ kpis.platforms }}</div></div>
-      <div class="kpi"><h4>Provincias/Municipios</h4><div class="v">{{ kpis.provinces }}</div></div>
-      <div class="kpi"><h4>Presupuesto total</h4><div class="v">$ {{ "{:,.2f}".format(kpis.budget_total).replace(",", "X").replace(".", ",").replace("X", ".") }}</div></div>
-      <div class="kpi"><h4>Rango de fechas</h4><div class="v">{{ kpis.date_min }}–{{ kpis.date_max }}</div></div>
+      <!-- Filtros -->
+      <div>
+        <div class="filters-grid">
+          <!-- Fecha -->
+          <div class="filter-card">
+            <h5>Fecha</h5>
+            <div class="stack" style="justify-content:space-between">
+              <input id="fDateFrom" type="date" style="width:48%">
+              <input id="fDateTo" type="date" style="width:48%">
+            </div>
+            <div class="range-wrap" style="margin-top:6px">
+              <div class="range-track"></div>
+              <div class="range-fill" id="dateFill"></div>
+              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1">
+              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1">
+            </div>
+            <div class="stack" style="justify-content:space-between;margin-top:6px">
+              <span class="pill" id="lblFrom">—</span>
+              <span class="pill" id="lblTo">—</span>
+            </div>
+          </div>
+
+          <div class="filter-card">
+            <h5>Plataforma</h5>
+            <div class="field"><select id="fPlataforma"><option value="">Todas</option></select></div>
+          </div>
+
+          <div class="filter-card">
+            <h5>Operador</h5>
+            <div class="field"><select id="fOperador"><option value="">Todos</option></select></div>
+          </div>
+
+          <div class="filter-card">
+            <h5>Cuenta</h5>
+            <div class="field"><select id="fCuenta"><option value="">Todas</option></select></div>
+          </div>
+
+          <div class="filter-card">
+            <h5>Repartición</h5>
+            <div class="field"><select id="fReparticion"><option value="">Todas</option></select></div>
+          </div>
+
+          <!-- Switches -->
+          <div class="filter-card" style="grid-column:1 / span 2">
+            <h5>Repartición: PAMI u Otras</h5>
+            <div class="chips" id="swPAMI">
+              <button type="button" class="chip is-on" data-val="todos">Todos</button>
+              <button type="button" class="chip" data-val="pami">PAMI</button>
+              <button type="button" class="chip" data-val="otras">Otras</button>
+            </div>
+          </div>
+
+          <div class="filter-card" style="grid-column:3 / span 2">
+            <h5>Estado</h5>
+            <div class="chips" id="swEstado">
+              <button type="button" class="chip is-on" data-val="todos">Todos</button>
+              <button type="button" class="chip" data-val="emergencia">Emergencia</button>
+              <button type="button" class="chip" data-val="regular">Regular</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Buscar -->
+        <div class="filter-card search-card" style="margin-top:10px">
+          <div class="searchbox">
+            <span class="ico">🔎</span>
+            <input id="fBuscar" placeholder="Buscar por objeto…">
+            <button class="clear" id="fClear" title="Limpiar">✕</button>
+          </div>
+          <div class="stack" style="justify-content:flex-end">
+            <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
+            <button class="btn-link" id="btnLimpiar" type="button">Limpiar</button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- FILTROS “original” -->
-    <div class="filters-grid mb-3">
-      <!-- Fecha: doble manija -->
-      <div class="filter-card">
-        <h5>Fecha</h5>
-        <div class="stack" style="justify-content:space-between">
-          <input id="fDateFrom" type="date" style="width:48%">
-          <input id="fDateTo" type="date" style="width:48%">
-        </div>
-        <div class="range-wrap" style="margin-top:8px">
-          <div class="range-track"></div>
-          <div class="range-fill" id="dateFill"></div>
-          <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1">
-          <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1">
-        </div>
-        <div class="stack" style="justify-content:space-between;margin-top:6px">
-          <span class="pill" id="lblFrom">—</span>
-          <span class="pill" id="lblTo">—</span>
-        </div>
-      </div>
-
-      <!-- Plataforma -->
-      <div class="filter-card">
-        <h5>Plataforma</h5>
-        <div class="field"><select id="fPlataforma"><option value="">Todas</option></select></div>
-      </div>
-
-      <!-- Operador -->
-      <div class="filter-card">
-        <h5>Operador</h5>
-        <div class="field"><select id="fOperador"><option value="">Todos</option></select></div>
-      </div>
-
-      <!-- Cuenta (N° UAPE) -->
-      <div class="filter-card">
-        <h5>Cuenta</h5>
-        <div class="field"><select id="fCuenta"><option value="">Todas</option></select></div>
-      </div>
-
-      <!-- Repartición -->
-      <div class="filter-card">
-        <h5>Repartición</h5>
-        <div class="field"><select id="fReparticion"><option value="">Todas</option></select></div>
-      </div>
-
-      <!-- Buscar por Objeto -->
-      <div class="filter-card search-card">
-        <div class="searchbox">
-          <span class="ico">🔎</span>
-          <input id="fBuscar" placeholder="Buscar por objeto…">
-          <button class="clear" id="fClear" title="Limpiar">✕</button>
-        </div>
-        <div class="stack" style="justify-content:flex-end">
-          <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-          <button class="btn-link" id="btnLimpiar" type="button">Limpiar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- TABLA -->
+    <!-- Tabla -->
     <div class="table-wrap">
       <table class="table" id="oppTable">
         <thead>
@@ -179,6 +192,7 @@
             data-plataforma="{{ row.get('Plataforma','')|e }}"
             data-operador="{{ row.get('Operador','')|e }}"
             data-cuenta="{{ row.get('N° UAPE','')|e }}"
+            data-estado="{{ row.get('Estado','')|e }}"
           >
             <td>{{ row.get('Número','') }}</td>
             <td>{{ row.get('Repartición','') }}</td>
@@ -202,7 +216,7 @@
       </table>
     </div>
 
-    <!-- PAGINACIÓN / ESTADO -->
+    <!-- Paginación -->
     <div class="pager">
       <div class="muted">
         Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
@@ -220,7 +234,6 @@
 <script>
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
-    // Si querés forzar un rango inicial, podés completar estas dos líneas:
     initialDateFrom: null,
     initialDateTo: null
   };
