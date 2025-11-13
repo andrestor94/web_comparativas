@@ -143,7 +143,6 @@
           </a>
         {% endif %}
 
-        {# 👉 Mesa de ayuda también habilitada para auditor #}
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
           {% set is_comments = request.url.path.startswith('/comentarios') %}
           <a href="/comentarios"
@@ -181,18 +180,7 @@
 
       <div class="signout mt-auto px-3 py-3 border-top">
         {% if user %}
-          {% if r == 'admin' %}
-            {# Botón de reset también accesible desde el panel lateral (solo admin) #}
-            <button type="button"
-                    class="btn btn-outline-danger w-100 mb-2"
-                    data-bs-toggle="modal"
-                    data-bs-target="#resetUploadsModal">
-              Resetear procesos
-            </button>
-            <a class="btn btn-outline-secondary w-100" href="/logout">Salir</a>
-          {% else %}
-            <a class="btn btn-outline-danger w-100" href="/logout">Salir</a>
-          {% endif %}
+          <a class="btn btn-outline-danger w-100" href="/logout">Salir</a>
         {% else %}
           <a class="btn btn-primary w-100" href="/login">Ingresar</a>
         {% endif %}
@@ -223,7 +211,7 @@
             <span class="position-absolute top-50 end-0 translate-middle-y pe-2 text-muted">🔎</span>
           </form>
 
-          {# ===== Botón global "Resetear procesos" (solo admin) ===== #}
+          {# ===== Botón global "Resetear procesos" (solo admin, arriba) ===== #}
           {% if user and r == 'admin' %}
             <button type="button"
                     class="btn btn-link text-danger fw-semibold d-none d-md-inline"
@@ -287,18 +275,14 @@
               <strong>No se puede deshacer.</strong> Los procesos seleccionados se eliminarán de forma permanente.
             </p>
             <div class="mb-3">
-              <label for="resetPasswordInput" class="form-label">Tu contraseña actual</label>
+              <label for="resetPasswordInput" class="form-label">Contraseña de administrador</label>
               <input type="password"
                      name="password"
                      id="resetPasswordInput"
                      class="form-control"
-                     placeholder="Ingresá la contraseña con la que iniciás sesión"
+                     placeholder="Ingresá tu contraseña actual"
                      required
                      autocomplete="current-password">
-              <div class="form-text">
-                Es la misma contraseña que usás para entrar a Web Comparativas.
-                Si querés cambiarla, podés hacerlo desde la opción <strong>"Mi contraseña"</strong>.
-              </div>
             </div>
           </div>
           <div class="modal-footer">
