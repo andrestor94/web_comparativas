@@ -134,7 +134,6 @@
     }
 
     /* Botones de la derecha (Vistas | Descargar normalized) */
-    .ph-right{}
     .ph-actions{
       display:flex;
       justify-content:flex-end;
@@ -225,12 +224,12 @@
     .chart-donut{height:var(--chart-donut-height)}
     .chart-bar{height:var(--chart-bar-height)}
     .chart-treemap{
-  /* altura mínima para pantallas bajas */
-  min-height: var(--chart-treemap-height);
-  /* ocupar todo el alto restante del card */
-  flex: 1 1 auto;
-  height: auto;
-}
+      /* altura mínima para pantallas bajas */
+      min-height: var(--chart-treemap-height);
+      /* ocupar todo el alto restante del card */
+      flex: 1 1 auto;
+      height: auto;
+    }
     .chart-donut>canvas,
     .chart-bar>canvas,
     .chart-treemap>canvas{
@@ -246,7 +245,7 @@
       .charts-row{grid-template-columns:1fr}
     }
 
-    /* === resaltado de búsqueda en la tabla === */
+    /* resaltado de búsqueda en la tabla */
     .table-wrap mark.sa-hit{
       background: rgba(0, 194, 255, .35);
       color: #064066;
@@ -254,7 +253,7 @@
       padding: 0 .15rem;
     }
 
-    /* === modo suizo: que se note el proveedor === */
+    /* modo suizo: que se note el proveedor */
     .table-wrap.rank-mode-suizo td.is-suizo,
     .table-wrap.rank-mode-suizo td.is-suizo .asignada-badge,
     .table-wrap.rank-mode-suizo td.is-suizo a{
@@ -262,7 +261,7 @@
       font-weight: 700;
     }
 
-    /* ==== bloque explicación pérdidas ==== */
+    /* bloque explicación pérdidas */
     .loss-explainer {
       background: #fff;
       border: 1px solid #e5e7eb;
@@ -294,7 +293,7 @@
       margin-top: .35rem;
     }
 
-    /* ==== competidores fuertes ==== */
+    /* competidores fuertes */
     .strong-competitors {
       background: #fff;
       border: 1px solid #e5e7eb;
@@ -326,7 +325,7 @@
       color: #0f172a;
     }
 
-    /* ==== micro KPI oportunidad perdida ==== */
+    /* micro KPI oportunidad perdida */
     .opportunity-bar {
       font-size: .7rem;
       color: #0f172a;
@@ -345,7 +344,7 @@
       background: #ef4444;
     }
 
-    /* === Comentarios / vistas (scoped) – lo dejo como lo tenías === */
+    /* Comentarios / vistas */
     .wc-comments-btn {
       position: fixed;
       right: 18px;
@@ -498,7 +497,7 @@
     }
     .wc-hide { display:none; }
 
-    /* ===== Modal de Vistas ===== */
+    /* Modal de Vistas */
     .views-backdrop{
       position: fixed;
       inset: 0;
@@ -549,7 +548,6 @@
       gap: .5rem;
       background: #fff;
     }
-
     .views-list .row{
       display: flex;
       align-items: center;
@@ -613,14 +611,15 @@
       color: #22c55e;
       margin-left: 8px;
     }
-            .kpi-trend.down { color: #ef4444; }
+    .kpi-trend.down { color: #ef4444; }
+
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(15px); }
       to { opacity: 1; transform: translateY(0); }
     }
     .fade-up { animation: fadeUp .6s ease forwards; }
 
-    /* === forzar barra superior del tablero === */
+    /* forzar barra superior del tablero */
     .wc-topbar,
     .page-toolbar,
     .app-toolbar,
@@ -805,11 +804,11 @@
 
           <div class="charts-row">
             <section class="chart-box" aria-labelledby="donutTitle">
-  <div class="title" id="donutTitle">Efectividad Suizo</div>
-  <div class="chart-donut" role="img" aria-label="Efectividad Suizo (Adjudicado vs No adjudicado)">
-    <canvas id="donutSuizo"></canvas>
-  </div>
-</section>
+              <div class="title" id="donutTitle">Efectividad Suizo</div>
+              <div class="chart-donut" role="img" aria-label="Efectividad Suizo (Adjudicado vs No adjudicado)">
+                <canvas id="donutSuizo"></canvas>
+              </div>
+            </section>
 
             <section class="chart-box" aria-labelledby="barTitle">
               <div class="title" id="barTitle">Posiciones</div>
@@ -985,8 +984,7 @@
   </div>
   <!-- ===== /MODAL VISTAS ===== -->
 
-  <!-- === Comentarios / Feedback (módulo UI) =============================== -->
-  <!-- Botón flotante (abre/cierra panel) — SIN contador -->
+  <!-- Panel / botón de comentarios -->
   <button
     id="wc-comments-toggle"
     class="wc-comments-btn"
@@ -996,7 +994,6 @@
     Comentarios
   </button>
 
-  <!-- Panel de comentarios -->
   <aside
     id="wc-comments-panel"
     class="wc-comments-panel"
@@ -1037,11 +1034,11 @@
       </div>
     </form>
   </aside>
-  <!-- === fin módulo comentarios ======================================== -->
+  <!-- fin módulo comentarios -->
 {% endblock %}
 {% block extra_js %}
   <script>
-    window.__DASH_VERSION__ = 'dashboard-exjs v2025-10-26-b';
+    window.__DASH_VERSION__ = 'dashboard-exjs v2025-10-26-b-fix';
     console.info('[dashboard] bundle', window.__DASH_VERSION__);
   </script>
 
@@ -1083,7 +1080,8 @@
       const elLossHint = document.getElementById('lossHint');
       const elStrongCompetitors = document.getElementById('scList');
 
-      // Espera segura a que Chart (y el treemap) estén listos
+      /* ===== Helpers ===== */
+
       const waitUntil = (testFn, {tries=40, every=120}={}) => new Promise(res => {
         (function loop(n){
           if (testFn()) return res(true);
@@ -1092,7 +1090,7 @@
         })(tries);
       });
 
-      // Inicializar defaults cuando Chart exista
+      // Inicializar defaults Chart cuando esté cargado
       (async function setupChartDefaults(){
         const ok = await waitUntil(() => !!window.Chart);
         if (!ok) return;
@@ -1112,7 +1110,6 @@
         Chart.defaults.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       })();
 
-      /* ===== Helpers ===== */
       const toNum = (x) => {
         if (typeof x === 'number') return isFinite(x) ? x : 0;
         const s = String(x ?? '')
@@ -1122,9 +1119,11 @@
         const n = parseFloat(s.replace(',', '.'));
         return isFinite(n) ? n : 0;
       };
+
       const nfARS = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(+v||0);
       const pctFmt = v => new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:0}).format(+v||0);
       const pctFmt1d = v => new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:1}).format(+v||0.0);
+
       const fmtDateDMY = s => {
         const m = String(s || '').trim().match(/^0*(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
         if (!m) return s || '';
@@ -1133,33 +1132,34 @@
         const yy = m[3].length === 2 ? '20' + m[3] : m[3].padStart(4, '0');
         return `${dd}/${mm}/${yy}`;
       };
-      const isSuizo = prov => /suizo/i.test(String(prov||''));
-      // normaliza textos: quita tildes y espacios/puntos/guiones
-const norm = function (s) {
-  var out = (s || "").toString().toLowerCase();
-  // algunos navegadores viejos no tienen normalize
-  if (typeof out.normalize === "function") {
-    out = out.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  }
-  // compactar separadores
-  out = out.replace(/[\s_.\-\/]+/g, "");
-  return out;
-};
 
-// escape seguro para HTML
-const esc = function (s) {
-  var str = (s == null ? "" : String(s));
-  return str.replace(/[&<>"']/g, function (m) {
-    switch (m) {
-      case "&": return "&amp;";
-      case "<": return "&lt;";
-      case ">": return "&gt;";
-      case "\"": return "&quot;";
-      default: return "&#39;";
-    }
-  });
-};
+      const isSuizo = prov => /suizo/i.test(String(prov||''));
+
+      // normaliza textos para comparaciones
+      const norm = function (s) {
+        var out = (s || "").toString().toLowerCase();
+        if (typeof out.normalize === "function") {
+          out = out.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        }
+        out = out.replace(/[\s_.\-\/]+/g, "");
+        return out;
+      };
+
+      const esc = function (s) {
+        var str = (s == null ? "" : String(s));
+        return str.replace(/[&<>"']/g, function (m) {
+          switch (m) {
+            case "&": return "&amp;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            case "\"": return "&quot;";
+            default: return "&#39;";
+          }
+        });
+      };
+
       const rxEscape = s => String(s||'').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
       const highlightText = (text, query) => {
         const src = String(text || '');
         const q = String(query || '').trim();
@@ -1173,6 +1173,7 @@ const esc = function (s) {
         const before = src.slice(0, i);
         return esc(before) + '<mark class="sa-hit">' + esc(match) + '</mark>' + esc(after);
       };
+
       function pickNumber(obj, keywords){
         if(!obj) return 0;
         const keys = Object.keys(obj||{});
@@ -1189,7 +1190,9 @@ const esc = function (s) {
       }
 
       /* ===== Cantidades & precios ===== */
+
       const unitPriceOf = p => toNum(p?.precio ?? p?.price);
+
       function rowQty(row){
         const cand = [
           row?.cantidad_solicitada,
@@ -1213,6 +1216,7 @@ const esc = function (s) {
           'cantidad'
         ])||0;
       }
+
       function offeredQty(row,p){
         let v = toNum(p?.cantidad ?? p?.cantidad_ofertada ?? p?.cant_ofertada ?? p?.qty);
         if(v>0) return v;
@@ -1222,6 +1226,7 @@ const esc = function (s) {
           'cant'
         ])||0;
       }
+
       function effectiveQty(row,p){
         const req=rowQty(row);
         const p1=(row.positions||[]).find(x=>+x.pos===1);
@@ -1234,11 +1239,15 @@ const esc = function (s) {
         }
         return 0;
       }
+
       const totalOf =(row,p)=>unitPriceOf(p)*offeredQty(row,p);
       const awardValue=(row,p)=>unitPriceOf(p)*effectiveQty(row,p);
 
       /* ===== visibilidad de ofertas por modo ===== */
+
       let MODE='todos';
+
+      // En "otros" ocultamos Suizo; en el resto mostramos todo y usamos filtros de filas.
       const showOfferByMode = (p) => MODE==='otros' ? !isSuizo(p.proveedor) : true;
 
       function cheapestPrice(row, {includedOnly=false}={}){
@@ -1262,6 +1271,7 @@ const esc = function (s) {
       }
 
       /* ===== Controles zoom/densidad ===== */
+
       const fitContainer=document.getElementById('fitContainer');
       const viewToggle=document.getElementById('viewToggle');
       const densityToggle=document.getElementById('densityToggle');
@@ -1270,6 +1280,7 @@ const esc = function (s) {
       let DENSITY=localStorage.getItem('density')||'normal';
 
       function setActive(group,attr,val){
+        if (!group) return;
         group.querySelectorAll('.mini-btn').forEach(b=>{
           const active = b.dataset[attr]===val;
           b.classList.toggle('active', active);
@@ -1278,17 +1289,21 @@ const esc = function (s) {
       }
 
       function computeFitScale(){
+        if (!fitContainer) return 1;
         fitContainer.classList.remove('scaled');
         fitContainer.style.setProperty('--fit-scale','1');
-        const natW=fitContainer.scrollWidth, natH=fitContainer.scrollHeight;
-        const vw=window.innerWidth, vh=window.innerHeight;
+        const natW=fitContainer.scrollWidth || 1,
+              natH=fitContainer.scrollHeight || 1;
+        const vw=window.innerWidth || 1,
+              vh=window.innerHeight || 1;
         return Math.min(1, vw/natW, (vh-12)/natH);
       }
 
       function applyView(){
+        if (!fitContainer) return;
         if(VIEW_MODE==='fit'){
           const s=computeFitScale();
-          fitContainer.style.setProperty('--fit-scale',String(s));
+          fitContainer.style.setProperty('--fit-scale',String(s || 1));
           fitContainer.classList.add('scaled');
         } else {
           fitContainer.classList.remove('scaled');
@@ -1297,27 +1312,32 @@ const esc = function (s) {
       }
 
       function applyDensity(){
+        if (!fitContainer) return;
         fitContainer.classList.toggle('compact', DENSITY==='compact');
         if(VIEW_MODE==='fit') applyView();
       }
 
-      viewToggle.addEventListener('click', e=>{
-        const b=e.target.closest('.mini-btn');
-        if(!b) return;
-        VIEW_MODE=b.dataset.view;
-        localStorage.setItem('viewMode',VIEW_MODE);
-        setActive(viewToggle,'view',VIEW_MODE);
-        applyView();
-      });
+      if (viewToggle){
+        viewToggle.addEventListener('click', e=>{
+          const b=e.target.closest('.mini-btn');
+          if(!b) return;
+          VIEW_MODE=b.dataset.view;
+          localStorage.setItem('viewMode',VIEW_MODE);
+          setActive(viewToggle,'view',VIEW_MODE);
+          applyView();
+        });
+      }
 
-      densityToggle.addEventListener('click', e=>{
-        const b=e.target.closest('.mini-btn');
-        if(!b) return;
-        DENSITY=b.dataset.density;
-        localStorage.setItem('density',DENSITY);
-        setActive(densityToggle,'density',DENSITY);
-        applyDensity();
-      });
+      if (densityToggle){
+        densityToggle.addEventListener('click', e=>{
+          const b=e.target.closest('.mini-btn');
+          if(!b) return;
+          DENSITY=b.dataset.density;
+          localStorage.setItem('density',DENSITY);
+          setActive(densityToggle,'density',DENSITY);
+          applyDensity();
+        });
+      }
 
       window.addEventListener('resize', ()=>{
         if(VIEW_MODE==='fit') applyView();
@@ -1332,10 +1352,10 @@ const esc = function (s) {
       const phAp=document.getElementById('ph_apertura');
       if(phAp) phAp.textContent=fmtDateDMY(phAp.textContent);
 
-      /* ===== Gráficos ===== */
+      /* ===== Gráficos (donut + barras posiciones) ===== */
+
       let chartDonutSuizo, chartBarPos;
 
-      // 👇 plugin que dibuja el porcentaje en el centro del donut
       const CenterPercent = {
         id:'centerPercent',
         afterDraw(chart, args, opt){
@@ -1360,66 +1380,66 @@ const esc = function (s) {
         if(!window.Chart) return;
 
         if(!chartDonutSuizo){
-  const c = document.getElementById('donutSuizo');
-  if (!c) return;
-  chartDonutSuizo = new Chart(c.getContext('2d'),{
-    type:'doughnut',
-    data:{
-      labels:['Adjudicado','No adjudicado'],
-      datasets:[{
-        data:[0,0],
-        backgroundColor:['#064066','#dce3ee'],
-        borderColor:'#ffffff',
-        borderWidth:2
-      }]
-    },
-    options:{
-      cutout:'55%',
-      plugins:{
-        legend:{ position:'bottom' },
-        // El plugin del centro mostrará el % del primer segmento (Adjudicado)
-        centerPercent:{ focusIndex:0 },
-        tooltip:{
-          callbacks:{
-            label:(ctx)=> {
-              const v = +ctx.raw || 0;
-              return `${ctx.label}: ${new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(v)}`;
-            }
+          const c = document.getElementById('donutSuizo');
+          if (c){
+            chartDonutSuizo = new Chart(c.getContext('2d'),{
+              type:'doughnut',
+              data:{
+                labels:['Adjudicado','No adjudicado'],
+                datasets:[{
+                  data:[0,0],
+                  backgroundColor:['#064066','#dce3ee'],
+                  borderColor:'#ffffff',
+                  borderWidth:2
+                }]
+              },
+              options:{
+                cutout:'55%',
+                plugins:{
+                  legend:{ position:'bottom' },
+                  centerPercent:{ focusIndex:0 },
+                  tooltip:{
+                    callbacks:{
+                      label:(ctx)=> {
+                        const v = +ctx.raw || 0;
+                        return `${ctx.label}: ${nfARS(v)}`;
+                      }
+                    }
+                  }
+                }
+              },
+              plugins:[CenterPercent]
+            });
           }
         }
-      }
-      // ← quitamos el onClick que antes cambiaba de Suizo/Otros
-    },
-    plugins:[CenterPercent]
-  });
-}
 
         if(!chartBarPos){
           const c = document.getElementById('barPosAgg');
-          if (!c) return;
-          chartBarPos = new Chart(c.getContext('2d'),{
-            type:'bar',
-            data:{
-              labels:['1','2','Otras'],
-              datasets:[{
-                data:[0,0,0],
-                backgroundColor:['#064066','#dce3ee','#dce3ee'],
-                borderColor:'#ffffff',
-                borderWidth:2
-              }]
-            },
-            options:{
-              scales:{
-                y:{ beginAtZero:true, ticks:{ precision:0 } }
+          if (c){
+            chartBarPos = new Chart(c.getContext('2d'),{
+              type:'bar',
+              data:{
+                labels:['1','2','Otras'],
+                datasets:[{
+                  data:[0,0,0],
+                  backgroundColor:['#064066','#dce3ee','#dce3ee'],
+                  borderColor:'#ffffff',
+                  borderWidth:2
+                }]
               },
-              plugins:{ legend:{ display:false } },
-              onClick:(_,els)=>{
-                if(!els?.length) return;
-                const idx=els[0].index;
-                togglePosBuckets(idx===0?'1':idx===1?'2':'otras');
+              options:{
+                scales:{
+                  y:{ beginAtZero:true, ticks:{ precision:0 } }
+                },
+                plugins:{ legend:{ display:false } },
+                onClick:(_,els)=>{
+                  if(!els?.length) return;
+                  const idx=els[0].index;
+                  togglePosBuckets(idx===0?'1':idx===1?'2':'otras');
+                }
               }
-            }
-          });
+            });
+          }
         }
       }
 
@@ -1449,7 +1469,7 @@ const esc = function (s) {
         return val;
       }
 
-      // Treemap con adjudicación efectiva (1° y remanente al 2°)
+      // Treemap con adjudicación efectiva (1° + remanente 2°)
       function treemapDataFirstPlace(rows, mode){
         const allow = (name)=>{
           if(mode==='suizo') return isSuizo(name);
@@ -1458,24 +1478,23 @@ const esc = function (s) {
         };
         const map = new Map();
         (rows || []).forEach(r=>{
-          const p1 = (r.positions || []).find(x => +x.pos === 1);
-          if (!p1) return;
-          const q1 = effectiveQty(r, p1);
-          const v1 = unitPriceOf(p1) * q1;
-          if (v1 > 0 && allow(p1.proveedor)) {
+          const p1 = (r.positions||[]).find(p=>+p.pos===1);
+          const q1 = p1 ? effectiveQty(r,p1) : 0;
+          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          if (v1>0 && allow(p1.proveedor)){
             const prov1 = String(p1.proveedor || '—');
             map.set(prov1, (map.get(prov1) || 0) + v1);
           }
-          const p2 = (r.positions || []).find(x => +x.pos === 2);
-          if (p2) {
-            const q2 = effectiveQty(r, p2);
-            const v2 = unitPriceOf(p2) * q2;
-            if (v2 > 0 && allow(p2.proveedor)) {
-              const prov2 = String(p2.proveedor || '—');
-              map.set(prov2, (map.get(prov2) || 0) + v2);
-            }
+
+          const p2 = (r.positions||[]).find(p=>+p.pos===2);
+          const q2 = p2 ? effectiveQty(r,p2) : 0;
+          const v2 = p2 ? unitPriceOf(p2)*q2 : 0;
+          if (v2>0 && allow(p2.proveedor)){
+            const prov2 = String(p2.proveedor || '—');
+            map.set(prov2, (map.get(prov2) || 0) + v2);
           }
         });
+
         return Array.from(map.entries())
           .sort((a,b)=>b[1]-a[1])
           .map(([label, value]) => ({ label, value }));
@@ -1483,12 +1502,15 @@ const esc = function (s) {
 
       function bindTreemapClickOnce(){
         const cv=document.getElementById('treemapProveedores');
-        if(!cv) return;
-        const chart=Chart.getChart?.(cv);
+        if(!cv || !window.Chart || !Chart.getChart) return;
+        const chart=Chart.getChart(cv);
         if(!chart){
           setTimeout(bindTreemapClickOnce,300);
           return;
         }
+        if (cv.__treemapClickBound) return;
+        cv.__treemapClickBound = true;
+
         cv.addEventListener('click',(evt)=>{
           const els=chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
           if(!els.length) return;
@@ -1496,12 +1518,15 @@ const esc = function (s) {
           const raw=(el.raw && (el.raw._data || el.raw)) || {};
           const label=raw.label || raw.name || raw.g || '';
           if(label && window.setFilter) window.setFilter('provider',label);
-        }, {once:true});
+        });
       }
+
       setTimeout(bindTreemapClickOnce,600);
 
       /* ===== Ranking + filtros ===== */
+
       const RANK_API="{{ rank_api_url }}";
+
       const elHead=document.getElementById('rankHead'),
             elBody=document.getElementById('rankBody');
       const elPageSz=document.getElementById('pageSize'),
@@ -1520,13 +1545,11 @@ const esc = function (s) {
 
       function setMode(m){
         MODE = m;
-        // marcar pestañas
         document.querySelectorAll('.segmented .seg-btn').forEach(b=>{
           const isActive = b.dataset.mode===m;
           b.classList.toggle('active', isActive);
           b.setAttribute('aria-selected', isActive ? 'true' : 'false');
         });
-        // clase del contenedor de la tabla
         if (elRankSection){
           elRankSection.classList.toggle('rank-mode-suizo', m === 'suizo');
         }
@@ -1542,6 +1565,7 @@ const esc = function (s) {
       };
 
       function buildPosCols(maxPos){
+        if (!elPosCols) return;
         elPosCols.innerHTML = Array.from({length:maxPos},(_,i)=>{
           const n=i+1,
                 active=FILTERS.posBuckets.has(String(n))?'active':'';
@@ -1550,6 +1574,7 @@ const esc = function (s) {
       }
 
       function updatePosButtonsUI(){
+        if (!elPosCols) return;
         elPosCols.querySelectorAll('.pos-chip').forEach(b=>{
           const key=b.dataset.pos;
           b.classList.toggle('active', FILTERS.posBuckets.has(String(key)));
@@ -1568,8 +1593,14 @@ const esc = function (s) {
 
       const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
       const getPageSize=()=>clamp(parseInt(elPageSz.value||'50',10),10,500);
+
       const hasSuizoRow=row=>row.positions?.some(p=>isSuizo(p.proveedor));
-      const rowMatchesQuery=(row,ql)=>!ql || String(row.descripcion||'').toLowerCase().includes(ql) || row.positions?.some(p=>String(p.proveedor||'').toLowerCase().includes(ql));
+
+      const rowMatchesQuery=(row,ql)=>{
+        if(!ql) return true;
+        if(String(row.descripcion||'').toLowerCase().includes(ql)) return true;
+        return (row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase().includes(ql));
+      };
 
       function togglePosBuckets(b){
         if(FILTERS.posBuckets.has(b)) FILTERS.posBuckets.delete(b);
@@ -1610,6 +1641,7 @@ const esc = function (s) {
       function headerFiltersOk(row){
         const H=FILTERS.header||{};
 
+        // Filtro N°
         if(H.nro){
           const valTxt=String(H.nro).trim();
           const [mn,mx]=parseRange(valTxt,false);
@@ -1618,17 +1650,21 @@ const esc = function (s) {
             if(isFinite(nroVal)){
               if(mn!=null && !(nroVal>=mn)) return false;
               if(mx!=null && !(nroVal<=mx)) return false;
-            } else return false;
-          } else {
-            if(!String(row.nro ?? row.item ?? '').toString().includes(valTxt)) return false;
+            } else {
+              return false;
+            }
+          }else{
+            if(!String(row.nro ?? row.item ?? '').includes(valTxt)) return false;
           }
         }
 
+        // Filtro descripción
         if(H.desc){
           const q=String(H.desc).toLowerCase();
           if(!String(row.descripcion||'').toLowerCase().includes(q)) return false;
         }
 
+        // Filtro cantidad
         if(H.cant){
           const [mn,mx]=parseRange(H.cant,false);
           const q=rowQty(row)||0;
@@ -1636,27 +1672,43 @@ const esc = function (s) {
           if(mx!=null && !(q<=mx)) return false;
         }
 
+        // Filtro proveedor (chip)
         if(FILTERS.provider){
           const prov=FILTERS.provider.toLowerCase();
           if(!(row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase()===prov)) return false;
         }
 
-        // Rel contra el más barato (respetando modo)
+        // Filtros por posición
         const baseIncluded = (MODE==='otros');
         const basePrice = cheapestPrice(row, {includedOnly: baseIncluded}) || 0;
 
-        for(const [posStr,conf] of Object.entries(FILTERS.header)){
-          if(['nro','desc','cant'].includes(posStr)) continue;
-          const pos=+posStr;
-          if(!FILTERS.visCols.has(pos)) continue;
-          const p=(row.positions||[]).find(x=>+x.pos===pos);
-          if(!p) return false;
-          if(conf.prov && !String(p.proveedor||'').toLowerCase().includes(String(conf.prov).toLowerCase())) return false;
-          if(conf.relmax){
-            const [mn,mx]=parseRange(conf.relmax,true);
-            const maxOnly=(mx??mn);
-            const rel=basePrice>0?(unitPriceOf(p)/basePrice - 1):0;
-            if(maxOnly!=null && !(rel<=maxOnly)) return false;
+        for (const [posStr, confRaw] of Object.entries(H)) {
+          if (['nro','desc','cant'].includes(posStr)) continue;
+          const pos = +posStr;
+          if (!Number.isFinite(pos)) continue;
+          if (!FILTERS.visCols.has(pos)) continue;
+
+          const conf = confRaw || {};
+          const hasProv = !!String(conf.prov || '').trim();
+          const hasRel  = !!String(conf.relmax || '').trim();
+
+          if (!hasProv && !hasRel) continue;
+
+          const p = (row.positions || []).find(x => +x.pos === pos);
+          if (!p) return false; // se pidió filtro para una pos que no existe en la fila
+
+          if (hasProv){
+            if (!String(p.proveedor || '').toLowerCase().includes(String(conf.prov).toLowerCase()))
+              return false;
+          }
+
+          if (hasRel && basePrice > 0){
+            const [mnPct, mxPct] = parseRange(conf.relmax, true);
+            const limit = (mxPct != null) ? mxPct : mnPct;
+            if (limit != null){
+              const rel = (unitPriceOf(p) / basePrice) - 1;
+              if (!(rel <= limit)) return false;
+            }
           }
         }
 
@@ -1674,16 +1726,19 @@ const esc = function (s) {
         });
       }
 
-      // Altura sticky para fila 2 del thead
+      // Altura sticky para fila 1 del thead
       function updateHeadOffsets(){
-        const topRow = elHead?.querySelector('tr:nth-child(1)');
+        if (!elHead) return;
+        const topRow = elHead.querySelector('tr:nth-child(1)');
         if(!topRow) return;
-        const h = Math.ceil(topRow.getBoundingClientRect().height);
+        const h = Math.ceil(topRow.getBoundingClientRect().height || 40);
         document.documentElement.style.setProperty('--head-row1-h', `${h}px`);
       }
 
       /* ========= ENCABEZADO DE TABLA ========= */
+
       function buildHead(maxPos){
+        if (!elHead) return;
         const isVis = pos => FILTERS.visCols.has(pos);
 
         // Fila 1
@@ -1737,23 +1792,37 @@ const esc = function (s) {
         updateHeadOffsets();
 
         // Listeners filtros
-        document.getElementById('toggleFilters').onclick = ()=> flt.classList.toggle('show');
+        const toggleBtn = document.getElementById('toggleFilters');
+        if (toggleBtn){
+          toggleBtn.onclick = ()=> flt.classList.toggle('show');
+        }
 
-        elHead.querySelector('#f_nro').oninput = e=>{
-          FILTERS.header.nro = e.target.value;
-          elInfo.dataset.page=1;
-          renderAll();
-        };
-        elHead.querySelector('#f_desc').oninput = e=>{
-          FILTERS.header.desc = e.target.value;
-          elInfo.dataset.page=1;
-          renderAll();
-        };
-        elHead.querySelector('#f_cant').oninput = e=>{
-          FILTERS.header.cant = e.target.value;
-          elInfo.dataset.page=1;
-          renderAll();
-        };
+        const fNro = elHead.querySelector('#f_nro');
+        const fDesc = elHead.querySelector('#f_desc');
+        const fCant = elHead.querySelector('#f_cant');
+
+        if (fNro){
+          fNro.oninput = e=>{
+            FILTERS.header.nro = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+        if (fDesc){
+          fDesc.oninput = e=>{
+            FILTERS.header.desc = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+        if (fCant){
+          fCant.oninput = e=>{
+            FILTERS.header.cant = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+
         elHead.querySelectorAll('[data-ft]').forEach(inp=>{
           inp.oninput = e=>{
             const pos=+e.target.dataset.pos,
@@ -1766,175 +1835,196 @@ const esc = function (s) {
           };
         });
       }
-
       /* ================= RENDER DE FILAS ================= */
       function renderTable(){
         const rows = filteredRows();
         const total = rows.length;
         const size = getPageSize();
-        const pages = Math.max(1, Math.ceil(total/size));
-        let page = Number(elInfo.dataset.page||1);
-        page=clamp(page,1,pages);
-        const start=(page-1)*size;
-        const slice=rows.slice(start,start+size);
-        const q = norm(QUERY).trim();
-        const hasQ = q.length > 0;
-        const mp = DATA.max_pos||0;
+        const pages = Math.max(1, Math.ceil(total / size));
+        let page = Number(elInfo.dataset.page || 1);
+        page = clamp(page, 1, pages);
 
-        elBody.innerHTML = (
-          slice.map(r=>{
-            const posByN={};
-            (r.positions||[]).forEach(p=>posByN[+p.pos]=p);
+        const start = (page - 1) * size;
+        const slice = rows.slice(start, start + size);
 
-            // Base (ver modo)
-            const basePrice = cheapestPrice(r, {includedOnly: MODE==='otros'}) || 0;
-            const rnkMap = rankAmong(r, {includedOnly: MODE==='otros'});
+        const qNorm = norm(QUERY).trim();
+        const hasQ = !!qNorm;
+        const maxPos = DATA.max_pos || 0;
 
-            const blocks=[];
-            for(let i=1;i<=mp;i++){
-              if(!FILTERS.visCols.has(i)) continue;
-              const p=posByN[i];
+        if (!slice.length){
+          elBody.innerHTML =
+            `<tr><td colspan="${3 + maxPos * 4}" class="text-center text-muted py-4">No hay filas para mostrar.</td></tr>`;
+        } else {
+          elBody.innerHTML = slice.map(row => {
+            const nro = row.nro ?? row.item ?? '';
+            const desc = String(row.descripcion || '');
+            const cant = rowQty(row);
+            const descHit = hasQ && norm(desc).includes(qNorm);
+            const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
+
+            const posByN = {};
+            (row.positions || []).forEach(p => { posByN[+p.pos] = p; });
+
+            const basePrice = cheapestPrice(row, { includedOnly: MODE === 'otros' }) || 0;
+            const rnkMap = rankAmong(row, { includedOnly: MODE === 'otros' });
+
+            const cells = [];
+            for (let pos = 1; pos <= maxPos; pos++){
+              if (!FILTERS.visCols.has(pos)) continue;
+              const p = posByN[pos];
               const visible = !!p && showOfferByMode(p);
               const isS = visible && isSuizo(p.proveedor);
               const sCls = isS ? ' is-suizo' : '';
+
+              // Precio
               const precioHTML = visible ? nfARS(unitPriceOf(p)) : '';
 
+              // Relación
               let relHTML = '';
-              if(visible){
-                const rank = rnkMap.get(i);
-                if(rank===1 || basePrice<=0){
+              if (visible){
+                const rank = rnkMap.get(pos);
+                if (rank === 1 || basePrice <= 0){
                   relHTML = `<span class="rel-cell rel-pos-1 px-1">—</span>`;
-                }else{
-                  const rel = (unitPriceOf(p)/basePrice) - 1;
-                  if(rank===2) relHTML=`<span class="rel-cell rel-pos-2 px-1">${pctFmt(rel)}</span>`;
-                  else if(rank===3) relHTML=`<span class="rel-cell rel-pos-3 px-1">${pctFmt(rel)}</span>`;
-                  else relHTML=`<span class="rel-cell px-1">${pctFmt(rel)}</span>`;
+                } else {
+                  const rel = (unitPriceOf(p) / basePrice) - 1;
+                  if (rank === 2){
+                    relHTML = `<span class="rel-cell rel-pos-2 px-1">${pctFmt(rel)}</span>`;
+                  } else if (rank === 3){
+                    relHTML = `<span class="rel-cell rel-pos-3 px-1">${pctFmt(rel)}</span>`;
+                  } else {
+                    relHTML = `<span class="rel-cell px-1">${pctFmt(rel)}</span>`;
+                  }
                 }
               }
 
-              let asigHTML='';
-              if(visible){
-                const qAdj=effectiveQty(r,p), req=rowQty(r);
-                if(qAdj>0 && req>0){
-                  if(qAdj>=req) asigHTML=`<span class="asignada-badge asignada-full" title="Asignación total">${qAdj.toLocaleString('es-AR')}</span>`;
-                  else asigHTML=`<span class="asignada-badge asignada-partial" title="Asignación parcial">${qAdj.toLocaleString('es-AR')}</span>`;
-                }else if(qAdj>0){
-                  asigHTML=`<span class="asignada-badge asignada-partial">${qAdj.toLocaleString('es-AR')}</span>`;
-                }else{
-                  asigHTML=`<span class="asignada-badge asignada-na">–</span>`;
+              // Asignación
+              let asigHTML = '';
+              if (visible){
+                const qAdj = effectiveQty(row, p);
+                const req = rowQty(row);
+                if (qAdj > 0 && req > 0){
+                  if (qAdj >= req){
+                    asigHTML =
+                      `<span class="asignada-badge asignada-full" title="Asignación total">${qAdj.toLocaleString('es-AR')}</span>`;
+                  } else {
+                    asigHTML =
+                      `<span class="asignada-badge asignada-partial" title="Asignación parcial">${qAdj.toLocaleString('es-AR')}</span>`;
+                  }
+                } else if (qAdj > 0){
+                  asigHTML =
+                    `<span class="asignada-badge asignada-partial">${qAdj.toLocaleString('es-AR')}</span>`;
+                } else {
+                  asigHTML = `<span class="asignada-badge asignada-na">–</span>`;
                 }
               }
 
-              const prov = visible ? (p.proveedor||'') : '';
-              const provHit = hasQ && visible && norm(prov).includes(q);
+              // Proveedor
+              const prov = visible ? (p.proveedor || '') : '';
+              const provHit = hasQ && visible && norm(prov).includes(qNorm);
+              const provHTML = hasQ
+                ? highlightText(prov, QUERY)
+                : esc(prov);
 
-              blocks.push(
-                `<td class="text-end c-price g-start${sCls}">${precioHTML}</td>
-                 <td class="c-rel${sCls}">${relHTML}</td>
-                 <td class="text-center c-asig${sCls}">${asigHTML}</td>
-                 <td class="cell-prov c-prov${sCls}${provHit ? ' cell-hit' : ''}" data-pos="${i}" data-prov="${esc(prov)}">
-                   ${hasQ ? highlightText(prov, QUERY) : esc(prov)}
-                 </td>`
+              cells.push(
+                `<td class="text-end c-price g-start${sCls}">${precioHTML}</td>`+
+                `<td class="c-rel${sCls}">${relHTML}</td>`+
+                `<td class="text-center c-asig${sCls}">${asigHTML}</td>`+
+                `<td class="cell-prov c-prov${sCls}${provHit ? ' cell-hit' : ''}" data-pos="${pos}" data-prov="${esc(prov)}">${provHTML}</td>`
               );
             }
 
-            const nro = (r.nro ?? r.item ?? '');
-            const desc = String(r.descripcion||'');
-            const cant = rowQty(r);
-            const descHit = hasQ && norm(desc).includes(q);
-            const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
             const descHTML =
               `<td class="col-desc${descHit ? ' cell-hit' : ''}">
                 <div class="desc-wrap">
                   <span class="desc-trunc">${descMarked}</span>
                   <div class="desc-tip">${descMarked}</div>
                 </div>
-              </td>`;
+               </td>`;
 
-            return `<tr>
-              <td class="text-center col-nro">${esc(nro)}</td>
-              ${descHTML}
-              <td class="text-end col-cant">${cant ? cant.toLocaleString('es-AR') : ''}</td>
-              ${blocks.join('')}
-            </tr>`;
-          }).join('')
-        ) || `<tr><td colspan="${3+((DATA.max_pos||0)*4)}" class="text-center text-muted py-4">No hay filas para mostrar.</td></tr>`;
+            return (
+              `<tr>`+
+                `<td class="text-center col-nro">${esc(nro)}</td>`+
+                descHTML+
+                `<td class="text-end col-cant">${cant ? cant.toLocaleString('es-AR') : ''}</td>`+
+                cells.join('')+
+              `</tr>`
+            );
+          }).join('');
+        }
 
-        elInfo.dataset.page=page;
-        elInfo.textContent=`Página ${page} / ${pages}`;
-        elTotal.textContent=`${total.toLocaleString('es-AR')} renglones`;
-        elPrev.disabled=page<=1;
-        elNext.disabled=page>=pages;
+        elInfo.dataset.page = page;
+        elInfo.textContent = `Página ${page} / ${pages}`;
+        elTotal.textContent = `${total.toLocaleString('es-AR')} renglones`;
+        elPrev.disabled = page <= 1;
+        elNext.disabled = page >= pages;
       }
 
       /* ================= KPIs SUIZO ================= */
       function refreshSuizoKPIs(){
-        const rows=filteredRows();
+        const rows = filteredRows();
         let renOfer=0, renAdj=0, montoOfer=0, montoAdj=0;
+
         rows.forEach(r=>{
-          const suizo=(r.positions||[]).find(p=>isSuizo(p.proveedor));
-          if(!suizo) return;
-          renOfer+=1;
-          montoOfer+=totalOf(r,suizo);
-          const qAdj=effectiveQty(r,suizo);
-          if(qAdj>0){
-            renAdj+=1;
-            montoAdj+=unitPriceOf(suizo)*qAdj;
+          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+          if (!suizo) return;
+
+          renOfer += 1;
+          montoOfer += totalOf(r, suizo);
+
+          const qAdj = effectiveQty(r, suizo);
+          if (qAdj > 0){
+            renAdj += 1;
+            montoAdj += unitPriceOf(suizo) * qAdj;
           }
         });
-        const efMonto=montoOfer?(montoAdj/montoOfer):0;
-        const efReng =renOfer?(renAdj/renOfer):0;
-        document.getElementById('es_monto_ofertado').textContent=nfARS(montoOfer);
-        document.getElementById('es_monto_adjudicado').textContent=nfARS(montoAdj);
-        document.getElementById('es_efectividad_monto').textContent=pctFmt1d(efMonto);
-        document.getElementById('es_renglones_ofertados').textContent=renOfer.toLocaleString('es-AR');
-        document.getElementById('es_renglones_adjudicados').textContent=renAdj.toLocaleString('es-AR');
-        document.getElementById('es_efectividad_renglones').textContent=pctFmt(efReng);
+
+        const efMonto = montoOfer ? (montoAdj / montoOfer) : 0;
+        const efReng = renOfer ? (renAdj / renOfer) : 0;
+
+        document.getElementById('es_monto_ofertado').textContent = nfARS(montoOfer);
+        document.getElementById('es_monto_adjudicado').textContent = nfARS(montoAdj);
+        document.getElementById('es_efectividad_monto').textContent = pctFmt1d(efMonto);
+        document.getElementById('es_renglones_ofertados').textContent = renOfer.toLocaleString('es-AR');
+        document.getElementById('es_renglones_adjudicados').textContent = renAdj.toLocaleString('es-AR');
+        document.getElementById('es_efectividad_renglones').textContent = pctFmt(efReng);
       }
 
-      /* ================= GRÁFICOS ================= */
+      /* ================= GRÁFICOS (REFRESH) ================= */
       function refreshCharts(){
         ensureCharts();
+
         const rows = filteredRows();
 
-        // Donut (Efectividad Suizo: Adjudicado vs No adjudicado)
-let montoOferSuizo = 0, montoAdjSuizo = 0;
+        // Donut: Monto ofertado vs adjudicado Suizo
+        let montoOferSuizo = 0, montoAdjSuizo = 0;
+        rows.forEach(r=>{
+          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+          if (!suizo) return;
 
-rows.forEach(r=>{
-  const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-  if(!suizo) return;
+          montoOferSuizo += offerValue(r, suizo);
 
-  // Ofertado de Suizo (precio * cantidad ofertada o estimada)
-  montoOferSuizo += offerValue(r, suizo);
+          const qAdj = effectiveQty(r, suizo);
+          if (qAdj > 0){
+            montoAdjSuizo += unitPriceOf(suizo) * qAdj;
+          }
+        });
 
-  // Adjudicado efectivo a Suizo (considera asignación total/parcial)
-  const qAdj = effectiveQty(r, suizo);
-  if (qAdj > 0) montoAdjSuizo += unitPriceOf(suizo) * qAdj;
-});
-
-const noAdj = Math.max(0, (montoOferSuizo || 0) - (montoAdjSuizo || 0));
-const donutData = [montoAdjSuizo, noAdj];
-
-if (chartDonutSuizo){
-  // El % del centro es (Adjudicado / (Adjudicado + No adjudicado)) = Adjudicado/Ofertado
-  chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };
-  chartDonutSuizo.data.labels = ['Adjudicado','No adjudicado'];
-  chartDonutSuizo.data.datasets[0].data = donutData;
-  chartDonutSuizo.update('none');
-}
+        const noAdj = Math.max(0, (montoOferSuizo || 0) - (montoAdjSuizo || 0));
+        const donutData = [montoAdjSuizo, noAdj];
 
         if (chartDonutSuizo){
           chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };
+          chartDonutSuizo.data.labels = ['Adjudicado','No adjudicado'];
           chartDonutSuizo.data.datasets[0].data = donutData;
           chartDonutSuizo.update('none');
         }
 
-        // Barras: posiciones de Suizo (no aplica en "Otros")
+        // Barras posiciones Suizo (sólo cuando el modo no es "otros")
         let pos = [0,0,0];
-        if (MODE !== 'otros') {
+        if (MODE !== 'otros'){
           rows.forEach(r=>{
             const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-            if(!suizo) return;
+            if (!suizo) return;
             const n = +suizo.pos;
             if (n === 1) pos[0]++;
             else if (n === 2) pos[1]++;
@@ -1946,23 +2036,25 @@ if (chartDonutSuizo){
           chartBarPos.update('none');
         }
 
-        // Treemap por proveedor (monto adjudicado) respeta el modo actual
+        // Treemap por proveedor (monto adjudicado efectivo) según modo
         const tree = treemapDataFirstPlace(rows, MODE);
         refreshTreemapFromData(tree);
       }
 
-      /* ============== RESUMEN EJECUTIVO / VISTA GERENTE ================= */
+      /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
       function computeExecutiveInfo(){
         const rows = filteredRows();
-        if(!rows.length) return {
-          suizo_part_monto: 0,
-          suizo_eff_reng: 0,
-          oportunidad_monto: 0,
-          oportunidad_count: 0,
-          perdidas: [],
-          total_adj: 0,
-          competitors: []
-        };
+        if (!rows.length){
+          return {
+            suizo_part_monto: 0,
+            suizo_eff_reng: 0,
+            oportunidad_monto: 0,
+            oportunidad_count: 0,
+            perdidas: [],
+            total_adj: 0,
+            competitors: []
+          };
+        }
 
         let suizoAdj = 0;
         let totalAdj = 0;
@@ -1974,50 +2066,48 @@ if (chartDonutSuizo){
         const compMap = new Map();
 
         rows.forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          const q1 = p1 ? effectiveQty(r,p1) : 0;
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          const p1 = (r.positions || []).find(p=>+p.pos===1);
+          const q1 = p1 ? effectiveQty(r, p1) : 0;
+          const v1 = p1 ? unitPriceOf(p1) * q1 : 0;
 
-          if (v1>0){
+          if (v1 > 0){
             totalAdj += v1;
             if (isSuizo(p1.proveedor)){
               suizoAdj += v1;
             } else {
               const key = String(p1.proveedor || '—');
-              const curr = compMap.get(key) || {nombre:key,monto:0,renglones:0,cerroContraSuizo:0};
+              const curr = compMap.get(key) || { nombre:key, monto:0, renglones:0, cerroContraSuizo:0 };
               curr.monto += v1;
               curr.renglones += 1;
               compMap.set(key, curr);
             }
           }
 
-          const suizo = (r.positions||[]).find(p=>isSuizo(p.proveedor));
+          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
           if (suizo){
             suizoOffRows += 1;
-            const qAdj = effectiveQty(r,suizo);
-            if (qAdj>0) suizoAdjRows += 1;
+            const qAdj = effectiveQty(r, suizo);
+            if (qAdj > 0) suizoAdjRows += 1;
 
             const basePrice = p1 ? unitPriceOf(p1) : 0;
             const suPrice = unitPriceOf(suizo);
 
-            if (basePrice>0 && suPrice>basePrice){
-              const diff = suPrice/basePrice - 1;
-              if (diff <= 0.05) {
+            if (basePrice > 0 && suPrice > basePrice){
+              const diff = suPrice / basePrice - 1;
+              if (diff <= 0.05){
                 oportunidadCount += 1;
                 const rq = rowQty(r) || 1;
                 oportunidadMonto += basePrice * rq * diff;
 
                 perdidas.push({
                   desc: r.descripcion || '(sin descripción)',
-                  motivo: `Perdida por ${pctFmt1d(diff)} sobre el más barato`,
-                  base: basePrice,
-                  suizo: suPrice
+                  motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
                 });
 
                 if (p1 && !isSuizo(p1.proveedor)){
                   const key = String(p1.proveedor || '—');
-                  const curr = compMap.get(key) || {nombre:key,monto:0,renglones:0,cerroContraSuizo:0};
-                  curr.cerroContraSuizo = (curr.cerroContraSuizo||0) + 1;
+                  const curr = compMap.get(key) || { nombre:key, monto:0, renglones:0, cerroContraSuizo:0 };
+                  curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
                   compMap.set(key, curr);
                 }
               }
@@ -2051,76 +2141,76 @@ if (chartDonutSuizo){
               <div class="sc-name" title="${esc(c.nombre)}">${esc(c.nombre)}</div>
               <div class="sc-value">${nfARS(c.monto)}</div>
               <div class="sc-meta">
-                ${c.cerroContraSuizo ? `${c.cerroContraSuizo}× vs Suizo` : `${c.renglones} rengl.`}
+                ${c.cerroContraSuizo
+                  ? `${c.cerroContraSuizo}× vs Suizo`
+                  : `${c.renglones} rengl.`}
               </div>
             </div>
           `).join('');
         } else {
-          elStrongCompetitors.innerHTML = `<div class="text-muted" style="font-size:.7rem;">No se detectaron competidores fuertes en este proceso.</div>`;
+          elStrongCompetitors.innerHTML =
+            `<div class="text-muted" style="font-size:.7rem;">No se detectaron competidores fuertes en este proceso.</div>`;
         }
       }
 
       function renderExecutive(info){
-        if(!info) return;
-        // Vista gerente
+        if (!info) return;
+
         const m1 = document.getElementById('ms_part_monto');
         const m2 = document.getElementById('ms_ef_reng');
         const m3 = document.getElementById('ms_oportunidad');
         const m4 = document.getElementById('ms_estado');
 
-        if(m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
-        if(m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
-        if(m3){
-          if (info.oportunidad_count > 0){
-            m3.textContent = `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng.)`;
-          } else {
-            m3.textContent = 'Sin oportunidades claras';
-          }
+        if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
+        if (m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
+        if (m3){
+          m3.textContent = info.oportunidad_count > 0
+            ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng.)`
+            : 'Sin oportunidades claras';
         }
 
         if (elOppBar){
           elOppBar.style.display = 'inline-flex';
           if (info.oportunidad_count > 0){
-            elOppText.textContent = `Se perdieron ${info.oportunidad_count} renglones por menos del 5%. Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
+            elOppText.textContent =
+              `Se perdieron ${info.oportunidad_count} renglones por menos del 5%. Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
           } else {
-            elOppText.textContent = 'No se detectaron renglones perdidos por poca diferencia.';
+            elOppText.textContent =
+              'No se detectaron renglones perdidos por poca diferencia.';
           }
         }
 
-        if(m4){
+        if (m4){
           const pill = m4.querySelector('.ms-pill');
           if (pill){
+            pill.classList.remove('ok','warn','danger');
             if (info.total_adj === 0){
               pill.textContent = 'Sin adjudicar';
-              pill.classList.remove('ok','warn','danger');
               pill.classList.add('warn');
             } else if (info.suizo_part_monto >= 0.5 || info.suizo_eff_reng >= 0.5){
               pill.textContent = 'Bueno';
-              pill.classList.remove('warn','danger');
               pill.classList.add('ok');
             } else if (info.suizo_part_monto > 0 || info.suizo_eff_reng > 0){
               pill.textContent = 'Competitivo';
-              pill.classList.remove('ok','danger');
               pill.classList.add('warn');
             } else {
               pill.textContent = 'Perdido';
-              pill.classList.remove('ok','warn');
               pill.classList.add('danger');
             }
           }
         }
 
-        // Competidores fuertes
         renderStrongCompetitors(info);
 
-        // Explicación de pérdidas
-        if(elLossExpl && elLossList && elLossHint){
-          if(info.perdidas && info.perdidas.length){
+        if (elLossExpl && elLossList && elLossHint){
+          if (info.perdidas && info.perdidas.length){
             elLossExpl.hidden = false;
-            elLossList.innerHTML = info.perdidas.slice(0,7).map(p=>`<li>${esc(p.desc)} — ${esc(p.motivo)}</li>`).join('');
-            elLossHint.textContent = info.perdidas.length > 7
-              ? `+ ${info.perdidas.length - 7} más…`
-              : `Se analizaron ${info.perdidas.length} renglones con oportunidad.`;
+            elLossList.innerHTML = info.perdidas.slice(0,7)
+              .map(p=>`<li>${esc(p.desc)} — ${esc(p.motivo)}</li>`).join('');
+            elLossHint.textContent =
+              info.perdidas.length > 7
+                ? `+ ${info.perdidas.length - 7} más…`
+                : `Se analizaron ${info.perdidas.length} renglones con oportunidad.`;
           } else {
             elLossExpl.hidden = true;
             elLossList.innerHTML = '';
@@ -2134,113 +2224,118 @@ if (chartDonutSuizo){
         renderTable();
         refreshSuizoKPIs();
         refreshCharts();
-        const info = computeExecutiveInfo();
-        renderExecutive(info);
+        renderExecutive(computeExecutiveInfo());
       }
 
       /* ================= UI & EVENTOS ================= */
-      const setTabs=(a)=>{
-        document.querySelectorAll('.segmented .seg-btn').forEach(b=>b.classList.remove('active'));
-        a.classList.add('active');
+      const setTabs = (btn) => {
+        document.querySelectorAll('.segmented .seg-btn').forEach(b=>{
+          const active = b === btn;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
       };
 
-      document.getElementById('tabSuizo').onclick = e=>{
+      document.getElementById('tabSuizo').onclick = (e)=>{
         e.preventDefault();
         setTabs(e.currentTarget);
         setMode('suizo');
       };
-      document.getElementById('tabOtros').onclick = e=>{
+      document.getElementById('tabOtros').onclick = (e)=>{
         e.preventDefault();
         setTabs(e.currentTarget);
         setMode('otros');
       };
-      document.getElementById('tabTodos').onclick = e=>{
+      document.getElementById('tabTodos').onclick = (e)=>{
         e.preventDefault();
         setTabs(e.currentTarget);
         setMode('todos');
       };
 
-      const debounce=(fn,ms)=>{
+      const debounce = (fn,ms)=>{
         let t;
         return (...a)=>{
           clearTimeout(t);
-          t=setTimeout(()=>fn(...a),ms);
+          t = setTimeout(()=>fn(...a), ms);
         };
       };
 
       elPrev.onclick = ()=>{
-        elInfo.dataset.page=String((+elInfo.dataset.page||1)-1);
+        elInfo.dataset.page = String((+elInfo.dataset.page || 1) - 1);
         renderAll();
       };
       elNext.onclick = ()=>{
-        elInfo.dataset.page=String((+elInfo.dataset.page||1)+1);
+        elInfo.dataset.page = String((+elInfo.dataset.page || 1) + 1);
         renderAll();
       };
       elPageSz.onchange = ()=>{
-        elInfo.dataset.page=1;
+        elInfo.dataset.page = 1;
         renderAll();
       };
       elSearch.oninput = debounce(()=>{
-        QUERY=(elSearch.value||'');
-        elInfo.dataset.page=1;
+        QUERY = elSearch.value || '';
+        elInfo.dataset.page = 1;
         renderAll();
       },150);
 
       // Quitar chips
-      elChip.addEventListener('click',e=>{
-        const btn=e.target.closest('button');
-        if(!btn) return;
-        const chip=btn.closest('.sel-chip');
-        const k=chip?.dataset.key;
-        if(!k) return;
-        if(k==='provider') FILTERS.provider=null;
-        if(k==='posBuckets'){
+      elChip.addEventListener('click', e=>{
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const chip = btn.closest('.sel-chip');
+        const key = chip?.dataset.key;
+        if (!key) return;
+
+        if (key === 'provider') FILTERS.provider = null;
+        if (key === 'posBuckets'){
           FILTERS.posBuckets.clear();
-          const max=DATA.max_pos||0;
-          FILTERS.visCols=new Set([1,2,3].filter(n=>n<=max));
+          const max = DATA.max_pos || 0;
+          FILTERS.visCols = new Set([1,2,3].filter(n=>n<=max));
           buildHead(max);
           updatePosButtonsUI();
         }
+
         renderChips();
-        elInfo.dataset.page=1;
+        elInfo.dataset.page = 1;
         renderAll();
       });
 
-      // Click proveedor -> filtro por proveedor
-      elBody.addEventListener('click',e=>{
-        const td=e.target.closest('td.cell-prov');
-        if(!td) return;
-        const prov=(td.dataset.prov||'').trim();
-        if(prov) window.setFilter('provider',prov);
+      // Click proveedor -> filtro
+      elBody.addEventListener('click', e=>{
+        const td = e.target.closest('td.cell-prov');
+        if (!td) return;
+        const prov = (td.dataset.prov || '').trim();
+        if (prov) window.setFilter('provider', prov);
       });
 
       // Chips posiciones
-      elPosCols.addEventListener('click',e=>{
-        const b=e.target.closest('.pos-chip');
-        if(!b) return;
-        const p=+b.dataset.pos, key=String(p);
+      elPosCols.addEventListener('click', e=>{
+        const b = e.target.closest('.pos-chip');
+        if (!b) return;
+        const p = +b.dataset.pos;
+        const key = String(p);
 
-        if(e.altKey){
-          if(FILTERS.visCols.has(p)) FILTERS.visCols.delete(p);
+        if (e.altKey){
+          if (FILTERS.visCols.has(p)) FILTERS.visCols.delete(p);
           else FILTERS.visCols.add(p);
-          buildHead(DATA.max_pos||0);
+          buildHead(DATA.max_pos || 0);
           renderTable();
           updateHeadOffsets();
           return;
         }
 
-        if(FILTERS.posBuckets.has(key)){
+        if (FILTERS.posBuckets.has(key)){
           FILTERS.posBuckets.delete(key);
           FILTERS.visCols.delete(p);
-        }else{
+        } else {
           FILTERS.posBuckets.add(key);
           FILTERS.visCols.add(p);
         }
 
         updatePosButtonsUI();
-        buildHead(DATA.max_pos||0);
+        buildHead(DATA.max_pos || 0);
         updateHeadOffsets();
-        elInfo.dataset.page=1;
+        elInfo.dataset.page = 1;
         renderAll();
         renderChips();
       });
@@ -2249,87 +2344,94 @@ if (chartDonutSuizo){
 
       /* ================= CARGA DE DATOS ================= */
       async function loadRanking(){
-        elBody.innerHTML='<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
-        let data=null;
+        elBody.innerHTML =
+          '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
+
+        let data = null;
         try{
-          const res=await fetch(RANK_API,{ headers:{'accept':'application/json'} });
-          if(res && res.ok) data=await res.json();
+          const res = await fetch(RANK_API, { headers:{'accept':'application/json'} });
+          if (res && res.ok) data = await res.json();
         }catch(_){}
 
-        if(!data){
-          elBody.innerHTML='<tr><td class="text-center text-danger py-4">No se pudo cargar el ranking</td></tr>';
+        if (!data){
+          elBody.innerHTML =
+            '<tr><td class="text-center text-danger py-4">No se pudo cargar el ranking</td></tr>';
           return;
         }
 
-        if(Array.isArray(data.rows) && data.rows.length && data.rows[0].positions){
+        if (Array.isArray(data.rows) && data.rows.length && data.rows[0].positions){
           DATA = {
             rows: data.rows,
             max_pos: Number(data.max_pos || 3),
             total_rows: Number(data.total_rows || data.rows.length)
           };
         } else {
-          // fallback tabular
-          const cols=data.columns||[];
-          const findIdx=name=>cols.findIndex(c=>String(c).toLowerCase()===String(name).toLowerCase());
-          const tryIdx=cands=>{
-            for(const n of cands){
-              const i=findIdx(n);
-              if(i!==-1) return i;
+          // Fallback tabular genérico
+          const cols = data.columns || [];
+          const findIdx = name =>
+            cols.findIndex(c => String(c).toLowerCase() === String(name).toLowerCase());
+          const tryIdx = cands => {
+            for (const n of cands){
+              const i = findIdx(n);
+              if (i !== -1) return i;
             }
             return -1;
           };
 
-          const rows=(data.rows||[]).map(arr=>{
-            const obj={
-              nro:arr[tryIdx(['N°','Nro','Nº','Item'])],
-              descripcion:arr[tryIdx(['Descripción','Descripcion','Descripción del renglón','Descripción renglón'])],
-              cantidad_solicitada:arr[tryIdx(['Cantidad solicitada','Cant. solicitada','Cantidad requerida','Cantidad','Cant.','Qty','Unidades'])],
-              positions:[]
+          const rows = (data.rows || []).map(arr => {
+            const obj = {
+              nro: arr[tryIdx(['N°','Nro','Nº','Item'])],
+              descripcion: arr[tryIdx(['Descripción','Descripcion','Descripción del renglón','Descripción renglón'])],
+              cantidad_solicitada: arr[tryIdx(['Cantidad solicitada','Cant. solicitada','Cantidad requerida','Cantidad','Cant.','Qty','Unidades'])],
+              positions: []
             };
-            let pos=1;
-            while(true){
-              const iProv=tryIdx([`${pos}° Proveedor`, `${pos}° proveedor`]);
-              if(iProv===-1) break;
-              const iPrice=tryIdx([`${pos}° Precio unitario`, `${pos}° Precio`, `${pos}° Precio Unitario`]);
-              if(iPrice===-1) break;
-              const iQtyOff=tryIdx([`${pos}° Cantidad ofertada`, `${pos}° Cantidad`, `${pos}° Cant.`]);
+            let pos = 1;
+            while (true){
+              const iProv = tryIdx([`${pos}° Proveedor`, `${pos}° proveedor`]);
+              if (iProv === -1) break;
+              const iPrice = tryIdx([`${pos}° Precio unitario`, `${pos}° Precio`, `${pos}° Precio Unitario`]);
+              if (iPrice === -1) break;
+              const iQtyOff = tryIdx([`${pos}° Cantidad ofertada`, `${pos}° Cantidad`, `${pos}° Cant.`]);
               obj.positions.push({
                 pos,
-                proveedor:arr[iProv],
-                precio:arr[iPrice],
-                cantidad:iQtyOff!==-1?arr[iQtyOff]:undefined
+                proveedor: arr[iProv],
+                precio: arr[iPrice],
+                cantidad: iQtyOff !== -1 ? arr[iQtyOff] : undefined
               });
               pos++;
             }
             return obj;
           });
 
-          DATA={
+          DATA = {
             rows,
-            max_pos:Math.max(0,...rows.map(r=>r.positions.length))||3,
-            total_rows:rows.length
+            max_pos: Math.max(0, ...rows.map(r=>r.positions.length)) || 3,
+            total_rows: rows.length
           };
         }
 
-        const max=DATA.max_pos||0;
-        FILTERS.visCols=new Set([1,2,3].filter(n=>n<=max)); // visibles por defecto
+        const max = DATA.max_pos || 0;
+        FILTERS.visCols = new Set([1,2,3].filter(n=>n<=max));
         buildHead(max);
         buildPosCols(max);
-        elInfo.dataset.page=1;
+        elInfo.dataset.page = 1;
         renderChips();
         renderAll();
         updateHeadOffsets();
       }
 
-      // Cargar y luego refrescar treemap si llega más tarde
       loadRanking();
+
+      // Refrescar treemap si CHART_PROV llegó antes
       setTimeout(()=>{
-        if(Array.isArray(window.CHART_PROV)) refreshTreemapFromData(window.CHART_PROV);
-      }, 600);
+        if (Array.isArray(window.CHART_PROV)){
+          refreshTreemapFromData(window.CHART_PROV);
+        }
+      },600);
     })();
   </script>
 
-  <!-- 3) Treemap (igual que antes, no tocar) -->
+  <!-- 3) Treemap proveedores -->
   <script>
     (function(){
       const SA_AZUL='#064066',
@@ -2340,11 +2442,12 @@ if (chartDonutSuizo){
 
       const isSuizo = s => /suizo/i.test(String(s||''));
       const nfARS = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(+v||0);
-      const waitUntil = (t,{tries=200,every=50}={}) => new Promise(r=>{
-        (function L(n){
-          if(t())return r(true);
-          if(n<=0)return r(false);
-          setTimeout(()=>L(n-1),every);
+
+      const waitUntil = (testFn,{tries=200,every=50}={}) => new Promise(res=>{
+        (function loop(n){
+          if (testFn()) return res(true);
+          if (n <= 0) return res(false);
+          setTimeout(()=>loop(n-1), every);
         })(tries);
       });
 
@@ -2363,35 +2466,26 @@ if (chartDonutSuizo){
           overflow: 'hidden',
           position: 'center',
           padding: 3,
-          color: (ctx) => isSuizo(ctx.raw?.g) ? '#ffffff' : SA_AZUL,
-          font: (ctx) => {
+          color: ctx => isSuizo(ctx.raw?.g) ? '#ffffff' : SA_AZUL,
+          font: ctx => {
             const box = ctx.raw && ctx.raw._data;
             const h = box ? (box.y1 - box.y0) : 0;
             const size = h ? Math.max(9, Math.min(14, Math.floor(h / 2.8))) : 12;
-            return {
-              weight: 600,
-              size: size
-            };
+            return { weight: 600, size };
           },
-          formatter: (ctx) => {
+          formatter: ctx => {
             const g = ctx.raw?.g || '—';
             const v = +ctx.raw?.v || 0;
             const box = ctx.raw && ctx.raw._data;
             const w = box ? (box.x1 - box.x0) : 999;
             let name = g;
 
-            if (w < 80 && name.length > 14) {
-              name = name.slice(0, 13) + '…';
-            } else if (w < 120 && name.length > 22) {
-              name = name.slice(0, 21) + '…';
-            } else if (name.length > 30) {
-              name = name.slice(0, 29) + '…';
-            }
+            if (w < 80 && name.length > 14)      name = name.slice(0,13) + '…';
+            else if (w < 120 && name.length > 22) name = name.slice(0,21) + '…';
+            else if (name.length > 30)            name = name.slice(0,29) + '…';
 
             const h = box ? (box.y1 - box.y0) : 999;
-            if (h < 38) {
-              return name;
-            }
+            if (h < 38) return name;
 
             const c = new Intl.NumberFormat('es-AR', {
               notation: 'compact',
@@ -2401,12 +2495,12 @@ if (chartDonutSuizo){
             return [name, c.format(v)];
           }
         },
-        backgroundColor: (ctx) => isSuizo(ctx.raw?.g) ? SA_AZUL : SA_GRIS
+        backgroundColor: ctx => isSuizo(ctx.raw?.g) ? SA_AZUL : SA_GRIS
       });
 
       function createBarFallback(ctx, data){
-        const L=(data||[]).map(d=>String(d.label||d.name||'—'));
-        const V=(data||[]).map(d=>+d.value||0);
+        const L = (data || []).map(d=>String(d.label||d.name||'—'));
+        const V = (data || []).map(d=>+d.value||0);
         return new Chart(ctx,{
           type:'bar',
           data:{
@@ -2421,32 +2515,36 @@ if (chartDonutSuizo){
           options:{
             indexAxis:'y',
             maintainAspectRatio:false,
-            plugins:{legend:{display:false}},
-            layout:{padding:2}
+            plugins:{ legend:{ display:false } },
+            layout:{ padding:2 }
           }
         });
       }
 
       function attachClick(canvas, chart){
-        canvas.onclick=(evt)=>{
-          const els=chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
-          if(!els.length) return;
-          const i=els[0].index??0;
-          let label='';
-          if(chart.config.type==='bar'){
+        if (!canvas || !chart) return;
+        if (canvas.__treemapClickBound) return;
+        canvas.__treemapClickBound = true;
+
+        canvas.addEventListener('click',evt=>{
+          const els = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+          if (!els.length) return;
+          const i = els[0].index ?? 0;
+          let label = '';
+          if (chart.config.type === 'bar'){
             label = chart.data.labels?.[i] || '';
-          }else{
-            const ds=chart.data.datasets[0];
-            label=(ds.tree?.[i]?.g)||'';
+          } else {
+            const ds = chart.data.datasets[0];
+            label = (ds.tree?.[i]?.g) || '';
           }
-          if(label&&window.setFilter) window.setFilter('provider',label);
-        };
+          if (label && window.setFilter) window.setFilter('provider', label);
+        });
       }
 
       async function buildOrUpgrade(canvas){
-        if (window.Chart && Chart.getChart) {
+        if (window.Chart && Chart.getChart){
           const existing = Chart.getChart(canvas);
-          if (existing) {
+          if (existing){
             attachClick(canvas, existing);
             treemapChart = existing;
             return existing;
@@ -2456,33 +2554,32 @@ if (chartDonutSuizo){
         const ctx = canvas.getContext('2d');
         const hasTreemap = !!(Chart?.registry?.getController?.('treemap'));
 
-        if (!hasTreemap) {
-          console.warn('[treemap] plugin no disponible: fallback (bar) y upgrade cuando cargue.');
-          const fb = createBarFallback(ctx, window.CHART_PROV||[]);
+        if (!hasTreemap){
+          const fb = createBarFallback(ctx, window.CHART_PROV || []);
           (async ()=>{
             const ok = await waitUntil(()=>!!(Chart?.registry?.getController?.('treemap')), {tries:120,every:100});
             if (!ok) return;
-            const existsNow = Chart.getChart(canvas);
-            if (existsNow) {
-              try{fb.destroy();}catch(_){}
-              treemapChart = existsNow;
-              attachClick(canvas, existsNow);
+            const exists = Chart.getChart(canvas);
+            if (exists){
+              try{ fb.destroy(); }catch(_){}
+              treemapChart = exists;
+              attachClick(canvas, exists);
               return;
             }
             try{ fb.destroy(); }catch(_){}
             treemapChart = new Chart(ctx,{
               type:'treemap',
-              data:{datasets:[buildDataset(window.CHART_PROV||[])]},
+              data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
               options:{
                 responsive:true,
                 maintainAspectRatio:false,
-                layout:{padding:2},
+                layout:{ padding:2 },
                 plugins:{
-                  legend:{display:false},
+                  legend:{ display:false },
                   tooltip:{
                     callbacks:{
                       title:()=> 'Proveedor',
-                      label:(tt)=>`${tt.raw?.g||'—'}: ${nfARS(+tt.raw?.v||0)}`
+                      label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                     }
                   }
                 }
@@ -2493,218 +2590,200 @@ if (chartDonutSuizo){
           return fb;
         }
 
-        const existsNow = Chart.getChart(canvas);
-        if (existsNow) {
-          attachClick(canvas, existsNow);
-          treemapChart = existsNow;
-          return existsNow;
+        const existing = Chart.getChart(canvas);
+        if (existing){
+          attachClick(canvas, existing);
+          treemapChart = existing;
+          return existing;
         }
 
         const chart = new Chart(ctx,{
           type:'treemap',
-          data:{datasets:[buildDataset(window.CHART_PROV||[])]},
+          data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
           options:{
             responsive:true,
             maintainAspectRatio:false,
-            layout:{padding:2},
+            layout:{ padding:2 },
             plugins:{
-              legend:{display:false},
+              legend:{ display:false },
               tooltip:{
                 callbacks:{
                   title:()=> 'Proveedor',
-                  label:(tt)=>`${tt.raw?.g||'—'}: ${nfARS(+tt.raw?.v||0)}`
+                  label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                 }
               }
             }
           }
         });
         attachClick(canvas, chart);
+        treemapChart = chart;
         return chart;
       }
 
       async function ensureChart(){
-        const canvas=document.getElementById('treemapProveedores');
-        if(!canvas) return null;
-        const ok=await waitUntil(()=>!!window.Chart);
-        if(!ok){
-          console.error('[treemap] Chart.js no disponible');
-          return null;
-        }
-        if(buildLock) return buildLock;
-        buildLock = buildOrUpgrade(canvas).then(c=>(treemapChart=c)).finally(()=>{buildLock=null;});
+        const canvas = document.getElementById('treemapProveedores');
+        if (!canvas) return null;
+        const ok = await waitUntil(()=>!!window.Chart);
+        if (!ok) return null;
+        if (buildLock) return buildLock;
+        buildLock = buildOrUpgrade(canvas)
+          .then(c => (treemapChart = c))
+          .finally(()=>{ buildLock = null; });
         return buildLock;
       }
 
-      // API pública
       window.updateTreemap = async function(data){
-        window.CHART_PROV=Array.isArray(data)?data:[];
-        const chart=await ensureChart();
-        if(!chart) return;
+        window.CHART_PROV = Array.isArray(data) ? data : [];
+        const chart = await ensureChart();
+        if (!chart) return;
 
-        const total=(window.CHART_PROV||[]).reduce((s,x)=>s+(+x.value||0),0);
-        const lbl=document.getElementById('treemapTotal');
-        if(lbl) lbl.textContent= total ? `Adjudicado: ${nfARS(total)}` : '';
+        const total = (window.CHART_PROV || [])
+          .reduce((s,x)=>s + (+x.value || 0), 0);
+        const lbl = document.getElementById('treemapTotal');
+        if (lbl) lbl.textContent = total ? `Adjudicado: ${nfARS(total)}` : '';
 
-        if(chart.config?.type==='bar'){
-          chart.data.labels=(window.CHART_PROV||[]).map(d=>String(d.label||d.name||'—'));
-          chart.data.datasets[0].data=(window.CHART_PROV||[]).map(d=>+d.value||0);
+        if (chart.config?.type === 'bar'){
+          chart.data.labels = (window.CHART_PROV || []).map(d=>String(d.label||d.name||'—'));
+          chart.data.datasets[0].data = (window.CHART_PROV || []).map(d=>+d.value||0);
           chart.update('none');
-        }else{
-          chart.data.datasets[0]=buildDataset(window.CHART_PROV||[]);
+        } else {
+          chart.data.datasets[0] = buildDataset(window.CHART_PROV || []);
           chart.update('none');
         }
       };
 
-      if(Array.isArray(window.CHART_PROV)){
+      if (Array.isArray(window.CHART_PROV)){
         window.updateTreemap(window.CHART_PROV);
-      }else{
+      } else {
         ensureChart();
       }
     })();
   </script>
 
-  <!-- 4) Vistas guardadas (igual que lo tenías) -->
+  <!-- 4) Vistas guardadas (localStorage, solo front) -->
   <script>
     (function () {
-      const VIEWS_API = '/api/views';
       const VIEW_ID = 'dashboard';
       const CONTEXT_ID = String({{ upload_id|tojson }});
       const LS_KEY = `views:${VIEW_ID}:${CONTEXT_ID}`;
 
-      const $ = (sel, root=document) => root.querySelector(sel);
+      const $  = (sel, root=document) => root.querySelector(sel);
       const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
-      const waitUntil = (testFn, {tries=40, every=200}={}) => new Promise(resolve=>{
-        (function loop(n){
-          if (testFn()) return resolve(true);
-          if (n<=0) return resolve(false);
-          setTimeout(()=>loop(n-1), every);
-        })(tries);
-      });
+      const waitUntil = (testFn,{tries=40,every=200}={}) =>
+        new Promise(resolve=>{
+          (function loop(n){
+            if (testFn()) return resolve(true);
+            if (n <= 0) return resolve(false);
+            setTimeout(()=>loop(n-1), every);
+          })(tries);
+        });
 
-      const dispatch = (el, type, opts={}) =>
-        el && el.dispatchEvent(new (type.startsWith('mouse')?'MouseEvent':'Event')(type, {bubbles:true, cancelable:true, ...opts}));
+      const dispatchInput = (el,type='input')=>{
+        if (!el) return;
+        el.dispatchEvent(new Event(type,{bubbles:true,cancelable:true}));
+      };
 
-      const btnViews = document.getElementById('btnViews');
-      const mod = document.getElementById('viewsModal');
-      const bd = document.getElementById('viewsBackdrop');
-      const btnClose = document.getElementById('vmClose');
-      const btnClose2 = document.getElementById('vmClose2');
-      const btnSave = document.getElementById('vmSave');
-      const btnRefresh = document.getElementById('vmRefresh');
-      const inputName = document.getElementById('vmName');
-      const inputDefault = document.getElementById('vmDefault');
-      const listBox = document.getElementById('viewsList');
-
-      async function api(method, path, body){
+      function readViews(){
         try{
-          const res = await fetch(path, {
-            method,
-            headers: {'content-type':'application/json','accept':'application/json'},
-            body: body?JSON.stringify(body):undefined
-          });
-          if(!res.ok) throw new Error(String(res.status));
-          const ct=res.headers.get('content-type')||'';
-          return ct.includes('json') ? await res.json() : await res.text();
-        }catch(_){
-          return null;
-        }
+          const raw = localStorage.getItem(LS_KEY);
+          if (!raw) return [];
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr : [];
+        }catch{ return []; }
       }
 
-      function lsList(){
-        try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }
-        catch(_){ return []; }
+      function writeViews(list){
+        try{ localStorage.setItem(LS_KEY, JSON.stringify(list || [])); }catch{}
       }
-      function lsWrite(arr){
-        localStorage.setItem(LS_KEY, JSON.stringify(arr));
-      }
-      function lsSave({id, name, is_default=false, payload}){
-        const arr = lsList();
-        if(!id){
+
+      function saveViewLS({id=null,name,is_default=false,payload}){
+        const list = readViews();
+        const now = new Date().toISOString();
+
+        if (!id){
           id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
-          arr.push({id, name, is_default, payload, updated_at: new Date().toISOString()});
-        }else{
-          const i = arr.findIndex(v=>v.id===id);
-          if(i>=0) arr[i] = {...arr[i], name, is_default, payload, updated_at:new Date().toISOString()};
-          else arr.push({id, name, is_default, payload, updated_at:new Date().toISOString()});
+          list.push({id,name,is_default,payload,updated_at:now});
+        } else {
+          const idx = list.findIndex(v=>v.id===id);
+          if (idx >= 0){
+            list[idx] = {...list[idx],name,is_default,payload,updated_at:now};
+          } else {
+            list.push({id,name,is_default,payload,updated_at:now});
+          }
         }
-        if(is_default){
-          arr.forEach(v=>{ if(v.id!==id) v.is_default=false; });
+
+        if (is_default){
+          list.forEach(v=>{ if(v.id !== id) v.is_default = false; });
         }
-        lsWrite(arr);
-        return arr.find(v=>v.id===id);
-      }
-      function lsDelete(id){
-        const arr = lsList().filter(v=>v.id!==id);
-        lsWrite(arr);
-      }
-      function lsSetDefault(id){
-        const arr = lsList().map(v=>({...v, is_default: v.id===id}));
-        lsWrite(arr);
-      }
-      function lsGetDefault(){
-        return lsList().find(v=>v.is_default) || null;
+
+        writeViews(list);
+        return list.find(v=>v.id===id);
       }
 
-      async function listViews(){
-        const q = `?view_id=${encodeURIComponent(VIEW_ID)}&context_id=${encodeURIComponent(CONTEXT_ID)}`;
-        const data = await api('GET', `${VIEWS_API}${q}`);
-        if (data && Array.isArray(data)) return data;
-        return lsList();
+      function deleteViewLS(id){
+        writeViews(readViews().filter(v=>v.id!==id));
       }
 
-      async function saveView({name, is_default, payload}){
-        const body = {view_id:VIEW_ID, context_id:CONTEXT_ID, name, is_default, payload};
-        const saved = await api('POST', VIEWS_API, body);
-        if (saved && saved.id) return saved;
-        return lsSave({name, is_default, payload});
+      function setDefaultLS(id){
+        writeViews(readViews().map(v=>({...v,is_default:v.id===id})));
       }
 
-      async function deleteView(id){
-        const ok = await api('DELETE', `${VIEWS_API}/${encodeURIComponent(id)}`);
-        if (ok!==null) return true;
-        lsDelete(id);
-        return true;
+      function clearDefaultLS(id){
+        writeViews(readViews().map(v=>({...v,is_default:v.id===id?false:v.is_default})));
       }
 
-      async function setDefaultView(id){
-        const ok = await api('POST', `${VIEWS_API}/${encodeURIComponent(id)}/default`, {});
-        if (ok!==null) return true;
-        lsSetDefault(id);
-        return true;
+      function getDefaultLS(){
+        return readViews().find(v=>v.is_default) || null;
       }
 
-      async function getDefaultView(){
-        const q = `?view_id=${encodeURIComponent(VIEW_ID)}&context_id=${encodeURIComponent(CONTEXT_ID)}&only_default=1`;
-        const data = await api('GET', `${VIEWS_API}${q}`);
-        if (data && data.payload) return data;
-        return lsGetDefault();
-      }
+      const btnViews    = $('#btnViews');
+      const mod         = $('#viewsModal');
+      const bd          = $('#viewsBackdrop');
+      const btnClose    = $('#vmClose');
+      const btnClose2   = $('#vmClose2');
+      const btnSave     = $('#vmSave');
+      const btnRefresh  = $('#vmRefresh');
+      const inputName   = $('#vmName');
+      const inputDefault= $('#vmDefault');
+      const listBox     = $('#viewsList');
 
       function collectCurrentView(){
-        const supplier_filter = $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
-        const fit_mode = $('#viewToggle .mini-btn.active')?.dataset.view === 'fit' ? 'ajustar' : '100';
-        const density = $('#densityToggle .mini-btn.active')?.dataset.density || 'normal';
+        const supplier_filter =
+          $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
+
+        const fitBtn = $('#viewToggle .mini-btn.active');
+        const fit_mode = fitBtn?.dataset.view === 'fit' ? 'fit' : 'normal';
+
+        const densBtn = $('#densityToggle .mini-btn.active');
+        const density = densBtn?.dataset.density || 'normal';
+
         const search_query = $('#search')?.value || '';
-        const page_size = Number($('#pageSize')?.value || 50);
-        const vis_cols = $$('#rankHead .pos-group-head').map(th=>+th.dataset.pos).filter(n=>Number.isFinite(n));
+        const page_size = Number($('#pageSize')?.value || 50) || 50;
+
+        const vis_cols = $$('#rankHead .pos-group-head')
+          .map(th => +th.dataset.pos)
+          .filter(n => Number.isFinite(n));
+
+        const pos_buckets = $$('#posCols .pos-chip.active')
+          .map(b => b.dataset.pos);
+
         const header_filters = {
-          nro: $('#f_nro')?.value || '',
+          nro:  $('#f_nro')?.value || '',
           desc: $('#f_desc')?.value || '',
           cant: $('#f_cant')?.value || ''
         };
         vis_cols.forEach(pos=>{
-          header_filters[pos] = {
-            relmax: $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '',
-            prov: $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || ''
-          };
+          const rel  = $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '';
+          const prov = $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || '';
+          header_filters[pos] = { relmax:rel, prov:prov };
         });
+
         let provider = null;
-        const chipProv = $('#selectionChip .sel-chip[data-key="provider"]');
-        if (chipProv){
-          provider = chipProv.textContent.replace('×','').trim();
+        const provChip = $('#selectionChip .sel-chip[data-key="provider"]');
+        if (provChip){
+          provider = (provChip.textContent || '').replace('×','').trim();
         }
-        const pos_buckets = $$('#posCols .pos-chip.active').map(b=>b.dataset.pos);
 
         return {
           supplier_filter,
@@ -2720,42 +2799,59 @@ if (chartDonutSuizo){
       }
 
       async function applyViewPayload(payload){
-        if(!payload || typeof payload!=='object') return;
+        if (!payload || typeof payload !== 'object') return;
 
-        if (payload.supplier_filter === 'suizo') $('#tabSuizo')?.click();
+        const ok = await waitUntil(()=>$('#rankHead') && $('#posCols'));
+        if (!ok) return;
+        await waitUntil(()=>$('#rankHead input#f_desc'));
+
+        if (payload.supplier_filter === 'suizo')      $('#tabSuizo')?.click();
         else if (payload.supplier_filter === 'otros') $('#tabOtros')?.click();
-        else $('#tabTodos')?.click();
+        else                                          $('#tabTodos')?.click();
 
-        if (payload.fit_mode === 'ajustar'){
-          const b = $('#viewToggle .mini-btn[data-view="fit"]');
-          b && b.click();
-        } else {
-          const b = $('#viewToggle .mini-btn[data-view="normal"]');
-          b && b.click();
-        }
+        if (payload.fit_mode === 'fit')
+          $('#viewToggle .mini-btn[data-view="fit"]')?.click();
+        else
+          $('#viewToggle .mini-btn[data-view="normal"]')?.click();
 
-        if (payload.density === 'compact'){
-          const b = $('#densityToggle .mini-btn[data-density="compact"]');
-          b && b.click();
-        } else {
-          const b = $('#densityToggle .mini-btn[data-density="normal"]');
-          b && b.click();
-        }
+        if (payload.density === 'compact')
+          $('#densityToggle .mini-btn[data-density="compact"]')?.click();
+        else
+          $('#densityToggle .mini-btn[data-density="normal"]')?.click();
 
         if ($('#pageSize') && payload.page_size){
           $('#pageSize').value = String(payload.page_size);
-          dispatch($('#pageSize'), 'change');
+          dispatchInput($('#pageSize'),'change');
         }
 
         if (Array.isArray(payload.vis_cols) && payload.vis_cols.length){
-          await waitUntil(()=> $$('#posCols .pos-chip').length > 0);
-          const want = new Set(payload.vis_cols.map(n=>String(n)));
+          const want = new Set(payload.vis_cols.map(String));
+          await waitUntil(() => $$('#posCols .pos-chip').length > 0);
+
           $$('#posCols .pos-chip').forEach(chip=>{
             const pos = chip.dataset.pos;
-            const isVisible = !!document.querySelector(`#rankHead .pos-group-head[data-pos="${pos}"]`);
-            const shouldBeVisible = want.has(pos);
-            if (isVisible !== shouldBeVisible){
-              chip.dispatchEvent(new MouseEvent('click',{bubbles:true, altKey:true}));
+            const headExists = !!document.querySelector(
+              `#rankHead .pos-group-head[data-pos="${pos}"]`
+            );
+            const should = want.has(pos);
+            if (headExists !== should){
+              chip.dispatchEvent(
+                new MouseEvent('click',{bubbles:true,altKey:true})
+              );
+            }
+          });
+        }
+
+        if (Array.isArray(payload.pos_buckets)){
+          const wantBuckets = new Set(payload.pos_buckets.map(String));
+          await waitUntil(()=>$$('#posCols .pos-chip').length > 0);
+
+          $$('#posCols .pos-chip').forEach(chip=>{
+            const pos = chip.dataset.pos;
+            const isActive = chip.classList.contains('active');
+            const should = wantBuckets.has(pos);
+            if (isActive !== should){
+              chip.click();
             }
           });
         }
@@ -2763,183 +2859,159 @@ if (chartDonutSuizo){
         const H = payload.header_filters || {};
         if ($('#f_nro') && H.nro != null){
           $('#f_nro').value = H.nro;
-          dispatch($('#f_nro'),'input');
+          dispatchInput($('#f_nro'));
         }
         if ($('#f_desc') && H.desc != null){
           $('#f_desc').value = H.desc;
-          dispatch($('#f_desc'),'input');
+          dispatchInput($('#f_desc'));
         }
         if ($('#f_cant') && H.cant != null){
           $('#f_cant').value = H.cant;
-          dispatch($('#f_cant'),'input');
+          dispatchInput($('#f_cant'));
         }
 
         if (Array.isArray(payload.vis_cols)){
           payload.vis_cols.forEach(pos=>{
             const conf = H[pos] || {};
-            const r = document.querySelector(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`);
-            const p = document.querySelector(`#rankHead [data-pos="${pos}"][data-ft="prov"]`);
+            const r = document.querySelector(
+              `#rankHead [data-pos="${pos}"][data-ft="relmax"]`
+            );
+            const p = document.querySelector(
+              `#rankHead [data-pos="${pos}"][data-ft="prov"]`
+            );
             if (r){
               r.value = conf.relmax || '';
-              dispatch(r,'input');
+              dispatchInput(r);
             }
             if (p){
               p.value = conf.prov || '';
-              dispatch(p,'input');
+              dispatchInput(p);
             }
           });
         }
 
-        if (Array.isArray(payload.pos_buckets)){
-          await waitUntil(()=> $$('#posCols .pos-chip').length > 0);
-          const want = new Set(payload.pos_buckets.map(String));
-          $$('#posCols .pos-chip').forEach(chip=>{
-            const pos = chip.dataset.pos;
-            const isActive = chip.classList.contains('active');
-            const shouldBeActive = want.has(pos);
-            if (isActive !== shouldBeActive){
-              chip.click();
-            }
-          });
-
-          if (Array.isArray(payload.vis_cols)){
-            const wantV = new Set(payload.vis_cols.map(String));
-            $$('#posCols .pos-chip').forEach(chip=>{
-              const pos = chip.dataset.pos;
-              const isVisible = !!document.querySelector(`#rankHead .pos-group-head[data-pos="${pos}"]`);
-              const shouldBeVisible = wantV.has(pos);
-              if (isVisible !== shouldBeVisible){
-                chip.dispatchEvent(new MouseEvent('click',{bubbles:true, altKey:true}));
-              }
-            });
-          }
-        }
-
-        if (payload.provider){
-          if (typeof window.setFilter === 'function'){
-            window.setFilter('provider', payload.provider);
-          }
+        if (payload.provider && typeof window.setFilter === 'function'){
+          window.setFilter('provider', payload.provider);
         } else {
-          const x = $('#selectionChip .sel-chip[data-key="provider"] button');
-          if (x) x.click();
+          const clearProv = $('#selectionChip .sel-chip[data-key="provider"] button');
+          if (clearProv) clearProv.click();
         }
 
         if ($('#search')){
           $('#search').value = payload.search_query || '';
-          dispatch($('#search'), 'input');
+          dispatchInput($('#search'));
         }
       }
 
       function renderViewsList(views){
-        if (!Array.isArray(views) || views.length===0){
+        if (!Array.isArray(views) || !views.length){
           listBox.innerHTML =
-            `<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>`;
+            '<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>';
           return;
         }
-        listBox.innerHTML = views.map(v=>
-          `<div class="row" data-id="${v.id}">
+
+        listBox.innerHTML = views.map(v => `
+          <div class="row" data-id="${v.id}">
             <div>
-              <span class="nm">${(v.name||'Sin nombre')}</span>
-              ${v.is_default?'<span class="tag">por defecto</span>':''}
-              ${v.updated_at?`<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`:''}
+              <span class="nm">${v.name || 'Sin nombre'}</span>
+              ${v.is_default ? '<span class="tag">por defecto</span>' : ''}
+              ${v.updated_at
+                ? `<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`
+                : ''}
             </div>
             <div class="act">
               <button data-act="apply">Aplicar</button>
-              ${v.is_default?'<button data-act="nodefault">Quitar defecto</button>':'<button data-act="default">Establecer por defecto</button>'}
+              ${v.is_default
+                ? '<button data-act="nodefault">Quitar defecto</button>'
+                : '<button data-act="default">Establecer por defecto</button>'}
               <button data-act="delete" style="color:#b91c1c">Eliminar</button>
             </div>
-          </div>`
-        ).join('');
+          </div>
+        `).join('');
       }
 
-      async function refreshList(){
-        const views = await listViews();
-        renderViewsList(views);
+      function refreshList(){
+        renderViewsList(readViews());
       }
 
       function openModal(){
-        mod.hidden=false;
-        bd.hidden=false;
-        mod.style.display='block';
-        bd.style.display='block';
         refreshList();
+        mod.hidden = false;
+        bd.hidden = false;
       }
       function closeModal(){
-        mod.hidden=true;
-        bd.hidden=true;
-        mod.style.display='none';
-        bd.style.display='none';
-        inputName.value='';
-        inputDefault.checked=false;
+        mod.hidden = true;
+        bd.hidden = true;
+        inputName.value = '';
+        inputDefault.checked = false;
       }
 
-      btnViews?.addEventListener('click', openModal);
-      btnClose?.addEventListener('click', closeModal);
-      btnClose2?.addEventListener('click', closeModal);
-      bd?.addEventListener('click', closeModal);
-      btnRefresh?.addEventListener('click', refreshList);
+      btnViews  && btnViews.addEventListener('click', openModal);
+      btnClose  && btnClose.addEventListener('click', closeModal);
+      btnClose2 && btnClose2.addEventListener('click', closeModal);
+      bd        && bd.addEventListener('click', closeModal);
+      btnRefresh&& btnRefresh.addEventListener('click', refreshList);
 
-      btnSave?.addEventListener('click', async ()=>{
-        const name = (inputName.value||'').trim() || 'Mi vista';
+      btnSave && btnSave.addEventListener('click', async ()=>{
+        const name = (inputName.value || '').trim() || 'Mi vista';
         const is_default = !!inputDefault.checked;
-        await waitUntil(()=> $('#rankHead tr.filters-row'));
+
+        await waitUntil(()=>$('#rankHead tr.filters-row'));
+
         const payload = collectCurrentView();
-        await saveView({name, is_default, payload});
-        await refreshList();
+        saveViewLS({ name, is_default, payload });
+
+        refreshList();
+        inputName.value = '';
+        inputDefault.checked = false;
       });
 
-      listBox?.addEventListener('click', async (e)=>{
+      listBox && listBox.addEventListener('click', async e=>{
         const btn = e.target.closest('button[data-act]');
-        if(!btn) return;
-        const row = e.target.closest('.row');
-        const id = row?.dataset.id;
-        if(!id) return;
-        const act = btn.dataset.act;
-        const all = await listViews();
-        const item = all.find(v=>v.id===id);
-        if(!item) return;
+        if (!btn) return;
 
-        if (act==='apply'){
-          const payload = item.payload && typeof item.payload==='string' ? JSON.parse(item.payload) : item.payload;
-          await waitUntil(()=> $('#rankHead .pos-group-head') || $('#posCols .pos-chip'));
-          applyViewPayload(payload||{});
+        const row = btn.closest('.row');
+        const id = row?.dataset.id;
+        if (!id) return;
+
+        const act = btn.dataset.act;
+        const all = readViews();
+        const item = all.find(v=>v.id===id);
+        if (!item) return;
+
+        if (act === 'apply'){
+          await applyViewPayload(item.payload || {});
           closeModal();
         }
-
-        if (act==='delete'){
+        if (act === 'delete'){
           if (confirm('¿Eliminar esta vista?')){
-            await deleteView(id);
-            await refreshList();
+            deleteViewLS(id);
+            refreshList();
           }
         }
-
-        if (act==='default'){
-          await setDefaultView(id);
-          await refreshList();
+        if (act === 'default'){
+          setDefaultLS(id);
+          refreshList();
         }
-
-        if (act==='nodefault'){
-          const arr = lsList().map(v=>({...v, is_default: v.id===id ? false : v.is_default}));
-          localStorage.setItem(LS_KEY, JSON.stringify(arr));
-          await refreshList();
+        if (act === 'nodefault'){
+          clearDefaultLS(id);
+          refreshList();
         }
       });
 
-      (async function autoApply(){
-        const ok = await waitUntil(()=> $('#rankHead') && $('#posCols'));
-        if(!ok) return;
-        await waitUntil(()=> $('#rankHead input#f_desc'));
-        const def = await getDefaultView();
+      (async function autoApplyDefault(){
+        const def = getDefaultLS();
         if (!def) return;
-        const payload = def.payload && typeof def.payload==='string' ? JSON.parse(def.payload) : def.payload;
-        applyViewPayload(payload||{});
+        const ok = await waitUntil(()=>$('#rankHead') && $('#posCols'));
+        if (!ok) return;
+        await applyViewPayload(def.payload || {});
       })();
 
       window.__collectView = collectCurrentView;
-      window.__applyView = applyViewPayload;
+      window.__applyView   = applyViewPayload;
     })();
   </script>
 
-  <!-- Comments JS -->
+  <!-- Comentarios -->
   <script defer src="{{ url_for('static', path='js/comments.js') }}?v=2025-10-27-2"></script>
 {% endblock %}

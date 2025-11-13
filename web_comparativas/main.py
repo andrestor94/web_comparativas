@@ -752,6 +752,24 @@ def verify_password(p: str, h) -> bool:
     except Exception:
         return hs == p
 
+def verify_reset_password(user: User, password: str) -> bool:
+    """
+    Verificación extra para acciones DESTRUCTIVAS (reset de procesos).
+    - Si existe la variable de entorno ADMIN_RESET_SECRET o RESET_UPLOADS_SECRET,
+      se usa como clave maestra.
+    - Si no existe, se usa la contraseña del propio usuario admin.
+    """
+    pwd = (password or "").strip()
+    if not pwd:
+        return False
+
+    # 1) clave maestra opcional por env (más segura para entornos compartidos)
+    master = os.getenv("ADMIN_RESET_SECRET") or os.getenv("RESET_UPLOADS_SECRET")
+    if master:
+        return pwd == master
+
+    # 2) fallback: validamos contra la contraseña del usuario actual
+    return verify_password(pwd, getattr(user, "password_hash", ""))
 
 def get_current_user(request: Request) -> Optional[User]:
     """
@@ -3604,6 +3622,53 @@ def tablero_show(
         },
     )
 
+# ======================================================================
+# ADMIN: RESET DE PROCESOS / CARGAS
+# ======================================================================
+@app.post("/admin/reset_uploads")
+def admin_reset_uploads(
+    request: Request,
+    password: str = Form(...),
+    user: User = Depends(require_roles("admin")),
+):
+    """
+    Elimina TODAS las cargas (UploadModel) y borra la carpeta data/uploads.
+    SOLO para admin y pidiendo una contraseña especial (verify_reset_password).
+    Se pensó para usarse desde un botón + modal en la interfaz.
+    """
+    # 1) Validar contraseña de seguridad
+    if not verify_reset_password(user, password):
+        # Podés leer estos flags en home.html para mostrar un toast/mensaje
+        return RedirectResponse(
+            "/?reset_err=bad_password",
+            status_code=303,
+        )
+
+    base_dir = Path("data/uploads")
+
+    try:
+        # 2) Borrar registros de UploadModel
+        db_session.query(UploadModel).delete()
+        db_session.commit()
+
+        # 3) Borrar los archivos físicos
+        if base_dir.exists():
+            shutil.rmtree(base_dir)
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        # 4) Volver al home con flag de OK
+        return RedirectResponse(
+            "/?reset_ok=1",
+            status_code=303,
+        )
+    except Exception as e:
+        db_session.rollback()
+        # Limitamos el mensaje de error para que no rompa la URL
+        msg = str(e).replace(" ", "_")[:180]
+        return RedirectResponse(
+            f"/?reset_err={msg}",
+            status_code=303,
+        )
 
 # ======================================================================
 # LOGIN / AUTENTICACIÓN
