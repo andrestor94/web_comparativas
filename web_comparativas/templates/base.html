@@ -127,8 +127,13 @@
         {% endif %}
 
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {% set is_hist = request.url.path.startswith('/cargas/historial') or request.url.path == '/historial'
-                            or request.url.path.startswith('/cargas/') or request.url.path.startswith('/tablero/') %}
+          {# 👉 Ajuste: Historial NO se activa en /cargas/nueva #}
+          {% set is_hist =
+            request.url.path.startswith('/cargas/historial')
+            or request.url.path == '/historial'
+            or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
+            or request.url.path.startswith('/tablero/')
+          %}
           <a href="/cargas/historial"
              class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
              <span>Historial</span>
