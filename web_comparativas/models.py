@@ -436,6 +436,25 @@ class SavedView(Base):
         return f"<SavedView id={self.id} user={self.user_id} view={self.view_id!r} name={self.name!r} default={self.is_default}>"
 
 
+# ---------- Configuración general (AppConfig) ----------
+class AppConfig(Base):
+    """
+    Configuración simple clave/valor para la aplicación.
+    Aquí vamos a guardar, entre otras cosas, la contraseña especial de RESET.
+    """
+    __tablename__ = "app_config"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(120), nullable=False, unique=True, index=True)
+    value = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow,
+                        nullable=False, index=True)
+
+    def __repr__(self) -> str:
+        return f"<AppConfig key={self.key!r} value={self.value!r}>"
+
+
 # ---------- Comentarios / Feedback ----------
 class Comment(Base):
     """
@@ -473,8 +492,6 @@ class Comment(Base):
         if len(body_preview) > 24:
             body_preview = body_preview[:24] + "…"
         return f"<Comment id={self.id} up={self.upload_id} by={self.author_user_id} '{body_preview}'>"
-
-
 # ----------------------------------------------------------------------
 # Helpers de visibilidad (utilizables desde vistas/rutas)
 # ----------------------------------------------------------------------
@@ -646,6 +663,7 @@ def can_view_upload(session, user: User, upload: Upload) -> bool:
 
     return False
 
+
 def find_self_duplicate_upload(session, *, user_id: int, proceso_nro: str | None = None, proceso_key: str | None = None) -> Upload | None:
     """
     Busca si el usuario ya cargó ese mismo proceso (normalizado).
@@ -660,6 +678,60 @@ def find_self_duplicate_upload(session, *, user_id: int, proceso_nro: str | None
         .order_by(Upload.created_at.desc())
         .first()
     )
+
+
+# ----------------------------------------------------------------------
+# Helpers de configuración / contraseña de RESET
+# ----------------------------------------------------------------------
+RESET_PASSWORD_KEY = "reset_password"
+
+def get_config_value(session, key: str) -> str | None:
+    """
+    Devuelve el valor (string) asociado a una clave en AppConfig, o None si no existe.
+    """
+    row = session.query(AppConfig).filter(AppConfig.key == key).first()
+    return row.value if row else None
+
+
+def set_config_value(session, key: str, value: str | None) -> None:
+    """
+    Crea o actualiza una clave en AppConfig.
+    """
+    row = session.query(AppConfig).filter(AppConfig.key == key).first()
+    if row is None:
+        row = AppConfig(key=key, value=value or "")
+        session.add(row)
+    else:
+        row.value = value or ""
+    session.commit()
+
+
+def get_reset_password(session) -> str | None:
+    """
+    Obtiene la contraseña de RESET (texto plano por ahora).
+    """
+    return get_config_value(session, RESET_PASSWORD_KEY)
+
+
+def verify_reset_password(session, password: str) -> bool:
+    """
+    Verifica si la contraseña enviada coincide con la almacenada.
+    Si no hay contraseña configurada, devuelve False (no permite reset).
+    """
+    if not password:
+        return False
+    stored = get_reset_password(session)
+    if not stored:
+        return False
+    return stored == password
+
+
+def set_reset_password(session, new_password: str) -> None:
+    """
+    Define/actualiza la contraseña de RESET.
+    (Más adelante la vamos a usar desde una vista/endpoint para que el admin la cambie.)
+    """
+    set_config_value(session, RESET_PASSWORD_KEY, new_password or "")
 
 
 # ----------------------------------------------------------------------
@@ -919,6 +991,29 @@ def _bootstrap_admin_from_env():
         s.close()
 
 
+def _bootstrap_reset_password_from_env():
+    """
+    Inicializa la contraseña de RESET desde la variable RESET_PASSWORD
+    si todavía no hay ninguna definida.
+    Esto es opcional, pero útil para el primer arranque.
+    """
+    reset_pwd = (os.getenv("RESET_PASSWORD") or "").strip()
+    if not reset_pwd:
+        return
+    s = db_session()
+    try:
+        current = get_reset_password(s)
+        if current:
+            return  # ya hay una configurada, no la pisamos
+        set_reset_password(s, reset_pwd)
+        logging.getLogger("bootstrap").info("[bootstrap] Reset password inicial configurada desde entorno")
+    except Exception:
+        s.rollback()
+        logging.getLogger("bootstrap").exception("[bootstrap] Error configurando reset password inicial")
+    finally:
+        s.close()
+
+
 def init_db():
     """Crea tablas si no existen y asegura columnas nuevas e índices básicos."""
     Base.metadata.create_all(bind=engine)
@@ -933,6 +1028,7 @@ def init_db():
     _ensure_email_notifications_indexes()
     _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
     _bootstrap_admin_from_env()  # <-- crea admin si tenés ADMIN_EMAIL/PASSWORD
+    _bootstrap_reset_password_from_env()  # <-- configura contraseña RESET si hay RESET_PASSWORD
 
 
 # ----------------------------------------------------------------------

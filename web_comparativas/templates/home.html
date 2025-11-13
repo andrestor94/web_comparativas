@@ -38,7 +38,28 @@
 <!-- ======= PANEL INICIAL ======= -->
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="m-0">Panel inicial</h2>
+  {% if r == 'admin' %}
+    <button type="button"
+            class="btn btn-outline-danger btn-sm"
+            data-bs-toggle="modal"
+            data-bs-target="#modalResetUploads">
+      Resetear procesos
+    </button>
+  {% endif %}
 </div>
+
+{# Mensajes de feedback del reset #}
+{% if reset_ok %}
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    Procesos reseteados correctamente.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+  </div>
+{% elif reset_err %}
+  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    {{ reset_err }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+  </div>
+{% endif %}
 
 <!-- ======= TARJETAS HORIZONTALES ======= -->
 <style>
@@ -212,6 +233,46 @@
       Accedé al <a href="/cargas/historial" class="alert-link">Historial</a> para ver procesos cuando existan.
     {% endif %}
   </div>
+{% endif %}
+
+{# Modal de reseteo de procesos (solo admin) #}
+{% if r == 'admin' %}
+<div class="modal fade" id="modalResetUploads" tabindex="-1" aria-labelledby="modalResetUploadsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="/admin/reset_uploads">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title" id="modalResetUploadsLabel">Resetear procesos</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3">
+            Esta acción está pensada para limpiar procesos de prueba o rearmar el entorno.
+            Los procesos seleccionados se eliminarán de forma permanente.
+          </p>
+          <p class="small text-muted mb-3">
+            Para continuar, confirmá tu contraseña de administrador.
+          </p>
+          <div class="mb-3">
+            <label for="resetPasswordInput" class="form-label">Contraseña</label>
+            <input type="password"
+                   class="form-control"
+                   id="resetPasswordInput"
+                   name="password_confirm"
+                   autocomplete="current-password"
+                   required>
+          </div>
+        </div>
+        <div class="modal-footer justify-content-between">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">
+            Sí, resetear procesos
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endif %}
 
 {% endblock %}
