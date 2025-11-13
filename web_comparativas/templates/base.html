@@ -92,9 +92,19 @@
     .sa-banner__close{ margin-left:auto; background:transparent; border:0; font-size:18px; cursor:pointer; color:#64748b; }
 
     /* ====== Sidebar: toggler con caret (seguro) ====== */
-    .nav-link-toggle{ cursor:pointer; background:transparent; color:inherit; border:0; text-align:left; width:100%; padding:.375rem .75rem; border-radius:.375rem; }
+    .nav-link-toggle{
+      cursor:pointer;
+      background:transparent;
+      color:inherit;
+      border:0;
+      text-align:left;
+      width:100%;
+      padding:.375rem .75rem;
+      border-radius:.375rem;
+    }
     .nav-link-toggle .caret{ font-size:.9rem; transition:transform .18s ease; }
     .nav-link-toggle[aria-expanded="true"] .caret{ transform:rotate(90deg); }
+
     /* submenú con sangría */
     .nav .submenu a.nav-link{ padding-left:1.75rem; }
   </style>
@@ -158,10 +168,11 @@
           {% endif %}
 
           {% if user and r in ['admin','analista','supervisor','auditor'] %}
-            {% set is_hist = request.url.path.startswith('/cargas/historial')
-                              or request.url.path == '/historial'
-                              or request.url.path.startswith('/cargas/')
-                              or request.url.path.startswith('/tablero/') %}
+            {% set is_hist =
+                request.url.path.startswith('/cargas/historial')
+                or request.url.path == '/historial'
+                or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
+                or request.url.path.startswith('/tablero/') %}
             <a href="/cargas/historial"
                class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
                <span>Historial</span>
@@ -283,6 +294,16 @@
             <span class="position-absolute top-50 end-0 translate-middle-y pe-2 text-muted">🔎</span>
           </form>
 
+          {# ===== Botón global "Resetear procesos" (solo admin, arriba) ===== #}
+          {% if user and r == 'admin' %}
+            <button type="button"
+                    class="btn btn-link text-danger fw-semibold d-none d-md-inline"
+                    data-bs-toggle="modal"
+                    data-bs-target="#resetUploadsModal">
+              Resetear procesos
+            </button>
+          {% endif %}
+
           <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
             {% if user %}
               {% if user_display is defined %}
@@ -318,6 +339,44 @@
       </div>
     </main>
   </div>
+
+  {# ===== Modal global para resetear procesos (solo admin) ===== #}
+  {% if user and r == 'admin' %}
+  <div class="modal fade" id="resetUploadsModal" tabindex="-1"
+       aria-labelledby="resetUploadsLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title" id="resetUploadsLabel">Resetear procesos</h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <form method="post" action="/admin/reset_uploads">
+          <div class="modal-body">
+            <p class="mb-3 small">
+              Esta acción está pensada para limpiar procesos de prueba o rearmar el entorno.
+              <strong>No se puede deshacer.</strong> Los procesos seleccionados se eliminarán de forma permanente.
+            </p>
+            <div class="mb-3">
+              <label for="resetPasswordInput" class="form-label">Contraseña de administrador</label>
+              <input type="password"
+                     name="password"
+                     id="resetPasswordInput"
+                     class="form-control"
+                     placeholder="Ingresá tu contraseña actual"
+                     required
+                     autocomplete="current-password">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+            <button type="submit" class="btn btn-danger">Sí, resetear procesos</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Contenedores de notificaciones -->
   <div id="banner-root" aria-live="polite" aria-atomic="true"></div>
@@ -426,6 +485,46 @@
       });
     })();
   </script>
+
+  {# ===== Feedback reset_ok / reset_err (toasts o alerts) ===== #}
+  {% if reset_ok %}
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      var msg = 'Se resetearon los procesos correctamente.';
+      if (window.Notify && Notify.toastSuccess) {
+        Notify.toastSuccess('Reset completado', msg);
+      } else {
+        var box = document.getElementById('flash-container');
+        if (box) {
+          box.innerHTML =
+            '<div class="alert alert-success alert-dismissible fade show" role="alert">'
+            + msg +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
+        }
+      }
+    });
+  </script>
+  {% endif %}
+
+  {% if reset_err %}
+  {% set _reset_err_msg = reset_err if reset_err is string else 'No se pudo resetear los procesos. Verificá la contraseña e intentá nuevamente.' %}
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      var msg = {{ _reset_err_msg|tojson }};
+      if (window.Notify && Notify.toastError) {
+        Notify.toastError('No se pudo resetear', msg);
+      } else {
+        var box = document.getElementById('flash-container');
+        if (box) {
+          box.innerHTML =
+            '<div class="alert alert-danger alert-dismissible fade show" role="alert">'
+            + msg +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
+        }
+      }
+    });
+  </script>
+  {% endif %}
 
   {% block extra_js %}{% endblock %}
 </body>
