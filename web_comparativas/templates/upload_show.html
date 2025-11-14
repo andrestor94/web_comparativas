@@ -79,6 +79,13 @@
            href="/descargas/{{ U.id }}" aria-disabled="true" title="Disponible según permisos">
           Descargar normalized.xlsx
         </a>
+        {% if user and (user.role or '').lower() == 'admin' %}
+        <a id="btnOriginal" class="btn btn-outline-secondary btn-lg btn-icon"
+           href="/cargas/{{ U.id }}/original" target="_blank"
+           title="Descargar el archivo original subido por el usuario">
+          Descargar archivo original
+        </a>
+        {% endif %}
         <button id="btnRefresh" type="button" class="btn btn-outline-secondary btn-lg btn-icon">
           Refrescar <span class="tiny muted">(R)</span>
         </button>
@@ -92,8 +99,9 @@
         <button id="btnNext" class="btn btn-outline-primary">
           <i class="bi bi-skip-forward-fill"></i> Avanzar
         </button>
-      {% endif %}
       </div>
+      {% endif %}
+    </div>
 
     <div class="mt-2 tiny muted">
       Tip: agregá <code>?autoredir=1</code> a la URL para entrar al tablero automáticamente cuando esté listo.

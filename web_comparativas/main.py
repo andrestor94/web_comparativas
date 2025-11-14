@@ -3882,6 +3882,54 @@ def password_reset_submit(
             status_code=303,
         )
 
+# ======================================================================
+# DESCARGA DEL ARCHIVO ORIGINAL SUBIDO
+# ======================================================================
+@app.get("/cargas/{upload_id}/original")
+def descargar_archivo_original(
+    upload_id: int,
+    user: User = Depends(require_roles("admin")),  # solo admin revisa
+):
+    """
+    Permite al administrador descargar el archivo ORIGINAL que subió el usuario,
+    antes de procesarlo.
+    """
+    up = db_session.get(UploadModel, upload_id)
+    if not up:
+        raise HTTPException(status_code=404, detail="Carga no encontrada")
+
+    # 🔒 Verificar visibilidad por grupos (auditor vería todo, pero acá solo admin)
+    vis_ids = visible_user_ids_ext(db_session, user)
+    if (up.user_id != user.id) and (up.user_id not in vis_ids):
+        raise HTTPException(
+            status_code=403,
+            detail="No autorizado para ver este archivo.",
+        )
+
+    # Ruta física del archivo original
+    orig_path = getattr(up, "original_path", None)
+    if not orig_path:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay archivo original registrado para esta carga.",
+        )
+
+    p = Path(orig_path)
+    if not p.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="El archivo original no se encuentra en el servidor.",
+        )
+
+    # Nombre de archivo para la descarga
+    filename = p.name
+
+    # Tipo genérico; Excel lo abre igual
+    return FileResponse(
+        str(p),
+        filename=filename,
+        media_type="application/octet-stream",
+    )
 
 # ======================================================================
 # DESCARGA normalized.xlsx
