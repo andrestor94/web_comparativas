@@ -53,9 +53,11 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args
 IS_SQLITE = engine.url.get_backend_name() == "sqlite"
 IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
 
-# Log suave para ver en Render qué backend quedó activo (no muestra credenciales)
-logger = logging.getLogger(__name__)
-logger.info("[DB] Backend de SQLAlchemy: %s", engine.url.get_backend_name())
+# Log visible en consola (sin credenciales)
+print(
+    f"[DB DEBUG] Backend activo: {engine.url.get_backend_name()} "
+    f"(database={engine.url.database})"
+)
 
 # Session factory + scoped_session
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
