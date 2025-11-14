@@ -49,19 +49,27 @@ else:
 connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args=connect_args, future=True)
 
-# Activar foreign keys en SQLite
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragma(dbapi_conn, connection_record):
-    if engine.url.get_backend_name() == "sqlite":
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+# Banderas útiles para saber qué backend estamos usando
+IS_SQLITE = engine.url.get_backend_name() == "sqlite"
+IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
+
+# Log suave para ver en Render qué backend quedó activo (no muestra credenciales)
+logger = logging.getLogger(__name__)
+logger.info("[DB] Backend de SQLAlchemy: %s", engine.url.get_backend_name())
 
 # Session factory + scoped_session
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
 db_session = scoped_session(SessionLocal)
 
 Base = declarative_base()
+
+# Activar foreign keys en SQLite
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    if IS_SQLITE:
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -492,6 +500,7 @@ class Comment(Base):
         if len(body_preview) > 24:
             body_preview = body_preview[:24] + "…"
         return f"<Comment id={self.id} up={self.upload_id} by={self.author_user_id} '{body_preview}'>"
+
 # ----------------------------------------------------------------------
 # Helpers de visibilidad (utilizables desde vistas/rutas)
 # ----------------------------------------------------------------------
