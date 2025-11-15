@@ -1782,8 +1782,6 @@ async def crear_carga(
         status="pending",
         created_at=dt.datetime.utcnow(),
         updated_at=dt.datetime.utcnow(),
-        # 👇 NUEVO: guardamos el archivo también en la BD compartida
-        original_file_bytes=file_bytes,
     )
     db_session.add(up)
     db_session.commit()
