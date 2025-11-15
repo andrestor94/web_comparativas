@@ -1718,10 +1718,13 @@ async def crear_carga(
     upload_dir = base_dir / uid
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Guardar archivo subido
+    # Leer el archivo en memoria (bytes)
+    file_bytes = await file.read()
+
+    # Guardar archivo subido en disco (como hasta ahora, para no romper nada)
     file_path = upload_dir / file.filename
     with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(file_bytes)
 
     # Normalizar fecha
     def _norm_date(s: str) -> str:
@@ -1763,7 +1766,7 @@ async def crear_carga(
             )
 
     # Crear la carga
-    up = UploadModel(
+        up = UploadModel(
         id=None,
         user_id=user.id,
         proceso_nro=proceso_nro_clean,
@@ -1779,6 +1782,8 @@ async def crear_carga(
         status="pending",
         created_at=dt.datetime.utcnow(),
         updated_at=dt.datetime.utcnow(),
+        # 👇 NUEVO: guardamos el archivo también en la BD compartida
+        original_file_bytes=file_bytes,
     )
     db_session.add(up)
     db_session.commit()
