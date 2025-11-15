@@ -1711,9 +1711,11 @@ async def crear_carga(
     Crea una carga y dispara el procesamiento en segundo plano.
     También evita duplicados usando el proceso_nro normalizado.
     """
+    # Carpeta base donde se guardan los uploads
     base_dir = Path("data/uploads")
     base_dir.mkdir(parents=True, exist_ok=True)
 
+    # Carpeta única para esta carga
     uid = str(uuid.uuid4())
     upload_dir = base_dir / uid
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -1721,12 +1723,12 @@ async def crear_carga(
     # Leer el archivo en memoria (bytes)
     file_bytes = await file.read()
 
-    # Guardar archivo subido en disco (como hasta ahora, para no romper nada)
+    # Guardar archivo subido en disco (como hasta ahora)
     file_path = upload_dir / file.filename
     with open(file_path, "wb") as f:
         f.write(file_bytes)
 
-    # Normalizar fecha
+    # Normalizar fecha de apertura
     def _norm_date(s: str) -> str:
         s = (s or "").strip()
         if not s:
@@ -1734,43 +1736,44 @@ async def crear_carga(
         # formato AAAA-MM-DD
         if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
             return s
-        # formato DD/MM/AAAA
+        # formato DD/MM/AAAA o DD-MM-AAAA
         m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
         if m:
             d, mm, y = map(int, m.groups())
             return f"{y:04d}-{mm:02d}-{d:02d}"
         return s
 
-    # Fallback: si los ocultos vienen vacíos, usar los visibles
+    # Fallback: si los hints ocultos vienen vacíos, usar los visibles
     platform_hint = (platform_hint or plataforma).strip()
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
 
-    # 👇 **NUEVO**: normalizamos el número de proceso para detectar duplicados
+    # Normalizamos el número de proceso para detectar duplicados
     proceso_nro_clean = (proceso_nro or "").strip() or None
     proceso_key = normalize_proceso_nro(proceso_nro_clean)
 
+    # Si hay clave normalizada, buscamos si ya existe una carga con ese proceso
+    existing = None
     if proceso_key:
-        # buscar si ya existe una carga con este proceso
         existing = (
             db_session.query(UploadModel)
             .filter(func.upper(func.trim(UploadModel.proceso_key)) == proceso_key)
             .order_by(UploadModel.created_at.desc())
             .first()
         )
-        if existing:
-            # 👈 no creamos nada, redirigimos a la existente
-            return RedirectResponse(
-                f"/cargas/{existing.id}?dup=1",
-                status_code=303,
-            )
 
-    # Crear la carga
-        up = UploadModel(
-        id=None,
+    if existing:
+        # No creamos nada nuevo: redirigimos al proceso existente
+        return RedirectResponse(
+            f"/cargas/{existing.id}?dup=1",
+            status_code=303,
+        )
+
+    # Crear la carga nueva
+    up = UploadModel(
         user_id=user.id,
         proceso_nro=proceso_nro_clean,
-        proceso_key=proceso_key,  # guardamos la key normalizada
+        proceso_key=proceso_key,  # puede ser None si no hay proceso cargado
         apertura_fecha=_norm_date(apertura_fecha) or None,
         cuenta_nro=(cuenta_nro or "").strip() or None,
         platform_hint=platform_hint or None,
