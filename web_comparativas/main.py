@@ -1251,7 +1251,7 @@ async def crear_carga(
     Crea una carga y dispara el procesamiento en segundo plano.
     También evita duplicados usando el proceso_nro normalizado.
     """
-        base_dir = Path("data/uploads")
+    base_dir = Path("data/uploads")
     base_dir.mkdir(parents=True, exist_ok=True)
 
     uid = str(uuid.uuid4())
