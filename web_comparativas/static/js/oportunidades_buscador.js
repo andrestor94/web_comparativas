@@ -103,44 +103,93 @@
     return arr;
   }
 
-  // ---- Dataset desde DOM (con fallback a celdas)
+  function escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function safeText(s) {
+    return escapeHtml(s).replace(/\n/g, "<br>");
+  }
+
+  // ============================================================
+  //  DATASET PRINCIPAL
+  //  1) Si existe window.OPP_DATA (JSON desde el backend),
+  //     lo usamos como fuente.
+  //  2) Si no, tomamos las filas ya renderizadas en el <tbody>.
+  // ============================================================
   const originalRows = $$("#oppTBody tr");
-  const DATA = originalRows.map((tr) => {
-    const tds = tr.children;
-    const td = (i) => (tds[i] ? tds[i].textContent.trim() : "");
+  const backendData =
+    window.OPP_DATA && Array.isArray(window.OPP_DATA) && window.OPP_DATA.length
+      ? window.OPP_DATA
+      : null;
 
-    // Preferimos data-*, pero si están vacíos, usamos texto de celdas
-    const numero = tr.dataset.numero || td(0);
-    const reparticion = tr.dataset.reparticion || td(1);
-    const objeto = tr.dataset.objeto || td(2);
-    const aperturaTxt = tr.dataset.apertura || td(3);
-    const tipo = tr.dataset.tipo || td(4);
-    const plataforma = tr.dataset.plataforma || "";
-    const operador = tr.dataset.operador || "";
-    const cuenta = tr.dataset.cuenta || "";
-    const estadoRaw = tr.dataset.estado || ""; // columna "Estado"
-    const enlaceEl = tr.querySelector("td:nth-child(6) a");
-    const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
+  const DATA = backendData
+    ? backendData.map((r) => {
+        // El backend debe mandar estas claves:
+        // numero, reparticion, objeto, apertura (string), tipo,
+        // plataforma, operador, cuenta (viene de "N° UAPE"),
+        // estado, enlace.
+        const aperturaTxt =
+          r.apertura_txt || r.apertura || r.Apertura || r.aperturaTxt || "";
+        const aperturaDate = parseApertura(aperturaTxt);
+        const estadoRaw = r.estado || r.Estado || "";
+        const estadoNorm = normalize(estadoRaw).includes("emerg")
+          ? "emergencia"
+          : "regular";
 
-    const aperturaDate = parseApertura(aperturaTxt);
-    const estadoNorm = normalize(estadoRaw).includes("emerg")
-      ? "emergencia"
-      : "regular";
+        return {
+          numero: r.numero || r["Número"] || "",
+          reparticion: r.reparticion || r["Repartición"] || "",
+          objeto: r.objeto || r["Objeto"] || "",
+          aperturaTxt,
+          apertura: aperturaDate ? aperturaDate.getTime() : null,
+          tipo: r.tipo || r["Tipo"] || "",
+          plataforma: r.plataforma || r["Plataforma"] || "",
+          operador: r.operador || r["Operador"] || "",
+          cuenta: r.cuenta || r["N° UAPE"] || "",
+          estado: estadoNorm,
+          enlace: r.enlace || r["Enlace de pliego"] || "",
+        };
+      })
+    : originalRows.map((tr) => {
+        const tds = tr.children;
+        const td = (i) => (tds[i] ? tds[i].textContent.trim() : "");
 
-    return {
-      numero,
-      reparticion,
-      objeto,
-      aperturaTxt,
-      apertura: aperturaDate ? aperturaDate.getTime() : null,
-      tipo,
-      plataforma,
-      operador,
-      cuenta,
-      estado: estadoNorm,
-      enlace,
-    };
-  });
+        // Preferimos data-*, pero si están vacíos, usamos texto de celdas
+        const numero = tr.dataset.numero || td(0);
+        const reparticion = tr.dataset.reparticion || td(1);
+        const objeto = tr.dataset.objeto || td(2);
+        const aperturaTxt = tr.dataset.apertura || td(3);
+        const tipo = tr.dataset.tipo || td(4);
+        const plataforma = tr.dataset.plataforma || "";
+        const operador = tr.dataset.operador || "";
+        const cuenta = tr.dataset.cuenta || "";
+        const estadoRaw = tr.dataset.estado || ""; // columna "Estado"
+        const enlaceEl = tr.querySelector("td:nth-child(6) a");
+        const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
+
+        const aperturaDate = parseApertura(aperturaTxt);
+        const estadoNorm = normalize(estadoRaw).includes("emerg")
+          ? "emergencia"
+          : "regular";
+
+        return {
+          numero,
+          reparticion,
+          objeto,
+          aperturaTxt,
+          apertura: aperturaDate ? aperturaDate.getTime() : null,
+          tipo,
+          plataforma,
+          operador,
+          cuenta,
+          estado: estadoNorm,
+          enlace,
+        };
+      });
 
   // Dominio de fechas
   const dates = DATA.map((d) => d.apertura).filter((v) => v !== null);
@@ -177,7 +226,9 @@
   function epochFromPercent(p) {
     if (DOMAIN_MIN === null || DOMAIN_MAX === null) return null;
     const clamped = Math.max(0, Math.min(100, p));
-    return Math.round(DOMAIN_MIN + (DOMAIN_MAX - DOMAIN_MIN) * (clamped / 100));
+    return Math.round(
+      DOMAIN_MIN + (DOMAIN_MAX - DOMAIN_MIN) * (clamped / 100)
+    );
   }
 
   const initFrom =
@@ -218,15 +269,16 @@
     if (lblTo) lblTo.textContent = d2 ? toDDMMYYYY(d2) : "—";
   }
   function updateFill() {
-    if (!rMin || !rMax) return;
+    if (!rMin || !rMax || !fill) {
+      setDatesFromSlider();
+      return;
+    }
     const a = Number(rMin.value),
       b = Number(rMax.value);
     const left = Math.min(a, b),
       right = Math.max(a, b);
-    if (fill) {
-      fill.style.left = left + "%";
-      fill.style.width = Math.max(0, right - left) + "%";
-    }
+    fill.style.left = left + "%";
+    fill.style.width = Math.max(0, right - left) + "%";
     setDatesFromSlider();
   }
 
@@ -284,40 +336,14 @@
     );
   }
 
-  function escapeHtml(s) {
-    return String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-  function safeText(s) {
-    return escapeHtml(s).replace(/\n/g, "<br>");
-  }
-
-  function escapeRegExp(str) {
-    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  // Resaltado de término buscado en el "Objeto"
-  function highlightText(text, query) {
-    if (!query) return safeText(text);
-    const trimmed = String(query).trim();
-    if (!trimmed) return safeText(text);
-    const pattern = escapeRegExp(trimmed);
-    const re = new RegExp(pattern, "gi");
-    const base = escapeHtml(text).replace(/\n/g, "<br>");
-    return base.replace(re, (m) => `<mark class="hit">${m}</mark>`);
-  }
-
   function applyFilters() {
-    const qRaw = inpBuscar && inpBuscar.value ? inpBuscar.value : "";
-    const q = normalize(qRaw);
+    const q = normalize(inpBuscar && inpBuscar.value);
 
     const vPlat = selPlataforma && selPlataforma.value ? selPlataforma.value : "";
     const vOper = selOperador && selOperador.value ? selOperador.value : "";
     const vCta = selCuenta && selCuenta.value ? selCuenta.value : "";
-    const vRep = selReparticion && selReparticion.value ? selReparticion.value : "";
+    const vRep =
+      selReparticion && selReparticion.value ? selReparticion.value : "";
 
     const vGrp = getChipGroup(swPAMI); // todos | pami | otras
     const vEst = getChipGroup(swEstado); // todos | emergencia | regular
@@ -386,15 +412,13 @@
     const end = Math.min(total, start + PAGE_SIZE);
     const slice = FILTERED.slice(start, end);
 
-    const searchRaw = inpBuscar && inpBuscar.value ? inpBuscar.value : "";
-
     const rowsHtml = slice
       .map((r) => {
         const linkHtml = r.enlace
-          ? `<a class="link-ico" href="${r.enlace}" target="_blank" rel="noopener">🔗</a>`
+          ? `<a class="link-ico" href="${escapeHtml(
+              r.enlace
+            )}" target="_blank" rel="noopener">🔗</a>`
           : `<span class="muted">—</span>`;
-        const objetoHtml = highlightText(r.objeto, searchRaw);
-
         return `
         <tr
           data-numero="${escapeHtml(r.numero)}"
@@ -409,7 +433,7 @@
         >
           <td>${safeText(r.numero)}</td>
           <td>${safeText(r.reparticion)}</td>
-          <td>${objetoHtml}</td>
+          <td>${safeText(r.objeto)}</td>
           <td>${safeText(r.aperturaTxt)}</td>
           <td>${safeText(r.tipo)}</td>
           <td>${linkHtml}</td>
@@ -430,19 +454,16 @@
     if (prevBtn) prevBtn.disabled = CUR_PAGE <= 1;
     if (nextBtn) nextBtn.disabled = CUR_PAGE >= pages;
 
-    // KPI: Procesos (N° UAPE únicos del conjunto filtrado completo)
+    // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
     if (kProcesos) {
-      const uniq = new Set(
-        FILTERED.map((r) => r.cuenta).filter((v) => v !== null && v !== "")
-      );
+      const uniq = new Set(FILTERED.map((r) => r.cuenta));
       kProcesos.textContent = String(uniq.size);
     }
   }
 
   // Eventos
-  if (btnAplicar) btnAplicar.addEventListener("click", applyFilters);
-
-  if (btnLimpiar) {
+  btnAplicar && btnAplicar.addEventListener("click", applyFilters);
+  btnLimpiar &&
     btnLimpiar.addEventListener("click", () => {
       if (selPlataforma) selPlataforma.value = "";
       if (selOperador) selOperador.value = "";
@@ -457,34 +478,28 @@
       setDatesFromSlider();
       applyFilters();
     });
-  }
-
-  if (btnClear) {
+  btnClear &&
     btnClear.addEventListener("click", (e) => {
       e.preventDefault();
       if (inpBuscar) inpBuscar.value = "";
-      applyFilters(); // al limpiar el texto, recargamos resultados
     });
-  }
 
-  if (inpBuscar) {
+  inpBuscar &&
     inpBuscar.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         applyFilters();
       }
     });
-  }
 
-  if (prevBtn) {
+  prevBtn &&
     prevBtn.addEventListener("click", () => {
       if (CUR_PAGE > 1) {
         CUR_PAGE--;
         render();
       }
     });
-  }
-  if (nextBtn) {
+  nextBtn &&
     nextBtn.addEventListener("click", () => {
       const pages = Math.max(1, Math.ceil(FILTERED.length / PAGE_SIZE));
       if (CUR_PAGE < pages) {
@@ -492,7 +507,6 @@
         render();
       }
     });
-  }
 
   // Render inicial
   applyFilters();

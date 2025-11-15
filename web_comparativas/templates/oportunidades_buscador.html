@@ -8,8 +8,10 @@
   .btn{background:var(--sa-azul-btn,#5274ce);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn-link{background:transparent;border:0;color:var(--sa-azul-btn,#5274ce);cursor:pointer}
+  .btn-link:disabled{opacity:.5;cursor:not-allowed}
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .field input,.field select{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;background:#fff}
+  .field input:disabled,.field select:disabled{background:#f9fafb;color:#9ca3af}
   .badges>span{display:inline-block;background:#eef2f7;border:1px solid #e5e7eb;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:6px}
 
   /* Barra superior: Procesos + filtros compactos */
@@ -24,8 +26,10 @@
   .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 220px;gap:10px}
   .searchbox{position:relative}
   .searchbox input{width:100%;padding:10px 38px 10px 36px;border:1px solid #e5e7eb;border-radius:12px}
+  .searchbox input:disabled{background:#f9fafb;color:#9ca3af}
   .searchbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.55}
   .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;opacity:.65}
+  .searchbox .clear:disabled{cursor:not-allowed;opacity:.3}
 
   /* Zona drag-and-drop (opcional, manejado por tu JS) */
   .dropzone{border:1px dashed #c7d2fe;background:#f8fafc;border-radius:12px;padding:10px}
@@ -43,6 +47,7 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer}
   .chip.is-on{background:#e0e7ff;border-color:#c7d2fe;color:#1f3a8a}
+  .chips.disabled .chip{cursor:not-allowed;opacity:.5}
 
   /* Tabla */
   .table-wrap{overflow:auto;max-height:55vh;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px}
@@ -69,6 +74,7 @@
 {% endblock %}
 
 {% block content %}
+{% set has_file = opp.has_file %}
 <div class="container-xxl py-4">
   <h1 class="mb-3">Oportunidades · Buscador</h1>
   <p class="muted">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
@@ -78,6 +84,11 @@
     {% if toast %}
     <div style="border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
       ✅ {{ toast }}
+    </div>
+    {% endif %}
+    {% if not has_file %}
+    <div style="border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
+      ℹ️ Aún no hay archivo maestro cargado. Subí un Excel para habilitar filtros y resultados.
     </div>
     {% endif %}
   </div>
@@ -96,7 +107,7 @@
       </div>
 
       <div class="badges" aria-label="Estado del maestro">
-        {% if opp.has_file %}
+        {% if has_file %}
           <span>Última act.: {{ opp.last_updated_str }}</span>
           {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
         {% else %}
@@ -104,7 +115,7 @@
         {% endif %}
       </div>
       <!-- Gancho para exportar/descargar (tu JS puede habilitarlo) -->
-      <button class="btn-link" type="button" id="btnDownloadCurrent" title="Descargar maestro actual" hidden>Descargar actual</button>
+      <button class="btn-link" type="button" id="btnDownloadCurrent" title="Descargar maestro actual" {% if not has_file %}disabled hidden{% endif %}>Descargar actual</button>
     </form>
     <p class="muted" style="margin:8px 0 0;">Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
   </div>
@@ -125,14 +136,14 @@
           <div class="filter-card" aria-labelledby="lblFecha">
             <h5 id="lblFecha">Fecha</h5>
             <div class="stack" style="justify-content:space-between">
-              <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
-              <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
+              <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde" {% if not has_file %}disabled{% endif %}>
+              <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta" {% if not has_file %}disabled{% endif %}>
             </div>
             <div class="range-wrap" style="margin-top:6px" aria-hidden="false" aria-label="Rango de fechas (slider)">
               <div class="range-track"></div>
               <div class="range-fill" id="dateFill"></div>
-              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
-              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
+              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior" {% if not has_file %}disabled{% endif %}>
+              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior" {% if not has_file %}disabled{% endif %}>
             </div>
             <div class="stack" style="justify-content:space-between;margin-top:6px">
               <span class="pill" id="lblFrom">—</span>
@@ -143,7 +154,7 @@
           <div class="filter-card">
             <h5>Plataforma</h5>
             <div class="field">
-              <select id="fPlataforma" aria-label="Filtrar por plataforma">
+              <select id="fPlataforma" aria-label="Filtrar por plataforma" {% if not has_file %}disabled{% endif %}>
                 <option value="">Todas</option>
               </select>
             </div>
@@ -152,7 +163,7 @@
           <div class="filter-card">
             <h5>Operador</h5>
             <div class="field">
-              <select id="fOperador" aria-label="Filtrar por operador">
+              <select id="fOperador" aria-label="Filtrar por operador" {% if not has_file %}disabled{% endif %}>
                 <option value="">Todos</option>
               </select>
             </div>
@@ -161,7 +172,7 @@
           <div class="filter-card">
             <h5>Cuenta</h5>
             <div class="field">
-              <select id="fCuenta" aria-label="Filtrar por cuenta">
+              <select id="fCuenta" aria-label="Filtrar por cuenta" {% if not has_file %}disabled{% endif %}>
                 <option value="">Todas</option>
               </select>
             </div>
@@ -170,7 +181,7 @@
           <div class="filter-card">
             <h5>Repartición</h5>
             <div class="field">
-              <select id="fReparticion" aria-label="Filtrar por repartición">
+              <select id="fReparticion" aria-label="Filtrar por repartición" {% if not has_file %}disabled{% endif %}>
                 <option value="">Todas</option>
               </select>
             </div>
@@ -179,19 +190,19 @@
           <!-- Switches -->
           <div class="filter-card" style="grid-column:1 / span 2">
             <h5>Repartición: PAMI u Otras</h5>
-            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
-              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
-              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
+            <div class="chips {% if not has_file %}disabled{% endif %}" id="swPAMI" role="group" aria-label="Filtro PAMI">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true" {% if not has_file %}disabled{% endif %}>Todos</button>
+              <button type="button" class="chip" data-val="pami" aria-pressed="false" {% if not has_file %}disabled{% endif %}>PAMI</button>
+              <button type="button" class="chip" data-val="otras" aria-pressed="false" {% if not has_file %}disabled{% endif %}>Otras</button>
             </div>
           </div>
 
           <div class="filter-card" style="grid-column:3 / span 2">
             <h5>Estado</h5>
-            <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
-              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
-              <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
+            <div class="chips {% if not has_file %}disabled{% endif %}" id="swEstado" role="group" aria-label="Filtro estado">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true" {% if not has_file %}disabled{% endif %}>Todos</button>
+              <button type="button" class="chip" data-val="emergencia" aria-pressed="false" {% if not has_file %}disabled{% endif %}>Emergencia</button>
+              <button type="button" class="chip" data-val="regular" aria-pressed="false" {% if not has_file %}disabled{% endif %}>Regular</button>
             </div>
           </div>
         </div>
@@ -200,13 +211,13 @@
         <div class="filter-card search-card" style="margin-top:10px">
           <div class="searchbox">
             <span class="ico" aria-hidden="true">🔎</span>
-            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
-            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
+            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto" {% if not has_file %}disabled{% endif %}>
+            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda" {% if not has_file %}disabled{% endif %}>✕</button>
           </div>
           <div class="stack" style="justify-content:flex-end">
-            <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
-            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
+            <button class="btn" id="btnAplicar" type="button" {% if not has_file %}disabled{% endif %}>Aplicar filtros</button>
+            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros" {% if not has_file %}disabled{% endif %}>Limpiar</button>
+            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV" {% if not has_file %}disabled{% endif %}>Exportar CSV</button>
           </div>
         </div>
       </div>
@@ -226,35 +237,40 @@
           </tr>
         </thead>
         <tbody id="oppTBody">
-          {% for row in table_rows %}
-          <tr
-            data-numero="{{ row.get('Número','')|e }}"
-            data-reparticion="{{ row.get('Repartición','')|e }}"
-            data-objeto="{{ row.get('Objeto','')|e }}"
-            data-apertura="{{ row.get('Apertura','')|e }}"
-            data-tipo="{{ row.get('Tipo','')|e }}"
-            data-plataforma="{{ row.get('Plataforma','')|e }}"
-            data-operador="{{ row.get('Operador','')|e }}"
-            data-cuenta="{{ row.get('N° UAPE','')|e }}"
-            data-estado="{{ row.get('Estado','')|e }}"
-          >
-            <td>{{ row.get('Número','') }}</td>
-            <td>{{ row.get('Repartición','') }}</td>
-            <td>{{ row.get('Objeto','') }}</td>
-            <td>{{ row.get('Apertura','') }}</td>
-            <td>{{ row.get('Tipo','') }}</td>
-            <td>
-              {% set link = row.get('Enlace de pliego','') %}
-              {% if link %}
-                <a class="link-ico" href="{{ link }}" target="_blank" rel="noopener noreferrer" title="Abrir pliego en nueva pestaña">🔗</a>
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-          {% if table_rows|length == 0 %}
-            <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
+          {% if has_file and table_rows and table_rows|length > 0 %}
+            {% for row in table_rows %}
+            <tr
+              data-numero="{{ row.get('Número','')|e }}"
+              data-reparticion="{{ row.get('Repartición','')|e }}"
+              data-objeto="{{ row.get('Objeto','')|e }}"
+              data-apertura="{{ row.get('Apertura','')|e }}"
+              data-tipo="{{ row.get('Tipo','')|e }}"
+              data-plataforma="{{ row.get('Plataforma','')|e }}"
+              data-operador="{{ row.get('Operador','')|e }}"
+              data-cuenta="{{ row.get('N° UAPE','')|e }}"
+              data-estado="{{ row.get('Estado','')|e }}"
+            >
+              <td>{{ row.get('Número','') }}</td>
+              <td>{{ row.get('Repartición','') }}</td>
+              <td>{{ row.get('Objeto','') }}</td>
+              <td>{{ row.get('Apertura','') }}</td>
+              <td>{{ row.get('Tipo','') }}</td>
+              <td>
+                {% set link = row.get('Enlace de pliego','') %}
+                {% if link %}
+                  <a class="link-ico" href="{{ link }}" target="_blank" rel="noopener noreferrer" title="Abrir pliego en nueva pestaña">🔗</a>
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            {% if not has_file %}
+              <tr><td class="muted" colspan="6">Primero cargá un archivo maestro para ver oportunidades.</td></tr>
+            {% else %}
+              <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
+            {% endif %}
           {% endif %}
         </tbody>
       </table>
@@ -266,9 +282,9 @@
         Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
       </div>
       <div class="stack">
-        <button class="btn" id="prevPage" type="button" disabled>Anterior</button>
+        <button class="btn" id="prevPage" type="button" {% if not has_file %}disabled{% endif %}>Anterior</button>
         <span class="muted">Página <span id="curPage">1</span> / <span id="maxPage">1</span></span>
-        <button class="btn" id="nextPage" type="button" disabled>Siguiente</button>
+        <button class="btn" id="nextPage" type="button" {% if not has_file %}disabled{% endif %}>Siguiente</button>
       </div>
     </div>
   </div>

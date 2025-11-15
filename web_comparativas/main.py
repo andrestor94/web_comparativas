@@ -1639,6 +1639,165 @@ def oportunidades_buscador(
     )
     return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
 
+@app.get("/api/oportunidades/buscador", response_class=JSONResponse)
+def api_oportunidades_buscador(
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=10, le=200),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    API JSON para el Buscador de Oportunidades.
+    Devuelve KPIs + filas paginadas en formato lista de dicts.
+    """
+    def _san_str(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v or "")
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    opp_info = _oportunidades_status()
+
+    df_all = _opp_load_df()
+    if df_all is None or df_all.empty:
+        return JSONResponse(
+            {
+                "ok": True,
+                "has_file": False,
+                "opp": opp_info,
+                "kpis": {
+                    "total_rows": 0,
+                    "buyers": 0,
+                    "platforms": 0,
+                    "provinces": 0,
+                    "budget_total": 0.0,
+                    "date_min": "",
+                    "date_max": "",
+                },
+                "filters": {
+                    "q": q or "",
+                    "buyer": buyer or "",
+                    "platform": platform or "",
+                    "province": province or "",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                },
+                "total": 0,
+                "page": 1,
+                "pages": 1,
+                "page_size": page_size,
+                "from": 0,
+                "to": 0,
+                "rows": [],
+            }
+        )
+
+    # aplicar filtros
+    df_filtered = _opp_apply_filters(df_all, q, buyer, platform, province, date_from, date_to)
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas candidatas (igual que en la vista HTML)
+    proc_col   = _opp_pick(df_filtered, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
+    fecha_col  = _opp_pick(df_filtered, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    buyer_col  = _opp_pick(df_filtered, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    prov_col   = _opp_pick(df_filtered, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    platf_col  = _opp_pick(df_filtered, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
+    desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
+
+    total = int(len(df_filtered))
+    pages = max(1, int(np.ceil(total / page_size)))
+    if page > pages:
+        page = pages
+    start = (page - 1) * page_size
+    end = min(total, start + page_size)
+    df_page = df_filtered.iloc[start:end].copy()
+
+    rows_json = []
+
+    for _, rec in df_page.iterrows():
+        # Proceso
+        v_proc = _san_str(rec.get(proc_col, "")) if proc_col else ""
+
+        # Fecha -> siempre dd/mm/YYYY si se puede
+        raw_fecha = rec.get(fecha_col, "") if fecha_col else ""
+        d = _opp_parse_date(raw_fecha)
+        v_fecha = d.strftime("%d/%m/%Y") if d else _san_str(raw_fecha)
+
+        # Comprador
+        v_buyer = _san_str(rec.get(buyer_col, "")) if buyer_col else ""
+
+        # Provincia / Municipio
+        v_prov = _san_str(rec.get(prov_col, "")) if prov_col else ""
+
+        # Plataforma
+        v_platf = _san_str(rec.get(platf_col, "")) if platf_col else ""
+
+        # Presupuesto: numérico + string formateado
+        if presu_col:
+            raw_presu = rec.get(presu_col, "")
+            presu_num = _opp_parse_number(raw_presu)
+            presu_fmt = (
+                f"$ {presu_num:,.2f}"
+                .replace(",", "X")
+                .replace(".", ",")
+                .replace("X", ".")
+            )
+        else:
+            presu_num = 0.0
+            presu_fmt = ""
+
+        # Descripción / Objeto
+        v_desc = _san_str(rec.get(desc_col, "")) if desc_col else ""
+
+        rows_json.append(
+            {
+                "proceso": v_proc,
+                "fecha": v_fecha,
+                "comprador": v_buyer,
+                "provincia": v_prov,
+                "plataforma": v_platf,
+                "presupuesto": presu_num,
+                "presupuesto_fmt": presu_fmt,
+                "descripcion": v_desc,
+            }
+        )
+
+    showing_from = 0 if total == 0 else (start + 1)
+    showing_to = end
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "has_file": True,
+            "opp": opp_info,
+            "kpis": kpis,
+            "filters": {
+                "q": q or "",
+                "buyer": buyer or "",
+                "platform": platform or "",
+                "province": province or "",
+                "date_from": date_from or "",
+                "date_to": date_to or "",
+            },
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "page_size": page_size,
+            "from": showing_from,
+            "to": showing_to,
+            "rows": rows_json,
+        }
+    )
+
 @app.post("/oportunidades/buscador/upload")
 async def oportunidades_buscador_upload(
     request: Request,
