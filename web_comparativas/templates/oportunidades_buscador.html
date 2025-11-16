@@ -9,7 +9,7 @@
     background:var(--sa-blanco,#fff);
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:14px;
-    padding:14px 18px;
+    padding:16px 18px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
   }
   .btn{
@@ -17,7 +17,7 @@
     color:#fff;
     border:0;
     border-radius:10px;
-    padding:7px 12px;
+    padding:8px 12px;
     cursor:pointer;
     font-size:14px;
   }
@@ -33,11 +33,10 @@
   .field input,.field select{
     width:100%;
     border:1px solid #e5e7eb;
-    border-radius:8px;
-    padding:6px 10px;
+    border-radius:10px;
+    padding:8px 10px;
     background:#fff;
     font-size:14px;
-    height:36px;
   }
   .badges>span{
     display:inline-block;
@@ -49,8 +48,8 @@
     margin-left:6px;
   }
 
-  /* --------- Upload limpio --------- */
-  .upload-card{display:flex;flex-direction:column;gap:8px}
+  /* --------- Upload (como antes) --------- */
+  .upload-card{display:flex;flex-direction:column;gap:10px}
   .upload-header{
     display:flex;
     justify-content:space-between;
@@ -61,71 +60,41 @@
   .upload-sub{margin:2px 0 0;font-size:13px}
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
-  .upload-grid{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:12px;
-  }
-  .upload-file{
-    display:flex;
-    align-items:center;
-    gap:10px;
-  }
-  .upload-file label{
-    white-space:nowrap;
-  }
-  .upload-file .field{
-    width:auto;
-  }
-  .upload-file .field input[type="file"]{
-    width:auto;
-    max-width:260px;
-  }
-  .upload-actions{
-    display:flex;
-    align-items:center;
-    justify-content:flex-end;
-    gap:10px;
-  }
   .upload-footer{margin:4px 0 0;font-size:12px}
 
-  /* Barra superior: Procesos + filtros compactos */
-  .topbar{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) 150px;
-    gap:10px;
-    align-items:flex-start;
+  /* Usamos el layout original tipo "stack" para el formulario */
+  .upload-form.stack{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
   }
-  .mini-kpi{
+  .upload-form .dropzone{
+    border:1px dashed #c7d2fe;
     background:#f8fafc;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:6px 10px;
+    padding:8px 12px;
+    font-size:13px;
   }
-  .mini-kpi h4{
-    margin:0 0 2px;
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:.04em;
-    color:#4b5563;
-  }
-  .mini-kpi .v{
-    font-weight:800;
-    font-size:20px;
-    color:var(--sa-text,#064066);
+
+  /* Barra superior: filtros + KPI */
+  .topbar{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
   }
 
   .filters-grid{
     display:grid;
-    grid-template-columns:1.4fr repeat(4,1fr);
+    grid-template-columns:repeat(5,minmax(0,1fr));
     gap:8px;
   }
   .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:8px 8px;
+    padding:8px 10px;
+    min-height:72px;
   }
   .filter-card h5{
     font-size:12px;
@@ -133,11 +102,29 @@
     color:#4b5563;
   }
 
+  /* KPI como una tarjeta más dentro de la grilla, debajo de Repartición */
+  .mini-kpi-card{
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+  }
+  .mini-kpi-card h5{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin:0 0 2px;
+    color:#4b5563;
+  }
+  .mini-kpi-card .kpi-v{
+    font-weight:800;
+    font-size:20px;
+    color:var(--sa-text,#064066);
+  }
+
   .search-card{
-    grid-column:1/-1;
     display:grid;
     grid-template-columns:minmax(0,3fr) auto;
-    gap:8px;
+    gap:10px;
     align-items:center;
   }
 
@@ -145,8 +132,8 @@
   .searchbox{position:relative}
   .searchbox input{
     width:100%;
-    height:40px;
-    padding:9px 38px 9px 34px;
+    height:42px;
+    padding:10px 38px 10px 34px;
     border:1px solid #e5e7eb;
     border-radius:12px;
     font-size:14px;
@@ -170,17 +157,12 @@
     font-size:14px;
   }
 
-  /* (Dropzone se mantiene solo para JS pero oculto) */
-  .dropzone{
-    display:none;
-  }
-
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:26px}
+  .range-wrap{position:relative;height:32px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:6px;
+    top:10px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -189,7 +171,7 @@
   .range-wrap input[type=range]::-webkit-slider-thumb{
     pointer-events:auto;
     -webkit-appearance:none;
-    height:12px;width:12px;
+    height:14px;width:14px;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
     border:2px solid #fff;
@@ -197,7 +179,7 @@
   }
   .range-wrap input[type=range]::-moz-range-thumb{
     pointer-events:auto;
-    height:12px;width:12px;
+    height:14px;width:14px;
     border:0;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
@@ -205,15 +187,15 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:12px;
-    height:3px;
+    top:16px;
+    height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:12px;
-    height:3px;
+    top:16px;
+    height:4px;
     background:#c7d2fe;
     border-radius:999px;
   }
@@ -224,7 +206,7 @@
     border:1px solid #e5e7eb;
     background:#fff;
     border-radius:999px;
-    padding:5px 9px;
+    padding:6px 10px;
     font-size:12px;
     cursor:pointer;
   }
@@ -234,7 +216,7 @@
     color:#1f3a8a;
   }
 
-  /* Tabla */
+  /* Tabla: filas del mismo alto + texto truncado + tooltip */
   .table-wrap{
     overflow:auto;
     max-height:55vh;
@@ -245,12 +227,15 @@
     width:100%;
     border-collapse:collapse;
     font-size:13px;
-    table-layout:fixed;
+    table-layout:fixed; /* necesario para ellipsis */
   }
   .table th,.table td{
     border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);
-    padding:6px 8px;
+    padding:8px 10px;
     vertical-align:middle;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
   .table th{
     background:#f8fafc;
@@ -259,39 +244,28 @@
     z-index:1;
     text-align:left;
   }
-
-  /* Filas con altura uniforme */
   .table tbody tr{
-    height:44px;
+    height:44px; /* todas las filas del mismo alto */
   }
 
-  /* Texto truncado con tooltip */
-  .cell-text{
-    display:block;
-    max-width:100%;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
-
-  /* Anchos columnas */
+  /* Anchos de columnas: Número, Tipo y Enlace más angostas */
   .table th:nth-child(1), .table td:nth-child(1){
     width:9ch;
   }
   .table th:nth-child(2), .table td:nth-child(2){
-    width:25%;
+    width:26%;
   }
   .table th:nth-child(3), .table td:nth-child(3){
-    width:25%;
+    width:30%;
   }
   .table th:nth-child(4), .table td:nth-child(4){
     width:15ch;
   }
   .table th:nth-child(5), .table td:nth-child(5){
-    width:11ch;
+    width:12ch;
   }
   .table th:nth-child(6), .table td:nth-child(6){
-    width:7ch;
+    width:9ch;
     text-align:center;
   }
 
@@ -326,23 +300,16 @@
   .loading.show{display:flex}
 
   @media (max-width:1200px){
-    .topbar{grid-template-columns:1fr}
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
-    .upload-grid{
-      flex-direction:column;
-      align-items:flex-start;
-    }
-    .upload-actions{
-      justify-content:flex-start;
-      width:100%;
-    }
+    .upload-header{flex-direction:column;align-items:flex-start}
+    .upload-meta{text-align:left}
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-xxl py-3">
+<div class="container-xxl py-4">
   <h1 class="mb-1">Buscador</h1>
   <p class="muted small">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
 
@@ -355,7 +322,7 @@
     {% endif %}
   </div>
 
-  <!-- Upload -->
+  <!-- Upload (versión anterior restaurada) -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
       <div>
@@ -378,39 +345,34 @@
     </div>
 
     <form
-      class="upload-grid"
+      class="upload-form stack"
       action="/oportunidades/buscador/upload"
       method="post"
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
-      <!-- Dropzone (se mantiene para JS, pero oculto por CSS) -->
-      <div class="dropzone" id="oppDrop" aria-hidden="true"></div>
-
-      <div class="upload-file">
-        <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
-        <div class="field">
-          <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
-        </div>
+      <div class="dropzone" id="oppDrop" aria-hidden="true">
+        <small class="muted small">Podés arrastrar y soltar el Excel aquí</small>
       </div>
 
-      <div class="upload-actions">
-        <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
+      <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
+      <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
 
-        <div class="loading" id="upLoading" role="status" aria-live="polite">
-          <span>Procesando…</span>
-        </div>
+      <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
 
-        <button
-          class="btn-link"
-          type="button"
-          id="btnDownloadCurrent"
-          title="Descargar maestro actual"
-          hidden
-        >
-          Descargar actual
-        </button>
+      <div class="loading" id="upLoading" role="status" aria-live="polite">
+        <span>Procesando…</span>
       </div>
+
+      <button
+        class="btn-link"
+        type="button"
+        id="btnDownloadCurrent"
+        title="Descargar maestro actual"
+        hidden
+      >
+        Descargar actual
+      </button>
     </form>
 
     <p class="muted upload-footer">
@@ -420,104 +382,102 @@
 
   <!-- Dashboard -->
   <div class="card" style="border-color:#c7d2fe;">
-    <div class="topbar mb-2">
-      <!-- Filtros -->
-      <div>
-        <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
-          <!-- Fecha -->
-          <div class="filter-card" aria-labelledby="lblFecha">
-            <h5 id="lblFecha">Fecha</h5>
-            <div class="stack" style="justify-content:space-between">
-              <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
-              <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
-            </div>
-            <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
-              <div class="range-track"></div>
-              <div class="range-fill" id="dateFill"></div>
-              <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
-              <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
-            </div>
-            <div class="stack" style="justify-content:space-between;margin-top:4px">
-              <span class="pill" id="lblFrom">—</span>
-              <span class="pill" id="lblTo">—</span>
-            </div>
+    <div class="topbar mb-3">
+      <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
+        <!-- Fecha -->
+        <div class="filter-card" aria-labelledby="lblFecha">
+          <h5 id="lblFecha">Fecha</h5>
+          <div class="stack" style="justify-content:space-between">
+            <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
+            <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
           </div>
-
-          <div class="filter-card">
-            <h5>Plataforma</h5>
-            <div class="field">
-              <select id="fPlataforma" aria-label="Filtrar por plataforma">
-                <option value="">Todas</option>
-              </select>
-            </div>
+          <div class="range-wrap" style="margin-top:6px" aria-hidden="false" aria-label="Rango de fechas (slider)">
+            <div class="range-track"></div>
+            <div class="range-fill" id="dateFill"></div>
+            <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
+            <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
-
-          <div class="filter-card">
-            <h5>Operador</h5>
-            <div class="field">
-              <select id="fOperador" aria-label="Filtrar por operador">
-                <option value="">Todos</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="filter-card">
-            <h5>Cuenta</h5>
-            <div class="field">
-              <select id="fCuenta" aria-label="Filtrar por cuenta">
-                <option value="">Todas</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="filter-card">
-            <h5>Repartición</h5>
-            <div class="field">
-              <select id="fReparticion" aria-label="Filtrar por repartición">
-                <option value="">Todas</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Switches -->
-          <div class="filter-card" style="grid-column:1 / span 2">
-            <h5>Repartición: PAMI u Otras</h5>
-            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
-              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
-              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
-            </div>
-          </div>
-
-          <div class="filter-card" style="grid-column:3 / span 2">
-            <h5>Estado</h5>
-            <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
-              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
-              <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
-            </div>
+          <div class="stack" style="justify-content:space-between;margin-top:6px">
+            <span class="pill" id="lblFrom">—</span>
+            <span class="pill" id="lblTo">—</span>
           </div>
         </div>
 
-        <!-- Buscar -->
-        <div class="filter-card search-card" style="margin-top:8px">
-          <div class="searchbox">
-            <span class="ico" aria-hidden="true">🔎</span>
-            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
-            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
+        <div class="filter-card">
+          <h5>Plataforma</h5>
+          <div class="field">
+            <select id="fPlataforma" aria-label="Filtrar por plataforma">
+              <option value="">Todas</option>
+            </select>
           </div>
-          <div class="stack" style="justify-content:flex-end">
-            <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
-            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
+        </div>
+
+        <div class="filter-card">
+          <h5>Operador</h5>
+          <div class="field">
+            <select id="fOperador" aria-label="Filtrar por operador">
+              <option value="">Todos</option>
+            </select>
           </div>
+        </div>
+
+        <div class="filter-card">
+          <h5>Cuenta</h5>
+          <div class="field">
+            <select id="fCuenta" aria-label="Filtrar por cuenta">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filter-card">
+          <h5>Repartición</h5>
+          <div class="field">
+            <select id="fReparticion" aria-label="Filtrar por repartición">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- PAMI -->
+        <div class="filter-card" style="grid-column:1 / span 2">
+          <h5>Repartición: PAMI u Otras</h5>
+          <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
+            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+            <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
+            <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
+          </div>
+        </div>
+
+        <!-- Estado -->
+        <div class="filter-card" style="grid-column:3 / span 2">
+          <h5>Estado</h5>
+          <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
+            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+            <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
+            <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
+          </div>
+        </div>
+
+        <!-- KPI Procesos debajo de Repartición (misma columna, segunda fila) -->
+        <div class="filter-card mini-kpi-card" style="grid-column:5 / span 1;">
+          <h5>Procesos</h5>
+          <div class="kpi-v" id="kProcesos">0</div>
         </div>
       </div>
 
-      <!-- KPI Procesos -->
-      <div class="mini-kpi" role="status" aria-live="polite" aria-label="Cantidad de procesos filtrados">
-        <h4>Procesos</h4>
-        <div class="v" id="kProcesos">0</div>
+      <!-- Buscar -->
+      <div class="filter-card search-card" style="margin-top:8px">
+        <div class="searchbox">
+          <span class="ico" aria-hidden="true">🔎</span>
+          <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
+          <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
+        </div>
+        <div class="stack" style="justify-content:flex-end">
+          <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
+          <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
+          <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
+        </div>
       </div>
     </div>
 
@@ -613,12 +573,12 @@
             data-uape="{{ uape|e }}"
             data-estado="{{ estado_raw|e }}"
           >
-            <td><span class="cell-text" title="{{ numero|e }}">{{ numero }}</span></td>
-            <td><span class="cell-text" title="{{ reparticion|e }}">{{ reparticion }}</span></td>
-            <td><span class="cell-text" title="{{ objeto|e }}">{{ objeto }}</span></td>
-            <td><span class="cell-text" title="{{ apertura_txt|e }}">{{ apertura_txt }}</span></td>
-            <td><span class="cell-text" title="{{ tipo|e }}">{{ tipo }}</span></td>
-            <td>
+            <td title="{{ numero }}">{{ numero }}</td>
+            <td title="{{ reparticion }}">{{ reparticion }}</td>
+            <td title="{{ objeto }}">{{ objeto }}</td>
+            <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
+            <td title="{{ tipo }}">{{ tipo }}</td>
+            <td title="{{ enlace }}">
               {% if enlace %}
                 <a class="link-ico"
                    href="{{ enlace }}"
