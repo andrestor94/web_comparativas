@@ -225,11 +225,111 @@
           </tr>
         </thead>
         <tbody id="oppTBody">
-          <!-- El JS reemplaza este contenido con los datos reales -->
-          {% if table_rows and table_rows|length %}
-            <tr><td class="muted" colspan="6">Aplicá filtros para ver los resultados.</td></tr>
-          {% else %}
-            <tr><td class="muted" colspan="6">Sin datos. Subí un archivo maestro.</td></tr>
+          {% for row in table_rows %}
+          {# =========
+             Normalizamos nombres de columnas para cubrir:
+             - "Número", "numero", "NUMERO", "número", "Nro", etc.
+             - "Repartición", "Reparticion", "reparticion", etc.
+             - "Objeto", "objeto"
+             - "Apertura", "Fecha apertura", etc.
+             - "Tipo", "tipo"
+             - "Plataforma", "plataforma"
+             - "Operador", "operador"
+             - "N° UAPE", "Cuenta", "UAPE", etc.
+             - "Estado", "estado"
+             - "Enlace de pliego", "Enlace", "URL", etc.
+           ========= #}
+          {% set numero =
+            row.get('Número')
+            or row.get('numero')
+            or row.get('NUMERO')
+            or row.get('número')
+            or row.get('Numero')
+            or row.get('Nro')
+            or row.get('nro')
+            or '' %}
+          {% set reparticion =
+            row.get('Repartición')
+            or row.get('Reparticion')
+            or row.get('reparticion')
+            or row.get('REPARTICION')
+            or '' %}
+          {% set objeto =
+            row.get('Objeto')
+            or row.get('objeto')
+            or row.get('OBJETO')
+            or '' %}
+          {% set apertura =
+            row.get('Apertura')
+            or row.get('apertura')
+            or row.get('APERTURA')
+            or row.get('Fecha apertura')
+            or row.get('Fecha Apertura')
+            or '' %}
+          {% set tipo =
+            row.get('Tipo')
+            or row.get('tipo')
+            or row.get('TIPO')
+            or '' %}
+          {% set plataforma =
+            row.get('Plataforma')
+            or row.get('plataforma')
+            or row.get('PLATAFORMA')
+            or '' %}
+          {% set operador =
+            row.get('Operador')
+            or row.get('operador')
+            or row.get('OPERADOR')
+            or '' %}
+          {% set cuenta =
+            row.get('N° UAPE')
+            or row.get('Nro UAPE')
+            or row.get('Cuenta')
+            or row.get('cuenta')
+            or row.get('CUENTA')
+            or row.get('uape')
+            or row.get('UAPE')
+            or '' %}
+          {% set estado =
+            row.get('Estado')
+            or row.get('estado')
+            or row.get('ESTADO')
+            or '' %}
+          {% set enlace =
+            row.get('Enlace de pliego')
+            or row.get('Enlace')
+            or row.get('enlace')
+            or row.get('URL')
+            or row.get('url')
+            or '' %}
+
+          <tr
+            data-numero="{{ numero|e }}"
+            data-reparticion="{{ reparticion|e }}"
+            data-objeto="{{ objeto|e }}"
+            data-apertura="{{ apertura|e }}"
+            data-tipo="{{ tipo|e }}"
+            data-plataforma="{{ plataforma|e }}"
+            data-operador="{{ operador|e }}"
+            data-cuenta="{{ cuenta|e }}"
+            data-estado="{{ estado|e }}"
+          >
+            <td>{{ numero }}</td>
+            <td>{{ reparticion }}</td>
+            <td>{{ objeto }}</td>
+            <td>{{ apertura }}</td>
+            <td>{{ tipo }}</td>
+            <td>
+              {% if enlace %}
+                <a class="link-ico" href="{{ enlace }}" target="_blank" rel="noopener noreferrer" title="Abrir pliego en nueva pestaña">🔗</a>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% if table_rows|length == 0 %}
+            <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
           {% endif %}
         </tbody>
       </table>
@@ -291,9 +391,6 @@
       maxPage: 'maxPage'
     }
   };
-
-  // 👉 AQUÍ inyectamos los datos que vienen del backend
-  window.OPP_DATA = {{ (table_rows or []) | tojson | safe }};
 </script>
 <script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}" defer></script>
 {% endblock %}
