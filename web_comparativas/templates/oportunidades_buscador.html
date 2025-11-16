@@ -34,9 +34,10 @@
     width:100%;
     border:1px solid #e5e7eb;
     border-radius:10px;
-    padding:8px 10px;
+    padding:6px 8px;              /* más compacto */
     background:#fff;
-    font-size:14px;
+    font-size:13px;
+    height:34px;
   }
   .badges>span{
     display:inline-block;
@@ -48,33 +49,35 @@
     margin-left:6px;
   }
 
-  /* --------- Upload (como antes) --------- */
+  /* --------- Upload --------- */
   .upload-card{display:flex;flex-direction:column;gap:10px}
   .upload-header{
     display:flex;
     justify-content:space-between;
-    align-items:flex-start;
+    align-items:center;
     gap:16px;
   }
   .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
-  .upload-sub{margin:2px 0 0;font-size:13px}
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
-  .upload-footer{margin:4px 0 0;font-size:12px}
-
-  /* Usamos el layout original tipo "stack" para el formulario */
-  .upload-form.stack{
+  .upload-grid{
+    display:grid;
+    grid-template-columns:minmax(0,2.5fr) minmax(0,2.5fr) auto;
+    gap:12px;
+    align-items:center;
+  }
+  .upload-drop .dropzone{
+    height:100%;
     display:flex;
     align-items:center;
-    gap:12px;
-    flex-wrap:wrap;
+    justify-content:flex-start;
   }
-  .upload-form .dropzone{
-    border:1px dashed #c7d2fe;
-    background:#f8fafc;
-    border-radius:12px;
-    padding:8px 12px;
-    font-size:13px;
+  .upload-file .field{width:100%}
+  .upload-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
   }
 
   /* Barra superior: filtros + KPI */
@@ -83,7 +86,6 @@
     flex-direction:column;
     gap:8px;
   }
-
   .filters-grid{
     display:grid;
     grid-template-columns:repeat(5,minmax(0,1fr));
@@ -93,29 +95,28 @@
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:8px 10px;
-    min-height:72px;
+    padding:6px 8px;              /* altura reducida */
   }
   .filter-card h5{
-    font-size:12px;
+    font-size:11px;
     margin:0 0 4px;
     color:#4b5563;
   }
 
-  /* KPI como una tarjeta más dentro de la grilla, debajo de Repartición */
-  .mini-kpi-card{
-    display:flex;
-    flex-direction:column;
-    justify-content:space-between;
+  .mini-kpi{
+    background:#f8fafc;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border-radius:12px;
+    padding:6px 8px;
   }
-  .mini-kpi-card h5{
+  .mini-kpi h4{
+    margin:0 0 2px;
     font-size:11px;
     text-transform:uppercase;
     letter-spacing:.04em;
-    margin:0 0 2px;
     color:#4b5563;
   }
-  .mini-kpi-card .kpi-v{
+  .mini-kpi .v{
     font-weight:800;
     font-size:20px;
     color:var(--sa-text,#064066);
@@ -128,7 +129,7 @@
     align-items:center;
   }
 
-  /* Barra de búsqueda: íconos centrados */
+  /* Barra de búsqueda */
   .searchbox{position:relative}
   .searchbox input{
     width:100%;
@@ -157,12 +158,22 @@
     font-size:14px;
   }
 
+  /* Zona drag-and-drop */
+  .dropzone{
+    border:1px dashed #c7d2fe;
+    background:#f8fafc;
+    border-radius:12px;
+    padding:10px 12px;
+    font-size:13px;
+  }
+  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
+
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:32px}
+  .range-wrap{position:relative;height:30px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:10px;
+    top:8px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -187,20 +198,20 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:16px;
+    top:14px;
     height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:16px;
+    top:14px;
     height:4px;
     background:#c7d2fe;
     border-radius:999px;
   }
 
-  /* Chips (switches) */
+  /* Chips */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{
     border:1px solid #e5e7eb;
@@ -216,7 +227,7 @@
     color:#1f3a8a;
   }
 
-  /* Tabla: filas del mismo alto + texto truncado + tooltip */
+  /* Tabla */
   .table-wrap{
     overflow:auto;
     max-height:55vh;
@@ -227,15 +238,13 @@
     width:100%;
     border-collapse:collapse;
     font-size:13px;
-    table-layout:fixed; /* necesario para ellipsis */
+    table-layout:fixed;
   }
   .table th,.table td{
     border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);
-    padding:8px 10px;
+    padding:6px 10px;
     vertical-align:middle;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    line-height:1.2;
   }
   .table th{
     background:#f8fafc;
@@ -244,29 +253,39 @@
     z-index:1;
     text-align:left;
   }
-  .table tbody tr{
-    height:44px; /* todas las filas del mismo alto */
-  }
 
-  /* Anchos de columnas: Número, Tipo y Enlace más angostas */
+  /* Anchos: Número, Tipo y Enlace más angostos.
+     Repartición y Objeto más anchos, filas de altura fija
+  */
   .table th:nth-child(1), .table td:nth-child(1){
     width:9ch;
+    white-space:nowrap;
   }
   .table th:nth-child(2), .table td:nth-child(2){
-    width:26%;
+    width:24%;
   }
   .table th:nth-child(3), .table td:nth-child(3){
     width:30%;
   }
   .table th:nth-child(4), .table td:nth-child(4){
     width:15ch;
+    white-space:nowrap;
   }
   .table th:nth-child(5), .table td:nth-child(5){
     width:12ch;
+    white-space:nowrap;
   }
   .table th:nth-child(6), .table td:nth-child(6){
-    width:9ch;
-    text-align:center;
+    width:10ch;
+    white-space:nowrap;
+  }
+
+  /* Todas las filas misma altura + tooltip con title */
+  .table td{
+    max-height:38px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
   }
 
   .link-ico{text-decoration:none}
@@ -302,8 +321,9 @@
   @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
-    .upload-header{flex-direction:column;align-items:flex-start}
+    .upload-grid{grid-template-columns:1fr}
     .upload-meta{text-align:left}
+    .upload-actions{justify-content:flex-start}
   }
 </style>
 {% endblock %}
@@ -311,7 +331,6 @@
 {% block content %}
 <div class="container-xxl py-4">
   <h1 class="mb-1">Buscador</h1>
-  <p class="muted small">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
 
   <!-- Región de avisos accesible -->
   <div aria-live="polite" aria-atomic="true">
@@ -322,14 +341,11 @@
     {% endif %}
   </div>
 
-  <!-- Upload (versión anterior restaurada) -->
+  <!-- Upload -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
       <div>
-        <h2 class="upload-title">Archivo maestro</h2>
-        <p class="muted upload-sub">
-          Subí un Excel con las oportunidades. Cada carga <b>reemplaza</b> el archivo anterior.
-        </p>
+        <h2 class="upload-title">Archivo - Reporte de Oportunidades</h2>
       </div>
 
       <div class="upload-meta">
@@ -345,39 +361,43 @@
     </div>
 
     <form
-      class="upload-form stack"
+      class="upload-grid"
       action="/oportunidades/buscador/upload"
       method="post"
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
-      <div class="dropzone" id="oppDrop" aria-hidden="true">
-        <small class="muted small">Podés arrastrar y soltar el Excel aquí</small>
+      <div class="upload-drop">
+        <div class="dropzone" id="oppDrop" aria-hidden="true">
+          <small class="muted small">Podés arrastrar y soltar el Excel aquí</small>
+        </div>
       </div>
 
-      <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
-      <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
-
-      <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
-
-      <div class="loading" id="upLoading" role="status" aria-live="polite">
-        <span>Procesando…</span>
+      <div class="upload-file">
+        <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
+        <div class="field">
+          <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
+        </div>
       </div>
 
-      <button
-        class="btn-link"
-        type="button"
-        id="btnDownloadCurrent"
-        title="Descargar maestro actual"
-        hidden
-      >
-        Descargar actual
-      </button>
+      <div class="upload-actions">
+        <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
+
+        <div class="loading" id="upLoading" role="status" aria-live="polite">
+          <span>Procesando…</span>
+        </div>
+
+        <button
+          class="btn-link"
+          type="button"
+          id="btnDownloadCurrent"
+          title="Descargar maestro actual"
+          hidden
+        >
+          Descargar actual
+        </button>
+      </div>
     </form>
-
-    <p class="muted upload-footer">
-      Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.
-    </p>
   </div>
 
   <!-- Dashboard -->
@@ -391,18 +411,19 @@
             <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
             <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
           </div>
-          <div class="range-wrap" style="margin-top:6px" aria-hidden="false" aria-label="Rango de fechas (slider)">
+          <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
             <div class="range-fill" id="dateFill"></div>
             <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
-          <div class="stack" style="justify-content:space-between;margin-top:6px">
+          <div class="stack" style="justify-content:space-between;margin-top:4px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
           </div>
         </div>
 
+        <!-- Plataforma -->
         <div class="filter-card">
           <h5>Plataforma</h5>
           <div class="field">
@@ -412,6 +433,7 @@
           </div>
         </div>
 
+        <!-- Operador -->
         <div class="filter-card">
           <h5>Operador</h5>
           <div class="field">
@@ -421,6 +443,7 @@
           </div>
         </div>
 
+        <!-- Cuenta -->
         <div class="filter-card">
           <h5>Cuenta</h5>
           <div class="field">
@@ -430,6 +453,7 @@
           </div>
         </div>
 
+        <!-- Repartición -->
         <div class="filter-card">
           <h5>Repartición</h5>
           <div class="field">
@@ -439,7 +463,7 @@
           </div>
         </div>
 
-        <!-- PAMI -->
+        <!-- PAMI / Otras -->
         <div class="filter-card" style="grid-column:1 / span 2">
           <h5>Repartición: PAMI u Otras</h5>
           <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
@@ -459,15 +483,17 @@
           </div>
         </div>
 
-        <!-- KPI Procesos debajo de Repartición (misma columna, segunda fila) -->
-        <div class="filter-card mini-kpi-card" style="grid-column:5 / span 1;">
-          <h5>Procesos</h5>
-          <div class="kpi-v" id="kProcesos">0</div>
+        <!-- KPI Procesos debajo de Repartición -->
+        <div class="mini-kpi" role="status" aria-live="polite"
+             aria-label="Cantidad de procesos filtrados"
+             style="grid-column:5;align-self:stretch;">
+          <h4>Procesos</h4>
+          <div class="v" id="kProcesos">0</div>
         </div>
       </div>
 
       <!-- Buscar -->
-      <div class="filter-card search-card" style="margin-top:8px">
+      <div class="filter-card search-card" style="margin-top:6px">
         <div class="searchbox">
           <span class="ico" aria-hidden="true">🔎</span>
           <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
@@ -578,7 +604,7 @@
             <td title="{{ objeto }}">{{ objeto }}</td>
             <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
             <td title="{{ tipo }}">{{ tipo }}</td>
-            <td title="{{ enlace }}">
+            <td>
               {% if enlace %}
                 <a class="link-ico"
                    href="{{ enlace }}"

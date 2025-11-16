@@ -43,7 +43,6 @@
 
   // Upload UI (spinner, drag & drop)
   const formUpload = (function () {
-    // buscamos el form que contiene el archivo
     const f = $("#oppFile") ? $("#oppFile").closest("form") : null;
     return f || null;
   })();
@@ -142,10 +141,6 @@
 
   // ============================================================
   //  DATASET PRINCIPAL
-  //  1) Si existe window.OPP_DATA (JSON desde el backend),
-  //     lo usamos como fuente.
-  //  2) Si no, tomamos las filas ya renderizadas en el <tbody>
-  //     pero solo aquellas con data-numero (evitando mensajes vacíos).
   // ============================================================
   const originalRows = $$("#oppTBody tr[data-numero]");
   const backendData =
@@ -153,14 +148,8 @@
       ? window.OPP_DATA
       : null;
 
-    const DATA = backendData
+  const DATA = backendData
     ? backendData.map((r) => {
-        // El backend debe mandar estas claves:
-        // numero, reparticion, objeto, apertura (string), tipo,
-        // plataforma, operador,
-        // cuenta => columna "Número" (para el filtro Cuenta)
-        // uape   => columna "N° UAPE" (para contar Procesos),
-        // estado, enlace.
         const aperturaTxt =
           r.apertura_txt || r.apertura || r.Apertura || r.aperturaTxt || "";
         const aperturaDate = parseApertura(aperturaTxt);
@@ -194,7 +183,6 @@
         const tds = tr.children;
         const td = (i) => (tds[i] ? tds[i].textContent.trim() : "");
 
-        // Preferimos data-*, pero si están vacíos, usamos texto de celdas
         const numero = tr.dataset.numero || td(0);
         const reparticion = tr.dataset.reparticion || td(1);
         const objeto = tr.dataset.objeto || td(2);
@@ -204,7 +192,7 @@
         const operador = tr.dataset.operador || "";
         const cuenta = tr.dataset.cuenta || "";
         const uape = tr.dataset.uape || "";
-        const estadoRaw = tr.dataset.estado || ""; // columna "Estado"
+        const estadoRaw = tr.dataset.estado || "";
         const enlaceEl = tr.querySelector("td:nth-child(6) a");
         const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
 
@@ -251,7 +239,7 @@
 
   initSelect(selPlataforma, uniqSorted(DATA.map((d) => d.plataforma)));
   initSelect(selOperador, uniqSorted(DATA.map((d) => d.operador)));
-    initSelect(selCuenta, uniqSorted(DATA.map((d) => d.cuenta)));
+  initSelect(selCuenta, uniqSorted(DATA.map((d) => d.cuenta)));
   initSelect(selReparticion, uniqSorted(DATA.map((d) => d.reparticion)));
 
   // ---- Slider & fechas
@@ -367,17 +355,19 @@
   let FILTERED = DATA;
   let LAST_QUERY = "";
 
+  // Detectar si una repartición es PAMI
   function isPAMIName(rep) {
     const r = normalize(rep);
-    // Más flexible: si contiene "pami" lo consideramos PAMI
+    if (!r) return false;
+
+    // 1) Si literalmente aparece "pami"
     if (r.includes("pami")) return true;
-    // Por si viene el nombre largo completo:
-    if (
-      r.includes(
-        "institutonacionaldeserviciossocialesparajubiladosypensionados"
-      )
-    )
-      return true;
+
+    // 2) Nombre largo oficial (sin acentos, en minúscula)
+    const base =
+      "instituto nacional de servicios sociales para jubilados y pensionados";
+    if (r.includes(base)) return true;
+
     return false;
   }
 
@@ -464,8 +454,10 @@
         const linkHtml = r.enlace
           ? `<a class="link-ico" href="${escapeHtml(
               r.enlace
-            )}" target="_blank" rel="noopener">🔗</a>`
+            )}" target="_blank" rel="noopener" title="Abrir pliego en nueva pestaña">🔗</a>`
           : `<span class="muted">—</span>`;
+
+        // IMPORTANTE: agregamos title en cada <td> para la burbuja
         return `
         <tr
           data-numero="${escapeHtml(r.numero)}"
@@ -479,11 +471,18 @@
           data-uape="${escapeHtml(r.uape || "")}"
           data-estado="${escapeHtml(r.estado)}"
         >
-          <td>${safeText(r.numero)}</td>
-          <td>${safeText(r.reparticion)}</td>
-          <td>${highlightPlain(r.objeto, LAST_QUERY)}</td>
-          <td>${safeText(r.aperturaTxt)}</td>
-          <td>${safeText(r.tipo)}</td>
+          <td title="${escapeHtml(r.numero)}">${safeText(r.numero)}</td>
+          <td title="${escapeHtml(r.reparticion)}">${safeText(
+          r.reparticion
+        )}</td>
+          <td title="${escapeHtml(r.objeto)}">${highlightPlain(
+          r.objeto,
+          LAST_QUERY
+        )}</td>
+          <td title="${escapeHtml(r.aperturaTxt)}">${safeText(
+          r.aperturaTxt
+        )}</td>
+          <td title="${escapeHtml(r.tipo)}">${safeText(r.tipo)}</td>
           <td>${linkHtml}</td>
         </tr>`;
       })
@@ -502,7 +501,7 @@
     if (prevBtn) prevBtn.disabled = CUR_PAGE <= 1 || !total;
     if (nextBtn) nextBtn.disabled = CUR_PAGE >= pages || !total;
 
-        // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
+    // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
     if (kProcesos) {
       const uniq = new Set(
         FILTERED.map((r) => r.uape || r.cuenta).filter(Boolean)
@@ -531,7 +530,7 @@
     const lines = [];
     lines.push(headers.join(";"));
 
-        for (const r of FILTERED) {
+    for (const r of FILTERED) {
       const row = [
         r.numero,
         r.reparticion,
@@ -540,7 +539,7 @@
         r.tipo,
         r.plataforma,
         r.operador,
-        r.uape || r.cuenta,  // N° UAPE
+        r.uape || r.cuenta, // N° UAPE
         r.estado,
         r.enlace,
       ].map((v) => {
@@ -618,10 +617,9 @@
 
   btnExport && btnExport.addEventListener("click", exportCSV);
 
-  // Descargar maestro actual (requiere endpoint en el backend)
+  // Descargar maestro actual
   btnDownloadCurrent &&
     btnDownloadCurrent.addEventListener("click", () => {
-      // Ajusta esta URL al endpoint real de descarga si es distinto
       window.location.href = "/oportunidades/buscador/download";
     });
 
@@ -655,11 +653,10 @@
       drop.classList.remove("is-drag");
       const dt = e.dataTransfer;
       if (dt && dt.files && dt.files.length) {
-        // Algunos navegadores permiten asignar directamente:
         try {
           fileInput.files = dt.files;
         } catch (err) {
-          // fallback: no hacemos nada especial, el usuario puede seleccionar manualmente
+          // fallback, el usuario puede elegir manualmente
         }
       }
     });
