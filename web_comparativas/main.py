@@ -1513,27 +1513,49 @@ def oportunidades_buscador(
     province: str = Query(""),
     date_from: str = Query(""),
     date_to: str = Query(""),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1),          # ya no lo usamos para cortar filas
     page_size: int = Query(20, ge=10, le=200),
-    uploaded: int = Query(0),  # <--- NUEVO: para mostrar toast tras subir
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    uploaded: int = Query(0),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
 ):
     opp_info = _oportunidades_status()
     toast_msg = None
     if uploaded:
         filas = opp_info.get("rows")
-        toast_msg = f"Archivo cargado correctamente. Filas: {filas}" if filas is not None else "Archivo cargado correctamente."
+        toast_msg = (
+            f"Archivo cargado correctamente. Filas: {filas}"
+            if filas is not None
+            else "Archivo cargado correctamente."
+        )
 
     df_all = _opp_load_df()
 
+    # Si no hay archivo maestro todavía, devolvemos el fallback
     if df_all is None or df_all.empty:
         ctx = {
             "request": request,
             "user": user,
             "opp": opp_info,
-            "toast": toast_msg,   # <--- usar el toast aquí
-            "kpis": {"total_rows": 0, "buyers": 0, "platforms": 0, "provinces": 0, "budget_total": 0.0, "date_min": "", "date_max": ""},
-            "filters": {"q": q, "buyer": buyer, "platform": platform, "province": province, "date_from": date_from, "date_to": date_to},
+            "toast": toast_msg,
+            "kpis": {
+                "total_rows": 0,
+                "buyers": 0,
+                "platforms": 0,
+                "provinces": 0,
+                "budget_total": 0.0,
+                "date_min": "",
+                "date_max": "",
+            },
+            "filters": {
+                "q": q,
+                "buyer": buyer,
+                "platform": platform,
+                "province": province,
+                "date_from": date_from,
+                "date_to": date_to,
+            },
             "table_cols": [],
             "table_rows": [],
             "total": 0,
@@ -1551,40 +1573,16 @@ def oportunidades_buscador(
         )
         return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
 
-    df_filtered = _opp_apply_filters(df_all, q, buyer, platform, province, date_from, date_to)
+    # A partir de acá dejamos todos los filtros al FRONT (JS)
+    df_filtered = df_all.copy()
+
+    # Seguimos calculando los KPIs por si los querés usar luego
     kpis = _opp_compute_kpis(df_filtered)
 
-    proc_col   = _opp_pick(df_filtered, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
-    fecha_col  = _opp_pick(df_filtered, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
-    buyer_col  = _opp_pick(df_filtered, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
-    prov_col   = _opp_pick(df_filtered, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
-    platf_col  = _opp_pick(df_filtered, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
-    presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
-    desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
-
-    colmap = []
-    for label, col in [
-        ("Proceso", proc_col),
-        ("Fecha", fecha_col),
-        ("Comprador", buyer_col),
-        ("Provincia/Municipio", prov_col),
-        ("Plataforma", platf_col),
-        ("Presupuesto", presu_col),
-        ("Objeto / Descripción", desc_col),
-    ]:
-        if col:
-            colmap.append((label, col))
-
-    total = int(len(df_filtered))
-    pages = max(1, int(np.ceil(total / page_size)))
-    if page > pages:
-        page = pages
-    start = (page - 1) * page_size
-    end = min(total, start + page_size)
-    df_page = df_filtered.iloc[start:end].copy()
-
     def _san(v):
+        """Sanea valores para enviarlos al template."""
         try:
+            import pandas as pd  # por si no está en el scope local
             if pd.isna(v):
                 return ""
         except Exception:
@@ -1592,27 +1590,22 @@ def oportunidades_buscador(
         s = str(v)
         return s.replace("<", "&lt;").replace(">", "&gt;")
 
-    table_cols = [lbl for (lbl, _) in colmap]
+    # Enviamos TODAS las columnas y TODAS las filas al HTML
+    table_cols = list(df_filtered.columns)
     table_rows = []
-    for _, rec in df_page.iterrows():
+    for _, rec in df_filtered.iterrows():
         row = {}
-        for (lbl, col) in colmap:
-            val = rec.get(col, "")
-            if _opp_norm(lbl).startswith("presupuesto"):
-                val = _opp_parse_number(val)
-                row[lbl] = f"$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            elif _opp_norm(lbl) == "fecha":
-                d = _opp_parse_date(val)
-                row[lbl] = d.strftime("%d/%m/%Y") if d else _san(val)
-            else:
-                row[lbl] = _san(val)
+        for col in table_cols:
+            row[col] = _san(rec.get(col, ""))
         table_rows.append(row)
+
+    total = len(table_rows)
 
     ctx = {
         "request": request,
         "user": user,
         "opp": opp_info,
-        "toast": toast_msg,  # <--- usar el toast aquí también
+        "toast": toast_msg,
         "kpis": kpis,
         "filters": {
             "q": q or "",
@@ -1625,12 +1618,15 @@ def oportunidades_buscador(
         "table_cols": table_cols,
         "table_rows": table_rows,
         "total": total,
-        "page": page,
-        "pages": pages,
+        # La paginación real ahora la maneja el JS.
+        # Dejamos estos campos fijos para que no molesten.
+        "page": 1,
+        "pages": 1,
         "page_size": page_size,
-        "showing_from": 0 if total == 0 else (start + 1),
-        "showing_to": end,
+        "showing_from": 0 if total == 0 else 1,
+        "showing_to": total,
     }
+
     fallback_html = (
         "<div style='font-family:system-ui;padding:32px;'>"
         "<h2>Oportunidades · Buscador</h2>"
