@@ -1,77 +1,321 @@
 {% extends "base.html" %}
-{% block title %}Oportunidades – Buscador{% endblock %}
+{% block title %}Buscador{% endblock %}
 
 {% block extra_head %}
 <style>
-  .muted{color:#6b7280}
-  .card{background:var(--sa-blanco,#fff);border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:14px;padding:16px}
-  .btn{background:var(--sa-azul-btn,#5274ce);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .muted{color:#6b7280;font-size:14px}
+  .muted.small{font-size:13px}
+  .card{
+    background:var(--sa-blanco,#fff);
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border-radius:14px;
+    padding:16px 18px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
+  .btn{
+    background:var(--sa-azul-btn,#5274ce);
+    color:#fff;
+    border:0;
+    border-radius:10px;
+    padding:8px 12px;
+    cursor:pointer;
+    font-size:14px;
+  }
   .btn:disabled{opacity:.5;cursor:not-allowed}
-  .btn-link{background:transparent;border:0;color:var(--sa-azul-btn,#5274ce);cursor:pointer}
+  .btn-link{
+    background:transparent;
+    border:0;
+    color:var(--sa-azul-btn,#5274ce);
+    cursor:pointer;
+    font-size:14px;
+  }
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .field input,.field select{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;background:#fff}
-  .badges>span{display:inline-block;background:#eef2f7;border:1px solid #e5e7eb;padding:4px 8px;border-radius:999px;font-size:12px;margin-left:6px}
+  .field input,.field select{
+    width:100%;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    padding:8px 10px;
+    background:#fff;
+    font-size:14px;
+  }
+  .badges>span{
+    display:inline-block;
+    background:#eef2f7;
+    border:1px solid #e5e7eb;
+    padding:4px 8px;
+    border-radius:999px;
+    font-size:12px;
+    margin-left:6px;
+  }
+
+  /* --------- Upload limpio --------- */
+  .upload-card{display:flex;flex-direction:column;gap:10px}
+  .upload-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:16px;
+  }
+  .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
+  .upload-sub{margin:2px 0 0;font-size:13px}
+  .upload-meta{text-align:right;font-size:12px}
+  .upload-meta .badges{margin-top:4px}
+  .upload-grid{
+    display:grid;
+    grid-template-columns:minmax(0,2fr) minmax(0,2fr) auto;
+    gap:12px;
+    align-items:center;
+  }
+  .upload-drop .dropzone{
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+  }
+  .upload-file .field{width:100%}
+  .upload-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+  }
+  .upload-footer{margin:4px 0 0;font-size:12px}
 
   /* Barra superior: Procesos + filtros compactos */
-  .topbar{display:grid;grid-template-columns:160px 1fr;gap:12px}
-  .mini-kpi{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:10px}
-  .mini-kpi h4{margin:0 0 4px;font-size:12px;color:#4b5563}
-  .mini-kpi .v{font-weight:800;font-size:22px;color:var(--sa-text,#064066)}
+  .topbar{
+    display:grid;
+    grid-template-columns:150px minmax(0,1fr);
+    gap:12px;
+    align-items:flex-start; /* KPI ya no se estira a toda la altura */
+  }
+  .mini-kpi{
+    background:#f8fafc;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border-radius:12px;
+    padding:8px 10px;
+  }
+  .mini-kpi h4{
+    margin:0 0 2px;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    color:#4b5563;
+  }
+  .mini-kpi .v{
+    font-weight:800;
+    font-size:20px;
+    color:var(--sa-text,#064066);
+  }
 
-  .filters-grid{display:grid;grid-template-columns:280px repeat(4,minmax(0,1fr));gap:10px}
-  .filter-card{background:#f8fafc;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px;padding:10px}
-  .filter-card h5{font-size:12px;margin:0 0 6px;color:#4b5563}
-  .search-card{grid-column:1/-1;display:grid;grid-template-columns:1fr 220px;gap:10px}
+  .filters-grid{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:10px;
+  }
+  .filter-card{
+    background:#f8fafc;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border-radius:12px;
+    padding:10px;
+  }
+  .filter-card h5{
+    font-size:12px;
+    margin:0 0 6px;
+    color:#4b5563;
+  }
+
+  .search-card{
+    grid-column:1/-1;
+    display:grid;
+    grid-template-columns:minmax(0,3fr) auto;
+    gap:10px;
+    align-items:center;
+  }
+
+  /* Barra de búsqueda: íconos centrados */
   .searchbox{position:relative}
-  .searchbox input{width:100%;padding:10px 38px 10px 36px;border:1px solid #e5e7eb;border-radius:12px}
-  .searchbox .ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.55}
-  .searchbox .clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;opacity:.65}
+  .searchbox input{
+    width:100%;
+    height:42px;
+    padding:10px 38px 10px 34px;
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    font-size:14px;
+  }
+  .searchbox .ico{
+    position:absolute;
+    left:10px;
+    top:50%;
+    transform:translateY(-50%);
+    opacity:.55;
+  }
+  .searchbox .clear{
+    position:absolute;
+    right:8px;
+    top:50%;
+    transform:translateY(-50%);
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    opacity:.65;
+    font-size:14px;
+  }
 
-  /* Zona drag-and-drop (opcional, manejado por tu JS) */
-  .dropzone{border:1px dashed #c7d2fe;background:#f8fafc;border-radius:12px;padding:10px}
+  /* Zona drag-and-drop */
+  .dropzone{
+    border:1px dashed #c7d2fe;
+    background:#f8fafc;
+    border-radius:12px;
+    padding:10px 12px;
+    font-size:13px;
+  }
   .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
   .range-wrap{position:relative;height:32px}
-  .range-wrap input[type=range]{position:absolute;left:0;right:0;top:10px;width:100%;pointer-events:none;background:transparent;-webkit-appearance:none}
-  .range-wrap input[type=range]::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;height:14px;width:14px;border-radius:50%;background:var(--sa-azul-btn,#5274ce);border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
-  .range-wrap input[type=range]::-moz-range-thumb{pointer-events:auto;height:14px;width:14px;border:0;border-radius:50%;background:var(--sa-azul-btn,#5274ce)}
-  .range-track{position:absolute;left:0;right:0;top:16px;height:4px;background:#e5e7eb;border-radius:999px}
-  .range-fill{position:absolute;top:16px;height:4px;background:#c7d2fe;border-radius:999px}
+  .range-wrap input[type=range]{
+    position:absolute;
+    left:0;right:0;
+    top:10px;
+    width:100%;
+    pointer-events:none;
+    background:transparent;
+    -webkit-appearance:none;
+  }
+  .range-wrap input[type=range]::-webkit-slider-thumb{
+    pointer-events:auto;
+    -webkit-appearance:none;
+    height:14px;width:14px;
+    border-radius:50%;
+    background:var(--sa-azul-btn,#5274ce);
+    border:2px solid #fff;
+    box-shadow:0 0 0 1px rgba(0,0,0,.08);
+  }
+  .range-wrap input[type=range]::-moz-range-thumb{
+    pointer-events:auto;
+    height:14px;width:14px;
+    border:0;
+    border-radius:50%;
+    background:var(--sa-azul-btn,#5274ce);
+  }
+  .range-track{
+    position:absolute;
+    left:0;right:0;
+    top:16px;
+    height:4px;
+    background:#e5e7eb;
+    border-radius:999px;
+  }
+  .range-fill{
+    position:absolute;
+    top:16px;
+    height:4px;
+    background:#c7d2fe;
+    border-radius:999px;
+  }
 
   /* Chips (switches) */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
-  .chip{border:1px solid #e5e7eb;background:#fff;border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer}
-  .chip.is-on{background:#e0e7ff;border-color:#c7d2fe;color:#1f3a8a}
+  .chip{
+    border:1px solid #e5e7eb;
+    background:#fff;
+    border-radius:999px;
+    padding:6px 10px;
+    font-size:12px;
+    cursor:pointer;
+  }
+  .chip.is-on{
+    background:#e0e7ff;
+    border-color:#c7d2fe;
+    color:#1f3a8a;
+  }
 
   /* Tabla */
-  .table-wrap{overflow:auto;max-height:55vh;border:1px solid var(--sa-gris-borde,#e5e7eb);border-radius:12px}
-  table.table{width:100%;border-collapse:collapse}
-  .table th,.table td{border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);padding:8px 10px;vertical-align:top}
-  .table th{background:#f8fafc;position:sticky;top:0;z-index:1;text-align:left}
+  .table-wrap{
+    overflow:auto;
+    max-height:55vh;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border-radius:12px;
+  }
+  table.table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .table th,.table td{
+    border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);
+    padding:8px 10px;
+    vertical-align:top;
+  }
+  .table th{
+    background:#f8fafc;
+    position:sticky;
+    top:0;
+    z-index:1;
+    text-align:left;
+  }
+
+  /* Anchos: Repartición y Objeto del mismo tamaño */
+  .table th:nth-child(1), .table td:nth-child(1){
+    width:10ch;
+    white-space:nowrap;
+  }
+  .table th:nth-child(2), .table td:nth-child(2){
+    width:22%;
+  }
+  .table th:nth-child(3), .table td:nth-child(3){
+    width:22%;
+  }
+  .table th:nth-child(4), .table td:nth-child(4){
+    width:16ch;
+    white-space:nowrap;
+  }
+
   .link-ico{text-decoration:none}
   .link-ico:hover{text-decoration:underline}
 
   /* Paginación */
-  .pager{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
-  .pill{display:inline-block;border:1px solid #e5e7eb;background:#f8fafc;border-radius:999px;padding:3px 8px;font-size:12px}
+  .pager{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:10px;
+    gap:12px;
+  }
+  .pill{
+    display:inline-block;
+    border:1px solid #e5e7eb;
+    background:#f8fafc;
+    border-radius:999px;
+    padding:3px 8px;
+    font-size:12px;
+  }
 
   /* Estado de carga */
-  .loading{display:none;align-items:center;gap:8px;font-size:14px;color:#374151}
+  .loading{
+    display:none;
+    align-items:center;
+    gap:8px;
+    font-size:14px;
+    color:#374151;
+  }
   .loading.show{display:flex}
 
   @media (max-width:1200px){
     .topbar{grid-template-columns:1fr}
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
+    .upload-grid{grid-template-columns:1fr}
+    .upload-meta{text-align:left}
+    .upload-actions{justify-content:flex-start}
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container-xxl py-4">
-  <h1 class="mb-3">Oportunidades · Buscador</h1>
-  <p class="muted">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
+  <h1 class="mb-1">Buscador</h1>
+  <p class="muted small">Primero cargá el archivo maestro (Excel). Cada carga <b>reemplaza</b> el anterior.</p>
 
   <!-- Región de avisos accesible -->
   <div aria-live="polite" aria-atomic="true">
@@ -82,30 +326,70 @@
     {% endif %}
   </div>
 
-  <!-- Upload -->
-  <div class="card mb-4">
-    <form class="stack" action="/oportunidades/buscador/upload" method="post" enctype="multipart/form-data" aria-label="Cargar archivo maestro de oportunidades">
-      <div class="dropzone" id="oppDrop" aria-hidden="true">
-        <small class="muted">Podés arrastrar y soltar el Excel aquí</small>
-      </div>
-      <label for="oppFile" class="muted" style="font-weight:600">Archivo (.xlsx / .xls)</label>
-      <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
-      <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
-      <div class="loading" id="upLoading" role="status" aria-live="polite">
-        <span>Procesando…</span>
+    <!-- Upload -->
+  <div class="card mb-4 upload-card">
+    <div class="upload-header">
+      <div>
+        <h2 class="upload-title">Archivo maestro</h2>
+        <p class="muted upload-sub">
+          Subí un Excel con las oportunidades. Cada carga <b>reemplaza</b> el archivo anterior.
+        </p>
       </div>
 
-      <div class="badges" aria-label="Estado del maestro">
-        {% if opp.has_file %}
-          <span>Última act.: {{ opp.last_updated_str }}</span>
-          {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
-        {% else %}
-          <span>Sin archivo</span>
-        {% endif %}
+      <div class="upload-meta">
+        <div class="badges" aria-label="Estado del maestro">
+          {% if opp.has_file %}
+            <span>Última act.: {{ opp.last_updated_str }}</span>
+            {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
+          {% else %}
+            <span>Sin archivo</span>
+          {% endif %}
+        </div>
       </div>
-      <button class="btn-link" type="button" id="btnDownloadCurrent" title="Descargar maestro actual" hidden>Descargar actual</button>
+    </div>
+
+    <form
+      class="upload-grid"
+      action="/oportunidades/buscador/upload"
+      method="post"
+      enctype="multipart/form-data"
+      aria-label="Cargar archivo maestro de oportunidades"
+    >
+      <div class="upload-drop">
+        <div class="dropzone" id="oppDrop" aria-hidden="true">
+          <small class="muted small">Podés arrastrar y soltar el Excel aquí</small>
+        </div>
+      </div>
+
+      <div class="upload-file">
+        <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
+        <div class="field">
+          <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
+        </div>
+      </div>
+
+      <div class="upload-actions">
+        <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
+
+        <div class="loading" id="upLoading" role="status" aria-live="polite">
+          <span>Procesando…</span>
+        </div>
+
+        <button
+          class="btn-link"
+          type="button"
+          id="btnDownloadCurrent"
+          title="Descargar maestro actual"
+          hidden
+        >
+          Descargar actual
+        </button>
+      </div>
     </form>
-    <p class="muted" style="margin:8px 0 0;">Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.</p>
+
+    <p class="muted upload-footer">
+      Al subir, el archivo anterior se elimina y se usa como fuente del dashboard.
+    </p>
   </div>
 
   <!-- Dashboard -->
