@@ -153,11 +153,13 @@
       ? window.OPP_DATA
       : null;
 
-  const DATA = backendData
+    const DATA = backendData
     ? backendData.map((r) => {
         // El backend debe mandar estas claves:
         // numero, reparticion, objeto, apertura (string), tipo,
-        // plataforma, operador, cuenta (viene de "N° UAPE"),
+        // plataforma, operador,
+        // cuenta => columna "Número" (para el filtro Cuenta)
+        // uape   => columna "N° UAPE" (para contar Procesos),
         // estado, enlace.
         const aperturaTxt =
           r.apertura_txt || r.apertura || r.Apertura || r.aperturaTxt || "";
@@ -175,7 +177,15 @@
           tipo: r.tipo || r["Tipo"] || "",
           plataforma: r.plataforma || r["Plataforma"] || "",
           operador: r.operador || r["Operador"] || "",
-          cuenta: r.cuenta || r["N° UAPE"] || "",
+          // Filtro Cuenta: usamos la columna "Número"
+          cuenta: r.cuenta || r["Número"] || "",
+          // Procesos: usamos la columna "N° UAPE"
+          uape:
+            r.uape ||
+            r["N° UAPE"] ||
+            r["Unidad Compra"] ||
+            r["Cod. UAPE"] ||
+            "",
           estado: estadoNorm,
           enlace: r.enlace || r["Enlace de pliego"] || "",
         };
@@ -193,6 +203,7 @@
         const plataforma = tr.dataset.plataforma || "";
         const operador = tr.dataset.operador || "";
         const cuenta = tr.dataset.cuenta || "";
+        const uape = tr.dataset.uape || "";
         const estadoRaw = tr.dataset.estado || ""; // columna "Estado"
         const enlaceEl = tr.querySelector("td:nth-child(6) a");
         const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
@@ -211,6 +222,7 @@
           plataforma,
           operador,
           cuenta,
+          uape,
           estado: estadoNorm,
           enlace,
         };
@@ -239,7 +251,7 @@
 
   initSelect(selPlataforma, uniqSorted(DATA.map((d) => d.plataforma)));
   initSelect(selOperador, uniqSorted(DATA.map((d) => d.operador)));
-  initSelect(selCuenta, uniqSorted(DATA.map((d) => d.cuenta), true));
+    initSelect(selCuenta, uniqSorted(DATA.map((d) => d.cuenta)));
   initSelect(selReparticion, uniqSorted(DATA.map((d) => d.reparticion)));
 
   // ---- Slider & fechas
@@ -464,6 +476,7 @@
           data-plataforma="${escapeHtml(r.plataforma)}"
           data-operador="${escapeHtml(r.operador)}"
           data-cuenta="${escapeHtml(r.cuenta)}"
+          data-uape="${escapeHtml(r.uape || "")}"
           data-estado="${escapeHtml(r.estado)}"
         >
           <td>${safeText(r.numero)}</td>
@@ -489,9 +502,11 @@
     if (prevBtn) prevBtn.disabled = CUR_PAGE <= 1 || !total;
     if (nextBtn) nextBtn.disabled = CUR_PAGE >= pages || !total;
 
-    // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
+        // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
     if (kProcesos) {
-      const uniq = new Set(FILTERED.map((r) => r.cuenta).filter(Boolean));
+      const uniq = new Set(
+        FILTERED.map((r) => r.uape || r.cuenta).filter(Boolean)
+      );
       kProcesos.textContent = String(uniq.size);
     }
   }
@@ -516,7 +531,7 @@
     const lines = [];
     lines.push(headers.join(";"));
 
-    for (const r of FILTERED) {
+        for (const r of FILTERED) {
       const row = [
         r.numero,
         r.reparticion,
@@ -525,7 +540,7 @@
         r.tipo,
         r.plataforma,
         r.operador,
-        r.cuenta,
+        r.uape || r.cuenta,  // N° UAPE
         r.estado,
         r.enlace,
       ].map((v) => {

@@ -264,12 +264,21 @@
               row.get('Operador')
               or row.get('Responsable')
           %}
+
+          {# 
+            - cuenta => se usa en el filtro "Cuenta" (columna Número en tu Excel)
+            - uape   => se usa para contar Procesos (columna N° UAPE)
+          #}
           {% set cuenta =
               row.get('Cuenta')
-              or row.get('N° UAPE')
+              or row.get('Número')
+          %}
+          {% set uape =
+              row.get('N° UAPE')
               or row.get('Unidad Compra')
               or row.get('Cod. UAPE')
           %}
+
           {% set estado_raw =
               row.get('Estado')
               or row.get('Tipo Proceso')
@@ -291,6 +300,7 @@
             data-plataforma="{{ plataforma|e }}"
             data-operador="{{ operador|e }}"
             data-cuenta="{{ cuenta|e }}"
+            data-uape="{{ uape|e }}"
             data-estado="{{ estado_raw|e }}"
           >
             <td>{{ numero }}</td>
