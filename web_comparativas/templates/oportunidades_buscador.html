@@ -9,7 +9,7 @@
     background:var(--sa-blanco,#fff);
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:14px;
-    padding:16px 18px;
+    padding:14px 18px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
   }
   .btn{
@@ -17,7 +17,7 @@
     color:#fff;
     border:0;
     border-radius:10px;
-    padding:8px 12px;
+    padding:7px 12px;
     cursor:pointer;
     font-size:14px;
   }
@@ -33,10 +33,11 @@
   .field input,.field select{
     width:100%;
     border:1px solid #e5e7eb;
-    border-radius:10px;
-    padding:8px 10px;
+    border-radius:8px;
+    padding:6px 10px;
     background:#fff;
     font-size:14px;
+    height:36px;
   }
   .badges>span{
     display:inline-block;
@@ -49,7 +50,7 @@
   }
 
   /* --------- Upload limpio --------- */
-  .upload-card{display:flex;flex-direction:column;gap:10px}
+  .upload-card{display:flex;flex-direction:column;gap:8px}
   .upload-header{
     display:flex;
     justify-content:space-between;
@@ -61,14 +62,26 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
   .upload-grid{
-    display:grid;
-    grid-template-columns:minmax(0,3fr) auto;
-    gap:12px;
+    display:flex;
+    justify-content:space-between;
     align-items:center;
+    gap:12px;
   }
-  /* Ocultamos la columna de drag & drop para no mostrar el bloque grande */
-  .upload-drop{display:none}
-  .upload-file .field{width:100%}
+  .upload-file{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .upload-file label{
+    white-space:nowrap;
+  }
+  .upload-file .field{
+    width:auto;
+  }
+  .upload-file .field input[type="file"]{
+    width:auto;
+    max-width:260px;
+  }
   .upload-actions{
     display:flex;
     align-items:center;
@@ -77,18 +90,18 @@
   }
   .upload-footer{margin:4px 0 0;font-size:12px}
 
-  /* Barra superior: filtros a la izquierda y Procesos a la derecha */
+  /* Barra superior: Procesos + filtros compactos */
   .topbar{
     display:grid;
     grid-template-columns:minmax(0,1fr) 150px;
-    gap:12px;
+    gap:10px;
     align-items:flex-start;
   }
   .mini-kpi{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:8px 10px;
+    padding:6px 10px;
   }
   .mini-kpi h4{
     margin:0 0 2px;
@@ -103,21 +116,20 @@
     color:var(--sa-text,#064066);
   }
 
-  /* Filtros: Fecha más ancha, resto más compacto */
   .filters-grid{
     display:grid;
-    grid-template-columns:1.4fr repeat(4,0.9fr);
-    gap:10px;
+    grid-template-columns:1.4fr repeat(4,1fr);
+    gap:8px;
   }
   .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:10px;
+    padding:8px 8px;
   }
   .filter-card h5{
     font-size:12px;
-    margin:0 0 6px;
+    margin:0 0 4px;
     color:#4b5563;
   }
 
@@ -125,7 +137,7 @@
     grid-column:1/-1;
     display:grid;
     grid-template-columns:minmax(0,3fr) auto;
-    gap:10px;
+    gap:8px;
     align-items:center;
   }
 
@@ -133,8 +145,8 @@
   .searchbox{position:relative}
   .searchbox input{
     width:100%;
-    height:42px;
-    padding:10px 38px 10px 34px;
+    height:40px;
+    padding:9px 38px 9px 34px;
     border:1px solid #e5e7eb;
     border-radius:12px;
     font-size:14px;
@@ -158,22 +170,17 @@
     font-size:14px;
   }
 
-  /* Zona drag-and-drop (se mantiene por JS, pero ya no se usa visualmente) */
+  /* (Dropzone se mantiene solo para JS pero oculto) */
   .dropzone{
-    border:1px dashed #c7d2fe;
-    background:#f8fafc;
-    border-radius:12px;
-    padding:10px 12px;
-    font-size:13px;
+    display:none;
   }
-  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:32px}
+  .range-wrap{position:relative;height:26px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:10px;
+    top:6px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -182,7 +189,7 @@
   .range-wrap input[type=range]::-webkit-slider-thumb{
     pointer-events:auto;
     -webkit-appearance:none;
-    height:14px;width:14px;
+    height:12px;width:12px;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
     border:2px solid #fff;
@@ -190,7 +197,7 @@
   }
   .range-wrap input[type=range]::-moz-range-thumb{
     pointer-events:auto;
-    height:14px;width:14px;
+    height:12px;width:12px;
     border:0;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
@@ -198,15 +205,15 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:16px;
-    height:4px;
+    top:12px;
+    height:3px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:16px;
-    height:4px;
+    top:12px;
+    height:3px;
     background:#c7d2fe;
     border-radius:999px;
   }
@@ -217,7 +224,7 @@
     border:1px solid #e5e7eb;
     background:#fff;
     border-radius:999px;
-    padding:6px 10px;
+    padding:5px 9px;
     font-size:12px;
     cursor:pointer;
   }
@@ -238,11 +245,12 @@
     width:100%;
     border-collapse:collapse;
     font-size:13px;
+    table-layout:fixed;
   }
   .table th,.table td{
     border-bottom:1px solid var(--sa-gris-borde,#e5e7eb);
-    padding:8px 10px;
-    vertical-align:top;
+    padding:6px 8px;
+    vertical-align:middle;
   }
   .table th{
     background:#f8fafc;
@@ -252,32 +260,39 @@
     text-align:left;
   }
 
-  /* Anchos de columnas:
-     - Número, Tipo y Enlace más angostos
-     - Repartición y Objeto con más espacio
-  */
-  .table th:nth-child(1), .table td:nth-child(1){
-    width:8ch;
+  /* Filas con altura uniforme */
+  .table tbody tr{
+    height:44px;
+  }
+
+  /* Texto truncado con tooltip */
+  .cell-text{
+    display:block;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
     white-space:nowrap;
+  }
+
+  /* Anchos columnas */
+  .table th:nth-child(1), .table td:nth-child(1){
+    width:9ch;
   }
   .table th:nth-child(2), .table td:nth-child(2){
-    width:26%;
+    width:25%;
   }
   .table th:nth-child(3), .table td:nth-child(3){
-    width:26%;
+    width:25%;
   }
   .table th:nth-child(4), .table td:nth-child(4){
-    width:14ch;
-    white-space:nowrap;
+    width:15ch;
   }
   .table th:nth-child(5), .table td:nth-child(5){
-    width:10ch;
-    white-space:nowrap;
+    width:11ch;
   }
   .table th:nth-child(6), .table td:nth-child(6){
-    width:8ch;
+    width:7ch;
     text-align:center;
-    white-space:nowrap;
   }
 
   .link-ico{text-decoration:none}
@@ -314,9 +329,14 @@
     .topbar{grid-template-columns:1fr}
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
-    .upload-grid{grid-template-columns:1fr}
-    .upload-meta{text-align:left}
-    .upload-actions{justify-content:flex-start}
+    .upload-grid{
+      flex-direction:column;
+      align-items:flex-start;
+    }
+    .upload-actions{
+      justify-content:flex-start;
+      width:100%;
+    }
   }
 </style>
 {% endblock %}
@@ -364,10 +384,8 @@
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
-      <!-- Mantengo el div para JS, pero oculto visualmente via CSS -->
-      <div class="upload-drop">
-        <div class="dropzone" id="oppDrop" aria-hidden="true"></div>
-      </div>
+      <!-- Dropzone (se mantiene para JS, pero oculto por CSS) -->
+      <div class="dropzone" id="oppDrop" aria-hidden="true"></div>
 
       <div class="upload-file">
         <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
@@ -402,8 +420,8 @@
 
   <!-- Dashboard -->
   <div class="card" style="border-color:#c7d2fe;">
-    <div class="topbar mb-3">
-      <!-- Filtros (ahora a la izquierda) -->
+    <div class="topbar mb-2">
+      <!-- Filtros -->
       <div>
         <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
           <!-- Fecha -->
@@ -413,13 +431,13 @@
               <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
               <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
             </div>
-            <div class="range-wrap" style="margin-top:6px" aria-hidden="false" aria-label="Rango de fechas (slider)">
+            <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
               <div class="range-track"></div>
               <div class="range-fill" id="dateFill"></div>
               <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
               <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
             </div>
-            <div class="stack" style="justify-content:space-between;margin-top:6px">
+            <div class="stack" style="justify-content:space-between;margin-top:4px">
               <span class="pill" id="lblFrom">—</span>
               <span class="pill" id="lblTo">—</span>
             </div>
@@ -482,7 +500,7 @@
         </div>
 
         <!-- Buscar -->
-        <div class="filter-card search-card" style="margin-top:10px">
+        <div class="filter-card search-card" style="margin-top:8px">
           <div class="searchbox">
             <span class="ico" aria-hidden="true">🔎</span>
             <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
@@ -496,7 +514,7 @@
         </div>
       </div>
 
-      <!-- KPI Procesos (ahora a la derecha) -->
+      <!-- KPI Procesos -->
       <div class="mini-kpi" role="status" aria-live="polite" aria-label="Cantidad de procesos filtrados">
         <h4>Procesos</h4>
         <div class="v" id="kProcesos">0</div>
@@ -595,11 +613,11 @@
             data-uape="{{ uape|e }}"
             data-estado="{{ estado_raw|e }}"
           >
-            <td>{{ numero }}</td>
-            <td>{{ reparticion }}</td>
-            <td>{{ objeto }}</td>
-            <td>{{ apertura_txt }}</td>
-            <td>{{ tipo }}</td>
+            <td><span class="cell-text" title="{{ numero|e }}">{{ numero }}</span></td>
+            <td><span class="cell-text" title="{{ reparticion|e }}">{{ reparticion }}</span></td>
+            <td><span class="cell-text" title="{{ objeto|e }}">{{ objeto }}</span></td>
+            <td><span class="cell-text" title="{{ apertura_txt|e }}">{{ apertura_txt }}</span></td>
+            <td><span class="cell-text" title="{{ tipo|e }}">{{ tipo }}</span></td>
             <td>
               {% if enlace %}
                 <a class="link-ico"
