@@ -34,10 +34,10 @@
     width:100%;
     border:1px solid #e5e7eb;
     border-radius:10px;
-    padding:6px 8px;              /* más compacto */
+    padding:4px 8px;              /* más compacto */
     background:#fff;
     font-size:13px;
-    height:34px;
+    height:30px;
   }
   .badges>span{
     display:inline-block;
@@ -48,6 +48,31 @@
     font-size:12px;
     margin-left:6px;
   }
+
+  /* Toast closable */
+  .toast{
+    border:1px solid #a7f3d0;
+    background:#ecfdf5;
+    color:#065f46;
+    padding:8px 12px;
+    border-radius:10px;
+    margin-bottom:12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    font-size:14px;
+  }
+  .toast-close{
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    font-size:16px;
+    line-height:1;
+    color:#065f46;
+    opacity:.7;
+  }
+  .toast-close:hover{opacity:1;}
 
   /* --------- Upload --------- */
   .upload-card{display:flex;flex-direction:column;gap:10px}
@@ -62,15 +87,17 @@
   .upload-meta .badges{margin-top:4px}
   .upload-grid{
     display:grid;
-    grid-template-columns:minmax(0,2.5fr) minmax(0,2.5fr) auto;
+    grid-template-columns:minmax(0,1.6fr) minmax(0,2.4fr) auto; /* dropzone más chica */
     gap:12px;
     align-items:center;
   }
   .upload-drop .dropzone{
-    height:100%;
+    min-height:32px;
     display:flex;
     align-items:center;
     justify-content:flex-start;
+    padding:6px 10px;
+    font-size:12px;
   }
   .upload-file .field{width:100%}
   .upload-actions{
@@ -88,14 +115,14 @@
   }
   .filters-grid{
     display:grid;
-    grid-template-columns:repeat(5,minmax(0,1fr));
+    grid-template-columns:1.3fr repeat(4,minmax(0,1fr)); /* Fecha un poco más ancha */
     gap:8px;
   }
   .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:6px 8px;              /* altura reducida */
+    padding:4px 8px;              /* altura reducida */
   }
   .filter-card h5{
     font-size:11px;
@@ -107,7 +134,7 @@
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:6px 8px;
+    padding:4px 8px;
   }
   .mini-kpi h4{
     margin:0 0 2px;
@@ -133,7 +160,7 @@
   .searchbox{position:relative}
   .searchbox input{
     width:100%;
-    height:42px;
+    height:40px;
     padding:10px 38px 10px 34px;
     border:1px solid #e5e7eb;
     border-radius:12px;
@@ -163,17 +190,15 @@
     border:1px dashed #c7d2fe;
     background:#f8fafc;
     border-radius:12px;
-    padding:10px 12px;
-    font-size:13px;
   }
   .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:30px}
+  .range-wrap{position:relative;height:28px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:8px;
+    top:6px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -198,14 +223,14 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:14px;
+    top:12px;
     height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:14px;
+    top:12px;
     height:4px;
     background:#c7d2fe;
     border-radius:999px;
@@ -254,9 +279,7 @@
     text-align:left;
   }
 
-  /* Anchos: Número, Tipo y Enlace más angostos.
-     Repartición y Objeto más anchos, filas de altura fija
-  */
+  /* Anchos y alturas */
   .table th:nth-child(1), .table td:nth-child(1){
     width:9ch;
     white-space:nowrap;
@@ -278,9 +301,9 @@
   .table th:nth-child(6), .table td:nth-child(6){
     width:10ch;
     white-space:nowrap;
+    text-align:center;  /* icono centrado */
   }
 
-  /* Todas las filas misma altura + tooltip con title */
   .table td{
     max-height:38px;
     overflow:hidden;
@@ -335,8 +358,9 @@
   <!-- Región de avisos accesible -->
   <div aria-live="polite" aria-atomic="true">
     {% if toast %}
-    <div style="border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;padding:10px 12px;border-radius:10px;margin-bottom:12px;">
-      ✅ {{ toast }}
+    <div id="oppToast" class="toast" role="status">
+      <span>✅ {{ toast }}</span>
+      <button type="button" class="toast-close" aria-label="Cerrar aviso">&times;</button>
     </div>
     {% endif %}
   </div>
@@ -408,8 +432,8 @@
         <div class="filter-card" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
           <div class="stack" style="justify-content:space-between">
-            <input id="fDateFrom" type="date" style="width:48%" aria-label="Fecha desde">
-            <input id="fDateTo" type="date" style="width:48%" aria-label="Fecha hasta">
+            <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
+            <input id="fDateTo" type="date" style="width:49%" aria-label="Fecha hasta">
           </div>
           <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
@@ -681,6 +705,19 @@
       maxPage: 'maxPage'
     }
   };
+
+  // Cerrar toast al hacer clic en la X
+  document.addEventListener('DOMContentLoaded', function () {
+    var toast = document.getElementById('oppToast');
+    if (toast) {
+      var btn = toast.querySelector('.toast-close');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          toast.style.display = 'none';
+        });
+      }
+    }
+  });
 </script>
 <script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}" defer></script>
 {% endblock %}
