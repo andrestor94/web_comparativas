@@ -15,6 +15,8 @@
   const btnClear = $("#fClear");
   const btnAplicar = $("#btnAplicar");
   const btnLimpiar = $("#btnLimpiar");
+  const btnExport = $("#btnExport");
+  const btnDownloadCurrent = $("#btnDownloadCurrent");
 
   const dateFrom = $("#fDateFrom");
   const dateTo = $("#fDateTo");
@@ -38,6 +40,17 @@
   const maxPage = $("#maxPage");
 
   const PAGE_SIZE = (window.OPP_UI && window.OPP_UI.pageSize) || 20;
+
+  // Upload UI (spinner, drag & drop)
+  const formUpload = (function () {
+    // buscamos el form que contiene el archivo
+    const f = $("#oppFile") ? $("#oppFile").closest("form") : null;
+    return f || null;
+  })();
+  const drop = $("#oppDrop");
+  const fileInput = $("#oppFile");
+  const btnUpload = $("#btnUpload");
+  const upLoading = $("#upLoading");
 
   // ---- Helpers
   const normalize = (s) =>
@@ -114,13 +127,27 @@
     return escapeHtml(s).replace(/\n/g, "<br>");
   }
 
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function highlightPlain(text, term) {
+    if (!term) return safeText(text);
+    const escText = escapeHtml(text || "").replace(/\n/g, "<br>");
+    const pat = escapeRegex(term.trim());
+    if (!pat) return escText;
+    const re = new RegExp(pat, "ig");
+    return escText.replace(re, (m) => `<mark class="hl">${m}</mark>`);
+  }
+
   // ============================================================
   //  DATASET PRINCIPAL
   //  1) Si existe window.OPP_DATA (JSON desde el backend),
   //     lo usamos como fuente.
-  //  2) Si no, tomamos las filas ya renderizadas en el <tbody>.
+  //  2) Si no, tomamos las filas ya renderizadas en el <tbody>
+  //     pero solo aquellas con data-numero (evitando mensajes vacíos).
   // ============================================================
-  const originalRows = $$("#oppTBody tr");
+  const originalRows = $$("#oppTBody tr[data-numero]");
   const backendData =
     window.OPP_DATA && Array.isArray(window.OPP_DATA) && window.OPP_DATA.length
       ? window.OPP_DATA
@@ -136,9 +163,8 @@
           r.apertura_txt || r.apertura || r.Apertura || r.aperturaTxt || "";
         const aperturaDate = parseApertura(aperturaTxt);
         const estadoRaw = r.estado || r.Estado || "";
-        const estadoNorm = normalize(estadoRaw).includes("emerg")
-          ? "emergencia"
-          : "regular";
+        const estNorm = normalize(estadoRaw);
+        const estadoNorm = estNorm.includes("emerg") ? "emergencia" : "regular";
 
         return {
           numero: r.numero || r["Número"] || "",
@@ -172,9 +198,8 @@
         const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
 
         const aperturaDate = parseApertura(aperturaTxt);
-        const estadoNorm = normalize(estadoRaw).includes("emerg")
-          ? "emergencia"
-          : "regular";
+        const estNorm = normalize(estadoRaw);
+        const estadoNorm = estNorm.includes("emerg") ? "emergencia" : "regular";
 
         return {
           numero,
@@ -311,7 +336,7 @@
   if (swPAMI) {
     swPAMI.addEventListener("click", (e) => {
       const btn = e.target.closest(".chip");
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       setChipGroup(swPAMI, btn.dataset.val);
       applyFilters();
     });
@@ -319,7 +344,7 @@
   if (swEstado) {
     swEstado.addEventListener("click", (e) => {
       const btn = e.target.closest(".chip");
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       setChipGroup(swEstado, btn.dataset.val);
       applyFilters();
     });
@@ -328,16 +353,26 @@
   // ---- Filtrado + render
   let CUR_PAGE = 1;
   let FILTERED = DATA;
+  let LAST_QUERY = "";
 
   function isPAMIName(rep) {
     const r = normalize(rep);
-    return r.includes(
-      "instituto nacional de servicios sociales para jubilados y pensionados"
-    );
+    // Más flexible: si contiene "pami" lo consideramos PAMI
+    if (r.includes("pami")) return true;
+    // Por si viene el nombre largo completo:
+    if (
+      r.includes(
+        "institutonacionaldeserviciossocialesparajubiladosypensionados"
+      )
+    )
+      return true;
+    return false;
   }
 
   function applyFilters() {
-    const q = normalize(inpBuscar && inpBuscar.value);
+    const rawQ = inpBuscar && inpBuscar.value ? inpBuscar.value.trim() : "";
+    const q = normalize(rawQ);
+    LAST_QUERY = rawQ;
 
     const vPlat = selPlataforma && selPlataforma.value ? selPlataforma.value : "";
     const vOper = selOperador && selOperador.value ? selOperador.value : "";
@@ -433,7 +468,7 @@
         >
           <td>${safeText(r.numero)}</td>
           <td>${safeText(r.reparticion)}</td>
-          <td>${safeText(r.objeto)}</td>
+          <td>${highlightPlain(r.objeto, LAST_QUERY)}</td>
           <td>${safeText(r.aperturaTxt)}</td>
           <td>${safeText(r.tipo)}</td>
           <td>${linkHtml}</td>
@@ -451,18 +486,72 @@
     if (showTo) showTo.textContent = String(end);
     if (curPage) curPage.textContent = String(CUR_PAGE);
     if (maxPage) maxPage.textContent = String(pages);
-    if (prevBtn) prevBtn.disabled = CUR_PAGE <= 1;
-    if (nextBtn) nextBtn.disabled = CUR_PAGE >= pages;
+    if (prevBtn) prevBtn.disabled = CUR_PAGE <= 1 || !total;
+    if (nextBtn) nextBtn.disabled = CUR_PAGE >= pages || !total;
 
     // KPI: Procesos (N° UAPE únicos del conjunto filtrado)
     if (kProcesos) {
-      const uniq = new Set(FILTERED.map((r) => r.cuenta));
+      const uniq = new Set(FILTERED.map((r) => r.cuenta).filter(Boolean));
       kProcesos.textContent = String(uniq.size);
     }
   }
 
-  // Eventos
+  // ---- Export CSV
+  function exportCSV() {
+    if (!FILTERED || !FILTERED.length) {
+      return;
+    }
+    const headers = [
+      "Número",
+      "Repartición",
+      "Objeto",
+      "Apertura",
+      "Tipo",
+      "Plataforma",
+      "Operador",
+      "N° UAPE",
+      "Estado",
+      "Enlace de pliego",
+    ];
+    const lines = [];
+    lines.push(headers.join(";"));
+
+    for (const r of FILTERED) {
+      const row = [
+        r.numero,
+        r.reparticion,
+        r.objeto,
+        r.aperturaTxt,
+        r.tipo,
+        r.plataforma,
+        r.operador,
+        r.cuenta,
+        r.estado,
+        r.enlace,
+      ].map((v) => {
+        const s = String(v == null ? "" : v);
+        return `"${s.replace(/"/g, '""')}"`;
+      });
+      lines.push(row.join(";"));
+    }
+
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const today = new Date().toISOString().slice(0, 10);
+    a.download = `oportunidades_${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---- Eventos
   btnAplicar && btnAplicar.addEventListener("click", applyFilters);
+
   btnLimpiar &&
     btnLimpiar.addEventListener("click", () => {
       if (selPlataforma) selPlataforma.value = "";
@@ -478,10 +567,14 @@
       setDatesFromSlider();
       applyFilters();
     });
+
   btnClear &&
     btnClear.addEventListener("click", (e) => {
       e.preventDefault();
-      if (inpBuscar) inpBuscar.value = "";
+      if (inpBuscar) {
+        inpBuscar.value = "";
+        applyFilters();
+      }
     });
 
   inpBuscar &&
@@ -507,6 +600,55 @@
         render();
       }
     });
+
+  btnExport && btnExport.addEventListener("click", exportCSV);
+
+  // Descargar maestro actual (requiere endpoint en el backend)
+  btnDownloadCurrent &&
+    btnDownloadCurrent.addEventListener("click", () => {
+      // Ajusta esta URL al endpoint real de descarga si es distinto
+      window.location.href = "/oportunidades/buscador/download";
+    });
+
+  // Upload: mostrar spinner al enviar
+  if (formUpload && upLoading && btnUpload) {
+    formUpload.addEventListener("submit", () => {
+      btnUpload.disabled = true;
+      upLoading.classList.add("show");
+    });
+  }
+
+  // Drag & drop sobre la dropzone
+  if (drop && fileInput) {
+    ["dragenter", "dragover"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.add("is-drag");
+      });
+    });
+    ["dragleave", "dragend"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.remove("is-drag");
+      });
+    });
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove("is-drag");
+      const dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length) {
+        // Algunos navegadores permiten asignar directamente:
+        try {
+          fileInput.files = dt.files;
+        } catch (err) {
+          // fallback: no hacemos nada especial, el usuario puede seleccionar manualmente
+        }
+      }
+    });
+  }
 
   // Render inicial
   applyFilters();
