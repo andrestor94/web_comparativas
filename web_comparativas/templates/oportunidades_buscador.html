@@ -224,146 +224,94 @@
             <th scope="col">Enlace de pliego</th>
           </tr>
         </thead>
-        <tbody id="oppTBody">
+                <tbody id="oppTBody">
           {% for row in table_rows %}
-  {# =========
-     Normalizamos nombres de columnas para cubrir:
-     - Proceso / Número
-     - Comprador / Repartición
-     - Objeto / Descripción
-     - Fecha / Apertura
-     - Plataforma
-     - Operador
-     - N° UAPE / Cuenta
-     - Estado
-     - Enlace de pliego / URL
-     ========= #}
+          {# Normalizamos las columnas para distintos nombres posibles #}
+          {% set numero =
+              row.get('Número')
+              or row.get('N° Proceso')
+              or row.get('Nro Proceso')
+              or row.get('Proceso')
+          %}
+          {% set reparticion =
+              row.get('Repartición')
+              or row.get('Comprador')
+              or row.get('Entidad Contratante')
+              or row.get('Organismo')
+          %}
+          {% set objeto =
+              row.get('Objeto')
+              or row.get('Objeto / Descripción')
+              or row.get('Descripción')
+          %}
+          {% set apertura_txt =
+              row.get('Apertura')
+              or row.get('Fecha Límite')
+              or row.get('Fecha de Cierre')
+              or row.get('Fecha de Apertura')
+              or row.get('Fecha')
+          %}
+          {% set tipo =
+              row.get('Tipo')
+              or row.get('Modalidad')
+              or row.get('Procedimiento')
+          %}
+          {% set plataforma =
+              row.get('Plataforma')
+              or row.get('Portal')
+          %}
+          {% set operador =
+              row.get('Operador')
+              or row.get('Responsable')
+          %}
+          {% set cuenta =
+              row.get('Cuenta')
+              or row.get('N° UAPE')
+              or row.get('Unidad Compra')
+              or row.get('Cod. UAPE')
+          %}
+          {% set estado_raw =
+              row.get('Estado')
+              or row.get('Tipo Proceso')
+              or row.get('Carácter')
+          %}
+          {% set enlace =
+              row.get('Enlace de pliego')
+              or row.get('Enlace')
+              or row.get('URL')
+              or row.get('Link')
+          %}
 
-  {# Número de proceso #}
-  {% set numero =
-    row.get('Número')
-    or row.get('numero')
-    or row.get('NUMERO')
-    or row.get('número')
-    or row.get('Numero')
-    or row.get('Nro')
-    or row.get('nro')
-    or row.get('Proceso')           # <- etiqueta canonizada por main.py
-    or row.get('N° Proceso')
-    or row.get('Nro Proceso')
-    or row.get('Expediente')
-    or '' %}
+          <tr
+            data-numero="{{ numero|e }}"
+            data-reparticion="{{ reparticion|e }}"
+            data-objeto="{{ objeto|e }}"
+            data-apertura="{{ apertura_txt|e }}"
+            data-tipo="{{ tipo|e }}"
+            data-plataforma="{{ plataforma|e }}"
+            data-operador="{{ operador|e }}"
+            data-cuenta="{{ cuenta|e }}"
+            data-estado="{{ estado_raw|e }}"
+          >
+            <td>{{ numero }}</td>
+            <td>{{ reparticion }}</td>
+            <td>{{ objeto }}</td>
+            <td>{{ apertura_txt }}</td>
+            <td>{{ tipo }}</td>
+            <td>
+              {% if enlace %}
+                <a class="link-ico"
+                   href="{{ enlace }}"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   title="Abrir pliego en nueva pestaña">🔗</a>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
 
-  {# Repartición / Comprador #}
-  {% set reparticion =
-    row.get('Repartición')
-    or row.get('Reparticion')
-    or row.get('reparticion')
-    or row.get('REPARTICION')
-    or row.get('Comprador')         # <- etiqueta canonizada
-    or row.get('Entidad')
-    or row.get('Organismo')
-    or row.get('Unidad Compradora')
-    or row.get('Buyer')
-    or '' %}
-
-  {# Objeto / Descripción #}
-  {% set objeto =
-    row.get('Objeto')
-    or row.get('objeto')
-    or row.get('OBJETO')
-    or row.get('Objeto / Descripción')  # <- etiqueta canonizada
-    or row.get('Descripción')
-    or row.get('Descripcion')
-    or row.get('DETALLE')
-    or row.get('Detalle')
-    or '' %}
-
-  {# Fecha de apertura #}
-  {% set apertura =
-    row.get('Apertura')
-    or row.get('apertura')
-    or row.get('APERTURA')
-    or row.get('Fecha')                 # <- etiqueta canonizada
-    or row.get('Fecha apertura')
-    or row.get('Fecha Apertura')
-    or row.get('Fecha de Publicación')
-    or row.get('Publicación')
-    or '' %}
-
-  {# Tipo (si existiera alguna columna así) #}
-  {% set tipo =
-    row.get('Tipo')
-    or row.get('tipo')
-    or row.get('TIPO')
-    or '' %}
-
-  {# Plataforma #}
-  {% set plataforma =
-    row.get('Plataforma')
-    or row.get('plataforma')
-    or row.get('PLATAFORMA')
-    or '' %}
-
-  {# Operador (si lo tuvieras en el Excel) #}
-  {% set operador =
-    row.get('Operador')
-    or row.get('operador')
-    or row.get('OPERADOR')
-    or '' %}
-
-  {# Cuenta / N° UAPE (en esta vista HTML hoy no se arma, así que quedará vacío) #}
-  {% set cuenta =
-    row.get('N° UAPE')
-    or row.get('Nro UAPE')
-    or row.get('Cuenta')
-    or row.get('cuenta')
-    or row.get('CUENTA')
-    or row.get('uape')
-    or row.get('UAPE')
-    or '' %}
-
-  {# Estado (si viene del Excel) #}
-  {% set estado =
-    row.get('Estado')
-    or row.get('estado')
-    or row.get('ESTADO')
-    or '' %}
-
-  {# Enlace de pliego o URL #}
-  {% set enlace =
-    row.get('Enlace de pliego')
-    or row.get('Enlace')
-    or row.get('enlace')
-    or row.get('URL')
-    or row.get('url')
-    or '' %}
-
-  <tr
-    data-numero="{{ numero|e }}"
-    data-reparticion="{{ reparticion|e }}"
-    data-objeto="{{ objeto|e }}"
-    data-apertura="{{ apertura|e }}"
-    data-tipo="{{ tipo|e }}"
-    data-plataforma="{{ plataforma|e }}"
-    data-operador="{{ operador|e }}"
-    data-cuenta="{{ cuenta|e }}"
-    data-estado="{{ estado|e }}"
-  >
-    <td>{{ numero }}</td>
-    <td>{{ reparticion }}</td>
-    <td>{{ objeto }}</td>
-    <td>{{ apertura }}</td>
-    <td>{{ tipo }}</td>
-    <td>
-      {% if enlace %}
-        <a class="link-ico" href="{{ enlace }}" target="_blank" rel="noopener noreferrer" title="Abrir pliego en nueva pestaña">🔗</a>
-      {% else %}
-        <span class="muted">—</span>
-      {% endif %}
-    </td>
-  </tr>
-{% endfor %}
           {% if table_rows|length == 0 %}
             <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
           {% endif %}
