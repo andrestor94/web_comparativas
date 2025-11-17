@@ -31,6 +31,7 @@
     font-size:14px;
   }
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .stack-nowrap{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
 
   /* Campos más compactos */
   .field input,
@@ -91,7 +92,7 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
-  /* NUEVO layout: input de archivo más corto y botón al lado */
+  /* Layout: input de archivo más corto y botón al lado */
   .upload-grid{
     display:flex;
     flex-wrap:wrap;
@@ -99,7 +100,7 @@
     gap:12px;
   }
   .upload-file{
-    flex:0 0 55%;          /* aprox. la mitad del ancho */
+    flex:0 0 55%;
     max-width:640px;
   }
   .upload-file .field{width:100%}
@@ -120,15 +121,17 @@
     display:grid;
     grid-template-columns:1.2fr repeat(4,minmax(0,1fr));
     gap:8px;
-    overflow:visible;              /* deja salir dropdowns */
-    margin-bottom:6px;             /* aire con la fila de chips */
+    overflow:visible;
+    margin-bottom:6px;
   }
 
+  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo) */
   .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:4px 8px;               /* un poco más bajo */
+    padding:3px 8px;
+    min-height:56px;              /* altura base más chica */
   }
   .filter-card h5{
     font-size:10px;
@@ -138,8 +141,8 @@
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
-    padding:4px 8px;
-    min-height:54px;              /* más bajito que antes */
+    padding:3px 8px;
+    min-height:52px;              /* casi la mitad de lo anterior */
     display:flex;
     flex-direction:column;
     justify-content:center;
@@ -155,22 +158,29 @@
     font-size:12px;
   }
 
-  /* Filtro Fecha compacto: inputs en línea y más bajos */
+  /* Filtro Fecha compacto */
   .filter-card--date{
-    padding:6px 8px;
+    padding:4px 8px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
   }
-  .filter-card--date .stack{
-    justify-content:space-between;
-    margin-bottom:4px;
+  .filter-card--date .dates-row{
+    margin-bottom:2px;
   }
-  .filter-card--date input[type="date"]{
-    width:49%;
+  .filter-card--date .dates-row input[type="date"]{
+    flex:1 1 0;
+    min-width:0;
     border:1px solid #e5e7eb;
     border-radius:10px;
     padding:3px 8px;
     background:#fff;
     font-size:12px;
-    height:28px;
+    height:30px;
+  }
+  .filter-card--date .dates-labels .pill{
+    font-size:11px;
+    padding:2px 8px;
   }
 
   .mini-kpi{
@@ -229,11 +239,11 @@
   }
 
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:26px}
+  .range-wrap{position:relative;height:20px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:4px;
+    top:2px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -258,15 +268,15 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:10px;
-    height:4px;
+    top:8px;
+    height:3px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:10px;
-    height:4px;
+    top:8px;
+    height:3px;
     background:#c7d2fe;
     border-radius:999px;
   }
@@ -479,17 +489,22 @@
         <!-- Fecha -->
         <div class="filter-card filter-card--date" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
-          <div class="stack">
+
+          <!-- DOS CAMPOS DE FECHA EN LA MISMA FILA -->
+          <div class="stack-nowrap dates-row">
             <input id="fDateFrom" type="date" aria-label="Fecha desde">
             <input id="fDateTo" type="date" aria-label="Fecha hasta">
           </div>
-          <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
+
+          <div class="range-wrap" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
             <div class="range-fill" id="dateFill"></div>
             <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
-          <div class="stack" style="justify-content:space-between;margin-top:4px">
+
+          <!-- Etiquetas del rango (siempre en línea) -->
+          <div class="stack-nowrap dates-labels" style="justify-content:space-between;margin-top:2px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
           </div>
