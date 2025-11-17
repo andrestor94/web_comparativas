@@ -90,26 +90,17 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
-  /* Alineamos dropzone, input y botón centrados verticalmente */
+  /* GRID SOLO CON CAMPO DE ARCHIVO + BOTÓN */
   .upload-grid{
     display:grid;
-    grid-template-columns:minmax(0,1.6fr) minmax(0,2.4fr) auto;
-    gap:12px;
-    align-items:center;          /* <--- centrado vertical */
+    grid-template-columns:minmax(0,3fr) auto;  /* archivo ancho + botón */
+    gap:16px;
+    align-items:center;                        /* alineado verticalmente */
   }
-  .upload-drop .dropzone{
-    min-height:36px;
-    display:flex;
-    align-items:center;
-    justify-content:flex-start;
-    padding:6px 10px;
-    font-size:12px;
-  }
-  /* Centrar label + input en su celda */
   .upload-file{
     display:flex;
     flex-direction:column;
-    justify-content:center;      /* <--- sube el bloque del archivo */
+    justify-content:center;
   }
   .upload-file .field{width:100%}
   .upload-actions{
@@ -118,6 +109,14 @@
     justify-content:flex-end;
     gap:10px;
   }
+
+  /* (la clase .dropzone queda sin uso pero no afecta nada) */
+  .dropzone{
+    border:1px dashed #c7d2fe;
+    background:#f8fafc;
+    border-radius:12px;
+  }
+  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Barra superior: filtros + KPI */
   .topbar{
@@ -196,14 +195,6 @@
     opacity:.65;
     font-size:14px;
   }
-
-  /* Zona drag-and-drop */
-  .dropzone{
-    border:1px dashed #c7d2fe;
-    background:#f8fafc;
-    border-radius:12px;
-  }
-  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
   .range-wrap{position:relative;height:26px}
@@ -291,25 +282,11 @@
     text-align:left;
   }
 
-  /* Anchos y alturas */
-  .table th:nth-child(1), .table td:nth-child(1){
-    width:9ch;
-    white-space:nowrap;
-  }
-  .table th:nth-child(2), .table td:nth-child(2){
-    width:24%;
-  }
-  .table th:nth-child(3), .table td:nth-child(3){
-    width:30%;
-  }
-  .table th:nth-child(4), .table td:nth-child(4){
-    width:15ch;
-    white-space:nowrap;
-  }
-  .table th:nth-child(5), .table td:nth-child(5){
-    width:12ch;
-    white-space:nowrap;
-  }
+  .table th:nth-child(1), .table td:nth-child(1){width:9ch;white-space:nowrap;}
+  .table th:nth-child(2), .table td:nth-child(2){width:24%;}
+  .table th:nth-child(3), .table td:nth-child(3){width:30%;}
+  .table th:nth-child(4), .table td:nth-child(4){width:15ch;white-space:nowrap;}
+  .table th:nth-child(5), .table td:nth-child(5){width:12ch;white-space:nowrap;}
   .table th:nth-child(6), .table td:nth-child(6){
     width:10ch;
     white-space:nowrap;
@@ -344,7 +321,6 @@
     font-size:12px;
   }
 
-  /* Selector de filas por página */
   .page-size-select{
     border:1px solid #e5e7eb;
     background:#f8fafc;
@@ -354,7 +330,6 @@
     height:28px;
   }
 
-  /* Estado de carga */
   .loading{
     display:none;
     align-items:center;
@@ -378,7 +353,6 @@
 <div class="container-xxl py-4">
   <h1 class="mb-1">Buscador</h1>
 
-  <!-- Región de avisos accesible -->
   <div aria-live="polite" aria-atomic="true">
     {% if toast %}
     <div id="oppToast" class="toast" role="status">
@@ -388,7 +362,7 @@
     {% endif %}
   </div>
 
-  <!-- Upload -->
+  <!-- Upload sin dropzone -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
       <div>
@@ -414,12 +388,6 @@
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
-      <div class="upload-drop">
-        <div class="dropzone" id="oppDrop" aria-hidden="true">
-          <small class="muted small">Podés arrastrar y soltar el Excel aquí</small>
-        </div>
-      </div>
-
       <div class="upload-file">
         <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
         <div class="field">
@@ -693,7 +661,6 @@
   </div>
 </div>
 
-<!-- Config inicial para el JS -->
 <script>
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
@@ -701,7 +668,7 @@
     initialDateTo: null,
     els: {
       file: 'oppFile',
-      drop: 'oppDrop',
+      drop: 'oppDrop',   // ya no existe, pero no rompe nada
       btnUpload: 'btnUpload',
       upLoading: 'upLoading',
       buscar: 'fBuscar',
