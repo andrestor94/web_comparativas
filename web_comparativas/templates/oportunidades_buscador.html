@@ -29,18 +29,18 @@
     cursor:pointer;
     font-size:14px;
   }
-  .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .stack{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
-  /* Campos más compactos */
+  /* Campos más compactos (filtros) */
   .field input,
   .field select{
     width:100%;
     border:1px solid #e5e7eb;
     border-radius:10px;
-    padding:3px 8px;              /* más compacto */
+    padding:2px 8px;
     background:#fff;
-    font-size:12px;
-    height:28px;
+    font-size:11px;
+    height:26px;
   }
 
   .badges>span{
@@ -90,12 +90,12 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
-  /* Alineamos dropzone con campo de archivo */
+  /* Alineamos dropzone + archivo + botón */
   .upload-grid{
     display:grid;
-    grid-template-columns:minmax(0,1.6fr) minmax(0,2.4fr) auto; /* dropzone más chica */
+    grid-template-columns:minmax(0,1.6fr) minmax(0,2.4fr) auto;
     gap:12px;
-    align-items:flex-start;       /* TOP alineado para que se vea prolijo */
+    align-items:center; /* centrado vertical de todas las columnas */
   }
   .upload-drop .dropzone{
     min-height:36px;
@@ -105,12 +105,20 @@
     padding:6px 10px;
     font-size:12px;
   }
+  .upload-file{
+    align-self:center;
+  }
+  .upload-file label{
+    display:block;
+    margin-bottom:2px;
+  }
   .upload-file .field{width:100%}
   .upload-actions{
     display:flex;
     align-items:center;
     justify-content:flex-end;
     gap:10px;
+    align-self:center;
   }
 
   /* Barra superior: filtros + KPI */
@@ -121,14 +129,14 @@
   }
   .filters-grid{
     display:grid;
-    grid-template-columns:1.3fr repeat(4,minmax(0,1fr)); /* Fecha un poco más ancha */
-    gap:8px;
+    grid-template-columns:1.3fr repeat(4,minmax(0,1fr));
+    gap:6px;
   }
   .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
-    border-radius:12px;
-    padding:4px 6px;              /* altura reducida */
+    border-radius:10px;
+    padding:3px 6px;              /* altura reducida */
   }
   .filter-card h5{
     font-size:10px;
@@ -139,7 +147,7 @@
   .mini-kpi{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
-    border-radius:12px;
+    border-radius:10px;
     padding:4px 8px;
   }
   .mini-kpi h4{
@@ -166,11 +174,11 @@
   .searchbox{position:relative}
   .searchbox input{
     width:100%;
-    height:40px;
-    padding:10px 38px 10px 34px;
+    height:38px;
+    padding:8px 34px 8px 30px;
     border:1px solid #e5e7eb;
     border-radius:12px;
-    font-size:14px;
+    font-size:13px;
   }
   .searchbox .ico{
     position:absolute;
@@ -200,7 +208,7 @@
   .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:26px}
+  .range-wrap{position:relative;height:24px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
@@ -213,7 +221,7 @@
   .range-wrap input[type=range]::-webkit-slider-thumb{
     pointer-events:auto;
     -webkit-appearance:none;
-    height:14px;width:14px;
+    height:12px;width:12px;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
     border:2px solid #fff;
@@ -221,7 +229,7 @@
   }
   .range-wrap input[type=range]::-moz-range-thumb{
     pointer-events:auto;
-    height:14px;width:14px;
+    height:12px;width:12px;
     border:0;
     border-radius:50%;
     background:var(--sa-azul-btn,#5274ce);
@@ -229,14 +237,14 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:10px;
+    top:9px;
     height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:10px;
+    top:9px;
     height:4px;
     background:#c7d2fe;
     border-radius:999px;
@@ -248,8 +256,8 @@
     border:1px solid #e5e7eb;
     background:#fff;
     border-radius:999px;
-    padding:6px 10px;
-    font-size:12px;
+    padding:4px 8px;
+    font-size:11px;
     cursor:pointer;
   }
   .chip.is-on{
@@ -307,7 +315,7 @@
   .table th:nth-child(6), .table td:nth-child(6){
     width:10ch;
     white-space:nowrap;
-    text-align:center;  /* icono centrado */
+    text-align:center;
   }
 
   .table td{
@@ -452,13 +460,13 @@
             <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
             <input id="fDateTo" type="date" style="width:49%" aria-label="Fecha hasta">
           </div>
-          <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
+          <div class="range-wrap" style="margin-top:2px" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
             <div class="range-fill" id="dateFill"></div>
             <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
-          <div class="stack" style="justify-content:space-between;margin-top:4px">
+          <div class="stack" style="justify-content:space-between;margin-top:2px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
           </div>
@@ -524,7 +532,7 @@
           </div>
         </div>
 
-        <!-- KPI Procesos debajo de Repartición -->
+        <!-- KPI Procesos -->
         <div class="mini-kpi" role="status" aria-live="polite"
              aria-label="Cantidad de procesos filtrados"
              style="grid-column:5;align-self:stretch;">
@@ -563,7 +571,6 @@
         </thead>
         <tbody id="oppTBody">
           {% for row in table_rows %}
-          {# Normalizamos las columnas para distintos nombres posibles #}
           {% set numero =
               row.get('Número')
               or row.get('N° Proceso')
@@ -602,10 +609,6 @@
               or row.get('Responsable')
           %}
 
-          {# 
-            - cuenta => se usa en el filtro "Cuenta" (columna Número en tu Excel)
-            - uape   => se usa para contar Procesos (columna N° UAPE)
-          #}
           {% set cuenta =
               row.get('Cuenta')
               or row.get('Número')
@@ -748,24 +751,32 @@
       }
     }
 
-    // Selector de page size
     var sel = document.getElementById('pageSizeSelect');
     if (sel) {
+      // valor inicial coherente con OPP_UI
+      if (window.OPP_UI && window.OPP_UI.pageSize) {
+        sel.value = String(window.OPP_UI.pageSize);
+      }
+
       sel.addEventListener('change', function () {
         var v = parseInt(this.value, 10) || 20;
         if (window.OPP_UI) {
           window.OPP_UI.pageSize = v;
         }
-        // Si el script principal expone un refresco específico
         if (window.OPP && typeof window.OPP.refreshPageSize === 'function') {
           window.OPP.refreshPageSize(v);
         } else {
-          // Fallback: evento para que lo escuche oportunidades_buscador.js
           document.dispatchEvent(
             new CustomEvent('opp:pageSizeChanged', { detail: { pageSize: v } })
           );
         }
       });
+
+      // Forzamos un refresh inicial para que respete el valor actual
+      var initial = parseInt(sel.value, 10) || 20;
+      if (window.OPP && typeof window.OPP.refreshPageSize === 'function') {
+        window.OPP.refreshPageSize(initial);
+      }
     }
   });
 </script>
