@@ -39,7 +39,8 @@
   const curPage = $("#curPage");
   const maxPage = $("#maxPage");
 
-  const PAGE_SIZE = (window.OPP_UI && window.OPP_UI.pageSize) || 20;
+  // Tamaño de página dinámico (se puede actualizar)
+  let PAGE_SIZE = (window.OPP_UI && window.OPP_UI.pageSize) || 20;
 
   // Upload UI (spinner, drag & drop)
   const formUpload = (function () {
@@ -509,6 +510,24 @@
       kProcesos.textContent = String(uniq.size);
     }
   }
+
+  // === Manejo dinámico del tamaño de página ====================
+  // API para que la use el HTML (window.OPP.refreshPageSize)
+  window.OPP = window.OPP || {};
+  window.OPP.refreshPageSize = function (newSize) {
+    const v = parseInt(newSize, 10) || 20;
+    PAGE_SIZE = v;
+    CUR_PAGE = 1;
+    render();
+  };
+
+  // Fallback: escuchar el evento personalizado si el HTML lo usa
+  document.addEventListener("opp:pageSizeChanged", function (ev) {
+    if (ev && ev.detail && ev.detail.pageSize) {
+      window.OPP.refreshPageSize(ev.detail.pageSize);
+    }
+  });
+  // =============================================================
 
   // ---- Export CSV
   function exportCSV() {
