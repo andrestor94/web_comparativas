@@ -129,16 +129,34 @@
     grid-template-columns:1.3fr repeat(4,minmax(0,1fr));
     gap:8px;
   }
-  .filter-card{
+    .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:4px 6px;
+    padding:6px 8px;
   }
   .filter-card h5{
     font-size:10px;
     margin:0 0 4px;
     color:#4b5563;
+  }
+
+  /* Filtros superiores (Fecha, Plataforma, Operador, Cuenta, Repartición) más bajos */
+  .filter-card--compact{
+    padding:2px 8px 4px;
+  }
+  .filter-card--compact h5{
+    font-size:10px;
+    margin:0 0 2px;
+  }
+  .filter-card--compact .field input,
+  .filter-card--compact .field select{
+    height:26px;
+    font-size:12px;
+    padding:2px 6px;
+  }
+  .filter-card--compact .stack{
+    gap:6px;
   }
 
   .mini-kpi{
@@ -420,7 +438,7 @@
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
-        <div class="filter-card" aria-labelledby="lblFecha">
+        <div class="filter-card filter-card--compact" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
           <div class="stack" style="justify-content:space-between">
             <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
@@ -440,7 +458,7 @@
 
         <!-- Plataforma -->
         <div class="filter-card">
-          <h5>Plataforma</h5>
+  <h5>Plataforma</h5>
           <div class="field">
             <select id="fPlataforma" aria-label="Filtrar por plataforma">
               <option value="">Todas</option>
@@ -449,8 +467,8 @@
         </div>
 
         <!-- Operador -->
-        <div class="filter-card">
-          <h5>Operador</h5>
+        <div class="filter-card filter-card--compact">
+  <h5>Operador</h5>
           <div class="field">
             <select id="fOperador" aria-label="Filtrar por operador">
               <option value="">Todos</option>
@@ -459,8 +477,8 @@
         </div>
 
         <!-- Cuenta -->
-        <div class="filter-card">
-          <h5>Cuenta</h5>
+        <div class="filter-card filter-card--compact">
+  <h5>Cuenta</h5>
           <div class="field">
             <select id="fCuenta" aria-label="Filtrar por cuenta">
               <option value="">Todas</option>
@@ -469,8 +487,8 @@
         </div>
 
         <!-- Repartición -->
-        <div class="filter-card">
-          <h5>Repartición</h5>
+        <div class="filter-card filter-card--compact">
+  <h5>Repartición</h5>
           <div class="field">
             <select id="fReparticion" aria-label="Filtrar por repartición">
               <option value="">Todas</option>
