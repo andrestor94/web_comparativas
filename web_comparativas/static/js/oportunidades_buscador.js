@@ -39,8 +39,11 @@
   const curPage = $("#curPage");
   const maxPage = $("#maxPage");
 
-  // Tamaño de página dinámico (se puede actualizar)
-  let PAGE_SIZE = (window.OPP_UI && window.OPP_UI.pageSize) || 20;
+  // Tamaño de página configurable
+  let PAGE_SIZE =
+    (window.OPP_UI && window.OPP_UI.pageSize) && Number(window.OPP_UI.pageSize)
+      ? Number(window.OPP_UI.pageSize)
+      : 20;
 
   // Upload UI (spinner, drag & drop)
   const formUpload = (function () {
@@ -177,7 +180,7 @@
             r["Cod. UAPE"] ||
             "",
           estado: estadoNorm,
-          enlace: r.enlace || r["Enlace de pliego"] || "",
+          enlace: r.enlace || r["Enlace de pliego"] || r["Enlace"] || "",
         };
       })
     : originalRows.map((tr) => {
@@ -458,7 +461,6 @@
             )}" target="_blank" rel="noopener" title="Abrir pliego en nueva pestaña">🔗</a>`
           : `<span class="muted">—</span>`;
 
-        // IMPORTANTE: agregamos title en cada <td> para la burbuja
         return `
         <tr
           data-numero="${escapeHtml(r.numero)}"
@@ -510,24 +512,6 @@
       kProcesos.textContent = String(uniq.size);
     }
   }
-
-  // === Manejo dinámico del tamaño de página ====================
-  // API para que la use el HTML (window.OPP.refreshPageSize)
-  window.OPP = window.OPP || {};
-  window.OPP.refreshPageSize = function (newSize) {
-    const v = parseInt(newSize, 10) || 20;
-    PAGE_SIZE = v;
-    CUR_PAGE = 1;
-    render();
-  };
-
-  // Fallback: escuchar el evento personalizado si el HTML lo usa
-  document.addEventListener("opp:pageSizeChanged", function (ev) {
-    if (ev && ev.detail && ev.detail.pageSize) {
-      window.OPP.refreshPageSize(ev.detail.pageSize);
-    }
-  });
-  // =============================================================
 
   // ---- Export CSV
   function exportCSV() {
@@ -680,6 +664,18 @@
       }
     });
   }
+
+  // API pública para cambiar tamaño de página (usada desde el HTML)
+  window.OPP = window.OPP || {};
+  window.OPP.refreshPageSize = function (newSize) {
+    const n = Number(newSize) || 20;
+    PAGE_SIZE = n;
+    if (window.OPP_UI) {
+      window.OPP_UI.pageSize = n;
+    }
+    CUR_PAGE = 1;
+    render();
+  };
 
   // Render inicial
   applyFilters();
