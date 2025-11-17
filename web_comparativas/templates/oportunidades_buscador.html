@@ -91,17 +91,22 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
+  /* NUEVO layout: input de archivo más corto y botón al lado */
   .upload-grid{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) auto;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-end;
     gap:12px;
-    align-items:center;
+  }
+  .upload-file{
+    flex:0 0 55%;          /* aprox. la mitad del ancho */
+    max-width:640px;
   }
   .upload-file .field{width:100%}
   .upload-actions{
     display:flex;
     align-items:center;
-    justify-content:flex-end;
+    justify-content:flex-start;
     gap:10px;
   }
 
@@ -123,24 +128,24 @@
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:6px 8px;
+    padding:4px 8px;               /* un poco más bajo */
   }
   .filter-card h5{
     font-size:10px;
-    margin:0 0 4px;
+    margin:0 0 3px;
     color:#4b5563;
   }
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
     padding:4px 8px;
-    min-height:64px;              /* más bajito */
+    min-height:54px;              /* más bajito que antes */
     display:flex;
     flex-direction:column;
-    justify-content:center;       /* centra label + select en el alto */
+    justify-content:center;
   }
   .filter-card--compact h5{
-    margin-bottom:2px;            /* menos espacio entre título y select */
+    margin-bottom:2px;
   }
   .filter-card--compact .field{
     margin-top:0;
@@ -382,7 +387,14 @@
   @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
-    .upload-grid{grid-template-columns:1fr}
+    .upload-grid{
+      flex-direction:column;
+      align-items:stretch;
+    }
+    .upload-file{
+      flex:1 1 100%;
+      max-width:none;
+    }
     .upload-meta{text-align:left}
     .upload-actions{justify-content:flex-start}
   }
