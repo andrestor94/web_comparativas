@@ -1214,6 +1214,22 @@ def home(
 # ======================================================================
 # CARGAS – NUEVA / CREAR
 # ======================================================================
+# Pantalla de Cargas externas (formulario de Microsoft Forms)
+@app.get("/cargas/externas", response_class=HTMLResponse)
+def cargas_externas(
+    request: Request,
+    # 👉 mismos roles que "Nueva carga": admin, analista y supervisor
+    user: User = Depends(require_roles("admin", "analista", "supervisor")),
+):
+    """
+    Muestra la pantalla de 'Cargas externas' con el formulario de Microsoft Forms
+    embebido en la plantilla cargas_externas.html.
+    """
+    return templates.TemplateResponse(
+        "cargas_externas.html",
+        {"request": request, "user": user},
+    )
+
 @app.get("/cargas/nueva", response_class=HTMLResponse)
 def nueva_carga(
     request: Request,
