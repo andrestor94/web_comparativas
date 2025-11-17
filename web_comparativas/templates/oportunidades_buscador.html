@@ -157,9 +157,11 @@
   .filter-card--date .stack{
     justify-content:space-between;
     margin-bottom:4px;
+    gap:8px;                      /* pequeño espacio entre los 2 inputs */
   }
   .filter-card--date input[type="date"]{
-    width:49%;
+    flex:1 1 0;                   /* cada uno ocupa la mitad del ancho */
+    min-width:0;
     border:1px solid #e5e7eb;
     border-radius:10px;
     padding:3px 8px;
@@ -777,5 +779,5 @@
     }
   });
 </script>
-<script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}" defer></script>
+<script src="{{ url_for('static', path:'/js/oportunidades_buscador.js') }}" defer></script>
 {% endblock %}
