@@ -71,6 +71,15 @@
     .mini-toggle .mini-btn{border:0;background:transparent;padding:.35rem .6rem;border-radius:.4rem;font-size:.85rem;color:var(--sa-text);cursor:pointer}
     .mini-toggle .mini-btn.active{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 
+    /* versión más chiquita para el treemap */
+    .mini-toggle.tiny{
+      padding:.15rem;
+    }
+    .mini-toggle.tiny .mini-btn{
+      padding:.18rem .45rem;
+      font-size:.75rem;
+    }
+
     /* Controles locales en zona de tabla (fallback si no existe el toolbar) */
     .mini-group{
       display: inline-flex;
@@ -760,14 +769,43 @@
           </section>
 
           <section class="chart-box" aria-labelledby="treemapTitle">
-            <div class="title">
-              <span id="treemapTitle">Proporción de presupuesto por proveedor</span>
-              <div class="small text-muted" id="treemapTotal" aria-live="polite"></div>
-            </div>
-            <div class="chart-treemap" role="img" aria-label="Treemap de adjudicaciones por proveedor">
-              <canvas id="treemapProveedores"></canvas>
-            </div>
-          </section>
+  <div class="title">
+    <!-- título + total -->
+    <div class="d-flex flex-column">
+      <span id="treemapTitle">Proporción de presupuesto por proveedor</span>
+      <div class="small text-muted" id="treemapTotal" aria-live="polite"></div>
+    </div>
+
+    <!-- switch de modo de treemap -->
+    <div
+      class="mini-toggle tiny"
+      id="treemapModeToggle"
+      role="group"
+      aria-label="Modo de treemap"
+    >
+      <button
+        type="button"
+        class="mini-btn active"
+        data-mode="prov"
+        aria-pressed="true"
+      >
+        Proveedor
+      </button>
+      <button
+        type="button"
+        class="mini-btn"
+        data-mode="item"
+        aria-pressed="false"
+      >
+        Renglón
+      </button>
+    </div>
+  </div>
+
+  <div class="chart-treemap" role="img" aria-label="Treemap de adjudicaciones">
+    <canvas id="treemapProveedores"></canvas>
+  </div>
+</section>
         </div>
 
         <!-- Derecha -->
@@ -1079,6 +1117,16 @@
       const elLossList = document.getElementById('lossList');
       const elLossHint = document.getElementById('lossHint');
       const elStrongCompetitors = document.getElementById('scList');
+      const elTreemapTitle = document.getElementById('treemapTitle');
+      const elTreemapModeToggle = document.getElementById('treemapModeToggle');
+
+      // estado del switch del treemap
+      let TREEMAP_VIEW = 'prov'; // 'prov' | 'item'
+      let TREEMAP_PROV_DATA = Array.isArray(window.CHART_PROV) ? window.CHART_PROV.slice() : [];
+      let TREEMAP_ITEM_DATA = [];
+
+      // etiqueta para el tooltip del treemap (la usa el script 3)
+      window.TREEMAP_LABEL = window.TREEMAP_LABEL || 'Proveedor';
 
       /* ===== Helpers ===== */
 
@@ -1469,8 +1517,8 @@
         return val;
       }
 
-      // Treemap con adjudicación efectiva (1° + remanente 2°)
-      function treemapDataFirstPlace(rows, mode){
+            // Treemap por renglón (monto adjudicado de posición 1)
+      function treemapDataByItemFirstPlace(rows, mode){
         const allow = (name)=>{
           if(mode==='suizo') return isSuizo(name);
           if(mode==='otros') return !isSuizo(name);
@@ -1479,20 +1527,18 @@
         const map = new Map();
         (rows || []).forEach(r=>{
           const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          const q1 = p1 ? effectiveQty(r,p1) : 0;
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (v1>0 && allow(p1.proveedor)){
-            const prov1 = String(p1.proveedor || '—');
-            map.set(prov1, (map.get(prov1) || 0) + v1);
-          }
+          if (!p1 || !allow(p1.proveedor)) return;
 
-          const p2 = (r.positions||[]).find(p=>+p.pos===2);
-          const q2 = p2 ? effectiveQty(r,p2) : 0;
-          const v2 = p2 ? unitPriceOf(p2)*q2 : 0;
-          if (v2>0 && allow(p2.proveedor)){
-            const prov2 = String(p2.proveedor || '—');
-            map.set(prov2, (map.get(prov2) || 0) + v2);
-          }
+          const q1 = effectiveQty(r,p1);
+          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          if (!(v1 > 0)) return;
+
+          const nro = r.nro ?? r.item;
+          const labelBase = (nro !== undefined && nro !== null && nro !== '')
+            ? `Renglón ${nro}`
+            : 'Renglón';
+
+          map.set(labelBase, (map.get(labelBase) || 0) + v1);
         });
 
         return Array.from(map.entries())
@@ -1959,6 +2005,23 @@
         elNext.disabled = page >= pages;
       }
 
+      // aplica el modo actual del treemap (proveedor / renglón)
+      function applyTreemapView(){
+        if (TREEMAP_VIEW === 'item'){
+          window.TREEMAP_LABEL = 'Renglón';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por renglón';
+          }
+          refreshTreemapFromData(TREEMAP_ITEM_DATA || []);
+        } else {
+          window.TREEMAP_LABEL = 'Proveedor';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por proveedor';
+          }
+          refreshTreemapFromData(TREEMAP_PROV_DATA || []);
+        }
+      }
+
       /* ================= KPIs SUIZO ================= */
       function refreshSuizoKPIs(){
         const rows = filteredRows();
@@ -2036,10 +2099,10 @@
           chartBarPos.update('none');
         }
 
-        // Treemap por proveedor (monto adjudicado efectivo) según modo
-        const tree = treemapDataFirstPlace(rows, MODE);
-        refreshTreemapFromData(tree);
-      }
+        // Treemap: armamos las dos vistas (proveedor / renglón)
+        TREEMAP_PROV_DATA = treemapDataFirstPlace(rows, MODE);
+        TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
+        applyTreemapView();
 
       /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
       function computeExecutiveInfo(){
@@ -2251,6 +2314,26 @@
         setTabs(e.currentTarget);
         setMode('todos');
       };
+
+      // switch "Proveedor / Renglón" del treemap
+      if (elTreemapModeToggle){
+        elTreemapModeToggle.addEventListener('click', (e)=>{
+          const btn = e.target.closest('button[data-mode]');
+          if (!btn) return;
+
+          const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
+          TREEMAP_VIEW = mode;
+
+          // actualizar estado visual del switch
+          elTreemapModeToggle.querySelectorAll('.mini-btn').forEach(b=>{
+            const active = b === btn;
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-pressed', active ? 'true' : 'false');
+          });
+
+          applyTreemapView();
+        });
+      }
 
       const debounce = (fn,ms)=>{
         let t;
@@ -2578,7 +2661,7 @@
                   legend:{ display:false },
                   tooltip:{
                     callbacks:{
-                      title:()=> 'Proveedor',
+                      title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
                       label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                     }
                   }
@@ -2608,7 +2691,7 @@
               legend:{ display:false },
               tooltip:{
                 callbacks:{
-                  title:()=> 'Proveedor',
+                  title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
                   label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                 }
               }
