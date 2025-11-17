@@ -1798,7 +1798,8 @@ def api_oportunidades_buscador(
 async def oportunidades_buscador_upload(
     request: Request,
     file: UploadFile = File(...),
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    # ⬇⬇⬇ SOLO ADMIN PUEDE SUBIR / REEMPLAZAR EL ARCHIVO
+    user: User = Depends(require_roles("admin")),
 ):
     # guarda y calcula filas
     rows = _save_oportunidades_excel(file)

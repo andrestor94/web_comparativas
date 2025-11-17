@@ -115,8 +115,8 @@
     display:grid;
     grid-template-columns:1.2fr repeat(4,minmax(0,1fr));
     gap:8px;
-    overflow:visible;
-    margin-bottom:6px;
+    overflow:visible;              /* deja salir dropdowns */
+    margin-bottom:6px;             /* aire con la fila de chips */
   }
 
   .filter-card{
@@ -131,47 +131,16 @@
     color:#4b5563;
   }
 
-  /* Fecha compacta */
-  .filter-card--fecha{
-    padding:4px 8px 6px;
-    min-height:90px;
-    display:flex;
-    flex-direction:column;
-    gap:4px;
-  }
-  .date-row{
-    display:flex;
-    gap:6px;
-    align-items:center;
-  }
-  .date-field{
-    flex:1;
-    display:flex;
-    align-items:center;
-    gap:4px;
-    font-size:11px;
-    color:#4b5563;
-  }
-  .date-field span{
-    white-space:nowrap;
-  }
-  .date-field input[type="date"]{
-    height:26px;
-    font-size:12px;
-    padding:2px 6px;
-  }
-
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
     padding:4px 8px;
-    min-height:70px;
+    min-height:70px;              /* ~la mitad de antes */
     display:flex;
     flex-direction:column;
-    justify-content:center;  /* centra título + select */
-    gap:4px;
+    justify-content:space-between;
   }
   .filter-card--compact .field{
-    margin-top:0;
+    margin-top:2px;
   }
   .filter-card--compact .field select{
     height:26px;
@@ -234,11 +203,7 @@
   }
 
   /* Slider doble compacto */
-  .range-wrap{
-    position:relative;
-    height:22px;
-    margin-top:0;
-  }
+  .range-wrap{position:relative;height:26px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
@@ -267,14 +232,14 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:8px;
+    top:10px;
     height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:8px;
+    top:10px;
     height:4px;
     background:#c7d2fe;
     border-radius:999px;
@@ -417,6 +382,8 @@
     {% endif %}
   </div>
 
+  {# === SOLO ADMIN VE EL BLOQUE DE CARGA === #}
+  {% if user and ((user.role or '')|lower == 'admin') %}
   <!-- Upload -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
@@ -469,34 +436,27 @@
       </div>
     </form>
   </div>
+  {% endif %}
+  {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
   <div class="card" style="border-color:#c7d2fe;">
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
-        <div class="filter-card filter-card--fecha" aria-labelledby="lblFecha">
+        <div class="filter-card" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
-
-          <div class="date-row">
-            <label class="date-field">
-              <span>Desde</span>
-              <input id="fDateFrom" type="date" aria-label="Fecha desde">
-            </label>
-            <label class="date-field">
-              <span>Hasta</span>
-              <input id="fDateTo" type="date" aria-label="Fecha hasta">
-            </label>
+          <div class="stack" style="justify-content:space-between">
+            <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
+            <input id="fDateTo" type="date" style="width:49%" aria-label="Fecha hasta">
           </div>
-
-          <div class="range-wrap" aria-hidden="false" aria-label="Rango de fechas (slider)">
+          <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
             <div class="range-fill" id="dateFill"></div>
             <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
-
-          <div class="stack" style="justify-content:space-between;margin-top:2px">
+          <div class="stack" style="justify-content:space-between;margin-top:4px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
           </div>
