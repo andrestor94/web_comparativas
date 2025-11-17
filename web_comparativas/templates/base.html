@@ -126,12 +126,21 @@
           </a>
         {% endif %}
 
+        {# ===== Nuevo ítem: Cargas externas (no visible para auditor) ===== #}
+        {% if user and r in ['admin','analista','supervisor'] %}
+          {% set is_ext = request.url.path.startswith('/cargas/externas') %}
+          <a href="/cargas/externas"
+             class="nav-link {% if is_ext %}active{% endif %}">
+             Cargas externas
+          </a>
+        {% endif %}
+
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
           {# 👉 Ajuste: Historial NO se activa en /cargas/nueva #}
           {% set is_hist =
             request.url.path.startswith('/cargas/historial')
             or request.url.path == '/historial'
-            or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
+            or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva') and not request.url.path.startswith('/cargas/externas'))
             or request.url.path.startswith('/tablero/')
           %}
           <a href="/cargas/historial"
