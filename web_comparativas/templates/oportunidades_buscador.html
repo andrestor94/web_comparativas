@@ -30,15 +30,19 @@
     font-size:14px;
   }
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .field input,.field select{
+
+  /* Campos más compactos */
+  .field input,
+  .field select{
     width:100%;
     border:1px solid #e5e7eb;
     border-radius:10px;
-    padding:4px 8px;              /* más compacto */
+    padding:3px 8px;              /* más compacto */
     background:#fff;
-    font-size:13px;
-    height:30px;
+    font-size:12px;
+    height:28px;
   }
+
   .badges>span{
     display:inline-block;
     background:#eef2f7;
@@ -85,14 +89,16 @@
   .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
+
+  /* Alineamos dropzone con campo de archivo */
   .upload-grid{
     display:grid;
     grid-template-columns:minmax(0,1.6fr) minmax(0,2.4fr) auto; /* dropzone más chica */
     gap:12px;
-    align-items:center;
+    align-items:flex-start;       /* TOP alineado para que se vea prolijo */
   }
   .upload-drop .dropzone{
-    min-height:32px;
+    min-height:36px;
     display:flex;
     align-items:center;
     justify-content:flex-start;
@@ -122,10 +128,10 @@
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    padding:4px 8px;              /* altura reducida */
+    padding:4px 6px;              /* altura reducida */
   }
   .filter-card h5{
-    font-size:11px;
+    font-size:10px;
     margin:0 0 4px;
     color:#4b5563;
   }
@@ -194,11 +200,11 @@
   .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
 
   /* Slider doble compacto */
-  .range-wrap{position:relative;height:28px}
+  .range-wrap{position:relative;height:26px}
   .range-wrap input[type=range]{
     position:absolute;
     left:0;right:0;
-    top:6px;
+    top:4px;
     width:100%;
     pointer-events:none;
     background:transparent;
@@ -223,14 +229,14 @@
   .range-track{
     position:absolute;
     left:0;right:0;
-    top:12px;
+    top:10px;
     height:4px;
     background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
-    top:12px;
+    top:10px;
     height:4px;
     background:#c7d2fe;
     border-radius:999px;
@@ -321,6 +327,7 @@
     align-items:center;
     margin-top:10px;
     gap:12px;
+    flex-wrap:wrap;
   }
   .pill{
     display:inline-block;
@@ -329,6 +336,16 @@
     border-radius:999px;
     padding:3px 8px;
     font-size:12px;
+  }
+
+  /* Selector de filas por página */
+  .page-size-select{
+    border:1px solid #e5e7eb;
+    background:#f8fafc;
+    border-radius:999px;
+    padding:2px 6px;
+    font-size:12px;
+    height:28px;
   }
 
   /* Estado de carga */
@@ -654,6 +671,18 @@
       <div class="muted">
         Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
       </div>
+
+      <div class="stack" style="align-items:center">
+        <span class="muted small">Filas por página:</span>
+        <select id="pageSizeSelect" class="page-size-select">
+          {% set _ps = page_size or 20 %}
+          <option value="20"  {% if _ps == 20  %}selected{% endif %}>20</option>
+          <option value="50"  {% if _ps == 50  %}selected{% endif %}>50</option>
+          <option value="100" {% if _ps == 100 %}selected{% endif %}>100</option>
+          <option value="200" {% if _ps == 200 %}selected{% endif %}>200</option>
+        </select>
+      </div>
+
       <div class="stack">
         <button class="btn" id="prevPage" type="button" disabled>Anterior</button>
         <span class="muted">Página <span id="curPage">1</span> / <span id="maxPage">1</span></span>
@@ -702,11 +731,12 @@
       showTo: 'showTo',
       totalFound: 'totalFound',
       curPage: 'curPage',
-      maxPage: 'maxPage'
+      maxPage: 'maxPage',
+      pageSizeSelect: 'pageSizeSelect'
     }
   };
 
-  // Cerrar toast al hacer clic en la X
+  // Cerrar toast + manejar cambio de filas por página
   document.addEventListener('DOMContentLoaded', function () {
     var toast = document.getElementById('oppToast');
     if (toast) {
@@ -716,6 +746,26 @@
           toast.style.display = 'none';
         });
       }
+    }
+
+    // Selector de page size
+    var sel = document.getElementById('pageSizeSelect');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        var v = parseInt(this.value, 10) || 20;
+        if (window.OPP_UI) {
+          window.OPP_UI.pageSize = v;
+        }
+        // Si el script principal expone un refresco específico
+        if (window.OPP && typeof window.OPP.refreshPageSize === 'function') {
+          window.OPP.refreshPageSize(v);
+        } else {
+          // Fallback: evento para que lo escuche oportunidades_buscador.js
+          document.dispatchEvent(
+            new CustomEvent('opp:pageSizeChanged', { detail: { pageSize: v } })
+          );
+        }
+      });
     }
   });
 </script>
