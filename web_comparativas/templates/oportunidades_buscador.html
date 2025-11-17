@@ -11,6 +11,7 @@
     border-radius:14px;
     padding:16px 18px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
+    overflow:visible; /* deja salir los desplegables */
   }
   .btn{
     background:var(--sa-azul-btn,#5274ce);
@@ -78,7 +79,7 @@
   }
   .toast-close:hover{opacity:1;}
 
-  /* --------- Upload --------- */
+  /* --------- Upload (sin dropzone) --------- */
   .upload-card{display:flex;flex-direction:column;gap:10px}
   .upload-header{
     display:flex;
@@ -90,17 +91,11 @@
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
-  /* GRID SOLO CON CAMPO DE ARCHIVO + BOTÓN */
   .upload-grid{
     display:grid;
-    grid-template-columns:minmax(0,3fr) auto;  /* archivo ancho + botón */
-    gap:16px;
-    align-items:center;                        /* alineado verticalmente */
-  }
-  .upload-file{
-    display:flex;
-    flex-direction:column;
-    justify-content:center;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:12px;
+    align-items:center;
   }
   .upload-file .field{width:100%}
   .upload-actions{
@@ -110,14 +105,6 @@
     gap:10px;
   }
 
-  /* (la clase .dropzone queda sin uso pero no afecta nada) */
-  .dropzone{
-    border:1px dashed #c7d2fe;
-    background:#f8fafc;
-    border-radius:12px;
-  }
-  .dropzone.is-drag{background:#eef2ff;border-color:#94a3b8}
-
   /* Barra superior: filtros + KPI */
   .topbar{
     display:flex;
@@ -126,10 +113,13 @@
   }
   .filters-grid{
     display:grid;
-    grid-template-columns:1.3fr repeat(4,minmax(0,1fr));
+    grid-template-columns:1.2fr repeat(4,minmax(0,1fr));
     gap:8px;
+    overflow:visible;              /* deja salir dropdowns */
+    margin-bottom:6px;             /* aire con la fila de chips */
   }
-    .filter-card{
+
+  .filter-card{
     background:#f8fafc;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
@@ -141,22 +131,20 @@
     color:#4b5563;
   }
 
-  /* Filtros superiores (Fecha, Plataforma, Operador, Cuenta, Repartición) más bajos */
+  /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
-    padding:2px 8px 4px;
+    padding:4px 8px;
+    min-height:70px;              /* ~la mitad de antes */
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
   }
-  .filter-card--compact h5{
-    font-size:10px;
-    margin:0 0 2px;
+  .filter-card--compact .field{
+    margin-top:2px;
   }
-  .filter-card--compact .field input,
   .filter-card--compact .field select{
     height:26px;
     font-size:12px;
-    padding:2px 6px;
-  }
-  .filter-card--compact .stack{
-    gap:6px;
   }
 
   .mini-kpi{
@@ -300,11 +288,24 @@
     text-align:left;
   }
 
-  .table th:nth-child(1), .table td:nth-child(1){width:9ch;white-space:nowrap;}
-  .table th:nth-child(2), .table td:nth-child(2){width:24%;}
-  .table th:nth-child(3), .table td:nth-child(3){width:30%;}
-  .table th:nth-child(4), .table td:nth-child(4){width:15ch;white-space:nowrap;}
-  .table th:nth-child(5), .table td:nth-child(5){width:12ch;white-space:nowrap;}
+  .table th:nth-child(1), .table td:nth-child(1){
+    width:9ch;
+    white-space:nowrap;
+  }
+  .table th:nth-child(2), .table td:nth-child(2){
+    width:24%;
+  }
+  .table th:nth-child(3), .table td:nth-child(3){
+    width:30%;
+  }
+  .table th:nth-child(4), .table td:nth-child(4){
+    width:15ch;
+    white-space:nowrap;
+  }
+  .table th:nth-child(5), .table td:nth-child(5){
+    width:12ch;
+    white-space:nowrap;
+  }
   .table th:nth-child(6), .table td:nth-child(6){
     width:10ch;
     white-space:nowrap;
@@ -371,6 +372,7 @@
 <div class="container-xxl py-4">
   <h1 class="mb-1">Buscador</h1>
 
+  <!-- Región de avisos accesible -->
   <div aria-live="polite" aria-atomic="true">
     {% if toast %}
     <div id="oppToast" class="toast" role="status">
@@ -380,7 +382,7 @@
     {% endif %}
   </div>
 
-  <!-- Upload sin dropzone -->
+  <!-- Upload -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
       <div>
@@ -438,7 +440,7 @@
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
-        <div class="filter-card filter-card--compact" aria-labelledby="lblFecha">
+        <div class="filter-card" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
           <div class="stack" style="justify-content:space-between">
             <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
@@ -457,8 +459,8 @@
         </div>
 
         <!-- Plataforma -->
-        <div class="filter-card">
-  <h5>Plataforma</h5>
+        <div class="filter-card filter-card--compact">
+          <h5>Plataforma</h5>
           <div class="field">
             <select id="fPlataforma" aria-label="Filtrar por plataforma">
               <option value="">Todas</option>
@@ -468,7 +470,7 @@
 
         <!-- Operador -->
         <div class="filter-card filter-card--compact">
-  <h5>Operador</h5>
+          <h5>Operador</h5>
           <div class="field">
             <select id="fOperador" aria-label="Filtrar por operador">
               <option value="">Todos</option>
@@ -478,7 +480,7 @@
 
         <!-- Cuenta -->
         <div class="filter-card filter-card--compact">
-  <h5>Cuenta</h5>
+          <h5>Cuenta</h5>
           <div class="field">
             <select id="fCuenta" aria-label="Filtrar por cuenta">
               <option value="">Todas</option>
@@ -488,7 +490,7 @@
 
         <!-- Repartición -->
         <div class="filter-card filter-card--compact">
-  <h5>Repartición</h5>
+          <h5>Repartición</h5>
           <div class="field">
             <select id="fReparticion" aria-label="Filtrar por repartición">
               <option value="">Todas</option>
@@ -592,7 +594,6 @@
               row.get('Operador')
               or row.get('Responsable')
           %}
-
           {% set cuenta =
               row.get('Cuenta')
               or row.get('Número')
@@ -602,7 +603,6 @@
               or row.get('Unidad Compra')
               or row.get('Cod. UAPE')
           %}
-
           {% set estado_raw =
               row.get('Estado')
               or row.get('Tipo Proceso')
@@ -679,6 +679,7 @@
   </div>
 </div>
 
+<!-- Config inicial para el JS -->
 <script>
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
@@ -686,7 +687,7 @@
     initialDateTo: null,
     els: {
       file: 'oppFile',
-      drop: 'oppDrop',   // ya no existe, pero no rompe nada
+      drop: 'oppDrop',
       btnUpload: 'btnUpload',
       upLoading: 'upLoading',
       buscar: 'fBuscar',
