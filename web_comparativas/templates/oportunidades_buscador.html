@@ -134,17 +134,38 @@
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
     padding:4px 8px;
-    min-height:70px;              /* ~la mitad de antes */
+    min-height:64px;              /* más bajito */
     display:flex;
     flex-direction:column;
-    justify-content:space-between;
+    justify-content:center;       /* centra label + select en el alto */
+  }
+  .filter-card--compact h5{
+    margin-bottom:2px;            /* menos espacio entre título y select */
   }
   .filter-card--compact .field{
-    margin-top:2px;
+    margin-top:0;
   }
   .filter-card--compact .field select{
     height:26px;
     font-size:12px;
+  }
+
+  /* Filtro Fecha compacto: inputs en línea y más bajos */
+  .filter-card--date{
+    padding:6px 8px;
+  }
+  .filter-card--date .stack{
+    justify-content:space-between;
+    margin-bottom:4px;
+  }
+  .filter-card--date input[type="date"]{
+    width:49%;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    padding:3px 8px;
+    background:#fff;
+    font-size:12px;
+    height:28px;
   }
 
   .mini-kpi{
@@ -444,11 +465,11 @@
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
-        <div class="filter-card" aria-labelledby="lblFecha">
+        <div class="filter-card filter-card--date" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
-          <div class="stack" style="justify-content:space-between">
-            <input id="fDateFrom" type="date" style="width:49%" aria-label="Fecha desde">
-            <input id="fDateTo" type="date" style="width:49%" aria-label="Fecha hasta">
+          <div class="stack">
+            <input id="fDateFrom" type="date" aria-label="Fecha desde">
+            <input id="fDateTo" type="date" aria-label="Fecha hasta">
           </div>
           <div class="range-wrap" style="margin-top:4px" aria-hidden="false" aria-label="Rango de fechas (slider)">
             <div class="range-track"></div>
