@@ -38,6 +38,7 @@
   const nextBtn = $("#nextPage");
   const curPage = $("#curPage");
   const maxPage = $("#maxPage");
+  const pageSizeSelect = $("#pageSizeSelect"); // <--- select de filas por página
 
   // Tamaño de página configurable
   let PAGE_SIZE =
@@ -566,7 +567,7 @@
     URL.revokeObjectURL(url);
   }
 
-  // ---- Eventos
+  // ---- Eventos principales de filtros / búsqueda
   btnAplicar && btnAplicar.addEventListener("click", applyFilters);
 
   btnLimpiar &&
@@ -634,7 +635,7 @@
     });
   }
 
-  // Drag & drop sobre la dropzone
+  // Drag & drop sobre la dropzone (si existiera)
   if (drop && fileInput) {
     ["dragenter", "dragover"].forEach((ev) => {
       drop.addEventListener(ev, (e) => {
@@ -665,7 +666,9 @@
     });
   }
 
-  // API pública para cambiar tamaño de página (usada desde el HTML)
+  // ----------------------------------------------------------
+  //  API pública para cambiar tamaño de página
+  // ----------------------------------------------------------
   window.OPP = window.OPP || {};
   window.OPP.refreshPageSize = function (newSize) {
     const n = Number(newSize) || 20;
@@ -676,6 +679,21 @@
     CUR_PAGE = 1;
     render();
   };
+
+  // Listener directo del select (por si el HTML no llama a OPP.refreshPageSize)
+  if (pageSizeSelect) {
+    pageSizeSelect.addEventListener("change", function () {
+      const v = parseInt(this.value, 10) || 20;
+      window.OPP.refreshPageSize(v);
+    });
+  }
+
+  // Listener del evento custom (fallback extra)
+  document.addEventListener("opp:pageSizeChanged", function (ev) {
+    if (!ev || !ev.detail) return;
+    const v = ev.detail.pageSize;
+    window.OPP.refreshPageSize(v);
+  });
 
   // Render inicial
   applyFilters();
