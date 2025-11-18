@@ -1234,677 +1234,2087 @@
   </aside>
   <!-- fin módulo comentarios -->
 {% endblock %}
+
 {% block extra_js %}
-<script>
-(function(){
-  "use strict";
+  <script>
+    window.__DASH_VERSION__ = 'dashboard-exjs v2025-10-26-b-fix';
+    console.info('[dashboard] bundle', window.__DASH_VERSION__);
+  </script>
 
-  // ==========================
-  // Helpers generales
-  // ==========================
-  function formatPeso(value){
-    if(value == null || isNaN(value)) return "—";
-    try{
-      return new Intl.NumberFormat("es-AR", {
-        style: "currency",
-        currency: "ARS",
-        maximumFractionDigits: 0
-      }).format(value);
-    } catch(e){
-      return "$" + (Math.round(Number(value)) || 0).toLocaleString("es-AR");
-    }
-  }
-
-  function formatPct(value){
-    if(value == null || !isFinite(value)) return "—";
-    return value.toFixed(1).replace(".", ",") + " %";
-  }
-
-  function safeNum(v){
-    var n = Number(v);
-    return isNaN(n) ? 0 : n;
-  }
-
-  // ==========================
-  // Detección Suizo / ganador
-  // ==========================
-  function isSuizoRow(row){
-    if(!row) return false;
-
-    if("is_suizo" in row) return !!row.is_suizo;
-    if("es_suizo" in row) return !!row.es_suizo;
-    if("suizo"    in row) return !!row.suizo;
-
-    var prov = (row.proveedor || row.provider || row.proveedor_ganador || "").toString().toLowerCase();
-    return prov.includes("suizo");
-  }
-
-  function isWinner(row){
-    if(!row) return false;
-
-    if("adjudicado" in row) return !!row.adjudicado;
-    if("is_winner"  in row) return !!row.is_winner;
-    if("ganador"    in row) return !!row.ganador;
-
-    if("pos" in row)       return Number(row.pos) === 1;
-    if("posicion" in row)  return Number(row.posicion) === 1;
-
-    return false;
-  }
-
-  function getAwardedAmount(row){
-    if(!row) return 0;
-
-    if(row.monto_adjudicado != null) return safeNum(row.monto_adjudicado);
-    if(row.awarded_amount   != null) return safeNum(row.awarded_amount);
-    if(row.monto_ganador    != null) return safeNum(row.monto_ganador);
-    if(row.total            != null) return safeNum(row.total);
-
-    return 0;
-  }
-
-  function getOfferedAmount(row){
-    if(!row) return 0;
-
-    if(row.monto_ofertado  != null) return safeNum(row.monto_ofertado);
-    if(row.offered_amount  != null) return safeNum(row.offered_amount);
-    if(row.oferta_total    != null) return safeNum(row.oferta_total);
-
-    return 0;
-  }
-
-  // ==========================
-  // KPIs generales
-  // ==========================
-  function computeGeneralKpis(rows){
-    rows = rows || [];
-
-    var totalAward = 0;
-    var itemSet   = new Set();
-    var provSet   = new Set();
-
-    rows.forEach(function(r){
-      if(isWinner(r)){
-        totalAward += getAwardedAmount(r);
-      }
-
-      var itemKey = r.renglon || r.item || r.codigo || r.id || r.nro_renglon;
-      if(itemKey != null){
-        itemSet.add(String(itemKey));
-      }
-
-      var provName = (r.proveedor || r.provider || r.proveedor_ganador || "").toString().trim();
-      if(provName){
-        provSet.add(provName);
-      }
-    });
-
-    return {
-      awarded : totalAward,
-      items   : itemSet.size || rows.length,
-      bidders : provSet.size || 0
-    };
-  }
-
-  // ==========================
-  // KPIs Suizo (fijos, no dependen de modo)
-  // ==========================
-  function computeSuizoKpis(rows){
-    rows = rows || [];
-
-    var suizoRows = rows.filter(isSuizoRow);
-
-    var offered = 0;
-    var awarded = 0;
-    var itemsSet    = new Set();
-    var wonItemsSet = new Set();
-
-    suizoRows.forEach(function(r){
-      offered += getOfferedAmount(r);
-
-      if(isWinner(r)){
-        awarded += getAwardedAmount(r);
-      }
-
-      var itemKey = r.renglon || r.item || r.codigo || r.id || r.nro_renglon;
-      if(itemKey != null){
-        var keyStr = String(itemKey);
-        itemsSet.add(keyStr);
-        if(isWinner(r)){
-          wonItemsSet.add(keyStr);
-        }
-      }
-    });
-
-    var renglonesOf  = itemsSet.size || suizoRows.length;
-    var renglonesAdj = wonItemsSet.size;
-
-    var effMonto = offered > 0 ? (awarded / offered * 100) : null;
-    var effReng  = renglonesOf > 0 ? (renglonesAdj / renglonesOf * 100) : null;
-
-    return {
-      offered       : offered,
-      awarded       : awarded,
-      effMonto      : effMonto,
-      renglonesOf   : renglonesOf,
-      renglonesAdj  : renglonesAdj,
-      effReng       : effReng
-    };
-  }
-
-  // ==========================
-  // Treemap: agrupar por proveedor o por renglón
-  // ==========================
-  function groupTreemap(rows, grouping){
-    rows = rows || [];
-    var map = {};
-
-    rows.forEach(function(r){
-      if(!isWinner(r)) return;
-
-      var key;
-      if(grouping === "item"){
-        key = r.renglon || r.item || r.codigo || r.id || "Renglón";
+  <!-- 1) Datos iniciales para el treemap (fallback si no hay chart_prov directo) -->
+  <script>
+    (() => {
+      const direct = {{ chart_prov|default([])|tojson }};
+      if (Array.isArray(direct) && direct.length) {
+        window.CHART_PROV = direct.map(d => ({
+          label: String(d.label ?? d.name ?? '—'),
+          value: +d.value || 0
+        }));
       } else {
-        key = r.proveedor || r.provider || r.proveedor_ganador || "Sin proveedor";
-      }
-
-      key = String(key);
-      var amt = getAwardedAmount(r);
-
-      if(!map[key]) map[key] = 0;
-      map[key] += amt;
-    });
-
-    var total = 0;
-    Object.keys(map).forEach(function(k){
-      total += map[k];
-    });
-
-    var nodes = Object.keys(map).map(function(k){
-      return { label: k, value: map[k] };
-    });
-
-    return { total: total, nodes: nodes };
-  }
-
-  // Exponer helpers para el resto de los scripts (PARTE 3)
-  window.__WC_DASH_HELPERS__ = {
-    formatPeso,
-    formatPct,
-    safeNum,
-    isSuizoRow,
-    isWinner,
-    getAwardedAmount,
-    getOfferedAmount,
-    computeGeneralKpis,
-    computeSuizoKpis,
-    groupTreemap
-  };
-})();
-</script>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  // =======================
-  // Helpers expuestos en la PARTE 2
-  // =======================
-  const H = window.__WC_DASH_HELPERS__ || {};
-  const {
-    formatPeso,
-    formatPct,
-    safeNum,
-    isSuizoRow,
-    isWinner,
-    getAwardedAmount,
-    getOfferedAmount,
-    computeGeneralKpis,
-    computeSuizoKpis,
-    groupTreemap
-  } = H;
-
-  // Si por algún motivo no están los helpers, no rompemos
-  if (!computeGeneralKpis || !computeSuizoKpis) {
-    console.warn('[dashboard] Helpers de KPIs no disponibles');
-    return;
-  }
-
-  // =======================
-  // Config / estado global
-  // =======================
-  const RANK_API = {{ rank_api_url|tojson }};
-  let ALL_SIMPLE_ROWS = [];     // filas "planas" (1 por proveedor / renglón)
-  let MODE = 'todos';           // 'suizo' | 'otros' | 'todos'
-
-  // gráficos
-  let donutChart = null;
-  let barChart   = null;
-
-  // =======================
-  // DOM helpers
-  // =======================
-  const $  = (sel, root) => (root || document).querySelector(sel);
-  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
-
-  const elTabSuizo = $('#tabSuizo');
-  const elTabOtros = $('#tabOtros');
-  const elTabTodos = $('#tabTodos');
-
-  const elTreemapTotalKpi = $('#treemapTotalKpi');
-  const elTreemapTotalLbl = $('#treemapTotal');
-  const elRengKpi         = $('#dg_renglones');
-  const elCompKpi         = $('#dg_competidores');
-  const elTreemapModeTg   = $('#treemapModeToggle');
-  const elTreemapTitle    = $('#treemapTitle');
-
-  const elES_monto_of   = $('#es_monto_ofertado');
-  const elES_monto_adj  = $('#es_monto_adjudicado');
-  const elES_ef_monto   = $('#es_efectividad_monto');
-  const elES_ren_of     = $('#es_renglones_ofertados');
-  const elES_ren_adj    = $('#es_renglones_adjudicados');
-  const elES_ef_reng    = $('#es_efectividad_renglones');
-
-  const elDonutCanvas = $('#donutSuizo');
-  const elBarCanvas   = $('#barPosAgg');
-
-  // =======================
-  // Normalización de datos de ranking
-  // =======================
-  function toNumber(x) {
-    if (x == null) return 0;
-    if (typeof x === 'number' && isFinite(x)) return x;
-    const s = String(x)
-      .replace(/\s+/g, '')
-      .replace(/[^0-9,.\-]/g, '')
-      .replace(/\.(?=\d{3}([\D]|$))/g, '');
-    const n = parseFloat(s.replace(',', '.'));
-    return isFinite(n) ? n : 0;
-  }
-
-  function normalizeRankData(raw) {
-    if (!raw) return [];
-    const rows = Array.isArray(raw.rows) ? raw.rows : (Array.isArray(raw) ? raw : []);
-
-    if (!rows.length) return [];
-
-    // Caso 1: estructura con positions (tu API actual del dashboard)
-    if (Array.isArray(rows[0].positions)) {
-      const out = [];
-
-      rows.forEach((r) => {
-        const baseQty =
-          toNumber(r.cantidad_solicitada ?? r.cantidad ?? r.qty ?? r.q ?? 0);
-        const itemKey =
-          r.renglon ?? r.item ?? r.nro ?? r.Nro ?? r.codigo ?? r.id ?? null;
-
-        (r.positions || []).forEach((p) => {
-          const provRaw = p.proveedor ?? p.provider ?? '';
-          const prov    = String(provRaw || '').trim();
-          const esSuizo = /suizo/i.test(prov);
-
-          const pos = Number(p.pos ?? p.position ?? 0) || 0;
-
-          const priceRaw =
-            p.precio_unitario ?? p.precio ?? p.price ?? p.unit_price ?? 0;
-          const price = toNumber(priceRaw);
-
-          const qtyOffRaw =
-            p.cantidad_ofertada ??
-            p.cant_ofertada     ??
-            p.cantidad          ??
-            p.qty               ??
-            baseQty             ??
-            1;
-          const qtyOff = toNumber(qtyOffRaw) || (baseQty || 1);
-
-          const offeredVal = price > 0 ? price * qtyOff : 0;
-
-          const winFlag = !!(p.adjudicado || p.is_winner || p.ganador);
-
-          let qtyAdjRaw =
-            p.cantidad_adjudicada ??
-            p.cant_adjudicada     ??
-            p.cantidad_asignada   ??
-            null;
-          let qtyAdj = 0;
-          if (qtyAdjRaw != null) {
-            qtyAdj = toNumber(qtyAdjRaw);
-          } else if (winFlag || pos === 1) {
-            qtyAdj = baseQty || qtyOff || 0;
-          }
-
-          const awardedVal = price > 0 ? price * qtyAdj : 0;
-          const ganador    = awardedVal > 0 || winFlag;
-
+        const L = {{ chart_suppliers_adj_labels|default([])|tojson }};
+        const V = {{ chart_suppliers_adj_values|default([])|tojson }};
+        const out = [];
+        for (let i = 0; i < Math.min(L.length, V.length); i++) {
           out.push({
-            proveedor: prov,
-            suizo: esSuizo,
-            ganador: ganador,
-            pos: pos,
-            renglon: itemKey,
-            monto_ofertado: offeredVal,
-            monto_adjudicado: awardedVal
+            label: String(L[i] ?? ''),
+            value: +V[i] || 0
           });
+        }
+        window.CHART_PROV = out;
+      }
+    })();
+  </script>
+
+  <!-- 2) Lógica principal (tabla + KPIs + gráficos + vista gerente + competidores fuertes) -->
+  <script>
+    (function () {
+      const SA_AZUL = '#064066',
+            SA_GRIS = '#EBEBEB',
+            SA_BLANCO = '#ffffff';
+
+      const elOppBar = document.getElementById('opportunityBar');
+      const elOppText = document.getElementById('opportunityText');
+
+      const elLossExpl = document.getElementById('lossExplainer');
+      const elLossList = document.getElementById('lossList');
+      const elLossHint = document.getElementById('lossHint');
+      const elStrongCompetitors = document.getElementById('scList');
+
+      const elTreemapTitle = document.getElementById('treemapTitle');
+      const elTreemapModeToggle = document.getElementById('treemapModeToggle');
+
+      // estado del switch del treemap
+      let TREEMAP_VIEW = 'prov'; // 'prov' | 'item'
+      let TREEMAP_PROV_DATA = Array.isArray(window.CHART_PROV) ? window.CHART_PROV.slice() : [];
+      let TREEMAP_ITEM_DATA = [];
+
+      // etiqueta para el tooltip del treemap (la usa el script 3)
+      window.TREEMAP_LABEL = window.TREEMAP_LABEL || 'Proveedor';
+
+      /* ===== Helpers ===== */
+      const waitUntil = (testFn, {tries=40, every=120}={}) =>
+        new Promise(res => {
+          (function loop(n){
+            if (testFn()) return res(true);
+            if (n <= 0) return res(false);
+            setTimeout(() => loop(n - 1), every);
+          })(tries);
         });
-      });
 
-      return out;
-    }
+      // Inicializar defaults Chart cuando esté cargado
+      (async function setupChartDefaults(){
+        const ok = await waitUntil(() => !!window.Chart);
+        if (!ok) return;
 
-    // Caso 2: ya viene plano -> sólo completamos flags
-    return rows.map((r) => {
-      const provRaw = r.proveedor ?? r.provider ?? r.proveedor_ganador ?? '';
-      const prov    = String(provRaw || '').trim();
-      const esSuizo = /suizo/i.test(prov);
+        Chart.defaults.font.family = "Outfit, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial";
+        Chart.defaults.color = SA_AZUL;
+        Chart.defaults.maintainAspectRatio = false;
+        Chart.defaults.animation = false;
 
-      let ganador = false;
-      if (typeof isWinner === 'function') {
-        ganador = !!isWinner(r);
-      } else {
-        ganador = !!(r.ganador || r.adjudicado || r.is_winner);
-      }
+        Chart.defaults.plugins.tooltip.enabled = true;
+        Chart.defaults.plugins.tooltip.backgroundColor = SA_BLANCO;
+        Chart.defaults.plugins.tooltip.borderColor = '#e5e7eb';
+        Chart.defaults.plugins.tooltip.borderWidth = 1;
+        Chart.defaults.plugins.tooltip.titleColor = SA_AZUL;
+        Chart.defaults.plugins.tooltip.bodyColor = SA_AZUL;
+        Chart.defaults.plugins.tooltip.cornerRadius = 6;
+        Chart.defaults.plugins.tooltip.padding = 8;
 
-      return Object.assign({}, r, {
-        proveedor: prov,
-        suizo: esSuizo,
-        ganador: ganador,
-        monto_ofertado: getOfferedAmount ? getOfferedAmount(r) : safeNum(r.monto_ofertado),
-        monto_adjudicado: getAwardedAmount ? getAwardedAmount(r) : safeNum(r.monto_adjudicado)
-      });
-    });
-  }
+        Chart.defaults.plugins.legend.labels.boxWidth = 12;
 
-  // =======================
-  // Segmentación Suizo / Otros / Todos
-  // =======================
-  function rowsForMode(mode) {
-    if (mode === 'suizo') {
-      return ALL_SIMPLE_ROWS.filter((r) => {
-        if (typeof isSuizoRow === 'function') return isSuizoRow(r);
-        return !!r.suizo;
-      });
-    }
-    if (mode === 'otros') {
-      return ALL_SIMPLE_ROWS.filter((r) => {
-        if (typeof isSuizoRow === 'function') return !isSuizoRow(r);
-        return !r.suizo;
-      });
-    }
-    // todos
-    return ALL_SIMPLE_ROWS.slice();
-  }
+        Chart.defaults.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+      })();
 
-  function setMode(newMode) {
-    MODE = newMode;
+      const toNum = (x) => {
+        if (typeof x === 'number') return isFinite(x) ? x : 0;
+        const s = String(x ?? '')
+          .replace(/\s+/g,'')
+          .replace(/[^0-9,.\-]/g,'')
+          .replace(/\.(?=\d{3}([\D]|$))/g,'');
+        const n = parseFloat(s.replace(',', '.'));
+        return isFinite(n) ? n : 0;
+      };
 
-    const btns = {
-      suizo: elTabSuizo,
-      otros: elTabOtros,
-      todos: elTabTodos
-    };
+      const nfARS = v =>
+        new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0})
+          .format(+v||0);
 
-    Object.keys(btns).forEach((key) => {
-      const b = btns[key];
-      if (!b) return;
-      const active = (key === newMode);
-      b.classList.toggle('active', active);
-      b.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
+      const pctFmt = v =>
+        new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:0})
+          .format(+v||0);
 
-    updateAll();
-  }
+      const pctFmt1d = v =>
+        new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:1})
+          .format(+v||0.0);
 
-  // =======================
-  // Gráficos (donut + barras)
-  // =======================
-  function initChartsIfNeeded() {
-    if (!window.Chart) return;
+      const fmtDateDMY = s => {
+        const m = String(s || '').trim().match(/^0*(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+        if (!m) return s || '';
+        const dd = m[1].padStart(2, '0');
+        const mm = m[2].padStart(2, '0');
+        const yy = m[3].length === 2 ? '20' + m[3] : m[3].padStart(4, '0');
+        return dd + '/' + mm + '/' + yy;
+      };
 
-    if (elDonutCanvas && !donutChart) {
-      donutChart = new Chart(elDonutCanvas.getContext('2d'), {
-        type: 'doughnut',
-        data: {
-          labels: ['Adjudicado', 'No adjudicado'],
-          datasets: [{
-            data: [0, 0],
-            backgroundColor: ['#064066', '#dce3ee'],
-            borderColor: '#ffffff',
-            borderWidth: 2
-          }]
-        },
-        options: {
-          cutout: '55%',
-          plugins: {
-            legend: { position: 'bottom' }
+      const isSuizo = prov => /suizo/i.test(String(prov||''));
+
+      // normaliza textos para comparaciones
+      const norm = function (s) {
+        var out = (s || "").toString().toLowerCase();
+        if (typeof out.normalize === "function") {
+          out = out.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        }
+        out = out.replace(/[\s_.\-\/]+/g, "");
+        return out;
+      };
+
+      const esc = function (s) {
+        var str = (s == null ? "" : String(s));
+        return str.replace(/[&<>"']/g, function (m) {
+          switch (m) {
+            case "&": return "&amp;";
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            case "\"": return "&quot;";
+            default: return "&#39;";
+          }
+        });
+      };
+
+      const rxEscape = s => String(s||'').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      const highlightText = (text, query) => {
+        const src = String(text || '');
+        const q = String(query || '').trim();
+        if (!q) return esc(src);
+
+        const re = new RegExp(rxEscape(q), 'i');
+        const m = src.match(re);
+        if (!m) return esc(src);
+
+        const i = m.index;
+        const match = m[0];
+        const after = src.slice(i + match.length);
+        const before = src.slice(0, i);
+
+        return esc(before) +
+          '<mark class="sa-hit">' + esc(match) + '</mark>' +
+          esc(after);
+      };
+
+      function pickNumber(obj, keywords){
+        if(!obj) return 0;
+        const keys = Object.keys(obj||{});
+        for(const k of keys){
+          const nk = norm(k);
+          for(const kw of keywords){
+            if(nk.includes(kw)){
+              const v = toNum(obj[k]);
+              if(v!==0) return v;
+            }
           }
         }
-      });
-    }
+        return 0;
+      }
 
-    if (elBarCanvas && !barChart) {
-      barChart = new Chart(elBarCanvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels: ['1', '2', 'Otras'],
-          datasets: [{
-            data: [0, 0, 0],
-            backgroundColor: ['#064066', '#dce3ee', '#dce3ee'],
-            borderColor: '#ffffff',
-            borderWidth: 2
-          }]
-        },
-        options: {
-          scales: {
-            y: { beginAtZero: true, ticks: { precision: 0 } }
+      /* ===== Cantidades & precios ===== */
+      const unitPriceOf = p => toNum(p?.precio ?? p?.price);
+
+      function rowQty(row){
+        const cand = [
+          row?.cantidad_solicitada,
+          row?.cantidadSolicitada,
+          row?.cant_solicitada,
+          row?.solicitada,
+          row?.cantidad_req,
+          row?.cantidad,
+          row?.qty,
+          row?.q
+        ];
+        for(const c of cand){
+          const v=toNum(c);
+          if(v>0) return v;
+        }
+        return pickNumber(row,[
+          'cantidadsolicitada',
+          'cantsolicitada',
+          'solicitada',
+          'unidades',
+          'cantidad'
+        ])||0;
+      }
+
+      function offeredQty(row,p){
+        let v = toNum(
+          p?.cantidad ??
+          p?.cantidad_ofertada ??
+          p?.cant_ofertada ??
+          p?.qty
+        );
+        if(v>0) return v;
+        return pickNumber(p,[
+          'cantidad',
+          'ofertada',
+          'cant'
+        ])||0;
+      }
+
+      function effectiveQty(row,p){
+        const req=rowQty(row);
+        const p1=(row.positions||[]).find(x=>+x.pos===1);
+        const q1=offeredQty(row,p1)||0;
+
+        if(+p.pos===1) return Math.min(q1,req);
+        if(+p.pos===2){
+          const rem=Math.max(0,req-q1);
+          const q2=offeredQty(row,p)||0;
+          return Math.min(q2,rem);
+        }
+        return 0;
+      }
+
+      const totalOf =(row,p)=>unitPriceOf(p)*offeredQty(row,p);
+      const awardValue=(row,p)=>unitPriceOf(p)*effectiveQty(row,p);
+
+      /* ===== visibilidad de ofertas por modo ===== */
+      let MODE='todos'; // En "otros" ocultamos Suizo; en el resto mostramos todo y usamos filtros de filas.
+
+      const showOfferByMode = (p) =>
+        MODE==='otros' ? !isSuizo(p.proveedor) : true;
+
+      function cheapestPrice(row, {includedOnly=false}={}){
+        const arr = (row.positions||[])
+          .filter(p => includedOnly ? showOfferByMode(p) : true);
+
+        let min = Infinity;
+        for(const p of arr){
+          const u=unitPriceOf(p);
+          if(u<min) min=u;
+        }
+        return isFinite(min) && min<Infinity ? min : 0;
+      }
+
+      function rankAmong(row, {includedOnly=false}={}){
+        const arr = (row.positions||[])
+          .filter(p => includedOnly ? showOfferByMode(p) : true)
+          .slice()
+          .sort((a,b)=>unitPriceOf(a)-unitPriceOf(b));
+
+        const map=new Map();
+        arr.forEach((p,i)=> map.set(+p.pos, i+1));
+        return map;
+      }
+
+      /* ===== Controles zoom/densidad ===== */
+      const fitContainer=document.getElementById('fitContainer');
+      const viewToggle=document.getElementById('viewToggle');
+      const densityToggle=document.getElementById('densityToggle');
+
+      let VIEW_MODE=localStorage.getItem('viewMode')||'normal';
+      let DENSITY=localStorage.getItem('density')||'normal';
+
+      function setActive(group,attr,val){
+        if (!group) return;
+        group.querySelectorAll('.mini-btn').forEach(b=>{
+          const active = b.dataset[attr]===val;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+      }
+
+      function computeFitScale(){
+        if (!fitContainer) return 1;
+        fitContainer.classList.remove('scaled');
+        fitContainer.style.setProperty('--fit-scale','1');
+        const natW=fitContainer.scrollWidth || 1,
+              natH=fitContainer.scrollHeight || 1;
+        const vw=window.innerWidth || 1,
+              vh=window.innerHeight || 1;
+        return Math.min(1, vw/natW, (vh-12)/natH);
+      }
+
+      function applyView(){
+        if (!fitContainer) return;
+        if(VIEW_MODE==='fit'){
+          const s=computeFitScale();
+          fitContainer.style.setProperty('--fit-scale',String(s || 1));
+          fitContainer.classList.add('scaled');
+        } else {
+          fitContainer.classList.remove('scaled');
+          fitContainer.style.setProperty('--fit-scale','1');
+        }
+      }
+
+      function applyDensity(){
+        if (!fitContainer) return;
+        fitContainer.classList.toggle('compact', DENSITY==='compact');
+        if(VIEW_MODE==='fit') applyView();
+      }
+
+      if (viewToggle){
+        viewToggle.addEventListener('click', e=>{
+          const b=e.target.closest('.mini-btn');
+          if(!b) return;
+          VIEW_MODE=b.dataset.view;
+          localStorage.setItem('viewMode',VIEW_MODE);
+          setActive(viewToggle,'view',VIEW_MODE);
+          applyView();
+        });
+      }
+
+      if (densityToggle){
+        densityToggle.addEventListener('click', e=>{
+          const b=e.target.closest('.mini-btn');
+          if(!b) return;
+          DENSITY=b.dataset.density;
+          localStorage.setItem('density',DENSITY);
+          setActive(densityToggle,'density',DENSITY);
+          applyDensity();
+        });
+      }
+
+      window.addEventListener('resize', ()=>{
+        if(VIEW_MODE==='fit') applyView();
+      });
+
+      setActive(viewToggle,'view',VIEW_MODE);
+      setActive(densityToggle,'density',DENSITY);
+      applyView();
+      applyDensity();
+
+      // Normalizar fecha visible
+      const phAp=document.getElementById('ph_apertura');
+      if(phAp) phAp.textContent=fmtDateDMY(phAp.textContent);
+
+      /* ===== Gráficos (donut + barras posiciones) ===== */
+      let chartDonutSuizo, chartBarPos;
+
+      const CenterPercent = {
+        id:'centerPercent',
+        afterDraw(chart, args, opt){
+          const d=chart.data.datasets?.[0]?.data??[];
+          const tot=d.reduce((a,b)=>a+(+b||0),0);
+          if(!tot) return;
+          const i=opt?.focusIndex??0;
+          const val=+d[i]||0, p=val/tot;
+
+          const meta=chart.getDatasetMeta(0).data?.[0];
+          if(!meta) return;
+
+          const {ctx}=chart;
+          ctx.save();
+          ctx.font='600 14px Outfit, ui-sans-serif, system-ui';
+          ctx.fillStyle='#064066';
+          ctx.textAlign='center';
+          ctx.fillText(pctFmt1d(p), meta.x, meta.y);
+          ctx.restore();
+        }
+      };
+
+      function ensureCharts(){
+        if(!window.Chart) return;
+        if(!chartDonutSuizo){
+          const c = document.getElementById('donutSuizo');
+          if (c){
+            chartDonutSuizo = new Chart(c.getContext('2d'),{
+              type:'doughnut',
+              data:{
+                labels:['Adjudicado','No adjudicado'],
+                datasets:[{
+                  data:[0,0],
+                  backgroundColor:['#064066','#dce3ee'],
+                  borderColor:'#ffffff',
+                  borderWidth:2
+                }]
+              },
+              options:{
+                cutout:'55%',
+                plugins:{
+                  legend:{ position:'bottom' },
+                  centerPercent:{ focusIndex:0 },
+                  tooltip:{
+                    callbacks:{
+                      label:(ctx)=> {
+                        const v = +ctx.raw || 0;
+                        return `${ctx.label}: ${nfARS(v)}`;
+                      }
+                    }
+                  }
+                }
+              },
+              plugins:[CenterPercent]
+            });
+          }
+        }
+
+        if(!chartBarPos){
+          const c = document.getElementById('barPosAgg');
+          if (c){
+            chartBarPos = new Chart(c.getContext('2d'),{
+              type:'bar',
+              data:{
+                labels:['1','2','Otras'],
+                datasets:[{
+                  data:[0,0,0],
+                  backgroundColor:['#064066','#dce3ee','#dce3ee'],
+                  borderColor:'#ffffff',
+                  borderWidth:2
+                }]
+              },
+              options:{
+                scales:{
+                  y:{ beginAtZero:true, ticks:{ precision:0 } }
+                },
+                plugins:{
+                  legend:{ display:false }
+                },
+                onClick:(_,els)=>{
+                  if(!els?.length) return;
+                  const idx=els[0].index;
+                  togglePosBuckets(idx===0?'1':idx===1?'2':'otras');
+                }
+              }
+            });
+          }
+        }
+      }
+
+      function colorTreemapTotal(total){
+        const lbl = document.getElementById('treemapTotal');
+        const kpi = document.getElementById('treemapTotalKpi');
+        if (lbl) lbl.textContent = total ? `Adjudicado: ${nfARS(total)}` : '';
+        if (kpi) kpi.textContent = nfARS(total || 0);
+      }
+
+      function refreshTreemapFromData(data){
+        if(typeof window.updateTreemap==='function'){
+          window.updateTreemap(data);
+          const total=(data||[]).reduce((s,x)=>s+(+x.value||0),0);
+          colorTreemapTotal(total);
+        }
+      }
+
+      if(Array.isArray(window.CHART_PROV)) refreshTreemapFromData(window.CHART_PROV);
+
+      // Valor ofertado (fallback)
+      function offerValue(row, p){
+        const price = unitPriceOf(p);
+        let qty = offeredQty(row, p);
+        if(!(qty > 0)) qty = rowQty(row) || 1;
+        const val = (price > 0 ? price * qty : qty) || 1;
+        return val;
+      }
+
+      // Treemap por renglón (monto adjudicado de posición 1)
+      function treemapDataByItemFirstPlace(rows, mode){
+        const allow = (name)=>{
+          if(mode==='suizo') return isSuizo(name);
+          if(mode==='otros') return !isSuizo(name);
+          return true;
+        };
+
+        const map = new Map();
+        (rows || []).forEach(r=>{
+          const p1 = (r.positions||[]).find(p=>+p.pos===1);
+          if (!p1 || !allow(p1.proveedor)) return;
+
+          const q1 = effectiveQty(r,p1);
+          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          if (!(v1 > 0)) return;
+
+          const nro = r.nro ?? r.item;
+          const labelBase = (nro !== undefined && nro !== null && nro !== '') ? `Renglón ${nro}` : 'Renglón';
+          map.set(labelBase, (map.get(labelBase) || 0) + v1);
+        });
+
+        return Array.from(map.entries())
+          .sort((a,b)=>b[1]-a[1])
+          .map(([label, value]) => ({ label, value }));
+      }
+
+      // Treemap por proveedor: monto adjudicado al proveedor en primer lugar
+      function treemapDataFirstPlace(rows, mode){
+        const allow = (name)=>{
+          if(mode==='suizo') return isSuizo(name);
+          if(mode==='otros') return !isSuizo(name);
+          return true;
+        };
+
+        const map = new Map();
+        (rows || []).forEach(r=>{
+          const p1 = (r.positions||[]).find(p=>+p.pos===1);
+          if (!p1 || !allow(p1.proveedor)) return;
+
+          const q1 = effectiveQty(r,p1);
+          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          if (!(v1 > 0)) return;
+
+          const key = String(p1.proveedor || '—');
+          map.set(key, (map.get(key) || 0) + v1);
+        });
+
+        return Array.from(map.entries())
+          .sort((a,b)=>b[1]-a[1])
+          .map(([label, value]) => ({ label, value }));
+      }
+
+      function bindTreemapClickOnce(){
+        const cv=document.getElementById('treemapProveedores');
+        if(!cv || !window.Chart || !Chart.getChart) return;
+        const chart=Chart.getChart(cv);
+        if(!chart){
+          setTimeout(bindTreemapClickOnce,300);
+          return;
+        }
+        if (cv.__treemapClickBound) return;
+        cv.__treemapClickBound = true;
+
+        cv.addEventListener('click',(evt)=>{
+          const els=chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+          if(!els.length) return;
+          const el=els[0];
+          const raw=(el.raw && (el.raw._data || el.raw)) || {};
+          const label=raw.label || raw.name || raw.g || '';
+          if(label && window.setFilter) window.setFilter('provider',label);
+        });
+      }
+      setTimeout(bindTreemapClickOnce,600);
+
+      /* ===== Ranking + filtros ===== */
+      const RANK_API="{{ rank_api_url }}";
+
+      const elHead=document.getElementById('rankHead'),
+            elBody=document.getElementById('rankBody');
+      const elPageSz=document.getElementById('pageSize'),
+            elPrev=document.getElementById('prev'),
+            elNext=document.getElementById('next'),
+            elInfo=document.getElementById('pageInfo');
+
+      const elTotal=document.getElementById('totalInfo'),
+            elSearch=document.getElementById('search'),
+            elChip=document.getElementById('selectionChip'),
+            elPosCols=document.getElementById('posCols');
+
+      const elRankSection = document.getElementById('rankSection');
+
+      let DATA={rows:[],max_pos:0,total_rows:0};
+      let QUERY='';
+      const FILTERS={ provider:null, posBuckets:new Set(), visCols:new Set(), header:{} };
+
+      function setMode(m){
+        MODE = m;
+        document.querySelectorAll('.segmented .seg-btn').forEach(b=>{
+          const isActive = b.dataset.mode===m;
+          b.classList.toggle('active', isActive);
+          b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        if (elRankSection){
+          elRankSection.classList.toggle('rank-mode-suizo', m === 'suizo');
+        }
+        elInfo.dataset.page=1;
+        renderAll();
+      }
+
+      window.setFilter=(k,v)=>{
+        if(k==='provider') FILTERS.provider=v||null;
+        elInfo.dataset.page=1;
+        renderAll();
+        renderChips();
+      };
+
+      function buildPosCols(maxPos){
+        if (!elPosCols) return;
+        elPosCols.innerHTML = Array.from({length:maxPos},(_,i)=>{
+          const n=i+1,
+                active=FILTERS.posBuckets.has(String(n))?'active':'';
+          return `<button class="pos-chip ${active}" data-pos="${n}">${n}°</button>`;
+        }).join('');
+      }
+
+      function updatePosButtonsUI(){
+        if (!elPosCols) return;
+        elPosCols.querySelectorAll('.pos-chip').forEach(b=>{
+          const key=b.dataset.pos;
+          b.classList.toggle('active', FILTERS.posBuckets.has(String(key)));
+        });
+      }
+
+      function renderChips(){
+        const chips=[];
+        if(FILTERS.provider) chips.push({key:'provider',label:FILTERS.provider});
+        if(FILTERS.posBuckets.size){
+          const label=[...FILTERS.posBuckets].map(x=>x+'°').join(', ');
+          chips.push({key:'posBuckets',label:'Posiciones: '+label});
+        }
+        elChip.innerHTML=chips.map(c=>
+          `<span class="sel-chip" data-key="${c.key}">${c.label} <button title="Quitar">×</button></span>`
+        ).join('');
+      }
+
+      const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+      const getPageSize=()=>clamp(parseInt(elPageSz.value||'50',10),10,500);
+
+      const hasSuizoRow=row=>row.positions?.some(p=>isSuizo(p.proveedor));
+
+      const rowMatchesQuery=(row,ql)=>{
+        if(!ql) return true;
+        if(String(row.descripcion||'').toLowerCase().includes(ql)) return true;
+        return (row.positions||[]).some(p=>
+          String(p.proveedor||'').toLowerCase().includes(ql)
+        );
+      };
+
+      function togglePosBuckets(b){
+        if(FILTERS.posBuckets.has(b)) FILTERS.posBuckets.delete(b);
+        else FILTERS.posBuckets.add(b);
+
+        const num=parseInt(b,10);
+        if(Number.isFinite(num)){
+          if(FILTERS.posBuckets.has(b)) FILTERS.visCols.add(num);
+          else FILTERS.visCols.delete(num);
+          buildHead(DATA.max_pos||0);
+        }
+        updatePosButtonsUI();
+        elInfo.dataset.page=1;
+        renderAll();
+        renderChips();
+      }
+
+      function posBucketsOk(row){
+        if(!FILTERS.posBuckets.size) return true;
+        return [...FILTERS.posBuckets].some(b=>
+          (row.positions||[]).some(p=>{
+            if(!showOfferByMode(p)) return false;
+            if(b==='otras') return +p.pos>=3;
+            return +p.pos===+b;
+          })
+        );
+      }
+
+      function parseRange(v,isPct=false){
+        const s=String(v||'').trim();
+        if(!s) return [null,null];
+        const m=s.match(/^\s*([+-]?\d+(?:[\.,]\d+)?)?\s*(?:\.\.|-)?\s*([+-]?\d+(?:[\.,]\d+)?)?\s*%?\s*$/);
+        if(!m) return [null,null];
+        const a=m[1]!=null?parseFloat(String(m[1]).replace(',', '.')):null;
+        const b=m[2]!=null?parseFloat(String(m[2]).replace(',', '.')):null;
+        return isPct ? [a!=null?a/100:null,b!=null?b/100:null] : [a,b];
+      }
+
+      function headerFiltersOk(row){
+        const H=FILTERS.header||{};
+
+        // Filtro N°
+        if(H.nro){
+          const valTxt=String(H.nro).trim();
+          const [mn,mx]=parseRange(valTxt,false);
+          const nroVal=Number(row.nro ?? row.item);
+          if(mn!=null || mx!=null){
+            if(isFinite(nroVal)){
+              if(mn!=null && !(nroVal>=mn)) return false;
+              if(mx!=null && !(nroVal<=mx)) return false;
+            } else {
+              return false;
+            }
+          }else{
+            if(!String(row.nro ?? row.item ?? '').includes(valTxt)) return false;
+          }
+        }
+
+        // Filtro descripción
+        if(H.desc){
+          const q=String(H.desc).toLowerCase();
+          if(!String(row.descripcion||'').toLowerCase().includes(q)) return false;
+        }
+
+        // Filtro cantidad
+        if(H.cant){
+          const [mn,mx]=parseRange(H.cant,false);
+          const q=rowQty(row)||0;
+          if(mn!=null && !(q>=mn)) return false;
+          if(mx!=null && !(q<=mx)) return false;
+        }
+
+        // Filtro proveedor (chip)
+        if(FILTERS.provider){
+          const prov=FILTERS.provider.toLowerCase();
+          if(!(row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase()===prov))
+            return false;
+        }
+
+        // Filtros por posición
+        const baseIncluded = (MODE==='otros');
+        const basePrice = cheapestPrice(row, {includedOnly: baseIncluded}) || 0;
+
+        for (const [posStr, confRaw] of Object.entries(H)) {
+          if (['nro','desc','cant'].includes(posStr)) continue;
+          const pos = +posStr;
+          if (!Number.isFinite(pos)) continue;
+          if (!FILTERS.visCols.has(pos)) continue;
+
+          const conf = confRaw || {};
+          const hasProv = !!String(conf.prov || '').trim();
+          const hasRel = !!String(conf.relmax || '').trim();
+          if (!hasProv && !hasRel) continue;
+
+          const p = (row.positions || []).find(x => +x.pos === pos);
+          if (!p) return false; // se pidió filtro para una pos que no existe en la fila
+
+          if (hasProv){
+            if (!String(p.proveedor || '').toLowerCase().includes(String(conf.prov).toLowerCase()))
+              return false;
+          }
+
+          if (hasRel && basePrice > 0){
+            const [mnPct, mxPct] = parseRange(conf.relmax, true);
+            const limit = (mxPct != null) ? mxPct : mnPct;
+            if (limit != null){
+              const rel = (unitPriceOf(p) / basePrice) - 1;
+              if (!(rel <= limit)) return false;
+            }
+          }
+        }
+        return true;
+      }
+
+      function filteredRows(){
+        const ql=(QUERY||'').trim().toLowerCase();
+        return (DATA.rows||[]).filter(r=>{
+          if(MODE==='suizo' && !hasSuizoRow(r)) return false;
+          if(!rowMatchesQuery(r,ql)) return false;
+          if(!posBucketsOk(r)) return false;
+          if(!headerFiltersOk(r)) return false;
+          return true;
+        });
+      }
+
+      // Altura sticky para fila 1 del thead
+      function updateHeadOffsets(){
+        if (!elHead) return;
+        const topRow = elHead.querySelector('tr:nth-child(1)');
+        if(!topRow) return;
+        const h = Math.ceil(topRow.getBoundingClientRect().height || 40);
+        document.documentElement.style.setProperty('--head-row1-h', `${h}px`);
+      }
+
+      /* ========= ENCABEZADO DE TABLA ========= */
+      function buildHead(maxPos){
+        if (!elHead) return;
+        const isVis = pos => FILTERS.visCols.has(pos);
+
+        // Fila 1
+        const top = document.createElement('tr');
+        top.innerHTML =
+          `<th rowspan="2" class="text-center col-nro">N°</th>`+
+          `<th rowspan="2" class="col-desc">Descripción</th>`+
+          `<th rowspan="2" class="text-center col-cant">Cant</th>`+
+          Array.from({length:maxPos},(_,i)=>{
+            const pos=i+1;
+            if(!isVis(pos)) return '';
+            return `<th colspan="4" class="pos-group-head" data-pos="${pos}">${pos}°</th>`;
+          }).join('');
+
+        // Fila 2
+        const sub = document.createElement('tr');
+        sub.innerHTML = Array.from({length:maxPos},(_,i)=>{
+          const pos=i+1;
+          if(!isVis(pos)) return '';
+          return (
+            `<th class="c-price g-start">Precio</th>`+
+            `<th class="c-rel">Relac</th>`+
+            `<th class="c-asig">Asign</th>`+
+            `<th class="c-prov">Proveedor</th>`
+          );
+        }).join('');
+
+        // Filtros
+        const flt = document.createElement('tr');
+        flt.className = 'filters-row show';
+
+        let cells =
+          `<th class="col-nro"><input id="f_nro" class="form-control form-control-sm f-mini" placeholder="#"></th>`+
+          `<th class="col-desc"><input id="f_desc" class="form-control form-control-sm f-mini" placeholder="Descripción"></th>`+
+          `<th class="col-cant"><input id="f_cant" class="form-control form-control-sm f-mini" placeholder="cant."></th>`;
+
+        for(let i=1;i<=maxPos;i++){
+          if(!isVis(i)) continue;
+          cells +=
+            `<th class="c-price g-start"></th>`+
+            `<th class="c-rel"><input data-pos="${i}" data-ft="relmax" class="form-control form-control-sm f-range" placeholder="% máx."></th>`+
+            `<th class="c-asig"></th>`+
+            `<th class="c-prov"><input data-pos="${i}" data-ft="prov" class="form-control form-control-sm f-mini" placeholder="Proveedor ${i}°"></th>`;
+        }
+
+        flt.innerHTML = cells;
+
+        elHead.innerHTML='';
+        elHead.appendChild(top);
+        elHead.appendChild(sub);
+        elHead.appendChild(flt);
+        updateHeadOffsets();
+
+        // Listeners filtros
+        const toggleBtn = document.getElementById('toggleFilters');
+        if (toggleBtn){
+          toggleBtn.onclick = ()=> flt.classList.toggle('show');
+        }
+
+        const fNro = elHead.querySelector('#f_nro');
+        const fDesc = elHead.querySelector('#f_desc');
+        const fCant = elHead.querySelector('#f_cant');
+
+        if (fNro){
+          fNro.oninput = e=>{
+            FILTERS.header.nro = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+        if (fDesc){
+          fDesc.oninput = e=>{
+            FILTERS.header.desc = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+        if (fCant){
+          fCant.oninput = e=>{
+            FILTERS.header.cant = e.target.value;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        }
+
+        elHead.querySelectorAll('[data-ft]').forEach(inp=>{
+          inp.oninput = e=>{
+            const pos=+e.target.dataset.pos,
+                  ft=e.target.dataset.ft,
+                  val=e.target.value;
+            if(!FILTERS.header[pos]) FILTERS.header[pos]={};
+            FILTERS.header[pos][ft]=val;
+            elInfo.dataset.page=1;
+            renderAll();
+          };
+        });
+      }
+
+      /* ================= RENDER DE FILAS ================= */
+      function renderTable(){
+        const rows = filteredRows();
+        const total = rows.length;
+        const size = getPageSize();
+        const pages = Math.max(1, Math.ceil(total / size));
+        let page = Number(elInfo.dataset.page || 1);
+        page = clamp(page, 1, pages);
+        const start = (page - 1) * size;
+        const slice = rows.slice(start, start + size);
+        const qNorm = norm(QUERY).trim();
+        const hasQ = !!qNorm;
+        const maxPos = DATA.max_pos || 0;
+
+        if (!slice.length){
+          elBody.innerHTML =
+            `<tr><td colspan="${3 + maxPos * 4}" class="text-center text-muted py-4">No hay filas para mostrar.</td></tr>`;
+        } else {
+          elBody.innerHTML = slice.map(row => {
+            const nro = row.nro ?? row.item ?? '';
+            const desc = String(row.descripcion || '');
+            const cant = rowQty(row);
+
+            const descHit = hasQ && norm(desc).includes(qNorm);
+            const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
+
+            const posByN = {};
+            (row.positions || []).forEach(p => {
+              posByN[+p.pos] = p;
+            });
+
+            const basePrice = cheapestPrice(row, { includedOnly: MODE === 'otros' }) || 0;
+            const rnkMap = rankAmong(row, { includedOnly: MODE === 'otros' });
+
+            const cells = [];
+            for (let pos = 1; pos <= maxPos; pos++){
+              if (!FILTERS.visCols.has(pos)) continue;
+              const p = posByN[pos];
+              const visible = !!p && showOfferByMode(p);
+              const isS = visible && isSuizo(p.proveedor);
+              const sCls = isS ? ' is-suizo' : '';
+
+              // Precio
+              const precioHTML = visible ? nfARS(unitPriceOf(p)) : '';
+
+              // Relación
+              let relHTML = '';
+              if (visible){
+                const rank = rnkMap.get(pos);
+                if (rank === 1 || basePrice <= 0){
+                  relHTML = `<span class="rel-cell rel-pos-1 px-1">—</span>`;
+                } else {
+                  const rel = (unitPriceOf(p) / basePrice) - 1;
+                  if (rank === 2){
+                    relHTML = `<span class="rel-cell rel-pos-2 px-1">${pctFmt(rel)}</span>`;
+                  } else if (rank === 3){
+                    relHTML = `<span class="rel-cell rel-pos-3 px-1">${pctFmt(rel)}</span>`;
+                  } else {
+                    relHTML = `<span class="rel-cell px-1">${pctFmt(rel)}</span>`;
+                  }
+                }
+              }
+
+              // Asignación
+              let asigHTML = '';
+              if (visible){
+                const qAdj = effectiveQty(row, p);
+                const req = rowQty(row);
+                if (qAdj > 0 && req > 0){
+                  if (qAdj >= req){
+                    asigHTML = `<span class="asignada-badge asignada-full" title="Asignación total">${qAdj.toLocaleString('es-AR')}</span>`;
+                  } else {
+                    asigHTML = `<span class="asignada-badge asignada-partial" title="Asignación parcial">${qAdj.toLocaleString('es-AR')}</span>`;
+                  }
+                } else if (qAdj > 0){
+                  asigHTML = `<span class="asignada-badge asignada-partial">${qAdj.toLocaleString('es-AR')}</span>`;
+                } else {
+                  asigHTML = `<span class="asignada-badge asignada-na">–</span>`;
+                }
+              }
+
+              // Proveedor
+              const prov = visible ? (p.proveedor || '') : '';
+              const provHit = hasQ && visible && norm(prov).includes(qNorm);
+              const provHTML = hasQ ? highlightText(prov, QUERY) : esc(prov);
+
+              cells.push(
+                `<td class="text-end c-price g-start${sCls}">${precioHTML}</td>`+
+                `<td class="c-rel${sCls}">${relHTML}</td>`+
+                `<td class="text-center c-asig${sCls}">${asigHTML}</td>`+
+                `<td class="cell-prov c-prov${sCls}${provHit ? ' cell-hit' : ''}" data-pos="${pos}" data-prov="${esc(prov)}">${provHTML}</td>`
+              );
+            }
+
+            const descHTML =
+              `<td class="col-desc${descHit ? ' cell-hit' : ''}">`+
+                `<div class="desc-wrap">`+
+                  `<span class="desc-trunc">${descMarked}</span>`+
+                  `<div class="desc-tip">${descMarked}</div>`+
+                `</div>`+
+              `</td>`;
+
+            return (
+              `<tr>`+
+                `<td class="text-center col-nro">${esc(nro)}</td>`+
+                descHTML+
+                `<td class="text-end col-cant">${cant ? cant.toLocaleString('es-AR') : ''}</td>`+
+                cells.join('')+
+              `</tr>`
+            );
+          }).join('');
+        }
+
+        elInfo.dataset.page = page;
+        elInfo.textContent = `Página ${page} / ${pages}`;
+        elTotal.textContent = `${total.toLocaleString('es-AR')} renglones`;
+        elPrev.disabled = page <= 1;
+        elNext.disabled = page >= pages;
+      }
+
+      // aplica el modo actual del treemap (proveedor / renglón)
+      function applyTreemapView(){
+        if (TREEMAP_VIEW === 'item'){
+          window.TREEMAP_LABEL = 'Renglón';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por renglón';
+          }
+          refreshTreemapFromData(TREEMAP_ITEM_DATA || []);
+        } else {
+          window.TREEMAP_LABEL = 'Proveedor';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por proveedor';
+          }
+          refreshTreemapFromData(TREEMAP_PROV_DATA || []);
+        }
+      }
+
+      /* ================= KPIs SUIZO ================= */
+      function refreshSuizoKPIs(){
+        const rows = filteredRows();
+        let renOfer=0, renAdj=0, montoOfer=0, montoAdj=0;
+
+        rows.forEach(r=>{
+          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+          if (!suizo) return;
+
+          renOfer += 1;
+          montoOfer += totalOf(r, suizo);
+
+          const qAdj = effectiveQty(r, suizo);
+          if (qAdj > 0){
+            renAdj += 1;
+            montoAdj += unitPriceOf(suizo) * qAdj;
+          }
+        });
+
+        const efMonto = montoOfer ? (montoAdj / montoOfer) : 0;
+        const efReng = renOfer ? (renAdj / renOfer) : 0;
+
+        document.getElementById('es_monto_ofertado').textContent = nfARS(montoOfer);
+        document.getElementById('es_monto_adjudicado').textContent = nfARS(montoAdj);
+        document.getElementById('es_efectividad_monto').textContent = pctFmt1d(efMonto);
+        document.getElementById('es_renglones_ofertados').textContent = renOfer.toLocaleString('es-AR');
+        document.getElementById('es_renglones_adjudicados').textContent = renAdj.toLocaleString('es-AR');
+        document.getElementById('es_efectividad_renglones').textContent = pctFmt(efReng);
+      }
+
+      /* ================= GRÁFICOS (REFRESH) ================= */
+      function refreshCharts(){
+        ensureCharts();
+        const rows = filteredRows();
+
+        // Donut: Monto ofertado vs adjudicado Suizo
+        let montoOferSuizo = 0,
+            montoAdjSuizo = 0;
+
+        rows.forEach(r=>{
+          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+          if (!suizo) return;
+
+          montoOferSuizo += offerValue(r, suizo);
+          const qAdj = effectiveQty(r, suizo);
+          if (qAdj > 0){
+            montoAdjSuizo += unitPriceOf(suizo) * qAdj;
+          }
+        });
+
+        const noAdj = Math.max(0, (montoOferSuizo || 0) - (montoAdjSuizo || 0));
+        const donutData = [montoAdjSuizo, noAdj];
+
+        if (chartDonutSuizo){
+          chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };
+          chartDonutSuizo.data.labels = ['Adjudicado','No adjudicado'];
+          chartDonutSuizo.data.datasets[0].data = donutData;
+          chartDonutSuizo.update('none');
+        }
+
+        // Barras posiciones Suizo (sólo cuando el modo no es "otros")
+        let pos = [0,0,0];
+        if (MODE !== 'otros'){
+          rows.forEach(r=>{
+            const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+            if (!suizo) return;
+            const n = +suizo.pos;
+            if (n === 1) pos[0]++;
+            else if (n === 2) pos[1]++;
+            else if (n >= 3) pos[2]++;
+          });
+        }
+        if (chartBarPos){
+          chartBarPos.data.datasets[0].data = pos;
+          chartBarPos.update('none');
+        }
+
+        // Treemap: armamos las dos vistas (proveedor / renglón)
+        TREEMAP_PROV_DATA = treemapDataFirstPlace(rows, MODE);
+        TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
+        applyTreemapView();
+
+        /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
+        function computeExecutiveInfo(){
+          const rows = filteredRows();
+          if (!rows.length){
+            return {
+              suizo_part_monto: 0,
+              suizo_eff_reng: 0,
+              oportunidad_monto: 0,
+              oportunidad_count: 0,
+              perdidas: [],
+              total_adj: 0,
+              competitors: []
+            };
+          }
+
+          let suizoAdj = 0;
+          let totalAdj = 0;
+          let suizoOffRows = 0;
+          let suizoAdjRows = 0;
+          let oportunidadMonto = 0;
+          let oportunidadCount = 0;
+          const perdidas = [];
+          const compMap = new Map();
+
+          rows.forEach(r=>{
+            const p1 = (r.positions || []).find(p=>+p.pos===1);
+            const q1 = p1 ? effectiveQty(r, p1) : 0;
+            const v1 = p1 ? unitPriceOf(p1) * q1 : 0;
+            if (v1 > 0){
+              totalAdj += v1;
+              if (isSuizo(p1.proveedor)){
+                suizoAdj += v1;
+              } else {
+                const key = String(p1.proveedor || '—');
+                const curr = compMap.get(key) || {
+                  nombre:key,
+                  monto:0,
+                  renglones:0,
+                  cerroContraSuizo:0
+                };
+                curr.monto += v1;
+                curr.renglones += 1;
+                compMap.set(key, curr);
+              }
+            }
+
+            const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+            if (suizo){
+              suizoOffRows += 1;
+              const qAdj = effectiveQty(r, suizo);
+              if (qAdj > 0) suizoAdjRows += 1;
+
+              const basePrice = p1 ? unitPriceOf(p1) : 0;
+              const suPrice = unitPriceOf(suizo);
+              if (basePrice > 0 && suPrice > basePrice){
+                const diff = suPrice / basePrice - 1;
+                if (diff <= 0.05){
+                  oportunidadCount += 1;
+                  const rq = rowQty(r) || 1;
+                  oportunidadMonto += basePrice * rq * diff;
+                  perdidas.push({
+                    desc: r.descripcion || '(sin descripción)',
+                    motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
+                  });
+
+                  if (p1 && !isSuizo(p1.proveedor)){
+                    const key = String(p1.proveedor || '—');
+                    const curr = compMap.get(key) || {
+                      nombre:key,
+                      monto:0,
+                      renglones:0,
+                      cerroContraSuizo:0
+                    };
+                    curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
+                    compMap.set(key, curr);
+                  }
+                }
+              }
+            }
+          });
+
+          const competitors = Array.from(compMap.values())
+            .sort((a,b)=>b.monto - a.monto)
+            .slice(0,5);
+
+          const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
+          const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+
+          return {
+            suizo_part_monto,
+            suizo_eff_reng,
+            oportunidad_monto: oportunidadMonto,
+            oportunidad_count: oportunidadCount,
+            perdidas,
+            total_adj: totalAdj,
+            competitors
+          };
+        }
+
+        function renderStrongCompetitors(info){
+          if (!elStrongCompetitors) return;
+          if (info.competitors && info.competitors.length){
+            elStrongCompetitors.innerHTML = info.competitors.map(c =>
+              `<div class="sc-item">
+                <div class="sc-name" title="${esc(c.nombre)}">${esc(c.nombre)}</div>
+                <div class="sc-value">${nfARS(c.monto)}</div>
+                <div class="sc-meta">
+                  ${c.cerroContraSuizo ? `${c.cerroContraSuizo}× vs Suizo` : `${c.renglones} rengl.`}
+                </div>
+              </div>`
+            ).join('');
+          } else {
+            elStrongCompetitors.innerHTML =
+              `<div class="text-muted" style="font-size:.7rem;">No se detectaron competidores fuertes en este proceso.</div>`;
+          }
+        }
+
+        function renderExecutive(info){
+          if (!info) return;
+          const m1 = document.getElementById('ms_part_monto');
+          const m2 = document.getElementById('ms_ef_reng');
+          const m3 = document.getElementById('ms_oportunidad');
+          const m4 = document.getElementById('ms_estado');
+
+          if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
+          if (m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
+          if (m3){
+            m3.textContent = info.oportunidad_count > 0
+              ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng.)`
+              : 'Sin oportunidades claras';
+          }
+
+          if (elOppBar){
+            elOppBar.style.display = 'inline-flex';
+            if (info.oportunidad_count > 0){
+              elOppText.textContent =
+                `Se perdieron ${info.oportunidad_count} renglones por menos del 5%. `+
+                `Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
+            } else {
+              elOppText.textContent =
+                'No se detectaron renglones perdidos por poca diferencia.';
+            }
+          }
+
+          if (m4){
+            const pill = m4.querySelector('.ms-pill');
+            if (pill){
+              pill.classList.remove('ok','warn','danger');
+              if (info.total_adj === 0){
+                pill.textContent = 'Sin adjudicar';
+                pill.classList.add('warn');
+              } else if (info.suizo_part_monto >= 0.5 || info.suizo_eff_reng >= 0.5){
+                pill.textContent = 'Bueno';
+                pill.classList.add('ok');
+              } else if (info.suizo_part_monto > 0 || info.suizo_eff_reng > 0){
+                pill.textContent = 'Competitivo';
+                pill.classList.add('warn');
+              } else {
+                pill.textContent = 'Perdido';
+                pill.classList.add('danger');
+              }
+            }
+          }
+
+          renderStrongCompetitors(info);
+
+          if (elLossExpl && elLossList && elLossHint){
+            if (info.perdidas && info.perdidas.length){
+              elLossExpl.hidden = false;
+              elLossList.innerHTML = info.perdidas.slice(0,7)
+                .map(p=>`<li>${esc(p.desc)} — ${esc(p.motivo)}</li>`).join('');
+              elLossHint.textContent = info.perdidas.length > 7
+                ? `+ ${info.perdidas.length - 7} más…`
+                : `Se analizaron ${info.perdidas.length} renglones con oportunidad.`;
+            } else {
+              elLossExpl.hidden = true;
+              elLossList.innerHTML = '';
+              elLossHint.textContent = '';
+            }
+          }
+        }
+
+        const info = computeExecutiveInfo();
+        renderExecutive(info);
+      }
+
+      /* ================= RENDER GLOBAL ================= */
+      function renderAll(){
+        renderTable();
+        refreshSuizoKPIs();
+        refreshCharts();
+      }
+
+      /* ================= UI & EVENTOS ================= */
+      const setTabs = (btn) => {
+        document.querySelectorAll('.segmented .seg-btn').forEach(b=>{
+          const active = b === btn;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      };
+
+      document.getElementById('tabSuizo').onclick = (e)=>{
+        e.preventDefault();
+        setTabs(e.currentTarget);
+        setMode('suizo');
+      };
+      document.getElementById('tabOtros').onclick = (e)=>{
+        e.preventDefault();
+        setTabs(e.currentTarget);
+        setMode('otros');
+      };
+      document.getElementById('tabTodos').onclick = (e)=>{
+        e.preventDefault();
+        setTabs(e.currentTarget);
+        setMode('todos');
+      };
+
+      // switch "Proveedor / Renglón" del treemap
+      if (elTreemapModeToggle){
+        elTreemapModeToggle.addEventListener('click', (e)=>{
+          const btn = e.target.closest('button[data-mode]');
+          if (!btn) return;
+          const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
+          TREEMAP_VIEW = mode;
+
+          // actualizar estado visual del switch
+          elTreemapModeToggle.querySelectorAll('.mini-btn').forEach(b=>{
+            const active = b === btn;
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-pressed', active ? 'true' : 'false');
+          });
+
+          applyTreemapView();
+        });
+      }
+
+      const debounce = (fn,ms)=>{
+        let t;
+        return (...a)=>{
+          clearTimeout(t);
+          t = setTimeout(()=>fn(...a), ms);
+        };
+      };
+
+      elPrev.onclick = ()=>{
+        elInfo.dataset.page = String((+elInfo.dataset.page || 1) - 1);
+        renderAll();
+      };
+      elNext.onclick = ()=>{
+        elInfo.dataset.page = String((+elInfo.dataset.page || 1) + 1);
+        renderAll();
+      };
+      elPageSz.onchange = ()=>{
+        elInfo.dataset.page = 1;
+        renderAll();
+      };
+
+      elSearch.oninput = debounce(()=>{
+        QUERY = elSearch.value || '';
+        elInfo.dataset.page = 1;
+        renderAll();
+      },150);
+
+      // Quitar chips
+      elChip.addEventListener('click', e=>{
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const chip = btn.closest('.sel-chip');
+        const key = chip?.dataset.key;
+        if (!key) return;
+
+        if (key === 'provider') FILTERS.provider = null;
+        if (key === 'posBuckets'){
+          FILTERS.posBuckets.clear();
+          const max = DATA.max_pos || 0;
+          FILTERS.visCols = new Set([1,2,3].filter(n=>n<=max));
+          buildHead(max);
+          updatePosButtonsUI();
+        }
+        renderChips();
+        elInfo.dataset.page = 1;
+        renderAll();
+      });
+
+      // Click proveedor -> filtro
+      elBody.addEventListener('click', e=>{
+        const td = e.target.closest('td.cell-prov');
+        if (!td) return;
+        const prov = (td.dataset.prov || '').trim();
+        if (prov) window.setFilter('provider', prov);
+      });
+
+      // Chips posiciones
+      elPosCols.addEventListener('click', e=>{
+        const b = e.target.closest('.pos-chip');
+        if (!b) return;
+        const p = +b.dataset.pos;
+        const key = String(p);
+
+        if (e.altKey){
+          if (FILTERS.visCols.has(p)) FILTERS.visCols.delete(p);
+          else FILTERS.visCols.add(p);
+          buildHead(DATA.max_pos || 0);
+          renderTable();
+          updateHeadOffsets();
+          return;
+        }
+
+        if (FILTERS.posBuckets.has(key)){
+          FILTERS.posBuckets.delete(key);
+          FILTERS.visCols.delete(p);
+        } else {
+          FILTERS.posBuckets.add(key);
+          FILTERS.visCols.add(p);
+        }
+        updatePosButtonsUI();
+        buildHead(DATA.max_pos || 0);
+        updateHeadOffsets();
+        elInfo.dataset.page = 1;
+        renderAll();
+        renderChips();
+      });
+
+      window.addEventListener('resize', updateHeadOffsets);
+
+      /* ================= CARGA DE DATOS ================= */
+      async function loadRanking(){
+        elBody.innerHTML = '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
+        let data = null;
+        try{
+          const res = await fetch(RANK_API, { headers:{'accept':'application/json'} });
+          if (res && res.ok) data = await res.json();
+        }catch(_){}
+
+        if (!data){
+          elBody.innerHTML = '<tr><td class="text-center text-danger py-4">No se pudo cargar el ranking</td></tr>';
+          return;
+        }
+
+        if (Array.isArray(data.rows) && data.rows.length && data.rows[0].positions){
+          DATA = {
+            rows: data.rows,
+            max_pos: Number(data.max_pos || 3),
+            total_rows: Number(data.total_rows || data.rows.length)
+          };
+        } else {
+          // Fallback tabular genérico
+          const cols = data.columns || [];
+          const findIdx = name =>
+            cols.findIndex(c => String(c).toLowerCase() === String(name).toLowerCase());
+          const tryIdx = cands => {
+            for (const n of cands){
+              const i = findIdx(n);
+              if (i !== -1) return i;
+            }
+            return -1;
+          };
+
+          const rows = (data.rows || []).map(arr => {
+            const obj = {
+              nro: arr[tryIdx(['N°','Nro','Nº','Item'])],
+              descripcion: arr[tryIdx(['Descripción','Descripcion','Descripción del renglón','Descripción renglón'])],
+              cantidad_solicitada: arr[tryIdx(['Cantidad solicitada','Cant. solicitada','Cantidad requerida','Cantidad','Cant.','Qty','Unidades'])],
+              positions: []
+            };
+
+            let pos = 1;
+            while (true){
+              const iProv = tryIdx([`${pos}° Proveedor`, `${pos}° proveedor`]);
+              if (iProv === -1) break;
+              const iPrice = tryIdx([`${pos}° Precio unitario`, `${pos}° Precio`, `${pos}° Precio Unitario`]);
+              if (iPrice === -1) break;
+              const iQtyOff = tryIdx([`${pos}° Cantidad ofertada`, `${pos}° Cantidad`, `${pos}° Cant.`]);
+
+              obj.positions.push({
+                pos,
+                proveedor: arr[iProv],
+                precio: arr[iPrice],
+                cantidad: iQtyOff !== -1 ? arr[iQtyOff] : undefined
+              });
+              pos++;
+            }
+            return obj;
+          });
+
+          DATA = {
+            rows,
+            max_pos: Math.max(0, ...rows.map(r=>r.positions.length)) || 3,
+            total_rows: rows.length
+          };
+        }
+
+        const max = DATA.max_pos || 0;
+        FILTERS.visCols = new Set([1,2,3].filter(n=>n<=max));
+        buildHead(max);
+        buildPosCols(max);
+        elInfo.dataset.page = 1;
+        renderChips();
+        renderAll();
+        updateHeadOffsets();
+      }
+
+      loadRanking();
+
+      // Refrescar treemap si CHART_PROV llegó antes
+      setTimeout(()=>{
+        if (Array.isArray(window.CHART_PROV)){
+          refreshTreemapFromData(window.CHART_PROV);
+        }
+      },600);
+    })();
+  </script>
+
+  <!-- 3) Treemap proveedores -->
+  <script>
+    (function(){
+      const SA_AZUL='#064066',
+            SA_GRIS='#dce3ee',
+            SA_BLANCO='#ffffff';
+
+      let treemapChart=null;
+      let buildLock=null;
+
+      const isSuizo = s => /suizo/i.test(String(s||''));
+      const nfARS = v =>
+        new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0})
+          .format(+v||0);
+
+      const waitUntil = (testFn,{tries=200,every=50}={}) =>
+        new Promise(res=>{
+          (function loop(n){
+            if (testFn()) return res(true);
+            if (n <= 0) return res(false);
+            setTimeout(()=>loop(n-1), every);
+          })(tries);
+        });
+
+      const buildDataset = (data) => ({
+        tree: (data || []).map(d => ({
+          g: String(d.label || d.name || '—'),
+          v: +d.value || 0
+        })),
+        groups: ['g'],
+        key: 'v',
+        spacing: 1,
+        borderWidth: 2,
+        borderColor: SA_BLANCO,
+        labels: {
+          display: true,
+          overflow: 'hidden',
+          position: 'center',
+          padding: 3,
+          color: ctx => isSuizo(ctx.raw?.g) ? '#ffffff' : SA_AZUL,
+          font: ctx => {
+            const box = ctx.raw && ctx.raw._data;
+            const h = box ? (box.y1 - box.y0) : 0;
+            const size = h ? Math.max(9, Math.min(14, Math.floor(h / 2.8))) : 12;
+            return { weight: 600, size };
           },
-          plugins: {
-            legend: { display: false }
+          formatter: ctx => {
+            const g = ctx.raw?.g || '—';
+            const v = +ctx.raw?.v || 0;
+            const box = ctx.raw && ctx.raw._data;
+            const w = box ? (box.x1 - box.x0) : 999;
+            let name = g;
+            if (w < 80 && name.length > 14) name = name.slice(0,13) + '…';
+            else if (w < 120 && name.length > 22) name = name.slice(0,21) + '…';
+            else if (name.length > 30) name = name.slice(0,29) + '…';
+
+            const h = box ? (box.y1 - box.y0) : 999;
+            if (h < 38) return name;
+
+            const c = new Intl.NumberFormat('es-AR', {
+              notation: 'compact',
+              compactDisplay: 'short',
+              maximumFractionDigits: 1
+            });
+            return [name, c.format(v)];
+          }
+        },
+        backgroundColor: ctx => isSuizo(ctx.raw?.g) ? SA_AZUL : SA_GRIS
+      });
+
+      function createBarFallback(ctx, data){
+        const L = (data || []).map(d=>String(d.label||d.name||'—'));
+        const V = (data || []).map(d=>+d.value||0);
+        return new Chart(ctx,{
+          type:'bar',
+          data:{
+            labels:L,
+            datasets:[{
+              data:V,
+              backgroundColor:SA_GRIS,
+              borderColor:'#fff',
+              borderWidth:2
+            }]
+          },
+          options:{
+            indexAxis:'y',
+            maintainAspectRatio:false,
+            plugins:{ legend:{ display:false } },
+            layout:{ padding:2 }
+          }
+        });
+      }
+
+      function attachClick(canvas, chart){
+        if (!canvas || !chart) return;
+        if (canvas.__treemapClickBound) return;
+        canvas.__treemapClickBound = true;
+
+        canvas.addEventListener('click',evt=>{
+          const els = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+          if (!els.length) return;
+          const i = els[0].index ?? 0;
+          let label = '';
+          if (chart.config.type === 'bar'){
+            label = chart.data.labels?.[i] || '';
+          } else {
+            const ds = chart.data.datasets[0];
+            label = (ds.tree?.[i]?.g) || '';
+          }
+          if (label && window.setFilter) window.setFilter('provider', label);
+        });
+      }
+
+      async function buildOrUpgrade(canvas){
+        if (window.Chart && Chart.getChart){
+          const existing = Chart.getChart(canvas);
+          if (existing){
+            attachClick(canvas, existing);
+            treemapChart = existing;
+            return existing;
           }
         }
+
+        const ctx = canvas.getContext('2d');
+        const hasTreemap = !!(Chart?.registry?.getController?.('treemap'));
+        if (!hasTreemap){
+          const fb = createBarFallback(ctx, window.CHART_PROV || []);
+
+          (async ()=>{
+            const ok = await waitUntil(()=>!!(Chart?.registry?.getController?.('treemap')), {tries:120,every:100});
+            if (!ok) return;
+
+            const exists = Chart.getChart(canvas);
+            if (exists){
+              try{ fb.destroy(); }catch(_){}
+              treemapChart = exists;
+              attachClick(canvas, exists);
+              return;
+            }
+
+            try{ fb.destroy(); }catch(_){}
+            treemapChart = new Chart(ctx,{
+              type:'treemap',
+              data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
+              options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                layout:{ padding:2 },
+                plugins:{
+                  legend:{ display:false },
+                  tooltip:{
+                    callbacks:{
+                      title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
+                      label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
+                    }
+                  }
+                }
+              }
+            });
+            attachClick(canvas, treemapChart);
+          })();
+
+          return fb;
+        }
+
+        const existing = Chart.getChart(canvas);
+        if (existing){
+          attachClick(canvas, existing);
+          treemapChart = existing;
+          return existing;
+        }
+
+        const chart = new Chart(ctx,{
+          type:'treemap',
+          data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
+          options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            layout:{ padding:2 },
+            plugins:{
+              legend:{ display:false },
+              tooltip:{
+                callbacks:{
+                  title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
+                  label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
+                }
+              }
+            }
+          }
+        });
+        attachClick(canvas, chart);
+        treemapChart = chart;
+        return chart;
+      }
+
+      async function ensureChart(){
+        const canvas = document.getElementById('treemapProveedores');
+        if (!canvas) return null;
+        const ok = await waitUntil(()=>!!window.Chart);
+        if (!ok) return null;
+
+        if (buildLock) return buildLock;
+        buildLock = buildOrUpgrade(canvas)
+          .then(c => (treemapChart = c))
+          .finally(()=>{ buildLock = null; });
+        return buildLock;
+      }
+
+      window.updateTreemap = async function(data){
+        window.CHART_PROV = Array.isArray(data) ? data : [];
+        const chart = await ensureChart();
+        if (!chart) return;
+
+        const total = (window.CHART_PROV || [])
+          .reduce((s,x)=>s + (+x.value || 0), 0);
+        const lbl = document.getElementById('treemapTotal');
+        if (lbl) lbl.textContent = total ? `Adjudicado: ${nfARS(total)}` : '';
+
+        if (chart.config?.type === 'bar'){
+          chart.data.labels = (window.CHART_PROV || []).map(d=>String(d.label||d.name||'—'));
+          chart.data.datasets[0].data = (window.CHART_PROV || []).map(d=>+d.value||0);
+          chart.update('none');
+        } else {
+          chart.data.datasets[0] = buildDataset(window.CHART_PROV || []);
+          chart.update('none');
+        }
+      };
+
+      if (Array.isArray(window.CHART_PROV)){
+        window.updateTreemap(window.CHART_PROV);
+      } else {
+        ensureChart();
+      }
+    })();
+  </script>
+
+  <!-- 4) Vistas guardadas (localStorage, solo front) -->
+  <script>
+    (function () {
+      const VIEW_ID = 'dashboard';
+      const CONTEXT_ID = String({{ upload_id|tojson }});
+      const LS_KEY = `views:${VIEW_ID}:${CONTEXT_ID}`;
+
+      const $ = (sel, root=document) => root.querySelector(sel);
+      const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+      const waitUntil = (testFn,{tries=40,every=200}={}) =>
+        new Promise(resolve=>{
+          (function loop(n){
+            if (testFn()) return resolve(true);
+            if (n <= 0) return resolve(false);
+            setTimeout(()=>loop(n-1), every);
+          })(tries);
+        });
+
+      const dispatchInput = (el,type='input')=>{
+        if (!el) return;
+        el.dispatchEvent(new Event(type,{bubbles:true,cancelable:true}));
+      };
+
+      function readViews(){
+        try{
+          const raw = localStorage.getItem(LS_KEY);
+          if (!raw) return [];
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr : [];
+        }catch{ return []; }
+      }
+
+      function writeViews(list){
+        try{
+          localStorage.setItem(LS_KEY, JSON.stringify(list || []));
+        }catch{}
+      }
+
+      function saveViewLS({id=null,name,is_default=false,payload}){
+        const list = readViews();
+        const now = new Date().toISOString();
+        if (!id){
+          id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+          list.push({id,name,is_default,payload,updated_at:now});
+        } else {
+          const idx = list.findIndex(v=>v.id===id);
+          if (idx >= 0){
+            list[idx] = {...list[idx],name,is_default,payload,updated_at:now};
+          } else {
+            list.push({id,name,is_default,payload,updated_at:now});
+          }
+        }
+
+        if (is_default){
+          list.forEach(v=>{
+            if(v.id !== id) v.is_default = false;
+          });
+        }
+
+        writeViews(list);
+        return list.find(v=>v.id===id);
+      }
+
+      function deleteViewLS(id){
+        writeViews(readViews().filter(v=>v.id!==id));
+      }
+
+      function setDefaultLS(id){
+        writeViews(readViews().map(v=>({...v,is_default:v.id===id})));
+      }
+
+      function clearDefaultLS(id){
+        writeViews(readViews().map(v=>({...v,is_default:v.id===id?false:v.is_default})));
+      }
+
+      function getDefaultLS(){
+        return readViews().find(v=>v.is_default) || null;
+      }
+
+      const btnViews = $('#btnViews');
+      const mod = $('#viewsModal');
+      const bd = $('#viewsBackdrop');
+      const btnClose = $('#vmClose');
+      const btnClose2 = $('#vmClose2');
+      const btnSave = $('#vmSave');
+      const btnRefresh = $('#vmRefresh');
+      const inputName = $('#vmName');
+      const inputDefault= $('#vmDefault');
+      const listBox = $('#viewsList');
+
+      function collectCurrentView(){
+        const supplier_filter = $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
+
+        const fitBtn = $('#viewToggle .mini-btn.active');
+        const fit_mode = fitBtn?.dataset.view === 'fit' ? 'fit' : 'normal';
+
+        const densBtn = $('#densityToggle .mini-btn.active');
+        const density = densBtn?.dataset.density || 'normal';
+
+        const search_query = $('#search')?.value || '';
+        const page_size = Number($('#pageSize')?.value || 50) || 50;
+
+        const vis_cols = $$('#rankHead .pos-group-head')
+          .map(th => +th.dataset.pos)
+          .filter(n => Number.isFinite(n));
+
+        const pos_buckets = $$('#posCols .pos-chip.active')
+          .map(b => b.dataset.pos);
+
+        const header_filters = {
+          nro: $('#f_nro')?.value || '',
+          desc: $('#f_desc')?.value || '',
+          cant: $('#f_cant')?.value || ''
+        };
+
+        vis_cols.forEach(pos=>{
+          const rel = $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '';
+          const prov = $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || '';
+          header_filters[pos] = { relmax:rel, prov:prov };
+        });
+
+        let provider = null;
+        const provChip = $('#selectionChip .sel-chip[data-key="provider"]');
+        if (provChip){
+          provider = (provChip.textContent || '').replace('×','').trim();
+        }
+
+        return {
+          supplier_filter,
+          fit_mode,
+          density,
+          vis_cols,
+          pos_buckets,
+          header_filters,
+          provider,
+          search_query,
+          page_size
+        };
+      }
+
+      async function applyViewPayload(payload){
+        if (!payload || typeof payload !== 'object') return;
+        const ok = await waitUntil(()=>$('#rankHead') && $('#posCols'));
+        if (!ok) return;
+        await waitUntil(()=>$('#rankHead input#f_desc'));
+
+        if (payload.supplier_filter === 'suizo') $('#tabSuizo')?.click();
+        else if (payload.supplier_filter === 'otros') $('#tabOtros')?.click();
+        else $('#tabTodos')?.click();
+
+        if (payload.fit_mode === 'fit') $('#viewToggle .mini-btn[data-view="fit"]')?.click();
+        else $('#viewToggle .mini-btn[data-view="normal"]')?.click();
+
+        if (payload.density === 'compact') $('#densityToggle .mini-btn[data-density="compact"]')?.click();
+        else $('#densityToggle .mini-btn[data-density="normal"]')?.click();
+
+        if ($('#pageSize') && payload.page_size){
+          $('#pageSize').value = String(payload.page_size);
+          dispatchInput($('#pageSize'),'change');
+        }
+
+        if (Array.isArray(payload.vis_cols) && payload.vis_cols.length){
+          const want = new Set(payload.vis_cols.map(String));
+          await waitUntil(() => $$('#posCols .pos-chip').length > 0);
+
+          $$('#posCols .pos-chip').forEach(chip=>{
+            const pos = chip.dataset.pos;
+            const headExists = !!document.querySelector(
+              `#rankHead .pos-group-head[data-pos="${pos}"]`
+            );
+            const should = want.has(pos);
+            if (headExists !== should){
+              chip.dispatchEvent(
+                new MouseEvent('click',{bubbles:true,altKey:true})
+              );
+            }
+          });
+        }
+
+        if (Array.isArray(payload.pos_buckets)){
+          const wantBuckets = new Set(payload.pos_buckets.map(String));
+          await waitUntil(()=>$$('#posCols .pos-chip').length > 0);
+
+          $$('#posCols .pos-chip').forEach(chip=>{
+            const pos = chip.dataset.pos;
+            const isActive = chip.classList.contains('active');
+            const should = wantBuckets.has(pos);
+            if (isActive !== should){
+              chip.click();
+            }
+          });
+        }
+
+        const H = payload.header_filters || {};
+        if ($('#f_nro') && H.nro != null){
+          $('#f_nro').value = H.nro;
+          dispatchInput($('#f_nro'));
+        }
+        if ($('#f_desc') && H.desc != null){
+          $('#f_desc').value = H.desc;
+          dispatchInput($('#f_desc'));
+        }
+        if ($('#f_cant') && H.cant != null){
+          $('#f_cant').value = H.cant;
+          dispatchInput($('#f_cant'));
+        }
+
+        if (Array.isArray(payload.vis_cols)){
+          payload.vis_cols.forEach(pos=>{
+            const conf = H[pos] || {};
+            const r = document.querySelector(
+              `#rankHead [data-pos="${pos}"][data-ft="relmax"]`
+            );
+            const p = document.querySelector(
+              `#rankHead [data-pos="${pos}"][data-ft="prov"]`
+            );
+            if (r){
+              r.value = conf.relmax || '';
+              dispatchInput(r);
+            }
+            if (p){
+              p.value = conf.prov || '';
+              dispatchInput(p);
+            }
+          });
+        }
+
+        if (payload.provider && typeof window.setFilter === 'function'){
+          window.setFilter('provider', payload.provider);
+        } else {
+          const clearProv = $('#selectionChip .sel-chip[data-key="provider"] button');
+          if (clearProv) clearProv.click();
+        }
+
+        if ($('#search')){
+          $('#search').value = payload.search_query || '';
+          dispatchInput($('#search'));
+        }
+      }
+
+      function renderViewsList(views){
+        if (!Array.isArray(views) || !views.length){
+          listBox.innerHTML =
+            '<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>';
+          return;
+        }
+        listBox.innerHTML = views.map(v =>
+          `<div class="row" data-id="${v.id}">
+            <div>
+              <span class="nm">${v.name || 'Sin nombre'}</span>
+              ${v.is_default ? '<span class="tag">por defecto</span>' : ''}
+              ${
+                v.updated_at
+                  ? `<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`
+                  : ''
+              }
+            </div>
+            <div class="act">
+              <button data-act="apply">Aplicar</button>
+              ${
+                v.is_default
+                  ? '<button data-act="nodefault">Quitar defecto</button>'
+                  : '<button data-act="default">Establecer por defecto</button>'
+              }
+              <button data-act="delete" style="color:#b91c1c">Eliminar</button>
+            </div>
+          </div>`
+        ).join('');
+      }
+
+      function refreshList(){
+        renderViewsList(readViews());
+      }
+
+      function openModal(){
+        refreshList();
+        mod.hidden = false;
+        bd.hidden = false;
+      }
+      function closeModal(){
+        mod.hidden = true;
+        bd.hidden = true;
+        inputName.value = '';
+        inputDefault.checked = false;
+      }
+
+      btnViews && btnViews.addEventListener('click', openModal);
+      btnClose && btnClose.addEventListener('click', closeModal);
+      btnClose2 && btnClose2.addEventListener('click', closeModal);
+      bd && bd.addEventListener('click', closeModal);
+      btnRefresh&& btnRefresh.addEventListener('click', refreshList);
+
+      btnSave && btnSave.addEventListener('click', async ()=>{
+        const name = (inputName.value || '').trim() || 'Mi vista';
+        const is_default = !!inputDefault.checked;
+        await waitUntil(()=>$('#rankHead tr.filters-row'));
+        const payload = collectCurrentView();
+        saveViewLS({ name, is_default, payload });
+        refreshList();
+        inputName.value = '';
+        inputDefault.checked = false;
       });
-    }
-  }
 
-  // =======================
-  // Actualizar "Datos generales" + Treemap
-  // =======================
-  function updateGeneralSection() {
-    const rows = rowsForMode(MODE);
-    const gk = computeGeneralKpis(rows) || { awarded: 0, items: 0, bidders: 0 };
+      listBox && listBox.addEventListener('click', async e=>{
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const row = btn.closest('.row');
+        const id = row?.dataset.id;
+        if (!id) return;
+        const act = btn.dataset.act;
+        const all = readViews();
+        const item = all.find(v=>v.id===id);
+        if (!item) return;
 
-    const totalAward = safeNum(gk.awarded);
-
-    if (elTreemapTotalKpi) {
-      elTreemapTotalKpi.textContent = formatPeso
-        ? formatPeso(totalAward)
-        : totalAward.toLocaleString('es-AR');
-    }
-    if (elTreemapTotalLbl) {
-      elTreemapTotalLbl.textContent = totalAward
-        ? 'Adjudicado: ' + (formatPeso ? formatPeso(totalAward) : totalAward.toLocaleString('es-AR'))
-        : '';
-    }
-    if (elRengKpi) {
-      elRengKpi.textContent = (gk.items || 0).toLocaleString('es-AR');
-    }
-    if (elCompKpi) {
-      elCompKpi.textContent = (gk.bidders || 0).toLocaleString('es-AR');
-    }
-
-    // Treemap: agrupamos según el toggle (Proveedor / Renglón) si existe
-    let grouping = 'prov';
-    if (elTreemapModeTg) {
-      const activeBtn = elTreemapModeTg.querySelector('.mini-btn.active');
-      if (activeBtn && activeBtn.dataset.mode === 'item') {
-        grouping = 'item';
-      }
-    }
-
-    if (groupTreemap) {
-      const info = groupTreemap(rows, grouping) || { total: totalAward, nodes: [] };
-      const data = (info.nodes || []).map(d => ({ label: d.label, value: d.value }));
-
-      // Si existe updateTreemap (script específico del treemap), lo usamos
-      if (typeof window.updateTreemap === 'function') {
-        window.updateTreemap(data);
-      }
-
-      const finalTotal = safeNum(info.total || totalAward || 0);
-      if (elTreemapTotalKpi && formatPeso) {
-        elTreemapTotalKpi.textContent = formatPeso(finalTotal);
-      }
-      if (elTreemapTotalLbl && formatPeso) {
-        elTreemapTotalLbl.textContent = finalTotal
-          ? 'Adjudicado: ' + formatPeso(finalTotal)
-          : '';
-      }
-
-      if (elTreemapTitle) {
-        elTreemapTitle.textContent =
-          (grouping === 'item')
-            ? 'Proporción de presupuesto por renglón'
-            : 'Proporción de presupuesto por proveedor';
-      }
-    }
-  }
-
-  // =======================
-  // Actualizar "Efectividad Suizo" + donut + barras
-  // =======================
-  function updateSuizoSection() {
-    // Siempre calculado SOLO con las filas de Suizo
-    const rowsSuizo = rowsForMode('suizo');
-    const sk = computeSuizoKpis(rowsSuizo) || {
-      offered: 0,
-      awarded: 0,
-      effMonto: null,
-      renglonesOf: 0,
-      renglonesAdj: 0,
-      effReng: null
-    };
-
-    if (elES_monto_of) {
-      elES_monto_of.textContent = formatPeso
-        ? formatPeso(sk.offered || 0)
-        : (safeNum(sk.offered || 0)).toLocaleString('es-AR');
-    }
-    if (elES_monto_adj) {
-      elES_monto_adj.textContent = formatPeso
-        ? formatPeso(sk.awarded || 0)
-        : (safeNum(sk.awarded || 0)).toLocaleString('es-AR');
-    }
-    if (elES_ef_monto) {
-      elES_ef_monto.textContent = (sk.effMonto != null)
-        ? (formatPct ? formatPct(sk.effMonto) : (sk.effMonto.toFixed(1) + ' %'))
-        : '0 %';
-    }
-    if (elES_ren_of) {
-      elES_ren_of.textContent = (sk.renglonesOf || 0).toLocaleString('es-AR');
-    }
-    if (elES_ren_adj) {
-      elES_ren_adj.textContent = (sk.renglonesAdj || 0).toLocaleString('es-AR');
-    }
-    if (elES_ef_reng) {
-      elES_ef_reng.textContent = (sk.effReng != null)
-        ? (formatPct ? formatPct(sk.effReng) : (sk.effReng.toFixed(1) + ' %'))
-        : '0 %';
-    }
-
-    // Gráficos (solo Suizo)
-    initChartsIfNeeded();
-
-    if (donutChart) {
-      const adj   = safeNum(sk.awarded || 0);
-      const off   = safeNum(sk.offered || 0);
-      const noAdj = Math.max(0, off - adj);
-
-      donutChart.data.labels = ['Adjudicado Suizo', 'No adjudicado Suizo'];
-      donutChart.data.datasets[0].data = [adj, noAdj];
-      donutChart.update('none');
-    }
-
-    if (barChart) {
-      const buckets = [0, 0, 0]; // 1°, 2°, otras
-      rowsSuizo.forEach((r) => {
-        if (!r.ganador) return;
-        const pos = Number(r.pos || 0);
-        if (pos === 1)      buckets[0] += 1;
-        else if (pos === 2) buckets[1] += 1;
-        else if (pos >= 3)  buckets[2] += 1;
+        if (act === 'apply'){
+          await applyViewPayload(item.payload || {});
+          closeModal();
+        }
+        if (act === 'delete'){
+          if (confirm('¿Eliminar esta vista?')){
+            deleteViewLS(id);
+            refreshList();
+          }
+        }
+        if (act === 'default'){
+          setDefaultLS(id);
+          refreshList();
+        }
+        if (act === 'nodefault'){
+          clearDefaultLS(id);
+          refreshList();
+        }
       });
 
-      barChart.data.datasets[0].data = buckets;
-      barChart.update('none');
-    }
-  }
+      (async function autoApplyDefault(){
+        const def = getDefaultLS();
+        if (!def) return;
+        const ok = await waitUntil(()=>$('#rankHead') && $('#posCols'));
+        if (!ok) return;
+        await applyViewPayload(def.payload || {});
+      })();
 
-  // =======================
-  // Refresco global
-  // =======================
-  function updateAll() {
-    if (!ALL_SIMPLE_ROWS.length) return;
-    updateGeneralSection(); // respeta el modo actual (Suizo / Otros / Todos)
-    updateSuizoSection();   // SIEMPRE Suizo, independiente del modo visible
-  }
+      window.__collectView = collectCurrentView;
+      window.__applyView = applyViewPayload;
+    })();
+  </script>
 
-  // =======================
-  // Listeners de tabs
-  // =======================
-  if (elTabSuizo) {
-    elTabSuizo.addEventListener('click', function (e) {
-      e.preventDefault();
-      setMode('suizo');
-    });
-  }
-  if (elTabOtros) {
-    elTabOtros.addEventListener('click', function (e) {
-      e.preventDefault();
-      setMode('otros');
-    });
-  }
-  if (elTabTodos) {
-    elTabTodos.addEventListener('click', function (e) {
-      e.preventDefault();
-      setMode('todos');
-    });
-  }
-
-  // Cambio proveedor/renglón del treemap
-  if (elTreemapModeTg) {
-    elTreemapModeTg.addEventListener('click', function (e) {
-      const btn = e.target.closest('button[data-mode]');
-      if (!btn) return;
-
-      elTreemapModeTg.querySelectorAll('.mini-btn').forEach((b) => {
-        const active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', active ? 'true' : 'false');
-      });
-
-      // Recalcular treemap según nuevo agrupamiento
-      updateGeneralSection();
-    });
-  }
-
-  // =======================
-  // Carga de datos
-  // =======================
-  async function loadData() {
-    try {
-      const res = await fetch(RANK_API, { headers: { 'accept': 'application/json' } });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-
-      ALL_SIMPLE_ROWS = normalizeRankData(data) || [];
-      console.info('[dashboard] filas normalizadas para KPIs/treemap:', ALL_SIMPLE_ROWS.length);
-
-      // Modo por defecto: TODOS
-      setMode('todos');
-    } catch (err) {
-      console.error('[dashboard] Error cargando ranking para KPIs:', err);
-    }
-  }
-
-  loadData();
-});
-</script>
+  <!-- Comentarios -->
+  <script defer src="{{ url_for('static', path='js/comments.js') }}?v=2025-10-27-2"></script>
 {% endblock %}
