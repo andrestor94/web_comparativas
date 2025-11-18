@@ -1699,32 +1699,79 @@
         return val;
       }
 
-      // Treemap por renglón (monto adjudicado de posición 1)
-      function treemapDataByItemFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
-        };
+// Treemap por proveedor (monto adjudicado real, incluyendo parciales y 2° puesto)
+function treemapDataFirstPlace(rows, mode){
+  const allow = function (name) {
+    if (mode === 'suizo') return isSuizo(name);
+    if (mode === 'otros') return !isSuizo(name);
+    return true;
+  };
 
-        const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
+  const map = new Map();
 
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
+  (rows || []).forEach(function (r) {
+    (r.positions || []).forEach(function (p) {
+      if (!allow(p.proveedor)) return;
 
-          const nro = r.nro ?? r.item;
-          const labelBase = (nro !== undefined && nro !== null && nro !== '') ? `Renglón ${nro}` : 'Renglón';
-          map.set(labelBase, (map.get(labelBase) || 0) + v1);
-        });
+      const qAdj = effectiveQty(r, p);
+      if (!(qAdj > 0)) return;
 
-        return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
-          .map(([label, value]) => ({ label, value }));
-      }
+      const val = unitPriceOf(p) * qAdj;
+      if (!(val > 0)) return;
+
+      const key = String(p.proveedor || '—');
+      map.set(key, (map.get(key) || 0) + val);
+    });
+  });
+
+  return Array.from(map.entries())
+    .sort(function (a, b) { return b[1] - a[1]; })
+    .map(function (entry) {
+      return { label: entry[0], value: entry[1] };
+    });
+}
+
+      // Treemap por renglón (monto adjudicado real del renglón)
+function treemapDataByItemFirstPlace(rows, mode){
+  const allow = function (name) {
+    if (mode === 'suizo') return isSuizo(name);
+    if (mode === 'otros') return !isSuizo(name);
+    return true;
+  };
+
+  const map = new Map();
+
+  (rows || []).forEach(function (r) {
+    const nro = (r.nro != null ? r.nro : r.item);
+    const labelBase = (nro !== undefined && nro !== null && nro !== '')
+      ? 'Renglón ' + nro
+      : 'Renglón';
+
+    let rowVal = 0;
+
+    (r.positions || []).forEach(function (p) {
+      if (!allow(p.proveedor)) return;
+
+      const qAdj = effectiveQty(r, p);
+      if (!(qAdj > 0)) return;
+
+      const val = unitPriceOf(p) * qAdj;
+      if (!(val > 0)) return;
+
+      rowVal += val;
+    });
+
+    if (rowVal > 0) {
+      map.set(labelBase, (map.get(labelBase) || 0) + rowVal);
+    }
+  });
+
+  return Array.from(map.entries())
+    .sort(function (a, b) { return b[1] - a[1]; })
+    .map(function (entry) {
+      return { label: entry[0], value: entry[1] };
+    });
+}
 
       // Treemap por proveedor: monto adjudicado al proveedor en primer lugar
       function treemapDataFirstPlace(rows, mode){
@@ -2312,103 +2359,114 @@
         applyTreemapView();
 
         /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-        function computeExecutiveInfo(){
-          const rows = filteredRows();
-          if (!rows.length){
-            return {
-              suizo_part_monto: 0,
-              suizo_eff_reng: 0,
-              oportunidad_monto: 0,
-              oportunidad_count: 0,
-              perdidas: [],
-              total_adj: 0,
-              competitors: []
-            };
-          }
+function computeExecutiveInfo(){
+  const rows = filteredRows();
 
-          let suizoAdj = 0;
-          let totalAdj = 0;
-          let suizoOffRows = 0;
-          let suizoAdjRows = 0;
-          let oportunidadMonto = 0;
-          let oportunidadCount = 0;
-          const perdidas = [];
-          const compMap = new Map();
+  if (!rows.length){
+    return {
+      suizo_part_monto: 0,
+      suizo_eff_reng: 0,
+      oportunidad_monto: 0,
+      oportunidad_count: 0,
+      perdidas: [],
+      total_adj: 0,
+      competitors: []
+    };
+  }
 
-          rows.forEach(r=>{
-            const p1 = (r.positions || []).find(p=>+p.pos===1);
-            const q1 = p1 ? effectiveQty(r, p1) : 0;
-            const v1 = p1 ? unitPriceOf(p1) * q1 : 0;
-            if (v1 > 0){
-              totalAdj += v1;
-              if (isSuizo(p1.proveedor)){
-                suizoAdj += v1;
-              } else {
-                const key = String(p1.proveedor || '—');
-                const curr = compMap.get(key) || {
-                  nombre:key,
-                  monto:0,
-                  renglones:0,
-                  cerroContraSuizo:0
-                };
-                curr.monto += v1;
-                curr.renglones += 1;
-                compMap.set(key, curr);
-              }
-            }
+  let suizoAdj = 0;
+  let totalAdj = 0;
+  let suizoOffRows = 0;
+  let suizoAdjRows = 0;
+  let oportunidadMonto = 0;
+  let oportunidadCount = 0;
+  const perdidas = [];
+  const compMap = new Map();
 
-            const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-            if (suizo){
-              suizoOffRows += 1;
-              const qAdj = effectiveQty(r, suizo);
-              if (qAdj > 0) suizoAdjRows += 1;
+  rows.forEach(function (r) {
+    const positions = r.positions || [];
 
-              const basePrice = p1 ? unitPriceOf(p1) : 0;
-              const suPrice = unitPriceOf(suizo);
-              if (basePrice > 0 && suPrice > basePrice){
-                const diff = suPrice / basePrice - 1;
-                if (diff <= 0.05){
-                  oportunidadCount += 1;
-                  const rq = rowQty(r) || 1;
-                  oportunidadMonto += basePrice * rq * diff;
-                  perdidas.push({
-                    desc: r.descripcion || '(sin descripción)',
-                    motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
-                  });
+    // 1) Sumar adjudicado real (todas las posiciones con cantidad efectiva)
+    positions.forEach(function (p) {
+      const qAdj = effectiveQty(r, p);
+      if (!(qAdj > 0)) return;
 
-                  if (p1 && !isSuizo(p1.proveedor)){
-                    const key = String(p1.proveedor || '—');
-                    const curr = compMap.get(key) || {
-                      nombre:key,
-                      monto:0,
-                      renglones:0,
-                      cerroContraSuizo:0
-                    };
-                    curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
-                    compMap.set(key, curr);
-                  }
-                }
-              }
-            }
+      const val = unitPriceOf(p) * qAdj;
+      if (!(val > 0)) return;
+
+      totalAdj += val;
+
+      const provName = String(p.proveedor || '—');
+      if (isSuizo(provName)) {
+        suizoAdj += val;
+      } else {
+        const curr = compMap.get(provName) || {
+          nombre: provName,
+          monto: 0,
+          renglones: 0,
+          cerroContraSuizo: 0
+        };
+        curr.monto += val;
+        curr.renglones += 1;
+        compMap.set(provName, curr);
+      }
+    });
+
+    // 2) Métricas de efectividad Suizo y oportunidades
+    const suizo = positions.find(function (p) { return isSuizo(p.proveedor); });
+    if (suizo){
+      suizoOffRows += 1;
+      const qAdjSuizo = effectiveQty(r, suizo);
+      if (qAdjSuizo > 0) suizoAdjRows += 1;
+
+      const p1 = positions.find(function (p) { return +p.pos === 1; });
+      const basePrice = p1 ? unitPriceOf(p1) : 0;
+      const suPrice = unitPriceOf(suizo);
+
+      // Oportunidades: Suizo pierde por menos del 5% contra el más barato
+      if (p1 && !isSuizo(p1.proveedor) && basePrice > 0 && suPrice > basePrice){
+        const diff = suPrice / basePrice - 1;
+        if (diff <= 0.05){
+          const rq = rowQty(r) || 1;
+          oportunidadCount += 1;
+          oportunidadMonto += basePrice * rq * diff;
+
+          perdidas.push({
+            desc: r.descripcion || '(sin descripción)',
+            motivo: 'Pérdida por ' + pctFmt1d(diff) + ' sobre el más barato'
           });
 
-          const competitors = Array.from(compMap.values())
-            .sort((a,b)=>b.monto - a.monto)
-            .slice(0,5);
-
-          const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
-
-          return {
-            suizo_part_monto,
-            suizo_eff_reng,
-            oportunidad_monto: oportunidadMonto,
-            oportunidad_count: oportunidadCount,
-            perdidas,
-            total_adj: totalAdj,
-            competitors
+          const key = String(p1.proveedor || '—');
+          const curr = compMap.get(key) || {
+            nombre: key,
+            monto: 0,
+            renglones: 0,
+            cerroContraSuizo: 0
           };
+          curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
+          compMap.set(key, curr);
         }
+      }
+    }
+  });
+
+  const competitors = Array.from(compMap.values())
+    .sort(function (a, b) { return b.monto - a.monto; })
+    .slice(0, 5);
+
+  const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
+  const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+
+  return {
+    suizo_part_monto: suizo_part_monto,
+    suizo_eff_reng: suizo_eff_reng,
+    oportunidad_monto: oportunidadMonto,
+    oportunidad_count: oportunidadCount,
+    perdidas: perdidas,
+    total_adj: totalAdj,
+    competitors: competitors
+  };
+}
 
         function renderStrongCompetitors(info){
           if (!elStrongCompetitors) return;
