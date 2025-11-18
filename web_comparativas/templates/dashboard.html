@@ -1280,8 +1280,11 @@
       const elLossHint = document.getElementById('lossHint');
       const elStrongCompetitors = document.getElementById('scList');
 
-      const elTreemapTitle = document.getElementById('treemapTitle');
+            const elTreemapTitle = document.getElementById('treemapTitle');
       const elTreemapModeToggle = document.getElementById('treemapModeToggle');
+
+      // total adjudicado “bueno” que viene del backend (incluye parciales)
+      window.__KPI_AWARDED_TOTAL = {{ kpis.get('awarded', 0)|tojson }};
 
       // estado del switch del treemap
       let TREEMAP_VIEW = 'prov'; // 'prov' | 'item'
@@ -1679,22 +1682,13 @@
         }
       }
 
-      function colorTreemapTotal(total){
-        const lbl = document.getElementById('treemapTotal');
-        const kpi = document.getElementById('treemapTotalKpi');
-        if (lbl) lbl.textContent = total ? `Adjudicado: ${nfARS(total)}` : '';
-        if (kpi) kpi.textContent = nfARS(total || 0);
-      }
-
-      function refreshTreemapFromData(data){
-        if(typeof window.updateTreemap==='function'){
+            function refreshTreemapFromData(data){
+        if (typeof window.updateTreemap === 'function') {
           window.updateTreemap(data);
-          const total=(data||[]).reduce((s,x)=>s+(+x.value||0),0);
-          colorTreemapTotal(total);
         }
       }
 
-      if(Array.isArray(window.CHART_PROV)) refreshTreemapFromData(window.CHART_PROV);
+      if (Array.isArray(window.CHART_PROV)) refreshTreemapFromData(window.CHART_PROV);
 
       // Valor ofertado (fallback)
       function offerValue(row, p){
@@ -2939,24 +2933,37 @@
         return buildLock;
       }
 
-      window.updateTreemap = async function(data){
+            window.updateTreemap = async function(data){
         window.CHART_PROV = Array.isArray(data) ? data : [];
         const chart = await ensureChart();
         if (!chart) return;
 
-        const total = (window.CHART_PROV || [])
-          .reduce((s,x)=>s + (+x.value || 0), 0);
-        const lbl = document.getElementById('treemapTotal');
-        if (lbl) lbl.textContent = total ? `Adjudicado: ${nfARS(total)}` : '';
-
+        // Actualizamos sólo la gráfica
         if (chart.config?.type === 'bar'){
-          chart.data.labels = (window.CHART_PROV || []).map(d=>String(d.label||d.name||'—'));
-          chart.data.datasets[0].data = (window.CHART_PROV || []).map(d=>+d.value||0);
+          chart.data.labels = (window.CHART_PROV || []).map(d => String(d.label || d.name || '—'));
+          chart.data.datasets[0].data = (window.CHART_PROV || []).map(d => +d.value || 0);
           chart.update('none');
         } else {
           chart.data.datasets[0] = buildDataset(window.CHART_PROV || []);
           chart.update('none');
         }
+
+        // === TOTAL ADJUDICADO (KPI + texto "Adjudicado") ===
+        const totalFromData = (window.CHART_PROV || [])
+          .reduce((s, x) => s + (+x.value || 0), 0);
+
+        // Si el backend nos dio un total “bueno”, usamos ese (incluye parciales).
+        const globalTotal = (window.__KPI_AWARDED_TOTAL != null
+          ? +window.__KPI_AWARDED_TOTAL
+          : null);
+
+        const finalTotal = (globalTotal && globalTotal > 0) ? globalTotal : totalFromData;
+
+        const lbl = document.getElementById('treemapTotal');
+        const kpi = document.getElementById('treemapTotalKpi');
+
+        if (lbl) lbl.textContent = finalTotal ? `Adjudicado: ${nfARS(finalTotal)}` : '';
+        if (kpi) kpi.textContent = nfARS(finalTotal || 0);
       };
 
       if (Array.isArray(window.CHART_PROV)){
