@@ -1479,6 +1479,17 @@
       const totalOf =(row,p)=>unitPriceOf(p)*offeredQty(row,p);
       const awardValue=(row,p)=>unitPriceOf(p)*effectiveQty(row,p);
 
+      function globalAwardedTotal(rows){
+        let total = 0;
+        (rows || []).forEach((r) => {
+          (r.positions || []).forEach((p) => {
+            const v = awardValue(r, p); // usa precio * cantidad adjudicada (effectiveQty)
+            if (v > 0) total += v;
+          });
+        });
+        return total;
+      }
+
       /* ===== visibilidad de ofertas por modo ===== */
       let MODE='todos'; // En "otros" ocultamos Suizo; en el resto mostramos todo y usamos filtros de filas.
 
@@ -2670,7 +2681,7 @@ function computeExecutiveInfo(){
       window.addEventListener('resize', updateHeadOffsets);
 
       /* ================= CARGA DE DATOS ================= */
-      async function loadRanking(){
+            async function loadRanking(){
         elBody.innerHTML = '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
         let data = null;
         try{
@@ -2734,6 +2745,17 @@ function computeExecutiveInfo(){
             max_pos: Math.max(0, ...rows.map(r=>r.positions.length)) || 3,
             total_rows: rows.length
           };
+        }
+
+        // 🔹 NUEVO: calcular total adjudicado REAL (incluye parciales y 2.º puesto)
+        const globalTotal = globalAwardedTotal(DATA.rows || []);
+        window.__KPI_AWARDED_TOTAL = globalTotal;
+
+        if (globalTotal && globalTotal > 0){
+          const kpiEl = document.getElementById('treemapTotalKpi');
+          const lblEl = document.getElementById('treemapTotal');
+          if (kpiEl) kpiEl.textContent = nfARS(globalTotal);
+          if (lblEl) lblEl.textContent = 'Adjudicado: ' + nfARS(globalTotal);
         }
 
         const max = DATA.max_pos || 0;
