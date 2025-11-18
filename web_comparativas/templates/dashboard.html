@@ -2775,7 +2775,6 @@ function computeExecutiveInfo(){
       loadRanking();
 
       // Refrescar treemap si CHART_PROV llegó antes
-      setTimeout(()=>{
         if (Array.isArray(window.CHART_PROV)){
           refreshTreemapFromData(window.CHART_PROV);
         }
