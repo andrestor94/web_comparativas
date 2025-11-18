@@ -2261,86 +2261,139 @@ function treemapDataByItemFirstPlace(rows, mode){
         }
       }
 
-      /* ================= KPIs SUIZO ================= */
-      function refreshSuizoKPIs(){
+      // ====== NUEVO: estadísticas agregadas según MODE (Suizo / Otros / Todos) ======
+      function computeGroupStats(){
         const rows = filteredRows();
-        let renOfer=0, renAdj=0, montoOfer=0, montoAdj=0;
 
-        rows.forEach(r=>{
-          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-          if (!suizo) return;
+        let renOfer = 0;
+        let renAdj = 0;
+        let montoOfer = 0;
+        let montoAdj = 0;
+        let posBuckets = [0, 0, 0]; // 1°, 2°, otras
+        const providers = new Set();
 
-          renOfer += 1;
-          montoOfer += totalOf(r, suizo);
+        rows.forEach((r) => {
+          const positions = r.positions || [];
+          let rowHasOffer = false;
+          let rowHasAdj = false;
+          let rowOfferSum = 0;
+          let rowAdjSum = 0;
 
-          const qAdj = effectiveQty(r, suizo);
-          if (qAdj > 0){
+          positions.forEach((p) => {
+            const nombreProv = p.proveedor || '';
+            const esSuizoProv = isSuizo(nombreProv);
+
+            // Filtrado según el modo actual
+            if (MODE === 'suizo' && !esSuizoProv) return;
+            if (MODE === 'otros' && esSuizoProv) return;
+            // MODE === 'todos' -> entra todo
+
+            // Valor ofertado de este proveedor en este renglón
+            const offVal = offerValue(r, p);
+            const qAdj = effectiveQty(r, p);
+
+            if (offVal > 0){
+              rowHasOffer = true;
+              rowOfferSum += offVal;
+            }
+
+            if (qAdj > 0){
+              rowHasAdj = true;
+              const valAdj = unitPriceOf(p) * qAdj;
+              if (valAdj > 0){
+                rowAdjSum += valAdj;
+              }
+
+              const pos = +p.pos;
+              if (pos === 1)      posBuckets[0] += 1;
+              else if (pos === 2) posBuckets[1] += 1;
+              else if (pos >= 3)  posBuckets[2] += 1;
+            }
+
+            if (offVal > 0 || qAdj > 0){
+              providers.add(nombreProv || '—');
+            }
+          });
+
+          if (rowHasOffer){
+            renOfer += 1;
+            montoOfer += rowOfferSum;
+          }
+          if (rowHasAdj){
             renAdj += 1;
-            montoAdj += unitPriceOf(suizo) * qAdj;
+            montoAdj += rowAdjSum;
           }
         });
 
-        const efMonto = montoOfer ? (montoAdj / montoOfer) : 0;
-        const efReng = renOfer ? (renAdj / renOfer) : 0;
+        return { renOfer, renAdj, montoOfer, montoAdj, posBuckets, providers };
+      }
 
-        document.getElementById('es_monto_ofertado').textContent = nfARS(montoOfer);
-        document.getElementById('es_monto_adjudicado').textContent = nfARS(montoAdj);
-        document.getElementById('es_efectividad_monto').textContent = pctFmt1d(efMonto);
-        document.getElementById('es_renglones_ofertados').textContent = renOfer.toLocaleString('es-AR');
-        document.getElementById('es_renglones_adjudicados').textContent = renAdj.toLocaleString('es-AR');
-        document.getElementById('es_efectividad_renglones').textContent = pctFmt(efReng);
+            /* ================= KPIs SUIZO ================= */
+      function refreshSuizoKPIs(){
+        const stats = computeGroupStats();
+
+        const efMonto = stats.montoOfer ? (stats.montoAdj / stats.montoOfer) : 0;
+        const efReng  = stats.renOfer ? (stats.renAdj / stats.renOfer) : 0;
+
+        document.getElementById('es_monto_ofertado').textContent =
+          nfARS(stats.montoOfer);
+        document.getElementById('es_monto_adjudicado').textContent =
+          nfARS(stats.montoAdj);
+        document.getElementById('es_efectividad_monto').textContent =
+          pctFmt1d(efMonto);
+        document.getElementById('es_renglones_ofertados').textContent =
+          stats.renOfer.toLocaleString('es-AR');
+        document.getElementById('es_renglones_adjudicados').textContent =
+          stats.renAdj.toLocaleString('es-AR');
+        document.getElementById('es_efectividad_renglones').textContent =
+          pctFmt(efReng);
       }
 
       /* ================= GRÁFICOS (REFRESH) ================= */
       function refreshCharts(){
         ensureCharts();
-        const rows = filteredRows();
 
-        // Donut: Monto ofertado vs adjudicado Suizo
-        let montoOferSuizo = 0,
-            montoAdjSuizo = 0;
+        // Estadísticas agregadas para el grupo actual (Suizo / Otros / Todos)
+        const stats = computeGroupStats();
 
-        rows.forEach(r=>{
-          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-          if (!suizo) return;
-
-          montoOferSuizo += offerValue(r, suizo);
-          const qAdj = effectiveQty(r, suizo);
-          if (qAdj > 0){
-            montoAdjSuizo += unitPriceOf(suizo) * qAdj;
-          }
-        });
-
-        const noAdj = Math.max(0, (montoOferSuizo || 0) - (montoAdjSuizo || 0));
-        const donutData = [montoAdjSuizo, noAdj];
+        // ----- Donut: adjudicado vs no adjudicado del grupo actual -----
+        const noAdj = Math.max(
+          0,
+          (stats.montoOfer || 0) - (stats.montoAdj || 0)
+        );
+        const donutData = [stats.montoAdj, noAdj];
 
         if (chartDonutSuizo){
           chartDonutSuizo.options.plugins.centerPercent = { focusIndex: 0 };
-          chartDonutSuizo.data.labels = ['Adjudicado','No adjudicado'];
+          chartDonutSuizo.data.labels = ['Adjudicado', 'No adjudicado'];
           chartDonutSuizo.data.datasets[0].data = donutData;
           chartDonutSuizo.update('none');
         }
 
-        // Barras posiciones Suizo (sólo cuando el modo no es "otros")
-        let pos = [0,0,0];
-        if (MODE !== 'otros'){
-          rows.forEach(r=>{
-            const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-            if (!suizo) return;
-            const n = +suizo.pos;
-            if (n === 1) pos[0]++;
-            else if (n === 2) pos[1]++;
-            else if (n >= 3) pos[2]++;
-          });
-        }
+        // ----- Barras de posiciones por grupo actual -----
+        const pos = stats.posBuckets || [0, 0, 0];
         if (chartBarPos){
           chartBarPos.data.datasets[0].data = pos;
           chartBarPos.update('none');
         }
 
-        // Treemap: armamos las dos vistas (proveedor / renglón)
-        TREEMAP_PROV_DATA = treemapDataFirstPlace(rows, MODE);
-        TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
+        // ----- Actualizar "Datos generales de licitación" según grupo -----
+        const kpiTotal = document.getElementById('treemapTotalKpi');
+        const kpiLabel = document.getElementById('treemapTotal');
+        const kpiReng  = document.getElementById('dg_renglones');
+        const kpiComp  = document.getElementById('dg_competidores');
+
+        if (kpiTotal) kpiTotal.textContent = nfARS(stats.montoAdj);
+        if (kpiLabel) kpiLabel.textContent = 'Adjudicado: ' + nfARS(stats.montoAdj);
+        if (kpiReng)  kpiReng.textContent  =
+          stats.renOfer.toLocaleString('es-AR');
+        if (kpiComp)  kpiComp.textContent  =
+          (stats.providers ? stats.providers.size : 0).toLocaleString('es-AR');
+
+        // ----- Treemap (usa las mismas filas filtradas y el MODE) -----
+        const rows = filteredRows();
+        TREEMAP_PROV_DATA  = treemapDataFirstPlace(rows, MODE);
+        TREEMAP_ITEM_DATA  = treemapDataByItemFirstPlace(rows, MODE);
         applyTreemapView();
 
         /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
