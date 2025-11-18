@@ -1545,6 +1545,35 @@
           .sort((a,b)=>b[1]-a[1])
           .map(([label, value]) => ({ label, value }));
       }
+      // Treemap por renglón (monto adjudicado de posición 1)
+      function treemapDataByItemFirstPlace(rows, mode){
+        const allow = (name)=>{
+          if(mode==='suizo') return isSuizo(name);
+          if(mode==='otros') return !isSuizo(name);
+          return true;
+        };
+        const map = new Map();
+        (rows || []).forEach(r=>{
+          const p1 = (r.positions||[]).find(p=>+p.pos===1);
+          if (!p1 || !allow(p1.proveedor)) return;
+
+          const q1 = effectiveQty(r,p1);
+          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
+          if (!(v1 > 0)) return;
+
+          // etiqueta básica de renglón
+          var nro = (r && (r.nro !== undefined && r.nro !== null && r.nro !== ''))
+            ? r.nro
+            : (r && (r.item !== undefined && r.item !== null && r.item !== '') ? r.item : '');
+          var labelBase = nro ? ('Renglón ' + nro) : 'Renglón';
+
+          map.set(labelBase, (map.get(labelBase) || 0) + v1);
+        });
+
+        return Array.from(map.entries())
+          .sort((a,b)=>b[1]-a[1])
+          .map(([label, value]) => ({ label, value }));
+      }
 
       function bindTreemapClickOnce(){
         const cv=document.getElementById('treemapProveedores');
@@ -2022,6 +2051,21 @@
         }
       }
 
+      // Aplica el modo actual del treemap (Proveedor / Renglón)
+      function applyTreemapView(){
+        if (TREEMAP_VIEW === 'item'){
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por renglón';
+          }
+          refreshTreemapFromData(TREEMAP_ITEM_DATA || []);
+        } else {
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por proveedor';
+          }
+          refreshTreemapFromData(TREEMAP_PROV_DATA || []);
+        }
+      }
+
       /* ================= KPIs SUIZO ================= */
       function refreshSuizoKPIs(){
         const rows = filteredRows();
@@ -2315,18 +2359,19 @@
         setMode('todos');
       };
 
-      // switch "Proveedor / Renglón" del treemap
+            // Switch pequeño "Proveedor / Renglón" sobre el treemap
       if (elTreemapModeToggle){
-        elTreemapModeToggle.addEventListener('click', (e)=>{
-          const btn = e.target.closest('button[data-mode]');
+        elTreemapModeToggle.addEventListener('click', function(e){
+          var btn = e.target.closest('button[data-mode]');
           if (!btn) return;
 
-          const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
+          var mode = btn.getAttribute('data-mode') === 'item' ? 'item' : 'prov';
           TREEMAP_VIEW = mode;
 
-          // actualizar estado visual del switch
-          elTreemapModeToggle.querySelectorAll('.mini-btn').forEach(b=>{
-            const active = b === btn;
+          // Actualizar estado visual
+          var buttons = elTreemapModeToggle.querySelectorAll('.mini-btn');
+          buttons.forEach(function(b){
+            var active = (b === btn);
             b.classList.toggle('active', active);
             b.setAttribute('aria-pressed', active ? 'true' : 'false');
           });
