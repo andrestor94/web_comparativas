@@ -1773,32 +1773,6 @@ function treemapDataByItemFirstPlace(rows, mode){
     });
 }
 
-      // Treemap por proveedor: monto adjudicado al proveedor en primer lugar
-      function treemapDataFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
-        };
-
-        const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
-
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
-
-          const key = String(p1.proveedor || '—');
-          map.set(key, (map.get(key) || 0) + v1);
-        });
-
-        return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
-          .map(([label, value]) => ({ label, value }));
-      }
-
       function bindTreemapClickOnce(){
         const cv=document.getElementById('treemapProveedores');
         if(!cv || !window.Chart || !Chart.getChart) return;
@@ -2775,39 +2749,41 @@ function computeExecutiveInfo(){
       loadRanking();
 
       // Refrescar treemap si CHART_PROV llegó antes
-        if (Array.isArray(window.CHART_PROV)){
-          refreshTreemapFromData(window.CHART_PROV);
-        }
-      },600);
+      if (Array.isArray(window.CHART_PROV)){
+        refreshTreemapFromData(window.CHART_PROV);
+      }
     })();
   </script>
 
-  <!-- 3) Treemap proveedores -->
+    <!-- 3) Treemap proveedores -->
   <script>
     (function(){
-      const SA_AZUL='#064066',
-            SA_GRIS='#dce3ee',
-            SA_BLANCO='#ffffff';
+      const SA_AZUL = '#064066';
+      const SA_GRIS = '#dce3ee';
+      const SA_BLANCO = '#ffffff';
 
-      let treemapChart=null;
-      let buildLock=null;
+      let treemapChart = null;
+      let buildLock = null;
 
-      const isSuizo = s => /suizo/i.test(String(s||''));
-      const nfARS = v =>
-        new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0})
-          .format(+v||0);
+      const isSuizo = (s) => /suizo/i.test(String(s || ''));
+      const nfARS = (v) =>
+        new Intl.NumberFormat('es-AR', {
+          style: 'currency',
+          currency: 'ARS',
+          maximumFractionDigits: 0
+        }).format(+v || 0);
 
-      const waitUntil = (testFn,{tries=200,every=50}={}) =>
-        new Promise(res=>{
+      const waitUntil = (testFn, {tries = 200, every = 50} = {}) =>
+        new Promise((res) => {
           (function loop(n){
             if (testFn()) return res(true);
             if (n <= 0) return res(false);
-            setTimeout(()=>loop(n-1), every);
+            setTimeout(() => loop(n - 1), every);
           })(tries);
         });
 
       const buildDataset = (data) => ({
-        tree: (data || []).map(d => ({
+        tree: (data || []).map((d) => ({
           g: String(d.label || d.name || '—'),
           v: +d.value || 0
         })),
@@ -2821,22 +2797,23 @@ function computeExecutiveInfo(){
           overflow: 'hidden',
           position: 'center',
           padding: 3,
-          color: ctx => isSuizo(ctx.raw?.g) ? '#ffffff' : SA_AZUL,
-          font: ctx => {
+          color: (ctx) => (isSuizo(ctx.raw?.g) ? '#ffffff' : SA_AZUL),
+          font: (ctx) => {
             const box = ctx.raw && ctx.raw._data;
             const h = box ? (box.y1 - box.y0) : 0;
             const size = h ? Math.max(9, Math.min(14, Math.floor(h / 2.8))) : 12;
-            return { weight: 600, size };
+            return {weight: 600, size};
           },
-          formatter: ctx => {
+          formatter: (ctx) => {
             const g = ctx.raw?.g || '—';
             const v = +ctx.raw?.v || 0;
             const box = ctx.raw && ctx.raw._data;
             const w = box ? (box.x1 - box.x0) : 999;
             let name = g;
-            if (w < 80 && name.length > 14) name = name.slice(0,13) + '…';
-            else if (w < 120 && name.length > 22) name = name.slice(0,21) + '…';
-            else if (name.length > 30) name = name.slice(0,29) + '…';
+
+            if (w < 80 && name.length > 14) name = name.slice(0, 13) + '…';
+            else if (w < 120 && name.length > 22) name = name.slice(0, 21) + '…';
+            else if (name.length > 30) name = name.slice(0, 29) + '…';
 
             const h = box ? (box.y1 - box.y0) : 999;
             if (h < 38) return name;
@@ -2849,28 +2826,28 @@ function computeExecutiveInfo(){
             return [name, c.format(v)];
           }
         },
-        backgroundColor: ctx => isSuizo(ctx.raw?.g) ? SA_AZUL : SA_GRIS
+        backgroundColor: (ctx) => (isSuizo(ctx.raw?.g) ? SA_AZUL : SA_GRIS)
       });
 
       function createBarFallback(ctx, data){
-        const L = (data || []).map(d=>String(d.label||d.name||'—'));
-        const V = (data || []).map(d=>+d.value||0);
-        return new Chart(ctx,{
-          type:'bar',
-          data:{
-            labels:L,
-            datasets:[{
-              data:V,
-              backgroundColor:SA_GRIS,
-              borderColor:'#fff',
-              borderWidth:2
+        const L = (data || []).map((d) => String(d.label || d.name || '—'));
+        const V = (data || []).map((d) => +d.value || 0);
+        return new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: L,
+            datasets: [{
+              data: V,
+              backgroundColor: SA_GRIS,
+              borderColor: '#ffffff',
+              borderWidth: 2
             }]
           },
-          options:{
-            indexAxis:'y',
-            maintainAspectRatio:false,
-            plugins:{ legend:{ display:false } },
-            layout:{ padding:2 }
+          options: {
+            indexAxis: 'y',
+            maintainAspectRatio: false,
+            plugins: {legend: {display: false}},
+            layout: {padding: 2}
           }
         });
       }
@@ -2880,18 +2857,27 @@ function computeExecutiveInfo(){
         if (canvas.__treemapClickBound) return;
         canvas.__treemapClickBound = true;
 
-        canvas.addEventListener('click',evt=>{
-          const els = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+        canvas.addEventListener('click', (evt) => {
+          const els = chart.getElementsAtEventForMode(
+            evt,
+            'nearest',
+            {intersect: true},
+            true
+          );
           if (!els.length) return;
           const i = els[0].index ?? 0;
           let label = '';
+
           if (chart.config.type === 'bar'){
             label = chart.data.labels?.[i] || '';
           } else {
             const ds = chart.data.datasets[0];
             label = (ds.tree?.[i]?.g) || '';
           }
-          if (label && window.setFilter) window.setFilter('provider', label);
+
+          if (label && typeof window.setFilter === 'function'){
+            window.setFilter('provider', label);
+          }
         });
       }
 
@@ -2907,35 +2893,40 @@ function computeExecutiveInfo(){
 
         const ctx = canvas.getContext('2d');
         const hasTreemap = !!(Chart?.registry?.getController?.('treemap'));
+
         if (!hasTreemap){
           const fb = createBarFallback(ctx, window.CHART_PROV || []);
 
-          (async ()=>{
-            const ok = await waitUntil(()=>!!(Chart?.registry?.getController?.('treemap')), {tries:120,every:100});
+          (async () => {
+            const ok = await waitUntil(
+              () => !!(Chart?.registry?.getController?.('treemap')),
+              {tries: 120, every: 100}
+            );
             if (!ok) return;
 
             const exists = Chart.getChart(canvas);
             if (exists){
-              try{ fb.destroy(); }catch(_){}
+              try { fb.destroy(); } catch (_) {}
               treemapChart = exists;
               attachClick(canvas, exists);
               return;
             }
 
-            try{ fb.destroy(); }catch(_){}
-            treemapChart = new Chart(ctx,{
-              type:'treemap',
-              data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
-              options:{
-                responsive:true,
-                maintainAspectRatio:false,
-                layout:{ padding:2 },
-                plugins:{
-                  legend:{ display:false },
-                  tooltip:{
-                    callbacks:{
-                      title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
-                      label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
+            try { fb.destroy(); } catch (_) {}
+            treemapChart = new Chart(ctx, {
+              type: 'treemap',
+              data: {datasets: [buildDataset(window.CHART_PROV || [])]},
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: {padding: 2},
+                plugins: {
+                  legend: {display: false},
+                  tooltip: {
+                    callbacks: {
+                      title: () => (window.TREEMAP_LABEL || 'Proveedor'),
+                      label: (tt) =>
+                        `${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                     }
                   }
                 }
@@ -2954,19 +2945,20 @@ function computeExecutiveInfo(){
           return existing;
         }
 
-        const chart = new Chart(ctx,{
-          type:'treemap',
-          data:{ datasets:[buildDataset(window.CHART_PROV || [])] },
-          options:{
-            responsive:true,
-            maintainAspectRatio:false,
-            layout:{ padding:2 },
-            plugins:{
-              legend:{ display:false },
-              tooltip:{
-                callbacks:{
-                  title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
-                  label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
+        const chart = new Chart(ctx, {
+          type: 'treemap',
+          data: {datasets: [buildDataset(window.CHART_PROV || [])]},
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {padding: 2},
+            plugins: {
+              legend: {display: false},
+              tooltip: {
+                callbacks: {
+                  title: () => (window.TREEMAP_LABEL || 'Proveedor'),
+                  label: (tt) =>
+                    `${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                 }
               }
             }
@@ -2980,46 +2972,47 @@ function computeExecutiveInfo(){
       async function ensureChart(){
         const canvas = document.getElementById('treemapProveedores');
         if (!canvas) return null;
-        const ok = await waitUntil(()=>!!window.Chart);
+        const ok = await waitUntil(() => !!window.Chart);
         if (!ok) return null;
 
         if (buildLock) return buildLock;
         buildLock = buildOrUpgrade(canvas)
-          .then(c => (treemapChart = c))
-          .finally(()=>{ buildLock = null; });
+          .then((c) => (treemapChart = c))
+          .finally(() => { buildLock = null; });
         return buildLock;
       }
 
-            window.updateTreemap = async function(data){
+      window.updateTreemap = async function(data){
         window.CHART_PROV = Array.isArray(data) ? data : [];
         const chart = await ensureChart();
         if (!chart) return;
 
-        // Actualizamos sólo la gráfica
         if (chart.config?.type === 'bar'){
-          chart.data.labels = (window.CHART_PROV || []).map(d => String(d.label || d.name || '—'));
-          chart.data.datasets[0].data = (window.CHART_PROV || []).map(d => +d.value || 0);
+          chart.data.labels = (window.CHART_PROV || [])
+            .map((d) => String(d.label || d.name || '—'));
+          chart.data.datasets[0].data = (window.CHART_PROV || [])
+            .map((d) => +d.value || 0);
           chart.update('none');
         } else {
           chart.data.datasets[0] = buildDataset(window.CHART_PROV || []);
           chart.update('none');
         }
 
-        // === TOTAL ADJUDICADO (KPI + texto "Adjudicado") ===
         const totalFromData = (window.CHART_PROV || [])
           .reduce((s, x) => s + (+x.value || 0), 0);
-
-        // Si el backend nos dio un total “bueno”, usamos ese (incluye parciales).
-        const globalTotal = (window.__KPI_AWARDED_TOTAL != null
+        const globalTotal = (window.__KPI_AWARDED_TOTAL != null)
           ? +window.__KPI_AWARDED_TOTAL
-          : null);
-
-        const finalTotal = (globalTotal && globalTotal > 0) ? globalTotal : totalFromData;
+          : null;
+        const finalTotal = (globalTotal && globalTotal > 0)
+          ? globalTotal
+          : totalFromData;
 
         const lbl = document.getElementById('treemapTotal');
         const kpi = document.getElementById('treemapTotalKpi');
 
-        if (lbl) lbl.textContent = finalTotal ? `Adjudicado: ${nfARS(finalTotal)}` : '';
+        if (lbl) lbl.textContent = finalTotal
+          ? `Adjudicado: ${nfARS(finalTotal)}`
+          : '';
         if (kpi) kpi.textContent = nfARS(finalTotal || 0);
       };
 
