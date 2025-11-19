@@ -210,6 +210,11 @@
     }
     .kpi-grid .kpi-label{font-size:.78rem;color:var(--sa-text);font-weight:600;text-transform:uppercase}
     .kpi-grid .kpi-value{font-size:1.05rem;font-weight:300;color:var(--sa-text)}
+    .kpi-subtext{
+      font-size:.75rem;
+      color:#64748b;
+      margin-top:.15rem;
+    }
 
     /* Gráficos */
     .chart-box{
@@ -869,52 +874,38 @@
         <div class="loss-hint" id="lossHint"></div>
       </section>
 
-      <!-- Resumen ejecutivo / vista gerente -->
-      <section class="manager-summary" aria-label="Resumen ejecutivo del proceso">
-        <article class="ms-card fade-up" aria-labelledby="ms_part_monto">
-          <div class="ms-label">Participación de Suizo en monto adjudicado</div>
-          <div class="ms-main" id="ms_part_monto">—</div>
-          <div class="ms-sub">Porcentaje del monto adjudicado que obtuvo Suizo.</div>
-        </article>
-
-        <article class="ms-card fade-up" aria-labelledby="ms_ef_reng">
-          <div class="ms-label">Efectividad por renglones</div>
-          <div class="ms-main" id="ms_ef_reng">—</div>
-          <div class="ms-sub">Renglones adjudicados sobre renglones ofertados.</div>
-        </article>
-
-        <article class="ms-card fade-up" aria-labelledby="ms_oportunidad">
-  <div class="ms-label">Renglones competitivos</div>
-  <div class="ms-main" id="ms_oportunidad">—</div>
-  <div class="ms-sub">Renglones donde la diferencia entre 1° y 2° es ≤ 5%.</div>
-</article>
-
-        <article class="ms-card fade-up ms-status" id="ms_estado" aria-label="Estado general del proceso">
-          <div class="ms-label">Estado general</div>
-          <div class="ms-main">
-            <span class="ms-pill">En análisis</span>
-          </div>
-          <div class="ms-sub">Calculado según participación y efectividad de Suizo.</div>
-        </article>
-      </section>
-
       <div class="dashboard-grid mb-4">
         <!-- Izquierda -->
         <div class="pane pane-left span-6 span-lg-6 span-sm-1">
-          <section class="kpi-group" aria-labelledby="kpiGenTitle">
+                    <section class="kpi-group" aria-labelledby="kpiGenTitle">
             <h2 class="group-title m-0" id="kpiGenTitle">Datos generales de licitación</h2>
             <div class="kpi-grid">
               <div class="kpi-card" role="group" aria-label="Presupuesto adjudicado">
                 <div class="kpi-label">Presupuesto adjudicado</div>
                 <div class="kpi-value" id="treemapTotalKpi">{{ kpis.get('awarded', 0) | peso }}</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Renglones">
                 <div class="kpi-label">Renglones</div>
                 <div class="kpi-value" id="dg_renglones">{{ kpis.get('items', 0) }}</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Cantidad de competidores">
                 <div class="kpi-label">Cantidad de competidores</div>
                 <div class="kpi-value" id="dg_competidores">{{ kpis.get('bidders', 0) }}</div>
+              </div>
+
+              <!-- NUEVOS KPIs: resumen Suizo debajo de Datos generales -->
+              <div class="kpi-card" role="group" aria-labelledby="ms_part_monto_label">
+                <div class="kpi-label" id="ms_part_monto_label">Participación de Suizo en monto adjudicado</div>
+                <div class="kpi-value" id="ms_part_monto">—</div>
+                <div class="kpi-subtext">Porcentaje del monto adjudicado que obtuvo Suizo.</div>
+              </div>
+
+              <div class="kpi-card" role="group" aria-labelledby="ms_ef_reng_label">
+                <div class="kpi-label" id="ms_ef_reng_label">Efectividad por renglones</div>
+                <div class="kpi-value" id="ms_ef_reng">—</div>
+                <div class="kpi-subtext">Renglones adjudicados sobre renglones ofertados.</div>
               </div>
             </div>
           </section>
@@ -961,32 +952,52 @@
 
         <!-- Derecha -->
         <div class="pane pane-right span-6 span-lg-6 span-sm-1">
-          <section class="kpi-group" aria-labelledby="kpiSuizoTitle">
+                    <section class="kpi-group" aria-labelledby="kpiSuizoTitle">
             <h2 class="group-title m-0" id="kpiSuizoTitle">Efectividad Suizo</h2>
             <div class="kpi-grid">
               <div class="kpi-card" role="group" aria-label="Monto ofertado">
                 <div class="kpi-label">Monto ofertado</div>
                 <div class="kpi-value" id="es_monto_ofertado">{{ 0 | peso }}</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Monto adjudicado">
                 <div class="kpi-label">Monto adjudicado</div>
                 <div class="kpi-value" id="es_monto_adjudicado">{{ 0 | peso }}</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Efectividad por monto">
                 <div class="kpi-label">Efectividad por monto</div>
                 <div class="kpi-value" id="es_efectividad_monto">0%</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Renglones ofertados">
                 <div class="kpi-label">Renglones ofertados</div>
                 <div class="kpi-value" id="es_renglones_ofertados">0</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Renglones adjudicados">
                 <div class="kpi-label">Renglones adjudicados</div>
                 <div class="kpi-value" id="es_renglones_adjudicados">0</div>
               </div>
+
               <div class="kpi-card" role="group" aria-label="Efectividad por renglones">
                 <div class="kpi-label">Efectividad por renglones</div>
                 <div class="kpi-value" id="es_efectividad_renglones">0%</div>
+              </div>
+
+              <!-- NUEVOS KPIs: debajo de Efectividad Suizo -->
+              <div class="kpi-card" role="group" aria-labelledby="ms_oportunidad_label">
+                <div class="kpi-label" id="ms_oportunidad_label">Renglones competitivos</div>
+                <div class="kpi-value" id="ms_oportunidad">—</div>
+                <div class="kpi-subtext">Renglones donde la diferencia entre 1° y 2° es ≤ 5%.</div>
+              </div>
+
+              <div class="kpi-card" role="group" aria-labelledby="ms_estado_label" id="ms_estado">
+                <div class="kpi-label" id="ms_estado_label">Estado general</div>
+                <div class="kpi-value">
+                  <span class="ms-pill">En análisis</span>
+                </div>
+                <div class="kpi-subtext">Calculado según participación y efectividad de Suizo.</div>
               </div>
             </div>
           </section>
