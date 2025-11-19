@@ -1705,56 +1705,57 @@
         return val;
       }
 
-      // Treemap por renglón (monto adjudicado de posición 1)
-      function treemapDataByItemFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
+            // Helper: recorre todas las posiciones adjudicadas (1° y 2°) respetando el modo
+      function forEachAwardedPosition(rows, mode, cb){
+        const allow = (name) => {
+          if (mode === 'suizo') return isSuizo(name);
+          if (mode === 'otros') return !isSuizo(name);
+          return true; // todos
         };
 
+        (rows || []).forEach(r => {
+          const positions = r.positions || [];
+          positions.forEach(p => {
+            if (!allow(p.proveedor)) return;
+
+            const qAdj = effectiveQty(r, p); // usa tu lógica: 1° + 2° parcial
+            if (!(qAdj > 0)) return;
+
+            const val = unitPriceOf(p) * qAdj;
+            cb(r, p, qAdj, val);
+          });
+        });
+      }
+
+      // Treemap por renglón: suma TODO lo adjudicado en el renglón (1° + 2°) filtrado por modo
+      function treemapDataByItemFirstPlace(rows, mode){
         const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
 
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
-
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
           const nro = r.nro ?? r.item;
-          const labelBase = (nro !== undefined && nro !== null && nro !== '') ? `Renglón ${nro}` : 'Renglón';
-          map.set(labelBase, (map.get(labelBase) || 0) + v1);
+          const labelBase = (nro !== undefined && nro !== null && nro !== '')
+            ? `Renglón ${nro}`
+            : 'Renglón';
+
+          map.set(labelBase, (map.get(labelBase) || 0) + val);
         });
 
         return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .map(([label, value]) => ({ label, value }));
       }
 
-      // Treemap por proveedor: monto adjudicado al proveedor en primer lugar
+      // Treemap por proveedor: suma TODO lo adjudicado a cada proveedor (1° + 2°) filtrado por modo
       function treemapDataFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
-        };
-
         const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
 
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
-
-          const key = String(p1.proveedor || '—');
-          map.set(key, (map.get(key) || 0) + v1);
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
+          const key = String(p.proveedor || '—');
+          map.set(key, (map.get(key) || 0) + val);
         });
 
         return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .map(([label, value]) => ({ label, value }));
       }
 
