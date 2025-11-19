@@ -899,9 +899,9 @@
           </section>
 
           <!-- NUEVO RECUDRO debajo de Datos generales -->
-          <section class="kpi-group" aria-label="Resumen ejecutivo de Suizo en la licitación">
-            <h2 class="group-title m-0">Resumen ejecutivo</h2>
-            <div class="kpi-grid kpi-grid-2">
+          <section class="kpi-group" aria-label="Participación de Suizo en la licitación">
+  <h2 class="group-title m-0">Participación Suizo</h2>
+  <div class="kpi-grid kpi-grid-2">
               <div class="kpi-card" role="group" aria-labelledby="ms_part_monto_label">
                 <div class="kpi-label" id="ms_part_monto_label">Participación de Suizo en monto adjudicado</div>
                 <div class="kpi-value" id="ms_part_monto">—</div>
@@ -2502,21 +2502,28 @@
             }
           }
 
-          if (m4){
+                    if (m4){
             const pill = m4.querySelector('.ms-pill');
             if (pill){
               pill.classList.remove('ok','warn','danger');
+
+              // Usamos la efectividad de Suizo por renglones (0–1)
+              const eff = info.suizo_eff_reng || 0;
+
               if (info.total_adj === 0){
                 pill.textContent = 'Sin adjudicar';
                 pill.classList.add('warn');
-              } else if (info.suizo_part_monto >= 0.5 || info.suizo_eff_reng >= 0.5){
-                pill.textContent = 'Bueno';
+              } else if (eff >= 0.35){
+                pill.textContent = 'Muy buena';
                 pill.classList.add('ok');
-              } else if (info.suizo_part_monto > 0 || info.suizo_eff_reng > 0){
-                pill.textContent = 'Competitivo';
+              } else if (eff >= 0.25){
+                pill.textContent = 'Buena';
+                pill.classList.add('ok');
+              } else if (eff >= 0.20){
+                pill.textContent = 'Regular';
                 pill.classList.add('warn');
               } else {
-                pill.textContent = 'Perdido';
+                pill.textContent = 'No buena';
                 pill.classList.add('danger');
               }
             }
