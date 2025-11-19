@@ -996,7 +996,7 @@
               <div class="kpi-card" role="group" aria-labelledby="ms_oportunidad_label">
                 <div class="kpi-label" id="ms_oportunidad_label">Renglones competitivos</div>
                 <div class="kpi-value" id="ms_oportunidad">—</div>
-                <div class="kpi-subtext">Renglones donde la diferencia entre 1° y 2° es ≤ 5%.</div>
+                <div class="kpi-subtext">Renglones donde la diferencia entre 1° y 2° es ≤ 3,5%.</div>
               </div>
 
               <div class="kpi-card" role="group" aria-labelledby="ms_estado_label" id="ms_estado">
@@ -2416,7 +2416,7 @@
               const suPrice = unitPriceOf(suizoPos);
               if (basePrice > 0 && suPrice > basePrice){
                 const diff = suPrice / basePrice - 1;
-                if (diff <= 0.05){
+                if (diff <= 0.035){
                   oportunidadCount += 1;
                   const rq = rowQty(r) || 1;
                   oportunidadMonto += basePrice * rq * diff;
@@ -2501,8 +2501,8 @@
           if (elOppBar){
             elOppBar.style.display = 'inline-flex';
             if (info.oportunidad_count > 0){
-              elOppText.textContent =
-                `Se perdieron ${info.oportunidad_count} renglones por menos del 5%. `+
+                            elOppText.textContent =
+                `Se perdieron ${info.oportunidad_count} renglones por diferencias ≤ 3,5%. `+
                 `Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
             } else {
               elOppText.textContent =
