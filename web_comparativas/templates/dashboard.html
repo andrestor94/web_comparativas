@@ -2341,27 +2341,63 @@
           const perdidas = [];
           const compMap = new Map();
 
-          rows.forEach(r=>{
-            const p1 = (r.positions || []).find(p=>+p.pos===1);
-            const q1 = p1 ? effectiveQty(r, p1) : 0;
-            const v1 = p1 ? unitPriceOf(p1) * q1 : 0;
-            if (v1 > 0){
-              totalAdj += v1;
-              if (isSuizo(p1.proveedor)){
-                suizoAdj += v1;
-              } else {
-                const key = String(p1.proveedor || '—');
-                const curr = compMap.get(key) || {
-                  nombre:key,
-                  monto:0,
-                  renglones:0,
-                  cerroContraSuizo:0
-                };
-                curr.monto += v1;
-                curr.renglones += 1;
-                compMap.set(key, curr);
-              }
-            }
+          rows.forEach(r => {
+  const req = rowQty(r) || 0;  
+  if (!req) return;
+
+  const positions = r.positions || [];
+  const p1 = positions.find(p => +p.pos === 1);
+  if (!p1) return;
+
+  const price1 = unitPriceOf(p1);
+  const q1 = offeredQty(r, p1) || 0;
+
+  let adjTotal = 0;
+
+  if (q1 >= req) {
+    // adjudicación TOTAL al primer puesto
+    adjTotal = req * price1;
+  } else {
+    // adjudicación PARCIAL + segundo puesto
+    const falta = req - q1;
+    adjTotal = q1 * price1;
+
+    const p2 = positions.find(p => +p.pos === 2);
+    if (p2) {
+      const price2 = unitPriceOf(p2);
+      adjTotal += falta * price2;
+    }
+  }
+
+  totalAdj += adjTotal;
+
+  // aportes específicos de Suizo
+  if (isSuizo(p1.proveedor)) {
+    // Suizo adjudicado se basa SOLO en p1 (no en p2)
+    const qAdjSuizo = Math.min(q1, req);
+    suizoAdj += qAdjSuizo * price1;
+  } else {
+    // Competidores fuertes
+    const key = String(p1.proveedor || '—');
+    const curr = compMap.get(key) || {
+      nombre: key,
+      monto: 0,
+      renglones: 0,
+      cerroContraSuizo: 0
+    };
+    curr.monto += adjTotal;
+    curr.renglones += 1;
+    compMap.set(key, curr);
+  }
+
+  // conteo suizo ofertado / adjudicado
+  const suizo = positions.find(p => isSuizo(p.proveedor));
+  if (suizo) {
+    suizoOffRows += 1;
+    const qAdj = effectiveQty(r, suizo);
+    if (qAdj > 0) suizoAdjRows += 1;
+  }
+});
 
             const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
             if (suizo){
