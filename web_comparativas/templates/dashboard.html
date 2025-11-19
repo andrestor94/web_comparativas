@@ -908,13 +908,13 @@
                 <div class="kpi-subtext">Porcentaje del monto adjudicado que obtuvo Suizo.</div>
               </div>
 
-                  <div class="kpi-card" role="group" aria-labelledby="ms_ef_reng_label">
-      <div class="kpi-label" id="ms_ef_reng_label">Participación de Suizo por renglones</div>
-      <div class="kpi-value" id="ms_ef_reng">—</div>
-      <div class="kpi-subtext">
-        Renglones adjudicados a Suizo sobre el total de renglones del proceso.
-      </div>
-    </div>
+              <div class="kpi-card" role="group" aria-labelledby="ms_ef_reng_label">
+                <div class="kpi-label" id="ms_ef_reng_label">Efectividad por renglones</div>
+                <div class="kpi-value" id="ms_ef_reng">—</div>
+                <div class="kpi-subtext">Renglones adjudicados sobre renglones ofertados.</div>
+              </div>
+            </div>
+          </section>
 
           <section class="chart-box" aria-labelledby="treemapTitle">
             <div class="title">
@@ -2336,13 +2336,12 @@
         applyTreemapView();
 
         /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-    function computeExecutiveInfo(){
+                function computeExecutiveInfo(){
           const rows = filteredRows();
           if (!rows.length){
             return {
               suizo_part_monto: 0,
               suizo_eff_reng: 0,
-              suizo_part_reng: 0,
               oportunidad_monto: 0,
               oportunidad_count: 0,
               perdidas: [],
@@ -2350,9 +2349,6 @@
               competitors: []
             };
           }
-
-          // Total de renglones del proceso (constante, viene del backend)
-          const totalRowsProc = Number(DATA.total_rows || rows.length) || rows.length;
 
           let suizoAdj = 0;
           let totalAdj = 0;
@@ -2403,7 +2399,7 @@
               suizoAdjRows += 1;
             }
 
-            // Oportunidad: Suizo vs proveedor más barato
+            // Oportunidad: se sigue comparando Suizo vs el más barato (p1)
             if (suizoPos){
               const basePrice = p1 ? unitPriceOf(p1) : 0;
               const suPrice = unitPriceOf(suizoPos);
@@ -2440,16 +2436,14 @@
 
           const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
           const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
-          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;
 
           return {
             suizo_part_monto,
-            suizo_eff_reng,   // sigue igual, lo usa el "Estado general"
-            suizo_part_reng,  // NUEVO: participación de Suizo por renglones
-            oportunidad_monto,
-            oportunidad_count,
+            suizo_eff_reng,
+            oportunidad_monto: oportunidadMonto,
+            oportunidad_count: oportunidadCount,
             perdidas,
-            total_adj,
+            total_adj: totalAdj,
             competitors
           };
         }
@@ -2475,7 +2469,7 @@
         function renderExecutive(info){
           if (!info) return;
           const m1 = document.getElementById('ms_part_monto');
-                    if (m2) m2.textContent = pctFmt1d(info.suizo_part_reng);
+          const m2 = document.getElementById('ms_ef_reng');
           const m3 = document.getElementById('ms_oportunidad');
           const m4 = document.getElementById('ms_estado');
 
