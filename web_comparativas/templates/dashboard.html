@@ -2355,8 +2355,9 @@
           // Total de renglones del proceso (si la API lo manda, usamos DATA.total_rows)
           const totalRowsProc = Number(DATA.total_rows || rows.length) || rows.length;
 
-          let suizoAdj = 0;
+                    let suizoAdj = 0;
           let totalAdj = 0;
+          let suizoOffVal = 0;          // NUEVO: monto ofertado por Suizo (para efectividad por monto)
           let suizoOffRows = 0;
           let suizoAdjRows = 0;
           let oportunidadMonto = 0;
@@ -2373,10 +2374,15 @@
               suizoOffRows += 1;
             }
 
-            let rowSuizoAdj = 0;
+                        let rowSuizoAdj = 0;
 
             // Sumar adjudicación de TODAS las posiciones (1° + 2°)
             positions.forEach(p => {
+              // NUEVO: monto ofertado por Suizo (para efectividad por monto)
+              if (isSuizo(p.proveedor)){
+                suizoOffVal += offerValue(r, p);
+              }
+
               const qAdj = effectiveQty(r, p);
               if (!(qAdj > 0)) return;
 
@@ -2439,14 +2445,16 @@
             .sort((a, b) => b.monto - a.monto)
             .slice(0, 5);
 
-          const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;       // se mantiene (estado general)
-          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;     // NUEVO: renglones Suizo / renglones totales
+                    const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
+          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;
+          const suizo_eff_monto = suizoOffVal ? (suizoAdj / suizoOffVal) : 0;   // NUEVO: efectividad por monto (adj/ofertado)
 
           return {
             suizo_part_monto,
             suizo_eff_reng,
             suizo_part_reng,
+            suizo_eff_monto,                     // 🔹 lo exponemos para usarlo en Estado general
             oportunidad_monto: oportunidadMonto,
             oportunidad_count: oportunidadCount,
             perdidas,
@@ -2502,13 +2510,14 @@
             }
           }
 
-                    if (m4){
+                              if (m4){
             const pill = m4.querySelector('.ms-pill');
             if (pill){
               pill.classList.remove('ok','warn','danger');
 
-              // Usamos la efectividad de Suizo por renglones (0–1)
-              const eff = info.suizo_eff_reng || 0;
+              // Usamos la efectividad de Suizo por monto (0–1),
+              // la misma lógica que la tarjeta "Efectividad por monto"
+              const eff = (info.suizo_eff_monto != null ? info.suizo_eff_monto : 0);
 
               if (info.total_adj === 0){
                 pill.textContent = 'Sin adjudicar';
