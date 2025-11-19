@@ -2337,13 +2337,13 @@
         applyTreemapView();
 
                 /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-                function computeExecutiveInfo(){
+        function computeExecutiveInfo(){
           const rows = filteredRows();
           if (!rows.length){
             return {
               suizo_part_monto: 0,
               suizo_eff_reng: 0,
-              suizo_eff_monto: 0,
+              suizo_part_reng: 0,
               oportunidad_monto: 0,
               oportunidad_count: 0,
               perdidas: [],
@@ -2352,12 +2352,13 @@
             };
           }
 
-          let suizoAdj = 0;           // monto adjudicado a Suizo
-          let totalAdj = 0;           // monto adjudicado total (todos los proveedores)
-          let suizoOffRows = 0;       // renglones donde Suizo ofertó
-          let suizoAdjRows = 0;       // renglones donde Suizo adjudicó algo
-          let montoOferSuizo = 0;     // monto ofertado por Suizo (para efectividad por monto)
+          // Total de renglones del proceso (si la API lo manda, usamos DATA.total_rows)
+          const totalRowsProc = Number(DATA.total_rows || rows.length) || rows.length;
 
+          let suizoAdj = 0;
+          let totalAdj = 0;
+          let suizoOffRows = 0;
+          let suizoAdjRows = 0;
           let oportunidadMonto = 0;
           let oportunidadCount = 0;
           const perdidas = [];
@@ -2385,9 +2386,6 @@
               if (isSuizo(p.proveedor)){
                 suizoAdj += val;
                 rowSuizoAdj += val;
-
-                // monto ofertado de Suizo (precio * cantidad ofertada)
-                montoOferSuizo += offerValue(r, p);
               } else {
                 const key = String(p.proveedor || '—');
                 const curr = compMap.get(key) || {
@@ -2442,13 +2440,13 @@
             .slice(0, 5);
 
           const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng   = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
-          const suizo_eff_monto  = (montoOferSuizo > 0) ? (suizoAdj / montoOferSuizo) : 0;
+          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;       // se mantiene (estado general)
+          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;     // NUEVO: renglones Suizo / renglones totales
 
           return {
             suizo_part_monto,
             suizo_eff_reng,
-            suizo_eff_monto,
+            suizo_part_reng,
             oportunidad_monto: oportunidadMonto,
             oportunidad_count: oportunidadCount,
             perdidas,
@@ -2504,13 +2502,13 @@
             }
           }
 
-                              if (m4){
+                    if (m4){
             const pill = m4.querySelector('.ms-pill');
             if (pill){
               pill.classList.remove('ok','warn','danger');
 
-              // Ahora usamos la efectividad de Suizo por MONTO (0–1)
-              const eff = info.suizo_eff_monto || 0;
+              // Usamos la efectividad de Suizo por renglones (0–1)
+              const eff = info.suizo_eff_reng || 0;
 
               if (info.total_adj === 0){
                 pill.textContent = 'Sin adjudicar';
