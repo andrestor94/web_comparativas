@@ -884,10 +884,10 @@
         </article>
 
         <article class="ms-card fade-up" aria-labelledby="ms_oportunidad">
-          <div class="ms-label">Oportunidad recuperable</div>
-          <div class="ms-main" id="ms_oportunidad">—</div>
-          <div class="ms-sub">Renglones perdidos por poca diferencia de precio.</div>
-        </article>
+  <div class="ms-label">Renglones competitivos</div>
+  <div class="ms-main" id="ms_oportunidad">—</div>
+  <div class="ms-sub">Renglones donde la diferencia entre 1° y 2° es ≤ 5%.</div>
+</article>
 
         <article class="ms-card fade-up ms-status" id="ms_estado" aria-label="Estado general del proceso">
           <div class="ms-label">Estado general</div>
@@ -2459,10 +2459,10 @@
           if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
           if (m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
           if (m3){
-            m3.textContent = info.oportunidad_count > 0
-              ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng.)`
-              : 'Sin oportunidades claras';
-          }
+  m3.textContent = info.oportunidad_count > 0
+    ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng. competitivos)`
+    : 'Sin renglones competitivos';
+}
 
           if (elOppBar){
             elOppBar.style.display = 'inline-flex';
