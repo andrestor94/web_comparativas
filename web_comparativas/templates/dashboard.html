@@ -1705,56 +1705,57 @@
         return val;
       }
 
-      // Treemap por renglón (monto adjudicado de posición 1)
-      function treemapDataByItemFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
+            // Helper: recorre todas las posiciones adjudicadas (1° y 2°) respetando el modo
+      function forEachAwardedPosition(rows, mode, cb){
+        const allow = (name) => {
+          if (mode === 'suizo') return isSuizo(name);
+          if (mode === 'otros') return !isSuizo(name);
+          return true; // todos
         };
 
+        (rows || []).forEach(r => {
+          const positions = r.positions || [];
+          positions.forEach(p => {
+            if (!allow(p.proveedor)) return;
+
+            const qAdj = effectiveQty(r, p); // usa tu lógica: 1° + 2° parcial
+            if (!(qAdj > 0)) return;
+
+            const val = unitPriceOf(p) * qAdj;
+            cb(r, p, qAdj, val);
+          });
+        });
+      }
+
+      // Treemap por renglón: suma TODO lo adjudicado en el renglón (1° + 2°) filtrado por modo
+      function treemapDataByItemFirstPlace(rows, mode){
         const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
 
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
-
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
           const nro = r.nro ?? r.item;
-          const labelBase = (nro !== undefined && nro !== null && nro !== '') ? `Renglón ${nro}` : 'Renglón';
-          map.set(labelBase, (map.get(labelBase) || 0) + v1);
+          const labelBase = (nro !== undefined && nro !== null && nro !== '')
+            ? `Renglón ${nro}`
+            : 'Renglón';
+
+          map.set(labelBase, (map.get(labelBase) || 0) + val);
         });
 
         return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .map(([label, value]) => ({ label, value }));
       }
 
-      // Treemap por proveedor: monto adjudicado al proveedor en primer lugar
+      // Treemap por proveedor: suma TODO lo adjudicado a cada proveedor (1° + 2°) filtrado por modo
       function treemapDataFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
-        };
-
         const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          if (!p1 || !allow(p1.proveedor)) return;
 
-          const q1 = effectiveQty(r,p1);
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (!(v1 > 0)) return;
-
-          const key = String(p1.proveedor || '—');
-          map.set(key, (map.get(key) || 0) + v1);
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
+          const key = String(p.proveedor || '—');
+          map.set(key, (map.get(key) || 0) + val);
         });
 
         return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .map(([label, value]) => ({ label, value }));
       }
 
@@ -2317,8 +2318,8 @@
         TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
         applyTreemapView();
 
-                /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-        function computeExecutiveInfo(){
+        /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
+                function computeExecutiveInfo(){
           const rows = filteredRows();
           if (!rows.length){
             return {
@@ -2332,49 +2333,101 @@
             };
           }
 
-          let suizoAdj = 0;        // monto adjudicado a Suizo
-          let totalAdj = 0;        // monto adjudicado total (primer lugar + parciales)
-          let suizoOffRows = 0;    // renglones donde Suizo ofertó
-          let suizoAdjRows = 0;    // renglones donde Suizo adjudicó algo
+          let suizoAdj = 0;
+          let totalAdj = 0;
+          let suizoOffRows = 0;
+          let suizoAdjRows = 0;
+          let oportunidadMonto = 0;
+          let oportunidadCount = 0;
+          const perdidas = [];
+          const compMap = new Map();
 
           rows.forEach(r => {
-            const positions = Array.isArray(r.positions) ? r.positions : [];
-
-            // Tomamos el proveedor en 1° lugar para construir el total adjudicado
+            const positions = r.positions || [];
+            const suizoPos = positions.find(p => isSuizo(p.proveedor));
             const p1 = positions.find(p => +p.pos === 1);
-            if (p1){
-              const q1 = effectiveQty(r, p1);               // usa la lógica nueva de parciales
-              const v1 = unitPriceOf(p1) * q1;
-              if (v1 > 0){
-                totalAdj += v1;
-                if (isSuizo(p1.proveedor)){
-                  suizoAdj += v1;
-                }
-              }
+
+            if (suizoPos){
+              suizoOffRows += 1;
             }
 
-            // Métricas de efectividad por renglones (Suizo)
-            const suizo = positions.find(p => isSuizo(p.proveedor));
-            if (suizo){
-              suizoOffRows += 1;
-              const qAdj = effectiveQty(r, suizo);
-              if (qAdj > 0){
-                suizoAdjRows += 1;
+            let rowSuizoAdj = 0;
+
+            // Sumar adjudicación de TODAS las posiciones (1° + 2°)
+            positions.forEach(p => {
+              const qAdj = effectiveQty(r, p);
+              if (!(qAdj > 0)) return;
+
+              const val = unitPriceOf(p) * qAdj;
+              totalAdj += val;
+
+              if (isSuizo(p.proveedor)){
+                suizoAdj += val;
+                rowSuizoAdj += val;
+              } else {
+                const key = String(p.proveedor || '—');
+                const curr = compMap.get(key) || {
+                  nombre: key,
+                  monto: 0,
+                  renglones: 0,
+                  cerroContraSuizo: 0
+                };
+                curr.monto += val;
+                curr.renglones += 1;
+                compMap.set(key, curr);
+              }
+            });
+
+            if (suizoPos && rowSuizoAdj > 0){
+              suizoAdjRows += 1;
+            }
+
+            // Oportunidad: se sigue comparando Suizo vs el más barato (p1)
+            if (suizoPos){
+              const basePrice = p1 ? unitPriceOf(p1) : 0;
+              const suPrice = unitPriceOf(suizoPos);
+              if (basePrice > 0 && suPrice > basePrice){
+                const diff = suPrice / basePrice - 1;
+                if (diff <= 0.05){
+                  oportunidadCount += 1;
+                  const rq = rowQty(r) || 1;
+                  oportunidadMonto += basePrice * rq * diff;
+                  perdidas.push({
+                    desc: r.descripcion || '(sin descripción)',
+                    motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
+                  });
+
+                  if (p1 && !isSuizo(p1.proveedor)){
+                    const key = String(p1.proveedor || '—');
+                    const curr = compMap.get(key) || {
+                      nombre: key,
+                      monto: 0,
+                      renglones: 0,
+                      cerroContraSuizo: 0
+                    };
+                    curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
+                    compMap.set(key, curr);
+                  }
+                }
               }
             }
           });
 
+          const competitors = Array.from(compMap.values())
+            .sort((a, b) => b.monto - a.monto)
+            .slice(0, 5);
+
           const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+          const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
 
           return {
             suizo_part_monto,
             suizo_eff_reng,
-            oportunidad_monto: 0,
-            oportunidad_count: 0,
-            perdidas: [],
+            oportunidad_monto: oportunidadMonto,
+            oportunidad_count: oportunidadCount,
+            perdidas,
             total_adj: totalAdj,
-            competitors: []
+            competitors
           };
         }
 
