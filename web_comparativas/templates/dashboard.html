@@ -909,11 +909,12 @@
               </div>
 
               <div class="kpi-card" role="group" aria-labelledby="ms_ef_reng_label">
-                <div class="kpi-label" id="ms_ef_reng_label">Efectividad por renglones</div>
-                <div class="kpi-value" id="ms_ef_reng">—</div>
-                <div class="kpi-subtext">Renglones adjudicados sobre renglones ofertados.</div>
-              </div>
-            </div>
+  <div class="kpi-label" id="ms_ef_reng_label">Participación de Suizo por renglones</div>
+  <div class="kpi-value" id="ms_ef_reng">—</div>
+  <div class="kpi-subtext">
+    Renglones adjudicados a Suizo sobre el total de renglones del proceso.
+  </div>
+</div>
           </section>
 
           <section class="chart-box" aria-labelledby="treemapTitle">
@@ -2335,13 +2336,14 @@
         TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
         applyTreemapView();
 
-        /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-                function computeExecutiveInfo(){
+                /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
+        function computeExecutiveInfo(){
           const rows = filteredRows();
           if (!rows.length){
             return {
               suizo_part_monto: 0,
               suizo_eff_reng: 0,
+              suizo_part_reng: 0,
               oportunidad_monto: 0,
               oportunidad_count: 0,
               perdidas: [],
@@ -2349,6 +2351,9 @@
               competitors: []
             };
           }
+
+          // Total de renglones del proceso (si la API lo manda, usamos DATA.total_rows)
+          const totalRowsProc = Number(DATA.total_rows || rows.length) || rows.length;
 
           let suizoAdj = 0;
           let totalAdj = 0;
@@ -2435,11 +2440,13 @@
             .slice(0, 5);
 
           const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;       // se mantiene (estado general)
+          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;     // NUEVO: renglones Suizo / renglones totales
 
           return {
             suizo_part_monto,
             suizo_eff_reng,
+            suizo_part_reng,
             oportunidad_monto: oportunidadMonto,
             oportunidad_count: oportunidadCount,
             perdidas,
@@ -2473,8 +2480,10 @@
           const m3 = document.getElementById('ms_oportunidad');
           const m4 = document.getElementById('ms_estado');
 
-          if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
-          if (m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
+                    if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
+          if (m2) m2.textContent = pctFmt1d(
+            info.suizo_part_reng != null ? info.suizo_part_reng : info.suizo_eff_reng
+          );
           if (m3){
   m3.textContent = info.oportunidad_count > 0
     ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng. competitivos)`
