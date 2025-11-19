@@ -2638,7 +2638,7 @@
         renderAll();
       },150);
 
-      // Quitar chips
+            // Quitar chips
       elChip.addEventListener('click', e=>{
         const btn = e.target.closest('button');
         if (!btn) return;
@@ -2647,6 +2647,7 @@
         if (!key) return;
 
         if (key === 'provider') FILTERS.provider = null;
+        if (key === 'item')     FILTERS.item = null;   // 🔹 NUEVO: limpia el filtro por renglón
         if (key === 'posBuckets'){
           FILTERS.posBuckets.clear();
           const max = DATA.max_pos || 0;
@@ -2881,13 +2882,18 @@
         });
       }
 
-      function attachClick(canvas, chart){
+            function attachClick(canvas, chart){
         if (!canvas || !chart) return;
         if (canvas.__treemapClickBound) return;
         canvas.__treemapClickBound = true;
 
-        canvas.addEventListener('click',evt=>{
-          const els = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+        canvas.addEventListener('click', evt => {
+          const els = chart.getElementsAtEventForMode(
+            evt,
+            'nearest',
+            { intersect: true },
+            true
+          );
           if (!els.length) return;
           const i = els[0].index ?? 0;
           let label = '';
@@ -2897,7 +2903,19 @@
             const ds = chart.data.datasets[0];
             label = (ds.tree?.[i]?.g) || '';
           }
-          if (label && window.setFilter) window.setFilter('provider', label);
+          if (!label || !window.setFilter) return;
+
+          // 🔹 Si el treemap está en modo "Renglón", filtramos por renglón
+          const view = window.TREEMAP_VIEW || 'prov';
+          if (view === 'item'){  // modo "Renglón"
+            // Ejemplo de label: "Renglón 15" → nos quedamos con "15"
+            const m = String(label).match(/\d+/);
+            const itemKey = m ? m[0] : label;
+            window.setFilter('item', itemKey);
+          } else {
+            // Modo "Proveedor" (comportamiento original)
+            window.setFilter('provider', label);
+          }
         });
       }
 
