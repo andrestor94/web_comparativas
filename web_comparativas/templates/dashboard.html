@@ -2317,7 +2317,7 @@
         TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
         applyTreemapView();
 
-        /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
+                /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
         function computeExecutiveInfo(){
           const rows = filteredRows();
           if (!rows.length){
@@ -2332,123 +2332,49 @@
             };
           }
 
-          let suizoAdj = 0;
-          let totalAdj = 0;
-          let suizoOffRows = 0;
-          let suizoAdjRows = 0;
-          let oportunidadMonto = 0;
-          let oportunidadCount = 0;
-          const perdidas = [];
-          const compMap = new Map();
+          let suizoAdj = 0;        // monto adjudicado a Suizo
+          let totalAdj = 0;        // monto adjudicado total (primer lugar + parciales)
+          let suizoOffRows = 0;    // renglones donde Suizo ofertó
+          let suizoAdjRows = 0;    // renglones donde Suizo adjudicó algo
 
           rows.forEach(r => {
-  const req = rowQty(r) || 0;  
-  if (!req) return;
+            const positions = Array.isArray(r.positions) ? r.positions : [];
 
-  const positions = r.positions || [];
-  const p1 = positions.find(p => +p.pos === 1);
-  if (!p1) return;
+            // Tomamos el proveedor en 1° lugar para construir el total adjudicado
+            const p1 = positions.find(p => +p.pos === 1);
+            if (p1){
+              const q1 = effectiveQty(r, p1);               // usa la lógica nueva de parciales
+              const v1 = unitPriceOf(p1) * q1;
+              if (v1 > 0){
+                totalAdj += v1;
+                if (isSuizo(p1.proveedor)){
+                  suizoAdj += v1;
+                }
+              }
+            }
 
-  const price1 = unitPriceOf(p1);
-  const q1 = offeredQty(r, p1) || 0;
-
-  let adjTotal = 0;
-
-  if (q1 >= req) {
-    // adjudicación TOTAL al primer puesto
-    adjTotal = req * price1;
-  } else {
-    // adjudicación PARCIAL + segundo puesto
-    const falta = req - q1;
-    adjTotal = q1 * price1;
-
-    const p2 = positions.find(p => +p.pos === 2);
-    if (p2) {
-      const price2 = unitPriceOf(p2);
-      adjTotal += falta * price2;
-    }
-  }
-
-  totalAdj += adjTotal;
-
-  // aportes específicos de Suizo
-  if (isSuizo(p1.proveedor)) {
-    // Suizo adjudicado se basa SOLO en p1 (no en p2)
-    const qAdjSuizo = Math.min(q1, req);
-    suizoAdj += qAdjSuizo * price1;
-  } else {
-    // Competidores fuertes
-    const key = String(p1.proveedor || '—');
-    const curr = compMap.get(key) || {
-      nombre: key,
-      monto: 0,
-      renglones: 0,
-      cerroContraSuizo: 0
-    };
-    curr.monto += adjTotal;
-    curr.renglones += 1;
-    compMap.set(key, curr);
-  }
-
-  // conteo suizo ofertado / adjudicado
-  const suizo = positions.find(p => isSuizo(p.proveedor));
-  if (suizo) {
-    suizoOffRows += 1;
-    const qAdj = effectiveQty(r, suizo);
-    if (qAdj > 0) suizoAdjRows += 1;
-  }
-});
-
-            const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
+            // Métricas de efectividad por renglones (Suizo)
+            const suizo = positions.find(p => isSuizo(p.proveedor));
             if (suizo){
               suizoOffRows += 1;
               const qAdj = effectiveQty(r, suizo);
-              if (qAdj > 0) suizoAdjRows += 1;
-
-              const basePrice = p1 ? unitPriceOf(p1) : 0;
-              const suPrice = unitPriceOf(suizo);
-              if (basePrice > 0 && suPrice > basePrice){
-                const diff = suPrice / basePrice - 1;
-                if (diff <= 0.05){
-                  oportunidadCount += 1;
-                  const rq = rowQty(r) || 1;
-                  oportunidadMonto += basePrice * rq * diff;
-                  perdidas.push({
-                    desc: r.descripcion || '(sin descripción)',
-                    motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
-                  });
-
-                  if (p1 && !isSuizo(p1.proveedor)){
-                    const key = String(p1.proveedor || '—');
-                    const curr = compMap.get(key) || {
-                      nombre:key,
-                      monto:0,
-                      renglones:0,
-                      cerroContraSuizo:0
-                    };
-                    curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
-                    compMap.set(key, curr);
-                  }
-                }
+              if (qAdj > 0){
+                suizoAdjRows += 1;
               }
             }
           });
 
-          const competitors = Array.from(compMap.values())
-            .sort((a,b)=>b.monto - a.monto)
-            .slice(0,5);
-
           const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-          const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
 
           return {
             suizo_part_monto,
             suizo_eff_reng,
-            oportunidad_monto: oportunidadMonto,
-            oportunidad_count: oportunidadCount,
-            perdidas,
+            oportunidad_monto: 0,
+            oportunidad_count: 0,
+            perdidas: [],
             total_adj: totalAdj,
-            competitors
+            competitors: []
           };
         }
 
