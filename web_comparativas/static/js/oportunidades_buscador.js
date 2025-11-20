@@ -318,16 +318,35 @@
     );
   }
 
-  const initFrom =
-    (window.OPP_UI &&
-      window.OPP_UI.initialDateFrom &&
-      parseApertura(window.OPP_UI.initialDateFrom)) ||
-    (DOMAIN_MIN ? new Date(DOMAIN_MIN) : null);
-  const initTo =
-    (window.OPP_UI &&
-      window.OPP_UI.initialDateTo &&
-      parseApertura(window.OPP_UI.initialDateTo)) ||
-    (DOMAIN_MAX ? new Date(DOMAIN_MAX) : null);
+    // Rango inicial de fechas (por defecto: últimas 72 horas de la apertura)
+  let initFrom = null;
+  let initTo = null;
+
+  const uiFrom =
+    window.OPP_UI &&
+    window.OPP_UI.initialDateFrom &&
+    parseApertura(window.OPP_UI.initialDateFrom);
+
+  const uiTo =
+    window.OPP_UI &&
+    window.OPP_UI.initialDateTo &&
+    parseApertura(window.OPP_UI.initialDateTo);
+
+  if (uiFrom && uiTo) {
+    // Si el backend envía un rango explícito, lo respetamos
+    initFrom = uiFrom;
+    initTo = uiTo;
+  } else if (DOMAIN_MAX !== null) {
+    // Si no, usamos la ÚLTIMA fecha de apertura disponible
+    const lastDate = new Date(DOMAIN_MAX);
+    const from72 = new Date(lastDate.getTime() - 72 * 60 * 60 * 1000); // 72 horas antes
+
+    initFrom = from72;
+    initTo = lastDate;
+  } else {
+    initFrom = null;
+    initTo = null;
+  }
 
   function setSliderFromDates(d1, d2) {
     if (DOMAIN_MIN === null || DOMAIN_MAX === null) {
