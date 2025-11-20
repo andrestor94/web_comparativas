@@ -28,6 +28,7 @@
 
   const swPAMI = $("#swPAMI");
   const swEstado = $("#swEstado");
+  const swDecision = $("#swDecision"); // NUEVO: grupo de chips de decisión
 
   const kProcesos = $("#kProcesos");
 
@@ -145,6 +146,40 @@
   }
 
   // ============================================================
+  //  PERSISTENCIA DECISIONES (localStorage)
+  // ============================================================
+  const STORAGE_KEY =
+    "wc_opp_decisions_v1_" + (window.location && window.location.pathname ? window.location.pathname : "default");
+
+  function loadDecisions() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (e) {
+      // ignorar
+    }
+    return {};
+  }
+
+  function saveDecisions() {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(decisionMap));
+    } catch (e) {
+      // ignorar
+    }
+  }
+
+  let decisionMap = loadDecisions(); // { rowKey: 'aceptado' | 'rechazado' }
+
+  function buildRowKey(numero, aperturaTxt) {
+    const n = (numero || "").toString().trim();
+    const a = (aperturaTxt || "").toString().trim();
+    return n + " | " + a;
+  }
+
+  // ============================================================
   //  DATASET PRINCIPAL
   // ============================================================
   const originalRows = $$("#oppTBody tr[data-numero]");
@@ -155,33 +190,47 @@
 
   const DATA = backendData
     ? backendData.map((r) => {
+        const numero = r.numero || r["Número"] || "";
+        const reparticion = r.reparticion || r["Repartición"] || "";
+        const objeto = r.objeto || r["Objeto"] || "";
         const aperturaTxt =
           r.apertura_txt || r.apertura || r.Apertura || r.aperturaTxt || "";
         const aperturaDate = parseApertura(aperturaTxt);
+        const tipo = r.tipo || r["Tipo"] || "";
+        const plataforma = r.plataforma || r["Plataforma"] || "";
+        const operador = r.operador || r["Operador"] || "";
+        const cuenta = r.cuenta || r["Cuenta"] || r["Número"] || "";
+        const uape =
+          r.uape ||
+          r["N° UAPE"] ||
+          r["Unidad Compra"] ||
+          r["Cod. UAPE"] ||
+          "";
         const estadoRaw = r.estado || r.Estado || "";
+        const enlace = r.enlace || r["Enlace de pliego"] || r["Enlace"] || "";
+
+        const apertura = aperturaDate ? aperturaDate.getTime() : null;
         const estNorm = normalize(estadoRaw);
         const estadoNorm = estNorm.includes("emerg") ? "emergencia" : "regular";
 
+        const rowKey = r.row_key || buildRowKey(numero, aperturaTxt);
+        const decision = decisionMap[rowKey] || "sin-marcar";
+
         return {
-          numero: r.numero || r["Número"] || "",
-          reparticion: r.reparticion || r["Repartición"] || "",
-          objeto: r.objeto || r["Objeto"] || "",
+          numero,
+          reparticion,
+          objeto,
           aperturaTxt,
-          apertura: aperturaDate ? aperturaDate.getTime() : null,
-          tipo: r.tipo || r["Tipo"] || "",
-          plataforma: r.plataforma || r["Plataforma"] || "",
-          operador: r.operador || r["Operador"] || "",
-          // Filtro Cuenta: usamos la columna "Número"
-          cuenta: r.cuenta || r["Número"] || "",
-          // Procesos: usamos la columna "N° UAPE"
-          uape:
-            r.uape ||
-            r["N° UAPE"] ||
-            r["Unidad Compra"] ||
-            r["Cod. UAPE"] ||
-            "",
+          apertura,
+          tipo,
+          plataforma,
+          operador,
+          cuenta,
+          uape,
           estado: estadoNorm,
-          enlace: r.enlace || r["Enlace de pliego"] || r["Enlace"] || "",
+          enlace,
+          rowKey,
+          decision,
         };
       })
     : originalRows.map((tr) => {
@@ -198,19 +247,25 @@
         const cuenta = tr.dataset.cuenta || "";
         const uape = tr.dataset.uape || "";
         const estadoRaw = tr.dataset.estado || "";
-        const enlaceEl = tr.querySelector("td:nth-child(6) a");
+
+        // En HTML original, la col 7 es enlace, pero ya no usamos esa fila
+        const enlaceEl = tr.querySelector("td:last-child a");
         const enlace = enlaceEl ? enlaceEl.getAttribute("href") : "";
 
         const aperturaDate = parseApertura(aperturaTxt);
+        const apertura = aperturaDate ? aperturaDate.getTime() : null;
         const estNorm = normalize(estadoRaw);
         const estadoNorm = estNorm.includes("emerg") ? "emergencia" : "regular";
+
+        const rowKey = tr.dataset.rowkey || buildRowKey(numero, aperturaTxt);
+        const decision = decisionMap[rowKey] || "sin-marcar";
 
         return {
           numero,
           reparticion,
           objeto,
           aperturaTxt,
-          apertura: aperturaDate ? aperturaDate.getTime() : null,
+          apertura,
           tipo,
           plataforma,
           operador,
@@ -218,6 +273,8 @@
           uape,
           estado: estadoNorm,
           enlace,
+          rowKey,
+          decision,
         };
       });
 
@@ -327,7 +384,7 @@
   if (dateFrom) dateFrom.addEventListener("change", syncSliderWithDates);
   if (dateTo) dateTo.addEventListener("change", syncSliderWithDates);
 
-  // ---- Switches (PAMI/Otras y Estado)
+  // ---- Switches (PAMI/Otras, Estado, Decisión)
   function setChipGroup(groupEl, value) {
     if (!groupEl) return;
     $$(".chip", groupEl).forEach((b) =>
@@ -351,6 +408,14 @@
       const btn = e.target.closest(".chip");
       if (!btn || btn.disabled) return;
       setChipGroup(swEstado, btn.dataset.val);
+      applyFilters();
+    });
+  }
+  if (swDecision) {
+    swDecision.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip");
+      if (!btn || btn.disabled) return;
+      setChipGroup(swDecision, btn.dataset.val);
       applyFilters();
     });
   }
@@ -389,6 +454,7 @@
 
     const vGrp = getChipGroup(swPAMI); // todos | pami | otras
     const vEst = getChipGroup(swEstado); // todos | emergencia | regular
+    const vDec = swDecision ? getChipGroup(swDecision) : "todos"; // todos | aceptado | rechazado | sin-marcar
 
     // Fechas
     let dFrom = null,
@@ -432,6 +498,11 @@
       // Switch Estado
       if (vEst !== "todos" && r.estado !== vEst) return false;
 
+      // Filtro por decisión
+      if (vDec === "aceptado" && r.decision !== "aceptado") return false;
+      if (vDec === "rechazado" && r.decision !== "rechazado") return false;
+      if (vDec === "sin-marcar" && r.decision !== "sin-marcar") return false;
+
       // Rango fechas
       if (fromMs !== null || toMs !== null) {
         if (r.apertura === null) return false;
@@ -443,6 +514,71 @@
 
     CUR_PAGE = 1;
     render();
+  }
+
+  // Manejo de clic en Aceptar / Rechazar
+  function bindDecisionHandlers() {
+    $$("#oppTBody .js-decide").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tr = btn.closest("tr");
+        if (!tr) return;
+        const action = btn.dataset.action;
+        const rowKey =
+          tr.getAttribute("data-rowkey") ||
+          buildRowKey(tr.getAttribute("data-numero") || "", tr.getAttribute("data-apertura") || "");
+
+        // Alternar decisión
+        let newDecision = "sin-marcar";
+        const current = tr.getAttribute("data-decision") || "sin-marcar";
+
+        if (action === "aceptar") {
+          newDecision = current === "aceptado" ? "sin-marcar" : "aceptado";
+        } else if (action === "rechazar") {
+          newDecision = current === "rechazado" ? "sin-marcar" : "rechazado";
+        }
+
+        tr.setAttribute("data-decision", newDecision);
+        tr.classList.remove("row-decision-accepted", "row-decision-rejected");
+
+        const cell = tr.querySelector("[data-decision-cell]");
+        if (cell) {
+          const btnAccept = cell.querySelector('[data-action="aceptar"]');
+          const btnReject = cell.querySelector('[data-action="rechazar"]');
+          if (btnAccept) {
+            btnAccept.classList.toggle("is-accepted", newDecision === "aceptado");
+          }
+          if (btnReject) {
+            btnReject.classList.toggle("is-rejected", newDecision === "rechazado");
+          }
+        }
+
+        if (newDecision === "aceptado") {
+          tr.classList.add("row-decision-accepted");
+        } else if (newDecision === "rechazado") {
+          tr.classList.add("row-decision-rejected");
+        }
+
+        // Actualizar en DATA
+        const item = DATA.find((r) => r.rowKey === rowKey);
+        if (item) {
+          item.decision = newDecision;
+        }
+
+        // Actualizar mapa y guardar
+        if (newDecision === "sin-marcar") {
+          delete decisionMap[rowKey];
+        } else {
+          decisionMap[rowKey] = newDecision;
+        }
+        saveDecisions();
+
+        // Si el filtro de decisión no es "todos", volver a aplicar filtros
+        const curDecFilter = swDecision ? getChipGroup(swDecision) : "todos";
+        if (curDecFilter !== "todos") {
+          applyFilters();
+        }
+      });
+    });
   }
 
   function render() {
@@ -462,8 +598,28 @@
             )}" target="_blank" rel="noopener" title="Abrir pliego en nueva pestaña">🔗</a>`
           : `<span class="muted">—</span>`;
 
+        const decision = r.decision || "sin-marcar";
+        let rowClass = "";
+        if (decision === "aceptado") rowClass = "row-decision-accepted";
+        else if (decision === "rechazado") rowClass = "row-decision-rejected";
+
+        const decisionBtnsHtml = `
+          <div class="decision-cell">
+            <button type="button"
+                    class="decision-pill js-decide ${decision === "aceptado" ? "is-accepted" : ""}"
+                    data-action="aceptar">
+              Aceptar
+            </button>
+            <button type="button"
+                    class="decision-pill js-decide ${decision === "rechazado" ? "is-rejected" : ""}"
+                    data-action="rechazar">
+              Rechazar
+            </button>
+          </div>`;
+
         return `
         <tr
+          class="${rowClass}"
           data-numero="${escapeHtml(r.numero)}"
           data-reparticion="${escapeHtml(r.reparticion)}"
           data-objeto="${escapeHtml(r.objeto)}"
@@ -474,6 +630,8 @@
           data-cuenta="${escapeHtml(r.cuenta)}"
           data-uape="${escapeHtml(r.uape || "")}"
           data-estado="${escapeHtml(r.estado)}"
+          data-decision="${decision}"
+          data-rowkey="${escapeHtml(r.rowKey)}"
         >
           <td title="${escapeHtml(r.numero)}">${safeText(r.numero)}</td>
           <td title="${escapeHtml(r.reparticion)}">${safeText(
@@ -487,6 +645,9 @@
           r.aperturaTxt
         )}</td>
           <td title="${escapeHtml(r.tipo)}">${safeText(r.tipo)}</td>
+          <td class="opp-decision" data-decision-cell>
+            ${decisionBtnsHtml}
+          </td>
           <td>${linkHtml}</td>
         </tr>`;
       })
@@ -494,7 +655,10 @@
 
     tbody.innerHTML =
       rowsHtml ||
-      `<tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>`;
+      `<tr><td class="muted" colspan="7">Sin resultados para los filtros actuales.</td></tr>`;
+
+    // Enlazar handlers de decisión en las filas recién renderizadas
+    bindDecisionHandlers();
 
     // Paginación
     if (totalFound) totalFound.textContent = String(total);
@@ -529,6 +693,7 @@
       "Operador",
       "N° UAPE",
       "Estado",
+      "Decisión",
       "Enlace de pliego",
     ];
     const lines = [];
@@ -545,6 +710,7 @@
         r.operador,
         r.uape || r.cuenta, // N° UAPE
         r.estado,
+        r.decision || "sin-marcar",
         r.enlace,
       ].map((v) => {
         const s = String(v == null ? "" : v);
@@ -557,9 +723,9 @@
       type: "text/csv;charset=utf-8;",
     });
     const url = URL.createObjectURL(blob);
+    const today = new Date().toISOString().slice(0, 10);
     const a = document.createElement("a");
     a.href = url;
-    const today = new Date().toISOString().slice(0, 10);
     a.download = `oportunidades_${today}.csv`;
     document.body.appendChild(a);
     a.click();
@@ -581,6 +747,7 @@
       if (dateTo) dateTo.value = initTo ? toISODate(initTo) : "";
       setChipGroup(swPAMI, "todos");
       setChipGroup(swEstado, "todos");
+      if (swDecision) setChipGroup(swDecision, "todos");
       setSliderFromDates(initFrom, initTo);
       setDatesFromSlider();
       applyFilters();
