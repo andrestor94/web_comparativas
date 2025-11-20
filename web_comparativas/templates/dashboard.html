@@ -1788,15 +1788,26 @@
         if (cv.__treemapClickBound) return;
         cv.__treemapClickBound = true;
 
-        cv.addEventListener('click',(evt)=>{
-          const els=chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
-          if(!els.length) return;
-          const el=els[0];
-          const raw=(el.raw && (el.raw._data || el.raw)) || {};
-          const label=raw.label || raw.name || raw.g || '';
-          if(label && window.setFilter) window.setFilter('provider',label);
-        });
-      }
+          cv.addEventListener('click', (evt) => {
+    const els = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+    if (!els.length) return;
+    const el = els[0];
+    const raw = (el.raw && (el.raw._data || el.raw)) || {};
+    const label = raw.label || raw.name || raw.g || '';
+    if (!label || !window.setFilter) return;
+
+    const view = window.TREEMAP_VIEW || 'prov';
+
+    // 🆕 si el treemap está en modo "Renglón", filtramos por número de renglón
+    if (view === 'item') {
+      const m = String(label).match(/\d+/);   // "Renglón 15" → "15"
+      const itemKey = m ? m[0] : label;
+      window.setFilter('item', itemKey);
+    } else {
+      // modo Proveedor (comportamiento de siempre)
+      window.setFilter('provider', label);
+    }
+  });
       setTimeout(bindTreemapClickOnce,600);
 
       /* ===== Ranking + filtros ===== */
@@ -1834,12 +1845,17 @@
         renderAll();
       }
 
-      window.setFilter=(k,v)=>{
-        if(k==='provider') FILTERS.provider=v||null;
-        elInfo.dataset.page=1;
-        renderAll();
-        renderChips();
-      };
+      window.setFilter = (k, v) => {
+  if (k === 'provider') {
+    FILTERS.provider = v || null;
+  }
+  if (k === 'item') {        // 🆕 filtro por renglón
+    FILTERS.item = v || null;
+  }
+  elInfo.dataset.page = 1;
+  renderAll();
+  renderChips();
+};
 
       function buildPosCols(maxPos){
         if (!elPosCols) return;
@@ -1858,17 +1874,22 @@
         });
       }
 
-      function renderChips(){
-        const chips=[];
-        if(FILTERS.provider) chips.push({key:'provider',label:FILTERS.provider});
-        if(FILTERS.posBuckets.size){
-          const label=[...FILTERS.posBuckets].map(x=>x+'°').join(', ');
-          chips.push({key:'posBuckets',label:'Posiciones: '+label});
-        }
-        elChip.innerHTML=chips.map(c=>
-          `<span class="sel-chip" data-key="${c.key}">${c.label} <button title="Quitar">×</button></span>`
-        ).join('');
-      }
+      function renderChips() {
+  const chips = [];
+  if (FILTERS.provider) {
+    chips.push({ key: 'provider', label: FILTERS.provider });
+  }
+  if (FILTERS.item) {  // 🆕 chip del renglón
+    chips.push({ key: 'item', label: 'Renglón ' + FILTERS.item });
+  }
+  if (FILTERS.posBuckets.size) {
+    const label = [...FILTERS.posBuckets].map(x => x + '°').join(', ');
+    chips.push({ key: 'posBuckets', label: 'Posiciones: ' + label });
+  }
+  elChip.innerHTML = chips.map(c =>
+    `<span class="sel-chip" data-key="${c.key}">${c.label} <button title="Quitar">×</button></span>`
+  ).join('');
+}
 
       const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
       const getPageSize=()=>clamp(parseInt(elPageSz.value||'50',10),10,500);
@@ -1996,16 +2017,24 @@
         return true;
       }
 
-      function filteredRows(){
-        const ql=(QUERY||'').trim().toLowerCase();
-        return (DATA.rows||[]).filter(r=>{
-          if(MODE==='suizo' && !hasSuizoRow(r)) return false;
-          if(!rowMatchesQuery(r,ql)) return false;
-          if(!posBucketsOk(r)) return false;
-          if(!headerFiltersOk(r)) return false;
-          return true;
-        });
-      }
+      function filteredRows() {
+  const ql = (QUERY || '').trim().toLowerCase();
+  return (DATA.rows || []).filter(r => {
+    if (MODE === 'suizo' && !hasSuizoRow(r)) return false;
+
+    // 🆕 si hay un renglón seleccionado desde el treemap, filtramos por ese N°
+    if (FILTERS.item) {
+      const nro = String(r.nro ?? r.item ?? '').trim().toLowerCase();
+      const target = String(FILTERS.item).trim().toLowerCase();
+      if (!nro || nro !== target) return false;
+    }
+
+    if (!rowMatchesQuery(r, ql)) return false;
+    if (!posBucketsOk(r)) return false;
+    if (!headerFiltersOk(r)) return false;
+    return true;
+  });
+}
 
       // Altura sticky para fila 1 del thead
       function updateHeadOffsets(){
