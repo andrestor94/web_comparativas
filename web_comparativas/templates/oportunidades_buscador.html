@@ -125,31 +125,34 @@
     margin-bottom:6px;
   }
 
-  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo) */
+    /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
-    background:#f8fafc;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    background:#f3f6fc; /* un poco más azul que antes */
+    border:1px solid #c7d2fe; /* borde azul suave */
     border-radius:12px;
     padding:3px 8px;
-    min-height:56px;              /* altura base más chica */
+    min-height:56px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
   }
   .filter-card h5{
     font-size:10px;
     margin:0 0 3px;
-    color:#4b5563;
+    color:#1f2937; /* título un poco más oscuro */
   }
 
-  /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
+    /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
     padding:3px 8px;
-    min-height:52px;              /* casi la mitad de lo anterior */
+    min-height:52px;
     display:flex;
     flex-direction:column;
     justify-content:center;
+    border-color:#b4c6fc; /* un poco más marcado que el general */
   }
   .filter-card--compact h5{
     margin-bottom:2px;
   }
+
   .filter-card--compact .field{
     margin-top:0;
   }
@@ -187,12 +190,13 @@
     display:none;
   }
 
-  .mini-kpi{
-    background:#f8fafc;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    .mini-kpi{
+    background:#eef2ff;
+    border:1px solid #c7d2fe;
     border-radius:12px;
     padding:4px 8px;
   }
+
   .mini-kpi h4{
     margin:0 0 2px;
     font-size:11px;
@@ -285,20 +289,26 @@
     border-radius:999px;
   }
 
-  /* Chips */
+    /* Chips */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{
-    border:1px solid #e5e7eb;
-    background:#fff;
+    border:1px solid #cbd5f5;
+    background:#ffffff;
     border-radius:999px;
     padding:6px 10px;
     font-size:12px;
     cursor:pointer;
+    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
+  }
+  .chip:hover{
+    border-color:#94a3ff;
+    box-shadow:0 0 0 1px rgba(82,116,206,.16);
   }
   .chip.is-on{
-    background:#e0e7ff;
-    border-color:#c7d2fe;
+    background:#dbeafe;
+    border-color:#5274ce; /* azul botón */
     color:#1f3a8a;
+    box-shadow:0 0 0 1px rgba(82,116,206,.28);
   }
 
   /* === NUEVOS ESTILOS PARA DECISIÓN === */
