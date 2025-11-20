@@ -317,8 +317,26 @@
       DOMAIN_MIN + (DOMAIN_MAX - DOMAIN_MIN) * (clamped / 100)
     );
   }
+  // --- Días hábiles (lunes a viernes) ---
+  function isBusinessDay(d) {
+    const day = d.getDay(); // 0 = domingo, 6 = sábado
+    return day !== 0 && day !== 6;
+  }
 
-    // Rango inicial de fechas (por defecto: últimas 72 horas de la apertura)
+  // Resta N días hábiles (saltando sábados y domingos)
+  function subtractBusinessDays(date, days) {
+    const d = new Date(date.getTime());
+    let remaining = days;
+    while (remaining > 0) {
+      d.setDate(d.getDate() - 1);
+      if (isBusinessDay(d)) {
+        remaining--;
+      }
+    }
+    return d;
+  }
+
+      // Rango inicial de fechas (por defecto: últimas 72 horas en días hábiles)
   let initFrom = null;
   let initTo = null;
 
@@ -337,11 +355,13 @@
     initFrom = uiFrom;
     initTo = uiTo;
   } else if (DOMAIN_MAX !== null) {
-    // Si no, usamos la ÚLTIMA fecha de apertura disponible
+    // Usamos la última fecha de apertura disponible
     const lastDate = new Date(DOMAIN_MAX);
-    const from72 = new Date(lastDate.getTime() - 72 * 60 * 60 * 1000); // 72 horas antes
 
-    initFrom = from72;
+    // Restamos 3 días hábiles manteniendo la hora (equivalente a 72 horas de días laborales)
+    const fromBiz = subtractBusinessDays(lastDate, 3);
+
+    initFrom = fromBiz;
     initTo = lastDate;
   } else {
     initFrom = null;
