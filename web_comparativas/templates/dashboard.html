@@ -1298,11 +1298,13 @@
       const elLossHint = document.getElementById('lossHint');
       const elStrongCompetitors = document.getElementById('scList');
 
-      const elTreemapTitle = document.getElementById('treemapTitle');
+            const elTreemapTitle = document.getElementById('treemapTitle');
       const elTreemapModeToggle = document.getElementById('treemapModeToggle');
 
-      // estado del switch del treemap
-      let TREEMAP_VIEW = 'prov'; // 'prov' | 'item'
+      // estado del switch del treemap (lo exponemos en window para que lo use el script 3)
+      let TREEMAP_VIEW = window.TREEMAP_VIEW || 'prov'; // 'prov' | 'item'
+      window.TREEMAP_VIEW = TREEMAP_VIEW;
+
       let TREEMAP_PROV_DATA = Array.isArray(window.CHART_PROV) ? window.CHART_PROV.slice() : [];
       let TREEMAP_ITEM_DATA = [];
 
@@ -2025,26 +2027,29 @@
         return true;
       }
 
-            function filteredRows() {
+                  function filteredRows() {
         const ql = (QUERY || '').trim().toLowerCase();
+
         return (DATA.rows || []).filter(r => {
           if (MODE === 'suizo' && !hasSuizoRow(r)) return false;
 
-          // 🆕 si hay un renglón seleccionado desde el treemap, filtramos por ese N°
+          // Si hay un renglón seleccionado desde el treemap, filtramos por ese N°
           if (FILTERS.item != null && FILTERS.item !== '') {
             const raw = r.nro ?? r.item ?? '';
             const rawStr = String(raw).trim();
             const targetStr = String(FILTERS.item).trim();
 
-            // Intentamos comparar como número para soportar 15 vs 15.0, "15,0", "015", etc.
-            const rawNum = Number(rawStr.replace(',', '.'));
-            const targetNum = Number(targetStr.replace(',', '.'));
+            // Tomamos solo dígitos → soporta "15", "15.", "R-15", "015", etc.
+            const rawNum = parseInt(rawStr.replace(/\D+/g, ''), 10);
+            const targetNum = parseInt(targetStr.replace(/\D+/g, ''), 10);
 
             if (Number.isFinite(rawNum) && Number.isFinite(targetNum)) {
               if (rawNum !== targetNum) return false;
             } else {
-              // Si no son numéricos, comparamos texto normalizado
-              if (!rawStr || rawStr.toLowerCase() !== targetStr.toLowerCase()) return false;
+              // Fallback textual, por si viniera algo raro no numérico
+              const a = rawStr.toLowerCase();
+              const b = targetStr.toLowerCase();
+              if (!a || (a !== b && !a.includes(b))) return false;
             }
           }
 
@@ -2287,6 +2292,8 @@
 
       // aplica el modo actual del treemap (proveedor / renglón)
       function applyTreemapView(){
+        window.TREEMAP_VIEW = TREEMAP_VIEW;   // <-- NUEVO
+
         if (TREEMAP_VIEW === 'item'){
           window.TREEMAP_LABEL = 'Renglón';
           if (elTreemapTitle){
@@ -2645,8 +2652,9 @@
         elTreemapModeToggle.addEventListener('click', (e)=>{
           const btn = e.target.closest('button[data-mode]');
           if (!btn) return;
-          const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
+                    const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
           TREEMAP_VIEW = mode;
+          window.TREEMAP_VIEW = mode;   // <-- NUEVO
 
           // actualizar estado visual del switch
           elTreemapModeToggle.querySelectorAll('.mini-btn').forEach(b=>{
