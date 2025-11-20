@@ -297,6 +297,46 @@
     color:#1f3a8a;
   }
 
+  /* === NUEVOS ESTILOS PARA DECISIÓN === */
+  .decision-filter-group .chip{
+    padding:5px 10px;
+    font-size:12px;
+  }
+
+  .decision-cell{
+    display:flex;
+    justify-content:center;
+    gap:6px;
+    flex-wrap:nowrap;
+  }
+  .decision-pill{
+    border:1px solid #e5e7eb;
+    background:#fff;
+    border-radius:999px;
+    padding:3px 6px;
+    font-size:11px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .decision-pill.is-accepted{
+    background:#dcfce7;       /* verde pastel claro */
+    border-color:#bbf7d0;
+    color:#166534;
+  }
+  .decision-pill.is-rejected{
+    background:#fee2e2;       /* rojo pastel claro */
+    border-color:#fecaca;
+    color:#991b1b;
+  }
+
+  /* Colores de fila según decisión */
+  tr.row-decision-accepted{
+    background:#dcfce7;       /* verde pastel */
+  }
+  tr.row-decision-rejected{
+    background:#fee2e2;       /* rojo pastel */
+  }
+
   /* Tabla */
   .table-wrap{
     overflow:auto;
@@ -342,7 +382,14 @@
     width:12ch;
     white-space:nowrap;
   }
+  /* Columna 6 = Decisión */
   .table th:nth-child(6), .table td:nth-child(6){
+    width:11ch;
+    white-space:nowrap;
+    text-align:center;
+  }
+  /* Columna 7 = Enlace de pliego */
+  .table th:nth-child(7), .table td:nth-child(7){
     width:10ch;
     white-space:nowrap;
     text-align:center;
@@ -577,6 +624,17 @@
           <h4>Procesos</h4>
           <div class="v" id="kProcesos">0</div>
         </div>
+
+        <!-- NUEVO FILTRO: DECISIÓN -->
+        <div class="filter-card decision-filter-group" style="grid-column:1 / span 4">
+          <h5>Decisión</h5>
+          <div class="chips" id="swDecision" role="group" aria-label="Filtro decisión">
+            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+            <button type="button" class="chip" data-val="aceptado" aria-pressed="false">Aceptados</button>
+            <button type="button" class="chip" data-val="rechazado" aria-pressed="false">Rechazados</button>
+            <button type="button" class="chip" data-val="sin-marcar" aria-pressed="false">Sin marcar</button>
+          </div>
+        </div>
       </div>
 
       <!-- Buscar -->
@@ -604,6 +662,7 @@
             <th scope="col">Objeto</th>
             <th scope="col">Apertura</th>
             <th scope="col">Tipo</th>
+            <th scope="col">Decisión</th>
             <th scope="col">Enlace de pliego</th>
           </tr>
         </thead>
@@ -678,12 +737,31 @@
             data-cuenta="{{ cuenta|e }}"
             data-uape="{{ uape|e }}"
             data-estado="{{ estado_raw|e }}"
+            data-decision="sin-marcar"
+            data-rowkey="{{ numero|e }}"
           >
             <td title="{{ numero }}">{{ numero }}</td>
             <td title="{{ reparticion }}">{{ reparticion }}</td>
             <td title="{{ objeto }}">{{ objeto }}</td>
             <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
             <td title="{{ tipo }}">{{ tipo }}</td>
+
+            <!-- NUEVA COLUMNA: DECISIÓN -->
+            <td class="opp-decision" data-decision-cell>
+              <div class="decision-cell">
+                <button type="button"
+                        class="decision-pill js-decide"
+                        data-action="aceptar">
+                  Aceptar
+                </button>
+                <button type="button"
+                        class="decision-pill js-decide"
+                        data-action="rechazar">
+                  Rechazar
+                </button>
+              </div>
+            </td>
+
             <td>
               {% if enlace %}
                 <a class="link-ico"
@@ -699,7 +777,7 @@
           {% endfor %}
 
           {% if table_rows|length == 0 %}
-            <tr><td class="muted" colspan="6">Sin resultados para los filtros actuales.</td></tr>
+            <tr><td class="muted" colspan="7">Sin resultados para los filtros actuales.</td></tr>
           {% endif %}
         </tbody>
       </table>
@@ -754,6 +832,7 @@
       reparticion: 'fReparticion',
       swPAMI: 'swPAMI',
       swEstado: 'swEstado',
+      swDecision: 'swDecision',      // NUEVO filtro decisión
       dateFrom: 'fDateFrom',
       dateTo: 'fDateTo',
       rMin: 'fRangeMin',
