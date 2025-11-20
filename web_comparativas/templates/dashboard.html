@@ -17,6 +17,7 @@
       --sa-blanco:#ffffff;
       --sa-text:#064066;
       --sa-amarillo:#eeede8;
+
       --search-hit-bg:#e6f8ff;
 
       /* alturas */
@@ -71,6 +72,15 @@
     .mini-toggle .mini-btn{border:0;background:transparent;padding:.35rem .6rem;border-radius:.4rem;font-size:.85rem;color:var(--sa-text);cursor:pointer}
     .mini-toggle .mini-btn.active{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.06)}
 
+    /* versión más chiquita para el treemap */
+    .mini-toggle.tiny{
+      padding:.15rem;
+    }
+    .mini-toggle.tiny .mini-btn{
+      padding:.18rem .45rem;
+      font-size:.75rem;
+    }
+
     /* Controles locales en zona de tabla (fallback si no existe el toolbar) */
     .mini-group{
       display: inline-flex;
@@ -107,6 +117,7 @@
     @media (max-width:992px){
       .process-header{grid-template-columns:1fr}
     }
+
     .ph-left{min-width:0}
     .ph-title{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;color:var(--sa-azul)}
     .ph-title .label{font-size:1.05rem;letter-spacing:.02em;text-transform:uppercase;font-weight:800}
@@ -165,6 +176,7 @@
       .dashboard-grid{grid-template-columns:repeat(1,minmax(0,1fr))}
       .span-sm-1{grid-column:span 1!important}
     }
+
     .pane{display:flex;flex-direction:column;gap:1rem}
     .pane-left{border-right:2px dashed var(--sa-gris-borde);padding-right:.5rem}
     .pane-right{padding-left:.5rem}
@@ -190,6 +202,9 @@
       margin:.1rem .2rem .6rem
     }
     .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}
+    .kpi-grid.kpi-grid-2{
+      grid-template-columns:repeat(2,minmax(0,1fr));
+    }
     .kpi-grid .kpi-card{
       background-image:var(--grad-soft);
       border:1px solid var(--sa-gris-borde);
@@ -198,6 +213,11 @@
     }
     .kpi-grid .kpi-label{font-size:.78rem;color:var(--sa-text);font-weight:600;text-transform:uppercase}
     .kpi-grid .kpi-value{font-size:1.05rem;font-weight:300;color:var(--sa-text)}
+    .kpi-subtext{
+      font-size:.75rem;
+      color:#64748b;
+      margin-top:.15rem;
+    }
 
     /* Gráficos */
     .chart-box{
@@ -238,6 +258,7 @@
       display:block;
       cursor:pointer
     }
+
     .charts-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
     .charts-row .chart-donut,
     .charts-row .chart-bar{height:var(--chart-half-height)}
@@ -362,8 +383,13 @@
       gap: 8px;
       z-index: 9998;
     }
-    .wc-comments-btn:hover { filter: brightness(0.95); }
-    .wc-badge { display: none !important; }
+    .wc-comments-btn:hover {
+      filter: brightness(0.95);
+    }
+    .wc-badge {
+      display: none !important;
+    }
+
     .wc-comments-panel {
       position: fixed;
       top: 0;
@@ -379,7 +405,9 @@
       transition: right .22s ease;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans";
     }
-    .wc-comments-panel.wc-open { right: 0; }
+    .wc-comments-panel.wc-open {
+      right: 0;
+    }
     .wc-hd {
       display:flex;
       align-items:center;
@@ -388,7 +416,10 @@
       border-bottom: 1px solid #e5e7eb;
       background: #f8fafc;
     }
-    .wc-hd h3 { font-size: 16px; margin: 0; }
+    .wc-hd h3 {
+      font-size: 16px;
+      margin: 0;
+    }
     #wc-comments-close {
       background:transparent;
       border:none;
@@ -426,7 +457,10 @@
       justify-content:space-between;
       gap: 10px;
     }
-    .wc-item-author { font-weight: 600; font-size: 14px; }
+    .wc-item-author {
+      font-weight: 600;
+      font-size: 14px;
+    }
     .wc-item-meta {
       color:#6b7280;
       font-size: 12px;
@@ -487,7 +521,9 @@
       font-size: 14px;
       cursor:pointer;
     }
-    .wc-btn:hover { filter: brightness(0.95); }
+    .wc-btn:hover {
+      filter: brightness(0.95);
+    }
     .wc-replying {
       font-size: 12px;
       color:#4338ca;
@@ -495,7 +531,9 @@
       border-radius: 6px;
       padding: 4px 8px;
     }
-    .wc-hide { display:none; }
+    .wc-hide {
+      display:none;
+    }
 
     /* Modal de Vistas */
     .views-backdrop{
@@ -523,7 +561,9 @@
       max-height: calc(100vh - 140px);
     }
     .views-modal[hidden],
-    .views-backdrop[hidden]{ display: none !important; }
+    .views-backdrop[hidden]{
+      display: none !important;
+    }
     .views-modal .vm-head{
       padding: .9rem 1rem;
       border-bottom: 1px solid #eef2f7;
@@ -532,7 +572,10 @@
       justify-content: space-between;
       gap: .5rem;
     }
-    .views-modal .vm-head .ttl{ font-weight: 700; color: #064066; }
+    .views-modal .vm-head .ttl{
+      font-weight: 700;
+      color: #064066;
+    }
     .views-modal .vm-body{
       padding: .9rem 1rem 1rem;
       gap: 1rem;
@@ -559,7 +602,10 @@
       padding: .4rem .6rem;
       margin-bottom: .4rem;
     }
-    .views-list .nm{ font-weight: 600; color: #064066; }
+    .views-list .nm{
+      font-weight: 600;
+      color: #064066;
+    }
     .views-list .tag{
       display: inline-block;
       background: #e0ebff;
@@ -576,10 +622,14 @@
       cursor: pointer;
       color: #064066;
     }
-    .views-list .act button:hover{ text-decoration: underline; }
-
+    .views-list .act button:hover{
+      text-decoration: underline;
+    }
     @media (max-width: 600px){
-      .views-modal{ top: 68px; width: 97vw; }
+      .views-modal{
+        top: 68px;
+        width: 97vw;
+      }
     }
 
     /* efecto premium KPI */
@@ -611,13 +661,23 @@
       color: #22c55e;
       margin-left: 8px;
     }
-    .kpi-trend.down { color: #ef4444; }
+    .kpi-trend.down {
+      color: #ef4444;
+    }
 
     @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(15px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(15px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
-    .fade-up { animation: fadeUp .6s ease forwards; }
+    .fade-up {
+      animation: fadeUp .6s ease forwards;
+    }
 
     /* forzar barra superior del tablero */
     .wc-topbar,
@@ -634,6 +694,83 @@
     .page-toolbar-right,
     .wc-topbar-right {
       margin-left: auto !important;
+    }
+
+    /* ===== Resumen ejecutivo / Vista gerente ===== */
+    .manager-summary{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:.75rem;
+      margin-bottom:1rem;
+    }
+    @media (max-width:1200px){
+      .manager-summary{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+    }
+    @media (max-width:768px){
+      .manager-summary{
+        grid-template-columns:1fr;
+      }
+    }
+    .ms-card{
+      background:#fff;
+      border-radius:.9rem;
+      border:1px solid var(--sa-gris-borde);
+      box-shadow:0 1px 3px rgba(15,23,42,.06);
+      padding:.75rem .9rem;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      min-height:90px;
+    }
+    .ms-card.fade-up{
+      /* reutiliza tu animación fadeUp ya definida */
+    }
+    .ms-label{
+      font-size:.75rem;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      color:var(--sa-azul);
+      font-weight:800;
+      margin-bottom:.35rem;
+    }
+    .ms-main{
+      font-size:1.25rem;
+      font-weight:700;
+      color:var(--sa-azul-btn);
+    }
+    .ms-sub{
+      font-size:.72rem;
+      color:#64748b;
+      margin-top:.25rem;
+    }
+    .ms-status .ms-main{
+      display:flex;
+      align-items:center;
+      gap:.35rem;
+    }
+    .ms-pill{
+      display:inline-flex;
+      align-items:center;
+      padding:2px 10px;
+      border-radius:999px;
+      font-size:.7rem;
+      font-weight:600;
+      background:#e5e7eb;
+      color:#0f172a;
+    }
+    .ms-pill.ok{
+      background:#dcfce7;
+      color:#15803d;
+    }
+    .ms-pill.warn{
+      background:#fef9c3;
+      color:#854d0e;
+    }
+    .ms-pill.danger{
+      background:#fee2e2;
+      color:#b91c1c;
     }
   </style>
 
@@ -653,6 +790,7 @@
       <button class="mini-btn active" data-view="normal" aria-pressed="true">100%</button>
       <button class="mini-btn" data-view="fit" aria-pressed="false">Ajustar a pantalla</button>
     </div>
+
     <div class="mini-toggle" id="densityToggle" title="Densidad de la vista" role="group" aria-label="Densidad">
       <button class="mini-btn active" data-density="normal" aria-pressed="true">Normal</button>
       <button class="mini-btn" data-density="compact" aria-pressed="false">Compacto</button>
@@ -718,6 +856,7 @@
             >
               Vistas
             </button>
+
             <a
               class="btn btn-primary btn-sm"
               href="/descargas/{{ upload_id }}"
@@ -741,7 +880,7 @@
       <div class="dashboard-grid mb-4">
         <!-- Izquierda -->
         <div class="pane pane-left span-6 span-lg-6 span-sm-1">
-          <section class="kpi-group" aria-labelledby="kpiGenTitle">
+                              <section class="kpi-group" aria-labelledby="kpiGenTitle">
             <h2 class="group-title m-0" id="kpiGenTitle">Datos generales de licitación</h2>
             <div class="kpi-grid">
               <div class="kpi-card" role="group" aria-label="Presupuesto adjudicado">
@@ -759,12 +898,60 @@
             </div>
           </section>
 
+          <!-- NUEVO RECUDRO debajo de Datos generales -->
+          <section class="kpi-group" aria-label="Participación de Suizo en la licitación">
+  <h2 class="group-title m-0">Participación Suizo</h2>
+  <div class="kpi-grid kpi-grid-2">
+              <div class="kpi-card" role="group" aria-labelledby="ms_part_monto_label">
+                <div class="kpi-label" id="ms_part_monto_label">Participación de Suizo en monto adjudicado</div>
+                <div class="kpi-value" id="ms_part_monto">—</div>
+                <div class="kpi-subtext">Porcentaje del monto adjudicado que obtuvo Suizo.</div>
+              </div>
+
+              <div class="kpi-card" role="group" aria-labelledby="ms_ef_reng_label">
+  <div class="kpi-label" id="ms_ef_reng_label">Participación de Suizo por renglones</div>
+  <div class="kpi-value" id="ms_ef_reng">—</div>
+  <div class="kpi-subtext">
+    Renglones adjudicados a Suizo sobre el total de renglones del proceso.
+  </div>
+</div>
+          </section>
+
           <section class="chart-box" aria-labelledby="treemapTitle">
             <div class="title">
-              <span id="treemapTitle">Proporción de presupuesto por proveedor</span>
-              <div class="small text-muted" id="treemapTotal" aria-live="polite"></div>
+              <!-- título + total -->
+              <div class="d-flex flex-column">
+                <span id="treemapTitle">Proporción de presupuesto por proveedor</span>
+                <div class="small text-muted" id="treemapTotal" aria-live="polite"></div>
+              </div>
+
+              <!-- switch de modo de treemap -->
+              <div
+                class="mini-toggle tiny"
+                id="treemapModeToggle"
+                role="group"
+                aria-label="Modo de treemap"
+              >
+                <button
+                  type="button"
+                  class="mini-btn active"
+                  data-mode="prov"
+                  aria-pressed="true"
+                >
+                  Proveedor
+                </button>
+                <button
+                  type="button"
+                  class="mini-btn"
+                  data-mode="item"
+                  aria-pressed="false"
+                >
+                  Renglón
+                </button>
+              </div>
             </div>
-            <div class="chart-treemap" role="img" aria-label="Treemap de adjudicaciones por proveedor">
+
+            <div class="chart-treemap" role="img" aria-label="Treemap de adjudicaciones">
               <canvas id="treemapProveedores"></canvas>
             </div>
           </section>
@@ -772,7 +959,7 @@
 
         <!-- Derecha -->
         <div class="pane pane-right span-6 span-lg-6 span-sm-1">
-          <section class="kpi-group" aria-labelledby="kpiSuizoTitle">
+                              <section class="kpi-group" aria-labelledby="kpiSuizoTitle">
             <h2 class="group-title m-0" id="kpiSuizoTitle">Efectividad Suizo</h2>
             <div class="kpi-grid">
               <div class="kpi-card" role="group" aria-label="Monto ofertado">
@@ -798,6 +985,26 @@
               <div class="kpi-card" role="group" aria-label="Efectividad por renglones">
                 <div class="kpi-label">Efectividad por renglones</div>
                 <div class="kpi-value" id="es_efectividad_renglones">0%</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- NUEVO RECUADRO debajo de Efectividad Suizo -->
+          <section class="kpi-group" aria-label="Resumen de competitividad de Suizo">
+            <h2 class="group-title m-0">Competitividad Suizo</h2>
+            <div class="kpi-grid kpi-grid-2">
+              <div class="kpi-card" role="group" aria-labelledby="ms_oportunidad_label">
+                <div class="kpi-label" id="ms_oportunidad_label">Renglones competitivos</div>
+                <div class="kpi-value" id="ms_oportunidad">—</div>
+                <div class="kpi-subtext">Renglones donde la diferencia entre 1° y 2° es ≤ 3,5%.</div>
+              </div>
+
+              <div class="kpi-card" role="group" aria-labelledby="ms_estado_label" id="ms_estado">
+                <div class="kpi-label" id="ms_estado_label">Estado general</div>
+                <div class="kpi-value">
+                  <span class="ms-pill">En análisis</span>
+                </div>
+                <div class="kpi-subtext">Calculado según participación y efectividad de Suizo.</div>
               </div>
             </div>
           </section>
@@ -841,13 +1048,16 @@
         <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
           <!-- fallback local si no se renderiza el toolbar -->
           <div class="d-flex gap-2 flex-wrap" id="localControls">
-            <div class="mini-group d-none" id="viewToggleLocal" role="group" aria-label="Zoom del tablero">
-              <button type="button" class="mini-btn active" data-view="normal" aria-pressed="true">100%</button>
-              <button type="button" class="mini-btn" data-view="fit" aria-pressed="false">Ajustar</button>
-            </div>
-            <div class="mini-group d-none" id="densityToggleLocal" role="group" aria-label="Densidad de filas">
-              <button type="button" class="mini-btn active" data-density="normal" aria-pressed="true">Normal</button>
-              <button type="button" class="mini-btn" data-density="compact" aria-pressed="false">Compacta</button>
+            <div class="d-flex gap-2 flex-wrap">
+              <div class="mini-group d-none" id="viewToggleLocal" role="group" aria-label="Zoom del tablero">
+                <button type="button" class="mini-btn active" data-view="normal" aria-pressed="true">100%</button>
+                <button type="button" class="mini-btn" data-view="fit" aria-pressed="false">Ajustar</button>
+              </div>
+
+              <div class="mini-group d-none" id="densityToggleLocal" role="group" aria-label="Densidad de filas">
+                <button type="button" class="mini-btn active" data-density="normal" aria-pressed="true">Normal</button>
+                <button type="button" class="mini-btn" data-density="compact" aria-pressed="false">Compacta</button>
+              </div>
             </div>
           </div>
 
@@ -872,7 +1082,12 @@
             aria-label="Columnas por posición"
           ></div>
 
-          <button id="toggleFilters" class="btn btn-sm btn-outline-secondary ms-1" aria-expanded="true" aria-controls="rankHead">
+          <button
+            id="toggleFilters"
+            class="btn btn-sm btn-outline-secondary ms-1"
+            aria-expanded="true"
+            aria-controls="rankHead"
+          >
             Filtros
           </button>
 
@@ -895,6 +1110,7 @@
           <button id="next" class="btn btn-sm btn-secondary" aria-label="Página siguiente">›</button>
 
           <div id="selectionChip" class="ms-2"></div>
+
           <div class="ms-auto small text-subtle" id="totalInfo" aria-live="polite"></div>
         </div>
 
@@ -1036,6 +1252,7 @@
   </aside>
   <!-- fin módulo comentarios -->
 {% endblock %}
+
 {% block extra_js %}
   <script>
     window.__DASH_VERSION__ = 'dashboard-exjs v2025-10-26-b-fix';
@@ -1075,29 +1292,45 @@
 
       const elOppBar = document.getElementById('opportunityBar');
       const elOppText = document.getElementById('opportunityText');
+
       const elLossExpl = document.getElementById('lossExplainer');
       const elLossList = document.getElementById('lossList');
       const elLossHint = document.getElementById('lossHint');
       const elStrongCompetitors = document.getElementById('scList');
 
-      /* ===== Helpers ===== */
+            const elTreemapTitle = document.getElementById('treemapTitle');
+      const elTreemapModeToggle = document.getElementById('treemapModeToggle');
 
-      const waitUntil = (testFn, {tries=40, every=120}={}) => new Promise(res => {
-        (function loop(n){
-          if (testFn()) return res(true);
-          if (n <= 0) return res(false);
-          setTimeout(() => loop(n - 1), every);
-        })(tries);
-      });
+      // estado del switch del treemap (lo exponemos en window para que lo use el script 3)
+      let TREEMAP_VIEW = window.TREEMAP_VIEW || 'prov'; // 'prov' | 'item'
+      window.TREEMAP_VIEW = TREEMAP_VIEW;
+
+      let TREEMAP_PROV_DATA = Array.isArray(window.CHART_PROV) ? window.CHART_PROV.slice() : [];
+      let TREEMAP_ITEM_DATA = [];
+
+      // etiqueta para el tooltip del treemap (la usa el script 3)
+      window.TREEMAP_LABEL = window.TREEMAP_LABEL || 'Proveedor';
+
+      /* ===== Helpers ===== */
+      const waitUntil = (testFn, {tries=40, every=120}={}) =>
+        new Promise(res => {
+          (function loop(n){
+            if (testFn()) return res(true);
+            if (n <= 0) return res(false);
+            setTimeout(() => loop(n - 1), every);
+          })(tries);
+        });
 
       // Inicializar defaults Chart cuando esté cargado
       (async function setupChartDefaults(){
         const ok = await waitUntil(() => !!window.Chart);
         if (!ok) return;
+
         Chart.defaults.font.family = "Outfit, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial";
         Chart.defaults.color = SA_AZUL;
         Chart.defaults.maintainAspectRatio = false;
         Chart.defaults.animation = false;
+
         Chart.defaults.plugins.tooltip.enabled = true;
         Chart.defaults.plugins.tooltip.backgroundColor = SA_BLANCO;
         Chart.defaults.plugins.tooltip.borderColor = '#e5e7eb';
@@ -1106,7 +1339,9 @@
         Chart.defaults.plugins.tooltip.bodyColor = SA_AZUL;
         Chart.defaults.plugins.tooltip.cornerRadius = 6;
         Chart.defaults.plugins.tooltip.padding = 8;
+
         Chart.defaults.plugins.legend.labels.boxWidth = 12;
+
         Chart.defaults.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       })();
 
@@ -1120,9 +1355,17 @@
         return isFinite(n) ? n : 0;
       };
 
-      const nfARS = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(+v||0);
-      const pctFmt = v => new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:0}).format(+v||0);
-      const pctFmt1d = v => new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:1}).format(+v||0.0);
+      const nfARS = v =>
+        new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0})
+          .format(+v||0);
+
+      const pctFmt = v =>
+        new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:0})
+          .format(+v||0);
+
+      const pctFmt1d = v =>
+        new Intl.NumberFormat('es-AR',{style:'percent',maximumFractionDigits:1})
+          .format(+v||0.0);
 
       const fmtDateDMY = s => {
         const m = String(s || '').trim().match(/^0*(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
@@ -1130,7 +1373,7 @@
         const dd = m[1].padStart(2, '0');
         const mm = m[2].padStart(2, '0');
         const yy = m[3].length === 2 ? '20' + m[3] : m[3].padStart(4, '0');
-        return `${dd}/${mm}/${yy}`;
+        return dd + '/' + mm + '/' + yy;
       };
 
       const isSuizo = prov => /suizo/i.test(String(prov||''));
@@ -1164,14 +1407,19 @@
         const src = String(text || '');
         const q = String(query || '').trim();
         if (!q) return esc(src);
+
         const re = new RegExp(rxEscape(q), 'i');
         const m = src.match(re);
         if (!m) return esc(src);
+
         const i = m.index;
         const match = m[0];
         const after = src.slice(i + match.length);
         const before = src.slice(0, i);
-        return esc(before) + '<mark class="sa-hit">' + esc(match) + '</mark>' + esc(after);
+
+        return esc(before) +
+          '<mark class="sa-hit">' + esc(match) + '</mark>' +
+          esc(after);
       };
 
       function pickNumber(obj, keywords){
@@ -1190,7 +1438,6 @@
       }
 
       /* ===== Cantidades & precios ===== */
-
       const unitPriceOf = p => toNum(p?.precio ?? p?.price);
 
       function rowQty(row){
@@ -1218,7 +1465,12 @@
       }
 
       function offeredQty(row,p){
-        let v = toNum(p?.cantidad ?? p?.cantidad_ofertada ?? p?.cant_ofertada ?? p?.qty);
+        let v = toNum(
+          p?.cantidad ??
+          p?.cantidad_ofertada ??
+          p?.cant_ofertada ??
+          p?.qty
+        );
         if(v>0) return v;
         return pickNumber(p,[
           'cantidad',
@@ -1231,6 +1483,7 @@
         const req=rowQty(row);
         const p1=(row.positions||[]).find(x=>+x.pos===1);
         const q1=offeredQty(row,p1)||0;
+
         if(+p.pos===1) return Math.min(q1,req);
         if(+p.pos===2){
           const rem=Math.max(0,req-q1);
@@ -1244,14 +1497,15 @@
       const awardValue=(row,p)=>unitPriceOf(p)*effectiveQty(row,p);
 
       /* ===== visibilidad de ofertas por modo ===== */
+      let MODE='todos'; // En "otros" ocultamos Suizo; en el resto mostramos todo y usamos filtros de filas.
 
-      let MODE='todos';
-
-      // En "otros" ocultamos Suizo; en el resto mostramos todo y usamos filtros de filas.
-      const showOfferByMode = (p) => MODE==='otros' ? !isSuizo(p.proveedor) : true;
+      const showOfferByMode = (p) =>
+        MODE==='otros' ? !isSuizo(p.proveedor) : true;
 
       function cheapestPrice(row, {includedOnly=false}={}){
-        const arr = (row.positions||[]).filter(p => includedOnly ? showOfferByMode(p) : true);
+        const arr = (row.positions||[])
+          .filter(p => includedOnly ? showOfferByMode(p) : true);
+
         let min = Infinity;
         for(const p of arr){
           const u=unitPriceOf(p);
@@ -1265,13 +1519,13 @@
           .filter(p => includedOnly ? showOfferByMode(p) : true)
           .slice()
           .sort((a,b)=>unitPriceOf(a)-unitPriceOf(b));
+
         const map=new Map();
         arr.forEach((p,i)=> map.set(+p.pos, i+1));
         return map;
       }
 
       /* ===== Controles zoom/densidad ===== */
-
       const fitContainer=document.getElementById('fitContainer');
       const viewToggle=document.getElementById('viewToggle');
       const densityToggle=document.getElementById('densityToggle');
@@ -1353,7 +1607,6 @@
       if(phAp) phAp.textContent=fmtDateDMY(phAp.textContent);
 
       /* ===== Gráficos (donut + barras posiciones) ===== */
-
       let chartDonutSuizo, chartBarPos;
 
       const CenterPercent = {
@@ -1364,8 +1617,10 @@
           if(!tot) return;
           const i=opt?.focusIndex??0;
           const val=+d[i]||0, p=val/tot;
+
           const meta=chart.getDatasetMeta(0).data?.[0];
           if(!meta) return;
+
           const {ctx}=chart;
           ctx.save();
           ctx.font='600 14px Outfit, ui-sans-serif, system-ui';
@@ -1378,7 +1633,6 @@
 
       function ensureCharts(){
         if(!window.Chart) return;
-
         if(!chartDonutSuizo){
           const c = document.getElementById('donutSuizo');
           if (c){
@@ -1431,7 +1685,9 @@
                 scales:{
                   y:{ beginAtZero:true, ticks:{ precision:0 } }
                 },
-                plugins:{ legend:{ display:false } },
+                plugins:{
+                  legend:{ display:false }
+                },
                 onClick:(_,els)=>{
                   if(!els?.length) return;
                   const idx=els[0].index;
@@ -1469,63 +1725,103 @@
         return val;
       }
 
-      // Treemap con adjudicación efectiva (1° + remanente 2°)
-      function treemapDataFirstPlace(rows, mode){
-        const allow = (name)=>{
-          if(mode==='suizo') return isSuizo(name);
-          if(mode==='otros') return !isSuizo(name);
-          return true;
+            // Helper: recorre todas las posiciones adjudicadas (1° y 2°) respetando el modo
+      function forEachAwardedPosition(rows, mode, cb){
+        const allow = (name) => {
+          if (mode === 'suizo') return isSuizo(name);
+          if (mode === 'otros') return !isSuizo(name);
+          return true; // todos
         };
-        const map = new Map();
-        (rows || []).forEach(r=>{
-          const p1 = (r.positions||[]).find(p=>+p.pos===1);
-          const q1 = p1 ? effectiveQty(r,p1) : 0;
-          const v1 = p1 ? unitPriceOf(p1)*q1 : 0;
-          if (v1>0 && allow(p1.proveedor)){
-            const prov1 = String(p1.proveedor || '—');
-            map.set(prov1, (map.get(prov1) || 0) + v1);
-          }
 
-          const p2 = (r.positions||[]).find(p=>+p.pos===2);
-          const q2 = p2 ? effectiveQty(r,p2) : 0;
-          const v2 = p2 ? unitPriceOf(p2)*q2 : 0;
-          if (v2>0 && allow(p2.proveedor)){
-            const prov2 = String(p2.proveedor || '—');
-            map.set(prov2, (map.get(prov2) || 0) + v2);
-          }
+        (rows || []).forEach(r => {
+          const positions = r.positions || [];
+          positions.forEach(p => {
+            if (!allow(p.proveedor)) return;
+
+            const qAdj = effectiveQty(r, p); // usa tu lógica: 1° + 2° parcial
+            if (!(qAdj > 0)) return;
+
+            const val = unitPriceOf(p) * qAdj;
+            cb(r, p, qAdj, val);
+          });
+        });
+      }
+
+      // Treemap por renglón: suma TODO lo adjudicado en el renglón (1° + 2°) filtrado por modo
+      function treemapDataByItemFirstPlace(rows, mode){
+        const map = new Map();
+
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
+          const nro = r.nro ?? r.item;
+          const labelBase = (nro !== undefined && nro !== null && nro !== '')
+            ? `Renglón ${nro}`
+            : 'Renglón';
+
+          map.set(labelBase, (map.get(labelBase) || 0) + val);
         });
 
         return Array.from(map.entries())
-          .sort((a,b)=>b[1]-a[1])
+          .sort((a, b) => b[1] - a[1])
           .map(([label, value]) => ({ label, value }));
       }
 
-      function bindTreemapClickOnce(){
-        const cv=document.getElementById('treemapProveedores');
-        if(!cv || !window.Chart || !Chart.getChart) return;
-        const chart=Chart.getChart(cv);
-        if(!chart){
+      // Treemap por proveedor: suma TODO lo adjudicado a cada proveedor (1° + 2°) filtrado por modo
+      function treemapDataFirstPlace(rows, mode){
+        const map = new Map();
+
+        forEachAwardedPosition(rows, mode, (r, p, qAdj, val) => {
+          const key = String(p.proveedor || '—');
+          map.set(key, (map.get(key) || 0) + val);
+        });
+
+        return Array.from(map.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([label, value]) => ({ label, value }));
+      }
+
+            function bindTreemapClickOnce(){
+        const cv = document.getElementById('treemapProveedores');
+        if (!cv || !window.Chart || !Chart.getChart) return;
+        const chart = Chart.getChart(cv);
+        if (!chart){
           setTimeout(bindTreemapClickOnce,300);
           return;
         }
         if (cv.__treemapClickBound) return;
         cv.__treemapClickBound = true;
 
-        cv.addEventListener('click',(evt)=>{
-          const els=chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
-          if(!els.length) return;
-          const el=els[0];
-          const raw=(el.raw && (el.raw._data || el.raw)) || {};
-          const label=raw.label || raw.name || raw.g || '';
-          if(label && window.setFilter) window.setFilter('provider',label);
+        cv.addEventListener('click', (evt) => {
+          const els = chart.getElementsAtEventForMode(
+            evt,
+            'nearest',
+            { intersect: true },
+            true
+          );
+          if (!els.length) return;
+          const el = els[0];
+          const raw = (el.raw && (el.raw._data || el.raw)) || {};
+          const label = raw.label || raw.name || raw.g || '';
+          if (!label || !window.setFilter) return;
+
+          const view = window.TREEMAP_VIEW || 'prov';
+
+          // si el treemap está en modo "Renglón", filtramos por número de renglón
+          if (view === 'item') {
+            const m = String(label).match(/\d+/);   // "Renglón 15" → "15"
+            const itemKey = m ? m[0] : label;
+            window.setFilter('item', itemKey);
+          } else {
+            // modo Proveedor (comportamiento de siempre)
+            window.setFilter('provider', label);
+          }
         });
       }
 
-      setTimeout(bindTreemapClickOnce,600);
+      // igual que antes: intentamos enlazarlo luego de crear el chart
+      setTimeout(bindTreemapClickOnce, 600);
 
       /* ===== Ranking + filtros ===== */
-
-      const RANK_API="{{ rank_api_url }}";
+      const RANK_API = "{{ rank_api_url }}";
 
       const elHead=document.getElementById('rankHead'),
             elBody=document.getElementById('rankBody');
@@ -1533,10 +1829,12 @@
             elPrev=document.getElementById('prev'),
             elNext=document.getElementById('next'),
             elInfo=document.getElementById('pageInfo');
+
       const elTotal=document.getElementById('totalInfo'),
             elSearch=document.getElementById('search'),
             elChip=document.getElementById('selectionChip'),
             elPosCols=document.getElementById('posCols');
+
       const elRankSection = document.getElementById('rankSection');
 
       let DATA={rows:[],max_pos:0,total_rows:0};
@@ -1557,12 +1855,17 @@
         renderAll();
       }
 
-      window.setFilter=(k,v)=>{
-        if(k==='provider') FILTERS.provider=v||null;
-        elInfo.dataset.page=1;
-        renderAll();
-        renderChips();
-      };
+      window.setFilter = (k, v) => {
+  if (k === 'provider') {
+    FILTERS.provider = v || null;
+  }
+  if (k === 'item') {        // 🆕 filtro por renglón
+    FILTERS.item = v || null;
+  }
+  elInfo.dataset.page = 1;
+  renderAll();
+  renderChips();
+};
 
       function buildPosCols(maxPos){
         if (!elPosCols) return;
@@ -1581,15 +1884,22 @@
         });
       }
 
-      function renderChips(){
-        const chips=[];
-        if(FILTERS.provider) chips.push({key:'provider',label:FILTERS.provider});
-        if(FILTERS.posBuckets.size){
-          const label=[...FILTERS.posBuckets].map(x=>x+'°').join(', ');
-          chips.push({key:'posBuckets',label:'Posiciones: '+label});
-        }
-        elChip.innerHTML=chips.map(c=>`<span class="sel-chip" data-key="${c.key}">${c.label} <button title="Quitar">×</button></span>`).join('');
-      }
+      function renderChips() {
+  const chips = [];
+  if (FILTERS.provider) {
+    chips.push({ key: 'provider', label: FILTERS.provider });
+  }
+  if (FILTERS.item) {  // 🆕 chip del renglón
+    chips.push({ key: 'item', label: 'Renglón ' + FILTERS.item });
+  }
+  if (FILTERS.posBuckets.size) {
+    const label = [...FILTERS.posBuckets].map(x => x + '°').join(', ');
+    chips.push({ key: 'posBuckets', label: 'Posiciones: ' + label });
+  }
+  elChip.innerHTML = chips.map(c =>
+    `<span class="sel-chip" data-key="${c.key}">${c.label} <button title="Quitar">×</button></span>`
+  ).join('');
+}
 
       const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
       const getPageSize=()=>clamp(parseInt(elPageSz.value||'50',10),10,500);
@@ -1599,7 +1909,9 @@
       const rowMatchesQuery=(row,ql)=>{
         if(!ql) return true;
         if(String(row.descripcion||'').toLowerCase().includes(ql)) return true;
-        return (row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase().includes(ql));
+        return (row.positions||[]).some(p=>
+          String(p.proveedor||'').toLowerCase().includes(ql)
+        );
       };
 
       function togglePosBuckets(b){
@@ -1612,7 +1924,6 @@
           else FILTERS.visCols.delete(num);
           buildHead(DATA.max_pos||0);
         }
-
         updatePosButtonsUI();
         elInfo.dataset.page=1;
         renderAll();
@@ -1621,11 +1932,13 @@
 
       function posBucketsOk(row){
         if(!FILTERS.posBuckets.size) return true;
-        return [...FILTERS.posBuckets].some(b=>(row.positions||[]).some(p=>{
-          if(!showOfferByMode(p)) return false;
-          if(b==='otras') return +p.pos>=3;
-          return +p.pos===+b;
-        }));
+        return [...FILTERS.posBuckets].some(b=>
+          (row.positions||[]).some(p=>{
+            if(!showOfferByMode(p)) return false;
+            if(b==='otras') return +p.pos>=3;
+            return +p.pos===+b;
+          })
+        );
       }
 
       function parseRange(v,isPct=false){
@@ -1675,7 +1988,8 @@
         // Filtro proveedor (chip)
         if(FILTERS.provider){
           const prov=FILTERS.provider.toLowerCase();
-          if(!(row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase()===prov)) return false;
+          if(!(row.positions||[]).some(p=>String(p.proveedor||'').toLowerCase()===prov))
+            return false;
         }
 
         // Filtros por posición
@@ -1690,8 +2004,7 @@
 
           const conf = confRaw || {};
           const hasProv = !!String(conf.prov || '').trim();
-          const hasRel  = !!String(conf.relmax || '').trim();
-
+          const hasRel = !!String(conf.relmax || '').trim();
           if (!hasProv && !hasRel) continue;
 
           const p = (row.positions || []).find(x => +x.pos === pos);
@@ -1711,17 +2024,38 @@
             }
           }
         }
-
         return true;
       }
 
-      function filteredRows(){
-        const ql=(QUERY||'').trim().toLowerCase();
-        return (DATA.rows||[]).filter(r=>{
-          if(MODE==='suizo' && !hasSuizoRow(r)) return false;
-          if(!rowMatchesQuery(r,ql)) return false;
-          if(!posBucketsOk(r)) return false;
-          if(!headerFiltersOk(r)) return false;
+                  function filteredRows() {
+        const ql = (QUERY || '').trim().toLowerCase();
+
+        return (DATA.rows || []).filter(r => {
+          if (MODE === 'suizo' && !hasSuizoRow(r)) return false;
+
+          // Si hay un renglón seleccionado desde el treemap, filtramos por ese N°
+          if (FILTERS.item != null && FILTERS.item !== '') {
+            const raw = r.nro ?? r.item ?? '';
+            const rawStr = String(raw).trim();
+            const targetStr = String(FILTERS.item).trim();
+
+            // Tomamos solo dígitos → soporta "15", "15.", "R-15", "015", etc.
+            const rawNum = parseInt(rawStr.replace(/\D+/g, ''), 10);
+            const targetNum = parseInt(targetStr.replace(/\D+/g, ''), 10);
+
+            if (Number.isFinite(rawNum) && Number.isFinite(targetNum)) {
+              if (rawNum !== targetNum) return false;
+            } else {
+              // Fallback textual, por si viniera algo raro no numérico
+              const a = rawStr.toLowerCase();
+              const b = targetStr.toLowerCase();
+              if (!a || (a !== b && !a.includes(b))) return false;
+            }
+          }
+
+          if (!rowMatchesQuery(r, ql)) return false;
+          if (!posBucketsOk(r)) return false;
+          if (!headerFiltersOk(r)) return false;
           return true;
         });
       }
@@ -1736,7 +2070,6 @@
       }
 
       /* ========= ENCABEZADO DE TABLA ========= */
-
       function buildHead(maxPos){
         if (!elHead) return;
         const isVis = pos => FILTERS.visCols.has(pos);
@@ -1758,10 +2091,12 @@
         sub.innerHTML = Array.from({length:maxPos},(_,i)=>{
           const pos=i+1;
           if(!isVis(pos)) return '';
-          return `<th class="c-price g-start">Precio</th>
-                  <th class="c-rel">Relac</th>
-                  <th class="c-asig">Asign</th>
-                  <th class="c-prov">Proveedor</th>`;
+          return (
+            `<th class="c-price g-start">Precio</th>`+
+            `<th class="c-rel">Relac</th>`+
+            `<th class="c-asig">Asign</th>`+
+            `<th class="c-prov">Proveedor</th>`
+          );
         }).join('');
 
         // Filtros
@@ -1776,10 +2111,10 @@
         for(let i=1;i<=maxPos;i++){
           if(!isVis(i)) continue;
           cells +=
-            `<th class="c-price g-start"></th>
-             <th class="c-rel"><input data-pos="${i}" data-ft="relmax" class="form-control form-control-sm f-range" placeholder="% máx."></th>
-             <th class="c-asig"></th>
-             <th class="c-prov"><input data-pos="${i}" data-ft="prov" class="form-control form-control-sm f-mini" placeholder="Proveedor ${i}°"></th>`;
+            `<th class="c-price g-start"></th>`+
+            `<th class="c-rel"><input data-pos="${i}" data-ft="relmax" class="form-control form-control-sm f-range" placeholder="% máx."></th>`+
+            `<th class="c-asig"></th>`+
+            `<th class="c-prov"><input data-pos="${i}" data-ft="prov" class="form-control form-control-sm f-mini" placeholder="Proveedor ${i}°"></th>`;
         }
 
         flt.innerHTML = cells;
@@ -1788,7 +2123,6 @@
         elHead.appendChild(top);
         elHead.appendChild(sub);
         elHead.appendChild(flt);
-
         updateHeadOffsets();
 
         // Listeners filtros
@@ -1835,6 +2169,7 @@
           };
         });
       }
+
       /* ================= RENDER DE FILAS ================= */
       function renderTable(){
         const rows = filteredRows();
@@ -1843,10 +2178,8 @@
         const pages = Math.max(1, Math.ceil(total / size));
         let page = Number(elInfo.dataset.page || 1);
         page = clamp(page, 1, pages);
-
         const start = (page - 1) * size;
         const slice = rows.slice(start, start + size);
-
         const qNorm = norm(QUERY).trim();
         const hasQ = !!qNorm;
         const maxPos = DATA.max_pos || 0;
@@ -1859,11 +2192,14 @@
             const nro = row.nro ?? row.item ?? '';
             const desc = String(row.descripcion || '');
             const cant = rowQty(row);
+
             const descHit = hasQ && norm(desc).includes(qNorm);
             const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
 
             const posByN = {};
-            (row.positions || []).forEach(p => { posByN[+p.pos] = p; });
+            (row.positions || []).forEach(p => {
+              posByN[+p.pos] = p;
+            });
 
             const basePrice = cheapestPrice(row, { includedOnly: MODE === 'otros' }) || 0;
             const rnkMap = rankAmong(row, { includedOnly: MODE === 'otros' });
@@ -1904,15 +2240,12 @@
                 const req = rowQty(row);
                 if (qAdj > 0 && req > 0){
                   if (qAdj >= req){
-                    asigHTML =
-                      `<span class="asignada-badge asignada-full" title="Asignación total">${qAdj.toLocaleString('es-AR')}</span>`;
+                    asigHTML = `<span class="asignada-badge asignada-full" title="Asignación total">${qAdj.toLocaleString('es-AR')}</span>`;
                   } else {
-                    asigHTML =
-                      `<span class="asignada-badge asignada-partial" title="Asignación parcial">${qAdj.toLocaleString('es-AR')}</span>`;
+                    asigHTML = `<span class="asignada-badge asignada-partial" title="Asignación parcial">${qAdj.toLocaleString('es-AR')}</span>`;
                   }
                 } else if (qAdj > 0){
-                  asigHTML =
-                    `<span class="asignada-badge asignada-partial">${qAdj.toLocaleString('es-AR')}</span>`;
+                  asigHTML = `<span class="asignada-badge asignada-partial">${qAdj.toLocaleString('es-AR')}</span>`;
                 } else {
                   asigHTML = `<span class="asignada-badge asignada-na">–</span>`;
                 }
@@ -1921,9 +2254,7 @@
               // Proveedor
               const prov = visible ? (p.proveedor || '') : '';
               const provHit = hasQ && visible && norm(prov).includes(qNorm);
-              const provHTML = hasQ
-                ? highlightText(prov, QUERY)
-                : esc(prov);
+              const provHTML = hasQ ? highlightText(prov, QUERY) : esc(prov);
 
               cells.push(
                 `<td class="text-end c-price g-start${sCls}">${precioHTML}</td>`+
@@ -1934,12 +2265,12 @@
             }
 
             const descHTML =
-              `<td class="col-desc${descHit ? ' cell-hit' : ''}">
-                <div class="desc-wrap">
-                  <span class="desc-trunc">${descMarked}</span>
-                  <div class="desc-tip">${descMarked}</div>
-                </div>
-               </td>`;
+              `<td class="col-desc${descHit ? ' cell-hit' : ''}">`+
+                `<div class="desc-wrap">`+
+                  `<span class="desc-trunc">${descMarked}</span>`+
+                  `<div class="desc-tip">${descMarked}</div>`+
+                `</div>`+
+              `</td>`;
 
             return (
               `<tr>`+
@@ -1957,6 +2288,25 @@
         elTotal.textContent = `${total.toLocaleString('es-AR')} renglones`;
         elPrev.disabled = page <= 1;
         elNext.disabled = page >= pages;
+      }
+
+      // aplica el modo actual del treemap (proveedor / renglón)
+      function applyTreemapView(){
+        window.TREEMAP_VIEW = TREEMAP_VIEW;   // <-- NUEVO
+
+        if (TREEMAP_VIEW === 'item'){
+          window.TREEMAP_LABEL = 'Renglón';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por renglón';
+          }
+          refreshTreemapFromData(TREEMAP_ITEM_DATA || []);
+        } else {
+          window.TREEMAP_LABEL = 'Proveedor';
+          if (elTreemapTitle){
+            elTreemapTitle.textContent = 'Proporción de presupuesto por proveedor';
+          }
+          refreshTreemapFromData(TREEMAP_PROV_DATA || []);
+        }
       }
 
       /* ================= KPIs SUIZO ================= */
@@ -1992,17 +2342,17 @@
       /* ================= GRÁFICOS (REFRESH) ================= */
       function refreshCharts(){
         ensureCharts();
-
         const rows = filteredRows();
 
         // Donut: Monto ofertado vs adjudicado Suizo
-        let montoOferSuizo = 0, montoAdjSuizo = 0;
+        let montoOferSuizo = 0,
+            montoAdjSuizo = 0;
+
         rows.forEach(r=>{
           const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
           if (!suizo) return;
 
           montoOferSuizo += offerValue(r, suizo);
-
           const qAdj = effectiveQty(r, suizo);
           if (qAdj > 0){
             montoAdjSuizo += unitPriceOf(suizo) * qAdj;
@@ -2036,187 +2386,233 @@
           chartBarPos.update('none');
         }
 
-        // Treemap por proveedor (monto adjudicado efectivo) según modo
-        const tree = treemapDataFirstPlace(rows, MODE);
-        refreshTreemapFromData(tree);
-      }
+        // Treemap: armamos las dos vistas (proveedor / renglón)
+        TREEMAP_PROV_DATA = treemapDataFirstPlace(rows, MODE);
+        TREEMAP_ITEM_DATA = treemapDataByItemFirstPlace(rows, MODE);
+        applyTreemapView();
 
-      /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
-      function computeExecutiveInfo(){
-        const rows = filteredRows();
-        if (!rows.length){
-          return {
-            suizo_part_monto: 0,
-            suizo_eff_reng: 0,
-            oportunidad_monto: 0,
-            oportunidad_count: 0,
-            perdidas: [],
-            total_adj: 0,
-            competitors: []
-          };
-        }
-
-        let suizoAdj = 0;
-        let totalAdj = 0;
-        let suizoOffRows = 0;
-        let suizoAdjRows = 0;
-        let oportunidadMonto = 0;
-        let oportunidadCount = 0;
-        const perdidas = [];
-        const compMap = new Map();
-
-        rows.forEach(r=>{
-          const p1 = (r.positions || []).find(p=>+p.pos===1);
-          const q1 = p1 ? effectiveQty(r, p1) : 0;
-          const v1 = p1 ? unitPriceOf(p1) * q1 : 0;
-
-          if (v1 > 0){
-            totalAdj += v1;
-            if (isSuizo(p1.proveedor)){
-              suizoAdj += v1;
-            } else {
-              const key = String(p1.proveedor || '—');
-              const curr = compMap.get(key) || { nombre:key, monto:0, renglones:0, cerroContraSuizo:0 };
-              curr.monto += v1;
-              curr.renglones += 1;
-              compMap.set(key, curr);
-            }
+                /* ============== RESUMEN EJECUTIVO / COMPETIDORES ================= */
+        function computeExecutiveInfo(){
+          const rows = filteredRows();
+          if (!rows.length){
+            return {
+              suizo_part_monto: 0,
+              suizo_eff_reng: 0,
+              suizo_part_reng: 0,
+              oportunidad_monto: 0,
+              oportunidad_count: 0,
+              perdidas: [],
+              total_adj: 0,
+              competitors: []
+            };
           }
 
-          const suizo = (r.positions || []).find(p=>isSuizo(p.proveedor));
-          if (suizo){
-            suizoOffRows += 1;
-            const qAdj = effectiveQty(r, suizo);
-            if (qAdj > 0) suizoAdjRows += 1;
+          // Total de renglones del proceso (si la API lo manda, usamos DATA.total_rows)
+          const totalRowsProc = Number(DATA.total_rows || rows.length) || rows.length;
 
-            const basePrice = p1 ? unitPriceOf(p1) : 0;
-            const suPrice = unitPriceOf(suizo);
+                    let suizoAdj = 0;
+          let totalAdj = 0;
+          let suizoOffVal = 0;          // NUEVO: monto ofertado por Suizo (para efectividad por monto)
+          let suizoOffRows = 0;
+          let suizoAdjRows = 0;
+          let oportunidadMonto = 0;
+          let oportunidadCount = 0;
+          const perdidas = [];
+          const compMap = new Map();
 
-            if (basePrice > 0 && suPrice > basePrice){
-              const diff = suPrice / basePrice - 1;
-              if (diff <= 0.05){
-                oportunidadCount += 1;
-                const rq = rowQty(r) || 1;
-                oportunidadMonto += basePrice * rq * diff;
+          rows.forEach(r => {
+            const positions = r.positions || [];
+            const suizoPos = positions.find(p => isSuizo(p.proveedor));
+            const p1 = positions.find(p => +p.pos === 1);
 
-                perdidas.push({
-                  desc: r.descripcion || '(sin descripción)',
-                  motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
-                });
+            if (suizoPos){
+              suizoOffRows += 1;
+            }
 
-                if (p1 && !isSuizo(p1.proveedor)){
-                  const key = String(p1.proveedor || '—');
-                  const curr = compMap.get(key) || { nombre:key, monto:0, renglones:0, cerroContraSuizo:0 };
-                  curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
-                  compMap.set(key, curr);
+                        let rowSuizoAdj = 0;
+
+            // Sumar adjudicación de TODAS las posiciones (1° + 2°)
+            positions.forEach(p => {
+              // NUEVO: monto ofertado por Suizo (para efectividad por monto)
+              if (isSuizo(p.proveedor)){
+                suizoOffVal += offerValue(r, p);
+              }
+
+              const qAdj = effectiveQty(r, p);
+              if (!(qAdj > 0)) return;
+
+              const val = unitPriceOf(p) * qAdj;
+              totalAdj += val;
+
+              if (isSuizo(p.proveedor)){
+                suizoAdj += val;
+                rowSuizoAdj += val;
+              } else {
+                const key = String(p.proveedor || '—');
+                const curr = compMap.get(key) || {
+                  nombre: key,
+                  monto: 0,
+                  renglones: 0,
+                  cerroContraSuizo: 0
+                };
+                curr.monto += val;
+                curr.renglones += 1;
+                compMap.set(key, curr);
+              }
+            });
+
+            if (suizoPos && rowSuizoAdj > 0){
+              suizoAdjRows += 1;
+            }
+
+            // Oportunidad: se sigue comparando Suizo vs el más barato (p1)
+            if (suizoPos){
+              const basePrice = p1 ? unitPriceOf(p1) : 0;
+              const suPrice = unitPriceOf(suizoPos);
+              if (basePrice > 0 && suPrice > basePrice){
+                const diff = suPrice / basePrice - 1;
+                if (diff <= 0.035){
+                  oportunidadCount += 1;
+                  const rq = rowQty(r) || 1;
+                  oportunidadMonto += basePrice * rq * diff;
+                  perdidas.push({
+                    desc: r.descripcion || '(sin descripción)',
+                    motivo: `Pérdida por ${pctFmt1d(diff)} sobre el más barato`
+                  });
+
+                  if (p1 && !isSuizo(p1.proveedor)){
+                    const key = String(p1.proveedor || '—');
+                    const curr = compMap.get(key) || {
+                      nombre: key,
+                      monto: 0,
+                      renglones: 0,
+                      cerroContraSuizo: 0
+                    };
+                    curr.cerroContraSuizo = (curr.cerroContraSuizo || 0) + 1;
+                    compMap.set(key, curr);
+                  }
                 }
               }
             }
-          }
-        });
+          });
 
-        const competitors = Array.from(compMap.values())
-          .sort((a,b)=>b.monto - a.monto)
-          .slice(0,5);
+          const competitors = Array.from(compMap.values())
+            .sort((a, b) => b.monto - a.monto)
+            .slice(0, 5);
 
-        const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
-        const suizo_eff_reng = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+                    const suizo_part_monto = totalAdj ? (suizoAdj / totalAdj) : 0;
+          const suizo_eff_reng  = suizoOffRows ? (suizoAdjRows / suizoOffRows) : 0;
+          const suizo_part_reng = totalRowsProc ? (suizoAdjRows / totalRowsProc) : 0;
+          const suizo_eff_monto = suizoOffVal ? (suizoAdj / suizoOffVal) : 0;   // NUEVO: efectividad por monto (adj/ofertado)
 
-        return {
-          suizo_part_monto,
-          suizo_eff_reng,
-          oportunidad_monto: oportunidadMonto,
-          oportunidad_count: oportunidadCount,
-          perdidas,
-          total_adj: totalAdj,
-          competitors
-        };
-      }
-
-      function renderStrongCompetitors(info){
-        if (!elStrongCompetitors) return;
-        if (info.competitors && info.competitors.length){
-          elStrongCompetitors.innerHTML = info.competitors.map(c => `
-            <div class="sc-item">
-              <div class="sc-name" title="${esc(c.nombre)}">${esc(c.nombre)}</div>
-              <div class="sc-value">${nfARS(c.monto)}</div>
-              <div class="sc-meta">
-                ${c.cerroContraSuizo
-                  ? `${c.cerroContraSuizo}× vs Suizo`
-                  : `${c.renglones} rengl.`}
-              </div>
-            </div>
-          `).join('');
-        } else {
-          elStrongCompetitors.innerHTML =
-            `<div class="text-muted" style="font-size:.7rem;">No se detectaron competidores fuertes en este proceso.</div>`;
-        }
-      }
-
-      function renderExecutive(info){
-        if (!info) return;
-
-        const m1 = document.getElementById('ms_part_monto');
-        const m2 = document.getElementById('ms_ef_reng');
-        const m3 = document.getElementById('ms_oportunidad');
-        const m4 = document.getElementById('ms_estado');
-
-        if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
-        if (m2) m2.textContent = pctFmt1d(info.suizo_eff_reng);
-        if (m3){
-          m3.textContent = info.oportunidad_count > 0
-            ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng.)`
-            : 'Sin oportunidades claras';
+          return {
+            suizo_part_monto,
+            suizo_eff_reng,
+            suizo_part_reng,
+            suizo_eff_monto,                     // 🔹 lo exponemos para usarlo en Estado general
+            oportunidad_monto: oportunidadMonto,
+            oportunidad_count: oportunidadCount,
+            perdidas,
+            total_adj: totalAdj,
+            competitors
+          };
         }
 
-        if (elOppBar){
-          elOppBar.style.display = 'inline-flex';
-          if (info.oportunidad_count > 0){
-            elOppText.textContent =
-              `Se perdieron ${info.oportunidad_count} renglones por menos del 5%. Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
+        function renderStrongCompetitors(info){
+          if (!elStrongCompetitors) return;
+          if (info.competitors && info.competitors.length){
+            elStrongCompetitors.innerHTML = info.competitors.map(c =>
+              `<div class="sc-item">
+                <div class="sc-name" title="${esc(c.nombre)}">${esc(c.nombre)}</div>
+                <div class="sc-value">${nfARS(c.monto)}</div>
+                <div class="sc-meta">
+                  ${c.cerroContraSuizo ? `${c.cerroContraSuizo}× vs Suizo` : `${c.renglones} rengl.`}
+                </div>
+              </div>`
+            ).join('');
           } else {
-            elOppText.textContent =
-              'No se detectaron renglones perdidos por poca diferencia.';
+            elStrongCompetitors.innerHTML =
+              `<div class="text-muted" style="font-size:.7rem;">No se detectaron competidores fuertes en este proceso.</div>`;
           }
         }
 
-        if (m4){
-          const pill = m4.querySelector('.ms-pill');
-          if (pill){
-            pill.classList.remove('ok','warn','danger');
-            if (info.total_adj === 0){
-              pill.textContent = 'Sin adjudicar';
-              pill.classList.add('warn');
-            } else if (info.suizo_part_monto >= 0.5 || info.suizo_eff_reng >= 0.5){
-              pill.textContent = 'Bueno';
-              pill.classList.add('ok');
-            } else if (info.suizo_part_monto > 0 || info.suizo_eff_reng > 0){
-              pill.textContent = 'Competitivo';
-              pill.classList.add('warn');
+        function renderExecutive(info){
+          if (!info) return;
+          const m1 = document.getElementById('ms_part_monto');
+          const m2 = document.getElementById('ms_ef_reng');
+          const m3 = document.getElementById('ms_oportunidad');
+          const m4 = document.getElementById('ms_estado');
+
+                    if (m1) m1.textContent = pctFmt1d(info.suizo_part_monto);
+          if (m2) m2.textContent = pctFmt1d(
+            info.suizo_part_reng != null ? info.suizo_part_reng : info.suizo_eff_reng
+          );
+          if (m3){
+  m3.textContent = info.oportunidad_count > 0
+    ? `${nfARS(info.oportunidad_monto)} (${info.oportunidad_count} reng. competitivos)`
+    : 'Sin renglones competitivos';
+}
+
+          if (elOppBar){
+            elOppBar.style.display = 'inline-flex';
+            if (info.oportunidad_count > 0){
+                            elOppText.textContent =
+                `Se perdieron ${info.oportunidad_count} renglones por diferencias ≤ 3,5%. `+
+                `Monto recuperable aprox: ${nfARS(info.oportunidad_monto)}.`;
             } else {
-              pill.textContent = 'Perdido';
-              pill.classList.add('danger');
+              elOppText.textContent =
+                'No se detectaron renglones perdidos por poca diferencia.';
+            }
+          }
+
+                              if (m4){
+            const pill = m4.querySelector('.ms-pill');
+            if (pill){
+              pill.classList.remove('ok','warn','danger');
+
+              // Usamos la efectividad de Suizo por monto (0–1),
+              // la misma lógica que la tarjeta "Efectividad por monto"
+              const eff = (info.suizo_eff_monto != null ? info.suizo_eff_monto : 0);
+
+              if (info.total_adj === 0){
+                pill.textContent = 'Sin adjudicar';
+                pill.classList.add('warn');
+              } else if (eff >= 0.35){
+                pill.textContent = 'Muy buena';
+                pill.classList.add('ok');
+              } else if (eff >= 0.25){
+                pill.textContent = 'Buena';
+                pill.classList.add('ok');
+              } else if (eff >= 0.20){
+                pill.textContent = 'Regular';
+                pill.classList.add('warn');
+              } else {
+                pill.textContent = 'No buena';
+                pill.classList.add('danger');
+              }
+            }
+          }
+
+          renderStrongCompetitors(info);
+
+          if (elLossExpl && elLossList && elLossHint){
+            if (info.perdidas && info.perdidas.length){
+              elLossExpl.hidden = false;
+              elLossList.innerHTML = info.perdidas.slice(0,7)
+                .map(p=>`<li>${esc(p.desc)} — ${esc(p.motivo)}</li>`).join('');
+              elLossHint.textContent = info.perdidas.length > 7
+                ? `+ ${info.perdidas.length - 7} más…`
+                : `Se analizaron ${info.perdidas.length} renglones con oportunidad.`;
+            } else {
+              elLossExpl.hidden = true;
+              elLossList.innerHTML = '';
+              elLossHint.textContent = '';
             }
           }
         }
 
-        renderStrongCompetitors(info);
-
-        if (elLossExpl && elLossList && elLossHint){
-          if (info.perdidas && info.perdidas.length){
-            elLossExpl.hidden = false;
-            elLossList.innerHTML = info.perdidas.slice(0,7)
-              .map(p=>`<li>${esc(p.desc)} — ${esc(p.motivo)}</li>`).join('');
-            elLossHint.textContent =
-              info.perdidas.length > 7
-                ? `+ ${info.perdidas.length - 7} más…`
-                : `Se analizaron ${info.perdidas.length} renglones con oportunidad.`;
-          } else {
-            elLossExpl.hidden = true;
-            elLossList.innerHTML = '';
-            elLossHint.textContent = '';
-          }
-        }
+        const info = computeExecutiveInfo();
+        renderExecutive(info);
       }
 
       /* ================= RENDER GLOBAL ================= */
@@ -2224,7 +2620,6 @@
         renderTable();
         refreshSuizoKPIs();
         refreshCharts();
-        renderExecutive(computeExecutiveInfo());
       }
 
       /* ================= UI & EVENTOS ================= */
@@ -2252,6 +2647,26 @@
         setMode('todos');
       };
 
+      // switch "Proveedor / Renglón" del treemap
+      if (elTreemapModeToggle){
+        elTreemapModeToggle.addEventListener('click', (e)=>{
+          const btn = e.target.closest('button[data-mode]');
+          if (!btn) return;
+                    const mode = btn.dataset.mode === 'item' ? 'item' : 'prov';
+          TREEMAP_VIEW = mode;
+          window.TREEMAP_VIEW = mode;   // <-- NUEVO
+
+          // actualizar estado visual del switch
+          elTreemapModeToggle.querySelectorAll('.mini-btn').forEach(b=>{
+            const active = b === btn;
+            b.classList.toggle('active', active);
+            b.setAttribute('aria-pressed', active ? 'true' : 'false');
+          });
+
+          applyTreemapView();
+        });
+      }
+
       const debounce = (fn,ms)=>{
         let t;
         return (...a)=>{
@@ -2272,13 +2687,14 @@
         elInfo.dataset.page = 1;
         renderAll();
       };
+
       elSearch.oninput = debounce(()=>{
         QUERY = elSearch.value || '';
         elInfo.dataset.page = 1;
         renderAll();
       },150);
 
-      // Quitar chips
+            // Quitar chips
       elChip.addEventListener('click', e=>{
         const btn = e.target.closest('button');
         if (!btn) return;
@@ -2287,6 +2703,7 @@
         if (!key) return;
 
         if (key === 'provider') FILTERS.provider = null;
+        if (key === 'item')     FILTERS.item = null;   // 🔹 NUEVO: limpia el filtro por renglón
         if (key === 'posBuckets'){
           FILTERS.posBuckets.clear();
           const max = DATA.max_pos || 0;
@@ -2294,7 +2711,6 @@
           buildHead(max);
           updatePosButtonsUI();
         }
-
         renderChips();
         elInfo.dataset.page = 1;
         renderAll();
@@ -2331,7 +2747,6 @@
           FILTERS.posBuckets.add(key);
           FILTERS.visCols.add(p);
         }
-
         updatePosButtonsUI();
         buildHead(DATA.max_pos || 0);
         updateHeadOffsets();
@@ -2344,9 +2759,7 @@
 
       /* ================= CARGA DE DATOS ================= */
       async function loadRanking(){
-        elBody.innerHTML =
-          '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
-
+        elBody.innerHTML = '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
         let data = null;
         try{
           const res = await fetch(RANK_API, { headers:{'accept':'application/json'} });
@@ -2354,8 +2767,7 @@
         }catch(_){}
 
         if (!data){
-          elBody.innerHTML =
-            '<tr><td class="text-center text-danger py-4">No se pudo cargar el ranking</td></tr>';
+          elBody.innerHTML = '<tr><td class="text-center text-danger py-4">No se pudo cargar el ranking</td></tr>';
           return;
         }
 
@@ -2385,6 +2797,7 @@
               cantidad_solicitada: arr[tryIdx(['Cantidad solicitada','Cant. solicitada','Cantidad requerida','Cantidad','Cant.','Qty','Unidades'])],
               positions: []
             };
+
             let pos = 1;
             while (true){
               const iProv = tryIdx([`${pos}° Proveedor`, `${pos}° proveedor`]);
@@ -2392,6 +2805,7 @@
               const iPrice = tryIdx([`${pos}° Precio unitario`, `${pos}° Precio`, `${pos}° Precio Unitario`]);
               if (iPrice === -1) break;
               const iQtyOff = tryIdx([`${pos}° Cantidad ofertada`, `${pos}° Cantidad`, `${pos}° Cant.`]);
+
               obj.positions.push({
                 pos,
                 proveedor: arr[iProv],
@@ -2437,19 +2851,23 @@
       const SA_AZUL='#064066',
             SA_GRIS='#dce3ee',
             SA_BLANCO='#ffffff';
+
       let treemapChart=null;
       let buildLock=null;
 
       const isSuizo = s => /suizo/i.test(String(s||''));
-      const nfARS = v => new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(+v||0);
+      const nfARS = v =>
+        new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0})
+          .format(+v||0);
 
-      const waitUntil = (testFn,{tries=200,every=50}={}) => new Promise(res=>{
-        (function loop(n){
-          if (testFn()) return res(true);
-          if (n <= 0) return res(false);
-          setTimeout(()=>loop(n-1), every);
-        })(tries);
-      });
+      const waitUntil = (testFn,{tries=200,every=50}={}) =>
+        new Promise(res=>{
+          (function loop(n){
+            if (testFn()) return res(true);
+            if (n <= 0) return res(false);
+            setTimeout(()=>loop(n-1), every);
+          })(tries);
+        });
 
       const buildDataset = (data) => ({
         tree: (data || []).map(d => ({
@@ -2479,10 +2897,9 @@
             const box = ctx.raw && ctx.raw._data;
             const w = box ? (box.x1 - box.x0) : 999;
             let name = g;
-
-            if (w < 80 && name.length > 14)      name = name.slice(0,13) + '…';
+            if (w < 80 && name.length > 14) name = name.slice(0,13) + '…';
             else if (w < 120 && name.length > 22) name = name.slice(0,21) + '…';
-            else if (name.length > 30)            name = name.slice(0,29) + '…';
+            else if (name.length > 30) name = name.slice(0,29) + '…';
 
             const h = box ? (box.y1 - box.y0) : 999;
             if (h < 38) return name;
@@ -2521,13 +2938,18 @@
         });
       }
 
-      function attachClick(canvas, chart){
+            function attachClick(canvas, chart){
         if (!canvas || !chart) return;
         if (canvas.__treemapClickBound) return;
         canvas.__treemapClickBound = true;
 
-        canvas.addEventListener('click',evt=>{
-          const els = chart.getElementsAtEventForMode(evt,'nearest',{intersect:true},true);
+        canvas.addEventListener('click', evt => {
+          const els = chart.getElementsAtEventForMode(
+            evt,
+            'nearest',
+            { intersect: true },
+            true
+          );
           if (!els.length) return;
           const i = els[0].index ?? 0;
           let label = '';
@@ -2537,7 +2959,19 @@
             const ds = chart.data.datasets[0];
             label = (ds.tree?.[i]?.g) || '';
           }
-          if (label && window.setFilter) window.setFilter('provider', label);
+          if (!label || !window.setFilter) return;
+
+          // 🔹 Si el treemap está en modo "Renglón", filtramos por renglón
+          const view = window.TREEMAP_VIEW || 'prov';
+          if (view === 'item'){  // modo "Renglón"
+            // Ejemplo de label: "Renglón 15" → nos quedamos con "15"
+            const m = String(label).match(/\d+/);
+            const itemKey = m ? m[0] : label;
+            window.setFilter('item', itemKey);
+          } else {
+            // Modo "Proveedor" (comportamiento original)
+            window.setFilter('provider', label);
+          }
         });
       }
 
@@ -2553,12 +2987,13 @@
 
         const ctx = canvas.getContext('2d');
         const hasTreemap = !!(Chart?.registry?.getController?.('treemap'));
-
         if (!hasTreemap){
           const fb = createBarFallback(ctx, window.CHART_PROV || []);
+
           (async ()=>{
             const ok = await waitUntil(()=>!!(Chart?.registry?.getController?.('treemap')), {tries:120,every:100});
             if (!ok) return;
+
             const exists = Chart.getChart(canvas);
             if (exists){
               try{ fb.destroy(); }catch(_){}
@@ -2566,6 +3001,7 @@
               attachClick(canvas, exists);
               return;
             }
+
             try{ fb.destroy(); }catch(_){}
             treemapChart = new Chart(ctx,{
               type:'treemap',
@@ -2578,7 +3014,7 @@
                   legend:{ display:false },
                   tooltip:{
                     callbacks:{
-                      title:()=> 'Proveedor',
+                      title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
                       label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                     }
                   }
@@ -2587,6 +3023,7 @@
             });
             attachClick(canvas, treemapChart);
           })();
+
           return fb;
         }
 
@@ -2608,7 +3045,7 @@
               legend:{ display:false },
               tooltip:{
                 callbacks:{
-                  title:()=> 'Proveedor',
+                  title:()=> (window.TREEMAP_LABEL || 'Proveedor'),
                   label:tt=>`${tt.raw?.g || '—'}: ${nfARS(+tt.raw?.v || 0)}`
                 }
               }
@@ -2625,6 +3062,7 @@
         if (!canvas) return null;
         const ok = await waitUntil(()=>!!window.Chart);
         if (!ok) return null;
+
         if (buildLock) return buildLock;
         buildLock = buildOrUpgrade(canvas)
           .then(c => (treemapChart = c))
@@ -2667,7 +3105,7 @@
       const CONTEXT_ID = String({{ upload_id|tojson }});
       const LS_KEY = `views:${VIEW_ID}:${CONTEXT_ID}`;
 
-      const $  = (sel, root=document) => root.querySelector(sel);
+      const $ = (sel, root=document) => root.querySelector(sel);
       const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
       const waitUntil = (testFn,{tries=40,every=200}={}) =>
@@ -2694,13 +3132,14 @@
       }
 
       function writeViews(list){
-        try{ localStorage.setItem(LS_KEY, JSON.stringify(list || [])); }catch{}
+        try{
+          localStorage.setItem(LS_KEY, JSON.stringify(list || []));
+        }catch{}
       }
 
       function saveViewLS({id=null,name,is_default=false,payload}){
         const list = readViews();
         const now = new Date().toISOString();
-
         if (!id){
           id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
           list.push({id,name,is_default,payload,updated_at:now});
@@ -2714,7 +3153,9 @@
         }
 
         if (is_default){
-          list.forEach(v=>{ if(v.id !== id) v.is_default = false; });
+          list.forEach(v=>{
+            if(v.id !== id) v.is_default = false;
+          });
         }
 
         writeViews(list);
@@ -2737,20 +3178,19 @@
         return readViews().find(v=>v.is_default) || null;
       }
 
-      const btnViews    = $('#btnViews');
-      const mod         = $('#viewsModal');
-      const bd          = $('#viewsBackdrop');
-      const btnClose    = $('#vmClose');
-      const btnClose2   = $('#vmClose2');
-      const btnSave     = $('#vmSave');
-      const btnRefresh  = $('#vmRefresh');
-      const inputName   = $('#vmName');
+      const btnViews = $('#btnViews');
+      const mod = $('#viewsModal');
+      const bd = $('#viewsBackdrop');
+      const btnClose = $('#vmClose');
+      const btnClose2 = $('#vmClose2');
+      const btnSave = $('#vmSave');
+      const btnRefresh = $('#vmRefresh');
+      const inputName = $('#vmName');
       const inputDefault= $('#vmDefault');
-      const listBox     = $('#viewsList');
+      const listBox = $('#viewsList');
 
       function collectCurrentView(){
-        const supplier_filter =
-          $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
+        const supplier_filter = $('.segmented .seg-btn.active')?.dataset.mode || 'todos';
 
         const fitBtn = $('#viewToggle .mini-btn.active');
         const fit_mode = fitBtn?.dataset.view === 'fit' ? 'fit' : 'normal';
@@ -2769,12 +3209,13 @@
           .map(b => b.dataset.pos);
 
         const header_filters = {
-          nro:  $('#f_nro')?.value || '',
+          nro: $('#f_nro')?.value || '',
           desc: $('#f_desc')?.value || '',
           cant: $('#f_cant')?.value || ''
         };
+
         vis_cols.forEach(pos=>{
-          const rel  = $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '';
+          const rel = $(`#rankHead [data-pos="${pos}"][data-ft="relmax"]`)?.value || '';
           const prov = $(`#rankHead [data-pos="${pos}"][data-ft="prov"]`)?.value || '';
           header_filters[pos] = { relmax:rel, prov:prov };
         });
@@ -2800,24 +3241,19 @@
 
       async function applyViewPayload(payload){
         if (!payload || typeof payload !== 'object') return;
-
         const ok = await waitUntil(()=>$('#rankHead') && $('#posCols'));
         if (!ok) return;
         await waitUntil(()=>$('#rankHead input#f_desc'));
 
-        if (payload.supplier_filter === 'suizo')      $('#tabSuizo')?.click();
+        if (payload.supplier_filter === 'suizo') $('#tabSuizo')?.click();
         else if (payload.supplier_filter === 'otros') $('#tabOtros')?.click();
-        else                                          $('#tabTodos')?.click();
+        else $('#tabTodos')?.click();
 
-        if (payload.fit_mode === 'fit')
-          $('#viewToggle .mini-btn[data-view="fit"]')?.click();
-        else
-          $('#viewToggle .mini-btn[data-view="normal"]')?.click();
+        if (payload.fit_mode === 'fit') $('#viewToggle .mini-btn[data-view="fit"]')?.click();
+        else $('#viewToggle .mini-btn[data-view="normal"]')?.click();
 
-        if (payload.density === 'compact')
-          $('#densityToggle .mini-btn[data-density="compact"]')?.click();
-        else
-          $('#densityToggle .mini-btn[data-density="normal"]')?.click();
+        if (payload.density === 'compact') $('#densityToggle .mini-btn[data-density="compact"]')?.click();
+        else $('#densityToggle .mini-btn[data-density="normal"]')?.click();
 
         if ($('#pageSize') && payload.page_size){
           $('#pageSize').value = String(payload.page_size);
@@ -2909,25 +3345,28 @@
             '<div class="row"><div class="nm text-muted">Sin vistas guardadas aún.</div></div>';
           return;
         }
-
-        listBox.innerHTML = views.map(v => `
-          <div class="row" data-id="${v.id}">
+        listBox.innerHTML = views.map(v =>
+          `<div class="row" data-id="${v.id}">
             <div>
               <span class="nm">${v.name || 'Sin nombre'}</span>
               ${v.is_default ? '<span class="tag">por defecto</span>' : ''}
-              ${v.updated_at
-                ? `<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`
-                : ''}
+              ${
+                v.updated_at
+                  ? `<span class="text-muted small ms-2">${new Date(v.updated_at).toLocaleString('es-AR')}</span>`
+                  : ''
+              }
             </div>
             <div class="act">
               <button data-act="apply">Aplicar</button>
-              ${v.is_default
-                ? '<button data-act="nodefault">Quitar defecto</button>'
-                : '<button data-act="default">Establecer por defecto</button>'}
+              ${
+                v.is_default
+                  ? '<button data-act="nodefault">Quitar defecto</button>'
+                  : '<button data-act="default">Establecer por defecto</button>'
+              }
               <button data-act="delete" style="color:#b91c1c">Eliminar</button>
             </div>
-          </div>
-        `).join('');
+          </div>`
+        ).join('');
       }
 
       function refreshList(){
@@ -2946,21 +3385,18 @@
         inputDefault.checked = false;
       }
 
-      btnViews  && btnViews.addEventListener('click', openModal);
-      btnClose  && btnClose.addEventListener('click', closeModal);
+      btnViews && btnViews.addEventListener('click', openModal);
+      btnClose && btnClose.addEventListener('click', closeModal);
       btnClose2 && btnClose2.addEventListener('click', closeModal);
-      bd        && bd.addEventListener('click', closeModal);
+      bd && bd.addEventListener('click', closeModal);
       btnRefresh&& btnRefresh.addEventListener('click', refreshList);
 
       btnSave && btnSave.addEventListener('click', async ()=>{
         const name = (inputName.value || '').trim() || 'Mi vista';
         const is_default = !!inputDefault.checked;
-
         await waitUntil(()=>$('#rankHead tr.filters-row'));
-
         const payload = collectCurrentView();
         saveViewLS({ name, is_default, payload });
-
         refreshList();
         inputName.value = '';
         inputDefault.checked = false;
@@ -2969,11 +3405,9 @@
       listBox && listBox.addEventListener('click', async e=>{
         const btn = e.target.closest('button[data-act]');
         if (!btn) return;
-
         const row = btn.closest('.row');
         const id = row?.dataset.id;
         if (!id) return;
-
         const act = btn.dataset.act;
         const all = readViews();
         const item = all.find(v=>v.id===id);
@@ -3008,7 +3442,7 @@
       })();
 
       window.__collectView = collectCurrentView;
-      window.__applyView   = applyViewPayload;
+      window.__applyView = applyViewPayload;
     })();
   </script>
 
