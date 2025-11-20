@@ -2025,24 +2025,35 @@
         return true;
       }
 
-      function filteredRows() {
-  const ql = (QUERY || '').trim().toLowerCase();
-  return (DATA.rows || []).filter(r => {
-    if (MODE === 'suizo' && !hasSuizoRow(r)) return false;
+            function filteredRows() {
+        const ql = (QUERY || '').trim().toLowerCase();
+        return (DATA.rows || []).filter(r => {
+          if (MODE === 'suizo' && !hasSuizoRow(r)) return false;
 
-    // 🆕 si hay un renglón seleccionado desde el treemap, filtramos por ese N°
-    if (FILTERS.item) {
-      const nro = String(r.nro ?? r.item ?? '').trim().toLowerCase();
-      const target = String(FILTERS.item).trim().toLowerCase();
-      if (!nro || nro !== target) return false;
-    }
+          // 🆕 si hay un renglón seleccionado desde el treemap, filtramos por ese N°
+          if (FILTERS.item != null && FILTERS.item !== '') {
+            const raw = r.nro ?? r.item ?? '';
+            const rawStr = String(raw).trim();
+            const targetStr = String(FILTERS.item).trim();
 
-    if (!rowMatchesQuery(r, ql)) return false;
-    if (!posBucketsOk(r)) return false;
-    if (!headerFiltersOk(r)) return false;
-    return true;
-  });
-}
+            // Intentamos comparar como número para soportar 15 vs 15.0, "15,0", "015", etc.
+            const rawNum = Number(rawStr.replace(',', '.'));
+            const targetNum = Number(targetStr.replace(',', '.'));
+
+            if (Number.isFinite(rawNum) && Number.isFinite(targetNum)) {
+              if (rawNum !== targetNum) return false;
+            } else {
+              // Si no son numéricos, comparamos texto normalizado
+              if (!rawStr || rawStr.toLowerCase() !== targetStr.toLowerCase()) return false;
+            }
+          }
+
+          if (!rowMatchesQuery(r, ql)) return false;
+          if (!posBucketsOk(r)) return false;
+          if (!headerFiltersOk(r)) return false;
+          return true;
+        });
+      }
 
       // Altura sticky para fila 1 del thead
       function updateHeadOffsets(){
