@@ -220,6 +220,11 @@
     font-size:20px;
     color:var(--sa-text,#064066);
   }
+  
+/* KPI Procesos más angosto para liberar espacio a los filtros */
+  .filters-row-secondary .mini-kpi{
+    flex:0 0 190px;   /* ancho fijo más angosto */
+  }
 
   /* Buscador: ocupa toda la fila de la grilla */
   .search-card{
@@ -490,6 +495,9 @@
       flex:1 1 50%;
     }
   }
+    .filters-row-secondary .mini-kpi{
+      flex:1 1 50%;   /* en responsive se comporta igual que los demás */
+    }
 </style>
 {% endblock %}
 
