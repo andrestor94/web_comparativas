@@ -150,10 +150,14 @@
     cursor:pointer;
   }
 
-    .upload-strip-right{
+      .upload-strip-right{
     display:flex;
     align-items:center;
     gap:10px;
+  }
+
+  .upload-btn{
+    display:none;
   }
 
   /* Ocultamos el botón azul, pero lo dejamos en el DOM
@@ -554,17 +558,22 @@
     {% endif %}
   </div>
 
-  {# === SOLO ADMIN VE EL BLOQUE DE CARGA === #}
+    {# === SOLO ADMIN VE EL BLOQUE DE CARGA === #}
   {% if user and ((user.role or '')|lower == 'admin') %}
+  <!-- Upload -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
-      <h2 class="upload-title">Archivo - Reporte de Oportunidades</h2>
+      <div>
+        <h2 class="upload-title">Archivo - Reporte de Oportunidades</h2>
+      </div>
 
       <div class="upload-meta">
         <div class="badges" aria-label="Estado del maestro">
           {% if opp.has_file %}
             <span>Última act.: {{ opp.last_updated_str }}</span>
-            {% if opp.rows is not none %}<span>Filas: {{ opp.rows }}</span>{% endif %}
+            {% if opp.rows is not none %}
+              <span>Filas: {{ opp.rows }}</span>
+            {% endif %}
           {% else %}
             <span>Sin archivo</span>
           {% endif %}
@@ -572,7 +581,7 @@
       </div>
     </div>
 
-        <form
+    <form
       id="oppUploadForm"
       class="upload-strip"
       action="/oportunidades/buscador/upload"
@@ -596,7 +605,7 @@
         />
       </label>
 
-      <!-- Lado derecho: solo loading + link de descarga (cuando haya archivo) -->
+      <!-- Lado derecho: loading + link de descarga (cuando haya archivo) -->
       <div class="upload-strip-right">
         <div class="loading" id="upLoading" role="status" aria-live="polite">
           <span>Procesando…</span>
@@ -624,6 +633,8 @@
         Subir y reemplazar
       </button>
     </form>
+  </div>
+  {% endif %}
   {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
