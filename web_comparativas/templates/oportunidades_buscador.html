@@ -133,9 +133,9 @@
     margin-top:4px;
     align-items:stretch;
   }
-  .filters-row-secondary > *{
-    flex:1 1 0;              /* 4 bloques del mismo ancho */
-  }
+  .filters-row-secondary > *:not(.mini-kpi){
+  flex:1 1 0;              /* PAMI / Evaluación / Estado ocupan el resto del ancho */
+}
 
   /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
