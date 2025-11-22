@@ -223,11 +223,21 @@
     color:var(--sa-text,#064066);
   }
 
-  .search-card{
-    display:grid;
-    grid-template-columns:minmax(0,3fr) auto;
-    gap:10px;
+    .search-card{
+    display:flex;
     align-items:center;
+    gap:10px;
+    width:100%;            /* ocupa todo el ancho disponible */
+  }
+
+  /* que la caja de búsqueda se estire al máximo */
+  .search-card .searchbox{
+    flex:1 1 auto;
+  }
+
+  /* los botones se quedan a la derecha con su ancho natural */
+  .search-card .stack{
+    flex:0 0 auto;
   }
 
   /* Barra de búsqueda */
