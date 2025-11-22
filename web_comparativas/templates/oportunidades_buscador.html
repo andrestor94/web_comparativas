@@ -124,6 +124,12 @@
     overflow:visible;
     margin-bottom:6px;
   }
+  .filters-row-secondary{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:8px;
+    margin-top:4px;
+  }
 
     /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
@@ -456,7 +462,7 @@
   }
   .loading.show{display:flex}
 
-  @media (max-width:1200px){
+    @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
     .upload-grid{
@@ -469,6 +475,10 @@
     }
     .upload-meta{text-align:left}
     .upload-actions{justify-content:flex-start}
+
+    .filters-row-secondary{
+      grid-template-columns:1fr 1fr;
+    }
   }
 </style>
 {% endblock %}
@@ -612,45 +622,46 @@
           </div>
         </div>
 
-        <!-- PAMI / Otras (columna 2) -->
-<div class="filter-card" style="grid-column:2;">
-  <h5>Repartición: PAMI u Otras</h5>
-          <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
-            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-            <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
-            <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
+                <!-- Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado -->
+        <div class="filters-row-secondary">
+          <!-- KPI Procesos -->
+          <div class="mini-kpi" role="status" aria-live="polite"
+               aria-label="Cantidad de procesos filtrados">
+            <h4>Procesos</h4>
+            <div class="v" id="kProcesos">0</div>
+          </div>
+
+          <!-- Repartición: PAMI u Otras -->
+          <div class="filter-card">
+            <h5>Repartición: PAMI u Otras</h5>
+            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
+              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
+            </div>
+          </div>
+
+          <!-- Evaluación -->
+          <div class="filter-card decision-filter-group">
+            <h5>Evaluación</h5>
+            <div class="chips" id="swDecision" role="group" aria-label="Filtro evaluación">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="aceptado" aria-pressed="false">Aceptados</button>
+              <button type="button" class="chip" data-val="rechazado" aria-pressed="false">Rechazados</button>
+              <button type="button" class="chip" data-val="sin-marcar" aria-pressed="false">Sin marcar</button>
+            </div>
+          </div>
+
+          <!-- Estado -->
+          <div class="filter-card">
+            <h5>Estado</h5>
+            <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
+              <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
+            </div>
           </div>
         </div>
-
-        <!-- Estado (columna 4-5) -->
-<div class="filter-card" style="grid-column:4 / span 2;">
-  <h5>Estado</h5>
-  <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
-            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-            <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
-            <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
-          </div>
-        </div>
-
-        <!-- KPI Procesos (columna 1) -->
-<div class="mini-kpi" role="status" aria-live="polite"
-     aria-label="Cantidad de procesos filtrados"
-     style="grid-column:1;align-self:stretch;">
-  <h4>Procesos</h4>
-  <div class="v" id="kProcesos">0</div>
-</div>
-
-        <!-- Evaluación (columna 3) -->
-<div class="filter-card decision-filter-group" style="grid-column:3;">
-  <h5>Evaluación</h5>
-  <div class="chips" id="swDecision" role="group" aria-label="Filtro evaluación">
-            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-            <button type="button" class="chip" data-val="aceptado" aria-pressed="false">Aceptados</button>
-            <button type="button" class="chip" data-val="rechazado" aria-pressed="false">Rechazados</button>
-            <button type="button" class="chip" data-val="sin-marcar" aria-pressed="false">Sin marcar</button>
-          </div>
-        </div>
-      </div>
 
       <!-- Buscar -->
       <div class="filter-card search-card" style="margin-top:6px">
