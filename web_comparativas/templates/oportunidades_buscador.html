@@ -223,11 +223,12 @@
     color:var(--sa-text,#064066);
   }
 
-    .search-card{
-    display:flex;
-    align-items:center;
+      .search-card{
+    display:grid;
+    grid-template-columns:minmax(0,4fr) auto;
     gap:10px;
-    width:100%;            /* ocupa todo el ancho disponible */
+    align-items:center;
+    width:100%;            /* asegura que use todo el ancho disponible */
   }
 
   /* que la caja de búsqueda se estire al máximo */
