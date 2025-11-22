@@ -150,15 +150,16 @@
     cursor:pointer;
   }
 
-  .upload-strip-right{
+    .upload-strip-right{
     display:flex;
     align-items:center;
     gap:10px;
   }
+
+  /* Ocultamos el botón azul, pero lo dejamos en el DOM
+     para no romper el JS (ids, listeners, etc.) */
   .upload-btn{
-    padding:6px 14px;
-    border-radius:999px;
-    font-size:13px;
+    display:none;
   }
 
   /* Barra superior: filtros + KPI */
@@ -571,7 +572,7 @@
       </div>
     </div>
 
-    <form
+        <form
       id="oppUploadForm"
       class="upload-strip"
       action="/oportunidades/buscador/upload"
@@ -579,10 +580,13 @@
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
+      <!-- Píldora completa clickeable: icono + texto -->
       <label for="oppFile" class="upload-file-zone">
         <span class="upload-ico" aria-hidden="true"⬆️</span>
         <span class="upload-text-main">Subir y reemplazar</span>
-        <span class="upload-text-sub">archivo (.xlsx / .xls) · sin archivo seleccionados</span>
+        <span class="upload-text-sub">
+          archivo (.xlsx / .xls) · sin archivo seleccionados
+        </span>
         <input
           id="oppFile"
           class="upload-input-hidden"
@@ -592,9 +596,8 @@
         />
       </label>
 
+      <!-- Lado derecho: solo loading + link de descarga (cuando haya archivo) -->
       <div class="upload-strip-right">
-        <button class="btn upload-btn" type="submit" id="btnUpload">Subir y reemplazar</button>
-
         <div class="loading" id="upLoading" role="status" aria-live="polite">
           <span>Procesando…</span>
         </div>
@@ -609,9 +612,18 @@
           Descargar actual
         </button>
       </div>
+
+      <!-- Botón oculto para que el JS no se rompa (mismo id que antes) -->
+      <button
+        class="btn upload-btn"
+        type="submit"
+        id="btnUpload"
+        aria-hidden="true"
+        tabindex="-1"
+      >
+        Subir y reemplazar
+      </button>
     </form>
-  </div>
-  {% endif %}
   {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
