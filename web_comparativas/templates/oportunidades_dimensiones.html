@@ -458,4 +458,310 @@
     </div>
   </div>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  // Elementos base
+  const elDateFrom      = document.getElementById("dimDateFrom");
+  const elDateTo        = document.getElementById("dimDateTo");
+  const elRangeFill     = document.getElementById("dimDateFill");
+  const elRangeMin      = document.getElementById("dimRangeMin");
+  const elRangeMax      = document.getElementById("dimRangeMax");
+
+  const elKpiProcesos   = document.getElementById("dimKpiProcesos");
+
+  const elPlataforma    = document.getElementById("dimPlataforma");
+  const elCuenta        = document.getElementById("dimCuenta");
+  const elReparticion   = document.getElementById("dimReparticion");
+
+  const chipsPamiGroup  = document.getElementById("dimSwPAMI");
+  const chipsEstadoGroup= document.getElementById("dimSwEstado");
+
+  const state = {
+    allRows: []  // datos crudos que vienen de /api/oportunidades/buscador
+  };
+
+  const fmtInt = new Intl.NumberFormat("es-AR");
+
+  function formatInt(n){
+    if (!Number.isFinite(n)) return "0";
+    return fmtInt.format(n);
+  }
+
+  // -----------------------------------------
+  // 72 horas hábiles por defecto (como Buscador)
+  // -----------------------------------------
+  function getLastBusinessDaysRange(nDays){
+    const today = new Date();
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    let date = new Date(end);
+    let collected = [];
+
+    while(collected.length < nDays){
+      const day = date.getDay(); // 0 dom, 6 sáb
+      if(day !== 0 && day !== 6){
+        collected.push(new Date(date));
+      }
+      date.setDate(date.getDate() - 1);
+    }
+
+    const from = collected[collected.length - 1];
+    return { from, to: end };
+  }
+
+  function ensureDefaultDates(){
+    if(!elDateFrom.value && !elDateTo.value){
+      const range = getLastBusinessDaysRange(3); // 3 días hábiles ~ 72 hs
+      const toISO   = d => d.toISOString().slice(0,10);
+
+      elDateFrom.value = toISO(range.from);
+      elDateTo.value   = toISO(range.to);
+    }
+  }
+
+  // Slider visual simple (llenar toda la barra por ahora)
+  function refreshRangeFill(){
+    if(!elRangeFill) return;
+    const minVal = Number(elRangeMin.value || 0);
+    const maxVal = Number(elRangeMax.value || 100);
+    const low = Math.min(minVal, maxVal);
+    const high = Math.max(minVal, maxVal);
+    elRangeFill.style.left  = low + "%";
+    elRangeFill.style.width = (high - low) + "%";
+  }
+
+  // -----------------------------------------
+  // Construcción de filtros (selects) a partir de los rows
+  // -----------------------------------------
+  function populateSelectOptions(selectEl, values){
+    if(!selectEl) return;
+    const current = selectEl.value;
+    // Mantener solo la primera opción ("Todas")
+    while(selectEl.options.length > 1){
+      selectEl.remove(1);
+    }
+    const arr = Array.from(values).filter(v => v && v.toString().trim() !== "");
+    arr.sort((a,b)=> a.localeCompare(b, "es", {sensitivity:"base"}));
+    for(const v of arr){
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      selectEl.appendChild(opt);
+    }
+    // Si el valor anterior sigue existiendo, lo mantenemos
+    if(current && Array.from(selectEl.options).some(o => o.value === current)){
+      selectEl.value = current;
+    }
+  }
+
+  function buildFiltersFromRows(){
+    const plats = new Set();
+    const reps  = new Set();
+    // Cuenta por ahora queda vacía (usamos "Todas")
+    for(const row of state.allRows){
+      if(row.plataforma) plats.add(row.plataforma);
+      if(row.comprador)  reps.add(row.comprador);
+    }
+    populateSelectOptions(elPlataforma, plats);
+    populateSelectOptions(elReparticion, reps);
+  }
+
+  // -----------------------------------------
+  // Clasificación simple de estado (EMERGENCIA / REGULAR)
+  // usando la descripción como aproximación
+  // -----------------------------------------
+  function computeEstado(row){
+    const desc = (row.descripcion || "").toString().toLowerCase();
+    if(desc.includes("emergencia")) return "EMERGENCIA";
+    return "REGULAR";
+  }
+
+  // -----------------------------------------
+  // Aplicar filtros de UI sobre state.allRows
+  // -----------------------------------------
+  function applyUiFilters(){
+    let rows = state.allRows.slice();
+
+    const selPlataforma  = elPlataforma ? elPlataforma.value : "";
+    const selCuenta      = elCuenta ? elCuenta.value : "";
+    const selReparticion = elReparticion ? elReparticion.value : "";
+
+    const chipPami = chipsPamiGroup
+      ? chipsPamiGroup.querySelector(".chip.is-on")
+      : null;
+    const modePami = chipPami ? chipPami.dataset.val : "todos";
+
+    const chipEstado = chipsEstadoGroup
+      ? chipsEstadoGroup.querySelector(".chip.is-on")
+      : null;
+    const modeEstado = chipEstado ? chipEstado.dataset.val : "todos";
+
+    rows = rows.filter(r => {
+      const comprador = (r.comprador || "").toString();
+      const compradorUpper = comprador.toUpperCase();
+      const plataforma = (r.plataforma || "").toString();
+
+      // Plataforma (servidor también filtra, pero esto refina)
+      if(selPlataforma && plataforma !== selPlataforma) return false;
+
+      // Cuenta (por ahora solo "Todas"; placeholder para futuro)
+      if(selCuenta && selCuenta !== "") {
+        // TODO: cuando tengamos el campo en el API, filtrar acá.
+      }
+
+      // Repartición por select
+      if(selReparticion && comprador !== selReparticion) return false;
+
+      // PAMI / Otras
+      if(modePami === "pami" && !compradorUpper.includes("PAMI")) return false;
+      if(modePami === "otras" && compradorUpper.includes("PAMI")) return false;
+
+      // Estado: EMERGENCIA / REGULAR (clasificación simple)
+      const est = r._estado || computeEstado(r);
+      if(modeEstado === "emergencia" && est !== "EMERGENCIA") return false;
+      if(modeEstado === "regular" && est !== "REGULAR") return false;
+
+      return true;
+    });
+
+    // KPI principal
+    if(elKpiProcesos){
+      elKpiProcesos.textContent = formatInt(rows.length);
+    }
+
+    // Aquí más adelante vamos a alimentar:
+    // - Timeline
+    // - Mapa por provincia
+    // - Treemap tipos
+    // - Barras y pie por estado
+    // usando 'rows' ya filtrados.
+  }
+
+  // -----------------------------------------
+  // Cargar datos desde /api/oportunidades/buscador
+  // (mismos datos que usa Buscador)
+  // -----------------------------------------
+  async function loadData(){
+    ensureDefaultDates();
+
+    const params = new URLSearchParams();
+    if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
+    if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
+
+    // Filtros server-side básicos (misma lógica que Buscador)
+    if(elPlataforma && elPlataforma.value){
+      params.set("platform", elPlataforma.value);
+    }
+    if(elReparticion && elReparticion.value){
+      params.set("buyer", elReparticion.value);
+    }
+    // Provincia no está en la UI de este dashboard (se puede sumar a futuro)
+
+    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
+
+    const url = "/api/oportunidades/buscador?" + params.toString();
+
+    try{
+      const resp = await fetch(url);
+      if(!resp.ok){
+        console.error("Dimensiones: error HTTP", resp.status);
+        return;
+      }
+      const data = await resp.json();
+      if(!data || data.ok === false){
+        console.warn("Dimensiones: respuesta sin datos válidos", data);
+        state.allRows = [];
+      } else {
+        state.allRows = Array.isArray(data.rows) ? data.rows : [];
+      }
+
+      // Pre-calculamos un "estado" aproximado por fila
+      state.allRows.forEach(r => {
+        r._estado = computeEstado(r);
+      });
+
+      // Construimos opciones de filtros a partir de los datos
+      buildFiltersFromRows();
+
+      // Actualizamos KPI y (a futuro) gráficos
+      applyUiFilters();
+
+      // Refrescamos la barrita del rango (visual)
+      refreshRangeFill();
+    } catch(err){
+      console.error("Dimensiones: error al cargar datos", err);
+    }
+  }
+
+  // -----------------------------------------
+  // Listeners de UI
+  // -----------------------------------------
+  if(chipsPamiGroup){
+    chipsPamiGroup.querySelectorAll(".chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        chipsPamiGroup.querySelectorAll(".chip").forEach(c => {
+          c.classList.remove("is-on");
+          c.setAttribute("aria-pressed","false");
+        });
+        btn.classList.add("is-on");
+        btn.setAttribute("aria-pressed","true");
+        applyUiFilters();
+      });
+    });
+  }
+
+  if(chipsEstadoGroup){
+    chipsEstadoGroup.querySelectorAll(".chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        chipsEstadoGroup.querySelectorAll(".chip").forEach(c => {
+          c.classList.remove("is-on");
+          c.setAttribute("aria-pressed","false");
+        });
+        btn.classList.add("is-on");
+        btn.setAttribute("aria-pressed","true");
+        applyUiFilters();
+      });
+    });
+  }
+
+  if(elPlataforma){
+    elPlataforma.addEventListener("change", () => {
+      // Re-cargamos desde el servidor con estos filtros
+      loadData();
+    });
+  }
+  if(elCuenta){
+    elCuenta.addEventListener("change", () => {
+      // De momento solo filtra en cliente
+      applyUiFilters();
+    });
+  }
+  if(elReparticion){
+    elReparticion.addEventListener("change", () => {
+      loadData();
+    });
+  }
+
+  if(elDateFrom){
+    elDateFrom.addEventListener("change", () => loadData());
+  }
+  if(elDateTo){
+    elDateTo.addEventListener("change", () => loadData());
+  }
+
+  if(elRangeMin){
+    elRangeMin.addEventListener("input", refreshRangeFill);
+  }
+  if(elRangeMax){
+    elRangeMax.addEventListener("input", refreshRangeFill);
+  }
+
+  // -----------------------------------------
+  // Init
+  // -----------------------------------------
+  ensureDefaultDates();
+  refreshRangeFill();
+  loadData();
+});
+</script>
 {% endblock %}

@@ -1808,6 +1808,197 @@ async def oportunidades_buscador_upload(
     url = str(url) + "?uploaded=1"
     return RedirectResponse(url, status_code=303)
 
+@app.get("/api/oportunidades/dimensiones", response_class=JSONResponse)
+def api_oportunidades_dimensiones(
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    API JSON para el dashboard de Dimensiones.
+    Usa el MISMO archivo maestro y la MISMA lógica de filtros que Buscador,
+    pero devuelve datos agregados por ejes (comprador, provincia, plataforma, cuenta, fecha).
+    """
+
+    def _san_str(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v or "")
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    opp_info = _oportunidades_status()
+
+    df_all = _opp_load_df()
+    if df_all is None or df_all.empty:
+        return JSONResponse(
+            {
+                "ok": True,
+                "has_file": False,
+                "opp": opp_info,
+                "kpis": {
+                    "total_rows": 0,
+                    "buyers": 0,
+                    "platforms": 0,
+                    "provinces": 0,
+                    "budget_total": 0.0,
+                    "date_min": "",
+                    "date_max": "",
+                },
+                "filters": {
+                    "q": q or "",
+                    "buyer": buyer or "",
+                    "platform": platform or "",
+                    "province": province or "",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                },
+                "dimensions": {
+                    "comprador": [],
+                    "provincia": [],
+                    "plataforma": [],
+                    "cuenta": [],
+                    "fecha_apertura": [],
+                },
+            }
+        )
+
+    # 👉 aplicamos los mismos filtros que en el buscador
+    df_filtered = _opp_apply_filters(
+        df_all, q, buyer, platform, province, date_from, date_to
+    )
+
+    # KPIs generales para mostrar arriba en Dimensiones (si los querés reutilizar)
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas candidatas para cada eje
+    buyer_col = _opp_pick(
+        df_filtered,
+        ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"],
+    )
+    prov_col = _opp_pick(
+        df_filtered,
+        ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"],
+    )
+    platf_col = _opp_pick(
+        df_filtered,
+        ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
+    )
+    cuenta_col = _opp_pick(
+        df_filtered,
+        ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro"],
+    )
+    fecha_col = _opp_pick(
+        df_filtered,
+        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
+    )
+    presu_col = _opp_pick(
+        df_filtered,
+        ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"],
+    )
+
+    # helper para agregar por dimensión
+    def _agg_dimension(col_name: str | None):
+        if not col_name:
+            return []
+
+        grp = df_filtered.groupby(col_name)
+        out = []
+        for key, sub in grp:
+            label = _san_str(key).strip() or "(Sin dato)"
+            count = int(len(sub))
+
+            if presu_col:
+                presupuestos = sub[presu_col].map(_opp_parse_number)
+                budget = float(presupuestos.sum())
+            else:
+                budget = 0.0
+
+            out.append(
+                {
+                    "label": label,
+                    "count": count,
+                    "budget": budget,
+                }
+            )
+
+        # ordenamos por presupuesto descendente (o por cantidad si casi no hay montos)
+        out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
+        # recortar para no explotar el gráfico
+        return out[:50]
+
+    # helper para serie temporal por fecha de apertura
+    def _agg_time_series():
+        if not fecha_col:
+            return []
+
+        fechas = df_filtered[fecha_col].apply(_opp_parse_date)
+        df_tmp = df_filtered.copy()
+        df_tmp["_fecha_norm"] = fechas
+
+        df_tmp = df_tmp[~df_tmp["_fecha_norm"].isna()]
+        if df_tmp.empty:
+            return []
+
+        if presu_col:
+            df_tmp["_presu_num"] = df_tmp[presu_col].map(_opp_parse_number)
+        else:
+            df_tmp["_presu_num"] = 0.0
+
+        grp = df_tmp.groupby("_fecha_norm")
+        out = []
+        for d, sub in grp:
+            count = int(len(sub))
+            budget = float(sub["_presu_num"].sum())
+            out.append(
+                {
+                    "date": d.strftime("%Y-%m-%d"),
+                    "count": count,
+                    "budget": budget,
+                }
+            )
+
+        out.sort(key=lambda r: r["date"])
+        return out
+
+    dim_comprador = _agg_dimension(buyer_col)
+    dim_provincia = _agg_dimension(prov_col)
+    dim_plataforma = _agg_dimension(platf_col)
+    dim_cuenta = _agg_dimension(cuenta_col)
+    dim_fecha = _agg_time_series()
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "has_file": True,
+            "opp": opp_info,
+            "kpis": kpis,
+            "filters": {
+                "q": q or "",
+                "buyer": buyer or "",
+                "platform": platform or "",
+                "province": province or "",
+                "date_from": date_from or "",
+                "date_to": date_to or "",
+            },
+            "dimensions": {
+                "comprador": dim_comprador,
+                "provincia": dim_provincia,
+                "plataforma": dim_plataforma,
+                "cuenta": dim_cuenta,
+                "fecha_apertura": dim_fecha,
+            },
+        }
+    )
+
 
 @app.get("/oportunidades/dimensiones", response_class=HTMLResponse)
 def oportunidades_dimensiones(
