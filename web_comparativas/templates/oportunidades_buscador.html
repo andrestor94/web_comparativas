@@ -124,21 +124,20 @@
     overflow:visible;
     margin-bottom:6px;
   }
-    .filters-row-secondary{
-    /* que esta fila ocupe todas las columnas de la grilla principal */
-    grid-column:1 / -1;
+
+  /* Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado */
+  .filters-row-secondary{
+    grid-column:1 / -1;      /* ocupa todo el ancho de la grilla */
     display:flex;
     gap:8px;
     margin-top:4px;
     align-items:stretch;
   }
-
-  /* que los 4 bloques tengan el mismo ancho */
   .filters-row-secondary > *{
-    flex:1 1 0;
+    flex:1 1 0;              /* 4 bloques del mismo ancho */
   }
 
-    /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
+  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
     background:#f3f6fc; /* un poco más azul que antes */
     border:1px solid #c7d2fe; /* borde azul suave */
@@ -153,7 +152,7 @@
     color:#1f2937; /* título un poco más oscuro */
   }
 
-    /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
+  /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
     padding:3px 8px;
     min-height:52px;
@@ -203,13 +202,12 @@
     display:none;
   }
 
-    .mini-kpi{
+  .mini-kpi{
     background:#eef2ff;
     border:1px solid #c7d2fe;
     border-radius:12px;
     padding:4px 8px;
   }
-
   .mini-kpi h4{
     margin:0 0 2px;
     font-size:11px;
@@ -223,22 +221,13 @@
     color:var(--sa-text,#064066);
   }
 
-      .search-card{
+  /* Buscador: ocupa toda la fila de la grilla */
+  .search-card{
     display:grid;
     grid-template-columns:minmax(0,4fr) auto;
     gap:10px;
     align-items:center;
-    width:100%;            /* asegura que use todo el ancho disponible */
-  }
-
-  /* que la caja de búsqueda se estire al máximo */
-  .search-card .searchbox{
-    flex:1 1 auto;
-  }
-
-  /* los botones se quedan a la derecha con su ancho natural */
-  .search-card .stack{
-    flex:0 0 auto;
+    width:100%;
   }
 
   /* Barra de búsqueda */
@@ -313,7 +302,7 @@
     border-radius:999px;
   }
 
-    /* Chips */
+  /* Chips */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{
     border:1px solid #cbd5f5;
@@ -420,7 +409,7 @@
     width:12ch;
     white-space:nowrap;
   }
-    /* Columna 6 = Decisión (más ancha) */
+  /* Columna 6 = Decisión (más ancha) */
   .table th:nth-child(6),
   .table td:nth-child(6){
     width:18ch;        /* antes 11ch */
@@ -480,7 +469,7 @@
   }
   .loading.show{display:flex}
 
-    @media (max-width:1200px){
+  @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
     .upload-grid{
@@ -494,7 +483,7 @@
     .upload-meta{text-align:left}
     .upload-actions{justify-content:flex-start}
 
-        .filters-row-secondary{
+    .filters-row-secondary{
       flex-wrap:wrap;
     }
     .filters-row-secondary > *{
@@ -643,7 +632,7 @@
           </div>
         </div>
 
-                <!-- Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado -->
+        <!-- Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado -->
         <div class="filters-row-secondary">
           <!-- KPI Procesos -->
           <div class="mini-kpi" role="status" aria-live="polite"
@@ -684,17 +673,18 @@
           </div>
         </div>
 
-      <!-- Buscar -->
-      <div class="filter-card search-card" style="margin-top:6px">
-        <div class="searchbox">
-          <span class="ico" aria-hidden="true">🔎</span>
-          <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
-          <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
-        </div>
-        <div class="stack" style="justify-content:flex-end">
-          <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-          <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
-          <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
+        <!-- Buscar: AHORA DENTRO DE LA GRILLA, OCUPANDO TODAS LAS COLUMNAS -->
+        <div class="filter-card search-card" style="margin-top:6px; grid-column:1 / -1;">
+          <div class="searchbox">
+            <span class="ico" aria-hidden="true">🔎</span>
+            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
+            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
+          </div>
+          <div class="stack" style="justify-content:flex-end">
+            <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
+            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
+            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
+          </div>
         </div>
       </div>
     </div>
