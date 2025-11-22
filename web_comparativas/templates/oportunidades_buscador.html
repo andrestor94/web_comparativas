@@ -124,11 +124,18 @@
     overflow:visible;
     margin-bottom:6px;
   }
-  .filters-row-secondary{
-    display:grid;
-    grid-template-columns:repeat(4,minmax(0,1fr));
+    .filters-row-secondary{
+    /* que esta fila ocupe todas las columnas de la grilla principal */
+    grid-column:1 / -1;
+    display:flex;
     gap:8px;
     margin-top:4px;
+    align-items:stretch;
+  }
+
+  /* que los 4 bloques tengan el mismo ancho */
+  .filters-row-secondary > *{
+    flex:1 1 0;
   }
 
     /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
@@ -476,8 +483,11 @@
     .upload-meta{text-align:left}
     .upload-actions{justify-content:flex-start}
 
-    .filters-row-secondary{
-      grid-template-columns:1fr 1fr;
+        .filters-row-secondary{
+      flex-wrap:wrap;
+    }
+    .filters-row-secondary > *{
+      flex:1 1 50%;
     }
   }
 </style>
