@@ -134,8 +134,8 @@
     align-items:stretch;
   }
   .filters-row-secondary > *:not(.mini-kpi){
-  flex:1 1 0;              /* PAMI / Evaluación / Estado ocupan el resto del ancho */
-}
+    flex:1 1 0;              /* PAMI / Evaluación / Estado ocupan el resto del ancho */
+  }
 
   /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
@@ -220,10 +220,10 @@
     font-size:20px;
     color:var(--sa-text,#064066);
   }
-  
-/* KPI Procesos más angosto para liberar espacio a los filtros */
+
+  /* KPI Procesos más angosto para liberar espacio a los filtros (solo escritorio) */
   .filters-row-secondary .mini-kpi{
-    flex:0 0 190px;   /* ancho fijo más angosto */
+    flex:0 0 190px;   /* ancho fijo angosto */
   }
 
   /* Buscador: ocupa toda la fila de la grilla */
@@ -474,6 +474,7 @@
   }
   .loading.show{display:flex}
 
+  /* RESPONSIVE */
   @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
@@ -494,10 +495,11 @@
     .filters-row-secondary > *{
       flex:1 1 50%;
     }
-  }
+    /* En pantallas chicas el KPI se comporta igual que los demás */
     .filters-row-secondary .mini-kpi{
-      flex:1 1 50%;   /* en responsive se comporta igual que los demás */
+      flex:1 1 50%;
     }
+  }
 </style>
 {% endblock %}
 
