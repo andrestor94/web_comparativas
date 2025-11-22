@@ -80,35 +80,85 @@
   }
   .toast-close:hover{opacity:1;}
 
-  /* --------- Upload (sin dropzone) --------- */
-  .upload-card{display:flex;flex-direction:column;gap:10px}
+  /* --------- Upload (estilo pill superior) --------- */
+  .upload-card{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
   .upload-header{
     display:flex;
     justify-content:space-between;
     align-items:center;
     gap:16px;
   }
-  .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
-  .upload-meta{text-align:right;font-size:12px}
-  .upload-meta .badges{margin-top:4px}
+  .upload-title{
+    font-size:16px;
+    font-weight:600;
+    margin:0;
+    color:#111827;
+  }
+  .upload-meta{
+    text-align:right;
+    font-size:12px;
+  }
+  .upload-meta .badges{
+    margin-top:0;
+  }
 
-  /* Layout: input de archivo más corto y botón al lado */
-  .upload-grid{
-    display:flex;
-    flex-wrap:wrap;
-    align-items:flex-end;
-    gap:12px;
-  }
-  .upload-file{
-    flex:0 0 55%;
-    max-width:640px;
-  }
-  .upload-file .field{width:100%}
-  .upload-actions{
+  /* Tira central tipo “barra” */
+  .upload-strip{
+    margin-top:2px;
+    padding:8px 14px;
+    border-radius:999px;
+    border:1px dashed #e5e7eb;
+    background:#f9fafb;
     display:flex;
     align-items:center;
-    justify-content:flex-start;
+    justify-content:space-between;
+    gap:12px;
+  }
+
+  .upload-file-zone{
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    cursor:pointer;
+    flex:1 1 auto;
+    min-width:0;
+  }
+  .upload-ico{
+    font-size:16px;
+    opacity:.6;
+  }
+  .upload-text-main{
+    font-size:14px;
+    font-weight:500;
+    color:#374151;
+  }
+  .upload-text-sub{
+    font-size:13px;
+    color:#9ca3af;
+    margin-left:4px;
+    white-space:nowrap;
+  }
+  .upload-input-hidden{
+    position:absolute;
+    inset:0;
+    opacity:0;
+    cursor:pointer;
+  }
+
+  .upload-strip-right{
+    display:flex;
+    align-items:center;
     gap:10px;
+  }
+  .upload-btn{
+    padding:6px 14px;
+    border-radius:999px;
+    font-size:13px;
   }
 
   /* Barra superior: filtros + KPI */
@@ -124,23 +174,21 @@
     overflow:visible;
     margin-bottom:6px;
   }
-
-  /* Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado */
   .filters-row-secondary{
-    grid-column:1 / -1;      /* ocupa todo el ancho de la grilla */
+    grid-column:1 / -1;
     display:flex;
     gap:8px;
     margin-top:4px;
     align-items:stretch;
   }
   .filters-row-secondary > *{
-    flex:1 1 0;              /* 4 bloques del mismo ancho */
+    flex:1 1 0;
   }
 
   /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
   .filter-card{
-    background:#f3f6fc; /* un poco más azul que antes */
-    border:1px solid #c7d2fe; /* borde azul suave */
+    background:#f3f6fc;
+    border:1px solid #c7d2fe;
     border-radius:12px;
     padding:3px 8px;
     min-height:56px;
@@ -149,7 +197,7 @@
   .filter-card h5{
     font-size:10px;
     margin:0 0 3px;
-    color:#1f2937; /* título un poco más oscuro */
+    color:#1f2937;
   }
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
@@ -159,12 +207,11 @@
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#b4c6fc; /* un poco más marcado que el general */
+    border-color:#b4c6fc;
   }
   .filter-card--compact h5{
     margin-bottom:2px;
   }
-
   .filter-card--compact .field{
     margin-top:0;
   }
@@ -197,7 +244,6 @@
     font-size:11px;
     padding:2px 8px;
   }
-  /* Ocultar etiquetas inferiores de rango de fecha (repetitivas) */
   .filter-card--date .dates-labels{
     display:none;
   }
@@ -221,13 +267,18 @@
     color:var(--sa-text,#064066);
   }
 
-  /* Buscador: ocupa toda la fila de la grilla */
   .search-card{
     display:grid;
     grid-template-columns:minmax(0,4fr) auto;
     gap:10px;
     align-items:center;
     width:100%;
+  }
+  .search-card .searchbox{
+    flex:1 1 auto;
+  }
+  .search-card .stack{
+    flex:0 0 auto;
   }
 
   /* Barra de búsqueda */
@@ -319,7 +370,7 @@
   }
   .chip.is-on{
     background:#dbeafe;
-    border-color:#5274ce; /* azul botón */
+    border-color:#5274ce;
     color:#1f3a8a;
     box-shadow:0 0 0 1px rgba(82,116,206,.28);
   }
@@ -329,7 +380,6 @@
     padding:5px 10px;
     font-size:12px;
   }
-
   .decision-cell{
     display:flex;
     justify-content:center;
@@ -346,22 +396,22 @@
     white-space:nowrap;
   }
   .decision-pill.is-accepted{
-    background:#dcfce7;       /* verde pastel claro */
+    background:#dcfce7;
     border-color:#bbf7d0;
     color:#166534;
   }
   .decision-pill.is-rejected{
-    background:#fee2e2;       /* rojo pastel claro */
+    background:#fee2e2;
     border-color:#fecaca;
     color:#991b1b;
   }
 
   /* Colores de fila según decisión */
   tr.row-decision-accepted{
-    background:#dcfce7;       /* verde pastel */
+    background:#dcfce7;
   }
   tr.row-decision-rejected{
-    background:#fee2e2;       /* rojo pastel */
+    background:#fee2e2;
   }
 
   /* Tabla */
@@ -390,7 +440,6 @@
     z-index:1;
     text-align:left;
   }
-
   .table th:nth-child(1), .table td:nth-child(1){
     width:9ch;
     white-space:nowrap;
@@ -409,20 +458,17 @@
     width:12ch;
     white-space:nowrap;
   }
-  /* Columna 6 = Decisión (más ancha) */
   .table th:nth-child(6),
   .table td:nth-child(6){
-    width:18ch;        /* antes 11ch */
+    width:18ch;
     white-space:nowrap;
     text-align:center;
   }
-  /* Columna 7 = Enlace de pliego */
   .table th:nth-child(7), .table td:nth-child(7){
     width:10ch;
     white-space:nowrap;
     text-align:center;
   }
-
   .table td{
     max-height:38px;
     overflow:hidden;
@@ -472,17 +518,17 @@
   @media (max-width:1200px){
     .filters-grid{grid-template-columns:1fr 1fr}
     .search-card{grid-template-columns:1fr}
+    .upload-strip{flex-direction:column;align-items:flex-start}
+    .upload-strip-right{width:100%;justify-content:flex-start}
+    .upload-card{gap:8px}
+  }
+
+  @media (max-width:1200px){
     .upload-grid{
       flex-direction:column;
       align-items:stretch;
     }
-    .upload-file{
-      flex:1 1 100%;
-      max-width:none;
-    }
     .upload-meta{text-align:left}
-    .upload-actions{justify-content:flex-start}
-
     .filters-row-secondary{
       flex-wrap:wrap;
     }
@@ -509,12 +555,9 @@
 
   {# === SOLO ADMIN VE EL BLOQUE DE CARGA === #}
   {% if user and ((user.role or '')|lower == 'admin') %}
-  <!-- Upload -->
   <div class="card mb-4 upload-card">
     <div class="upload-header">
-      <div>
-        <h2 class="upload-title">Archivo - Reporte de Oportunidades</h2>
-      </div>
+      <h2 class="upload-title">Archivo - Reporte de Oportunidades</h2>
 
       <div class="upload-meta">
         <div class="badges" aria-label="Estado del maestro">
@@ -529,21 +572,28 @@
     </div>
 
     <form
-      class="upload-grid"
+      id="oppUploadForm"
+      class="upload-strip"
       action="/oportunidades/buscador/upload"
       method="post"
       enctype="multipart/form-data"
       aria-label="Cargar archivo maestro de oportunidades"
     >
-      <div class="upload-file">
-        <label for="oppFile" class="muted small" style="font-weight:600">Archivo (.xlsx / .xls)</label>
-        <div class="field">
-          <input id="oppFile" type="file" name="file" accept=".xlsx,.xls" />
-        </div>
-      </div>
+      <label for="oppFile" class="upload-file-zone">
+        <span class="upload-ico" aria-hidden="true"⬆️</span>
+        <span class="upload-text-main">Subir y reemplazar</span>
+        <span class="upload-text-sub">archivo (.xlsx / .xls) · sin archivo seleccionados</span>
+        <input
+          id="oppFile"
+          class="upload-input-hidden"
+          type="file"
+          name="file"
+          accept=".xlsx,.xls"
+        />
+      </label>
 
-      <div class="upload-actions">
-        <button class="btn" type="submit" id="btnUpload">Subir y reemplazar</button>
+      <div class="upload-strip-right">
+        <button class="btn upload-btn" type="submit" id="btnUpload">Subir y reemplazar</button>
 
         <div class="loading" id="upLoading" role="status" aria-live="polite">
           <span>Procesando…</span>
@@ -554,7 +604,7 @@
           type="button"
           id="btnDownloadCurrent"
           title="Descargar maestro actual"
-          hidden
+          {% if not opp.has_file %}hidden{% endif %}
         >
           Descargar actual
         </button>
@@ -572,7 +622,6 @@
         <div class="filter-card filter-card--date" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
 
-          <!-- DOS CAMPOS DE FECHA EN LA MISMA FILA -->
           <div class="stack-nowrap dates-row">
             <input id="fDateFrom" type="date" aria-label="Fecha desde">
             <input id="fDateTo" type="date" aria-label="Fecha hasta">
@@ -585,7 +634,6 @@
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
 
-          <!-- Etiquetas del rango (siempre en línea) -->
           <div class="stack-nowrap dates-labels" style="justify-content:space-between;margin-top:2px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
@@ -672,19 +720,19 @@
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Buscar: AHORA DENTRO DE LA GRILLA, OCUPANDO TODAS LAS COLUMNAS -->
-        <div class="filter-card search-card" style="margin-top:6px; grid-column:1 / -1;">
-          <div class="searchbox">
-            <span class="ico" aria-hidden="true">🔎</span>
-            <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
-            <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
-          </div>
-          <div class="stack" style="justify-content:flex-end">
-            <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
-            <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
-            <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
-          </div>
+      <!-- Buscar -->
+      <div class="filter-card search-card" style="margin-top:6px">
+        <div class="searchbox">
+          <span class="ico" aria-hidden="true">🔎</span>
+          <input id="fBuscar" placeholder="Buscar por objeto…" autocomplete="off" aria-label="Buscar por objeto">
+          <button class="clear" id="fClear" type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda">✕</button>
+        </div>
+        <div class="stack" style="justify-content:flex-end">
+          <button class="btn" id="btnAplicar" type="button">Aplicar filtros</button>
+          <button class="btn-link" id="btnLimpiar" type="button" title="Restablecer filtros">Limpiar</button>
+          <button class="btn-link" id="btnExport" type="button" title="Exportar resultados visibles a CSV">Exportar CSV</button>
         </div>
       </div>
     </div>
@@ -783,7 +831,6 @@
             <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
             <td title="{{ tipo }}">{{ tipo }}</td>
 
-            <!-- NUEVA COLUMNA: DECISIÓN -->
             <td class="opp-decision" data-decision-cell>
               <div class="decision-cell">
                 <button type="button"
@@ -869,7 +916,7 @@
       reparticion: 'fReparticion',
       swPAMI: 'swPAMI',
       swEstado: 'swEstado',
-      swDecision: 'swDecision',      // NUEVO filtro decisión
+      swDecision: 'swDecision',
       dateFrom: 'fDateFrom',
       dateTo: 'fDateTo',
       rMin: 'fRangeMin',
