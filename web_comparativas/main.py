@@ -1830,7 +1830,7 @@ def api_oportunidades_dimensiones(
     API JSON para el dashboard de Dimensiones.
     Usa el MISMO archivo maestro y la MISMA lógica de filtros que Buscador,
     pero devuelve datos agregados por ejes (comprador, provincia, plataforma,
-    cuenta, tipo de proceso, fecha, y también repartición+estado).
+    cuenta, fecha, tipo de proceso, y repartición+estado).
     """
 
     def _san_str(v):
@@ -1842,24 +1842,10 @@ def api_oportunidades_dimensiones(
         s = str(v or "")
         return s.replace("<", "&lt;").replace(">", "&gt;")
 
-    def _norm_estado(v: str) -> str:
-        """
-        Normaliza el estado a 'emergencia' o 'regular', igual que en el Buscador.
-        Si no matchea nada, lo mandamos a 'regular' como fallback.
-        """
-        s = _san_str(v).lower()
-        if "emerg" in s:
-            return "emergencia"
-        if "regul" in s:
-            return "regular"
-        # fallback
-        return "regular"
-
     opp_info = _oportunidades_status()
 
     df_all = _opp_load_df()
     if df_all is None or df_all.empty:
-        # Fallback cuando no hay archivo
         return JSONResponse(
             {
                 "ok": True,
@@ -1895,12 +1881,12 @@ def api_oportunidades_dimensiones(
             }
         )
 
-    # 👉 aplicamos los mismos filtros base que en el buscador
+    # 👉 aplicamos los mismos filtros que en el buscador
     df_filtered = _opp_apply_filters(
         df_all, q, buyer, platform, province, date_from, date_to
     )
 
-    # KPIs generales (los mismos que usás en el Buscador)
+    # KPIs generales para mostrar arriba en Dimensiones
     kpis = _opp_compute_kpis(df_filtered)
 
     # columnas candidatas para cada eje
@@ -1926,27 +1912,24 @@ def api_oportunidades_dimensiones(
     )
     presu_col = _opp_pick(
         df_filtered,
-        ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total",
-         "Total Presupuesto", "Monto Total", "Importe"],
+        ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"],
     )
     # 👉 NUEVO: tipo de proceso / modalidad / procedimiento
     tipo_col = _opp_pick(
         df_filtered,
         ["Tipo", "Modalidad", "Procedimiento"],
     )
-    # 👉 NUEVO: estado (Emergencia / Regular)
+    # 👉 NUEVO: columna para EMERGENCIA / REGULAR
     estado_col = _opp_pick(
         df_filtered,
         ["Estado", "Tipo Proceso", "Carácter"],
     )
 
-    # -------------------------------
-    # Helpers de agregación genéricos
-    # -------------------------------
+    # ------------- helpers internos -----------------
+
     def _agg_dimension(col_name: str | None):
         """
-        Agrega por una columna dada: label, cantidad de procesos y presupuesto.
-        Sirve para comprador, provincia, plataforma, cuenta y tipo de proceso.
+        Devuelve lista de dicts: [{label, count, budget}, ...] ordenados por presupuesto.
         """
         if not col_name:
             return []
@@ -1971,17 +1954,13 @@ def api_oportunidades_dimensiones(
                 }
             )
 
-        # ordenamos por presupuesto descendente (o por cantidad si casi no hay montos)
         out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
-        # recortar para no explotar el gráfico
         return out[:50]
 
     def _agg_time_series():
         """
-        Serie temporal por fecha de apertura.
-        date: YYYY-MM-DD
-        count: cantidad de procesos
-        budget: suma de presupuesto
+        Serie temporal por fecha de apertura:
+        [{date:'YYYY-MM-DD', count:int, budget:float}, ...]
         """
         if not fecha_col:
             return []
@@ -2015,75 +1994,75 @@ def api_oportunidades_dimensiones(
         out.sort(key=lambda r: r["date"])
         return out
 
-    # -------------------------------
-    # NUEVO: repartición + estado
-    # -------------------------------
-    def _agg_reparticion_estado():
+    def _norm_estado(v: str) -> str:
         """
-        Para el gráfico de barras "Proceso por repartición y estado".
-        Devuelve una lista:
-          { reparticion: str, estado: 'emergencia'|'regular', count: int }
+        Normaliza cualquier texto de estado a 'EMERGENCIA' o 'REGULAR'
         """
-        if not (buyer_col and estado_col):
-            return []
+        s = _san_str(v).lower()
+        if "emerg" in s:
+            return "EMERGENCIA"
+        return "REGULAR"
 
-        df_tmp = df_filtered[[buyer_col, estado_col]].copy()
-        df_tmp["_estado_norm"] = df_tmp[estado_col].apply(_norm_estado)
-
-        grp = df_tmp.groupby([buyer_col, "_estado_norm"]).size().reset_index(name="count")
-
-        out = []
-        for _, row in grp.iterrows():
-            rep_label = _san_str(row[buyer_col]).strip() or "(Sin dato)"
-            estado_norm = str(row["_estado_norm"])
-            count = int(row["count"])
-            out.append(
-                {
-                    "reparticion": rep_label,
-                    "estado": estado_norm,
-                    "count": count,
-                }
-            )
-        # No hace falta ordenar acá; eso se puede hacer en el JS si querés.
-        return out
-
-    def _agg_estado_total():
+    def _agg_reparticion_estado(
+        buyer_col_name: str | None,
+        estado_col_name: str | None,
+    ):
         """
-        Totales por estado (para la torta).
         Devuelve:
-          { estado: 'emergencia'|'regular', count: int }
+          - lista por repartición: [{label, emergencia, regular, total}, ...]
+          - resumen global por estado: [{estado, count}, ...]
         """
-        if not estado_col:
-            return []
+        if not buyer_col_name:
+            return [], []
 
-        df_tmp = df_filtered[[estado_col]].copy()
-        df_tmp["_estado_norm"] = df_tmp[estado_col].apply(_norm_estado)
+        rep_map: dict[str, dict[str, int]] = {}
+        total_estado = {"EMERGENCIA": 0, "REGULAR": 0}
 
-        grp = df_tmp.groupby("_estado_norm").size().reset_index(name="count")
+        for _, rec in df_filtered.iterrows():
+            label = _san_str(rec.get(buyer_col_name, "")).strip() or "(Sin dato)"
 
-        out = []
-        for _, row in grp.iterrows():
-            estado_norm = str(row["_estado_norm"])
-            count = int(row["count"])
-            out.append(
-                {
-                    "estado": estado_norm,
-                    "count": count,
-                }
+            if estado_col_name:
+                est_raw = rec.get(estado_col_name, "")
+                est_norm = _norm_estado(est_raw)
+            else:
+                est_norm = "REGULAR"
+
+            bucket = rep_map.setdefault(
+                label,
+                {"EMERGENCIA": 0, "REGULAR": 0, "total": 0},
             )
-        return out
+            bucket[est_norm] += 1
+            bucket["total"] += 1
+            total_estado[est_norm] += 1
 
-    # -------------------------------
-    # Ejecutamos las agregaciones
-    # -------------------------------
+        out = [
+            {
+                "label": label,
+                "emergencia": vals["EMERGENCIA"],
+                "regular": vals["REGULAR"],
+                "total": vals["total"],
+            }
+            for label, vals in rep_map.items()
+        ]
+        out.sort(key=lambda r: r["total"], reverse=True)
+        # recortamos a las 20 reparticiones más relevantes
+        out = out[:20]
+
+        dim_estado = [
+            {"estado": "EMERGENCIA", "count": total_estado["EMERGENCIA"]},
+            {"estado": "REGULAR", "count": total_estado["REGULAR"]},
+        ]
+        return out, dim_estado
+
+    # ------------- construir dimensiones -----------------
+
     dim_comprador = _agg_dimension(buyer_col)
     dim_provincia = _agg_dimension(prov_col)
     dim_plataforma = _agg_dimension(platf_col)
     dim_cuenta = _agg_dimension(cuenta_col)
     dim_fecha = _agg_time_series()
     dim_tipo = _agg_dimension(tipo_col)
-    dim_rep_estado = _agg_reparticion_estado()
-    dim_estado = _agg_estado_total()
+    dim_rep_estado, dim_estado = _agg_reparticion_estado(buyer_col, estado_col)
 
     return JSONResponse(
         {
@@ -2105,9 +2084,9 @@ def api_oportunidades_dimensiones(
                 "plataforma": dim_plataforma,
                 "cuenta": dim_cuenta,
                 "fecha_apertura": dim_fecha,
-                "tipo_proceso": dim_tipo,          # 👈 Procesos por Tipo
-                "reparticion_estado": dim_rep_estado,  # 👈 barras por repartición y estado
-                "estado": dim_estado,              # 👈 totales por estado (torta)
+                "tipo_proceso": dim_tipo,
+                "reparticion_estado": dim_rep_estado,
+                "estado": dim_estado,
             },
         }
     )

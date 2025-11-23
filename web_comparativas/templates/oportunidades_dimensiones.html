@@ -285,7 +285,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-xxl py-4">
+<div class="container-xxl py-4" id="dimensiones-root">
   <h1 class="mb-1">Dimensiones</h1>
   <p class="muted small mb-3">
     Panel de análisis de oportunidades por dimensión (tiempo, plataforma, repartición, estado, tipo y provincia).
@@ -357,7 +357,7 @@
       <div class="dim-row-state">
         <div class="filter-card">
           <h5>Repartición: PAMI u otras</h5>
-          <div class="chips" id="dimSwPAMI" role="group" aria-label="Filtro PAMI u otras">
+          <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI u otras">
             <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todas</button>
             <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
             <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras reparticiones</button>
@@ -366,7 +366,7 @@
 
         <div class="filter-card">
           <h5>Estado</h5>
-          <div class="chips" id="dimSwEstado" role="group" aria-label="Filtro de estado">
+          <div class="chips" id="swEstado" role="group" aria-label="Filtro de estado">
             <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
             <button type="button" class="chip" data-val="emergencia" aria-pressed="false">EMERGENCIA</button>
             <button type="button" class="chip" data-val="regular" aria-pressed="false">REGULAR</button>
@@ -379,77 +379,77 @@
          ========================= #}
       <div class="dim-row-middle">
         <!-- Apertura de procesos en el tiempo -->
-        <section class="chart-card" aria-labelledby="dimTitleTimeline">
+        <section class="chart-card" id="dimPanelTimeline" aria-labelledby="dimTitleTimeline">
           <header>
             <h3 id="dimTitleTimeline">Apertura de procesos en el tiempo</h3>
             <small>Distribución diaria de aperturas según el período seleccionado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="dimTimelinePlaceholder">
+            <div class="chart-placeholder">
               Aquí se mostrará el gráfico de barras por día (timeline).
             </div>
-            <canvas id="dimChartTimeline" style="display:none;"></canvas>
+            <canvas id="dimChartTimeline"></canvas>
           </div>
         </section>
 
-        <!-- Procesos por provincia (mapa / barras por provincia) -->
-        <section class="chart-card" aria-labelledby="dimTitleMap">
+        <!-- Procesos por provincia -->
+        <section class="chart-card" id="dimPanelProvincia" aria-labelledby="dimTitleMap">
           <header>
             <h3 id="dimTitleMap">Procesos por provincia</h3>
             <small>Distribución de procesos según provincia.</small>
           </header>
           <div class="chart-body">
-            <div class="map-placeholder" id="dimMapPlaceholder">
-              Aquí se mostrará el gráfico por provincia.
+            <div class="map-placeholder">
+              Mapa de Argentina<br>(aquí luego incorporamos el mapa interactivo).
             </div>
-            <canvas id="dimChartProvincia" style="display:none;"></canvas>
+            <canvas id="dimChartProvincia"></canvas>
           </div>
         </section>
       </div>
 
       {# =========================
-         FILA INFERIOR: TREEMAP + BARRAS + PIE
+         FILA INFERIOR: TIPO + BARRAS + PIE
          ========================= #}
       <div class="dim-row-bottom">
         <!-- Procesos por tipo -->
-        <section class="chart-card" aria-labelledby="dimTitleTreemap">
+        <section class="chart-card" id="dimPanelTipo" aria-labelledby="dimTitleTreemap">
           <header>
             <h3 id="dimTitleTreemap">Procesos por tipo</h3>
             <small>Distribución de procesos según el tipo de procedimiento.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="dimTiposPlaceholder">
+            <div class="chart-placeholder">
               Aquí se mostrará el gráfico de procesos por tipo.
             </div>
-            <canvas id="dimChartTipos" style="display:none;"></canvas>
+            <canvas id="dimChartTipo"></canvas>
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (barras stacked horizontales) -->
-        <section class="chart-card" aria-labelledby="dimTitleBars">
+        <!-- Proceso por repartición y estado (barras) -->
+        <section class="chart-card" id="dimPanelRepEstado" aria-labelledby="dimTitleBars">
           <header>
             <h3 id="dimTitleBars">Proceso por repartición y estado</h3>
             <small>Cantidad de procesos por repartición segmentados por estado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="dimBarsPlaceholder">
+            <div class="chart-placeholder">
               Aquí se mostrará el gráfico de barras por repartición y estado.
             </div>
-            <canvas id="dimChartBars" style="display:none;"></canvas>
+            <canvas id="dimChartRepEstado"></canvas>
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (pie EMERGENCIA / REGULAR) -->
-        <section class="chart-card" aria-labelledby="dimTitlePie">
+        <!-- Proceso por repartición y estado (torta EMERGENCIA / REGULAR) -->
+        <section class="chart-card" id="dimPanelEstadoPie" aria-labelledby="dimTitlePie">
           <header>
             <h3 id="dimTitlePie">Proceso por repartición y estado</h3>
             <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="dimPiePlaceholder">
+            <div class="chart-placeholder">
               Aquí se mostrará el gráfico de torta de estados.
             </div>
-            <canvas id="dimChartPie" style="display:none;"></canvas>
+            <canvas id="dimChartEstadoPie"></canvas>
           </div>
         </section>
       </div>
@@ -458,668 +458,6 @@
   </div>
 </div>
 
-<script>
-document.addEventListener("DOMContentLoaded", function(){
-  // Elementos base
-  const elDateFrom      = document.getElementById("dimDateFrom");
-  const elDateTo        = document.getElementById("dimDateTo");
-  const elRangeFill     = document.getElementById("dimDateFill");
-  const elRangeMin      = document.getElementById("dimRangeMin");
-  const elRangeMax      = document.getElementById("dimRangeMax");
-
-  const elKpiProcesos   = document.getElementById("dimKpiProcesos");
-
-  const elPlataforma    = document.getElementById("dimPlataforma");
-  const elCuenta        = document.getElementById("dimCuenta");
-  const elReparticion   = document.getElementById("dimReparticion");
-
-  const chipsPamiGroup  = document.getElementById("dimSwPAMI");
-  const chipsEstadoGroup= document.getElementById("dimSwEstado");
-
-  // Canvases y placeholders de gráficos
-  const canvasTimeline      = document.getElementById("dimChartTimeline");
-  const canvasBars          = document.getElementById("dimChartBars");
-  const canvasPie           = document.getElementById("dimChartPie");
-  const canvasProv          = document.getElementById("dimChartProvincia");
-  const canvasTipos         = document.getElementById("dimChartTipos");
-
-  const placeholderTimeline = document.getElementById("dimTimelinePlaceholder");
-  const placeholderBars     = document.getElementById("dimBarsPlaceholder");
-  const placeholderPie      = document.getElementById("dimPiePlaceholder");
-  const placeholderMap      = document.getElementById("dimMapPlaceholder");
-  const placeholderTipos    = document.getElementById("dimTiposPlaceholder");
-
-  // Instancias Chart.js
-  let chartTimeline = null;
-  let chartBars     = null;
-  let chartPie      = null;
-  let chartProv     = null;
-  let chartTipos    = null;
-
-  const state = {
-    allRows: []  // datos crudos que vienen de /api/oportunidades/buscador
-  };
-
-  const fmtInt = new Intl.NumberFormat("es-AR");
-
-  function formatInt(n){
-    if (!Number.isFinite(n)) return "0";
-    return fmtInt.format(n);
-  }
-
-  // -----------------------------------------
-  // 72 horas hábiles por defecto (como Buscador)
-  // -----------------------------------------
-  function getLastBusinessDaysRange(nDays){
-    const today = new Date();
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    let date = new Date(end);
-    let collected = [];
-
-    while(collected.length < nDays){
-      const day = date.getDay(); // 0 dom, 6 sáb
-      if(day !== 0 && day !== 6){
-        collected.push(new Date(date));
-      }
-      date.setDate(date.getDate() - 1);
-    }
-
-    const from = collected[collected.length - 1];
-    return { from, to: end };
-  }
-
-  function ensureDefaultDates(){
-    if(!elDateFrom.value && !elDateTo.value){
-      const range = getLastBusinessDaysRange(3); // 3 días hábiles ~ 72 hs
-      const toISO   = d => d.toISOString().slice(0,10);
-
-      elDateFrom.value = toISO(range.from);
-      elDateTo.value   = toISO(range.to);
-    }
-  }
-
-  // Slider visual simple (llenar toda la barra por ahora)
-  function refreshRangeFill(){
-    if(!elRangeFill) return;
-    const minVal = Number(elRangeMin.value || 0);
-    const maxVal = Number(elRangeMax.value || 100);
-    const low = Math.min(minVal, maxVal);
-    const high = Math.max(minVal, maxVal);
-    elRangeFill.style.left  = low + "%";
-    elRangeFill.style.width = (high - low) + "%";
-  }
-
-  // -----------------------------------------
-  // Construcción de filtros (selects) a partir de los rows
-  // -----------------------------------------
-  function populateSelectOptions(selectEl, values){
-    if(!selectEl) return;
-    const current = selectEl.value;
-    // Mantener solo la primera opción ("Todas")
-    while(selectEl.options.length > 1){
-      selectEl.remove(1);
-    }
-    const arr = Array.from(values).filter(v => v && v.toString().trim() !== "");
-    arr.sort((a,b)=> a.localeCompare(b, "es", {sensitivity:"base"}));
-    for(const v of arr){
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v;
-      selectEl.appendChild(opt);
-    }
-    // Si el valor anterior sigue existiendo, lo mantenemos
-    if(current && Array.from(selectEl.options).some(o => o.value === current)){
-      selectEl.value = current;
-    }
-  }
-
-  function buildFiltersFromRows(){
-    const plats = new Set();
-    const reps  = new Set();
-    // Cuenta por ahora queda vacía (usamos "Todas")
-    for(const row of state.allRows){
-      if(row.plataforma) plats.add(row.plataforma);
-      if(row.comprador)  reps.add(row.comprador);
-    }
-    populateSelectOptions(elPlataforma, plats);
-    populateSelectOptions(elReparticion, reps);
-  }
-
-  // -----------------------------------------
-  // Clasificación simple de estado (EMERGENCIA / REGULAR)
-  // usando la descripción como aproximación
-  // -----------------------------------------
-  function computeEstado(row){
-    const desc = (row.descripcion || "").toString().toLowerCase();
-    if(desc.includes("emergencia")) return "EMERGENCIA";
-    return "REGULAR";
-  }
-
-  // -----------------------------------------
-  // Helpers para gráficos
-  // -----------------------------------------
-  function toggleChartVisibility(placeholder, canvas, hasData){
-    if(!placeholder || !canvas) return;
-    if(hasData){
-      placeholder.style.display = "none";
-      canvas.style.display = "block";
-    }else{
-      placeholder.style.display = "flex";
-      canvas.style.display = "none";
-    }
-  }
-
-  function updateTimelineChart(rows){
-    if(chartTimeline){
-      chartTimeline.destroy();
-      chartTimeline = null;
-    }
-    if(!canvasTimeline) return;
-
-    const counts = new Map();
-    for(const r of rows){
-      const f = r.fecha;
-      if(!f) continue;
-      counts.set(f, (counts.get(f) || 0) + 1);
-    }
-    const labels = Array.from(counts.keys()).sort();
-    const data = labels.map(d => counts.get(d));
-
-    if(labels.length === 0){
-      toggleChartVisibility(placeholderTimeline, canvasTimeline, false);
-      return;
-    }
-
-    toggleChartVisibility(placeholderTimeline, canvasTimeline, true);
-
-    const ctx = canvasTimeline.getContext("2d");
-    chartTimeline = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [{
-          label: "Procesos",
-          data: data
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            ticks: { autoSkip: true, maxTicksLimit: 10 }
-          },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              precision: 0
-            }
-          }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `Procesos: ${ctx.parsed.y}`
-            }
-          }
-        }
-      }
-    });
-  }
-
-  // --- NUEVO: gráfico por provincia (barras horizontales) ---
-  function updateProvinciaChart(rows){
-    if(chartProv){
-      chartProv.destroy();
-      chartProv = null;
-    }
-    if(!canvasProv) return;
-
-    const counts = new Map();
-    for(const r of rows){
-      const prov = (r.provincia || "Sin provincia").toString();
-      counts.set(prov, (counts.get(prov) || 0) + 1);
-    }
-
-    let labels = Array.from(counts.keys());
-    labels.sort((a,b)=> counts.get(b) - counts.get(a));
-    labels = labels.slice(0, 10);
-    const data = labels.map(p => counts.get(p));
-
-    const hasData = labels.length > 0 && data.some(v => v > 0);
-    if(!hasData){
-      toggleChartVisibility(placeholderMap, canvasProv, false);
-      return;
-    }
-
-    toggleChartVisibility(placeholderMap, canvasProv, true);
-
-    const ctx = canvasProv.getContext("2d");
-    chartProv = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [{
-          label: "Procesos",
-          data: data
-        }]
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: { precision: 0 }
-          },
-          y: {
-            ticks: { autoSkip: false, maxTicksLimit: 10 }
-          }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `Procesos: ${ctx.parsed.x}`
-            }
-          }
-        }
-      }
-    });
-  }
-
-  // --- NUEVO: gráfico por tipo de proceso ---
-  function updateTiposChart(rows){
-    if(chartTipos){
-      chartTipos.destroy();
-      chartTipos = null;
-    }
-    if(!canvasTipos) return;
-
-    const counts = new Map();
-    for(const r of rows){
-      const tipo = (r.tipo || "Sin tipo").toString();
-      counts.set(tipo, (counts.get(tipo) || 0) + 1);
-    }
-
-    let labels = Array.from(counts.keys());
-    labels.sort((a,b)=> counts.get(b) - counts.get(a));
-    labels = labels.slice(0, 8);
-    const data = labels.map(t => counts.get(t));
-
-    const hasData = labels.length > 0 && data.some(v => v > 0);
-    if(!hasData){
-      toggleChartVisibility(placeholderTipos, canvasTipos, false);
-      return;
-    }
-
-    toggleChartVisibility(placeholderTipos, canvasTipos, true);
-
-    const ctx = canvasTipos.getContext("2d");
-    chartTipos = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [{
-          label: "Procesos",
-          data: data
-        }]
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: { precision: 0 }
-          },
-          y: {
-            ticks: { autoSkip: false, maxTicksLimit: 8 }
-          }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `Procesos: ${ctx.parsed.x}`
-            }
-          }
-        }
-      }
-    });
-  }
-
-  // --- CORREGIDO: barras horizontales apiladas por repartición y estado ---
-  function updateBarsChart(rows){
-    if(chartBars){
-      chartBars.destroy();
-      chartBars = null;
-    }
-    if(!canvasBars) return;
-
-    const emerg = {};
-    const reg   = {};
-    for(const r of rows){
-      const buyer = (r.comprador || "Sin repartición").toString();
-      const est   = r._estado || computeEstado(r);
-      if(est === "EMERGENCIA"){
-        emerg[buyer] = (emerg[buyer] || 0) + 1;
-      }else{
-        reg[buyer] = (reg[buyer] || 0) + 1;
-      }
-    }
-
-    const buyersSet = new Set([
-      ...Object.keys(emerg),
-      ...Object.keys(reg)
-    ]);
-    let buyers = Array.from(buyersSet);
-    buyers.sort((a,b)=>{
-      const ta = (emerg[a] || 0) + (reg[a] || 0);
-      const tb = (emerg[b] || 0) + (reg[b] || 0);
-      return tb - ta;
-    });
-    buyers = buyers.slice(0, 10);
-
-    const dataEmerg = buyers.map(b => emerg[b] || 0);
-    const dataReg   = buyers.map(b => reg[b] || 0);
-
-    const hasData = buyers.length > 0 && (dataEmerg.some(v => v>0) || dataReg.some(v => v>0));
-    if(!hasData){
-      toggleChartVisibility(placeholderBars, canvasBars, false);
-      return;
-    }
-
-    toggleChartVisibility(placeholderBars, canvasBars, true);
-
-    const ctx = canvasBars.getContext("2d");
-    chartBars = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: buyers,
-        datasets: [
-          {
-            label: "EMERGENCIA",
-            data: dataEmerg
-          },
-          {
-            label: "REGULAR",
-            data: dataReg
-          }
-        ]
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            stacked: true,
-            beginAtZero: true,
-            ticks: { precision: 0 }
-          },
-          y: {
-            stacked: true,
-            ticks: { autoSkip: false, maxTicksLimit: 10 }
-          }
-        },
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.x}`
-            }
-          }
-        }
-      }
-    });
-  }
-
-  function updatePieChart(rows){
-    if(chartPie){
-      chartPie.destroy();
-      chartPie = null;
-    }
-    if(!canvasPie) return;
-
-    let cntEmerg = 0;
-    let cntReg   = 0;
-    for(const r of rows){
-      const est = r._estado || computeEstado(r);
-      if(est === "EMERGENCIA") cntEmerg++;
-      else cntReg++;
-    }
-
-    const hasData = (cntEmerg + cntReg) > 0;
-    if(!hasData){
-      toggleChartVisibility(placeholderPie, canvasPie, false);
-      return;
-    }
-
-    toggleChartVisibility(placeholderPie, canvasPie, true);
-
-    const ctx = canvasPie.getContext("2d");
-    chartPie = new Chart(ctx, {
-      type: "pie",
-      data: {
-        labels: ["EMERGENCIA", "REGULAR"],
-        datasets: [{
-          data: [cntEmerg, cntReg]
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: "bottom"
-          },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const total = cntEmerg + cntReg || 1;
-                const val   = ctx.parsed;
-                const pct   = (val * 100 / total).toFixed(1);
-                return `${ctx.label}: ${val} (${pct}%)`;
-              }
-            }
-          }
-        }
-      }
-    });
-  }
-
-  function updateAllCharts(rows){
-    updateTimelineChart(rows);
-    updateProvinciaChart(rows);
-    updateTiposChart(rows);
-    updateBarsChart(rows);
-    updatePieChart(rows);
-  }
-
-  // -----------------------------------------
-  // Aplicar filtros de UI sobre state.allRows
-  // -----------------------------------------
-  function applyUiFilters(){
-    let rows = state.allRows.slice();
-
-    const selPlataforma  = elPlataforma ? elPlataforma.value : "";
-    const selCuenta      = elCuenta ? elCuenta.value : "";
-    const selReparticion = elReparticion ? elReparticion.value : "";
-
-    const chipPami = chipsPamiGroup
-      ? chipsPamiGroup.querySelector(".chip.is-on")
-      : null;
-    const modePami = chipPami ? chipPami.dataset.val : "todos";
-
-    const chipEstado = chipsEstadoGroup
-      ? chipsEstadoGroup.querySelector(".chip.is-on")
-      : null;
-    const modeEstado = chipEstado ? chipEstado.dataset.val : "todos";
-
-    rows = rows.filter(r => {
-      const comprador = (r.comprador || "").toString();
-      const compradorUpper = comprador.toUpperCase();
-      const plataforma = (r.plataforma || "").toString();
-
-      // Plataforma (servidor también filtra, pero esto refina)
-      if(selPlataforma && plataforma !== selPlataforma) return false;
-
-      // Cuenta (por ahora solo "Todas"; placeholder para futuro)
-      if(selCuenta && selCuenta !== "") {
-        // TODO: cuando tengamos el campo en el API, filtrar acá.
-      }
-
-      // Repartición por select
-      if(selReparticion && comprador !== selReparticion) return false;
-
-      // PAMI / Otras
-      if(modePami === "pami" && !compradorUpper.includes("PAMI")) return false;
-      if(modePami === "otras" && compradorUpper.includes("PAMI")) return false;
-
-      // Estado: EMERGENCIA / REGULAR (clasificación simple)
-      const est = r._estado || computeEstado(r);
-      if(modeEstado === "emergencia" && est !== "EMERGENCIA") return false;
-      if(modeEstado === "regular" && est !== "REGULAR") return false;
-
-      return true;
-    });
-
-    // KPI principal
-    if(elKpiProcesos){
-      elKpiProcesos.textContent = formatInt(rows.length);
-    }
-
-    // Actualizamos gráficos con los rows filtrados
-    updateAllCharts(rows);
-  }
-
-  // -----------------------------------------
-  // Cargar datos desde /api/oportunidades/buscador
-  // (mismos datos que usa Buscador)
-  // -----------------------------------------
-  async function loadData(){
-    ensureDefaultDates();
-
-    const params = new URLSearchParams();
-    if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
-    if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
-
-    // Filtros server-side básicos (misma lógica que Buscador)
-    if(elPlataforma && elPlataforma.value){
-      params.set("platform", elPlataforma.value);
-    }
-    if(elReparticion && elReparticion.value){
-      params.set("buyer", elReparticion.value);
-    }
-
-    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
-
-    const url = "/api/oportunidades/buscador?" + params.toString();
-
-    try{
-      const resp = await fetch(url);
-      if(!resp.ok){
-        console.error("Dimensiones: error HTTP", resp.status);
-        return;
-      }
-      const data = await resp.json();
-      if(!data || data.ok === false){
-        console.warn("Dimensiones: respuesta sin datos válidos", data);
-        state.allRows = [];
-      } else {
-        state.allRows = Array.isArray(data.rows) ? data.rows : [];
-      }
-
-      // Pre-calculamos un "estado" aproximado por fila
-      state.allRows.forEach(r => {
-        r._estado = computeEstado(r);
-      });
-
-      // Construimos opciones de filtros a partir de los datos
-      buildFiltersFromRows();
-
-      // Actualizamos KPI y gráficos
-      applyUiFilters();
-
-      // Refrescamos la barrita del rango (visual)
-      refreshRangeFill();
-    } catch(err){
-      console.error("Dimensiones: error al cargar datos", err);
-    }
-  }
-
-  // -----------------------------------------
-  // Listeners de UI
-  // -----------------------------------------
-  if(chipsPamiGroup){
-    chipsPamiGroup.querySelectorAll(".chip").forEach(btn => {
-      btn.addEventListener("click", () => {
-        chipsPamiGroup.querySelectorAll(".chip").forEach(c => {
-          c.classList.remove("is-on");
-          c.setAttribute("aria-pressed","false");
-        });
-        btn.classList.add("is-on");
-        btn.setAttribute("aria-pressed","true");
-        applyUiFilters();
-      });
-    });
-  }
-
-  if(chipsEstadoGroup){
-    chipsEstadoGroup.querySelectorAll(".chip").forEach(btn => {
-      btn.addEventListener("click", () => {
-        chipsEstadoGroup.querySelectorAll(".chip").forEach(c => {
-          c.classList.remove("is-on");
-          c.setAttribute("aria-pressed","false");
-        });
-        btn.classList.add("is-on");
-        btn.setAttribute("aria-pressed","true");
-        applyUiFilters();
-      });
-    });
-  }
-
-  if(elPlataforma){
-    elPlataforma.addEventListener("change", () => {
-      // Re-cargamos desde el servidor con estos filtros
-      loadData();
-    });
-  }
-  if(elCuenta){
-    elCuenta.addEventListener("change", () => {
-      // De momento solo filtra en cliente
-      applyUiFilters();
-    });
-  }
-  if(elReparticion){
-    elReparticion.addEventListener("change", () => {
-      loadData();
-    });
-  }
-
-  if(elDateFrom){
-    elDateFrom.addEventListener("change", () => loadData());
-  }
-  if(elDateTo){
-    elDateTo.addEventListener("change", () => loadData());
-  }
-
-  if(elRangeMin){
-    elRangeMin.addEventListener("input", refreshRangeFill);
-  }
-  if(elRangeMax){
-    elRangeMax.addEventListener("input", refreshRangeFill);
-  }
-
-  // -----------------------------------------
-  // Init
-  // -----------------------------------------
-  ensureDefaultDates();
-  refreshRangeFill();
-  loadData();
-});
-</script>
+{# Script que conecta esta vista con el dashboard de dimensiones #}
+<script src="{{ url_for('static', path='/js/oportunidades_dimensiones.js') }}" defer></script>
 {% endblock %}
