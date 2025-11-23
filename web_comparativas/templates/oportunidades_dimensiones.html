@@ -352,7 +352,7 @@
       </div>
 
       {# =========================
-         FILA ESTADO (EMERGENCIA / REGULAR)
+         FILA ESTADO (PAMI / OTRAS + ESTADO)
          ========================= #}
       <div class="dim-row-state">
         <div class="filter-card">
@@ -385,11 +385,10 @@
             <small>Distribución diaria de aperturas según el período seleccionado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder">
+            <div class="chart-placeholder" id="dimTimelinePlaceholder">
               Aquí se mostrará el gráfico de barras por día (timeline).
             </div>
-            <!-- Más adelante reemplazamos el placeholder por un canvas -->
-            <!-- <canvas id="dimChartTimeline"></canvas> -->
+            <canvas id="dimChartTimeline" style="display:none;"></canvas>
           </div>
         </section>
 
@@ -422,7 +421,7 @@
             <div class="chart-placeholder">
               Aquí se mostrará el treemap de tipos de proceso.
             </div>
-            <!-- <canvas id="dimChartTreemap"></canvas> -->
+            <!-- A futuro: <canvas id="dimChartTreemap"></canvas> -->
           </div>
         </section>
 
@@ -433,10 +432,10 @@
             <small>Cantidad de procesos por repartición segmentados por estado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder">
+            <div class="chart-placeholder" id="dimBarsPlaceholder">
               Aquí se mostrará el gráfico de barras por repartición y estado.
             </div>
-            <!-- <canvas id="dimChartBars"></canvas> -->
+            <canvas id="dimChartBars" style="display:none;"></canvas>
           </div>
         </section>
 
@@ -447,10 +446,10 @@
             <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder">
+            <div class="chart-placeholder" id="dimPiePlaceholder">
               Aquí se mostrará el gráfico de torta de estados.
             </div>
-            <!-- <canvas id="dimChartPie"></canvas> -->
+            <canvas id="dimChartPie" style="display:none;"></canvas>
           </div>
         </section>
       </div>
@@ -476,6 +475,20 @@ document.addEventListener("DOMContentLoaded", function(){
 
   const chipsPamiGroup  = document.getElementById("dimSwPAMI");
   const chipsEstadoGroup= document.getElementById("dimSwEstado");
+
+  // Canvases y placeholders de gráficos
+  const canvasTimeline      = document.getElementById("dimChartTimeline");
+  const canvasBars          = document.getElementById("dimChartBars");
+  const canvasPie           = document.getElementById("dimChartPie");
+
+  const placeholderTimeline = document.getElementById("dimTimelinePlaceholder");
+  const placeholderBars     = document.getElementById("dimBarsPlaceholder");
+  const placeholderPie      = document.getElementById("dimPiePlaceholder");
+
+  // Instancias Chart.js
+  let chartTimeline = null;
+  let chartBars     = null;
+  let chartPie      = null;
 
   const state = {
     allRows: []  // datos crudos que vienen de /api/oportunidades/buscador
@@ -577,6 +590,224 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 
   // -----------------------------------------
+  // Helpers para gráficos
+  // -----------------------------------------
+  function toggleChartVisibility(placeholder, canvas, hasData){
+    if(!placeholder || !canvas) return;
+    if(hasData){
+      placeholder.style.display = "none";
+      canvas.style.display = "block";
+    }else{
+      placeholder.style.display = "flex";
+      canvas.style.display = "none";
+    }
+  }
+
+  function updateTimelineChart(rows){
+    if(chartTimeline){
+      chartTimeline.destroy();
+      chartTimeline = null;
+    }
+    if(!canvasTimeline) return;
+
+    const counts = new Map();
+    for(const r of rows){
+      const f = r.fecha;
+      if(!f) continue;
+      counts.set(f, (counts.get(f) || 0) + 1);
+    }
+    const labels = Array.from(counts.keys()).sort();
+    const data = labels.map(d => counts.get(d));
+
+    if(labels.length === 0){
+      toggleChartVisibility(placeholderTimeline, canvasTimeline, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderTimeline, canvasTimeline, true);
+
+    const ctx = canvasTimeline.getContext("2d");
+    chartTimeline = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Procesos",
+          data: data
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            ticks: { autoSkip: true, maxTicksLimit: 10 }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
+            }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `Procesos: ${ctx.parsed.y}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateBarsChart(rows){
+    if(chartBars){
+      chartBars.destroy();
+      chartBars = null;
+    }
+    if(!canvasBars) return;
+
+    const emerg = {};
+    const reg   = {};
+    for(const r of rows){
+      const buyer = (r.comprador || "Sin repartición").toString();
+      const est   = r._estado || computeEstado(r);
+      if(est === "EMERGENCIA"){
+        emerg[buyer] = (emerg[buyer] || 0) + 1;
+      }else{
+        reg[buyer] = (reg[buyer] || 0) + 1;
+      }
+    }
+
+    // Total por repartición para ordenar
+    const buyersSet = new Set([
+      ...Object.keys(emerg),
+      ...Object.keys(reg)
+    ]);
+    let buyers = Array.from(buyersSet);
+    buyers.sort((a,b)=>{
+      const ta = (emerg[a] || 0) + (reg[a] || 0);
+      const tb = (emerg[b] || 0) + (reg[b] || 0);
+      return tb - ta;
+    });
+    // Limitamos a top 8 para que no explote
+    buyers = buyers.slice(0, 8);
+
+    const dataEmerg = buyers.map(b => emerg[b] || 0);
+    const dataReg   = buyers.map(b => reg[b] || 0);
+
+    const hasData = buyers.length > 0 && (dataEmerg.some(v => v>0) || dataReg.some(v => v>0));
+    if(!hasData){
+      toggleChartVisibility(placeholderBars, canvasBars, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderBars, canvasBars, true);
+
+    const ctx = canvasBars.getContext("2d");
+    chartBars = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: buyers,
+        datasets: [
+          {
+            label: "EMERGENCIA",
+            data: dataEmerg
+          },
+          {
+            label: "REGULAR",
+            data: dataReg
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { autoSkip: true, maxTicksLimit: 8 }
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updatePieChart(rows){
+    if(chartPie){
+      chartPie.destroy();
+      chartPie = null;
+    }
+    if(!canvasPie) return;
+
+    let cntEmerg = 0;
+    let cntReg   = 0;
+    for(const r of rows){
+      const est = r._estado || computeEstado(r);
+      if(est === "EMERGENCIA") cntEmerg++;
+      else cntReg++;
+    }
+
+    const hasData = (cntEmerg + cntReg) > 0;
+    if(!hasData){
+      toggleChartVisibility(placeholderPie, canvasPie, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderPie, canvasPie, true);
+
+    const ctx = canvasPie.getContext("2d");
+    chartPie = new Chart(ctx, {
+      type: "pie",
+      data: {
+        labels: ["EMERGENCIA", "REGULAR"],
+        datasets: [{
+          data: [cntEmerg, cntReg]
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "bottom"
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const total = cntEmerg + cntReg || 1;
+                const val   = ctx.parsed;
+                const pct   = (val * 100 / total).toFixed(1);
+                return `${ctx.label}: ${val} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateAllCharts(rows){
+    updateTimelineChart(rows);
+    updateBarsChart(rows);
+    updatePieChart(rows);
+  }
+
+  // -----------------------------------------
   // Aplicar filtros de UI sobre state.allRows
   // -----------------------------------------
   function applyUiFilters(){
@@ -629,12 +860,8 @@ document.addEventListener("DOMContentLoaded", function(){
       elKpiProcesos.textContent = formatInt(rows.length);
     }
 
-    // Aquí más adelante vamos a alimentar:
-    // - Timeline
-    // - Mapa por provincia
-    // - Treemap tipos
-    // - Barras y pie por estado
-    // usando 'rows' ya filtrados.
+    // Actualizamos gráficos con los rows filtrados
+    updateAllCharts(rows);
   }
 
   // -----------------------------------------
@@ -683,7 +910,7 @@ document.addEventListener("DOMContentLoaded", function(){
       // Construimos opciones de filtros a partir de los datos
       buildFiltersFromRows();
 
-      // Actualizamos KPI y (a futuro) gráficos
+      // Actualizamos KPI y gráficos
       applyUiFilters();
 
       // Refrescamos la barrita del rango (visual)
