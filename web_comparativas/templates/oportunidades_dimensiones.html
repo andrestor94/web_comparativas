@@ -182,7 +182,7 @@
     gap:10px;
   }
 
-  /* Fila de estado (EMERGENCIA / REGULAR) */
+  /* Fila de estado (PAMI / OTRAS + ESTADO) */
   .dim-row-state{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -282,6 +282,9 @@
     }
   }
 </style>
+
+{# Cargamos Chart.js solo para esta vista #}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -507,9 +510,7 @@ document.addEventListener("DOMContentLoaded", function(){
     return fmtInt.format(n);
   }
 
-  // -----------------------------
-  // Slider visual
-  // -----------------------------
+  // Slider visual (decorativo)
   function refreshRangeFill(){
     if(!elRangeFill) return;
     const minVal = Number(elRangeMin.value || 0);
@@ -520,39 +521,12 @@ document.addEventListener("DOMContentLoaded", function(){
     elRangeFill.style.width = (high - low) + "%";
   }
 
-  // -----------------------------
-  // Utilidades de fecha
-  // -----------------------------
-  function parseRowDate(fechaStr){
-    // fecha viene como "dd/mm/aaaa"
-    if(!fechaStr) return null;
-    const parts = fechaStr.split("/");
-    if(parts.length !== 3) return null;
-    const dd   = Number(parts[0]);
-    const mm   = Number(parts[1]);
-    const yyyy = Number(parts[2]);
-    if(!yyyy || !mm || !dd) return null;
-    return new Date(yyyy, mm - 1, dd);
-  }
-
-  function getMinMaxRowDate(rows){
-    let min = null, max = null;
-    for(const r of rows){
-      const d = parseRowDate(r.fecha);
-      if(!d) continue;
-      if(!min || d < min) min = d;
-      if(!max || d > max) max = d;
-    }
-    return {min, max};
-  }
-
   // -----------------------------------------
   // Construcción de filtros (selects) a partir de los rows
   // -----------------------------------------
   function populateSelectOptions(selectEl, values){
     if(!selectEl) return;
     const current = selectEl.value;
-    // Mantener solo la primera opción ("Todas")
     while(selectEl.options.length > 1){
       selectEl.remove(1);
     }
@@ -954,36 +928,22 @@ document.addEventListener("DOMContentLoaded", function(){
       : null;
     const modeEstado = chipEstado ? chipEstado.dataset.val : "todos";
 
-    // Fechas seleccionadas en la UI
-    const df = elDateFrom && elDateFrom.value ? new Date(elDateFrom.value) : null;
-    const dt = elDateTo   && elDateTo.value   ? new Date(elDateTo.value)   : null;
-
     rows = rows.filter(r => {
       const comprador = (r.comprador || "").toString();
       const compradorUpper = comprador.toUpperCase();
       const plataforma = (r.plataforma || "").toString();
 
-      // Fecha: se compara contra r.fecha (dd/mm/aaaa)
-      const rowDate = parseRowDate(r.fecha);
-      if(df && rowDate && rowDate < df) return false;
-      if(dt && rowDate && rowDate > dt) return false;
-
-      // Plataforma
       if(selPlataforma && plataforma !== selPlataforma) return false;
 
-      // Cuenta (placeholder para futuro: de momento no filtra nada)
       if(selCuenta && selCuenta !== "") {
-        // cuando tengas cuenta en el API, podés filtrar acá
+        // futuro: filtrar por cuenta cuando venga en el API
       }
 
-      // Repartición por select
       if(selReparticion && comprador !== selReparticion) return false;
 
-      // PAMI / Otras
       if(modePami === "pami" && !compradorUpper.includes("PAMI")) return false;
       if(modePami === "otras" && compradorUpper.includes("PAMI")) return false;
 
-      // Estado: EMERGENCIA / REGULAR (clasificación simple)
       const est = r._estado || computeEstado(r);
       if(modeEstado === "emergencia" && est !== "EMERGENCIA") return false;
       if(modeEstado === "regular" && est !== "REGULAR") return false;
@@ -991,22 +951,31 @@ document.addEventListener("DOMContentLoaded", function(){
       return true;
     });
 
-    // KPI principal
     if(elKpiProcesos){
       elKpiProcesos.textContent = formatInt(rows.length);
     }
 
-    // Actualizamos gráficos con los rows filtrados
     updateAllCharts(rows);
   }
 
   // -----------------------------------------
   // Cargar datos desde /api/oportunidades/buscador
-  // (TODAS las filas, sin filtros; filtros se aplican en el cliente)
+  // (mismos datos que usa Buscador)
   // -----------------------------------------
   async function loadData(){
     const params = new URLSearchParams();
-    params.set("page", "1");
+
+    // Solo mandamos fechas si el usuario las define.
+    if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
+    if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
+
+    if(elPlataforma && elPlataforma.value){
+      params.set("platform", elPlataforma.value);
+    }
+    if(elReparticion && elReparticion.value){
+      params.set("buyer", elReparticion.value);
+    }
+
     params.set("page_size", "5000"); // traemos un tamaño grande para análisis
 
     const url = "/api/oportunidades/buscador?" + params.toString();
@@ -1015,14 +984,15 @@ document.addEventListener("DOMContentLoaded", function(){
       const resp = await fetch(url);
       if(!resp.ok){
         console.error("Dimensiones: error HTTP", resp.status);
-        return;
-      }
-      const data = await resp.json();
-      if(!data || data.ok === false){
-        console.warn("Dimensiones: respuesta sin datos válidos", data);
         state.allRows = [];
       } else {
-        state.allRows = Array.isArray(data.rows) ? data.rows : [];
+        const data = await resp.json();
+        if(!data || data.ok === false){
+          console.warn("Dimensiones: respuesta sin datos válidos", data);
+          state.allRows = [];
+        } else {
+          state.allRows = Array.isArray(data.rows) ? data.rows : [];
+        }
       }
 
       // Pre-calculamos un "estado" aproximado por fila
@@ -1032,16 +1002,6 @@ document.addEventListener("DOMContentLoaded", function(){
 
       // Construimos opciones de filtros a partir de los datos
       buildFiltersFromRows();
-
-      // Definimos fechas mín/máx automáticas según los datos
-      const range = getMinMaxRowDate(state.allRows);
-      const toISO = d => d.toISOString().slice(0,10);
-      if(range.min && !elDateFrom.value){
-        elDateFrom.value = toISO(range.min);
-      }
-      if(range.max && !elDateTo.value){
-        elDateTo.value = toISO(range.max);
-      }
 
       // KPI + gráficos
       applyUiFilters();
@@ -1086,7 +1046,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
   if(elPlataforma){
     elPlataforma.addEventListener("change", () => {
-      applyUiFilters();
+      loadData();
     });
   }
   if(elCuenta){
@@ -1096,21 +1056,15 @@ document.addEventListener("DOMContentLoaded", function(){
   }
   if(elReparticion){
     elReparticion.addEventListener("change", () => {
-      applyUiFilters();
+      loadData();
     });
   }
 
   if(elDateFrom){
-    elDateFrom.addEventListener("change", () => {
-      applyUiFilters();
-      refreshRangeFill();
-    });
+    elDateFrom.addEventListener("change", () => loadData());
   }
   if(elDateTo){
-    elDateTo.addEventListener("change", () => {
-      applyUiFilters();
-      refreshRangeFill();
-    });
+    elDateTo.addEventListener("change", () => loadData());
   }
 
   if(elRangeMin){
