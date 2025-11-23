@@ -182,7 +182,7 @@
     gap:10px;
   }
 
-  /* Fila de estado (PAMI / OTRAS + ESTADO) */
+  /* Fila de estado (EMERGENCIA / REGULAR) */
   .dim-row-state{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -282,9 +282,6 @@
     }
   }
 </style>
-
-{# Cargamos Chart.js solo para esta vista #}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -510,7 +507,38 @@ document.addEventListener("DOMContentLoaded", function(){
     return fmtInt.format(n);
   }
 
-  // Slider visual (decorativo)
+  // -----------------------------------------
+  // 72 horas hábiles por defecto (como Buscador)
+  // -----------------------------------------
+  function getLastBusinessDaysRange(nDays){
+    const today = new Date();
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    let date = new Date(end);
+    let collected = [];
+
+    while(collected.length < nDays){
+      const day = date.getDay(); // 0 dom, 6 sáb
+      if(day !== 0 && day !== 6){
+        collected.push(new Date(date));
+      }
+      date.setDate(date.getDate() - 1);
+    }
+
+    const from = collected[collected.length - 1];
+    return { from, to: end };
+  }
+
+  function ensureDefaultDates(){
+    if(!elDateFrom.value && !elDateTo.value){
+      const range = getLastBusinessDaysRange(3); // 3 días hábiles ~ 72 hs
+      const toISO   = d => d.toISOString().slice(0,10);
+
+      elDateFrom.value = toISO(range.from);
+      elDateTo.value   = toISO(range.to);
+    }
+  }
+
+  // Slider visual simple (llenar toda la barra por ahora)
   function refreshRangeFill(){
     if(!elRangeFill) return;
     const minVal = Number(elRangeMin.value || 0);
@@ -527,6 +555,7 @@ document.addEventListener("DOMContentLoaded", function(){
   function populateSelectOptions(selectEl, values){
     if(!selectEl) return;
     const current = selectEl.value;
+    // Mantener solo la primera opción ("Todas")
     while(selectEl.options.length > 1){
       selectEl.remove(1);
     }
@@ -538,6 +567,7 @@ document.addEventListener("DOMContentLoaded", function(){
       opt.textContent = v;
       selectEl.appendChild(opt);
     }
+    // Si el valor anterior sigue existiendo, lo mantenemos
     if(current && Array.from(selectEl.options).some(o => o.value === current)){
       selectEl.value = current;
     }
@@ -546,6 +576,7 @@ document.addEventListener("DOMContentLoaded", function(){
   function buildFiltersFromRows(){
     const plats = new Set();
     const reps  = new Set();
+    // Cuenta por ahora queda vacía (usamos "Todas")
     for(const row of state.allRows){
       if(row.plataforma) plats.add(row.plataforma);
       if(row.comprador)  reps.add(row.comprador);
@@ -637,7 +668,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- gráfico por provincia (barras horizontales) ---
+  // --- NUEVO: gráfico por provincia (barras horizontales) ---
   function updateProvinciaChart(rows){
     if(chartProv){
       chartProv.destroy();
@@ -699,7 +730,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- gráfico por tipo de proceso ---
+  // --- NUEVO: gráfico por tipo de proceso ---
   function updateTiposChart(rows){
     if(chartTipos){
       chartTipos.destroy();
@@ -761,7 +792,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- barras horizontales apiladas por repartición y estado ---
+  // --- CORREGIDO: barras horizontales apiladas por repartición y estado ---
   function updateBarsChart(rows){
     if(chartBars){
       chartBars.destroy();
@@ -933,17 +964,22 @@ document.addEventListener("DOMContentLoaded", function(){
       const compradorUpper = comprador.toUpperCase();
       const plataforma = (r.plataforma || "").toString();
 
+      // Plataforma (servidor también filtra, pero esto refina)
       if(selPlataforma && plataforma !== selPlataforma) return false;
 
+      // Cuenta (por ahora solo "Todas"; placeholder para futuro)
       if(selCuenta && selCuenta !== "") {
-        // futuro: filtrar por cuenta cuando venga en el API
+        // TODO: cuando tengamos el campo en el API, filtrar acá.
       }
 
+      // Repartición por select
       if(selReparticion && comprador !== selReparticion) return false;
 
+      // PAMI / Otras
       if(modePami === "pami" && !compradorUpper.includes("PAMI")) return false;
       if(modePami === "otras" && compradorUpper.includes("PAMI")) return false;
 
+      // Estado: EMERGENCIA / REGULAR (clasificación simple)
       const est = r._estado || computeEstado(r);
       if(modeEstado === "emergencia" && est !== "EMERGENCIA") return false;
       if(modeEstado === "regular" && est !== "REGULAR") return false;
@@ -951,10 +987,12 @@ document.addEventListener("DOMContentLoaded", function(){
       return true;
     });
 
+    // KPI principal
     if(elKpiProcesos){
       elKpiProcesos.textContent = formatInt(rows.length);
     }
 
+    // Actualizamos gráficos con los rows filtrados
     updateAllCharts(rows);
   }
 
@@ -963,12 +1001,13 @@ document.addEventListener("DOMContentLoaded", function(){
   // (mismos datos que usa Buscador)
   // -----------------------------------------
   async function loadData(){
-    const params = new URLSearchParams();
+    ensureDefaultDates();
 
-    // Solo mandamos fechas si el usuario las define.
+    const params = new URLSearchParams();
     if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
     if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
 
+    // Filtros server-side básicos (misma lógica que Buscador)
     if(elPlataforma && elPlataforma.value){
       params.set("platform", elPlataforma.value);
     }
@@ -976,7 +1015,8 @@ document.addEventListener("DOMContentLoaded", function(){
       params.set("buyer", elReparticion.value);
     }
 
-    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
+    // ⚠️ IMPORTANTE: el backend permite max page_size=200
+    params.set("page_size", "200");
 
     const url = "/api/oportunidades/buscador?" + params.toString();
 
@@ -1003,13 +1043,14 @@ document.addEventListener("DOMContentLoaded", function(){
       // Construimos opciones de filtros a partir de los datos
       buildFiltersFromRows();
 
-      // KPI + gráficos
+      // Actualizamos KPI y gráficos
       applyUiFilters();
 
       // Refrescamos la barrita del rango (visual)
       refreshRangeFill();
     } catch(err){
       console.error("Dimensiones: error al cargar datos", err);
+      state.allRows = [];
     }
   }
 
@@ -1046,11 +1087,13 @@ document.addEventListener("DOMContentLoaded", function(){
 
   if(elPlataforma){
     elPlataforma.addEventListener("change", () => {
+      // Re-cargamos desde el servidor con estos filtros
       loadData();
     });
   }
   if(elCuenta){
     elCuenta.addEventListener("change", () => {
+      // De momento solo filtra en cliente
       applyUiFilters();
     });
   }
@@ -1077,6 +1120,7 @@ document.addEventListener("DOMContentLoaded", function(){
   // -----------------------------------------
   // Init
   // -----------------------------------------
+  ensureDefaultDates();
   refreshRangeFill();
   loadData();
 });
