@@ -282,9 +282,6 @@
     }
   }
 </style>
-
-<!-- Carga de Chart.js para los gráficos de Dimensiones -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -395,17 +392,17 @@
           </div>
         </section>
 
-        <!-- Procesos por provincia (mapa) -->
+        <!-- Procesos por provincia (mapa / barras por provincia) -->
         <section class="chart-card" aria-labelledby="dimTitleMap">
           <header>
             <h3 id="dimTitleMap">Procesos por provincia</h3>
-            <small>Mapa de Argentina coloreado según cantidad de procesos.</small>
+            <small>Distribución de procesos según provincia.</small>
           </header>
           <div class="chart-body">
             <div class="map-placeholder" id="dimMapPlaceholder">
-              Mapa de Argentina<br>
-              (aquí luego incorporamos el mapa interactivo).
+              Aquí se mostrará el gráfico por provincia.
             </div>
+            <canvas id="dimChartProvincia" style="display:none;"></canvas>
           </div>
         </section>
       </div>
@@ -414,21 +411,21 @@
          FILA INFERIOR: TREEMAP + BARRAS + PIE
          ========================= #}
       <div class="dim-row-bottom">
-        <!-- Procesos por tipo (treemap) -->
+        <!-- Procesos por tipo -->
         <section class="chart-card" aria-labelledby="dimTitleTreemap">
           <header>
             <h3 id="dimTitleTreemap">Procesos por tipo</h3>
             <small>Distribución de procesos según el tipo de procedimiento.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder">
-              Aquí se mostrará el treemap de tipos de proceso.
+            <div class="chart-placeholder" id="dimTiposPlaceholder">
+              Aquí se mostrará el gráfico de procesos por tipo.
             </div>
-            <!-- A futuro: <canvas id="dimChartTreemap"></canvas> -->
+            <canvas id="dimChartTipos" style="display:none;"></canvas>
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (barras) -->
+        <!-- Proceso por repartición y estado (barras stacked horizontales) -->
         <section class="chart-card" aria-labelledby="dimTitleBars">
           <header>
             <h3 id="dimTitleBars">Proceso por repartición y estado</h3>
@@ -442,7 +439,7 @@
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (pie) -->
+        <!-- Proceso por repartición y estado (pie EMERGENCIA / REGULAR) -->
         <section class="chart-card" aria-labelledby="dimTitlePie">
           <header>
             <h3 id="dimTitlePie">Proceso por repartición y estado</h3>
@@ -483,15 +480,21 @@ document.addEventListener("DOMContentLoaded", function(){
   const canvasTimeline      = document.getElementById("dimChartTimeline");
   const canvasBars          = document.getElementById("dimChartBars");
   const canvasPie           = document.getElementById("dimChartPie");
+  const canvasProv          = document.getElementById("dimChartProvincia");
+  const canvasTipos         = document.getElementById("dimChartTipos");
 
   const placeholderTimeline = document.getElementById("dimTimelinePlaceholder");
   const placeholderBars     = document.getElementById("dimBarsPlaceholder");
   const placeholderPie      = document.getElementById("dimPiePlaceholder");
+  const placeholderMap      = document.getElementById("dimMapPlaceholder");
+  const placeholderTipos    = document.getElementById("dimTiposPlaceholder");
 
   // Instancias Chart.js
   let chartTimeline = null;
   let chartBars     = null;
   let chartPie      = null;
+  let chartProv     = null;
+  let chartTipos    = null;
 
   const state = {
     allRows: []  // datos crudos que vienen de /api/oportunidades/buscador
@@ -665,6 +668,131 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
+  // --- NUEVO: gráfico por provincia (barras horizontales) ---
+  function updateProvinciaChart(rows){
+    if(chartProv){
+      chartProv.destroy();
+      chartProv = null;
+    }
+    if(!canvasProv) return;
+
+    const counts = new Map();
+    for(const r of rows){
+      const prov = (r.provincia || "Sin provincia").toString();
+      counts.set(prov, (counts.get(prov) || 0) + 1);
+    }
+
+    let labels = Array.from(counts.keys());
+    labels.sort((a,b)=> counts.get(b) - counts.get(a));
+    labels = labels.slice(0, 10);
+    const data = labels.map(p => counts.get(p));
+
+    const hasData = labels.length > 0 && data.some(v => v > 0);
+    if(!hasData){
+      toggleChartVisibility(placeholderMap, canvasProv, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderMap, canvasProv, true);
+
+    const ctx = canvasProv.getContext("2d");
+    chartProv = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Procesos",
+          data: data
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          },
+          y: {
+            ticks: { autoSkip: false, maxTicksLimit: 10 }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `Procesos: ${ctx.parsed.x}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // --- NUEVO: gráfico por tipo de proceso ---
+  function updateTiposChart(rows){
+    if(chartTipos){
+      chartTipos.destroy();
+      chartTipos = null;
+    }
+    if(!canvasTipos) return;
+
+    const counts = new Map();
+    for(const r of rows){
+      const tipo = (r.tipo || "Sin tipo").toString();
+      counts.set(tipo, (counts.get(tipo) || 0) + 1);
+    }
+
+    let labels = Array.from(counts.keys());
+    labels.sort((a,b)=> counts.get(b) - counts.get(a));
+    labels = labels.slice(0, 8);
+    const data = labels.map(t => counts.get(t));
+
+    const hasData = labels.length > 0 && data.some(v => v > 0);
+    if(!hasData){
+      toggleChartVisibility(placeholderTipos, canvasTipos, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderTipos, canvasTipos, true);
+
+    const ctx = canvasTipos.getContext("2d");
+    chartTipos = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Procesos",
+          data: data
+        }]
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          },
+          y: {
+            ticks: { autoSkip: false, maxTicksLimit: 8 }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `Procesos: ${ctx.parsed.x}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // --- CORREGIDO: barras horizontales apiladas por repartición y estado ---
   function updateBarsChart(rows){
     if(chartBars){
       chartBars.destroy();
@@ -684,7 +812,6 @@ document.addEventListener("DOMContentLoaded", function(){
       }
     }
 
-    // Total por repartición para ordenar
     const buyersSet = new Set([
       ...Object.keys(emerg),
       ...Object.keys(reg)
@@ -695,8 +822,7 @@ document.addEventListener("DOMContentLoaded", function(){
       const tb = (emerg[b] || 0) + (reg[b] || 0);
       return tb - ta;
     });
-    // Limitamos a top 8 para que no explote
-    buyers = buyers.slice(0, 8);
+    buyers = buyers.slice(0, 10);
 
     const dataEmerg = buyers.map(b => emerg[b] || 0);
     const dataReg   = buyers.map(b => reg[b] || 0);
@@ -726,23 +852,24 @@ document.addEventListener("DOMContentLoaded", function(){
         ]
       },
       options: {
+        indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
         scales: {
           x: {
             stacked: true,
-            ticks: { autoSkip: true, maxTicksLimit: 8 }
+            beginAtZero: true,
+            ticks: { precision: 0 }
           },
           y: {
             stacked: true,
-            beginAtZero: true,
-            ticks: { precision: 0 }
+            ticks: { autoSkip: false, maxTicksLimit: 10 }
           }
         },
         plugins: {
           tooltip: {
             callbacks: {
-              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.x}`
             }
           }
         }
@@ -806,6 +933,8 @@ document.addEventListener("DOMContentLoaded", function(){
 
   function updateAllCharts(rows){
     updateTimelineChart(rows);
+    updateProvinciaChart(rows);
+    updateTiposChart(rows);
     updateBarsChart(rows);
     updatePieChart(rows);
   }
@@ -885,10 +1014,8 @@ document.addEventListener("DOMContentLoaded", function(){
     if(elReparticion && elReparticion.value){
       params.set("buyer", elReparticion.value);
     }
-        // Provincia no está en la UI de este dashboard (se puede sumar a futuro)
 
-    // IMPORTANTE: el backend sólo permite page_size hasta 200
-    params.set("page_size", "200");
+    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
 
     const url = "/api/oportunidades/buscador?" + params.toString();
 

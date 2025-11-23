@@ -1708,6 +1708,8 @@ def api_oportunidades_buscador(
     platf_col  = _opp_pick(df_filtered, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
     presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
     desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
+    # 👉 NUEVO: columna para Tipo / Modalidad / Procedimiento
+    tipo_col   = _opp_pick(df_filtered, ["Tipo", "Modalidad", "Procedimiento"])
 
     total = int(len(df_filtered))
     pages = max(1, int(np.ceil(total / page_size)))
@@ -1754,6 +1756,9 @@ def api_oportunidades_buscador(
         # Descripción / Objeto
         v_desc = _san_str(rec.get(desc_col, "")) if desc_col else ""
 
+        # 👉 NUEVO: Tipo de proceso / modalidad / procedimiento
+        v_tipo = _san_str(rec.get(tipo_col, "")) if tipo_col else ""
+
         rows_json.append(
             {
                 "proceso": v_proc,
@@ -1764,6 +1769,7 @@ def api_oportunidades_buscador(
                 "presupuesto": presu_num,
                 "presupuesto_fmt": presu_fmt,
                 "descripcion": v_desc,
+                "tipo": v_tipo,   # 👈 NUEVO CAMPO
             }
         )
 
