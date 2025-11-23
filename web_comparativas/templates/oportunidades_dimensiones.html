@@ -282,9 +282,6 @@
     }
   }
 </style>
-
-<!-- 👇 IMPORTAMOS CHART.JS PARA PODER USAR new Chart(...) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -510,38 +507,9 @@ document.addEventListener("DOMContentLoaded", function(){
     return fmtInt.format(n);
   }
 
-  // -----------------------------------------
-  // 72 horas hábiles por defecto (como Buscador)
-  // -----------------------------------------
-  function getLastBusinessDaysRange(nDays){
-    const today = new Date();
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    let date = new Date(end);
-    let collected = [];
-
-    while(collected.length < nDays){
-      const day = date.getDay(); // 0 dom, 6 sáb
-      if(day !== 0 && day !== 6){
-        collected.push(new Date(date));
-      }
-      date.setDate(date.getDate() - 1);
-    }
-
-    const from = collected[collected.length - 1];
-    return { from, to: end };
-  }
-
-  function ensureDefaultDates(){
-    if(!elDateFrom.value && !elDateTo.value){
-      const range = getLastBusinessDaysRange(3); // 3 días hábiles ~ 72 hs
-      const toISO   = d => d.toISOString().slice(0,10);
-
-      elDateFrom.value = toISO(range.from);
-      elDateTo.value   = toISO(range.to);
-    }
-  }
-
-  // Slider visual simple (llenar toda la barra por ahora)
+  // -----------------------------
+  // Slider visual
+  // -----------------------------
   function refreshRangeFill(){
     if(!elRangeFill) return;
     const minVal = Number(elRangeMin.value || 0);
@@ -550,6 +518,32 @@ document.addEventListener("DOMContentLoaded", function(){
     const high = Math.max(minVal, maxVal);
     elRangeFill.style.left  = low + "%";
     elRangeFill.style.width = (high - low) + "%";
+  }
+
+  // -----------------------------
+  // Utilidades de fecha
+  // -----------------------------
+  function parseRowDate(fechaStr){
+    // fecha viene como "dd/mm/aaaa"
+    if(!fechaStr) return null;
+    const parts = fechaStr.split("/");
+    if(parts.length !== 3) return null;
+    const dd   = Number(parts[0]);
+    const mm   = Number(parts[1]);
+    const yyyy = Number(parts[2]);
+    if(!yyyy || !mm || !dd) return null;
+    return new Date(yyyy, mm - 1, dd);
+  }
+
+  function getMinMaxRowDate(rows){
+    let min = null, max = null;
+    for(const r of rows){
+      const d = parseRowDate(r.fecha);
+      if(!d) continue;
+      if(!min || d < min) min = d;
+      if(!max || d > max) max = d;
+    }
+    return {min, max};
   }
 
   // -----------------------------------------
@@ -570,7 +564,6 @@ document.addEventListener("DOMContentLoaded", function(){
       opt.textContent = v;
       selectEl.appendChild(opt);
     }
-    // Si el valor anterior sigue existiendo, lo mantenemos
     if(current && Array.from(selectEl.options).some(o => o.value === current)){
       selectEl.value = current;
     }
@@ -579,7 +572,6 @@ document.addEventListener("DOMContentLoaded", function(){
   function buildFiltersFromRows(){
     const plats = new Set();
     const reps  = new Set();
-    // Cuenta por ahora queda vacía (usamos "Todas")
     for(const row of state.allRows){
       if(row.plataforma) plats.add(row.plataforma);
       if(row.comprador)  reps.add(row.comprador);
@@ -671,7 +663,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- NUEVO: gráfico por provincia (barras horizontales) ---
+  // --- gráfico por provincia (barras horizontales) ---
   function updateProvinciaChart(rows){
     if(chartProv){
       chartProv.destroy();
@@ -733,7 +725,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- NUEVO: gráfico por tipo de proceso ---
+  // --- gráfico por tipo de proceso ---
   function updateTiposChart(rows){
     if(chartTipos){
       chartTipos.destroy();
@@ -795,7 +787,7 @@ document.addEventListener("DOMContentLoaded", function(){
     });
   }
 
-  // --- CORREGIDO: barras horizontales apiladas por repartición y estado ---
+  // --- barras horizontales apiladas por repartición y estado ---
   function updateBarsChart(rows){
     if(chartBars){
       chartBars.destroy();
@@ -962,17 +954,26 @@ document.addEventListener("DOMContentLoaded", function(){
       : null;
     const modeEstado = chipEstado ? chipEstado.dataset.val : "todos";
 
+    // Fechas seleccionadas en la UI
+    const df = elDateFrom && elDateFrom.value ? new Date(elDateFrom.value) : null;
+    const dt = elDateTo   && elDateTo.value   ? new Date(elDateTo.value)   : null;
+
     rows = rows.filter(r => {
       const comprador = (r.comprador || "").toString();
       const compradorUpper = comprador.toUpperCase();
       const plataforma = (r.plataforma || "").toString();
 
-      // Plataforma (servidor también filtra, pero esto refina)
+      // Fecha: se compara contra r.fecha (dd/mm/aaaa)
+      const rowDate = parseRowDate(r.fecha);
+      if(df && rowDate && rowDate < df) return false;
+      if(dt && rowDate && rowDate > dt) return false;
+
+      // Plataforma
       if(selPlataforma && plataforma !== selPlataforma) return false;
 
-      // Cuenta (por ahora solo "Todas"; placeholder para futuro)
+      // Cuenta (placeholder para futuro: de momento no filtra nada)
       if(selCuenta && selCuenta !== "") {
-        // TODO: cuando tengamos el campo en el API, filtrar acá.
+        // cuando tengas cuenta en el API, podés filtrar acá
       }
 
       // Repartición por select
@@ -1001,23 +1002,11 @@ document.addEventListener("DOMContentLoaded", function(){
 
   // -----------------------------------------
   // Cargar datos desde /api/oportunidades/buscador
-  // (mismos datos que usa Buscador)
+  // (TODAS las filas, sin filtros; filtros se aplican en el cliente)
   // -----------------------------------------
   async function loadData(){
-    ensureDefaultDates();
-
     const params = new URLSearchParams();
-    if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
-    if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
-
-    // Filtros server-side básicos (misma lógica que Buscador)
-    if(elPlataforma && elPlataforma.value){
-      params.set("platform", elPlataforma.value);
-    }
-    if(elReparticion && elReparticion.value){
-      params.set("buyer", elReparticion.value);
-    }
-
+    params.set("page", "1");
     params.set("page_size", "5000"); // traemos un tamaño grande para análisis
 
     const url = "/api/oportunidades/buscador?" + params.toString();
@@ -1044,7 +1033,17 @@ document.addEventListener("DOMContentLoaded", function(){
       // Construimos opciones de filtros a partir de los datos
       buildFiltersFromRows();
 
-      // Actualizamos KPI y gráficos
+      // Definimos fechas mín/máx automáticas según los datos
+      const range = getMinMaxRowDate(state.allRows);
+      const toISO = d => d.toISOString().slice(0,10);
+      if(range.min && !elDateFrom.value){
+        elDateFrom.value = toISO(range.min);
+      }
+      if(range.max && !elDateTo.value){
+        elDateTo.value = toISO(range.max);
+      }
+
+      // KPI + gráficos
       applyUiFilters();
 
       // Refrescamos la barrita del rango (visual)
@@ -1087,27 +1086,31 @@ document.addEventListener("DOMContentLoaded", function(){
 
   if(elPlataforma){
     elPlataforma.addEventListener("change", () => {
-      // Re-cargamos desde el servidor con estos filtros
-      loadData();
+      applyUiFilters();
     });
   }
   if(elCuenta){
     elCuenta.addEventListener("change", () => {
-      // De momento solo filtra en cliente
       applyUiFilters();
     });
   }
   if(elReparticion){
     elReparticion.addEventListener("change", () => {
-      loadData();
+      applyUiFilters();
     });
   }
 
   if(elDateFrom){
-    elDateFrom.addEventListener("change", () => loadData());
+    elDateFrom.addEventListener("change", () => {
+      applyUiFilters();
+      refreshRangeFill();
+    });
   }
   if(elDateTo){
-    elDateTo.addEventListener("change", () => loadData());
+    elDateTo.addEventListener("change", () => {
+      applyUiFilters();
+      refreshRangeFill();
+    });
   }
 
   if(elRangeMin){
@@ -1120,7 +1123,6 @@ document.addEventListener("DOMContentLoaded", function(){
   // -----------------------------------------
   // Init
   // -----------------------------------------
-  ensureDefaultDates();
   refreshRangeFill();
   loadData();
 });
