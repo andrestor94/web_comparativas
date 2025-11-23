@@ -189,7 +189,7 @@
     gap:10px;
   }
 
-  /* Bloque de gráficos medio: timeline + mapa (barras por provincia) */
+  /* Bloque de gráficos medio: timeline + mapa */
   .dim-row-middle{
     display:grid;
     grid-template-columns:2fr 1.1fr;
@@ -197,7 +197,7 @@
     align-items:stretch;
   }
 
-  /* Bloque inferior: treemap (tipo) + barras + pie */
+  /* Bloque inferior: treemap + barras + pie */
   .dim-row-bottom{
     display:grid;
     grid-template-columns:1.2fr 1.4fr 1.1fr;
@@ -260,11 +260,6 @@
     color:#1f2937;
     text-align:center;
     padding:8px;
-  }
-
-  canvas{
-    width:100% !important;
-    height:100% !important;
   }
 
   /* Responsive */
@@ -357,7 +352,7 @@
       </div>
 
       {# =========================
-         FILA ESTADO (EMERGENCIA / REGULAR)
+         FILA ESTADO (PAMI / OTRAS + ESTADO)
          ========================= #}
       <div class="dim-row-state">
         <div class="filter-card">
@@ -380,7 +375,7 @@
       </div>
 
       {# =========================
-         FILA MEDIA: LÍNEA DE TIEMPO + PROVINCIA
+         FILA MEDIA: LÍNEA DE TIEMPO + MAPA
          ========================= #}
       <div class="dim-row-middle">
         <!-- Apertura de procesos en el tiempo -->
@@ -390,72 +385,71 @@
             <small>Distribución diaria de aperturas según el período seleccionado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="phTimeline">
+            <div class="chart-placeholder" id="dimTimelinePlaceholder">
               Aquí se mostrará el gráfico de barras por día (timeline).
             </div>
-            <canvas id="dimChartTimeline" aria-label="Timeline de aperturas" role="img"></canvas>
+            <canvas id="dimChartTimeline" style="display:none;"></canvas>
           </div>
         </section>
 
-        <!-- Procesos por provincia (barras) -->
+        <!-- Procesos por provincia (mapa) -->
         <section class="chart-card" aria-labelledby="dimTitleMap">
           <header>
             <h3 id="dimTitleMap">Procesos por provincia</h3>
-            <small>Distribución de procesos por provincia en el período seleccionado.</small>
+            <small>Mapa de Argentina coloreado según cantidad de procesos.</small>
           </header>
           <div class="chart-body">
-            <div class="map-placeholder" id="phProvincia">
-              Mapa de Argentina / barras por provincia<br>
+            <div class="map-placeholder" id="dimMapPlaceholder">
+              Mapa de Argentina<br>
               (aquí luego incorporamos el mapa interactivo).
             </div>
-            <canvas id="dimChartProvincia" aria-label="Procesos por provincia" role="img"></canvas>
           </div>
         </section>
       </div>
 
       {# =========================
-         FILA INFERIOR: TIPO + BARRAS + PIE
+         FILA INFERIOR: TREEMAP + BARRAS + PIE
          ========================= #}
       <div class="dim-row-bottom">
-        <!-- Procesos por tipo (usamos Plataforma como proxy de tipo) -->
+        <!-- Procesos por tipo (treemap) -->
         <section class="chart-card" aria-labelledby="dimTitleTreemap">
           <header>
             <h3 id="dimTitleTreemap">Procesos por tipo</h3>
-            <small>Distribución de procesos según la plataforma / tipo de procedimiento.</small>
+            <small>Distribución de procesos según el tipo de procedimiento.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="phTipo">
-              Aquí se mostrará el gráfico por tipo de proceso.
+            <div class="chart-placeholder">
+              Aquí se mostrará el treemap de tipos de proceso.
             </div>
-            <canvas id="dimChartTipo" aria-label="Procesos por tipo" role="img"></canvas>
+            <!-- A futuro: <canvas id="dimChartTreemap"></canvas> -->
           </div>
         </section>
 
-        <!-- Procesos por repartición y estado (barras) -->
+        <!-- Proceso por repartición y estado (barras) -->
         <section class="chart-card" aria-labelledby="dimTitleBars">
           <header>
             <h3 id="dimTitleBars">Proceso por repartición y estado</h3>
             <small>Cantidad de procesos por repartición segmentados por estado.</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="phBars">
+            <div class="chart-placeholder" id="dimBarsPlaceholder">
               Aquí se mostrará el gráfico de barras por repartición y estado.
             </div>
-            <canvas id="dimChartBars" aria-label="Procesos por repartición y estado" role="img"></canvas>
+            <canvas id="dimChartBars" style="display:none;"></canvas>
           </div>
         </section>
 
-        <!-- Procesos por estado (pie) -->
+        <!-- Proceso por repartición y estado (pie) -->
         <section class="chart-card" aria-labelledby="dimTitlePie">
           <header>
             <h3 id="dimTitlePie">Proceso por repartición y estado</h3>
             <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
           </header>
           <div class="chart-body">
-            <div class="chart-placeholder" id="phPie">
+            <div class="chart-placeholder" id="dimPiePlaceholder">
               Aquí se mostrará el gráfico de torta de estados.
             </div>
-            <canvas id="dimChartPie" aria-label="Procesos por estado" role="img"></canvas>
+            <canvas id="dimChartPie" style="display:none;"></canvas>
           </div>
         </section>
       </div>
@@ -466,7 +460,7 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function(){
-  // ---------- ELEMENTOS BASE ----------
+  // Elementos base
   const elDateFrom      = document.getElementById("dimDateFrom");
   const elDateTo        = document.getElementById("dimDateTo");
   const elRangeFill     = document.getElementById("dimDateFill");
@@ -482,18 +476,19 @@ document.addEventListener("DOMContentLoaded", function(){
   const chipsPamiGroup  = document.getElementById("dimSwPAMI");
   const chipsEstadoGroup= document.getElementById("dimSwEstado");
 
-  // Placeholders y canvases
-  const phTimeline    = document.getElementById("phTimeline");
-  const phProvincia   = document.getElementById("phProvincia");
-  const phTipo        = document.getElementById("phTipo");
-  const phBars        = document.getElementById("phBars");
-  const phPie         = document.getElementById("phPie");
+  // Canvases y placeholders de gráficos
+  const canvasTimeline      = document.getElementById("dimChartTimeline");
+  const canvasBars          = document.getElementById("dimChartBars");
+  const canvasPie           = document.getElementById("dimChartPie");
 
-  const cvTimeline    = document.getElementById("dimChartTimeline");
-  const cvProvincia   = document.getElementById("dimChartProvincia");
-  const cvTipo        = document.getElementById("dimChartTipo");
-  const cvBars        = document.getElementById("dimChartBars");
-  const cvPie         = document.getElementById("dimChartPie");
+  const placeholderTimeline = document.getElementById("dimTimelinePlaceholder");
+  const placeholderBars     = document.getElementById("dimBarsPlaceholder");
+  const placeholderPie      = document.getElementById("dimPiePlaceholder");
+
+  // Instancias Chart.js
+  let chartTimeline = null;
+  let chartBars     = null;
+  let chartPie      = null;
 
   const state = {
     allRows: []  // datos crudos que vienen de /api/oportunidades/buscador
@@ -506,12 +501,14 @@ document.addEventListener("DOMContentLoaded", function(){
     return fmtInt.format(n);
   }
 
-  // ---------- FECHAS: 72 HS HÁBILES POR DEFECTO ----------
+  // -----------------------------------------
+  // 72 horas hábiles por defecto (como Buscador)
+  // -----------------------------------------
   function getLastBusinessDaysRange(nDays){
     const today = new Date();
     const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     let date = new Date(end);
-    const collected = [];
+    let collected = [];
 
     while(collected.length < nDays){
       const day = date.getDay(); // 0 dom, 6 sáb
@@ -535,7 +532,7 @@ document.addEventListener("DOMContentLoaded", function(){
     }
   }
 
-  // Slider visual simple
+  // Slider visual simple (llenar toda la barra por ahora)
   function refreshRangeFill(){
     if(!elRangeFill) return;
     const minVal = Number(elRangeMin.value || 0);
@@ -546,10 +543,13 @@ document.addEventListener("DOMContentLoaded", function(){
     elRangeFill.style.width = (high - low) + "%";
   }
 
-  // ---------- SELECTS DESDE DATOS ----------
+  // -----------------------------------------
+  // Construcción de filtros (selects) a partir de los rows
+  // -----------------------------------------
   function populateSelectOptions(selectEl, values){
     if(!selectEl) return;
     const current = selectEl.value;
+    // Mantener solo la primera opción ("Todas")
     while(selectEl.options.length > 1){
       selectEl.remove(1);
     }
@@ -561,6 +561,7 @@ document.addEventListener("DOMContentLoaded", function(){
       opt.textContent = v;
       selectEl.appendChild(opt);
     }
+    // Si el valor anterior sigue existiendo, lo mantenemos
     if(current && Array.from(selectEl.options).some(o => o.value === current)){
       selectEl.value = current;
     }
@@ -569,7 +570,7 @@ document.addEventListener("DOMContentLoaded", function(){
   function buildFiltersFromRows(){
     const plats = new Set();
     const reps  = new Set();
-    // Cuenta queda reservada para futuro
+    // Cuenta por ahora queda vacía (usamos "Todas")
     for(const row of state.allRows){
       if(row.plataforma) plats.add(row.plataforma);
       if(row.comprador)  reps.add(row.comprador);
@@ -578,269 +579,237 @@ document.addEventListener("DOMContentLoaded", function(){
     populateSelectOptions(elReparticion, reps);
   }
 
-  // ---------- ESTADO EMERGENCIA / REGULAR ----------
+  // -----------------------------------------
+  // Clasificación simple de estado (EMERGENCIA / REGULAR)
+  // usando la descripción como aproximación
+  // -----------------------------------------
   function computeEstado(row){
     const desc = (row.descripcion || "").toString().toLowerCase();
     if(desc.includes("emergencia")) return "EMERGENCIA";
     return "REGULAR";
   }
 
-  // ---------- PARSE DE FECHA DEVUELTA POR LA API (dd/mm/yyyy) ----------
-  function parseApiDate(str){
-    if(!str) return null;
-    const t = String(str).trim();
-    if(!t) return null;
-    const parts = t.split("/");
-    if(parts.length === 3){
-      const d = parseInt(parts[0],10);
-      const m = parseInt(parts[1],10) - 1;
-      const y = parseInt(parts[2],10);
-      if(!isNaN(d) && !isNaN(m) && !isNaN(y)){
-        return new Date(y,m,d);
-      }
+  // -----------------------------------------
+  // Helpers para gráficos
+  // -----------------------------------------
+  function toggleChartVisibility(placeholder, canvas, hasData){
+    if(!placeholder || !canvas) return;
+    if(hasData){
+      placeholder.style.display = "none";
+      canvas.style.display = "block";
+    }else{
+      placeholder.style.display = "flex";
+      canvas.style.display = "none";
     }
-    const d2 = new Date(t);
-    return isNaN(d2.getTime()) ? null : d2;
   }
 
-  // ---------- CHART.JS INSTANCIAS ----------
-  let chartTimeline = null;
-  let chartProvincia = null;
-  let chartTipo = null;
-  let chartBars = null;
-  let chartPie = null;
-
-  function ensureChart(ctx, type, baseConfig, currentInstanceHolder){
-    if(!window.Chart || !ctx) return null;
-    if(currentInstanceHolder){
-      currentInstanceHolder.data = baseConfig.data;
-      currentInstanceHolder.options = baseConfig.options || {};
-      currentInstanceHolder.update();
-      return currentInstanceHolder;
+  function updateTimelineChart(rows){
+    if(chartTimeline){
+      chartTimeline.destroy();
+      chartTimeline = null;
     }
-    return new Chart(ctx, {
-      type: type,
-      data: baseConfig.data,
-      options: baseConfig.options || {}
-    });
-  }
+    if(!canvasTimeline) return;
 
-  function togglePlaceholder(phEl, hasData){
-    if(!phEl) return;
-    phEl.style.display = hasData ? "none" : "flex";
-  }
+    const counts = new Map();
+    for(const r of rows){
+      const f = r.fecha;
+      if(!f) continue;
+      counts.set(f, (counts.get(f) || 0) + 1);
+    }
+    const labels = Array.from(counts.keys()).sort();
+    const data = labels.map(d => counts.get(d));
 
-  // ---------- ACTUALIZAR GRÁFICOS ----------
-  function updateCharts(rows){
-    const hasData = rows && rows.length > 0;
-    // Placeholders generales
-    togglePlaceholder(phTimeline,  hasData);
-    togglePlaceholder(phProvincia, hasData);
-    togglePlaceholder(phTipo,      hasData);
-    togglePlaceholder(phBars,      hasData);
-    togglePlaceholder(phPie,       hasData);
-
-    if(!hasData || !window.Chart){
-      // Si no hay datos o no está Chart, destruimos si existían
+    if(labels.length === 0){
+      toggleChartVisibility(placeholderTimeline, canvasTimeline, false);
       return;
     }
 
-    // --- Timeline por fecha ---
-    const byDate = new Map();
-    for(const r of rows){
-      const f = (r.fecha || "").toString().trim();
-      if(!f) continue;
-      byDate.set(f, (byDate.get(f) || 0) + 1);
-    }
-    const dateLabels = Array.from(byDate.keys())
-      .sort((a,b)=>{
-        const da = parseApiDate(a) || new Date(0);
-        const db = parseApiDate(b) || new Date(0);
-        return da - db;
-      });
-    const dateCounts = dateLabels.map(d=>byDate.get(d) || 0);
+    toggleChartVisibility(placeholderTimeline, canvasTimeline, true);
 
-    if(cvTimeline){
-      const ctxT = cvTimeline.getContext("2d");
-      chartTimeline = ensureChart(ctxT, "bar", {
-        data: {
-          labels: dateLabels,
-          datasets: [{
-            label: "Procesos",
-            data: dateCounts
-          }]
-        },
-        options: {
-          responsive:true,
-          maintainAspectRatio:false,
-          scales:{
-            x:{ticks:{autoSkip:true,maxTicksLimit:8}},
-            y:{beginAtZero:true}
+    const ctx = canvasTimeline.getContext("2d");
+    chartTimeline = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Procesos",
+          data: data
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            ticks: { autoSkip: true, maxTicksLimit: 10 }
           },
-          plugins:{
-            legend:{display:false}
-          }
-        }
-      }, chartTimeline);
-    }
-
-    // --- Procesos por provincia ---
-    const byProv = new Map();
-    for(const r of rows){
-      const p = (r.provincia || "Sin provincia").toString().trim() || "Sin provincia";
-      byProv.set(p, (byProv.get(p) || 0) + 1);
-    }
-    let provEntries = Array.from(byProv.entries())
-      .sort((a,b)=>b[1] - a[1]);
-    // Top 10 + "Otras"
-    if(provEntries.length > 10){
-      const top = provEntries.slice(0,10);
-      const rest = provEntries.slice(10);
-      const otrasCount = rest.reduce((acc,[,v])=>acc+v,0);
-      top.push(["Otras", otrasCount]);
-      provEntries = top;
-    }
-    const provLabels = provEntries.map(([k])=>k);
-    const provCounts = provEntries.map(([,v])=>v);
-
-    if(cvProvincia){
-      const ctxP = cvProvincia.getContext("2d");
-      chartProvincia = ensureChart(ctxP, "bar", {
-        data:{
-          labels: provLabels,
-          datasets:[{
-            label:"Procesos",
-            data: provCounts
-          }]
-        },
-        options:{
-          indexAxis:"y",
-          responsive:true,
-          maintainAspectRatio:false,
-          scales:{
-            x:{beginAtZero:true}
-          },
-          plugins:{legend:{display:false}}
-        }
-      }, chartProvincia);
-    }
-
-    // --- Procesos por tipo (plataforma como proxy) ---
-    const byPlat = new Map();
-    for(const r of rows){
-      const p = (r.plataforma || "Sin plataforma").toString().trim() || "Sin plataforma";
-      byPlat.set(p, (byPlat.get(p) || 0) + 1);
-    }
-    let platEntries = Array.from(byPlat.entries())
-      .sort((a,b)=>b[1]-a[1]);
-    if(platEntries.length > 12){
-      const top = platEntries.slice(0,12);
-      const rest = platEntries.slice(12);
-      const otras = rest.reduce((acc,[,v])=>acc+v,0);
-      top.push(["Otras", otras]);
-      platEntries = top;
-    }
-    const platLabels = platEntries.map(([k])=>k);
-    const platCounts = platEntries.map(([,v])=>v);
-
-    if(cvTipo){
-      const ctxTipo = cvTipo.getContext("2d");
-      chartTipo = ensureChart(ctxTipo, "bar", {
-        data:{
-          labels: platLabels,
-          datasets:[{
-            label:"Procesos",
-            data: platCounts
-          }]
-        },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          scales:{y:{beginAtZero:true}},
-          plugins:{legend:{display:false}}
-        }
-      }, chartTipo);
-    }
-
-    // --- Barras por repartición y estado ---
-    const byRepState = new Map(); // key: comprador, value: {EMERGENCIA:x, REGULAR:y}
-    for(const r of rows){
-      const rep = (r.comprador || "Sin repartición").toString().trim() || "Sin repartición";
-      const est = r._estado || computeEstado(r);
-      if(!byRepState.has(rep)){
-        byRepState.set(rep, {EMERGENCIA:0, REGULAR:0});
-      }
-      const bucket = byRepState.get(rep);
-      if(est === "EMERGENCIA") bucket.EMERGENCIA += 1;
-      else bucket.REGULAR += 1;
-    }
-    let repEntries = Array.from(byRepState.entries())
-      .sort((a,b)=>{
-        const at = a[1].EMERGENCIA + a[1].REGULAR;
-        const bt = b[1].EMERGENCIA + b[1].REGULAR;
-        return bt - at;
-      });
-    if(repEntries.length > 10){
-      repEntries = repEntries.slice(0,10);
-    }
-    const repLabels = repEntries.map(([k])=>k);
-    const repEmerg = repEntries.map(([,v])=>v.EMERGENCIA);
-    const repReg   = repEntries.map(([,v])=>v.REGULAR);
-
-    if(cvBars){
-      const ctxBars = cvBars.getContext("2d");
-      chartBars = ensureChart(ctxBars, "bar", {
-        data:{
-          labels: repLabels,
-          datasets:[
-            {
-              label:"EMERGENCIA",
-              data:repEmerg
-            },
-            {
-              label:"REGULAR",
-              data:repReg
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
             }
-          ]
+          }
         },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false,
-          scales:{
-            x:{stacked:true},
-            y:{stacked:true,beginAtZero:true}
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `Procesos: ${ctx.parsed.y}`
+            }
           }
         }
-      }, chartBars);
-    }
-
-    // --- Pie por estado global ---
-    let totalEmerg = 0;
-    let totalReg   = 0;
-    for(const r of rows){
-      const est = r._estado || computeEstado(r);
-      if(est === "EMERGENCIA") totalEmerg++;
-      else totalReg++;
-    }
-
-    if(cvPie){
-      const ctxPie = cvPie.getContext("2d");
-      chartPie = ensureChart(ctxPie, "pie", {
-        data:{
-          labels:["EMERGENCIA","REGULAR"],
-          datasets:[{
-            data:[totalEmerg, totalReg]
-          }]
-        },
-        options:{
-          responsive:true,
-          maintainAspectRatio:false
-        }
-      }, chartPie);
-    }
+      }
+    });
   }
 
-  // ---------- APLICAR FILTROS UI SOBRE state.allRows ----------
+  function updateBarsChart(rows){
+    if(chartBars){
+      chartBars.destroy();
+      chartBars = null;
+    }
+    if(!canvasBars) return;
+
+    const emerg = {};
+    const reg   = {};
+    for(const r of rows){
+      const buyer = (r.comprador || "Sin repartición").toString();
+      const est   = r._estado || computeEstado(r);
+      if(est === "EMERGENCIA"){
+        emerg[buyer] = (emerg[buyer] || 0) + 1;
+      }else{
+        reg[buyer] = (reg[buyer] || 0) + 1;
+      }
+    }
+
+    // Total por repartición para ordenar
+    const buyersSet = new Set([
+      ...Object.keys(emerg),
+      ...Object.keys(reg)
+    ]);
+    let buyers = Array.from(buyersSet);
+    buyers.sort((a,b)=>{
+      const ta = (emerg[a] || 0) + (reg[a] || 0);
+      const tb = (emerg[b] || 0) + (reg[b] || 0);
+      return tb - ta;
+    });
+    // Limitamos a top 8 para que no explote
+    buyers = buyers.slice(0, 8);
+
+    const dataEmerg = buyers.map(b => emerg[b] || 0);
+    const dataReg   = buyers.map(b => reg[b] || 0);
+
+    const hasData = buyers.length > 0 && (dataEmerg.some(v => v>0) || dataReg.some(v => v>0));
+    if(!hasData){
+      toggleChartVisibility(placeholderBars, canvasBars, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderBars, canvasBars, true);
+
+    const ctx = canvasBars.getContext("2d");
+    chartBars = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: buyers,
+        datasets: [
+          {
+            label: "EMERGENCIA",
+            data: dataEmerg
+          },
+          {
+            label: "REGULAR",
+            data: dataReg
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { autoSkip: true, maxTicksLimit: 8 }
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { precision: 0 }
+          }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updatePieChart(rows){
+    if(chartPie){
+      chartPie.destroy();
+      chartPie = null;
+    }
+    if(!canvasPie) return;
+
+    let cntEmerg = 0;
+    let cntReg   = 0;
+    for(const r of rows){
+      const est = r._estado || computeEstado(r);
+      if(est === "EMERGENCIA") cntEmerg++;
+      else cntReg++;
+    }
+
+    const hasData = (cntEmerg + cntReg) > 0;
+    if(!hasData){
+      toggleChartVisibility(placeholderPie, canvasPie, false);
+      return;
+    }
+
+    toggleChartVisibility(placeholderPie, canvasPie, true);
+
+    const ctx = canvasPie.getContext("2d");
+    chartPie = new Chart(ctx, {
+      type: "pie",
+      data: {
+        labels: ["EMERGENCIA", "REGULAR"],
+        datasets: [{
+          data: [cntEmerg, cntReg]
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "bottom"
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const total = cntEmerg + cntReg || 1;
+                const val   = ctx.parsed;
+                const pct   = (val * 100 / total).toFixed(1);
+                return `${ctx.label}: ${val} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function updateAllCharts(rows){
+    updateTimelineChart(rows);
+    updateBarsChart(rows);
+    updatePieChart(rows);
+  }
+
+  // -----------------------------------------
+  // Aplicar filtros de UI sobre state.allRows
+  // -----------------------------------------
   function applyUiFilters(){
     let rows = state.allRows.slice();
 
@@ -858,36 +827,17 @@ document.addEventListener("DOMContentLoaded", function(){
       : null;
     const modeEstado = chipEstado ? chipEstado.dataset.val : "todos";
 
-    let fromDate = null;
-    let toDate = null;
-    if(elDateFrom && elDateFrom.value){
-      fromDate = new Date(elDateFrom.value); // yyyy-mm-dd
-    }
-    if(elDateTo && elDateTo.value){
-      toDate = new Date(elDateTo.value);
-      // incluímos todo el día
-      toDate = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate(), 23,59,59,999);
-    }
-
     rows = rows.filter(r => {
       const comprador = (r.comprador || "").toString();
       const compradorUpper = comprador.toUpperCase();
       const plataforma = (r.plataforma || "").toString();
 
-      // Filtro por fechas (cliente)
-      if(fromDate || toDate){
-        const d = parseApiDate(r.fecha);
-        if(!d) return false;
-        if(fromDate && d < fromDate) return false;
-        if(toDate && d > toDate) return false;
-      }
-
-      // Plataforma
+      // Plataforma (servidor también filtra, pero esto refina)
       if(selPlataforma && plataforma !== selPlataforma) return false;
 
-      // Cuenta (placeholder futuro)
-      if(selCuenta && selCuenta !== ""){
-        // TODO: cuando tengamos el campo en el API
+      // Cuenta (por ahora solo "Todas"; placeholder para futuro)
+      if(selCuenta && selCuenta !== "") {
+        // TODO: cuando tengamos el campo en el API, filtrar acá.
       }
 
       // Repartición por select
@@ -897,7 +847,7 @@ document.addEventListener("DOMContentLoaded", function(){
       if(modePami === "pami" && !compradorUpper.includes("PAMI")) return false;
       if(modePami === "otras" && compradorUpper.includes("PAMI")) return false;
 
-      // Estado: EMERGENCIA / REGULAR
+      // Estado: EMERGENCIA / REGULAR (clasificación simple)
       const est = r._estado || computeEstado(r);
       if(modeEstado === "emergencia" && est !== "EMERGENCIA") return false;
       if(modeEstado === "regular" && est !== "REGULAR") return false;
@@ -910,17 +860,31 @@ document.addEventListener("DOMContentLoaded", function(){
       elKpiProcesos.textContent = formatInt(rows.length);
     }
 
-    // Actualizar gráficos con estos rows filtrados
-    updateCharts(rows);
+    // Actualizamos gráficos con los rows filtrados
+    updateAllCharts(rows);
   }
 
-  // ---------- CARGAR DATOS DESDE /api/oportunidades/buscador ----------
+  // -----------------------------------------
+  // Cargar datos desde /api/oportunidades/buscador
+  // (mismos datos que usa Buscador)
+  // -----------------------------------------
   async function loadData(){
     ensureDefaultDates();
 
     const params = new URLSearchParams();
-    // No filtramos por fecha en el servidor: traemos todo y filtramos en cliente
-    params.set("page_size", "5000");
+    if(elDateFrom && elDateFrom.value) params.set("date_from", elDateFrom.value);
+    if(elDateTo && elDateTo.value)     params.set("date_to", elDateTo.value);
+
+    // Filtros server-side básicos (misma lógica que Buscador)
+    if(elPlataforma && elPlataforma.value){
+      params.set("platform", elPlataforma.value);
+    }
+    if(elReparticion && elReparticion.value){
+      params.set("buyer", elReparticion.value);
+    }
+    // Provincia no está en la UI de este dashboard (se puede sumar a futuro)
+
+    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
 
     const url = "/api/oportunidades/buscador?" + params.toString();
 
@@ -928,9 +892,6 @@ document.addEventListener("DOMContentLoaded", function(){
       const resp = await fetch(url);
       if(!resp.ok){
         console.error("Dimensiones: error HTTP", resp.status);
-        state.allRows = [];
-        applyUiFilters();
-        refreshRangeFill();
         return;
       }
       const data = await resp.json();
@@ -956,13 +917,12 @@ document.addEventListener("DOMContentLoaded", function(){
       refreshRangeFill();
     } catch(err){
       console.error("Dimensiones: error al cargar datos", err);
-      state.allRows = [];
-      applyUiFilters();
-      refreshRangeFill();
     }
   }
 
-  // ---------- LISTENERS DE UI ----------
+  // -----------------------------------------
+  // Listeners de UI
+  // -----------------------------------------
   if(chipsPamiGroup){
     chipsPamiGroup.querySelectorAll(".chip").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -993,25 +953,27 @@ document.addEventListener("DOMContentLoaded", function(){
 
   if(elPlataforma){
     elPlataforma.addEventListener("change", () => {
-      applyUiFilters();
+      // Re-cargamos desde el servidor con estos filtros
+      loadData();
     });
   }
   if(elCuenta){
     elCuenta.addEventListener("change", () => {
+      // De momento solo filtra en cliente
       applyUiFilters();
     });
   }
   if(elReparticion){
     elReparticion.addEventListener("change", () => {
-      applyUiFilters();
+      loadData();
     });
   }
 
   if(elDateFrom){
-    elDateFrom.addEventListener("change", () => applyUiFilters());
+    elDateFrom.addEventListener("change", () => loadData());
   }
   if(elDateTo){
-    elDateTo.addEventListener("change", () => applyUiFilters());
+    elDateTo.addEventListener("change", () => loadData());
   }
 
   if(elRangeMin){
@@ -1021,7 +983,9 @@ document.addEventListener("DOMContentLoaded", function(){
     elRangeMax.addEventListener("input", refreshRangeFill);
   }
 
-  // ---------- INIT ----------
+  // -----------------------------------------
+  // Init
+  // -----------------------------------------
   ensureDefaultDates();
   refreshRangeFill();
   loadData();
