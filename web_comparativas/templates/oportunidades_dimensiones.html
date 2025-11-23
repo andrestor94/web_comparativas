@@ -882,9 +882,10 @@ document.addEventListener("DOMContentLoaded", function(){
     if(elReparticion && elReparticion.value){
       params.set("buyer", elReparticion.value);
     }
-    // Provincia no está en la UI de este dashboard (se puede sumar a futuro)
+        // Provincia no está en la UI de este dashboard (se puede sumar a futuro)
 
-    params.set("page_size", "5000"); // traemos un tamaño grande para análisis
+    // IMPORTANTE: el backend sólo permite page_size hasta 200
+    params.set("page_size", "200");
 
     const url = "/api/oportunidades/buscador?" + params.toString();
 
