@@ -1957,37 +1957,71 @@ def api_oportunidades_dimensiones(
         out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
         return out[:50]
 
-    def _agg_time_series():
+        def _agg_time_series(estado_col_name: str | None):
         """
-        Serie temporal por fecha de apertura:
-        [{date:'YYYY-MM-DD', count:int, budget:float}, ...]
+        Serie temporal por fecha de apertura con desglose por estado:
+        [
+          {
+            date: 'YYYY-MM-DD',
+            count: int,           # total (emergencia + regular)
+            budget: float,
+            emergencia: int,
+            regular: int
+          },
+          ...
+        ]
         """
         if not fecha_col:
             return []
 
-        fechas = df_filtered[fecha_col].apply(_opp_parse_date)
+        # Normalizamos fechas
         df_tmp = df_filtered.copy()
-        df_tmp["_fecha_norm"] = fechas
-
+        df_tmp["_fecha_norm"] = df_tmp[fecha_col].apply(_opp_parse_date)
         df_tmp = df_tmp[~df_tmp["_fecha_norm"].isna()]
         if df_tmp.empty:
             return []
 
+        # Monto numérico (si existe)
         if presu_col:
             df_tmp["_presu_num"] = df_tmp[presu_col].map(_opp_parse_number)
         else:
             df_tmp["_presu_num"] = 0.0
 
-        grp = df_tmp.groupby("_fecha_norm")
+        # Agrupamos por fecha y estado
+        rep_map = {}
+        for _, rec in df_tmp.iterrows():
+            d = rec["_fecha_norm"]
+            if pd.isna(d):
+                continue
+
+            if estado_col_name:
+                est_raw = rec.get(estado_col_name, "")
+                est_norm = _norm_estado(est_raw)  # EMERGENCIA / REGULAR
+            else:
+                est_norm = "REGULAR"
+
+            bucket = rep_map.setdefault(
+                d,
+                {
+                    "EMERGENCIA": 0,
+                    "REGULAR": 0,
+                    "budget": 0.0,
+                },
+            )
+            bucket[est_norm] += 1
+            bucket["budget"] += float(rec.get("_presu_num", 0.0) or 0.0)
+
         out = []
-        for d, sub in grp:
-            count = int(len(sub))
-            budget = float(sub["_presu_num"].sum())
+        for d, vals in rep_map.items():
+            em = int(vals["EMERGENCIA"])
+            rg = int(vals["REGULAR"])
             out.append(
                 {
                     "date": d.strftime("%Y-%m-%d"),
-                    "count": count,
-                    "budget": budget,
+                    "count": em + rg,
+                    "budget": float(vals["budget"]),
+                    "emergencia": em,
+                    "regular": rg,
                 }
             )
 
@@ -2060,7 +2094,7 @@ def api_oportunidades_dimensiones(
     dim_provincia = _agg_dimension(prov_col)
     dim_plataforma = _agg_dimension(platf_col)
     dim_cuenta = _agg_dimension(cuenta_col)
-    dim_fecha = _agg_time_series()
+    dim_fecha = _agg_time_series(estado_col)
     dim_tipo = _agg_dimension(tipo_col)
     dim_rep_estado, dim_estado = _agg_reparticion_estado(buyer_col, estado_col)
 

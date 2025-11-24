@@ -125,6 +125,60 @@
   };
 
   // ------------------------------------------------------------------
+  // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
+  // ------------------------------------------------------------------
+  function refreshSelectOptions() {
+    if (!RAW || !RAW.dimensions) return;
+
+    const dims = RAW.dimensions;
+
+    function listLabels(dimList) {
+      if (!Array.isArray(dimList)) return [];
+      const seen = new Set();
+      const out = [];
+      for (const item of dimList) {
+        const label =
+          item && item.label != null ? String(item.label).trim() : "";
+        if (!label) continue;
+        if (seen.has(label)) continue;
+        seen.add(label);
+        out.push(label);
+      }
+      return out;
+    }
+
+    const plataformas = listLabels(dims.plataforma);
+    const cuentas = listLabels(dims.cuenta);
+    const reps = listLabels(dims.comprador);
+
+    function fillSelect(sel, values) {
+      if (!sel) return;
+      const current = sel.value;
+      sel.innerHTML = "";
+
+      const optAll = document.createElement("option");
+      optAll.value = "";
+      optAll.textContent = "Todas";
+      sel.appendChild(optAll);
+
+      values.forEach((v) => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        sel.appendChild(opt);
+      });
+
+      if (current && values.includes(current)) {
+        sel.value = current;
+      }
+    }
+
+    fillSelect(selPlataforma, plataformas);
+    fillSelect(selCuenta, cuentas);
+    fillSelect(selReparticion, reps);
+  }
+
+  // ------------------------------------------------------------------
   // Construir query de filtros y pedir datos
   // ------------------------------------------------------------------
   function buildQueryString() {
@@ -166,8 +220,9 @@
         console.error("[Dimensiones] Error HTTP", res.status);
         return;
       }
-      const data = await res.json();
+            const data = await res.json();
       RAW = data;
+      refreshSelectOptions(); // llena Plataforma / Cuenta / Repartición
       updateUI();
     } catch (err) {
       console.error("[Dimensiones] Error de red", err);
@@ -177,11 +232,13 @@
   // ------------------------------------------------------------------
   // Transformar datos crudos según filtros PAMI / Estado
   // ------------------------------------------------------------------
-  function computeFilteredData() {
+    function computeFilteredData() {
     if (!RAW || !RAW.dimensions) return null;
 
     const dims = RAW.dimensions;
-    const dimFecha = Array.isArray(dims.fecha_apertura)
+
+    // OJO: dimFecha es "let" porque lo vamos a modificar según el chip de Estado
+    let dimFecha = Array.isArray(dims.fecha_apertura)
       ? dims.fecha_apertura
       : [];
     const dimProv = Array.isArray(dims.provincia) ? dims.provincia : [];
@@ -207,7 +264,7 @@
       });
     }
 
-    // --- Filtro por Estado (EMERGENCIA / REGULAR) en repartición+estado y en el pie
+    // --- Filtro por Estado (EMERGENCIA / REGULAR)
     if (estVal !== "todos") {
       const wanted =
         estVal === "emergencia"
@@ -217,6 +274,7 @@
           : null;
 
       if (wanted) {
+        // a) repartición+estado -> dejamos solo el estado seleccionado
         dimRepEstado = dimRepEstado
           .map((row) => {
             const em = row.emergencia || 0;
@@ -237,19 +295,37 @@
           })
           .filter((r) => r.total > 0);
 
+        // b) torta global de estados
         dimEstado = dimEstado.filter(
           (e) =>
             (e.estado || "").toString().toUpperCase() === wanted.toUpperCase()
         );
+
+        // c) serie temporal: usamos emergencia/regular por día que nos da la API
+        dimFecha = dimFecha.map((row) => {
+          const em = row.emergencia || 0;
+          const rg = row.regular || 0;
+          let em2 = em;
+          let rg2 = rg;
+          if (wanted === "EMERGENCIA") {
+            rg2 = 0;
+          } else if (wanted === "REGULAR") {
+            em2 = 0;
+          }
+          return Object.assign({}, row, {
+            emergencia: em2,
+            regular: rg2,
+            count: (em2 || 0) + (rg2 || 0),
+          });
+        });
       }
     }
 
-    // --- KPI Procesos
+    // --- KPI Procesos ---
     let procesosCount = 0;
     if (dimRepEstado.length && (pamiVal !== "todos" || estVal !== "todos")) {
       procesosCount = dimRepEstado.reduce(
-        (acc, r) =>
-          acc + (r.emergencia || 0) + (r.regular || 0 || r.total || 0),
+        (acc, r) => acc + (r.emergencia || 0) + (r.regular || 0),
         0
       );
     } else if (RAW.kpis && typeof RAW.kpis.total_rows === "number") {
@@ -328,10 +404,11 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-    // --- 1) Apertura de procesos en el tiempo (barras)
+        // --- 1) Apertura de procesos en el tiempo (barras apiladas EMERGENCIA / REGULAR)
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
-      const counts = F.dimFecha.map((d) => d.count || 0);
+      const emData = F.dimFecha.map((d) => d.emergencia || 0);
+      const rgData = F.dimFecha.map((d) => d.regular || 0);
 
       charts.timeline = createOrUpdateBar(
         charts.timeline,
@@ -339,11 +416,14 @@
         labels,
         [
           {
-            label: "Procesos",
-            data: counts,
-            borderWidth: 1,
-            backgroundColor: "#bfdbfe",
-            borderColor: "#60a5fa",
+            label: "EMERGENCIA",
+            data: emData,
+            backgroundColor: "#f97373",
+          },
+          {
+            label: "REGULAR",
+            data: rgData,
+            backgroundColor: "#60a5fa",
           },
         ],
         {
@@ -351,16 +431,21 @@
           maintainAspectRatio: false,
           scales: {
             x: {
-              ticks: { autoSkip: true, maxTicksLimit: 10 },
+              stacked: true,
+              ticks: { autoSkip: true, maxTicksLimit: 15 },
               grid: { display: false },
             },
             y: {
+              stacked: true,
               beginAtZero: true,
               grid: { color: "rgba(148, 163, 184, 0.3)" },
             },
           },
           plugins: {
-            legend: { display: false },
+            legend: {
+              display: true,
+              position: "top",
+            },
           },
         }
       );
