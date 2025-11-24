@@ -464,6 +464,9 @@
   </div>
 </div>
 
-{# IMPORTANTÍSIMO: usamos el JS externo que ya tienes preparado #}
+{# Cargamos Chart.js (igual que en el tablero principal) #}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+{# Script específico de Dimensiones #}
 <script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
 {% endblock %}
