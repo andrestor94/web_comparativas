@@ -112,7 +112,7 @@
   if (typeof Chart === "undefined") {
     // Si Chart.js no está cargado, no hacemos nada con gráficos
     console.warn(
-      "[Dimensiones] Chart.js no está disponible. Verificá que se cargue el script de Chart.js en base.html."
+      "[Dimensiones] Chart.js no está disponible. Verificá que se cargue el script de Chart.js en el template."
     );
   }
 
@@ -190,7 +190,7 @@
   function buildQueryString() {
     const params = new URLSearchParams();
 
-    // NUEVO: id del archivo asociado al Buscador
+    // id del archivo asociado al Buscador
     if (uploadId) {
       params.set("upload_id", uploadId);
     }
@@ -248,7 +248,7 @@
 
     const dims = RAW.dimensions;
 
-    // OJO: dimFecha es "let" porque lo vamos a modificar según el chip de Estado
+    // dimFecha es "let" porque lo vamos a modificar según el chip de Estado
     let dimFecha = Array.isArray(dims.fecha_apertura)
       ? dims.fecha_apertura
       : [];
@@ -398,6 +398,80 @@
     });
   }
 
+  // NUEVO: helper para treemap
+  function createOrUpdateTreemap(chartRef, ctx, tree, options) {
+    if (!ctx || typeof Chart === "undefined") return null;
+
+    // chequeamos que el tipo 'treemap' exista (plugin cargado)
+    const hasTreemap =
+      Chart.registry &&
+      typeof Chart.registry.getController === "function" &&
+      !!Chart.registry.getController("treemap");
+
+    if (!hasTreemap) {
+      console.warn(
+        "[Dimensiones] Plugin treemap no está disponible. Verificá el script chartjs-chart-treemap."
+      );
+      return chartRef;
+    }
+
+    if (chartRef) {
+      chartRef.data.datasets[0].tree = tree;
+      chartRef.options = Object.assign(chartRef.options || {}, options || {});
+      chartRef.update();
+      return chartRef;
+    }
+
+    return new Chart(ctx, {
+      type: "treemap",
+      data: {
+        datasets: [
+          {
+            label: "Procesos por tipo",
+            tree,
+            key: "value",
+            groups: ["label"],
+            borderColor: "#ffffff",
+            borderWidth: 1,
+            spacing: 0.5,
+            labels: {
+              display: true,
+              formatter(ctx) {
+                const name = ctx.raw.g || "";
+                // recortamos para que no rompa el layout
+                const short =
+                  name.length > 24 ? name.slice(0, 23).trimEnd() + "…" : name;
+                return short;
+              },
+            },
+          },
+        ],
+      },
+      options: Object.assign(
+        {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  return items[0].raw.g || "";
+                },
+                label(item) {
+                  const val =
+                    item.raw.v ?? item.raw.value ?? item.raw.count ?? 0;
+                  return `Procesos: ${val}`;
+                },
+              },
+            },
+          },
+        },
+        options || {}
+      ),
+    });
+  }
+
   // ------------------------------------------------------------------
   // Actualizar toda la UI (KPI + gráficos)
   // ------------------------------------------------------------------
@@ -462,7 +536,7 @@
       );
     }
 
-    // --- 2) Procesos por provincia (barras)
+    // --- 2) Procesos por provincia (barras horizontales)
     if (ctxProvincia) {
       const src = F.dimProv.slice(0, 15);
       const labels = src.map((d) => d.label || "");
@@ -501,40 +575,15 @@
       );
     }
 
-    // --- 3) Procesos por tipo (barras)
+    // --- 3) Procesos por tipo (TREEMAP)
     if (ctxTipo) {
-      const src = F.dimTipo.slice(0, 15);
-      const labels = src.map((d) => d.label || "");
-      const counts = src.map((d) => d.count || 0);
+      const src = F.dimTipo.slice(0, 40); // hasta 40 tipos distintos
+      const tree = src.map((d) => ({
+        label: d.label || "Sin tipo",
+        value: d.count || 0,
+      }));
 
-      charts.tipo = createOrUpdateBar(
-        charts.tipo,
-        ctxTipo,
-        labels,
-        [
-          {
-            label: "Procesos",
-            data: counts,
-            backgroundColor: "#c4b5fd",
-            borderColor: "#6366f1",
-            borderWidth: 1,
-          },
-        ],
-        {
-          indexAxis: "y",
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: { beginAtZero: true },
-            y: {
-              grid: { display: false },
-            },
-          },
-          plugins: {
-            legend: { display: false },
-          },
-        }
-      );
+      charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
     // --- 4) Proceso por repartición y estado (barras apiladas)
