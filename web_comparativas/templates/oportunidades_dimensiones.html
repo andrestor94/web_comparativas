@@ -462,5 +462,12 @@
 {# Scripts de gráficos para Dimensiones #}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.umd.min.js"></script>
-<script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
+<!-- Chart.js principal -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Plugin treemap -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.0.2/dist/chartjs-chart-treemap.min.js"></script>
+
+<!-- Tu script -->
+<script src="{{ url_for('static', path='oportunidades_dimensiones.js') }}"></script>
 {% endblock %}
