@@ -460,12 +460,13 @@
 </div>
 
 {# Scripts de gráficos para Dimensiones #}
+
 <!-- Chart.js (estable y compatible con treemap) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 
 <!-- Plugin Treemap compatible con Chart.js v3 -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.1.0/dist/chartjs-chart-treemap.min.js"></script>
 
-<!-- Tu script -->
-<script src="{{ url_for('static', path='oportunidades_dimensiones.js') }}"></script>
+<!-- Tu script principal de Dimensiones (ruta correcta en /static/js/...) -->
+<script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
 {% endblock %}
