@@ -1925,7 +1925,7 @@ def api_oportunidades_dimensiones(
         ["Estado", "Tipo Proceso", "Carácter"],
     )
 
-    # ------------- helpers internos -----------------
+        # ------------- helpers internos -----------------
 
     def _agg_dimension(col_name: str | None):
         """
@@ -1957,7 +1957,7 @@ def api_oportunidades_dimensiones(
         out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
         return out[:50]
 
-            def _agg_time_series(estado_col_name: str | None):
+    def _agg_time_series(estado_col_name: str | None):
         """
         Serie temporal por fecha de apertura con desglose por estado:
         [
