@@ -182,7 +182,7 @@
     gap:10px;
   }
 
-  /* Fila de estado (PAMI / OTRAS + ESTADO) */
+  /* Fila de estado (EMERGENCIA / REGULAR) */
   .dim-row-state{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -262,12 +262,6 @@
     padding:8px;
   }
 
-  /* Por ahora ocultamos los placeholders para que no se superpongan con los charts */
-  .chart-placeholder,
-  .map-placeholder{
-    display:none;
-  }
-
   /* Responsive */
   @media (max-width:1200px){
     .dim-row-top{
@@ -291,7 +285,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-xxl py-4">
+<div id="dimensiones-root" class="container-xxl py-4">
   <h1 class="mb-1">Dimensiones</h1>
   <p class="muted small mb-3">
     Panel de análisis de oportunidades por dimensión (tiempo, plataforma, repartición, estado, tipo y provincia).
@@ -381,7 +375,7 @@
       </div>
 
       {# =========================
-         FILA MEDIA: LÍNEA DE TIEMPO + MAPA
+         FILA MEDIA: LÍNEA DE TIEMPO + MAPA/BARRAS PROVINCIA
          ========================= #}
       <div class="dim-row-middle">
         <!-- Apertura de procesos en el tiempo -->
@@ -390,25 +384,23 @@
             <h3 id="dimTitleTimeline">Apertura de procesos en el tiempo</h3>
             <small>Distribución diaria de aperturas según el período seleccionado.</small>
           </header>
-          <div class="chart-body">
-            <div class="chart-placeholder" id="dimTimelinePlaceholder">
-              Aquí se mostrará el gráfico de barras por día (timeline).
+          <div class="chart-body" id="dimPanelTimeline">
+            <div class="chart-placeholder">
+              Aquí se mostrará el gráfico de barras por día (timeline EMERGENCIA / REGULAR).
             </div>
-            <canvas id="dimChartTimeline"></canvas>
           </div>
         </section>
 
-        <!-- Procesos por provincia -->
+        <!-- Procesos por provincia (mapa / barras por provincia) -->
         <section class="chart-card" aria-labelledby="dimTitleMap">
           <header>
             <h3 id="dimTitleMap">Procesos por provincia</h3>
             <small>Distribución de procesos según provincia.</small>
           </header>
-          <div class="chart-body">
-            <div class="map-placeholder" id="dimMapPlaceholder">
-              Aquí se mostrará el gráfico por provincia.
+          <div class="chart-body" id="dimPanelProvincia">
+            <div class="map-placeholder">
+              Aquí se mostrará el gráfico por provincia (por ahora barras; más adelante mapa).
             </div>
-            <canvas id="dimChartProvincia"></canvas>
           </div>
         </section>
       </div>
@@ -423,39 +415,36 @@
             <h3 id="dimTitleTreemap">Procesos por tipo</h3>
             <small>Distribución de procesos según el tipo de procedimiento.</small>
           </header>
-          <div class="chart-body">
-            <div class="chart-placeholder" id="dimTiposPlaceholder">
-              Aquí se mostrará el gráfico de procesos por tipo.
+          <div class="chart-body" id="dimPanelTipo">
+            <div class="chart-placeholder">
+              Aquí se mostrará el gráfico de procesos por tipo (treemap / barras).
             </div>
-            <canvas id="dimChartTipo"></canvas>
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (barras stacked horizontales) -->
+        <!-- Proceso por repartición y estado (barras stacked) -->
         <section class="chart-card" aria-labelledby="dimTitleBars">
           <header>
             <h3 id="dimTitleBars">Proceso por repartición y estado</h3>
             <small>Cantidad de procesos por repartición segmentados por estado.</small>
           </header>
-          <div class="chart-body">
-            <div class="chart-placeholder" id="dimBarsPlaceholder">
-              Aquí se mostrará el gráfico de barras por repartición y estado.
+          <div class="chart-body" id="dimPanelRepEstado">
+            <div class="chart-placeholder">
+              Aquí se mostrará el gráfico de barras apiladas por repartición y estado.
             </div>
-            <canvas id="dimChartRepEstado"></canvas>
           </div>
         </section>
 
-        <!-- Proceso por repartición y estado (pie EMERGENCIA / REGULAR) -->
+        <!-- Proceso por estado (pie EMERGENCIA / REGULAR) -->
         <section class="chart-card" aria-labelledby="dimTitlePie">
           <header>
-            <h3 id="dimTitlePie">Proceso por repartición y estado</h3>
+            <h3 id="dimTitlePie">Proceso por estado</h3>
             <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
           </header>
-          <div class="chart-body">
-            <div class="chart-placeholder" id="dimPiePlaceholder">
-              Aquí se mostrará el gráfico de torta de estados.
+          <div class="chart-body" id="dimPanelEstadoPie">
+            <div class="chart-placeholder">
+              Aquí se mostrará el gráfico de torta por estado.
             </div>
-            <canvas id="dimChartEstadoPie"></canvas>
           </div>
         </section>
       </div>
@@ -464,9 +453,6 @@
   </div>
 </div>
 
-{# Cargamos Chart.js (igual que en el tablero principal) #}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-{# Script específico de Dimensiones #}
-<script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
+{# JS específico de Dimensiones (usa /api/oportunidades/dimensiones) #}
+<script src="{{ url_for('static', path='oportunidades_dimensiones.js') }}"></script>
 {% endblock %}
