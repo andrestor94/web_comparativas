@@ -286,170 +286,175 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-xxl py-4">
-  <h1 class="mb-1">Dimensiones</h1>
-  <p class="muted small mb-3">
-    Panel de análisis de oportunidades por dimensión (tiempo, plataforma, repartición, estado, tipo y provincia).
-  </p>
+{# NUEVO: wrapper con upload_id #}
+<div id="dimensiones-root"
+     data-upload-id="{{ upload.id if upload is defined and upload else '' }}">
 
-  <div class="card" style="border-color:#c7d2fe;">
-    <div class="dim-dashboard">
+  <div class="container-xxl py-4">
+    <h1 class="mb-1">Dimensiones</h1>
+    <p class="muted small mb-3">
+      Panel de análisis de oportunidades por dimensión (tiempo, plataforma, repartición, estado, tipo y provincia).
+    </p>
 
-      {# =========================
-         FILA SUPERIOR
-         ========================= #}
-      <div class="dim-row-top" aria-label="Filtros principales y KPI" role="group">
-        <!-- Fecha -->
-        <div class="filter-card filter-card--date" aria-labelledby="lblDimFecha">
-          <h5 id="lblDimFecha">Fecha de apertura</h5>
-          <div class="dates-row">
-            <input id="dimDateFrom" type="date" aria-label="Fecha desde">
-            <input id="dimDateTo" type="date" aria-label="Fecha hasta">
+    <div class="card" style="border-color:#c7d2fe;">
+      <div class="dim-dashboard">
+
+        {# =========================
+           FILA SUPERIOR
+           ========================= #}
+        <div class="dim-row-top" aria-label="Filtros principales y KPI" role="group">
+          <!-- Fecha -->
+          <div class="filter-card filter-card--date" aria-labelledby="lblDimFecha">
+            <h5 id="lblDimFecha">Fecha de apertura</h5>
+            <div class="dates-row">
+              <input id="dimDateFrom" type="date" aria-label="Fecha desde">
+              <input id="dimDateTo" type="date" aria-label="Fecha hasta">
+            </div>
+            <div class="range-wrap" aria-hidden="true">
+              <div class="range-track"></div>
+              <div class="range-fill" id="dimDateFill"></div>
+              <input type="range" id="dimRangeMin" min="0" max="100" value="0" step="1">
+              <input type="range" id="dimRangeMax" min="0" max="100" value="100" step="1">
+            </div>
           </div>
-          <div class="range-wrap" aria-hidden="true">
-            <div class="range-track"></div>
-            <div class="range-fill" id="dimDateFill"></div>
-            <input type="range" id="dimRangeMin" min="0" max="100" value="0" step="1">
-            <input type="range" id="dimRangeMax" min="0" max="100" value="100" step="1">
+
+          <!-- KPI Procesos -->
+          <div class="kpi-main" role="status" aria-live="polite">
+            <h4>Procesos</h4>
+            <div class="v" id="dimKpiProcesos">0</div>
+            <div class="sub">Cantidad de procesos en el rango seleccionado</div>
+          </div>
+
+          <!-- Plataforma -->
+          <div class="filter-card filter-card--compact">
+            <h5>Plataforma</h5>
+            <div class="field">
+              <select id="dimPlataforma" aria-label="Filtrar por plataforma">
+                <option value="">Todas</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Cuenta -->
+          <div class="filter-card filter-card--compact">
+            <h5>Cuenta</h5>
+            <div class="field">
+              <select id="dimCuenta" aria-label="Filtrar por cuenta">
+                <option value="">Todas</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Repartición -->
+          <div class="filter-card filter-card--compact">
+            <h5>Repartición</h5>
+            <div class="field">
+              <select id="dimReparticion" aria-label="Filtrar por repartición">
+                <option value="">Todas</option>
+              </select>
+            </div>
           </div>
         </div>
 
-        <!-- KPI Procesos -->
-        <div class="kpi-main" role="status" aria-live="polite">
-          <h4>Procesos</h4>
-          <div class="v" id="dimKpiProcesos">0</div>
-          <div class="sub">Cantidad de procesos en el rango seleccionado</div>
-        </div>
+        {# =========================
+           FILA ESTADO (PAMI / OTRAS + ESTADO)
+           ========================= #}
+        <div class="dim-row-state">
+          <div class="filter-card">
+            <h5>Repartición: PAMI u otras</h5>
+            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI u otras">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todas</button>
+              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
+              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras reparticiones</button>
+            </div>
+          </div>
 
-        <!-- Plataforma -->
-        <div class="filter-card filter-card--compact">
-          <h5>Plataforma</h5>
-          <div class="field">
-            <select id="dimPlataforma" aria-label="Filtrar por plataforma">
-              <option value="">Todas</option>
-            </select>
+          <div class="filter-card">
+            <h5>Estado</h5>
+            <div class="chips" id="swEstado" role="group" aria-label="Filtro de estado">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">EMERGENCIA</button>
+              <button type="button" class="chip" data-val="regular" aria-pressed="false">REGULAR</button>
+            </div>
           </div>
         </div>
 
-        <!-- Cuenta -->
-        <div class="filter-card filter-card--compact">
-          <h5>Cuenta</h5>
-          <div class="field">
-            <select id="dimCuenta" aria-label="Filtrar por cuenta">
-              <option value="">Todas</option>
-            </select>
-          </div>
+        {# =========================
+           FILA MEDIA: LÍNEA DE TIEMPO + PROVINCIA
+           ========================= #}
+        <div class="dim-row-middle">
+          <!-- Apertura de procesos en el tiempo -->
+          <section class="chart-card" aria-labelledby="dimTitleTimeline">
+            <header>
+              <h3 id="dimTitleTimeline">Apertura de procesos en el tiempo</h3>
+              <small>Distribución diaria de aperturas según el período seleccionado (EMERGENCIA / REGULAR).</small>
+            </header>
+            <div id="dimPanelTimeline" class="chart-body">
+              <div class="chart-placeholder">
+                Aquí se mostrará el gráfico de barras por día (timeline EMERGENCIA / REGULAR).
+              </div>
+            </div>
+          </section>
+
+          <!-- Procesos por provincia (barra / mapa futuro) -->
+          <section class="chart-card" aria-labelledby="dimTitleProvincia">
+            <header>
+              <h3 id="dimTitleProvincia">Procesos por provincia</h3>
+              <small>Distribución de procesos según provincia (por ahora barras; más adelante mapa).</small>
+            </header>
+            <div id="dimPanelProvincia" class="chart-body">
+              <div class="map-placeholder">
+                Aquí se mostrará el gráfico por provincia (por ahora barras; más adelante mapa).
+              </div>
+            </div>
+          </section>
         </div>
 
-        <!-- Repartición -->
-        <div class="filter-card filter-card--compact">
-          <h5>Repartición</h5>
-          <div class="field">
-            <select id="dimReparticion" aria-label="Filtrar por repartición">
-              <option value="">Todas</option>
-            </select>
-          </div>
+        {# =========================
+           FILA INFERIOR: TIPO + BARRAS + TORTA
+           ========================= #}
+        <div class="dim-row-bottom">
+          <!-- Procesos por tipo -->
+          <section class="chart-card" aria-labelledby="dimTitleTipo">
+            <header>
+              <h3 id="dimTitleTipo">Procesos por tipo</h3>
+              <small>Distribución de procesos según el tipo de procedimiento.</small>
+            </header>
+            <div id="dimPanelTipo" class="chart-body">
+              <div class="chart-placeholder">
+                Aquí se mostrará el gráfico de procesos por tipo (treemap / barras).
+              </div>
+            </div>
+          </section>
+
+          <!-- Proceso por repartición y estado (barras apiladas) -->
+          <section class="chart-card" aria-labelledby="dimTitleRepEstado">
+            <header>
+              <h3 id="dimTitleRepEstado">Proceso por repartición y estado</h3>
+              <small>Cantidad de procesos por repartición segmentados por estado (EMERGENCIA / REGULAR).</small>
+            </header>
+            <div id="dimPanelRepEstado" class="chart-body">
+              <div class="chart-placeholder">
+                Aquí se mostrará el gráfico de barras apiladas por repartición y estado.
+              </div>
+            </div>
+          </section>
+
+          <!-- Proceso por estado (torta global) -->
+          <section class="chart-card" aria-labelledby="dimTitleEstadoPie">
+            <header>
+              <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
+              <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
+            </header>
+            <div id="dimPanelEstadoPie" class="chart-body">
+              <div class="chart-placeholder">
+                Aquí se mostrará el gráfico de torta por estado.
+              </div>
+            </div>
+          </section>
         </div>
+
       </div>
-
-      {# =========================
-         FILA ESTADO (PAMI / OTRAS + ESTADO)
-         ========================= #}
-      <div class="dim-row-state">
-        <div class="filter-card">
-          <h5>Repartición: PAMI u otras</h5>
-          <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI u otras">
-            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todas</button>
-            <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
-            <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras reparticiones</button>
-          </div>
-        </div>
-
-        <div class="filter-card">
-          <h5>Estado</h5>
-          <div class="chips" id="swEstado" role="group" aria-label="Filtro de estado">
-            <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
-            <button type="button" class="chip" data-val="emergencia" aria-pressed="false">EMERGENCIA</button>
-            <button type="button" class="chip" data-val="regular" aria-pressed="false">REGULAR</button>
-          </div>
-        </div>
-      </div>
-
-      {# =========================
-         FILA MEDIA: LÍNEA DE TIEMPO + PROVINCIA
-         ========================= #}
-      <div class="dim-row-middle">
-        <!-- Apertura de procesos en el tiempo -->
-        <section class="chart-card" aria-labelledby="dimTitleTimeline">
-          <header>
-            <h3 id="dimTitleTimeline">Apertura de procesos en el tiempo</h3>
-            <small>Distribución diaria de aperturas según el período seleccionado (EMERGENCIA / REGULAR).</small>
-          </header>
-          <div id="dimPanelTimeline" class="chart-body">
-            <div class="chart-placeholder">
-              Aquí se mostrará el gráfico de barras por día (timeline EMERGENCIA / REGULAR).
-            </div>
-          </div>
-        </section>
-
-        <!-- Procesos por provincia (barra / mapa futuro) -->
-        <section class="chart-card" aria-labelledby="dimTitleProvincia">
-          <header>
-            <h3 id="dimTitleProvincia">Procesos por provincia</h3>
-            <small>Distribución de procesos según provincia (por ahora barras; más adelante mapa).</small>
-          </header>
-          <div id="dimPanelProvincia" class="chart-body">
-            <div class="map-placeholder">
-              Aquí se mostrará el gráfico por provincia (por ahora barras; más adelante mapa).
-            </div>
-          </div>
-        </section>
-      </div>
-
-      {# =========================
-         FILA INFERIOR: TIPO + BARRAS + TORTA
-         ========================= #}
-      <div class="dim-row-bottom">
-        <!-- Procesos por tipo -->
-        <section class="chart-card" aria-labelledby="dimTitleTipo">
-          <header>
-            <h3 id="dimTitleTipo">Procesos por tipo</h3>
-            <small>Distribución de procesos según el tipo de procedimiento.</small>
-          </header>
-          <div id="dimPanelTipo" class="chart-body">
-            <div class="chart-placeholder">
-              Aquí se mostrará el gráfico de procesos por tipo (treemap / barras).
-            </div>
-          </div>
-        </section>
-
-        <!-- Proceso por repartición y estado (barras apiladas) -->
-        <section class="chart-card" aria-labelledby="dimTitleRepEstado">
-          <header>
-            <h3 id="dimTitleRepEstado">Proceso por repartición y estado</h3>
-            <small>Cantidad de procesos por repartición segmentados por estado (EMERGENCIA / REGULAR).</small>
-          </header>
-          <div id="dimPanelRepEstado" class="chart-body">
-            <div class="chart-placeholder">
-              Aquí se mostrará el gráfico de barras apiladas por repartición y estado.
-            </div>
-          </div>
-        </section>
-
-        <!-- Proceso por estado (torta global) -->
-        <section class="chart-card" aria-labelledby="dimTitleEstadoPie">
-          <header>
-            <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
-            <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
-          </header>
-          <div id="dimPanelEstadoPie" class="chart-body">
-            <div class="chart-placeholder">
-              Aquí se mostrará el gráfico de torta por estado.
-            </div>
-          </div>
-        </section>
-      </div>
-
     </div>
   </div>
 </div>

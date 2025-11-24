@@ -61,6 +61,12 @@
   }
 
   // ------------------------------------------------------------------
+  // Nodo raíz y upload_id (si el template lo pasó)
+  // ------------------------------------------------------------------
+  const rootDim = document.getElementById("dimensiones-root");
+  const uploadId = rootDim ? rootDim.dataset.uploadId || "" : "";
+
+  // ------------------------------------------------------------------
   // Referencias de UI (IDs flexibles para evitar roturas)
   // ------------------------------------------------------------------
   const dateFromEl = pickId("dimDateFrom", "fDateFrom");
@@ -104,7 +110,7 @@
   }
 
   if (typeof Chart === "undefined") {
-    // Si Chart.js no está cargado, no hacemos nada
+    // Si Chart.js no está cargado, no hacemos nada con gráficos
     console.warn(
       "[Dimensiones] Chart.js no está disponible. Verificá que se cargue el script de Chart.js en base.html."
     );
@@ -113,7 +119,7 @@
   // ------------------------------------------------------------------
   // Estado global (datos crudos + gráficos)
   // ------------------------------------------------------------------
-  const API_URL = "/api/oportunidades/dimensiones";
+  const API_BASE_URL = "/api/oportunidades/dimensiones";
 
   let RAW = null; // JSON devuelto por la API
   const charts = {
@@ -184,6 +190,11 @@
   function buildQueryString() {
     const params = new URLSearchParams();
 
+    // NUEVO: id del archivo asociado al Buscador
+    if (uploadId) {
+      params.set("upload_id", uploadId);
+    }
+
     // Fecha
     if (dateFromEl && dateFromEl.value) {
       params.set("date_from", dateFromEl.value);
@@ -210,7 +221,7 @@
 
   async function fetchData() {
     const qs = buildQueryString();
-    const url = qs ? `${API_URL}?${qs}` : API_URL;
+    const url = qs ? `${API_BASE_URL}?${qs}` : API_BASE_URL;
 
     try {
       const res = await fetch(url, {
@@ -220,7 +231,7 @@
         console.error("[Dimensiones] Error HTTP", res.status);
         return;
       }
-            const data = await res.json();
+      const data = await res.json();
       RAW = data;
       refreshSelectOptions(); // llena Plataforma / Cuenta / Repartición
       updateUI();
@@ -232,7 +243,7 @@
   // ------------------------------------------------------------------
   // Transformar datos crudos según filtros PAMI / Estado
   // ------------------------------------------------------------------
-    function computeFilteredData() {
+  function computeFilteredData() {
     if (!RAW || !RAW.dimensions) return null;
 
     const dims = RAW.dimensions;
@@ -404,7 +415,7 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-        // --- 1) Apertura de procesos en el tiempo (barras apiladas EMERGENCIA / REGULAR)
+    // --- 1) Apertura de procesos en el tiempo (barras apiladas EMERGENCIA / REGULAR)
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -572,7 +583,7 @@
       );
     }
 
-    // --- 5) Proceso por repartición y estado (torta global EMERGENCIA / REGULAR)
+    // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
     if (ctxEstadoPie) {
       // dimEstado: [{estado: "EMERGENCIA", count}, {estado: "REGULAR", count}]
       const labels = F.dimEstado.map((e) => e.estado || "");
