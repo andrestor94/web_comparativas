@@ -586,9 +586,17 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-    // --- 4) Proceso por repartición y estado (barras apiladas)
+        // --- 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
     if (ctxRepEstado) {
-      const src = F.dimRepEstado.slice(0, 15);
+      // Ordenamos por total (emergencia + regular) y mostramos solo las 10 principales
+      const src = [...F.dimRepEstado]
+        .map((r) => ({
+          ...r,
+          total: (r.emergencia || 0) + (r.regular || 0),
+        }))
+        .sort((a, b) => (b.total || 0) - (a.total || 0))
+        .slice(0, 10);
+
       const labels = src.map((d) => d.label || "");
       const emData = src.map((d) => d.emergencia || 0);
       const rgData = src.map((d) => d.regular || 0);
@@ -610,22 +618,31 @@
           },
         ],
         {
+          indexAxis: "y", // 👉 Barras horizontales
           responsive: true,
           maintainAspectRatio: false,
           scales: {
             x: {
               stacked: true,
-              grid: { display: false },
+              beginAtZero: true,
+              grid: { color: "rgba(148, 163, 184, 0.25)" },
             },
             y: {
               stacked: true,
-              beginAtZero: true,
-              grid: { color: "rgba(148, 163, 184, 0.25)" },
+              grid: { display: false },
+              ticks: {
+                // Evita que el texto se solape demasiado
+                autoSkip: false,
+                font: { size: 10 },
+              },
             },
           },
           plugins: {
             legend: {
               position: "top",
+              labels: {
+                font: { size: 11 },
+              },
             },
           },
         }

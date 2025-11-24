@@ -191,18 +191,25 @@
   }
 
   /* Bloque de gráficos medio: timeline + mapa */
-  .dim-row-middle{
+    .dim-row-middle{
     display:grid;
-    grid-template-columns:2fr 1.1fr;
+    /* Le damos más espacio a "Procesos por provincia" */
+    grid-template-columns:2.2fr 0.8fr;
     gap:12px;
     align-items:stretch;
   }
 
-  /* Bloque inferior: tipo + barras + torta */
   .dim-row-bottom{
     display:grid;
-    grid-template-columns:1.2fr 1.4fr 1.1fr;
+    /* Hacemos más chico el 3er bloque (torta) */
+    grid-template-columns:1.3fr 1.6fr 0.9fr;
     gap:12px;
+  }
+
+  /* Para que la torta no se desmadre de ancho */
+  .chart-card--small .chart-body{
+    max-width:260px;
+    margin:0 auto;
   }
 
   .chart-card{
@@ -441,7 +448,7 @@
           </section>
 
           <!-- Proceso por estado (torta global) -->
-          <section class="chart-card" aria-labelledby="dimTitleEstadoPie">
+        <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
             <header>
               <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
               <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
