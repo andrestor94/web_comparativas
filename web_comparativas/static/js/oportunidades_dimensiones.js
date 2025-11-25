@@ -176,20 +176,17 @@
     );
   }
 
-    async function ensureArgentinaGeojsonLoaded() {
+      async function ensureArgentinaGeojsonLoaded() {
     if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
     ARG_PROV_LOADING = true;
     try {
-      // ✅ URL correcta de provincias en formato GeoJSON
-      const res = await fetch(
-        "https://apis.datos.gob.ar/georef/api/provincias.geojson",
-        {
-          headers: { Accept: "application/json" },
-        }
-      );
+      // ✅ Ahora cargamos el archivo LOCAL servido por tu app
+      const res = await fetch("/static/data/argentina_provincias.geojson", {
+        headers: { Accept: "application/json" },
+      });
       if (!res.ok) {
         console.error(
-          "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
+          "[Dimensiones] No se pudo cargar /static/data/argentina_provincias.geojson: HTTP",
           res.status
         );
         return;
@@ -201,11 +198,14 @@
         if (RAW) updateUI();
       } else {
         console.warn(
-          "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
+          "[Dimensiones] argentina_provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
         );
       }
     } catch (err) {
-      console.error("[Dimensiones] Error cargando provincias.geojson", err);
+      console.error(
+        "[Dimensiones] Error cargando argentina_provincias.geojson",
+        err
+      );
     } finally {
       ARG_PROV_LOADING = false;
     }
