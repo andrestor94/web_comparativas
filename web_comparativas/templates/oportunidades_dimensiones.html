@@ -190,20 +190,28 @@
     gap:10px;
   }
 
-  /* Bloque de gráficos medio: timeline + MAPA (mapa un poco más angosto) */
-.dim-row-middle{
-  display:grid;
-  grid-template-columns:0.9fr 1.1fr; /* antes: 1fr 1.6fr */
-  gap:12px;
-  align-items:stretch;
-}
+  /* Fila media: SOLO timeline, ancho completo */
+  .dim-row-middle{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:12px;
+  }
 
-  /* Fila inferior: tipo + repartición/estado + torta (más espacio al primer gráfico) */
-.dim-row-bottom{
-  display:grid;
-  grid-template-columns:1.4fr 1.1fr 0.7fr; /* achicamos los dos últimos */
-  gap:12px;
-}
+  /* Fila inferior: tipo + barras + (mapa + torta apilados) */
+  .dim-row-bottom{
+    display:grid;
+    grid-template-columns:1.3fr 1.2fr 1.1fr;
+    gap:12px;
+    align-items:stretch;
+  }
+
+  /* Contenedor columna derecha (mapa + torta) */
+  .dim-bottom-right{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    height:100%;
+  }
 
   .chart-card{
     background:#f9fafb;
@@ -233,29 +241,25 @@
     position:relative;
   }
 
-  /* Tarjetas inferiores un poco más compactas */
+  /* Tarjetas inferiores algo más compactas */
   .dim-row-bottom .chart-card{
-  padding:8px 10px;
-}
-.dim-row-bottom .chart-body{
-  min-height:135px; /* un poco más bajo en general */
-}
+    padding:8px 10px;
+  }
+  .dim-row-bottom .chart-body{
+    min-height:160px;
+  }
 
-/* Recuadro más chico para "Proceso por repartición y estado" */
-.chart-card--rep-estado .chart-body{
-  min-height:125px;
-}
+  /* Barras repartición/estado un poco más bajas */
+  .chart-card--rep-estado .chart-body{
+    min-height:150px;
+  }
 
-/* Recuadro más chico para "Proceso por estado" (torta) */
-.chart-card--estado-pie .chart-body{
-  min-height:115px;
-}
-
-.chart-card--small .chart-body{
-  max-width:240px;   /* ligeramente más angosto */
-  min-height:120px;  /* más bajo */
-  margin:0 auto;
-}
+  /* Para que la torta no se desmadre de ancho */
+  .chart-card--small .chart-body{
+    max-width:240px;
+    min-height:130px;
+    margin:0 auto;
+  }
 
   .chart-placeholder{
     width:100%;
@@ -273,17 +277,17 @@
   }
 
   /* --- MAPA --- */
-.chart-card--map .chart-body{
-  min-height:360px; /* más alto */
-}
-.dim-map{
-  width:100%;
-  height:100%;
-  min-height:340px; /* más alto */
-  border-radius:10px;
-  overflow:hidden;
-  box-shadow:0 0 0 1px rgba(148,163,184,0.35);
-}
+  .chart-card--map .chart-body{
+    min-height:260px;
+  }
+  .dim-map{
+    width:100%;
+    height:100%;
+    min-height:260px;
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:0 0 0 1px rgba(148,163,184,0.35);
+  }
   .leaflet-container{
     background:#e5f0ff;
     border-radius:10px;
@@ -299,6 +303,9 @@
     }
     .dim-row-bottom{
       grid-template-columns:1fr;
+    }
+    .dim-bottom-right{
+      flex-direction:column;
     }
   }
 
@@ -412,7 +419,7 @@
         </div>
 
         {# =========================
-           FILA MEDIA: LÍNEA DE TIEMPO + MAPA
+           FILA MEDIA: LÍNEA DE TIEMPO SOLO
            ========================= #}
         <div class="dim-row-middle">
           <!-- Apertura de procesos en el tiempo -->
@@ -427,24 +434,10 @@
               </div>
             </div>
           </section>
-
-          <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
-          <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
-            <header>
-              <h3 id="dimTitleProvincia">Procesos por provincia</h3>
-              <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
-            </header>
-            <div class="chart-body">
-              <div id="dimProvinciaMap"
-                   class="dim-map"
-                   aria-label="Mapa de Argentina por provincia">
-              </div>
-            </div>
-          </section>
         </div>
 
         {# =========================
-           FILA INFERIOR: TIPO + BARRAS + TORTA
+           FILA INFERIOR: TIPO + BARRAS + MAPA+TORTA
            ========================= #}
         <div class="dim-row-bottom">
           <!-- Procesos por tipo -->
@@ -473,18 +466,35 @@
             </div>
           </section>
 
-          <!-- Proceso por estado (torta global) -->
-          <section class="chart-card chart-card--small chart-card--estado-pie" aria-labelledby="dimTitleEstadoPie">
-            <header>
-              <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
-              <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
-            </header>
-            <div id="dimPanelEstadoPie" class="chart-body">
-              <div class="chart-placeholder">
-                Aquí se mostrará el gráfico de torta por estado.
+          <!-- Columna derecha: MAPA + TORTA -->
+          <div class="dim-bottom-right">
+            <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
+            <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
+              <header>
+                <h3 id="dimTitleProvincia">Procesos por provincia</h3>
+                <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
+              </header>
+              <div class="chart-body">
+                <div id="dimProvinciaMap"
+                     class="dim-map"
+                     aria-label="Mapa de Argentina por provincia">
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+
+            <!-- Proceso por estado (torta global) -->
+            <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
+              <header>
+                <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
+                <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
+              </header>
+              <div id="dimPanelEstadoPie" class="chart-body">
+                <div class="chart-placeholder">
+                  Aquí se mostrará el gráfico de torta por estado.
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
 
       </div>
