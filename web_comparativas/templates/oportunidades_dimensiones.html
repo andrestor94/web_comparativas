@@ -190,20 +190,20 @@
     gap:10px;
   }
 
-  /* Bloque de gráficos medio: timeline + MAPA */
-  .dim-row-middle{
-    display:grid;
-    grid-template-columns:1fr 1.6fr;
-    gap:12px;
-    align-items:stretch;
-  }
+  /* Bloque de gráficos medio: timeline + MAPA (mapa un poco más angosto) */
+.dim-row-middle{
+  display:grid;
+  grid-template-columns:0.9fr 1.1fr; /* antes: 1fr 1.6fr */
+  gap:12px;
+  align-items:stretch;
+}
 
-  /* Fila inferior: tipo + repartición/estado + torta */
-  .dim-row-bottom{
-    display:grid;
-    grid-template-columns:1.2fr 1.4fr 0.8fr;
-    gap:12px;
-  }
+  /* Fila inferior: tipo + repartición/estado + torta (más espacio al primer gráfico) */
+.dim-row-bottom{
+  display:grid;
+  grid-template-columns:1.4fr 1.1fr 0.7fr; /* achicamos los dos últimos */
+  gap:12px;
+}
 
   .chart-card{
     background:#f9fafb;
@@ -235,18 +235,27 @@
 
   /* Tarjetas inferiores un poco más compactas */
   .dim-row-bottom .chart-card{
-    padding:8px 10px;
-  }
-  .dim-row-bottom .chart-body{
-    min-height:150px;
-  }
+  padding:8px 10px;
+}
+.dim-row-bottom .chart-body{
+  min-height:135px; /* un poco más bajo en general */
+}
 
-  /* Para que la torta no se desmadre de ancho */
-  .chart-card--small .chart-body{
-    max-width:260px;
-    min-height:140px;
-    margin:0 auto;
-  }
+/* Recuadro más chico para "Proceso por repartición y estado" */
+.chart-card--rep-estado .chart-body{
+  min-height:125px;
+}
+
+/* Recuadro más chico para "Proceso por estado" (torta) */
+.chart-card--estado-pie .chart-body{
+  min-height:115px;
+}
+
+.chart-card--small .chart-body{
+  max-width:240px;   /* ligeramente más angosto */
+  min-height:120px;  /* más bajo */
+  margin:0 auto;
+}
 
   .chart-placeholder{
     width:100%;
@@ -264,17 +273,17 @@
   }
 
   /* --- MAPA --- */
-  .chart-card--map .chart-body{
-    min-height:260px;
-  }
-  .dim-map{
-    width:100%;
-    height:100%;
-    min-height:240px;
-    border-radius:10px;
-    overflow:hidden;
-    box-shadow:0 0 0 1px rgba(148,163,184,0.35);
-  }
+.chart-card--map .chart-body{
+  min-height:360px; /* más alto */
+}
+.dim-map{
+  width:100%;
+  height:100%;
+  min-height:340px; /* más alto */
+  border-radius:10px;
+  overflow:hidden;
+  box-shadow:0 0 0 1px rgba(148,163,184,0.35);
+}
   .leaflet-container{
     background:#e5f0ff;
     border-radius:10px;
@@ -452,7 +461,7 @@
           </section>
 
           <!-- Proceso por repartición y estado (barras apiladas) -->
-          <section class="chart-card" aria-labelledby="dimTitleRepEstado">
+          <section class="chart-card chart-card--rep-estado" aria-labelledby="dimTitleRepEstado">
             <header>
               <h3 id="dimTitleRepEstado">Proceso por repartición y estado</h3>
               <small>Cantidad de procesos por repartición segmentados por estado (EMERGENCIA / REGULAR).</small>
@@ -465,7 +474,7 @@
           </section>
 
           <!-- Proceso por estado (torta global) -->
-          <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
+          <section class="chart-card chart-card--small chart-card--estado-pie" aria-labelledby="dimTitleEstadoPie">
             <header>
               <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
               <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
