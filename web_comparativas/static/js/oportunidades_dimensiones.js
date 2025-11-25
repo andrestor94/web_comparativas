@@ -118,7 +118,7 @@
   // ------------------------------------------------------------------
   // Estado global (datos crudos + gráficos)
   // ------------------------------------------------------------------
-    const API_BASE_URL = "/api/oportunidades/dimensiones";
+  const API_BASE_URL = "/api/oportunidades/dimensiones";
 
   // NUEVO: ruta local al GeoJSON de provincias
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
@@ -179,7 +179,7 @@
     );
   }
 
-    async function ensureArgentinaGeojsonLoaded() {
+  async function ensureArgentinaGeojsonLoaded() {
     if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
     ARG_PROV_LOADING = true;
     try {
@@ -209,7 +209,10 @@
         );
       }
     } catch (err) {
-      console.error("[Dimensiones] Error cargando provincias_argentina.geojson", err);
+      console.error(
+        "[Dimensiones] Error cargando provincias_argentina.geojson",
+        err
+      );
     } finally {
       ARG_PROV_LOADING = false;
     }
@@ -607,7 +610,8 @@
     if (
       typeof ChartGeo === "undefined" ||
       !hasChoroplethController() ||
-      !ARG_PROV_FEATURES
+      !Array.isArray(ARG_PROV_FEATURES) ||
+      !ARG_PROV_FEATURES.length
     ) {
       ensureArgentinaGeojsonLoaded();
       return updateProvinciaBar(chartRef, ctx, dimProv);
@@ -618,6 +622,7 @@
       const countsByName = new Map();
       dimProv.forEach((d) => {
         const name = (d.label || "").toString().toUpperCase().trim();
+        if (!name) return;
         const prev = countsByName.get(name) || 0;
         countsByName.set(name, prev + (d.count || 0));
       });
@@ -657,10 +662,19 @@
             },
           },
         },
+        // Escalas específicas de ChartGeo: proyección + escala de color
         scales: {
           projection: {
             axis: "x",
             projection: "mercator",
+          },
+          color: {
+            axis: "x",
+            quantize: 6,
+            legend: {
+              position: "bottom-right",
+              align: "right",
+            },
           },
         },
       };
