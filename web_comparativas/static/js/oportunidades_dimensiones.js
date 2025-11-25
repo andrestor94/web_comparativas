@@ -135,7 +135,39 @@
   let ARG_PROV_FEATURES = null;
   let ARG_PROV_LOADING = false;
 
+    // Registra el plugin de mapas (ChartGeo) una sola vez
+  function ensureGeoRegistered() {
+    if (
+      typeof Chart === "undefined" ||
+      typeof ChartGeo === "undefined" ||
+      ensureGeoRegistered._done
+    ) {
+      return;
+    }
+    try {
+      const {
+        ChoroplethController,
+        GeoFeature,
+        ColorScale,
+        ProjectionScale,
+      } = ChartGeo;
+
+      Chart.register(
+        ChoroplethController,
+        GeoFeature,
+        ColorScale,
+        ProjectionScale
+      );
+
+      ensureGeoRegistered._done = true;
+    } catch (e) {
+      console.warn("[Dimensiones] No se pudo registrar ChartGeo", e);
+    }
+  }
+
   function hasChoroplethController() {
+    // Nos aseguramos de registrar primero
+    ensureGeoRegistered();
     return (
       typeof Chart !== "undefined" &&
       Chart.registry &&
