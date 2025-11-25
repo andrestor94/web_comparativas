@@ -190,26 +190,20 @@
     gap:10px;
   }
 
-  /* Bloque de gráficos medio: timeline + mapa */
-    .dim-row-middle{
+  /* Bloque de gráficos medio: timeline + provincia */
+  .dim-row-middle{
     display:grid;
-    /* Le damos más espacio a "Procesos por provincia" */
-    grid-template-columns:2.2fr 0.8fr;
+    /* 👉 ahora le damos MÁS espacio al gráfico de provincia */
+    grid-template-columns:1fr 1.6fr;
     gap:12px;
     align-items:stretch;
   }
 
+  /* Fila inferior: tipo + repartición/estado + torta */
   .dim-row-bottom{
     display:grid;
-    /* Hacemos más chico el 3er bloque (torta) */
-    grid-template-columns:1.3fr 1.6fr 0.9fr;
+    grid-template-columns:1.2fr 1.4fr 0.8fr;
     gap:12px;
-  }
-
-  /* Para que la torta no se desmadre de ancho */
-  .chart-card--small .chart-body{
-    max-width:260px;
-    margin:0 auto;
   }
 
   .chart-card{
@@ -239,6 +233,22 @@
     justify-content:center;
     position:relative;
   }
+
+  /* Tarjetas inferiores un poco más compactas */
+  .dim-row-bottom .chart-card{
+    padding:8px 10px;
+  }
+  .dim-row-bottom .chart-body{
+    min-height:150px;
+  }
+
+  /* Para que la torta no se desmadre de ancho */
+  .chart-card--small .chart-body{
+    max-width:260px;
+    min-height:140px;
+    margin:0 auto;
+  }
+
   .chart-placeholder{
     width:100%;
     height:100%;
@@ -252,6 +262,11 @@
     color:#9ca3af;
     text-align:center;
     padding:8px;
+  }
+
+  /* Mapa / provincia más alto y protagonista */
+  .chart-card--map .chart-body{
+    min-height:260px;
   }
 
   .map-placeholder{
@@ -404,7 +419,7 @@
           </section>
 
           <!-- Procesos por provincia (barra / mapa futuro) -->
-          <section class="chart-card" aria-labelledby="dimTitleProvincia">
+          <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
             <header>
               <h3 id="dimTitleProvincia">Procesos por provincia</h3>
               <small>Distribución de procesos según provincia (por ahora barras; más adelante mapa).</small>
@@ -448,7 +463,7 @@
           </section>
 
           <!-- Proceso por estado (torta global) -->
-        <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
+          <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
             <header>
               <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
               <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
