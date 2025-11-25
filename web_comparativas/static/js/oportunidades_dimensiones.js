@@ -749,7 +749,7 @@
       );
     }
 
-    // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
+        // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -767,10 +767,39 @@
               position: "bottom",
             },
           },
+          // 🔵 Nuevo: clic en la torta = cambiar filtro de Estado (chips)
+          onClick(evt, elements, chart) {
+            if (!swEstado) return;
+
+            // Si haces clic fuera de un sector, reseteamos a "Todos"
+            if (!elements.length) {
+              setChipGroupValue(swEstado, "todos");
+              updateUI();
+              return;
+            }
+
+            const el = elements[0];
+            const labelRaw = chart.data.labels[el.index] || "";
+            const label = labelRaw.toString().toUpperCase();
+
+            // Qué valor de chip queremos según el texto del sector
+            let target = "todos";
+            if (label.includes("EMERGENCIA")) target = "emergencia";
+            else if (label.includes("REGULAR")) target = "regular";
+
+            // Si ya está seleccionado, al volver a hacer clic lo apagamos (vuelve a "Todos")
+            const current = getChipGroupValue(swEstado);
+            if (current === target) {
+              target = "todos";
+            }
+
+            setChipGroupValue(swEstado, target);
+            // Recalculamos todo el dashboard (se aplica solo client-side sobre RAW)
+            updateUI();
+          },
         }
       );
     }
-  }
 
   // ------------------------------------------------------------------
   // Eventos de filtros
