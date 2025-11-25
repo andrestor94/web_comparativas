@@ -749,7 +749,7 @@
       );
     }
 
-        // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
+            // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -768,7 +768,7 @@
             },
           },
           // 🔵 Nuevo: clic en la torta = cambiar filtro de Estado (chips)
-          onClick(evt, elements, chart) {
+          onClick: function (evt, elements, chart) {
             if (!swEstado) return;
 
             // Si haces clic fuera de un sector, reseteamos a "Todos"
@@ -800,6 +800,7 @@
         }
       );
     }
+  }
 
   // ------------------------------------------------------------------
   // Eventos de filtros
