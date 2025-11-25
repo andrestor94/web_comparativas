@@ -193,8 +193,7 @@
   /* Bloque de gráficos medio: timeline + provincia */
   .dim-row-middle{
     display:grid;
-    /* 👉 ahora le damos MÁS espacio al gráfico de provincia */
-    grid-template-columns:1fr 1.6fr;
+    grid-template-columns:1fr 1.6fr; /* más ancho provincia */
     gap:12px;
     align-items:stretch;
   }
@@ -264,7 +263,7 @@
     padding:8px;
   }
 
-  /* Mapa / provincia más alto y protagonista */
+  /* 👉 El mapa necesita altura fija para que el canvas no sea 0 */
   .chart-card--map .chart-body{
     min-height:260px;
   }
@@ -308,7 +307,6 @@
 {% endblock %}
 
 {% block content %}
-{# NUEVO: wrapper con upload_id #}
 <div id="dimensiones-root"
      data-upload-id="{{ upload.id if upload is defined and upload else '' }}">
 
@@ -418,8 +416,8 @@
             </div>
           </section>
 
-                    <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
-          <section class="chart-card" aria-labelledby="dimTitleProvincia">
+          <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
+          <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
             <header>
               <h3 id="dimTitleProvincia">Procesos por provincia</h3>
               <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
@@ -480,8 +478,6 @@
     </div>
   </div>
 </div>
-
-{# Scripts de gráficos para Dimensiones #}
 
 <!-- Chart.js (estable y compatible con treemap) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>

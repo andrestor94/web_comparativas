@@ -134,8 +134,9 @@
   // ------------------------------------------------------------------
   let ARG_PROV_FEATURES = null;
   let ARG_PROV_LOADING = false;
+  let PROV_MAP_BROKEN = false; // si algo falla, volvemos a barras
 
-    // Registra el plugin de mapas (ChartGeo) una sola vez
+  // Registra el plugin de mapas (ChartGeo) una sola vez
   function ensureGeoRegistered() {
     if (
       typeof Chart === "undefined" ||
@@ -166,7 +167,6 @@
   }
 
   function hasChoroplethController() {
-    // Nos aseguramos de registrar primero
     ensureGeoRegistered();
     return (
       typeof Chart !== "undefined" &&
@@ -176,17 +176,19 @@
     );
   }
 
-      async function ensureArgentinaGeojsonLoaded() {
+  async function ensureArgentinaGeojsonLoaded() {
     if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
     ARG_PROV_LOADING = true;
     try {
-      // ✅ Ahora cargamos el archivo LOCAL servido por tu app
-      const res = await fetch("/static/data/argentina_provincias.geojson", {
-        headers: { Accept: "application/json" },
-      });
+      const res = await fetch(
+        "https://apis.datos.gob.ar/georef/api/provincias.geojson",
+        {
+          headers: { Accept: "application/json" },
+        }
+      );
       if (!res.ok) {
         console.error(
-          "[Dimensiones] No se pudo cargar /static/data/argentina_provincias.geojson: HTTP",
+          "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
           res.status
         );
         return;
@@ -198,14 +200,11 @@
         if (RAW) updateUI();
       } else {
         console.warn(
-          "[Dimensiones] argentina_provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
+          "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
         );
       }
     } catch (err) {
-      console.error(
-        "[Dimensiones] Error cargando argentina_provincias.geojson",
-        err
-      );
+      console.error("[Dimensiones] Error cargando provincias.geojson", err);
     } finally {
       ARG_PROV_LOADING = false;
     }
@@ -295,7 +294,6 @@
     }
 
     // Cuenta NO se envía por ahora (no está en el endpoint)
-
     return params.toString();
   }
 
@@ -551,113 +549,94 @@
   }
 
   // ------------------------------------------------------------------
-  // NUEVO: Mapa / Choropleth de "Procesos por provincia"
+  // Mapa / Choropleth de "Procesos por provincia"
   // ------------------------------------------------------------------
-    function updateProvinciaChart(chartRef, ctx, dimProv) {
+
+  function updateProvinciaBar(chartRef, ctx, dimProv) {
+    const src = (dimProv || []).slice(0, 15);
+    const labels = src.map((d) => d.label || "");
+    const counts = src.map((d) => d.count || 0);
+
+    return createOrUpdateBar(
+      chartRef,
+      ctx,
+      labels,
+      [
+        {
+          label: "Procesos",
+          data: counts,
+          backgroundColor: "#93c5fd",
+          borderColor: "#1d4ed8",
+          borderWidth: 1,
+        },
+      ],
+      {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            grid: { color: "rgba(148, 163, 184, 0.25)" },
+          },
+          y: {
+            grid: { display: false },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+        },
+      }
+    );
+  }
+
+  function updateProvinciaChart(chartRef, ctx, dimProv) {
     if (!ctx || !dimProv) return chartRef;
 
-    // Si todavía no tenemos el plugin o el GeoJSON, cargamos el archivo
-    // y mostramos el fallback de barras horizontales
-    if (!hasChoroplethController() || !ARG_PROV_FEATURES) {
-      // dispara la carga del GeoJSON en segundo plano (si hace falta)
-      ensureArgentinaGeojsonLoaded();
-
-      const src = dimProv.slice(0, 15);
-      const labels = src.map((d) => d.label || "");
-      const counts = src.map((d) => d.count || 0);
-
-      return createOrUpdateBar(
-        chartRef,
-        ctx,
-        labels,
-        [
-          {
-            label: "Procesos",
-            data: counts,
-            backgroundColor: "#93c5fd",
-            borderColor: "#1d4ed8",
-            borderWidth: 1,
-          },
-        ],
-        {
-          indexAxis: "y",
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: {
-              beginAtZero: true,
-              grid: { color: "rgba(148, 163, 184, 0.25)" },
-            },
-            y: {
-              grid: { display: false },
-            },
-          },
-          plugins: {
-            legend: { display: false },
-          },
-        }
-      );
+    // Si ya falló una vez el mapa, nos quedamos con barras
+    if (PROV_MAP_BROKEN) {
+      return updateProvinciaBar(chartRef, ctx, dimProv);
     }
 
-    // ✅ En este punto YA tenemos plugin + GeoJSON -> queremos un mapa
-    // Si existe un gráfico anterior y NO es choropleth, lo destruimos
+    // Si no está ChartGeo o aún no cargó el GeoJSON, usamos barras y disparamos carga
     if (
-      chartRef &&
-      chartRef.config &&
-      chartRef.config.type !== "choropleth"
+      typeof ChartGeo === "undefined" ||
+      !hasChoroplethController() ||
+      !ARG_PROV_FEATURES
     ) {
-      chartRef.destroy();
-      chartRef = null;
+      ensureArgentinaGeojsonLoaded();
+      return updateProvinciaBar(chartRef, ctx, dimProv);
     }
 
-    // Armamos el dataset de provincias
-    const countsByName = new Map();
-    dimProv.forEach((d) => {
-      const name = (d.label || "").toString().toUpperCase().trim();
-      const prev = countsByName.get(name) || 0;
-      countsByName.set(name, prev + (d.count || 0));
-    });
+    try {
+      // Tenemos GeoJSON y plugin: armamos el choropleth de provincias
+      const countsByName = new Map();
+      dimProv.forEach((d) => {
+        const name = (d.label || "").toString().toUpperCase().trim();
+        const prev = countsByName.get(name) || 0;
+        countsByName.set(name, prev + (d.count || 0));
+      });
 
-    const dataPoints = ARG_PROV_FEATURES.map((feat) => {
-      const props = feat.properties || {};
-      const rawName =
-        props.provincia ||
-        props.nombre ||
-        props.NOMBRE ||
-        props.name ||
-        "";
-      const key = rawName.toString().toUpperCase().trim();
-      const value = countsByName.get(key) || 0;
-      return {
-        feature: feat,
-        value,
-        label: rawName || key || "Sin nombre",
-      };
-    });
+      const dataPoints = ARG_PROV_FEATURES.map((feat) => {
+        const props = feat.properties || {};
+        const rawName =
+          props.provincia ||
+          props.nombre ||
+          props.NOMBRE ||
+          props.name ||
+          "";
+        const key = rawName.toString().toUpperCase().trim();
+        const value = countsByName.get(key) || 0;
+        return {
+          feature: feat,
+          value,
+          label: rawName || key || "Sin nombre",
+        };
+      });
 
-    const labels = dataPoints.map((d) => d.label);
+      const labels = dataPoints.map((d) => d.label);
 
-    if (chartRef) {
-      // Ya es choropleth: solo actualizamos datos
-      chartRef.data.labels = labels;
-      chartRef.data.datasets[0].data = dataPoints;
-      chartRef.update();
-      return chartRef;
-    }
-
-    // Creamos el choropleth desde cero
-    return new Chart(ctx, {
-      type: "choropleth",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "Procesos por provincia",
-            data: dataPoints,
-          },
-        ],
-      },
-      options: {
+      const options = {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -674,12 +653,42 @@
           },
         },
         scales: {
-          xy: {
+          projection: {
+            axis: "x",
             projection: "mercator",
           },
         },
-      },
-    });
+      };
+
+      if (chartRef) {
+        chartRef.data.labels = labels;
+        chartRef.data.datasets[0].data = dataPoints;
+        chartRef.options = Object.assign(chartRef.options || {}, options);
+        chartRef.update();
+        return chartRef;
+      }
+
+      return new Chart(ctx, {
+        type: "choropleth",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Procesos por provincia",
+              data: dataPoints,
+            },
+          ],
+        },
+        options,
+      });
+    } catch (err) {
+      console.error(
+        "[Dimensiones] Error dibujando mapa de provincias, vuelvo a barras",
+        err
+      );
+      PROV_MAP_BROKEN = true;
+      return updateProvinciaBar(chartRef, ctx, dimProv);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -797,7 +806,7 @@
           },
         ],
         {
-          indexAxis: "y", // 👉 Barras horizontales
+          indexAxis: "y", // Barras horizontales
           responsive: true,
           maintainAspectRatio: false,
           scales: {
