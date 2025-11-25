@@ -480,10 +480,18 @@
       return;
     }
 
+    // Crear mapa y enfocarlo directamente en Argentina
     provMap = L.map(mapEl, {
       zoomControl: false,
       attributionControl: false,
-    }).setView([-38.4, -64.8], 3.8); // centro aproximado de Argentina
+    });
+
+    // Bounds aproximados de Argentina (sudoeste / noreste)
+    const argentinaBounds = L.latLngBounds(
+      L.latLng(-55.0, -73.5),
+      L.latLng(-21.5, -53.0)
+    );
+    provMap.fitBounds(argentinaBounds);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 7,
