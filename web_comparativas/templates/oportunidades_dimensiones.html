@@ -190,27 +190,20 @@
     gap:10px;
   }
 
-  /* Fila media: SOLO timeline, ancho completo */
+  /* Fila media: timeline + mapa (lado a lado) */
   .dim-row-middle{
     display:grid;
-    grid-template-columns:1fr;
-    gap:12px;
-  }
-
-  /* Fila inferior: tipo + barras + (mapa + torta apilados) */
-  .dim-row-bottom{
-    display:grid;
-    grid-template-columns:1.3fr 1.2fr 1.1fr;
+    grid-template-columns:1.8fr 1.1fr; /* timeline más ancho, mapa más angosto */
     gap:12px;
     align-items:stretch;
   }
 
-  /* Contenedor columna derecha (mapa + torta) */
-  .dim-bottom-right{
-    display:flex;
-    flex-direction:column;
+  /* Fila inferior: tipo + barras + torta */
+  .dim-row-bottom{
+    display:grid;
+    grid-template-columns:1.3fr 1.2fr 0.9fr;
     gap:12px;
-    height:100%;
+    align-items:stretch;
   }
 
   .chart-card{
@@ -241,23 +234,23 @@
     position:relative;
   }
 
-  /* Tarjetas inferiores algo más compactas */
+  /* Tarjetas inferiores más bajitas */
   .dim-row-bottom .chart-card{
     padding:8px 10px;
   }
   .dim-row-bottom .chart-body{
-    min-height:160px;
+    min-height:140px;
   }
 
   /* Barras repartición/estado un poco más bajas */
   .chart-card--rep-estado .chart-body{
-    min-height:150px;
+    min-height:130px;
   }
 
   /* Para que la torta no se desmadre de ancho */
   .chart-card--small .chart-body{
-    max-width:240px;
-    min-height:130px;
+    max-width:230px;
+    min-height:120px;
     margin:0 auto;
   }
 
@@ -278,7 +271,7 @@
 
   /* --- MAPA --- */
   .chart-card--map .chart-body{
-    min-height:260px;
+    min-height:260px; /* más largo para ver bien Argentina */
   }
   .dim-map{
     width:100%;
@@ -303,9 +296,6 @@
     }
     .dim-row-bottom{
       grid-template-columns:1fr;
-    }
-    .dim-bottom-right{
-      flex-direction:column;
     }
   }
 
@@ -419,7 +409,7 @@
         </div>
 
         {# =========================
-           FILA MEDIA: LÍNEA DE TIEMPO SOLO
+           FILA MEDIA: LÍNEA DE TIEMPO + MAPA
            ========================= #}
         <div class="dim-row-middle">
           <!-- Apertura de procesos en el tiempo -->
@@ -434,10 +424,24 @@
               </div>
             </div>
           </section>
+
+          <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
+          <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
+            <header>
+              <h3 id="dimTitleProvincia">Procesos por provincia</h3>
+              <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
+            </header>
+            <div class="chart-body">
+              <div id="dimProvinciaMap"
+                   class="dim-map"
+                   aria-label="Mapa de Argentina por provincia">
+              </div>
+            </div>
+          </section>
         </div>
 
         {# =========================
-           FILA INFERIOR: TIPO + BARRAS + MAPA+TORTA
+           FILA INFERIOR: TIPO + BARRAS + TORTA
            ========================= #}
         <div class="dim-row-bottom">
           <!-- Procesos por tipo -->
@@ -466,35 +470,18 @@
             </div>
           </section>
 
-          <!-- Columna derecha: MAPA + TORTA -->
-          <div class="dim-bottom-right">
-            <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
-            <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
-              <header>
-                <h3 id="dimTitleProvincia">Procesos por provincia</h3>
-                <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
-              </header>
-              <div class="chart-body">
-                <div id="dimProvinciaMap"
-                     class="dim-map"
-                     aria-label="Mapa de Argentina por provincia">
-                </div>
+          <!-- Proceso por estado (torta global) -->
+          <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
+            <header>
+              <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
+              <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
+            </header>
+            <div id="dimPanelEstadoPie" class="chart-body">
+              <div class="chart-placeholder">
+                Aquí se mostrará el gráfico de torta por estado.
               </div>
-            </section>
-
-            <!-- Proceso por estado (torta global) -->
-            <section class="chart-card chart-card--small" aria-labelledby="dimTitleEstadoPie">
-              <header>
-                <h3 id="dimTitleEstadoPie">Proceso por estado</h3>
-                <small>Participación relativa por estado (EMERGENCIA / REGULAR).</small>
-              </header>
-              <div id="dimPanelEstadoPie" class="chart-body">
-                <div class="chart-placeholder">
-                  Aquí se mostrará el gráfico de torta por estado.
-                </div>
-              </div>
-            </section>
-          </div>
+            </div>
+          </section>
         </div>
 
       </div>
