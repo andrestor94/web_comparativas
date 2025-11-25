@@ -176,39 +176,40 @@
     );
   }
 
-  async function ensureArgentinaGeojsonLoaded() {
-  if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
-  ARG_PROV_LOADING = true;
-  try {
-    const res = await fetch(
-      "https://apis.datos.gob.ar/georef/api/v2.0/provincias.geojson",
-      {
-        headers: { Accept: "application/json" },
+    async function ensureArgentinaGeojsonLoaded() {
+    if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
+    ARG_PROV_LOADING = true;
+    try {
+      // ✅ URL correcta de provincias en formato GeoJSON
+      const res = await fetch(
+        "https://apis.datos.gob.ar/georef/api/provincias.geojson",
+        {
+          headers: { Accept: "application/json" },
+        }
+      );
+      if (!res.ok) {
+        console.error(
+          "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
+          res.status
+        );
+        return;
       }
-    );
-    if (!res.ok) {
-      console.error(
-        "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
-        res.status
-      );
-      return;
+      const geo = await res.json();
+      if (geo && Array.isArray(geo.features)) {
+        ARG_PROV_FEATURES = geo.features;
+        // si ya hay datos cargados, redibujamos el mapa
+        if (RAW) updateUI();
+      } else {
+        console.warn(
+          "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
+        );
+      }
+    } catch (err) {
+      console.error("[Dimensiones] Error cargando provincias.geojson", err);
+    } finally {
+      ARG_PROV_LOADING = false;
     }
-    const geo = await res.json();
-    if (geo && Array.isArray(geo.features)) {
-      ARG_PROV_FEATURES = geo.features;
-      // si ya hay datos cargados, redibujamos el mapa
-      if (RAW) updateUI();
-    } else {
-      console.warn(
-        "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
-      );
-    }
-  } catch (err) {
-    console.error("[Dimensiones] Error cargando provincias.geojson", err);
-  } finally {
-    ARG_PROV_LOADING = false;
   }
-}
 
   // ------------------------------------------------------------------
   // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
@@ -552,7 +553,7 @@
   // ------------------------------------------------------------------
   // NUEVO: Mapa / Choropleth de "Procesos por provincia"
   // ------------------------------------------------------------------
-  function updateProvinciaChart(chartRef, ctx, dimProv) {
+    function updateProvinciaChart(chartRef, ctx, dimProv) {
     if (!ctx || !dimProv) return chartRef;
 
     // Si todavía no tenemos el plugin o el GeoJSON, cargamos el archivo
@@ -598,7 +599,18 @@
       );
     }
 
-    // Tenemos GeoJSON y plugin: armamos el choropleth de provincias
+    // ✅ En este punto YA tenemos plugin + GeoJSON -> queremos un mapa
+    // Si existe un gráfico anterior y NO es choropleth, lo destruimos
+    if (
+      chartRef &&
+      chartRef.config &&
+      chartRef.config.type !== "choropleth"
+    ) {
+      chartRef.destroy();
+      chartRef = null;
+    }
+
+    // Armamos el dataset de provincias
     const countsByName = new Map();
     dimProv.forEach((d) => {
       const name = (d.label || "").toString().toUpperCase().trim();
@@ -626,12 +638,14 @@
     const labels = dataPoints.map((d) => d.label);
 
     if (chartRef) {
+      // Ya es choropleth: solo actualizamos datos
       chartRef.data.labels = labels;
       chartRef.data.datasets[0].data = dataPoints;
       chartRef.update();
       return chartRef;
     }
 
+    // Creamos el choropleth desde cero
     return new Chart(ctx, {
       type: "choropleth",
       data: {
@@ -661,7 +675,6 @@
         },
         scales: {
           xy: {
-            // Proyección centrada en Argentina (se puede ajustar)
             projection: "mercator",
           },
         },
