@@ -120,7 +120,7 @@
   // ------------------------------------------------------------------
   const API_BASE_URL = "/api/oportunidades/dimensiones";
 
-  // NUEVO: ruta local al GeoJSON de provincias
+  // Ruta local al GeoJSON de provincias
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
   let RAW = null;
@@ -164,6 +164,7 @@
       );
 
       ensureGeoRegistered._done = true;
+      console.log("[Dimensiones] ChartGeo registrado.");
     } catch (e) {
       console.warn("[Dimensiones] No se pudo registrar ChartGeo", e);
     }
@@ -446,6 +447,13 @@
   // ------------------------------------------------------------------
   function createOrUpdateBar(chartRef, ctx, labels, datasets, options) {
     if (!ctx || typeof Chart === "undefined") return null;
+
+    // Si ya existe pero NO es un bar, lo destruimos para recrear
+    if (chartRef && chartRef.config && chartRef.config.type !== "bar") {
+      chartRef.destroy();
+      chartRef = null;
+    }
+
     if (chartRef) {
       chartRef.data.labels = labels;
       chartRef.data.datasets = datasets;
@@ -610,22 +618,27 @@
     if (
       typeof ChartGeo === "undefined" ||
       !hasChoroplethController() ||
-      !Array.isArray(ARG_PROV_FEATURES) ||
-      !ARG_PROV_FEATURES.length
+      !ARG_PROV_FEATURES
     ) {
       ensureArgentinaGeojsonLoaded();
       return updateProvinciaBar(chartRef, ctx, dimProv);
     }
 
     try {
-      // Tenemos GeoJSON y plugin: armamos el choropleth de provincias
+      console.log("[Dimensiones] Dibujando mapa choropleth de provincias…");
+
+      // Agregamos los valores por provincia
       const countsByName = new Map();
       dimProv.forEach((d) => {
         const name = (d.label || "").toString().toUpperCase().trim();
-        if (!name) return;
         const prev = countsByName.get(name) || 0;
         countsByName.set(name, prev + (d.count || 0));
       });
+
+      const outline = {
+        type: "FeatureCollection",
+        features: ARG_PROV_FEATURES,
+      };
 
       const dataPoints = ARG_PROV_FEATURES.map((feat) => {
         const props = feat.properties || {};
@@ -662,26 +675,40 @@
             },
           },
         },
-        // Escalas específicas de ChartGeo: proyección + escala de color
+        // Esto hace que ChartGeo use un mapa centrado en Argentina
         scales: {
           projection: {
             axis: "x",
             projection: "mercator",
           },
           color: {
-            axis: "x",
+            axis: "color",
             quantize: 6,
             legend: {
               position: "bottom-right",
               align: "right",
+              labels: {
+                font: { size: 10 },
+              },
+              title: {
+                display: true,
+                text: "Procesos",
+              },
             },
           },
         },
       };
 
+      // IMPORTANTÍSIMO: si actualmente es un bar, lo destruimos
+      if (chartRef && chartRef.config && chartRef.config.type !== "choropleth") {
+        chartRef.destroy();
+        chartRef = null;
+      }
+
       if (chartRef) {
         chartRef.data.labels = labels;
         chartRef.data.datasets[0].data = dataPoints;
+        chartRef.data.datasets[0].outline = outline;
         chartRef.options = Object.assign(chartRef.options || {}, options);
         chartRef.update();
         return chartRef;
@@ -695,6 +722,9 @@
             {
               label: "Procesos por provincia",
               data: dataPoints,
+              outline: outline,
+              borderColor: "#f9fafb",
+              borderWidth: 0.6,
             },
           ],
         },
