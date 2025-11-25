@@ -120,13 +120,13 @@
   const API_BASE_URL = "/api/oportunidades/dimensiones";
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
-  // Paleta Suizo (azules corporativos, un poco más claros)
+  // Paleta SUISO (hex, sin transparencias en barras principales)
   const COLORS = {
-    emergency: "rgba(6, 64, 102, 0.9)", // azul oscuro Suizo
-    regular: "rgba(82, 116, 206, 0.9)", // azul medio Suizo
-    emergencySoft: "rgba(6, 64, 102, 0.18)",
-    regularSoft: "rgba(82, 116, 206, 0.18)",
-    treemap: "rgba(82, 116, 206, 0.78)",
+    emergency: "#064066",      // EMERGENCIA
+    regular: "#5274ce",        // REGULAR
+    emergencySoft: "#064066",  // lo usamos igual que emergency (lleno)
+    regularSoft: "#5274ce",
+    treemap: "#6886c4",        // bloques del treemap
   };
 
   let RAW = null;
@@ -396,7 +396,6 @@
         datasets: [
           {
             data,
-            // EMERGENCIA (azul oscuro) / REGULAR (azul medio)
             backgroundColor: [COLORS.emergency, COLORS.regular],
           },
         ],
@@ -440,7 +439,6 @@
             borderColor: "#ffffff",
             borderWidth: 1,
             spacing: 0.5,
-            // Bloques en azul Suizo medio, ligeramente translúcido
             backgroundColor: COLORS.treemap,
             labels: {
               display: true,
@@ -557,10 +555,10 @@
     function colorFor(v) {
       if (maxCount <= 0 || v <= 0) return "#e5e7eb";
       const t = v / maxCount;
-      if (t > 0.75) return "#064066"; // azul Suizo oscuro
-      if (t > 0.5) return "#285a9c";  // intermedio
-      if (t > 0.25) return "#5274ce"; // azul Suizo medio
-      return "#9fb5f5";              // azul claro
+      if (t > 0.75) return "#064066"; // azul oscuro
+      if (t > 0.5) return "#5274ce"; // azul alternativo
+      if (t > 0.25) return "#6886c4"; // azul claro
+      return "#a8bce9";              // extra claro
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
