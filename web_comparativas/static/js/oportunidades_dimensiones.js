@@ -145,40 +145,38 @@
   }
 
   async function ensureArgentinaGeojsonLoaded() {
-    if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
-    ARG_PROV_LOADING = true;
-    try {
-      const res = await fetch("/static/data/argentina_provincias.geojson", {
+  if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
+  ARG_PROV_LOADING = true;
+  try {
+    const res = await fetch(
+      "https://apis.datos.gob.ar/georef/api/v2.0/provincias.geojson",
+      {
         headers: { Accept: "application/json" },
-      });
-      if (!res.ok) {
-        console.error(
-          "[Dimensiones] No se pudo cargar argentina_provincias.geojson: HTTP",
-          res.status
-        );
-        return;
       }
-      const geo = await res.json();
-      if (geo && Array.isArray(geo.features)) {
-        ARG_PROV_FEATURES = geo.features;
-        // Si ya tenemos datos cargados, repintamos el mapa
-        if (RAW) {
-          updateUI();
-        }
-      } else {
-        console.warn(
-          "[Dimensiones] argentina_provincias.geojson no tiene formato GeoJSON esperado (FeatureCollection.features)."
-        );
-      }
-    } catch (err) {
+    );
+    if (!res.ok) {
       console.error(
-        "[Dimensiones] Error cargando argentina_provincias.geojson",
-        err
+        "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
+        res.status
       );
-    } finally {
-      ARG_PROV_LOADING = false;
+      return;
     }
+    const geo = await res.json();
+    if (geo && Array.isArray(geo.features)) {
+      ARG_PROV_FEATURES = geo.features;
+      // si ya hay datos cargados, redibujamos el mapa
+      if (RAW) updateUI();
+    } else {
+      console.warn(
+        "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
+      );
+    }
+  } catch (err) {
+    console.error("[Dimensiones] Error cargando provincias.geojson", err);
+  } finally {
+    ARG_PROV_LOADING = false;
   }
+}
 
   // ------------------------------------------------------------------
   // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
