@@ -193,7 +193,7 @@
   /* Bloque de gráficos medio: timeline + provincia */
   .dim-row-middle{
     display:grid;
-    grid-template-columns:1fr 1.6fr; /* más ancho provincia */
+    grid-template-columns:1fr 1.6fr;
     gap:12px;
     align-items:stretch;
   }
@@ -263,25 +263,22 @@
     padding:8px;
   }
 
-  /* 👉 El mapa necesita altura fija para que el canvas no sea 0 */
+  /* --- MAPA --- */
   .chart-card--map .chart-body{
     min-height:260px;
   }
-
-  .map-placeholder{
+  .dim-map{
     width:100%;
     height:100%;
-    min-height:180px;
+    min-height:240px;
     border-radius:10px;
-    border:1px dashed #d1d5db;
+    overflow:hidden;
+    box-shadow:0 0 0 1px rgba(148,163,184,0.35);
+  }
+  /* mejorar el look del mapa */
+  .leaflet-container{
     background:#e5f0ff;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    font-size:12px;
-    color:#1f2937;
-    text-align:center;
-    padding:8px;
+    border-radius:10px;
   }
 
   /* Responsive */
@@ -304,6 +301,14 @@
     }
   }
 </style>
+
+<!-- Leaflet CSS para el mapa -->
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin=""
+/>
 {% endblock %}
 
 {% block content %}
@@ -400,7 +405,7 @@
         </div>
 
         {# =========================
-           FILA MEDIA: LÍNEA DE TIEMPO + PROVINCIA
+           FILA MEDIA: LÍNEA DE TIEMPO + MAPA
            ========================= #}
         <div class="dim-row-middle">
           <!-- Apertura de procesos en el tiempo -->
@@ -422,9 +427,10 @@
               <h3 id="dimTitleProvincia">Procesos por provincia</h3>
               <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
             </header>
-            <div id="dimPanelProvincia" class="chart-body">
-              <div class="map-placeholder">
-                Cargando mapa de provincias de Argentina…
+            <div class="chart-body">
+              <div id="dimProvinciaMap"
+                   class="dim-map"
+                   aria-label="Mapa de Argentina por provincia">
               </div>
             </div>
           </section>
@@ -479,14 +485,20 @@
   </div>
 </div>
 
-<!-- Chart.js (estable y compatible con treemap) -->
+{# Scripts de gráficos para Dimensiones #}
+
+<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 
 <!-- Plugin Treemap compatible con Chart.js v3 -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.1.0/dist/chartjs-chart-treemap.min.js"></script>
 
-<!-- Plugin de mapas (ChartGeo) para choropleth -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-geo@3.9.0/build/index.umd.min.js"></script>
+<!-- Leaflet JS para el mapa -->
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-o9N1j7kGStpG2zN1NWn0C6x4s9Xp1l9V+4yRjQoaf+o="
+  crossorigin=""
+></script>
 
 <!-- Tu script principal de Dimensiones -->
 <script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>

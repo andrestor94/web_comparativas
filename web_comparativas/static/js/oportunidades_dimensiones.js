@@ -66,8 +66,13 @@
   const rootDim = document.getElementById("dimensiones-root");
   const uploadId = rootDim ? rootDim.dataset.uploadId || "" : "";
 
+  if (!rootDim) {
+    // No estamos en la vista de Dimensiones
+    return;
+  }
+
   // ------------------------------------------------------------------
-  // Referencias de UI (IDs flexibles para evitar roturas)
+  // Referencias de UI
   // ------------------------------------------------------------------
   const dateFromEl = pickId("dimDateFrom", "fDateFrom");
   const dateToEl = pickId("dimDateTo", "fDateTo");
@@ -83,7 +88,7 @@
   const swPAMI = document.getElementById("swPAMI");
   const swEstado = document.getElementById("swEstado");
 
-  // Contenedores / canvas de gráficos
+  // Contenedores / canvas de gráficos (solo charts, el mapa va con Leaflet)
   function getCtx(canvasId, containerId) {
     let canvas = document.getElementById(canvasId);
     if (!canvas && containerId) {
@@ -99,15 +104,9 @@
   }
 
   const ctxTimeline = getCtx("dimChartTimeline", "dimPanelTimeline");
-  const ctxProvincia = getCtx("dimChartProvincia", "dimPanelProvincia");
   const ctxTipo = getCtx("dimChartTipo", "dimPanelTipo");
   const ctxRepEstado = getCtx("dimChartRepEstado", "dimPanelRepEstado");
   const ctxEstadoPie = getCtx("dimChartEstadoPie", "dimPanelEstadoPie");
-
-  if (!$("#dimensiones-root") && !ctxTimeline && !ctxProvincia && !ctxTipo) {
-    // Si no estamos en Dimensiones, salir
-    return;
-  }
 
   if (typeof Chart === "undefined") {
     console.warn(
@@ -116,108 +115,25 @@
   }
 
   // ------------------------------------------------------------------
-  // Estado global (datos crudos + gráficos)
+  // Estado global (datos crudos + gráficos + mapa)
   // ------------------------------------------------------------------
   const API_BASE_URL = "/api/oportunidades/dimensiones";
-
-  // Ruta local al GeoJSON de provincias
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
   let RAW = null;
+  let LAST_FILTERED = null;
+
   const charts = {
     timeline: null,
-    provincia: null,
     tipo: null,
     repEstado: null,
     estadoPie: null,
   };
 
-  // ------------------------------------------------------------------
-  // GeoJSON de provincias de Argentina para el mapa
-  // ------------------------------------------------------------------
-  let ARG_PROV_FEATURES = null;
-  let ARG_PROV_LOADING = false;
-  let PROV_MAP_BROKEN = false; // si algo falla, volvemos a barras
-
-  // Registra el plugin de mapas (ChartGeo) una sola vez
-  function ensureGeoRegistered() {
-    if (
-      typeof Chart === "undefined" ||
-      typeof ChartGeo === "undefined" ||
-      ensureGeoRegistered._done
-    ) {
-      return;
-    }
-    try {
-      const {
-        ChoroplethController,
-        GeoFeature,
-        ColorScale,
-        ProjectionScale,
-      } = ChartGeo;
-
-      Chart.register(
-        ChoroplethController,
-        GeoFeature,
-        ColorScale,
-        ProjectionScale
-      );
-
-      ensureGeoRegistered._done = true;
-      console.log("[Dimensiones] ChartGeo registrado.");
-    } catch (e) {
-      console.warn("[Dimensiones] No se pudo registrar ChartGeo", e);
-    }
-  }
-
-  function hasChoroplethController() {
-    ensureGeoRegistered();
-    return (
-      typeof Chart !== "undefined" &&
-      Chart.registry &&
-      typeof Chart.registry.getController === "function" &&
-      !!Chart.registry.getController("choropleth")
-    );
-  }
-
-  async function ensureArgentinaGeojsonLoaded() {
-    if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
-    ARG_PROV_LOADING = true;
-    try {
-      const res = await fetch(GEOJSON_PROVINCIAS_URL, {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) {
-        console.error(
-          "[Dimensiones] No se pudo cargar provincias_argentina.geojson: HTTP",
-          res.status
-        );
-        return;
-      }
-      const geo = await res.json();
-      if (geo && Array.isArray(geo.features)) {
-        ARG_PROV_FEATURES = geo.features;
-        console.log(
-          "[Dimensiones] GeoJSON de provincias cargado desde estático.",
-          ARG_PROV_FEATURES.length,
-          "features"
-        );
-        // si ya hay datos de la API, redibujamos para pasar de barras -> mapa
-        if (RAW) updateUI();
-      } else {
-        console.warn(
-          "[Dimensiones] provincias_argentina.geojson no tiene el formato esperado (FeatureCollection.features)."
-        );
-      }
-    } catch (err) {
-      console.error(
-        "[Dimensiones] Error cargando provincias_argentina.geojson",
-        err
-      );
-    } finally {
-      ARG_PROV_LOADING = false;
-    }
-  }
+  // Mapa Leaflet
+  let provMap = null;
+  let provGeoLayer = null;
+  let PROV_GEOJSON = null;
 
   // ------------------------------------------------------------------
   // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
@@ -279,12 +195,10 @@
   function buildQueryString() {
     const params = new URLSearchParams();
 
-    // id del archivo asociado al Buscador
     if (uploadId) {
       params.set("upload_id", uploadId);
     }
 
-    // Fecha
     if (dateFromEl && dateFromEl.value) {
       params.set("date_from", dateFromEl.value);
     }
@@ -292,12 +206,10 @@
       params.set("date_to", dateToEl.value);
     }
 
-    // Plataforma
     if (selPlataforma && selPlataforma.value) {
       params.set("platform", selPlataforma.value);
     }
 
-    // Repartición (comprador)
     if (selReparticion && selReparticion.value) {
       params.set("buyer", selReparticion.value);
     }
@@ -320,7 +232,7 @@
       }
       const data = await res.json();
       RAW = data;
-      refreshSelectOptions(); // llena Plataforma / Cuenta / Repartición
+      refreshSelectOptions();
       updateUI();
     } catch (err) {
       console.error("[Dimensiones] Error de red", err);
@@ -335,7 +247,6 @@
 
     const dims = RAW.dimensions;
 
-    // dimFecha es "let" porque lo vamos a modificar según el chip de Estado
     let dimFecha = Array.isArray(dims.fecha_apertura)
       ? dims.fecha_apertura
       : [];
@@ -348,7 +259,6 @@
       : [];
     let dimEstado = Array.isArray(dims.estado) ? dims.estado : [];
 
-    // Valores de chips
     const pamiVal = getChipGroupValue(swPAMI); // todos | pami | otras
     const estVal = getChipGroupValue(swEstado); // todos | emergencia | regular
 
@@ -372,7 +282,7 @@
           : null;
 
       if (wanted) {
-        // a) repartición+estado -> dejamos solo el estado seleccionado
+        // a) repartición+estado
         dimRepEstado = dimRepEstado
           .map((row) => {
             const em = row.emergencia || 0;
@@ -393,7 +303,7 @@
           })
           .filter((r) => r.total > 0);
 
-        // b) torta global de estados
+        // b) torta global
         dimEstado = dimEstado.filter(
           (e) =>
             (e.estado || "").toString().toUpperCase() === wanted.toUpperCase()
@@ -447,13 +357,6 @@
   // ------------------------------------------------------------------
   function createOrUpdateBar(chartRef, ctx, labels, datasets, options) {
     if (!ctx || typeof Chart === "undefined") return null;
-
-    // Si ya existe pero NO es un bar, lo destruimos para recrear
-    if (chartRef && chartRef.config && chartRef.config.type !== "bar") {
-      chartRef.destroy();
-      chartRef = null;
-    }
-
     if (chartRef) {
       chartRef.data.labels = labels;
       chartRef.data.datasets = datasets;
@@ -565,183 +468,134 @@
   }
 
   // ------------------------------------------------------------------
-  // Mapa / Choropleth de "Procesos por provincia"
+  // Mapa de "Procesos por provincia" con Leaflet
   // ------------------------------------------------------------------
+  function initProvinciaMap() {
+    const mapEl = document.getElementById("dimProvinciaMap");
+    if (!mapEl) return;
+    if (typeof L === "undefined") {
+      console.warn(
+        "[Dimensiones] Leaflet (L) no está disponible. El mapa no se mostrará."
+      );
+      return;
+    }
 
-  function updateProvinciaBar(chartRef, ctx, dimProv) {
-    const src = (dimProv || []).slice(0, 15);
-    const labels = src.map((d) => d.label || "");
-    const counts = src.map((d) => d.count || 0);
+    provMap = L.map(mapEl, {
+      zoomControl: false,
+      attributionControl: false,
+    }).setView([-38.4, -64.8], 3.8); // centro aproximado de Argentina
 
-    return createOrUpdateBar(
-      chartRef,
-      ctx,
-      labels,
-      [
-        {
-          label: "Procesos",
-          data: counts,
-          backgroundColor: "#93c5fd",
-          borderColor: "#1d4ed8",
-          borderWidth: 1,
-        },
-      ],
-      {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            beginAtZero: true,
-            grid: { color: "rgba(148, 163, 184, 0.25)" },
-          },
-          y: {
-            grid: { display: false },
-          },
-        },
-        plugins: {
-          legend: { display: false },
-        },
-      }
-    );
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 7,
+      minZoom: 3,
+    }).addTo(provMap);
+
+    // Cargamos el GeoJSON local de provincias
+    fetch(GEOJSON_PROVINCIAS_URL, {
+      headers: { Accept: "application/json" },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((geo) => {
+        if (geo && Array.isArray(geo.features)) {
+          PROV_GEOJSON = geo;
+          console.log(
+            "[Dimensiones] GeoJSON de provincias cargado:",
+            geo.features.length,
+            "features"
+          );
+          redrawProvinciaChoropleth();
+        } else {
+          console.warn(
+            "[Dimensiones] provincias_argentina.geojson no tiene el formato esperado."
+          );
+        }
+      })
+      .catch((err) => {
+        console.error(
+          "[Dimensiones] Error cargando provincias_argentina.geojson",
+          err
+        );
+      });
   }
 
-  function updateProvinciaChart(chartRef, ctx, dimProv) {
-    if (!ctx || !dimProv) return chartRef;
+  function redrawProvinciaChoropleth() {
+    if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
-    // Si ya falló una vez el mapa, nos quedamos con barras
-    if (PROV_MAP_BROKEN) {
-      return updateProvinciaBar(chartRef, ctx, dimProv);
+    const dimProv = LAST_FILTERED.dimProv || [];
+
+    const countsByName = new Map();
+    dimProv.forEach((d) => {
+      const name = normalize(d.label);
+      const prev = countsByName.get(name) || 0;
+      countsByName.set(name, prev + (d.count || 0));
+    });
+
+    if (provGeoLayer) {
+      provGeoLayer.remove();
+      provGeoLayer = null;
     }
 
-    // Si no está ChartGeo o aún no cargó el GeoJSON, usamos barras y disparamos carga
-    if (
-      typeof ChartGeo === "undefined" ||
-      !hasChoroplethController() ||
-      !ARG_PROV_FEATURES
-    ) {
-      ensureArgentinaGeojsonLoaded();
-      return updateProvinciaBar(chartRef, ctx, dimProv);
+    const values = Array.from(countsByName.values());
+    const maxCount = values.length ? Math.max(...values) : 0;
+
+    function colorFor(v) {
+      if (maxCount <= 0 || v <= 0) return "#e5e7eb";
+      const t = v / maxCount;
+      if (t > 0.75) return "#1d4ed8";
+      if (t > 0.5) return "#2563eb";
+      if (t > 0.25) return "#60a5fa";
+      return "#bfdbfe";
     }
 
-    try {
-      console.log("[Dimensiones] Dibujando mapa choropleth de provincias…");
-
-      // Agregamos los valores por provincia
-      const countsByName = new Map();
-      dimProv.forEach((d) => {
-        const name = (d.label || "").toString().toUpperCase().trim();
-        const prev = countsByName.get(name) || 0;
-        countsByName.set(name, prev + (d.count || 0));
-      });
-
-      const outline = {
-        type: "FeatureCollection",
-        features: ARG_PROV_FEATURES,
-      };
-
-      const dataPoints = ARG_PROV_FEATURES.map((feat) => {
-        const props = feat.properties || {};
+    provGeoLayer = L.geoJSON(PROV_GEOJSON, {
+      style: (feature) => {
+        const props = feature.properties || {};
         const rawName =
           props.provincia ||
           props.nombre ||
           props.NOMBRE ||
           props.name ||
           "";
-        const key = rawName.toString().toUpperCase().trim();
+        const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
         return {
-          feature: feat,
-          value,
-          label: rawName || key || "Sin nombre",
+          color: "#ffffff",
+          weight: 1,
+          fillColor: colorFor(value),
+          fillOpacity: value > 0 ? 0.9 : 0.3,
         };
-      });
+      },
+      onEachFeature(feature, layer) {
+        const props = feature.properties || {};
+        const rawName =
+          props.provincia ||
+          props.nombre ||
+          props.NOMBRE ||
+          props.name ||
+          "Sin nombre";
+        const key = normalize(rawName);
+        const value = countsByName.get(key) || 0;
+        layer.bindTooltip(
+          `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
+          {
+            direction: "top",
+            sticky: true,
+          }
+        );
+      },
+    }).addTo(provMap);
 
-      const labels = dataPoints.map((d) => d.label);
-
-      const options = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label(context) {
-                const d = context.raw || {};
-                const name = d.label || "";
-                const value = d.value || 0;
-                return `${name}: ${value} procesos`;
-              },
-            },
-          },
-        },
-        // Esto hace que ChartGeo use un mapa centrado en Argentina
-        scales: {
-          projection: {
-            axis: "x",
-            projection: "mercator",
-          },
-          color: {
-            axis: "color",
-            quantize: 6,
-            legend: {
-              position: "bottom-right",
-              align: "right",
-              labels: {
-                font: { size: 10 },
-              },
-              title: {
-                display: true,
-                text: "Procesos",
-              },
-            },
-          },
-        },
-      };
-
-      // IMPORTANTÍSIMO: si actualmente es un bar, lo destruimos
-      if (chartRef && chartRef.config && chartRef.config.type !== "choropleth") {
-        chartRef.destroy();
-        chartRef = null;
-      }
-
-      if (chartRef) {
-        chartRef.data.labels = labels;
-        chartRef.data.datasets[0].data = dataPoints;
-        chartRef.data.datasets[0].outline = outline;
-        chartRef.options = Object.assign(chartRef.options || {}, options);
-        chartRef.update();
-        return chartRef;
-      }
-
-      return new Chart(ctx, {
-        type: "choropleth",
-        data: {
-          labels,
-          datasets: [
-            {
-              label: "Procesos por provincia",
-              data: dataPoints,
-              outline: outline,
-              borderColor: "#f9fafb",
-              borderWidth: 0.6,
-            },
-          ],
-        },
-        options,
-      });
-    } catch (err) {
-      console.error(
-        "[Dimensiones] Error dibujando mapa de provincias, vuelvo a barras",
-        err
-      );
-      PROV_MAP_BROKEN = true;
-      return updateProvinciaBar(chartRef, ctx, dimProv);
+    const bounds = provGeoLayer.getBounds();
+    if (bounds.isValid()) {
+      provMap.fitBounds(bounds, { padding: [10, 10] });
     }
   }
 
   // ------------------------------------------------------------------
-  // Actualizar toda la UI (KPI + gráficos)
+  // Actualizar toda la UI (KPI + gráficos + mapa)
   // ------------------------------------------------------------------
   function updateUI() {
     if (!RAW || !RAW.ok || !RAW.has_file) {
@@ -751,6 +605,7 @@
 
     const F = computeFilteredData();
     if (!F) return;
+    LAST_FILTERED = F;
 
     // KPI Procesos
     if (kProcesos) {
@@ -804,14 +659,8 @@
       );
     }
 
-    // --- 2) Procesos por provincia (MAPA / fallback barras)
-    if (ctxProvincia) {
-      charts.provincia = updateProvinciaChart(
-        charts.provincia,
-        ctxProvincia,
-        F.dimProv
-      );
-    }
+    // --- 2) Procesos por provincia (MAPA Leaflet)
+    redrawProvinciaChoropleth();
 
     // --- 3) Procesos por tipo (TREEMAP)
     if (ctxTipo) {
@@ -855,7 +704,7 @@
           },
         ],
         {
-          indexAxis: "y", // Barras horizontales
+          indexAxis: "y",
           responsive: true,
           maintainAspectRatio: false,
           scales: {
@@ -937,9 +786,7 @@
   // ------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     bindFilters();
-    // Cargamos el GeoJSON de provincias en segundo plano
-    ensureArgentinaGeojsonLoaded();
-    // Primera carga de datos desde el backend
+    initProvinciaMap();
     fetchData();
   });
 })();
