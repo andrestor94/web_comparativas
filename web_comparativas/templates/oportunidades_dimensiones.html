@@ -7,11 +7,11 @@
   .muted.small{font-size:13px}
 
   .card{
-    background:var(--sa-blanco,#fff);
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    background:#ffffff;
+    border:1px solid #e2e8f0;
     border-radius:14px;
     padding:16px 18px;
-    box-shadow:0 1px 2px rgba(15,23,42,.04);
+    box-shadow:0 8px 18px rgba(15,23,42,.06);
     overflow:visible;
   }
 
@@ -19,39 +19,40 @@
   .field input,
   .field select{
     width:100%;
-    border:1px solid #e5e7eb;
+    border:1px solid #d4dde7;
     border-radius:10px;
     padding:3px 8px;
-    background:#fff;
+    background:#ffffff;
     font-size:12px;
     height:28px;
   }
 
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{
-    border:1px solid #cbd5f5;
+    border:1px solid #c0e3ec;          /* celeste suave */
     background:#ffffff;
     border-radius:999px;
     padding:6px 10px;
     font-size:12px;
     cursor:pointer;
-    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
+    color:#374151;
+    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease;
   }
   .chip:hover{
-    border-color:#94a3ff;
-    box-shadow:0 0 0 1px rgba(82,116,206,.16);
+    border-color:#7ac7d8;
+    box-shadow:0 0 0 1px rgba(122,199,216,.22);
   }
   .chip.is-on{
-    background:#dbeafe;
-    border-color:#5274ce;
-    color:#1f3a8a;
-    box-shadow:0 0 0 1px rgba(82,116,206,.28);
+    background:#e4f6f9;                /* fondo seleccionado */
+    border-color:#0b7189;              /* celeste oscuro */
+    color:#0b7189;
+    box-shadow:0 0 0 1px rgba(11,113,137,.35);
   }
 
   /* RECTÁNGULO BASE DE TODOS LOS FILTROS */
   .filter-card{
-    background:#f3f6fc;
-    border:1px solid #c7d2fe;
+    background:#f5f7fa;
+    border:1px solid #dde5ee;
     border-radius:12px;
     padding:6px 10px;
     min-height:56px;
@@ -60,7 +61,7 @@
   .filter-card h5{
     font-size:10px;
     margin:0 0 4px;
-    color:#1f2937;
+    color:#4b5563;
     text-transform:uppercase;
     letter-spacing:.04em;
   }
@@ -71,7 +72,7 @@
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#b4c6fc;
+    border-color:#cdd9e5;
   }
   .filter-card--compact .field{margin-top:0}
   .filter-card--compact .field select{
@@ -92,10 +93,10 @@
   .filter-card--date input[type="date"]{
     flex:1 1 0;
     min-width:0;
-    border:1px solid #e5e7eb;
+    border:1px solid #d4dde7;
     border-radius:10px;
     padding:3px 8px;
-    background:#fff;
+    background:#ffffff;
     font-size:12px;
     height:30px;
   }
@@ -115,7 +116,7 @@
     -webkit-appearance:none;
     height:14px;width:14px;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:#0b7189;               /* knob celeste oscuro */
     border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.08);
   }
@@ -124,28 +125,28 @@
     height:14px;width:14px;
     border:0;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:#0b7189;
   }
   .range-track{
     position:absolute;
     left:0;right:0;
     top:8px;
     height:3px;
-    background:#e5e7eb;
+    background:#e2e8f0;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
     top:8px;
     height:3px;
-    background:#c7d2fe;
+    background:#9ad5e0;
     border-radius:999px;
   }
 
   /* KPI principal */
   .kpi-main{
-    background:#eef2ff;
-    border:1px solid #c7d2fe;
+    background:#e9f6f9;
+    border:1px solid #bfe5ef;
     border-radius:12px;
     padding:10px 12px;
     display:flex;
@@ -157,12 +158,12 @@
     font-size:11px;
     text-transform:uppercase;
     letter-spacing:.04em;
-    color:#4b5563;
+    color:#6b7280;
   }
   .kpi-main .v{
     font-weight:800;
     font-size:26px;
-    color:var(--sa-text,#064066);
+    color:#0b7189;
   }
   .kpi-main .sub{
     font-size:11px;
@@ -206,14 +207,15 @@
   }
 
   .chart-card{
-    background:#f9fafb;
+    background:#ffffff;
     border-radius:14px;
-    border:1px solid #e5e7eb;
+    border:1px solid #e2e8f0;
     padding:10px 12px;
     display:flex;
     flex-direction:column;
     gap:8px;
     height:100%;
+    box-shadow:0 6px 14px rgba(15,23,42,.05);
   }
   .chart-card h3{
     margin:0;
@@ -281,7 +283,7 @@
     box-shadow:0 0 0 1px rgba(148,163,184,0.35);
   }
   .leaflet-container{
-    background:#e5f0ff;
+    background:#e5f6fb;
     border-radius:10px;
   }
 
@@ -324,7 +326,7 @@
       Panel de análisis de oportunidades por dimensión (tiempo, plataforma, repartición, estado, tipo y provincia).
     </p>
 
-    <div class="card" style="border-color:#c7d2fe;">
+    <div class="card">
       <div class="dim-dashboard">
 
         {# =========================

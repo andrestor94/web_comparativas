@@ -61,6 +61,16 @@
   }
 
   // ------------------------------------------------------------------
+  // Paleta de colores (similar a la del ejemplo Power BI)
+  // ------------------------------------------------------------------
+  const COLORS = {
+    emergency: "#0b7189", // EMERGENCIA (azul petróleo)
+    regular: "#9ad5e0",   // REGULAR (celeste claro)
+    mapSteps: ["#e5f4f7", "#c0e3ec", "#7ac7d8", "#0b7189"],
+    treemapBase: "#7ac7d8",
+  };
+
+  // ------------------------------------------------------------------
   // Nodo raíz y upload_id (si el template lo pasó)
   // ------------------------------------------------------------------
   const rootDim = document.getElementById("dimensiones-root");
@@ -387,7 +397,7 @@
         datasets: [
           {
             data,
-            backgroundColor: ["#60a5fa", "#f97373"],
+            backgroundColor: [COLORS.emergency, COLORS.regular],
           },
         ],
       },
@@ -430,6 +440,7 @@
             borderColor: "#ffffff",
             borderWidth: 1,
             spacing: 0.5,
+            backgroundColor: COLORS.treemapBase,
             labels: {
               display: true,
               formatter(ctx) {
@@ -480,18 +491,10 @@
       return;
     }
 
-    // Crear mapa y enfocarlo directamente en Argentina
     provMap = L.map(mapEl, {
       zoomControl: false,
       attributionControl: false,
-    });
-
-    // Bounds aproximados de Argentina (sudoeste / noreste)
-    const argentinaBounds = L.latLngBounds(
-      L.latLng(-55.0, -73.5),
-      L.latLng(-21.5, -53.0)
-    );
-    provMap.fitBounds(argentinaBounds);
+    }).setView([-38.4, -64.8], 3.8); // centro aproximado de Argentina
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 7,
@@ -550,12 +553,12 @@
     const maxCount = values.length ? Math.max(...values) : 0;
 
     function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#e5e7eb";
+      if (maxCount <= 0 || v <= 0) return "#e2e8f0";
       const t = v / maxCount;
-      if (t > 0.75) return "#1d4ed8";
-      if (t > 0.5) return "#2563eb";
-      if (t > 0.25) return "#60a5fa";
-      return "#bfdbfe";
+      if (t > 0.75) return COLORS.mapSteps[3];
+      if (t > 0.5) return COLORS.mapSteps[2];
+      if (t > 0.25) return COLORS.mapSteps[1];
+      return COLORS.mapSteps[0];
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -634,12 +637,12 @@
           {
             label: "EMERGENCIA",
             data: emData,
-            backgroundColor: "#f97373",
+            backgroundColor: COLORS.emergency,
           },
           {
             label: "REGULAR",
             data: rgData,
-            backgroundColor: "#60a5fa",
+            backgroundColor: COLORS.regular,
           },
         ],
         {
@@ -703,12 +706,12 @@
           {
             label: "EMERGENCIA",
             data: emData,
-            backgroundColor: "#f97373",
+            backgroundColor: COLORS.emergency,
           },
           {
             label: "REGULAR",
             data: rgData,
-            backgroundColor: "#60a5fa",
+            backgroundColor: COLORS.regular,
           },
         ],
         {
