@@ -251,16 +251,17 @@
   // ------------------------------------------------------------------
   // Transformar datos crudos según filtros PAMI / Estado
   // ------------------------------------------------------------------
-  function computeFilteredData() {
+    function computeFilteredData() {
     if (!RAW || !RAW.dimensions) return null;
 
     const dims = RAW.dimensions;
 
+    // Copia base de todas las dimensiones
     let dimFecha = Array.isArray(dims.fecha_apertura)
       ? dims.fecha_apertura
       : [];
-    const dimProv = Array.isArray(dims.provincia) ? dims.provincia : [];
-    const dimTipo = Array.isArray(dims.tipo_proceso)
+    let dimProv = Array.isArray(dims.provincia) ? dims.provincia : [];
+    let dimTipo = Array.isArray(dims.tipo_proceso)
       ? dims.tipo_proceso
       : [];
     let dimRepEstado = Array.isArray(dims.reparticion_estado)
@@ -268,10 +269,12 @@
       : [];
     let dimEstado = Array.isArray(dims.estado) ? dims.estado : [];
 
-    const pamiVal = getChipGroupValue(swPAMI); // todos | pami | otras
-    const estVal = getChipGroupValue(swEstado); // todos | emergencia | regular
+    const pamiVal = getChipGroupValue(swPAMI);   // todos | pami | otras
+    const estVal = getChipGroupValue(swEstado);  // todos | emergencia | regular
 
-    // --- Filtro PAMI sobre repartición+estado
+    // ----------------------------------------------------------
+    // 1) Filtro PAMI: por ahora solo tiene sentido en repartición+estado
+    // ----------------------------------------------------------
     if (pamiVal !== "todos") {
       dimRepEstado = dimRepEstado.filter((row) => {
         const isPami = isPAMIName(row.label);
@@ -281,7 +284,10 @@
       });
     }
 
-    // --- Filtro por Estado (EMERGENCIA / REGULAR)
+    // ----------------------------------------------------------
+    // 2) Filtro de Estado (EMERGENCIA / REGULAR)
+    //    Se aplica a TODAS las dimensiones que tienen ese detalle
+    // ----------------------------------------------------------
     if (estVal !== "todos") {
       const wanted =
         estVal === "emergencia"
@@ -291,18 +297,75 @@
           : null;
 
       if (wanted) {
-        // a) repartición+estado
+        // Helper genérico para dims con campos emergencia/regular
+        const filterDimListByEstado = (list) => {
+          if (!Array.isArray(list)) return [];
+
+          return list
+            .map((row) => {
+              if (!row) return row;
+
+              const emRaw =
+                typeof row.emergencia === "number"
+                  ? row.emergencia
+                  : typeof row.EMERGENCIA === "number"
+                  ? row.EMERGENCIA
+                  : null;
+              const rgRaw =
+                typeof row.regular === "number"
+                  ? row.regular
+                  : typeof row.REGULAR === "number"
+                  ? row.REGULAR
+                  : null;
+
+              const hasSplit = emRaw !== null || rgRaw !== null;
+
+              // Si esta dimensión no viene desglosada por estado,
+              // la dejamos tal cual (no podemos filtrar bien).
+              if (!hasSplit) return row;
+
+              const em = emRaw || 0;
+              const rg = rgRaw || 0;
+              let em2 = em;
+              let rg2 = rg;
+
+              if (wanted === "EMERGENCIA") rg2 = 0;
+              else if (wanted === "REGULAR") em2 = 0;
+
+              const count = em2 + rg2;
+
+              return Object.assign({}, row, {
+                emergencia: em2,
+                regular: rg2,
+                count,
+                total:
+                  typeof row.total === "number" ? row.total : count,
+              });
+            })
+            .filter((row) => {
+              if (!row) return false;
+              const em = row.emergencia || 0;
+              const rg = row.regular || 0;
+              const c =
+                typeof row.count === "number" ? row.count : em + rg;
+              return c > 0;
+            });
+        };
+
+        // a) Repartición + estado (ya estaba desglosado)
         dimRepEstado = dimRepEstado
           .map((row) => {
             const em = row.emergencia || 0;
             const rg = row.regular || 0;
             let em2 = em;
             let rg2 = rg;
+
             if (wanted === "EMERGENCIA") {
               rg2 = 0;
             } else if (wanted === "REGULAR") {
               em2 = 0;
             }
+
             return {
               label: row.label,
               emergencia: em2,
@@ -312,33 +375,41 @@
           })
           .filter((r) => r.total > 0);
 
-        // b) torta global
+        // b) Torta global: solo filas del estado seleccionado
         dimEstado = dimEstado.filter(
           (e) =>
-            (e.estado || "").toString().toUpperCase() === wanted.toUpperCase()
+            (e.estado || "").toString().toUpperCase() === wanted
         );
 
-        // c) serie temporal
+        // c) Serie temporal (timeline)
         dimFecha = dimFecha.map((row) => {
           const em = row.emergencia || 0;
           const rg = row.regular || 0;
           let em2 = em;
           let rg2 = rg;
+
           if (wanted === "EMERGENCIA") {
             rg2 = 0;
           } else if (wanted === "REGULAR") {
             em2 = 0;
           }
+
           return Object.assign({}, row, {
             emergencia: em2,
             regular: rg2,
             count: (em2 || 0) + (rg2 || 0),
           });
         });
+
+        // d) Tipo de proceso y Provincia (si vienen con emergencia/regular)
+        dimTipo = filterDimListByEstado(dimTipo);
+        dimProv = filterDimListByEstado(dimProv);
       }
     }
 
-    // --- KPI Procesos ---
+    // ----------------------------------------------------------
+    // 3) KPI de Procesos
+    // ----------------------------------------------------------
     let procesosCount = 0;
     if (dimRepEstado.length && (pamiVal !== "todos" || estVal !== "todos")) {
       procesosCount = dimRepEstado.reduce(
