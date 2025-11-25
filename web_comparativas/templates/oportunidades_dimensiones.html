@@ -483,15 +483,15 @@
 
 {# Scripts de gráficos para Dimensiones #}
 
-<!-- Chart.js (estable y compatible con treemap y mapas) -->
+<!-- Chart.js (estable y compatible con treemap) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 
 <!-- Plugin Treemap compatible con Chart.js v3 -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.1.0/dist/chartjs-chart-treemap.min.js"></script>
 
-<!-- Plugin de mapas (choropleth / bubble) para Chart.js -->
-<script src="https://unpkg.com/chartjs-chart-geo@3.9.0/build/index.umd.min.js"></script>
+<!-- Plugin de mapas (ChartGeo) para choropleth -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-geo@3.9.0/build/index.umd.min.js"></script>
 
-<!-- Script principal de Dimensiones -->
+<!-- Tu script principal de Dimensiones -->
 <script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
 {% endblock %}
