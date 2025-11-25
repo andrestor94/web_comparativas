@@ -199,13 +199,13 @@
   }
 
   /* Fila inferior: tipo + barras + torta
-     – se achica un poco "Procesos por tipo" y se ensancha "Repartición y estado" */
-  .dim-row-bottom{
+   – central más ancho, izquierda un poco más chica */
+.dim-row-bottom{
     display:grid;
-    grid-template-columns:1.1fr 1.6fr 0.8fr;
+    grid-template-columns:0.9fr 1.8fr 0.8fr; /* MÁS ancho el gráfico central */
     gap:12px;
     align-items:stretch;
-  }
+}
 
   .chart-card{
     background:#f9fafb;
@@ -235,11 +235,14 @@
     position:relative;
   }
 
-  /* Timeline más bajo (mitad de altura aprox.) */
-  .chart-card--timeline .chart-body{
-    min-height:180px;
-    max-height:220px;
-  }
+  /* Timeline MUCHO más bajo (similar al de la imagen de referencia) */
+.chart-card--timeline{
+    padding:6px 10px;              /* menos padding vertical */
+}
+.chart-card--timeline .chart-body{
+    min-height:130px;              /* antes 180 */
+    max-height:150px;              /* límite para que no se estire */
+}
 
   /* Tarjetas inferiores más bajitas */
   .dim-row-bottom .chart-card{
@@ -254,12 +257,12 @@
     min-height:115px;
   }
 
-  /* Torta más compacta */
-  .chart-card--small .chart-body{
+  /* Torta más compacta (toma menos altura) */
+.chart-card--small .chart-body{
     max-width:210px;
-    min-height:85px;
+    min-height:70px;  /* antes 85 */
     margin:0 auto;
-  }
+}
 
   .chart-placeholder{
     width:100%;
