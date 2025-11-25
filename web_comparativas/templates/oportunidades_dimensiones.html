@@ -418,15 +418,15 @@
             </div>
           </section>
 
-          <!-- Procesos por provincia (barra / mapa futuro) -->
-          <section class="chart-card chart-card--map" aria-labelledby="dimTitleProvincia">
+                    <!-- Procesos por provincia (MAPA DE ARGENTINA) -->
+          <section class="chart-card" aria-labelledby="dimTitleProvincia">
             <header>
               <h3 id="dimTitleProvincia">Procesos por provincia</h3>
-              <small>Distribución de procesos según provincia (por ahora barras; más adelante mapa).</small>
+              <small>Mapa de Argentina por provincia (cantidad de procesos según los filtros aplicados).</small>
             </header>
             <div id="dimPanelProvincia" class="chart-body">
               <div class="map-placeholder">
-                Aquí se mostrará el gráfico por provincia (por ahora barras; más adelante mapa).
+                Cargando mapa de provincias de Argentina…
               </div>
             </div>
           </section>
@@ -483,12 +483,15 @@
 
 {# Scripts de gráficos para Dimensiones #}
 
-<!-- Chart.js (estable y compatible con treemap) -->
+<!-- Chart.js (estable y compatible con treemap y mapas) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 
 <!-- Plugin Treemap compatible con Chart.js v3 -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.1.0/dist/chartjs-chart-treemap.min.js"></script>
 
-<!-- Tu script principal de Dimensiones (ruta correcta en /static/js/...) -->
+<!-- Plugin de mapas (choropleth / bubble) para Chart.js -->
+<script src="https://unpkg.com/chartjs-chart-geo@3.9.0/build/index.umd.min.js"></script>
+
+<!-- Script principal de Dimensiones -->
 <script src="{{ url_for('static', path='js/oportunidades_dimensiones.js') }}"></script>
 {% endblock %}

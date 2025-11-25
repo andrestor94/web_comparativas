@@ -73,10 +73,10 @@
   const dateToEl = pickId("dimDateTo", "fDateTo");
 
   const selPlataforma = pickId("dimPlataforma", "fPlataforma");
-  const selCuenta = pickId("dimCuenta", "fCuenta"); // hoy no se manda al backend
+  const selCuenta = pickId("dimCuenta", "fCuenta");
   const selReparticion = pickId("dimReparticion", "fReparticion");
 
-  // KPI de procesos (puede ser dimKpiProcesos o el mismo kProcesos que usás en Buscador)
+  // KPI de procesos
   const kProcesos = pickId("dimKpiProcesos", "kProcesos");
 
   // Grupos de chips
@@ -105,12 +105,11 @@
   const ctxEstadoPie = getCtx("dimChartEstadoPie", "dimPanelEstadoPie");
 
   if (!$("#dimensiones-root") && !ctxTimeline && !ctxProvincia && !ctxTipo) {
-    // Si no estamos en la pantalla de Dimensiones, no seguimos
+    // Si no estamos en Dimensiones, salir
     return;
   }
 
   if (typeof Chart === "undefined") {
-    // Si Chart.js no está cargado, no hacemos nada con gráficos
     console.warn(
       "[Dimensiones] Chart.js no está disponible. Verificá que se cargue el script de Chart.js en el template."
     );
@@ -121,7 +120,7 @@
   // ------------------------------------------------------------------
   const API_BASE_URL = "/api/oportunidades/dimensiones";
 
-  let RAW = null; // JSON devuelto por la API
+  let RAW = null;
   const charts = {
     timeline: null,
     provincia: null,
@@ -129,6 +128,57 @@
     repEstado: null,
     estadoPie: null,
   };
+
+  // ------------------------------------------------------------------
+  // GeoJSON de provincias de Argentina para el mapa
+  // ------------------------------------------------------------------
+  let ARG_PROV_FEATURES = null;
+  let ARG_PROV_LOADING = false;
+
+  function hasChoroplethController() {
+    return (
+      typeof Chart !== "undefined" &&
+      Chart.registry &&
+      typeof Chart.registry.getController === "function" &&
+      !!Chart.registry.getController("choropleth")
+    );
+  }
+
+  async function ensureArgentinaGeojsonLoaded() {
+    if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
+    ARG_PROV_LOADING = true;
+    try {
+      const res = await fetch("/static/data/argentina_provincias.geojson", {
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) {
+        console.error(
+          "[Dimensiones] No se pudo cargar argentina_provincias.geojson: HTTP",
+          res.status
+        );
+        return;
+      }
+      const geo = await res.json();
+      if (geo && Array.isArray(geo.features)) {
+        ARG_PROV_FEATURES = geo.features;
+        // Si ya tenemos datos cargados, repintamos el mapa
+        if (RAW) {
+          updateUI();
+        }
+      } else {
+        console.warn(
+          "[Dimensiones] argentina_provincias.geojson no tiene formato GeoJSON esperado (FeatureCollection.features)."
+        );
+      }
+    } catch (err) {
+      console.error(
+        "[Dimensiones] Error cargando argentina_provincias.geojson",
+        err
+      );
+    } finally {
+      ARG_PROV_LOADING = false;
+    }
+  }
 
   // ------------------------------------------------------------------
   // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
@@ -214,7 +264,6 @@
     }
 
     // Cuenta NO se envía por ahora (no está en el endpoint)
-    // if (selCuenta && selCuenta.value) { ... }
 
     return params.toString();
   }
@@ -265,7 +314,7 @@
     const pamiVal = getChipGroupValue(swPAMI); // todos | pami | otras
     const estVal = getChipGroupValue(swEstado); // todos | emergencia | regular
 
-    // --- Filtro PAMI sobre repartición+estado (porque ahí sí tenemos repartición)
+    // --- Filtro PAMI sobre repartición+estado
     if (pamiVal !== "todos") {
       dimRepEstado = dimRepEstado.filter((row) => {
         const isPami = isPAMIName(row.label);
@@ -312,7 +361,7 @@
             (e.estado || "").toString().toUpperCase() === wanted.toUpperCase()
         );
 
-        // c) serie temporal: usamos emergencia/regular por día que nos da la API
+        // c) serie temporal
         dimFecha = dimFecha.map((row) => {
           const em = row.emergencia || 0;
           const rg = row.regular || 0;
@@ -398,11 +447,10 @@
     });
   }
 
-  // NUEVO: helper para treemap
+  // Treemap para "Procesos por tipo"
   function createOrUpdateTreemap(chartRef, ctx, tree, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
-    // chequeamos que el tipo 'treemap' exista (plugin cargado)
     const hasTreemap =
       Chart.registry &&
       typeof Chart.registry.getController === "function" &&
@@ -438,7 +486,6 @@
               display: true,
               formatter(ctx) {
                 const name = ctx.raw.g || "";
-                // recortamos para que no rompa el layout
                 const short =
                   name.length > 24 ? name.slice(0, 23).trimEnd() + "…" : name;
                 return short;
@@ -473,6 +520,126 @@
   }
 
   // ------------------------------------------------------------------
+  // NUEVO: Mapa / Choropleth de "Procesos por provincia"
+  // ------------------------------------------------------------------
+  function updateProvinciaChart(chartRef, ctx, dimProv) {
+    if (!ctx || !dimProv) return chartRef;
+
+    // Si todavía no tenemos el plugin o el GeoJSON, cargamos el archivo
+    // y mostramos el fallback de barras horizontales
+    if (!hasChoroplethController() || !ARG_PROV_FEATURES) {
+      // dispara la carga del GeoJSON en segundo plano (si hace falta)
+      ensureArgentinaGeojsonLoaded();
+
+      const src = dimProv.slice(0, 15);
+      const labels = src.map((d) => d.label || "");
+      const counts = src.map((d) => d.count || 0);
+
+      return createOrUpdateBar(
+        chartRef,
+        ctx,
+        labels,
+        [
+          {
+            label: "Procesos",
+            data: counts,
+            backgroundColor: "#93c5fd",
+            borderColor: "#1d4ed8",
+            borderWidth: 1,
+          },
+        ],
+        {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              beginAtZero: true,
+              grid: { color: "rgba(148, 163, 184, 0.25)" },
+            },
+            y: {
+              grid: { display: false },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+          },
+        }
+      );
+    }
+
+    // Tenemos GeoJSON y plugin: armamos el choropleth de provincias
+    const countsByName = new Map();
+    dimProv.forEach((d) => {
+      const name = (d.label || "").toString().toUpperCase().trim();
+      const prev = countsByName.get(name) || 0;
+      countsByName.set(name, prev + (d.count || 0));
+    });
+
+    const dataPoints = ARG_PROV_FEATURES.map((feat) => {
+      const props = feat.properties || {};
+      const rawName =
+        props.provincia ||
+        props.nombre ||
+        props.NOMBRE ||
+        props.name ||
+        "";
+      const key = rawName.toString().toUpperCase().trim();
+      const value = countsByName.get(key) || 0;
+      return {
+        feature: feat,
+        value,
+        label: rawName || key || "Sin nombre",
+      };
+    });
+
+    const labels = dataPoints.map((d) => d.label);
+
+    if (chartRef) {
+      chartRef.data.labels = labels;
+      chartRef.data.datasets[0].data = dataPoints;
+      chartRef.update();
+      return chartRef;
+    }
+
+    return new Chart(ctx, {
+      type: "choropleth",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Procesos por provincia",
+            data: dataPoints,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(context) {
+                const d = context.raw || {};
+                const name = d.label || "";
+                const value = d.value || 0;
+                return `${name}: ${value} procesos`;
+              },
+            },
+          },
+        },
+        scales: {
+          xy: {
+            // Proyección centrada en Argentina (se puede ajustar)
+            projection: "mercator",
+          },
+        },
+      },
+    });
+  }
+
+  // ------------------------------------------------------------------
   // Actualizar toda la UI (KPI + gráficos)
   // ------------------------------------------------------------------
   function updateUI() {
@@ -489,7 +656,7 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-    // --- 1) Apertura de procesos en el tiempo (barras apiladas EMERGENCIA / REGULAR)
+    // --- 1) Apertura de procesos en el tiempo
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -536,42 +703,12 @@
       );
     }
 
-    // --- 2) Procesos por provincia (barras horizontales)
+    // --- 2) Procesos por provincia (MAPA / fallback barras)
     if (ctxProvincia) {
-      const src = F.dimProv.slice(0, 15);
-      const labels = src.map((d) => d.label || "");
-      const counts = src.map((d) => d.count || 0);
-
-      charts.provincia = createOrUpdateBar(
+      charts.provincia = updateProvinciaChart(
         charts.provincia,
         ctxProvincia,
-        labels,
-        [
-          {
-            label: "Procesos",
-            data: counts,
-            backgroundColor: "#93c5fd",
-            borderColor: "#1d4ed8",
-            borderWidth: 1,
-          },
-        ],
-        {
-          indexAxis: "y",
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: {
-              beginAtZero: true,
-              grid: { color: "rgba(148, 163, 184, 0.25)" },
-            },
-            y: {
-              grid: { display: false },
-            },
-          },
-          plugins: {
-            legend: { display: false },
-          },
-        }
+        F.dimProv
       );
     }
 
@@ -586,9 +723,8 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-        // --- 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
+    // --- 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
     if (ctxRepEstado) {
-      // Ordenamos por total (emergencia + regular) y mostramos solo las 10 principales
       const src = [...F.dimRepEstado]
         .map((r) => ({
           ...r,
@@ -631,7 +767,6 @@
               stacked: true,
               grid: { display: false },
               ticks: {
-                // Evita que el texto se solape demasiado
                 autoSkip: false,
                 font: { size: 10 },
               },
@@ -651,7 +786,6 @@
 
     // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
     if (ctxEstadoPie) {
-      // dimEstado: [{estado: "EMERGENCIA", count}, {estado: "REGULAR", count}]
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
 
@@ -702,6 +836,9 @@
   // ------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     bindFilters();
-    fetchData(); // primera carga
+    // Cargamos el GeoJSON de provincias en segundo plano
+    ensureArgentinaGeojsonLoaded();
+    // Primera carga de datos desde el backend
+    fetchData();
   });
 })();
