@@ -190,7 +190,7 @@
     gap:10px;
   }
 
-  /* Bloque de gráficos medio: timeline + provincia */
+  /* Bloque de gráficos medio: timeline + MAPA */
   .dim-row-middle{
     display:grid;
     grid-template-columns:1fr 1.6fr;
@@ -275,7 +275,6 @@
     overflow:hidden;
     box-shadow:0 0 0 1px rgba(148,163,184,0.35);
   }
-  /* mejorar el look del mapa */
   .leaflet-container{
     background:#e5f0ff;
     border-radius:10px;
@@ -302,11 +301,10 @@
   }
 </style>
 
-<!-- Leaflet CSS para el mapa -->
+<!-- Leaflet CSS para el mapa (sin integrity para evitar bloqueo) -->
 <link
   rel="stylesheet"
   href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin=""
 />
 {% endblock %}
@@ -493,10 +491,9 @@
 <!-- Plugin Treemap compatible con Chart.js v3 -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.1.0/dist/chartjs-chart-treemap.min.js"></script>
 
-<!-- Leaflet JS para el mapa -->
+<!-- Leaflet JS para el mapa (sin integrity para evitar bloqueo) -->
 <script
   src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-o9N1j7kGStpG2zN1NWn0C6x4s9Xp1l9V+4yRjQoaf+o="
   crossorigin=""
 ></script>
 
