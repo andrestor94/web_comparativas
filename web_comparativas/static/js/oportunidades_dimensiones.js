@@ -118,7 +118,10 @@
   // ------------------------------------------------------------------
   // Estado global (datos crudos + gráficos)
   // ------------------------------------------------------------------
-  const API_BASE_URL = "/api/oportunidades/dimensiones";
+    const API_BASE_URL = "/api/oportunidades/dimensiones";
+
+  // NUEVO: ruta local al GeoJSON de provincias
+  const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
   let RAW = null;
   const charts = {
@@ -176,19 +179,16 @@
     );
   }
 
-  async function ensureArgentinaGeojsonLoaded() {
+    async function ensureArgentinaGeojsonLoaded() {
     if (ARG_PROV_FEATURES || ARG_PROV_LOADING) return;
     ARG_PROV_LOADING = true;
     try {
-      const res = await fetch(
-        "https://apis.datos.gob.ar/georef/api/provincias.geojson",
-        {
-          headers: { Accept: "application/json" },
-        }
-      );
+      const res = await fetch(GEOJSON_PROVINCIAS_URL, {
+        headers: { Accept: "application/json" },
+      });
       if (!res.ok) {
         console.error(
-          "[Dimensiones] No se pudo cargar provincias.geojson: HTTP",
+          "[Dimensiones] No se pudo cargar provincias_argentina.geojson: HTTP",
           res.status
         );
         return;
@@ -196,15 +196,20 @@
       const geo = await res.json();
       if (geo && Array.isArray(geo.features)) {
         ARG_PROV_FEATURES = geo.features;
-        // si ya hay datos cargados, redibujamos el mapa
+        console.log(
+          "[Dimensiones] GeoJSON de provincias cargado desde estático.",
+          ARG_PROV_FEATURES.length,
+          "features"
+        );
+        // si ya hay datos de la API, redibujamos para pasar de barras -> mapa
         if (RAW) updateUI();
       } else {
         console.warn(
-          "[Dimensiones] provincias.geojson no tiene el formato esperado (FeatureCollection.features)."
+          "[Dimensiones] provincias_argentina.geojson no tiene el formato esperado (FeatureCollection.features)."
         );
       }
     } catch (err) {
-      console.error("[Dimensiones] Error cargando provincias.geojson", err);
+      console.error("[Dimensiones] Error cargando provincias_argentina.geojson", err);
     } finally {
       ARG_PROV_LOADING = false;
     }
