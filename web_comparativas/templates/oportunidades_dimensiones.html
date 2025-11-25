@@ -190,18 +190,19 @@
     gap:10px;
   }
 
-  /* Fila media: timeline + mapa (mapa más angosto, timeline más ancho) */
-.dim-row-middle{
+  /* Fila media: timeline + mapa (lado a lado) */
+  .dim-row-middle{
     display:grid;
-    grid-template-columns:2fr 0.9fr; /* timeline domina, mapa más finito */
+    grid-template-columns:2fr 0.9fr; /* timeline ancho, mapa más finito */
     gap:12px;
     align-items:stretch;
-}
+  }
 
-  /* Fila inferior: tipo + barras + torta */
+  /* Fila inferior: tipo + barras + torta
+     – se achica un poco "Procesos por tipo" y se ensancha "Repartición y estado" */
   .dim-row-bottom{
     display:grid;
-    grid-template-columns:1.3fr 1.2fr 0.9fr;
+    grid-template-columns:1.1fr 1.6fr 0.8fr;
     gap:12px;
     align-items:stretch;
   }
@@ -234,25 +235,31 @@
     position:relative;
   }
 
+  /* Timeline más bajo (mitad de altura aprox.) */
+  .chart-card--timeline .chart-body{
+    min-height:180px;
+    max-height:220px;
+  }
+
   /* Tarjetas inferiores más bajitas */
-.dim-row-bottom .chart-card{
+  .dim-row-bottom .chart-card{
     padding:8px 10px;
-}
-.dim-row-bottom .chart-body{
+  }
+  .dim-row-bottom .chart-body{
     min-height:120px;
-}
+  }
 
-/* Barras repartición/estado un poco más bajas */
-.chart-card--rep-estado .chart-body{
-    min-height:110px;
-}
+  /* Barras repartición/estado un poco más bajas */
+  .chart-card--rep-estado .chart-body{
+    min-height:115px;
+  }
 
-/* Para que la torta no se desmadre de ancho */
-.chart-card--small .chart-body{
-    max-width:220px;
-    min-height:100px;
+  /* Torta más compacta */
+  .chart-card--small .chart-body{
+    max-width:210px;
+    min-height:85px;
     margin:0 auto;
-}
+  }
 
   .chart-placeholder{
     width:100%;
@@ -270,17 +277,17 @@
   }
 
   /* --- MAPA --- */
-.chart-card--map .chart-body{
-    min-height:360px; /* MÁS ALTO */
-}
-.dim-map{
+  .chart-card--map .chart-body{
+    min-height:400px; /* más alto que antes */
+  }
+  .dim-map{
     width:100%;
     height:100%;
-    min-height:340px; /* MÁS ALTO */
+    min-height:380px;
     border-radius:10px;
     overflow:hidden;
     box-shadow:0 0 0 1px rgba(148,163,184,0.35);
-}
+  }
   .leaflet-container{
     background:#e5f0ff;
     border-radius:10px;
@@ -413,7 +420,7 @@
            ========================= #}
         <div class="dim-row-middle">
           <!-- Apertura de procesos en el tiempo -->
-          <section class="chart-card" aria-labelledby="dimTitleTimeline">
+          <section class="chart-card chart-card--timeline" aria-labelledby="dimTitleTimeline">
             <header>
               <h3 id="dimTitleTimeline">Apertura de procesos en el tiempo</h3>
               <small>Distribución diaria de aperturas según el período seleccionado (EMERGENCIA / REGULAR).</small>
