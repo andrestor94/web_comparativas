@@ -476,15 +476,14 @@
   // ------------------------------------------------------------------
   // Creación / actualización de gráficos con Chart.js
   // ------------------------------------------------------------------
+    // Siempre destruimos y recreamos el gráfico de barras
   function createOrUpdateBar(chartRef, ctx, labels, datasets, options) {
     if (!ctx || typeof Chart === "undefined") return null;
-    if (chartRef) {
-      chartRef.data.labels = labels;
-      chartRef.data.datasets = datasets;
-      chartRef.options = Object.assign(chartRef.options || {}, options || {});
-      chartRef.update();
-      return chartRef;
+
+    if (chartRef && typeof chartRef.destroy === "function") {
+      chartRef.destroy();
     }
+
     return new Chart(ctx, {
       type: "bar",
       data: { labels, datasets },
@@ -492,7 +491,7 @@
     });
   }
 
-  // Torta "Proceso por estado" con colores según la etiqueta
+    // Siempre destruimos y recreamos la torta
   function createOrUpdatePie(chartRef, ctx, labels, data, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -503,15 +502,8 @@
       return "#d1d5db";
     });
 
-    if (chartRef) {
-      chartRef.data.labels = labels;
-      chartRef.data.datasets[0].data = data;
-      chartRef.data.datasets[0].backgroundColor = backgroundColor;
-      chartRef.data.datasets[0].borderColor = "#ffffff";
-      chartRef.data.datasets[0].borderWidth = 2;
-      chartRef.options = Object.assign(chartRef.options || {}, options || {});
-      chartRef.update();
-      return chartRef;
+    if (chartRef && typeof chartRef.destroy === "function") {
+      chartRef.destroy();
     }
 
     return new Chart(ctx, {
@@ -531,7 +523,7 @@
     });
   }
 
-  // Treemap para "Procesos por tipo" con degradé según tamaño
+    // Siempre destruimos y recreamos el treemap
   function createOrUpdateTreemap(chartRef, ctx, tree, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -548,9 +540,7 @@
     }
 
     // Mapear label -> rank (posición por tamaño)
-    const rankByLabel = new Map(
-      tree.map((d, idx) => [d.label, idx])
-    );
+    const rankByLabel = new Map(tree.map((d, idx) => [d.label, idx]));
 
     const makeBgFn = () =>
       function backgroundColor(ctx) {
@@ -562,12 +552,8 @@
         return COLORS.treemapBase;
       };
 
-    if (chartRef) {
-      chartRef.data.datasets[0].tree = tree;
-      chartRef.data.datasets[0].backgroundColor = makeBgFn();
-      chartRef.options = Object.assign(chartRef.options || {}, options || {});
-      chartRef.update();
-      return chartRef;
+    if (chartRef && typeof chartRef.destroy === "function") {
+      chartRef.destroy();
     }
 
     return new Chart(ctx, {
