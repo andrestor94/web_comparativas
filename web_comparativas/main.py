@@ -276,17 +276,50 @@ def _opp_load_df() -> pd.DataFrame | None:
         print("[_opp_load_df] Error:", e)
         return None
 
-def _opp_apply_filters(df: pd.DataFrame, q: str, buyer: str, platform: str,
-                       province: str, date_from: str, date_to: str) -> pd.DataFrame:
+def _opp_apply_filters(
+    df: pd.DataFrame,
+    q: str,
+    buyer: str,
+    platform: str,
+    province: str,
+    date_from: str,
+    date_to: str,
+) -> pd.DataFrame:
     out = df.copy()
 
     # columnas candidatas
-    buyer_col = _opp_pick(out, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
-    platf_col = _opp_pick(out, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
-    prov_col  = _opp_pick(out, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
-    fecha_col = _opp_pick(out, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
-        desc_col  = _opp_pick(out, ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"])
-    proc_col  = _opp_pick(out, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
+    buyer_col = _opp_pick(
+        out,
+        ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"],
+    )
+    platf_col = _opp_pick(
+        out,
+        ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
+    )
+    prov_col = _opp_pick(
+        out,
+        [
+            "Provincia",
+            "Provincia/Municipio",
+            "Municipio",
+            "Jurisdicción",
+            "Localidad",
+            "Departamento",
+        ],
+    )
+    fecha_col = _opp_pick(
+        out,
+        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
+    )
+    desc_col = _opp_pick(
+        out,
+        ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"],
+    )
+    proc_col = _opp_pick(
+        out,
+        ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"],
+    )
+    # 👉 Cuenta: ahora también acepta “Número” del Excel
     cuenta_col = _opp_pick(
         out,
         ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro"],
@@ -295,7 +328,11 @@ def _opp_apply_filters(df: pd.DataFrame, q: str, buyer: str, platform: str,
     # búsqueda libre
     if q.strip():
         like = q.strip().lower()
-        cols_buscar = [c for c in [desc_col, buyer_col, platf_col, prov_col, proc_col, cuenta_col] if c]
+        cols_buscar = [
+            c
+            for c in [desc_col, buyer_col, platf_col, prov_col, proc_col, cuenta_col]
+            if c
+        ]
         if cols_buscar:
             m = False
             for c in cols_buscar:
@@ -304,11 +341,23 @@ def _opp_apply_filters(df: pd.DataFrame, q: str, buyer: str, platform: str,
 
     # filtros por campo
     if buyer.strip() and buyer_col:
-        out = out[out[buyer_col].astype(str).str.contains(buyer.strip(), case=False, na=False)]
+        out = out[
+            out[buyer_col]
+            .astype(str)
+            .str.contains(buyer.strip(), case=False, na=False)
+        ]
     if platform.strip() and platf_col:
-        out = out[out[platf_col].astype(str).str.contains(platform.strip(), case=False, na=False)]
+        out = out[
+            out[platf_col]
+            .astype(str)
+            .str.contains(platform.strip(), case=False, na=False)
+        ]
     if province.strip() and prov_col:
-        out = out[out[prov_col].astype(str).str.contains(province.strip(), case=False, na=False)]
+        out = out[
+            out[prov_col]
+            .astype(str)
+            .str.contains(province.strip(), case=False, na=False)
+        ]
 
     # rango de fechas
     if fecha_col and (date_from.strip() or date_to.strip()):
