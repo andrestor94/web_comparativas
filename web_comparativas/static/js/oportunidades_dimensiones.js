@@ -674,12 +674,12 @@
       });
   }
 
-    function redrawProvinciaChoropleth() {
+      function redrawProvinciaChoropleth() {
     if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
     const dimProv = LAST_FILTERED.dimProv || [];
 
-    // Conteo por nombre normalizado de provincia
+    // Conteo por provincia (nombre normalizado)
     const countsByName = new Map();
     dimProv.forEach((d) => {
       const name = normalize(d.label);
@@ -687,12 +687,13 @@
       countsByName.set(name, prev + (d.count || 0));
     });
 
-    // Eliminamos capa anterior si existe
+    // Limpio capa anterior
     if (provGeoLayer) {
       provGeoLayer.remove();
       provGeoLayer = null;
     }
 
+    // Determino provincia con máximo número de procesos
     const entries = Array.from(countsByName.entries());
     let maxKey = null;
     let maxCount = 0;
@@ -703,13 +704,16 @@
       }
     }
 
-    // Misma escala suave que ya venías usando para el resto
-    function colorForValue(v) {
+    // Escala de colores para el resto (igual que antes, pero sin usar el azul oscuro)
+    function colorFor(v) {
       if (maxCount <= 0 || v <= 0) return "#E5EEF5";
       const t = v / maxCount;
-      if (t > 0.7) return COLORS.regular;
-      if (t > 0.4) return COLORS.treemapBase;
-      return COLORS.regularSoft;
+
+      // NOTA: el azul oscuro se reserva solo para la provincia top
+      if (t > 0.75) return "#2F7AA8";
+      if (t > 0.5) return COLORS.regular;
+      if (t > 0.25) return COLORS.regularSoft;
+      return "#E5EEF5";
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -724,13 +728,13 @@
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
 
-        // Solo la provincia con más procesos va en azul oscuro corporativo
+        // Solo la provincia con más procesos va en azul corporativo oscuro
         const isTop = maxKey && key === maxKey && value > 0;
 
         return {
           color: "#ffffff",
           weight: 1,
-          fillColor: isTop ? COLORS.emergency : colorForValue(value),
+          fillColor: isTop ? COLORS.emergency : colorFor(value),
           fillOpacity: value > 0 ? 0.9 : 0.4,
         };
       },
