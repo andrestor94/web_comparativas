@@ -124,12 +124,17 @@
   // - EMERGENCIA: azul oscuro corporativo
   // - REGULAR: azul agua marina suave
   const COLORS = {
-    emergency: "#064066",      // EMERGENCIA (principal)
-    emergencySoft: "#0B527F",  // EMERGENCIA relleno barras
-    regular: "#6CC4E0",        // REGULAR agua marina
-    regularSoft: "#BFE9F6",    // REGULAR relleno suave
-    treemap: "#8CC5EA",        // Bloques del treemap
-  };
+  // EMERGENCIA: azul corporativo (principal)
+  emergency: "#064066",
+  emergencySoft: "#0B527F", // versión un poco más suave para relleno
+
+  // REGULAR: azul agua marina suave
+  regular: "#6CC4E0",
+  regularSoft: "#BFE9F6",
+
+  // Treemap: azul intermedio suave
+  treemap: "#8CC5EA",
+};
 
   let RAW = null;
   let LAST_FILTERED = null;
@@ -626,13 +631,13 @@
 
     // Escala en azules/agua marina (claro -> oscuro)
     function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#E5F3FB";
-      const t = v / maxCount;
-      if (t > 0.75) return "#0B527F";   // azul fuerte
-      if (t > 0.5) return "#2F8AB8";    // intermedio
-      if (t > 0.25) return "#6CC4E0";   // agua marina
-      return "#BFE9F6";                 // muy suave
-    }
+  if (maxCount <= 0 || v <= 0) return "#E5F3FB"; // casi blanco azulado
+  const t = v / maxCount;
+  if (t > 0.75) return "#0B527F";   // azul fuerte
+  if (t > 0.5) return "#2F8AB8";    // intermedio
+  if (t > 0.25) return "#6CC4E0";   // agua marina
+  return "#BFE9F6";                 // muy suave
+}
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
       style: (feature) => {
