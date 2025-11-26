@@ -1,6 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-3");
+  console.log("[Dimensiones] JS cargado v-colores-4");
 
   // ------------------------------------------------------------------
   // Helpers generales
@@ -128,10 +128,11 @@
     regular: "#6CC4E0",
     regularSoft: "#BFE9F6",
 
-    // Treemap: degradé según tamaño (rank)
-    treemapDark: "#064066",   // bloque más grande
-    treemapMedium: "#48B3C9", // segundo bloque
-    treemapBase: "#8CC5EA",   // resto
+    // Treemap: degradé por tamaño
+    treemapDark1: "#064066", // más grande
+    treemapDark2: "#1E5A8A", // segundo
+    treemapDark3: "#3F7FB0", // tercero
+    treemapBase: "#8CC5EA",  // resto
   };
 
   // ------------------------------------------------------------------
@@ -147,12 +148,11 @@
         // Solo tocamos los gráficos de esta pantalla
         if (!/^dimChart/.test(id)) return;
 
-        // Para la torta dejamos que el propio gráfico maneje los colores
+        // Para la torta dejamos que la configure createOrUpdatePie
         if (chart.config.type === "pie") {
           return;
         }
 
-        // Ajustamos datasets según EMERGENCIA / REGULAR
         chart.data.datasets.forEach((ds) => {
           const label = (ds.label || "").toString().toUpperCase();
           const isHorizontal = chart.options.indexAxis === "y";
@@ -547,8 +547,24 @@
       return chartRef;
     }
 
+    // Mapear label -> rank (posición por tamaño)
+    const rankByLabel = new Map(
+      tree.map((d, idx) => [d.label, idx])
+    );
+
+    const makeBgFn = () =>
+      function backgroundColor(ctx) {
+        const label = ctx.raw && ctx.raw.g ? ctx.raw.g : "";
+        const rank = rankByLabel.get(label);
+        if (rank === 0) return COLORS.treemapDark1;
+        if (rank === 1) return COLORS.treemapDark2;
+        if (rank === 2) return COLORS.treemapDark3;
+        return COLORS.treemapBase;
+      };
+
     if (chartRef) {
       chartRef.data.datasets[0].tree = tree;
+      chartRef.data.datasets[0].backgroundColor = makeBgFn();
       chartRef.options = Object.assign(chartRef.options || {}, options || {});
       chartRef.update();
       return chartRef;
@@ -566,16 +582,7 @@
             borderColor: "#ffffff",
             borderWidth: 1,
             spacing: 0.5,
-            // Degradé: rank 0 = más grande, 1 = segundo, resto base
-            backgroundColor(ctx) {
-              const rank =
-                ctx.raw && typeof ctx.raw.rank === "number"
-                  ? ctx.raw.rank
-                  : 2;
-              if (rank === 0) return COLORS.treemapDark;
-              if (rank === 1) return COLORS.treemapMedium;
-              return COLORS.treemapBase;
-            },
+            backgroundColor: makeBgFn(),
             labels: {
               display: true,
               formatter(ctx) {
@@ -687,15 +694,17 @@
     const values = Array.from(countsByName.values());
     const maxCount = values.length ? Math.max(...values) : 0;
 
-    // Escala en azules: la provincia con más procesos va SIEMPRE en azul oscuro
-    function colorFor(v) {
+    // ----------------------------------------------------------------
+    // Escala en azules:
+    //   - provincia/s con maxCount exacto => azul oscuro corporativo
+    //   - resto: gradiente según proporción
+    // ----------------------------------------------------------------
+    function colorForValue(v) {
       if (maxCount <= 0 || v <= 0) return "#E5EEF5";
-      if (v === maxCount) return COLORS.emergency; // la más alta = azul oscuro
-
       const t = v / maxCount;
-      if (t > 0.6) return COLORS.regular;       // bastante alta
-      if (t > 0.3) return COLORS.treemapBase;   // intermedia
-      return COLORS.regularSoft;                // baja
+      if (t > 0.7) return COLORS.regular;
+      if (t > 0.4) return COLORS.treemapBase;
+      return COLORS.regularSoft;
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -709,10 +718,13 @@
           "";
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
+
+        const isTop = maxCount > 0 && value === maxCount;
+
         return {
           color: "#ffffff",
           weight: 1,
-          fillColor: colorFor(value),
+          fillColor: isTop ? COLORS.emergency : colorForValue(value),
           fillOpacity: value > 0 ? 0.9 : 0.4,
         };
       },
@@ -824,10 +836,9 @@
         .sort((a, b) => b.count - a.count)
         .slice(0, 40);
 
-      const tree = src.map((d, idx) => ({
+      const tree = src.map((d) => ({
         label: d.label,
         value: d.count,
-        rank: idx, // para el degradé
       }));
 
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
