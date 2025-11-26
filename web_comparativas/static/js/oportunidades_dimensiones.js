@@ -991,7 +991,7 @@
     }
   }
 
-  // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
   // Eventos de filtros
   // ------------------------------------------------------------------
   function bindFilters() {
@@ -1016,10 +1016,50 @@
   }
 
   // ------------------------------------------------------------------
+  // Rango de fecha por defecto (últimos 3 días hábiles)
+  // ------------------------------------------------------------------
+  function setDefaultDateRangeIfEmpty() {
+    if (!dateFromEl || !dateToEl) return;
+
+    // Solo aplicamos el default si ambos están vacíos
+    if (dateFromEl.value || dateToEl.value) return;
+
+    const today = new Date();
+
+    // Resta N días hábiles (sin contar sábados ni domingos)
+    function subtractBusinessDays(date, days) {
+      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      let remaining = days;
+      while (remaining > 0) {
+        d.setDate(d.getDate() - 1);
+        const day = d.getDay(); // 0 = domingo, 6 = sábado
+        if (day !== 0 && day !== 6) {
+          remaining -= 1;
+        }
+      }
+      return d;
+    }
+
+    const fromDate = subtractBusinessDays(today, 3);
+    const toDate = today;
+
+    function toISO(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${dd}`;
+    }
+
+    dateFromEl.value = toISO(fromDate);
+    dateToEl.value = toISO(toDate);
+  }
+
+  // ------------------------------------------------------------------
   // Inicialización
   // ------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     bindFilters();
+    setDefaultDateRangeIfEmpty(); // 👉 aplica rango por defecto si está vacío
     initProvinciaMap();
     fetchData();
   });
