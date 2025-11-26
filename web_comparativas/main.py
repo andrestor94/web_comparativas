@@ -285,9 +285,12 @@ def _opp_apply_filters(df: pd.DataFrame, q: str, buyer: str, platform: str,
     platf_col = _opp_pick(out, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
     prov_col  = _opp_pick(out, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
     fecha_col = _opp_pick(out, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
-    desc_col  = _opp_pick(out, ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"])
+        desc_col  = _opp_pick(out, ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"])
     proc_col  = _opp_pick(out, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
-    cuenta_col = _opp_pick(out, ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro"])
+    cuenta_col = _opp_pick(
+        out,
+        ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro"],
+    )
 
     # búsqueda libre
     if q.strip():
@@ -1902,9 +1905,9 @@ def api_oportunidades_dimensiones(
         df_filtered,
         ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
     )
-    cuenta_col = _opp_pick(
+        cuenta_col = _opp_pick(
         df_filtered,
-        ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro"],
+        ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro"],
     )
     fecha_col = _opp_pick(
         df_filtered,
