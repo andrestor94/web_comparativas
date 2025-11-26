@@ -1,5 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
+  console.log("[Dimensiones] JS cargado v-colores-1");  // 👈 línea nueva para probar
   // ------------------------------------------------------------------
   // Helpers generales
   // ------------------------------------------------------------------
