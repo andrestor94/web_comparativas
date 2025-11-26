@@ -83,6 +83,13 @@
   const selCuenta = pickId("dimCuenta", "fCuenta");
   const selReparticion = pickId("dimReparticion", "fReparticion");
 
+  // Slider interno de rango de fechas (dos manijas)
+  const rangeFromEl = pickId("dimDateRangeFrom", "fDateRangeFrom");
+  const rangeToEl = pickId("dimDateRangeTo", "fDateRangeTo");
+
+  // Dominio total de fechas disponibles (YYYY-MM-DD ordenadas)
+  let DATE_DOMAIN = [];
+
   // KPI de procesos
   const kProcesos = pickId("dimKpiProcesos", "kProcesos");
 
@@ -291,9 +298,10 @@
         console.error("[Dimensiones] Error HTTP", res.status);
         return;
       }
-      const data = await res.json();
+            const data = await res.json();
       RAW = data;
       refreshSelectOptions();
+      refreshDateSliderDomain(); // 👉 actualiza dominio y posiciones del slider
       updateUI();
     } catch (err) {
       console.error("[Dimensiones] Error de red", err);
@@ -471,6 +479,88 @@
       dimEstado,
       procesosCount,
     };
+  }
+
+  // ------------------------------------------------------------------
+  // Dominio de fechas para el slider (a partir de RAW.dimensions.fecha_apertura)
+  // ------------------------------------------------------------------
+  function refreshDateSliderDomain() {
+    DATE_DOMAIN = [];
+
+    if (!RAW || !RAW.dimensions || !Array.isArray(RAW.dimensions.fecha_apertura)) {
+      return;
+    }
+
+    const set = new Set();
+    RAW.dimensions.fecha_apertura.forEach((d) => {
+      if (!d) return;
+      const v = d.date || d.fecha || d.label || null;
+      if (!v) return;
+      // Nos quedamos con la parte de fecha YYYY-MM-DD
+      const s = String(v).slice(0, 10);
+      set.add(s);
+    });
+
+    DATE_DOMAIN = Array.from(set).sort();
+
+    if (!rangeFromEl || !rangeToEl || DATE_DOMAIN.length === 0) return;
+
+    const maxIndex = DATE_DOMAIN.length - 1;
+
+    rangeFromEl.min = 0;
+    rangeFromEl.max = maxIndex;
+    rangeToEl.min = 0;
+    rangeToEl.max = maxIndex;
+
+    // Alinear slider con las fechas actuales de los inputs
+    const fromVal = dateFromEl && dateFromEl.value;
+    const toVal = dateToEl && dateToEl.value;
+
+    let idxFrom = fromVal ? DATE_DOMAIN.indexOf(fromVal) : 0;
+    let idxTo = toVal ? DATE_DOMAIN.indexOf(toVal) : maxIndex;
+
+    if (idxFrom < 0) idxFrom = 0;
+    if (idxTo < 0) idxTo = maxIndex;
+    if (idxFrom > idxTo) {
+      const tmp = idxFrom;
+      idxFrom = idxTo;
+      idxTo = tmp;
+    }
+
+    rangeFromEl.value = String(idxFrom);
+    rangeToEl.value = String(idxTo);
+  }
+
+  // ------------------------------------------------------------------
+  // Cuando se mueve el slider, actualizamos fechas y recargamos datos
+  // ------------------------------------------------------------------
+  function handleDateRangeSliderChange() {
+    if (!rangeFromEl || !rangeToEl || DATE_DOMAIN.length === 0) return;
+
+    let iFrom = parseInt(rangeFromEl.value, 10);
+    let iTo = parseInt(rangeToEl.value, 10);
+    if (Number.isNaN(iFrom)) iFrom = 0;
+    if (Number.isNaN(iTo)) iTo = 0;
+
+    const maxIdx = DATE_DOMAIN.length - 1;
+    if (iFrom < 0) iFrom = 0;
+    if (iTo > maxIdx) iTo = maxIdx;
+
+    // Siempre mantener from <= to
+    if (iFrom > iTo) {
+      const tmp = iFrom;
+      iFrom = iTo;
+      iTo = tmp;
+    }
+
+    const fromDate = DATE_DOMAIN[iFrom];
+    const toDate = DATE_DOMAIN[iTo];
+
+    if (dateFromEl && fromDate) dateFromEl.value = fromDate;
+    if (dateToEl && toDate) dateToEl.value = toDate;
+
+    // Recargamos datos con el nuevo rango
+    fetchData();
   }
 
   // ------------------------------------------------------------------
@@ -1007,8 +1097,15 @@
     if (selReparticion) {
       selReparticion.addEventListener("change", fetchData);
     }
-    if (selCuenta) {
+        if (selCuenta) {
       selCuenta.addEventListener("change", fetchData);
+    }
+
+    if (rangeFromEl) {
+      rangeFromEl.addEventListener("input", handleDateRangeSliderChange);
+    }
+    if (rangeToEl) {
+      rangeToEl.addEventListener("input", handleDateRangeSliderChange);
     }
 
     bindChipGroup(swPAMI, updateUI);
@@ -1018,7 +1115,7 @@
   // ------------------------------------------------------------------
   // Rango de fecha por defecto (últimos 3 días hábiles)
   // ------------------------------------------------------------------
-  function setDefaultDateRangeIfEmpty() {
+    function setDefaultDateRangeIfEmpty() {
     if (!dateFromEl || !dateToEl) return;
 
     // Solo aplicamos el default si ambos están vacíos
@@ -1026,12 +1123,12 @@
 
     const today = new Date();
 
-    // Resta N días hábiles (sin contar sábados ni domingos)
-    function subtractBusinessDays(date, days) {
+    // Suma N días hábiles (sin contar sábados ni domingos)
+    function addBusinessDays(date, days) {
       const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       let remaining = days;
       while (remaining > 0) {
-        d.setDate(d.getDate() - 1);
+        d.setDate(d.getDate() + 1);
         const day = d.getDay(); // 0 = domingo, 6 = sábado
         if (day !== 0 && day !== 6) {
           remaining -= 1;
@@ -1040,8 +1137,8 @@
       return d;
     }
 
-    const fromDate = subtractBusinessDays(today, 3);
-    const toDate = today;
+    const fromDate = today; // hoy
+    const toDate = addBusinessDays(today, 3); // hoy + 3 hábiles
 
     function toISO(d) {
       const y = d.getFullYear();
