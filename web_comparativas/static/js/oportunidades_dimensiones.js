@@ -674,11 +674,12 @@
       });
   }
 
-  function redrawProvinciaChoropleth() {
+    function redrawProvinciaChoropleth() {
     if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
     const dimProv = LAST_FILTERED.dimProv || [];
 
+    // Conteo por nombre normalizado de provincia
     const countsByName = new Map();
     dimProv.forEach((d) => {
       const name = normalize(d.label);
@@ -686,19 +687,23 @@
       countsByName.set(name, prev + (d.count || 0));
     });
 
+    // Eliminamos capa anterior si existe
     if (provGeoLayer) {
       provGeoLayer.remove();
       provGeoLayer = null;
     }
 
-    const values = Array.from(countsByName.values());
-    const maxCount = values.length ? Math.max(...values) : 0;
+    const entries = Array.from(countsByName.entries());
+    let maxKey = null;
+    let maxCount = 0;
+    for (const [k, v] of entries) {
+      if (v > maxCount) {
+        maxCount = v;
+        maxKey = k;
+      }
+    }
 
-    // ----------------------------------------------------------------
-    // Escala en azules:
-    //   - provincia/s con maxCount exacto => azul oscuro corporativo
-    //   - resto: gradiente según proporción
-    // ----------------------------------------------------------------
+    // Misma escala suave que ya venías usando para el resto
     function colorForValue(v) {
       if (maxCount <= 0 || v <= 0) return "#E5EEF5";
       const t = v / maxCount;
@@ -719,7 +724,8 @@
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
 
-        const isTop = maxCount > 0 && value === maxCount;
+        // Solo la provincia con más procesos va en azul oscuro corporativo
+        const isTop = maxKey && key === maxKey && value > 0;
 
         return {
           color: "#ffffff",
