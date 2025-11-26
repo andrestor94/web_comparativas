@@ -1,6 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-2");
+  console.log("[Dimensiones] JS cargado v-colores-3");
 
   // ------------------------------------------------------------------
   // Helpers generales
@@ -128,8 +128,10 @@
     regular: "#6CC4E0",
     regularSoft: "#BFE9F6",
 
-    // Treemap: azul intermedio suave
-    treemap: "#8CC5EA",
+    // Treemap: degradé según tamaño (rank)
+    treemapDark: "#064066",   // bloque más grande
+    treemapMedium: "#48B3C9", // segundo bloque
+    treemapBase: "#8CC5EA",   // resto
   };
 
   // ------------------------------------------------------------------
@@ -145,19 +147,14 @@
         // Solo tocamos los gráficos de esta pantalla
         if (!/^dimChart/.test(id)) return;
 
+        // Para la torta dejamos que el propio gráfico maneje los colores
+        if (chart.config.type === "pie") {
+          return;
+        }
+
         // Ajustamos datasets según EMERGENCIA / REGULAR
         chart.data.datasets.forEach((ds) => {
           const label = (ds.label || "").toString().toUpperCase();
-
-          // Torta de estado: 2 sectores EMERGENCIA / REGULAR
-          if (chart.config.type === "pie") {
-            if (chart.data.labels && chart.data.labels.length === 2) {
-              ds.backgroundColor = [COLORS.emergency, COLORS.regular];
-              ds.borderColor = "#ffffff";
-            }
-            return;
-          }
-
           const isHorizontal = chart.options.indexAxis === "y";
 
           if (label.includes("EMERGENCIA")) {
@@ -495,15 +492,28 @@
     });
   }
 
+  // Torta "Proceso por estado" con colores según la etiqueta
   function createOrUpdatePie(chartRef, ctx, labels, data, options) {
     if (!ctx || typeof Chart === "undefined") return null;
+
+    const backgroundColor = labels.map((lbl) => {
+      const up = (lbl || "").toString().toUpperCase();
+      if (up.includes("EMERGENCIA")) return COLORS.emergency;
+      if (up.includes("REGULAR")) return COLORS.regular;
+      return "#d1d5db";
+    });
+
     if (chartRef) {
       chartRef.data.labels = labels;
       chartRef.data.datasets[0].data = data;
+      chartRef.data.datasets[0].backgroundColor = backgroundColor;
+      chartRef.data.datasets[0].borderColor = "#ffffff";
+      chartRef.data.datasets[0].borderWidth = 2;
       chartRef.options = Object.assign(chartRef.options || {}, options || {});
       chartRef.update();
       return chartRef;
     }
+
     return new Chart(ctx, {
       type: "pie",
       data: {
@@ -511,7 +521,9 @@
         datasets: [
           {
             data,
-            // el plugin se encarga de los colores
+            backgroundColor,
+            borderColor: "#ffffff",
+            borderWidth: 2,
           },
         ],
       },
@@ -519,7 +531,7 @@
     });
   }
 
-  // Treemap para "Procesos por tipo"
+  // Treemap para "Procesos por tipo" con degradé según tamaño
   function createOrUpdateTreemap(chartRef, ctx, tree, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -554,7 +566,16 @@
             borderColor: "#ffffff",
             borderWidth: 1,
             spacing: 0.5,
-            backgroundColor: COLORS.treemap,
+            // Degradé: rank 0 = más grande, 1 = segundo, resto base
+            backgroundColor(ctx) {
+              const rank =
+                ctx.raw && typeof ctx.raw.rank === "number"
+                  ? ctx.raw.rank
+                  : 2;
+              if (rank === 0) return COLORS.treemapDark;
+              if (rank === 1) return COLORS.treemapMedium;
+              return COLORS.treemapBase;
+            },
             labels: {
               display: true,
               formatter(ctx) {
@@ -666,14 +687,15 @@
     const values = Array.from(countsByName.values());
     const maxCount = values.length ? Math.max(...values) : 0;
 
-    // Escala en azules suaves (agua marina)
+    // Escala en azules: la provincia con más procesos va SIEMPRE en azul oscuro
     function colorFor(v) {
       if (maxCount <= 0 || v <= 0) return "#E5EEF5";
+      if (v === maxCount) return COLORS.emergency; // la más alta = azul oscuro
+
       const t = v / maxCount;
-      if (t > 0.75) return COLORS.emergency; // más oscuro
-      if (t > 0.5) return "#2F7AA8";
-      if (t > 0.25) return COLORS.regular;
-      return COLORS.regularSoft;
+      if (t > 0.6) return COLORS.regular;       // bastante alta
+      if (t > 0.3) return COLORS.treemapBase;   // intermedia
+      return COLORS.regularSoft;                // baja
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -792,12 +814,20 @@
     // 2) Procesos por provincia (MAPA Leaflet)
     redrawProvinciaChoropleth();
 
-    // 3) Procesos por tipo (TREEMAP)
+    // 3) Procesos por tipo (TREEMAP con degradé)
     if (ctxTipo) {
-      const src = F.dimTipo.slice(0, 40);
-      const tree = src.map((d) => ({
-        label: d.label || "Sin tipo",
-        value: d.count || 0,
+      const src = [...F.dimTipo]
+        .map((d) => ({
+          label: d.label || "Sin tipo",
+          count: d.count || 0,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 40);
+
+      const tree = src.map((d, idx) => ({
+        label: d.label,
+        value: d.count,
+        rank: idx, // para el degradé
       }));
 
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
