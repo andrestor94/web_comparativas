@@ -120,13 +120,15 @@
   const API_BASE_URL = "/api/oportunidades/dimensiones";
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
-  // Paleta SUISO (hex, sin transparencias en barras principales)
+  // Paleta SUISO para Dimensiones:
+  // - EMERGENCIA: azul oscuro corporativo
+  // - REGULAR: azul agua marina suave
   const COLORS = {
-    emergency: "#064066",      // EMERGENCIA
-    regular: "#5274ce",        // REGULAR
-    emergencySoft: "#064066",  // lo usamos igual que emergency (lleno)
-    regularSoft: "#5274ce",
-    treemap: "#6886c4",        // bloques del treemap
+    emergency: "#064066",      // EMERGENCIA (principal)
+    emergencySoft: "#0B527F",  // EMERGENCIA relleno barras
+    regular: "#6CC4E0",        // REGULAR agua marina
+    regularSoft: "#BFE9F6",    // REGULAR relleno suave
+    treemap: "#8CC5EA",        // Bloques del treemap
   };
 
   let RAW = null;
@@ -251,7 +253,7 @@
   // ------------------------------------------------------------------
   // Transformar datos crudos según filtros PAMI / Estado
   // ------------------------------------------------------------------
-    function computeFilteredData() {
+  function computeFilteredData() {
     if (!RAW || !RAW.dimensions) return null;
 
     const dims = RAW.dimensions;
@@ -622,14 +624,14 @@
     const values = Array.from(countsByName.values());
     const maxCount = values.length ? Math.max(...values) : 0;
 
-    // Escala en azules Suizo (claro -> oscuro)
+    // Escala en azules/agua marina (claro -> oscuro)
     function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#e5e7eb";
+      if (maxCount <= 0 || v <= 0) return "#E5F3FB";
       const t = v / maxCount;
-      if (t > 0.75) return "#064066"; // azul oscuro
-      if (t > 0.5) return "#5274ce"; // azul alternativo
-      if (t > 0.25) return "#6886c4"; // azul claro
-      return "#a8bce9";              // extra claro
+      if (t > 0.75) return "#0B527F";   // azul fuerte
+      if (t > 0.5) return "#2F8AB8";    // intermedio
+      if (t > 0.25) return "#6CC4E0";   // agua marina
+      return "#BFE9F6";                 // muy suave
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -732,7 +734,7 @@
             y: {
               stacked: true,
               beginAtZero: true,
-              grid: { color: "rgba(148, 163, 184, 0.3)" },
+              grid: { color: "rgba(148, 163, 184, 0.25)" },
             },
           },
           plugins: {
@@ -820,7 +822,7 @@
       );
     }
 
-            // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
+    // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -838,7 +840,7 @@
               position: "bottom",
             },
           },
-          // 🔵 Nuevo: clic en la torta = cambiar filtro de Estado (chips)
+          // Clic en la torta = cambiar filtro de Estado (chips)
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
 
@@ -853,19 +855,16 @@
             const labelRaw = chart.data.labels[el.index] || "";
             const label = labelRaw.toString().toUpperCase();
 
-            // Qué valor de chip queremos según el texto del sector
             let target = "todos";
             if (label.includes("EMERGENCIA")) target = "emergencia";
             else if (label.includes("REGULAR")) target = "regular";
 
-            // Si ya está seleccionado, al volver a hacer clic lo apagamos (vuelve a "Todos")
             const current = getChipGroupValue(swEstado);
             if (current === target) {
               target = "todos";
             }
 
             setChipGroupValue(swEstado, target);
-            // Recalculamos todo el dashboard (se aplica solo client-side sobre RAW)
             updateUI();
           },
         }
@@ -893,7 +892,7 @@
       selCuenta.addEventListener("change", fetchData);
     }
 
-    bindChipGroup(swPAMI, updateUI); // PAMI/Otras se aplica client-side
+    bindChipGroup(swPAMI, updateUI);   // PAMI/Otras se aplica client-side
     bindChipGroup(swEstado, updateUI); // Estado se aplica client-side
   }
 
