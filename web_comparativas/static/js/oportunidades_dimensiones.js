@@ -120,21 +120,19 @@
   const API_BASE_URL = "/api/oportunidades/dimensiones";
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
-  // Paleta SUISO para Dimensiones:
-  // - EMERGENCIA: azul oscuro corporativo
-  // - REGULAR: azul agua marina suave
+  // 🎨 Paleta de colores Dimensiones
   const COLORS = {
-  // EMERGENCIA: azul corporativo (principal)
-  emergency: "#064066",
-  emergencySoft: "#0B527F", // versión un poco más suave para relleno
+    // EMERGENCIA: azul corporativo
+    emergency: "#064066",
+    emergencySoft: "#0B527F", // relleno un poco más suave
 
-  // REGULAR: azul agua marina suave
-  regular: "#6CC4E0",
-  regularSoft: "#BFE9F6",
+    // REGULAR: azul agua marina suave
+    regular: "#6CC4E0",
+    regularSoft: "#BFE9F6",
 
-  // Treemap: azul intermedio suave
-  treemap: "#8CC5EA",
-};
+    // Treemap: azul intermedio suave
+    treemap: "#8CC5EA",
+  };
 
   let RAW = null;
   let LAST_FILTERED = null;
@@ -279,9 +277,7 @@
     const pamiVal = getChipGroupValue(swPAMI);   // todos | pami | otras
     const estVal = getChipGroupValue(swEstado);  // todos | emergencia | regular
 
-    // ----------------------------------------------------------
-    // 1) Filtro PAMI: por ahora solo tiene sentido en repartición+estado
-    // ----------------------------------------------------------
+    // 1) Filtro PAMI
     if (pamiVal !== "todos") {
       dimRepEstado = dimRepEstado.filter((row) => {
         const isPami = isPAMIName(row.label);
@@ -291,10 +287,7 @@
       });
     }
 
-    // ----------------------------------------------------------
     // 2) Filtro de Estado (EMERGENCIA / REGULAR)
-    //    Se aplica a TODAS las dimensiones que tienen ese detalle
-    // ----------------------------------------------------------
     if (estVal !== "todos") {
       const wanted =
         estVal === "emergencia"
@@ -304,7 +297,6 @@
           : null;
 
       if (wanted) {
-        // Helper genérico para dims con campos emergencia/regular
         const filterDimListByEstado = (list) => {
           if (!Array.isArray(list)) return [];
 
@@ -326,9 +318,6 @@
                   : null;
 
               const hasSplit = emRaw !== null || rgRaw !== null;
-
-              // Si esta dimensión no viene desglosada por estado,
-              // la dejamos tal cual (no podemos filtrar bien).
               if (!hasSplit) return row;
 
               const em = emRaw || 0;
@@ -359,7 +348,7 @@
             });
         };
 
-        // a) Repartición + estado (ya estaba desglosado)
+        // a) Repartición + estado
         dimRepEstado = dimRepEstado
           .map((row) => {
             const em = row.emergencia || 0;
@@ -388,7 +377,7 @@
             (e.estado || "").toString().toUpperCase() === wanted
         );
 
-        // c) Serie temporal (timeline)
+        // c) Serie temporal
         dimFecha = dimFecha.map((row) => {
           const em = row.emergencia || 0;
           const rg = row.regular || 0;
@@ -408,15 +397,13 @@
           });
         });
 
-        // d) Tipo de proceso y Provincia (si vienen con emergencia/regular)
+        // d) Tipo de proceso y Provincia
         dimTipo = filterDimListByEstado(dimTipo);
         dimProv = filterDimListByEstado(dimProv);
       }
     }
 
-    // ----------------------------------------------------------
     // 3) KPI de Procesos
-    // ----------------------------------------------------------
     let procesosCount = 0;
     if (dimRepEstado.length && (pamiVal !== "todos" || estVal !== "todos")) {
       procesosCount = dimRepEstado.reduce(
@@ -629,15 +616,15 @@
     const values = Array.from(countsByName.values());
     const maxCount = values.length ? Math.max(...values) : 0;
 
-    // Escala en azules/agua marina (claro -> oscuro)
+    // Escala en azules / agua marina
     function colorFor(v) {
-  if (maxCount <= 0 || v <= 0) return "#E5F3FB"; // casi blanco azulado
-  const t = v / maxCount;
-  if (t > 0.75) return "#0B527F";   // azul fuerte
-  if (t > 0.5) return "#2F8AB8";    // intermedio
-  if (t > 0.25) return "#6CC4E0";   // agua marina
-  return "#BFE9F6";                 // muy suave
-}
+      if (maxCount <= 0 || v <= 0) return "#E5F3FB"; // azul muy clarito
+      const t = v / maxCount;
+      if (t > 0.75) return "#0B527F";   // azul fuerte
+      if (t > 0.5) return "#2F8AB8";    // intermedio
+      if (t > 0.25) return "#6CC4E0";   // agua marina
+      return "#BFE9F6";                 // muy suave
+    }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
       style: (feature) => {
@@ -701,7 +688,7 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-    // --- 1) Apertura de procesos en el tiempo
+    // 1) Apertura de procesos en el tiempo
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -752,12 +739,12 @@
       );
     }
 
-    // --- 2) Procesos por provincia (MAPA Leaflet)
+    // 2) Procesos por provincia (MAPA Leaflet)
     redrawProvinciaChoropleth();
 
-    // --- 3) Procesos por tipo (TREEMAP)
+    // 3) Procesos por tipo (TREEMAP)
     if (ctxTipo) {
-      const src = F.dimTipo.slice(0, 40); // hasta 40 tipos distintos
+      const src = F.dimTipo.slice(0, 40);
       const tree = src.map((d) => ({
         label: d.label || "Sin tipo",
         value: d.count || 0,
@@ -766,7 +753,7 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-    // --- 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
+    // 4) Proceso por repartición y estado
     if (ctxRepEstado) {
       const src = [...F.dimRepEstado]
         .map((r) => ({
@@ -827,7 +814,7 @@
       );
     }
 
-    // --- 5) Proceso por estado (torta global EMERGENCIA / REGULAR)
+    // 5) Proceso por estado (torta)
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -845,11 +832,9 @@
               position: "bottom",
             },
           },
-          // Clic en la torta = cambiar filtro de Estado (chips)
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
 
-            // Si haces clic fuera de un sector, reseteamos a "Todos"
             if (!elements.length) {
               setChipGroupValue(swEstado, "todos");
               updateUI();
@@ -897,8 +882,8 @@
       selCuenta.addEventListener("change", fetchData);
     }
 
-    bindChipGroup(swPAMI, updateUI);   // PAMI/Otras se aplica client-side
-    bindChipGroup(swEstado, updateUI); // Estado se aplica client-side
+    bindChipGroup(swPAMI, updateUI);
+    bindChipGroup(swEstado, updateUI);
   }
 
   // ------------------------------------------------------------------
