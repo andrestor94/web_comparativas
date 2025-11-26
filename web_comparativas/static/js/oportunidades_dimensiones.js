@@ -1,6 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-4");
+  console.log("[Dimensiones] JS cargado v-colores-5");
 
   // ------------------------------------------------------------------
   // Helpers generales
@@ -84,8 +84,9 @@
   const selReparticion = pickId("dimReparticion", "fReparticion");
 
   // Slider interno de rango de fechas (dos manijas)
-  const rangeFromEl = pickId("dimDateRangeFrom", "fDateRangeFrom");
-  const rangeToEl = pickId("dimDateRangeTo", "fDateRangeTo");
+  const rangeMinEl = document.getElementById("dimRangeMin");
+  const rangeMaxEl = document.getElementById("dimRangeMax");
+  const rangeFillEl = document.getElementById("dimDateFill");
 
   // Dominio total de fechas disponibles (YYYY-MM-DD ordenadas)
   let DATE_DOMAIN = [];
@@ -139,7 +140,7 @@
     treemapDark1: "#064066", // más grande
     treemapDark2: "#1E5A8A", // segundo
     treemapDark3: "#3F7FB0", // tercero
-    treemapBase: "#8CC5EA",  // resto
+    treemapBase: "#8CC5EA", // resto
   };
 
   // ------------------------------------------------------------------
@@ -298,7 +299,7 @@
         console.error("[Dimensiones] Error HTTP", res.status);
         return;
       }
-            const data = await res.json();
+      const data = await res.json();
       RAW = data;
       refreshSelectOptions();
       refreshDateSliderDomain(); // 👉 actualiza dominio y posiciones del slider
@@ -321,9 +322,7 @@
       ? dims.fecha_apertura
       : [];
     let dimProv = Array.isArray(dims.provincia) ? dims.provincia : [];
-    let dimTipo = Array.isArray(dims.tipo_proceso)
-      ? dims.tipo_proceso
-      : [];
+    let dimTipo = Array.isArray(dims.tipo_proceso) ? dims.tipo_proceso : [];
     let dimRepEstado = Array.isArray(dims.reparticion_estado)
       ? dims.reparticion_estado
       : [];
@@ -428,8 +427,7 @@
 
         // b) Torta global
         dimEstado = dimEstado.filter(
-          (e) =>
-            (e.estado || "").toString().toUpperCase() === wanted
+          (e) => (e.estado || "").toString().toUpperCase() === wanted
         );
 
         // c) Serie temporal
@@ -482,12 +480,43 @@
   }
 
   // ------------------------------------------------------------------
+  // Barra de relleno del slider (track coloreado)
+  // ------------------------------------------------------------------
+  function updateDateRangeFill() {
+    if (!rangeMinEl || !rangeMaxEl || !rangeFillEl) return;
+
+    const min = parseInt(rangeMinEl.min || "0", 10);
+    const max = parseInt(rangeMinEl.max || "0", 10);
+    if (max <= min) {
+      rangeFillEl.style.left = "0%";
+      rangeFillEl.style.width = "0%";
+      return;
+    }
+
+    let vMin = parseInt(rangeMinEl.value || "0", 10);
+    let vMax = parseInt(rangeMaxEl.value || "0", 10);
+    if (vMin > vMax) {
+      const tmp = vMin;
+      vMin = vMax;
+      vMax = tmp;
+    }
+
+    const total = max - min;
+    const startPct = ((vMin - min) / total) * 100;
+    const endPct = ((vMax - min) / total) * 100;
+
+    rangeFillEl.style.left = `${startPct}%`;
+    rangeFillEl.style.width = `${Math.max(endPct - startPct, 0)}%`;
+  }
+
+  // ------------------------------------------------------------------
   // Dominio de fechas para el slider (a partir de RAW.dimensions.fecha_apertura)
   // ------------------------------------------------------------------
   function refreshDateSliderDomain() {
     DATE_DOMAIN = [];
 
     if (!RAW || !RAW.dimensions || !Array.isArray(RAW.dimensions.fecha_apertura)) {
+      updateDateRangeFill();
       return;
     }
 
@@ -503,16 +532,34 @@
 
     DATE_DOMAIN = Array.from(set).sort();
 
-    if (!rangeFromEl || !rangeToEl || DATE_DOMAIN.length === 0) return;
+    if (!rangeMinEl || !rangeMaxEl || DATE_DOMAIN.length === 0) {
+      updateDateRangeFill();
+      return;
+    }
 
     const maxIndex = DATE_DOMAIN.length - 1;
+    const minDate = DATE_DOMAIN[0];
+    const maxDate = DATE_DOMAIN[maxIndex];
 
-    rangeFromEl.min = 0;
-    rangeFromEl.max = maxIndex;
-    rangeToEl.min = 0;
-    rangeToEl.max = maxIndex;
+    rangeMinEl.min = "0";
+    rangeMinEl.max = String(maxIndex);
+    rangeMaxEl.min = "0";
+    rangeMaxEl.max = String(maxIndex);
 
-    // Alinear slider con las fechas actuales de los inputs
+    // Si el "hasta" está vacío, lo alineamos al máximo disponible
+    if (dateToEl && !dateToEl.value && maxDate) {
+      dateToEl.value = maxDate;
+    }
+
+    // Si el "desde" está por encima del máximo disponible, lo recortamos
+    if (dateFromEl && dateFromEl.value && dateFromEl.value > maxDate) {
+      dateFromEl.value = maxDate;
+    }
+    // Si está antes del mínimo, lo subimos al mínimo del dominio
+    if (dateFromEl && dateFromEl.value && dateFromEl.value < minDate) {
+      dateFromEl.value = minDate;
+    }
+
     const fromVal = dateFromEl && dateFromEl.value;
     const toVal = dateToEl && dateToEl.value;
 
@@ -527,18 +574,19 @@
       idxTo = tmp;
     }
 
-    rangeFromEl.value = String(idxFrom);
-    rangeToEl.value = String(idxTo);
+    rangeMinEl.value = String(idxFrom);
+    rangeMaxEl.value = String(idxTo);
+    updateDateRangeFill();
   }
 
   // ------------------------------------------------------------------
   // Cuando se mueve el slider, actualizamos fechas y recargamos datos
   // ------------------------------------------------------------------
   function handleDateRangeSliderChange() {
-    if (!rangeFromEl || !rangeToEl || DATE_DOMAIN.length === 0) return;
+    if (!rangeMinEl || !rangeMaxEl || DATE_DOMAIN.length === 0) return;
 
-    let iFrom = parseInt(rangeFromEl.value, 10);
-    let iTo = parseInt(rangeToEl.value, 10);
+    let iFrom = parseInt(rangeMinEl.value, 10);
+    let iTo = parseInt(rangeMaxEl.value, 10);
     if (Number.isNaN(iFrom)) iFrom = 0;
     if (Number.isNaN(iTo)) iTo = 0;
 
@@ -559,6 +607,7 @@
     if (dateFromEl && fromDate) dateFromEl.value = fromDate;
     if (dateToEl && toDate) dateToEl.value = toDate;
 
+    updateDateRangeFill();
     // Recargamos datos con el nuevo rango
     fetchData();
   }
@@ -566,7 +615,6 @@
   // ------------------------------------------------------------------
   // Creación / actualización de gráficos con Chart.js
   // ------------------------------------------------------------------
-    // Siempre destruimos y recreamos el gráfico de barras
   function createOrUpdateBar(chartRef, ctx, labels, datasets, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -581,7 +629,6 @@
     });
   }
 
-    // Siempre destruimos y recreamos la torta
   function createOrUpdatePie(chartRef, ctx, labels, data, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -613,7 +660,6 @@
     });
   }
 
-    // Siempre destruimos y recreamos el treemap
   function createOrUpdateTreemap(chartRef, ctx, tree, options) {
     if (!ctx || typeof Chart === "undefined") return null;
 
@@ -712,14 +758,13 @@
     provMap = L.map(mapEl, {
       zoomControl: false,
       attributionControl: false,
-    }).setView([-38.4, -64.8], 3.8); // centro aproximado de Argentina
+    }).setView([-38.4, -64.8], 3.8);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 7,
       minZoom: 3,
     }).addTo(provMap);
 
-    // Cargamos el GeoJSON local de provincias
     fetch(GEOJSON_PROVINCIAS_URL, {
       headers: { Accept: "application/json" },
     })
@@ -750,12 +795,11 @@
       });
   }
 
-      function redrawProvinciaChoropleth() {
+  function redrawProvinciaChoropleth() {
     if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
     const dimProv = LAST_FILTERED.dimProv || [];
 
-    // Conteo por provincia (nombre normalizado)
     const countsByName = new Map();
     dimProv.forEach((d) => {
       const name = normalize(d.label);
@@ -763,13 +807,11 @@
       countsByName.set(name, prev + (d.count || 0));
     });
 
-    // Limpio capa anterior
     if (provGeoLayer) {
       provGeoLayer.remove();
       provGeoLayer = null;
     }
 
-    // Determino provincia con máximo número de procesos
     const entries = Array.from(countsByName.entries());
     let maxKey = null;
     let maxCount = 0;
@@ -780,12 +822,10 @@
       }
     }
 
-    // Escala de colores para el resto (igual que antes, pero sin usar el azul oscuro)
     function colorFor(v) {
       if (maxCount <= 0 || v <= 0) return "#E5EEF5";
       const t = v / maxCount;
 
-      // NOTA: el azul oscuro se reserva solo para la provincia top
       if (t > 0.75) return "#2F7AA8";
       if (t > 0.5) return COLORS.regular;
       if (t > 0.25) return COLORS.regularSoft;
@@ -804,7 +844,6 @@
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
 
-        // Solo la provincia con más procesos va en azul corporativo oscuro
         const isTop = maxKey && key === maxKey && value > 0;
 
         return {
@@ -853,12 +892,10 @@
     if (!F) return;
     LAST_FILTERED = F;
 
-    // KPI Procesos
     if (kProcesos) {
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-        // 1) Apertura de procesos en el tiempo
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -905,20 +942,18 @@
               position: "top",
             },
           },
-          // 👉 Clic en una barra = filtra por EMERGENCIA / REGULAR
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
             if (!elements.length) return;
 
             const el = elements[0];
-            const dsIndex = el.datasetIndex; // 0 = EMERGENCIA, 1 = REGULAR
+            const dsIndex = el.datasetIndex;
             let target = "todos";
 
             if (dsIndex === 0) target = "emergencia";
             else if (dsIndex === 1) target = "regular";
 
             const current = getChipGroupValue(swEstado);
-            // Si ya estaba en ese estado, volver a "todos"
             if (current === target) {
               target = "todos";
             }
@@ -930,10 +965,8 @@
       );
     }
 
-    // 2) Procesos por provincia (MAPA Leaflet)
     redrawProvinciaChoropleth();
 
-    // 3) Procesos por tipo (TREEMAP con degradé)
     if (ctxTipo) {
       const src = [...F.dimTipo]
         .map((d) => ({
@@ -951,7 +984,6 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-        // 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
     if (ctxRepEstado) {
       const src = [...F.dimRepEstado]
         .map((r) => ({
@@ -1008,13 +1040,12 @@
               },
             },
           },
-          // 👉 Clic en una barra horizontal = filtra por estado
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
             if (!elements.length) return;
 
             const el = elements[0];
-            const dsIndex = el.datasetIndex; // 0 = EMERGENCIA, 1 = REGULAR
+            const dsIndex = el.datasetIndex;
             let target = "todos";
 
             if (dsIndex === 0) target = "emergencia";
@@ -1032,7 +1063,6 @@
       );
     }
 
-    // 5) Proceso por estado (torta)
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -1050,7 +1080,6 @@
               position: "bottom",
             },
           },
-          // clic en la torta = cambiar chips de Estado
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
 
@@ -1081,7 +1110,7 @@
     }
   }
 
-    // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
   // Eventos de filtros
   // ------------------------------------------------------------------
   function bindFilters() {
@@ -1097,15 +1126,15 @@
     if (selReparticion) {
       selReparticion.addEventListener("change", fetchData);
     }
-        if (selCuenta) {
+    if (selCuenta) {
       selCuenta.addEventListener("change", fetchData);
     }
 
-    if (rangeFromEl) {
-      rangeFromEl.addEventListener("input", handleDateRangeSliderChange);
+    if (rangeMinEl) {
+      rangeMinEl.addEventListener("input", handleDateRangeSliderChange);
     }
-    if (rangeToEl) {
-      rangeToEl.addEventListener("input", handleDateRangeSliderChange);
+    if (rangeMaxEl) {
+      rangeMaxEl.addEventListener("input", handleDateRangeSliderChange);
     }
 
     bindChipGroup(swPAMI, updateUI);
@@ -1113,9 +1142,11 @@
   }
 
   // ------------------------------------------------------------------
-  // Rango de fecha por defecto (últimos 3 días hábiles)
+  // Rango de fecha por defecto:
+  //   - Desde: hoy + 3 días hábiles
+  //   - Hasta: sin límite (se completa luego al máximo disponible)
   // ------------------------------------------------------------------
-    function setDefaultDateRangeIfEmpty() {
+  function setDefaultDateRangeIfEmpty() {
     if (!dateFromEl || !dateToEl) return;
 
     // Solo aplicamos el default si ambos están vacíos
@@ -1123,7 +1154,6 @@
 
     const today = new Date();
 
-    // Suma N días hábiles (sin contar sábados ni domingos)
     function addBusinessDays(date, days) {
       const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       let remaining = days;
@@ -1137,8 +1167,7 @@
       return d;
     }
 
-    const fromDate = today; // hoy
-    const toDate = addBusinessDays(today, 3); // hoy + 3 hábiles
+    const fromDate = addBusinessDays(today, 3); // 👉 3 días hábiles hacia adelante
 
     function toISO(d) {
       const y = d.getFullYear();
@@ -1148,7 +1177,8 @@
     }
 
     dateFromEl.value = toISO(fromDate);
-    dateToEl.value = toISO(toDate);
+    // Dejamos dateToEl vacío => la API devuelve todo lo posterior
+    dateToEl.value = "";
   }
 
   // ------------------------------------------------------------------
@@ -1156,7 +1186,7 @@
   // ------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     bindFilters();
-    setDefaultDateRangeIfEmpty(); // 👉 aplica rango por defecto si está vacío
+    setDefaultDateRangeIfEmpty();
     initProvinciaMap();
     fetchData();
   });
