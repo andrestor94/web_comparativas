@@ -1,6 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-5");
+  console.log("[Dimensiones] JS cargado v-colores-6");
 
   // ------------------------------------------------------------------
   // Helpers generales
@@ -28,9 +28,7 @@
   function isPAMIName(rep) {
     const r = normalize(rep);
     if (!r) return false;
-
     if (r.includes("pami")) return true;
-
     const base =
       "instituto nacional de servicios sociales para jubilados y pensionados";
     return r.includes(base);
@@ -63,15 +61,12 @@
   }
 
   // ------------------------------------------------------------------
-  // Nodo raíz y upload_id (si el template lo pasó)
+  // Nodo raíz y upload_id
   // ------------------------------------------------------------------
   const rootDim = document.getElementById("dimensiones-root");
   const uploadId = rootDim ? rootDim.dataset.uploadId || "" : "";
 
-  if (!rootDim) {
-    // No estamos en la vista de Dimensiones
-    return;
-  }
+  if (!rootDim) return; // no estamos en Dimensiones
 
   // ------------------------------------------------------------------
   // Referencias de UI
@@ -83,22 +78,22 @@
   const selCuenta = pickId("dimCuenta", "fCuenta");
   const selReparticion = pickId("dimReparticion", "fReparticion");
 
-  // Slider interno de rango de fechas (dos manijas)
+  // Slider interno de rango de fechas
   const rangeMinEl = document.getElementById("dimRangeMin");
   const rangeMaxEl = document.getElementById("dimRangeMax");
   const rangeFillEl = document.getElementById("dimDateFill");
 
-  // Dominio total de fechas disponibles (YYYY-MM-DD ordenadas)
-  let DATE_DOMAIN = [];
+  // Dominio total de fechas disponibles (todas las fechas Apertura)
+  let DATE_DOMAIN = []; // array de strings YYYY-MM-DD
 
-  // KPI de procesos
+  // KPI
   const kProcesos = pickId("dimKpiProcesos", "kProcesos");
 
-  // Grupos de chips
+  // Chips
   const swPAMI = document.getElementById("swPAMI");
   const swEstado = document.getElementById("swEstado");
 
-  // Contenedores / canvas de gráficos (solo charts, el mapa va con Leaflet)
+  // Chart canvases
   function getCtx(canvasId, containerId) {
     let canvas = document.getElementById(canvasId);
     if (!canvas && containerId) {
@@ -128,23 +123,18 @@
   // Paleta de colores Dimensiones
   // ------------------------------------------------------------------
   const COLORS = {
-    // EMERGENCIA: azul corporativo
     emergency: "#064066",
     emergencySoft: "#0B527F",
-
-    // REGULAR: azul agua marina suave
     regular: "#6CC4E0",
     regularSoft: "#BFE9F6",
-
-    // Treemap: degradé por tamaño
-    treemapDark1: "#064066", // más grande
-    treemapDark2: "#1E5A8A", // segundo
-    treemapDark3: "#3F7FB0", // tercero
-    treemapBase: "#8CC5EA", // resto
+    treemapDark1: "#064066",
+    treemapDark2: "#1E5A8A",
+    treemapDark3: "#3F7FB0",
+    treemapBase: "#8CC5EA",
   };
 
   // ------------------------------------------------------------------
-  // Plugin global que fuerza la paleta SOLO en los charts de Dimensiones
+  // Plugin global de colores
   // ------------------------------------------------------------------
   if (typeof window !== "undefined" && window.Chart) {
     window.Chart.register({
@@ -152,14 +142,8 @@
       afterUpdate(chart) {
         const canvas = chart.canvas || {};
         const id = canvas.id || "";
-
-        // Solo tocamos los gráficos de esta pantalla
         if (!/^dimChart/.test(id)) return;
-
-        // Para la torta dejamos que la configure createOrUpdatePie
-        if (chart.config.type === "pie") {
-          return;
-        }
+        if (chart.config.type === "pie") return;
 
         chart.data.datasets.forEach((ds) => {
           const label = (ds.label || "").toString().toUpperCase();
@@ -184,12 +168,14 @@
   }
 
   // ------------------------------------------------------------------
-  // Estado global (datos crudos + gráficos + mapa)
+  // Estado global
   // ------------------------------------------------------------------
   const API_BASE_URL = "/api/oportunidades/dimensiones";
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
-  let RAW = null;
+  let RAW = null; // datos filtrados actuales
+  let RAW_DOMAIN = null; // respuesta sin filtro de fecha (solo para dominio)
+
   let LAST_FILTERED = null;
 
   const charts = {
@@ -205,7 +191,7 @@
   let PROV_GEOJSON = null;
 
   // ------------------------------------------------------------------
-  // Llenar selects de Plataforma / Cuenta / Repartición desde RAW.dimensions
+  // Selects de Plataforma / Cuenta / Repartición
   // ------------------------------------------------------------------
   function refreshSelectOptions() {
     if (!RAW || !RAW.dimensions) return;
@@ -259,14 +245,12 @@
   }
 
   // ------------------------------------------------------------------
-  // Construir query de filtros y pedir datos
+  // Query string para fetch filtrado
   // ------------------------------------------------------------------
   function buildQueryString() {
     const params = new URLSearchParams();
 
-    if (uploadId) {
-      params.set("upload_id", uploadId);
-    }
+    if (uploadId) params.set("upload_id", uploadId);
 
     if (dateFromEl && dateFromEl.value) {
       params.set("date_from", dateFromEl.value);
@@ -278,46 +262,262 @@
     if (selPlataforma && selPlataforma.value) {
       params.set("platform", selPlataforma.value);
     }
-
     if (selReparticion && selReparticion.value) {
       params.set("buyer", selReparticion.value);
     }
 
-    // Cuenta NO se envía por ahora (no está en el endpoint)
+    // Cuenta NO se envía por ahora
     return params.toString();
   }
 
-  async function fetchData() {
+  // ------------------------------------------------------------------
+  // Fetch de datos FILTRADOS (usa date_from/date_to)
+  // ------------------------------------------------------------------
+  async function fetchDataFiltered() {
     const qs = buildQueryString();
     const url = qs ? `${API_BASE_URL}?${qs}` : API_BASE_URL;
 
     try {
-      const res = await fetch(url, {
-        headers: { Accept: "application/json" },
-      });
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
       if (!res.ok) {
-        console.error("[Dimensiones] Error HTTP", res.status);
+        console.error("[Dimensiones] Error HTTP (filtrado)", res.status);
         return;
       }
       const data = await res.json();
       RAW = data;
       refreshSelectOptions();
-      refreshDateSliderDomain(); // 👉 actualiza dominio y posiciones del slider
       updateUI();
     } catch (err) {
-      console.error("[Dimensiones] Error de red", err);
+      console.error("[Dimensiones] Error de red (filtrado)", err);
     }
   }
 
   // ------------------------------------------------------------------
-  // Transformar datos crudos según filtros PAMI / Estado
+  // Fetch inicial: solo para obtener DOMINIO de fechas
+  // ------------------------------------------------------------------
+  async function fetchDomainAndInit() {
+    const params = new URLSearchParams();
+    if (uploadId) params.set("upload_id", uploadId);
+    const url = `${API_BASE_URL}?${params.toString()}`;
+
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        console.error("[Dimensiones] Error HTTP (dominio)", res.status);
+        return;
+      }
+      const data = await res.json();
+      RAW_DOMAIN = data;
+      extractDateDomainFromRaw(RAW_DOMAIN);
+
+      // Si no hay fechas, igual intentamos dibujar algo
+      if (!DATE_DOMAIN.length) {
+        await fetchDataFiltered();
+        return;
+      }
+
+      // Solo ponemos el default si los inputs están vacíos
+      setDefaultDateRangeIfEmpty();
+      syncSliderWithInputsFromDomain();
+
+      // Ahora sí: pedimos los datos filtrados
+      await fetchDataFiltered();
+    } catch (err) {
+      console.error("[Dimensiones] Error de red (dominio)", err);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Dominio de fechas a partir de RAW_DOMAIN
+  // ------------------------------------------------------------------
+  function extractDateDomainFromRaw(raw) {
+    DATE_DOMAIN = [];
+    if (!raw || !raw.dimensions) return;
+    const arr = raw.dimensions.fecha_apertura;
+    if (!Array.isArray(arr)) return;
+
+    const set = new Set();
+    arr.forEach((d) => {
+      if (!d) return;
+      const v = d.date || d.fecha || d.label || null;
+      if (!v) return;
+      const s = String(v).slice(0, 10); // YYYY-MM-DD
+      set.add(s);
+    });
+
+    DATE_DOMAIN = Array.from(set).sort();
+  }
+
+  // ------------------------------------------------------------------
+  // Utilidades de fechas + slider
+  // ------------------------------------------------------------------
+  function addBusinessDays(date, days) {
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    let remaining = days;
+    while (remaining > 0) {
+      d.setDate(d.getDate() + 1);
+      const day = d.getDay(); // 0 domingo, 6 sábado
+      if (day !== 0 && day !== 6) remaining -= 1;
+    }
+    return d;
+  }
+
+  function toISODate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  function findDomainDateOnOrAfter(targetDate) {
+    if (!DATE_DOMAIN.length) return null;
+    const targetTime = targetDate.getTime();
+    for (const s of DATE_DOMAIN) {
+      const t = new Date(s).getTime();
+      if (!Number.isNaN(t) && t >= targetTime) return s;
+    }
+    // si no hay ninguna mayor, usamos la última
+    return DATE_DOMAIN[DATE_DOMAIN.length - 1];
+  }
+
+  function findIndexForDateStr(dateStr, fallbackIndex) {
+    if (!DATE_DOMAIN.length) return 0;
+    const idx = DATE_DOMAIN.indexOf(dateStr);
+    if (idx >= 0) return idx;
+
+    const targetTime = new Date(dateStr).getTime();
+    if (Number.isNaN(targetTime)) return fallbackIndex;
+
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    DATE_DOMAIN.forEach((s, i) => {
+      const t = new Date(s).getTime();
+      if (Number.isNaN(t)) return;
+      const diff = Math.abs(t - targetTime);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    });
+    return bestIdx;
+  }
+
+  // Primer rango por defecto: desde hoy + 3 días hábiles hasta última fecha del dominio
+  function setDefaultDateRangeIfEmpty() {
+    if (!dateFromEl || !dateToEl) return;
+    if (!DATE_DOMAIN.length) return;
+
+    if (dateFromEl.value || dateToEl.value) return; // ya estaba seteado
+
+    const today = new Date();
+    const candidateFrom = addBusinessDays(today, 3);
+    const fromDomainStr = findDomainDateOnOrAfter(candidateFrom);
+
+    // Si el dominio es todo anterior a candidateFrom, fromDomainStr será la última (queda bien)
+    const toStr = DATE_DOMAIN[DATE_DOMAIN.length - 1];
+
+    dateFromEl.value = fromDomainStr || DATE_DOMAIN[0];
+    dateToEl.value = toStr;
+  }
+
+  function updateDateRangeFill() {
+    if (!rangeMinEl || !rangeMaxEl || !rangeFillEl) return;
+
+    const min = parseInt(rangeMinEl.min || "0", 10);
+    const max = parseInt(rangeMinEl.max || "0", 10);
+    if (max <= min) {
+      rangeFillEl.style.left = "0%";
+      rangeFillEl.style.width = "0%";
+      return;
+    }
+
+    let vMin = parseInt(rangeMinEl.value || "0", 10);
+    let vMax = parseInt(rangeMaxEl.value || "0", 10);
+    if (vMin > vMax) {
+      const tmp = vMin;
+      vMin = vMax;
+      vMax = tmp;
+    }
+
+    const total = max - min;
+    const startPct = ((vMin - min) / total) * 100;
+    const endPct = ((vMax - min) / total) * 100;
+
+    rangeFillEl.style.left = `${startPct}%`;
+    rangeFillEl.style.width = `${Math.max(endPct - startPct, 0)}%`;
+  }
+
+  // Configura min/max del slider y lo alinea con los inputs actuales
+  function syncSliderWithInputsFromDomain() {
+    if (!rangeMinEl || !rangeMaxEl || !DATE_DOMAIN.length) {
+      updateDateRangeFill();
+      return;
+    }
+
+    const maxIndex = DATE_DOMAIN.length - 1;
+    rangeMinEl.min = "0";
+    rangeMinEl.max = String(maxIndex);
+    rangeMaxEl.min = "0";
+    rangeMaxEl.max = String(maxIndex);
+
+    const defaultFromStr = DATE_DOMAIN[0];
+    const defaultToStr = DATE_DOMAIN[maxIndex];
+
+    const fromStr =
+      (dateFromEl && dateFromEl.value) ? dateFromEl.value : defaultFromStr;
+    const toStr =
+      (dateToEl && dateToEl.value) ? dateToEl.value : defaultToStr;
+
+    let idxFrom = findIndexForDateStr(fromStr, 0);
+    let idxTo = findIndexForDateStr(toStr, maxIndex);
+    if (idxFrom > idxTo) {
+      const tmp = idxFrom;
+      idxFrom = idxTo;
+      idxTo = tmp;
+    }
+
+    rangeMinEl.value = String(idxFrom);
+    rangeMaxEl.value = String(idxTo);
+    updateDateRangeFill();
+  }
+
+  // Cuando se mueve el slider → actualizar inputs y recargar datos filtrados
+  function handleDateRangeSliderChange() {
+    if (!rangeMinEl || !rangeMaxEl || !DATE_DOMAIN.length) return;
+
+    let iFrom = parseInt(rangeMinEl.value, 10);
+    let iTo = parseInt(rangeMaxEl.value, 10);
+    if (Number.isNaN(iFrom)) iFrom = 0;
+    if (Number.isNaN(iTo)) iTo = 0;
+
+    const maxIdx = DATE_DOMAIN.length - 1;
+    if (iFrom < 0) iFrom = 0;
+    if (iTo > maxIdx) iTo = maxIdx;
+
+    if (iFrom > iTo) {
+      const tmp = iFrom;
+      iFrom = iTo;
+      iTo = tmp;
+    }
+
+    const fromDate = DATE_DOMAIN[iFrom];
+    const toDate = DATE_DOMAIN[iTo];
+
+    if (dateFromEl && fromDate) dateFromEl.value = fromDate;
+    if (dateToEl && toDate) dateToEl.value = toDate;
+
+    updateDateRangeFill();
+    fetchDataFiltered();
+  }
+
+  // ------------------------------------------------------------------
+  // Transformación de datos según filtros PAMI / Estado
   // ------------------------------------------------------------------
   function computeFilteredData() {
     if (!RAW || !RAW.dimensions) return null;
 
     const dims = RAW.dimensions;
 
-    // Copia base de todas las dimensiones
     let dimFecha = Array.isArray(dims.fecha_apertura)
       ? dims.fecha_apertura
       : [];
@@ -328,10 +528,10 @@
       : [];
     let dimEstado = Array.isArray(dims.estado) ? dims.estado : [];
 
-    const pamiVal = getChipGroupValue(swPAMI); // todos | pami | otras
-    const estVal = getChipGroupValue(swEstado); // todos | emergencia | regular
+    const pamiVal = getChipGroupValue(swPAMI);
+    const estVal = getChipGroupValue(swEstado);
 
-    // 1) Filtro PAMI solo en repartición+estado
+    // Filtro PAMI solo sobre repartición+estado
     if (pamiVal !== "todos") {
       dimRepEstado = dimRepEstado.filter((row) => {
         const isPami = isPAMIName(row.label);
@@ -341,7 +541,7 @@
       });
     }
 
-    // 2) Filtro de Estado (EMERGENCIA / REGULAR)
+    // Filtro EMERGENCIA / REGULAR
     if (estVal !== "todos") {
       const wanted =
         estVal === "emergencia"
@@ -353,11 +553,9 @@
       if (wanted) {
         const filterDimListByEstado = (list) => {
           if (!Array.isArray(list)) return [];
-
           return list
             .map((row) => {
               if (!row) return row;
-
               const emRaw =
                 typeof row.emergencia === "number"
                   ? row.emergencia
@@ -410,11 +608,8 @@
             let em2 = em;
             let rg2 = rg;
 
-            if (wanted === "EMERGENCIA") {
-              rg2 = 0;
-            } else if (wanted === "REGULAR") {
-              em2 = 0;
-            }
+            if (wanted === "EMERGENCIA") rg2 = 0;
+            else if (wanted === "REGULAR") em2 = 0;
 
             return {
               label: row.label,
@@ -425,7 +620,7 @@
           })
           .filter((r) => r.total > 0);
 
-        // b) Torta global
+        // b) Torta
         dimEstado = dimEstado.filter(
           (e) => (e.estado || "").toString().toUpperCase() === wanted
         );
@@ -437,11 +632,8 @@
           let em2 = em;
           let rg2 = rg;
 
-          if (wanted === "EMERGENCIA") {
-            rg2 = 0;
-          } else if (wanted === "REGULAR") {
-            em2 = 0;
-          }
+          if (wanted === "EMERGENCIA") rg2 = 0;
+          else if (wanted === "REGULAR") em2 = 0;
 
           return Object.assign({}, row, {
             emergencia: em2,
@@ -450,13 +642,13 @@
           });
         });
 
-        // d) Tipo de proceso y Provincia
+        // d) Tipo y provincia
         dimTipo = filterDimListByEstado(dimTipo);
         dimProv = filterDimListByEstado(dimProv);
       }
     }
 
-    // 3) KPI de Procesos
+    // KPI procesos
     let procesosCount = 0;
     if (dimRepEstado.length && (pamiVal !== "todos" || estVal !== "todos")) {
       procesosCount = dimRepEstado.reduce(
@@ -480,148 +672,139 @@
   }
 
   // ------------------------------------------------------------------
-  // Barra de relleno del slider (track coloreado)
+  // Mapa Leaflet
   // ------------------------------------------------------------------
-  function updateDateRangeFill() {
-    if (!rangeMinEl || !rangeMaxEl || !rangeFillEl) return;
-
-    const min = parseInt(rangeMinEl.min || "0", 10);
-    const max = parseInt(rangeMinEl.max || "0", 10);
-    if (max <= min) {
-      rangeFillEl.style.left = "0%";
-      rangeFillEl.style.width = "0%";
+  function initProvinciaMap() {
+    const mapEl = document.getElementById("dimProvinciaMap");
+    if (!mapEl) return;
+    if (typeof L === "undefined") {
+      console.warn("[Dimensiones] Leaflet no está disponible.");
       return;
     }
 
-    let vMin = parseInt(rangeMinEl.value || "0", 10);
-    let vMax = parseInt(rangeMaxEl.value || "0", 10);
-    if (vMin > vMax) {
-      const tmp = vMin;
-      vMin = vMax;
-      vMax = tmp;
-    }
+    provMap = L.map(mapEl, {
+      zoomControl: false,
+      attributionControl: false,
+    }).setView([-38.4, -64.8], 3.8);
 
-    const total = max - min;
-    const startPct = ((vMin - min) / total) * 100;
-    const endPct = ((vMax - min) / total) * 100;
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 7,
+      minZoom: 3,
+    }).addTo(provMap);
 
-    rangeFillEl.style.left = `${startPct}%`;
-    rangeFillEl.style.width = `${Math.max(endPct - startPct, 0)}%`;
+    fetch(GEOJSON_PROVINCIAS_URL, {
+      headers: { Accept: "application/json" },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((geo) => {
+        if (geo && Array.isArray(geo.features)) {
+          PROV_GEOJSON = geo;
+          redrawProvinciaChoropleth();
+        } else {
+          console.warn(
+            "[Dimensiones] provincias_argentina.geojson no tiene el formato esperado."
+          );
+        }
+      })
+      .catch((err) => {
+        console.error(
+          "[Dimensiones] Error cargando provincias_argentina.geojson",
+          err
+        );
+      });
   }
 
-  // ------------------------------------------------------------------
-  // Dominio de fechas para el slider (a partir de RAW.dimensions.fecha_apertura)
-  // ------------------------------------------------------------------
-  function refreshDateSliderDomain() {
-    DATE_DOMAIN = [];
+  function redrawProvinciaChoropleth() {
+    if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
-    if (!RAW || !RAW.dimensions || !Array.isArray(RAW.dimensions.fecha_apertura)) {
-      updateDateRangeFill();
-      return;
-    }
+    const dimProv = LAST_FILTERED.dimProv || [];
 
-    const set = new Set();
-    RAW.dimensions.fecha_apertura.forEach((d) => {
-      if (!d) return;
-      const v = d.date || d.fecha || d.label || null;
-      if (!v) return;
-      // Nos quedamos con la parte de fecha YYYY-MM-DD
-      const s = String(v).slice(0, 10);
-      set.add(s);
+    const countsByName = new Map();
+    dimProv.forEach((d) => {
+      const name = normalize(d.label);
+      const prev = countsByName.get(name) || 0;
+      countsByName.set(name, prev + (d.count || 0));
     });
 
-    DATE_DOMAIN = Array.from(set).sort();
-
-    if (!rangeMinEl || !rangeMaxEl || DATE_DOMAIN.length === 0) {
-      updateDateRangeFill();
-      return;
+    if (provGeoLayer) {
+      provGeoLayer.remove();
+      provGeoLayer = null;
     }
 
-    const maxIndex = DATE_DOMAIN.length - 1;
-    const minDate = DATE_DOMAIN[0];
-    const maxDate = DATE_DOMAIN[maxIndex];
-
-    rangeMinEl.min = "0";
-    rangeMinEl.max = String(maxIndex);
-    rangeMaxEl.min = "0";
-    rangeMaxEl.max = String(maxIndex);
-
-    // Si el "hasta" está vacío, lo alineamos al máximo disponible
-    if (dateToEl && !dateToEl.value && maxDate) {
-      dateToEl.value = maxDate;
+    const entries = Array.from(countsByName.entries());
+    let maxKey = null;
+    let maxCount = 0;
+    for (const [k, v] of entries) {
+      if (v > maxCount) {
+        maxCount = v;
+        maxKey = k;
+      }
     }
 
-    // Si el "desde" está por encima del máximo disponible, lo recortamos
-    if (dateFromEl && dateFromEl.value && dateFromEl.value > maxDate) {
-      dateFromEl.value = maxDate;
-    }
-    // Si está antes del mínimo, lo subimos al mínimo del dominio
-    if (dateFromEl && dateFromEl.value && dateFromEl.value < minDate) {
-      dateFromEl.value = minDate;
-    }
-
-    const fromVal = dateFromEl && dateFromEl.value;
-    const toVal = dateToEl && dateToEl.value;
-
-    let idxFrom = fromVal ? DATE_DOMAIN.indexOf(fromVal) : 0;
-    let idxTo = toVal ? DATE_DOMAIN.indexOf(toVal) : maxIndex;
-
-    if (idxFrom < 0) idxFrom = 0;
-    if (idxTo < 0) idxTo = maxIndex;
-    if (idxFrom > idxTo) {
-      const tmp = idxFrom;
-      idxFrom = idxTo;
-      idxTo = tmp;
+    function colorFor(v) {
+      if (maxCount <= 0 || v <= 0) return "#E5EEF5";
+      const t = v / maxCount;
+      if (t > 0.75) return "#2F7AA8";
+      if (t > 0.5) return COLORS.regular;
+      if (t > 0.25) return COLORS.regularSoft;
+      return "#E5EEF5";
     }
 
-    rangeMinEl.value = String(idxFrom);
-    rangeMaxEl.value = String(idxTo);
-    updateDateRangeFill();
+    provGeoLayer = L.geoJSON(PROV_GEOJSON, {
+      style: (feature) => {
+        const props = feature.properties || {};
+        const rawName =
+          props.provincia ||
+          props.nombre ||
+          props.NOMBRE ||
+          props.name ||
+          "";
+        const key = normalize(rawName);
+        const value = countsByName.get(key) || 0;
+        const isTop = maxKey && key === maxKey && value > 0;
+
+        return {
+          color: "#ffffff",
+          weight: 1,
+          fillColor: isTop ? COLORS.emergency : colorFor(value),
+          fillOpacity: value > 0 ? 0.9 : 0.4,
+        };
+      },
+      onEachFeature(feature, layer) {
+        const props = feature.properties || {};
+        const rawName =
+          props.provincia ||
+          props.nombre ||
+          props.NOMBRE ||
+          props.name ||
+          "Sin nombre";
+        const key = normalize(rawName);
+        const value = countsByName.get(key) || 0;
+        layer.bindTooltip(
+          `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
+          {
+            direction: "top",
+            sticky: true,
+          }
+        );
+      },
+    }).addTo(provMap);
+
+    const bounds = provGeoLayer.getBounds();
+    if (bounds.isValid()) {
+      provMap.fitBounds(bounds, { padding: [10, 10] });
+    }
   }
 
   // ------------------------------------------------------------------
-  // Cuando se mueve el slider, actualizamos fechas y recargamos datos
-  // ------------------------------------------------------------------
-  function handleDateRangeSliderChange() {
-    if (!rangeMinEl || !rangeMaxEl || DATE_DOMAIN.length === 0) return;
-
-    let iFrom = parseInt(rangeMinEl.value, 10);
-    let iTo = parseInt(rangeMaxEl.value, 10);
-    if (Number.isNaN(iFrom)) iFrom = 0;
-    if (Number.isNaN(iTo)) iTo = 0;
-
-    const maxIdx = DATE_DOMAIN.length - 1;
-    if (iFrom < 0) iFrom = 0;
-    if (iTo > maxIdx) iTo = maxIdx;
-
-    // Siempre mantener from <= to
-    if (iFrom > iTo) {
-      const tmp = iFrom;
-      iFrom = iTo;
-      iTo = tmp;
-    }
-
-    const fromDate = DATE_DOMAIN[iFrom];
-    const toDate = DATE_DOMAIN[iTo];
-
-    if (dateFromEl && fromDate) dateFromEl.value = fromDate;
-    if (dateToEl && toDate) dateToEl.value = toDate;
-
-    updateDateRangeFill();
-    // Recargamos datos con el nuevo rango
-    fetchData();
-  }
-
-  // ------------------------------------------------------------------
-  // Creación / actualización de gráficos con Chart.js
+  // Creación / actualización de gráficos
   // ------------------------------------------------------------------
   function createOrUpdateBar(chartRef, ctx, labels, datasets, options) {
     if (!ctx || typeof Chart === "undefined") return null;
-
-    if (chartRef && typeof chartRef.destroy === "function") {
-      chartRef.destroy();
-    }
-
+    if (chartRef && typeof chartRef.destroy === "function") chartRef.destroy();
     return new Chart(ctx, {
       type: "bar",
       data: { labels, datasets },
@@ -639,9 +822,7 @@
       return "#d1d5db";
     });
 
-    if (chartRef && typeof chartRef.destroy === "function") {
-      chartRef.destroy();
-    }
+    if (chartRef && typeof chartRef.destroy === "function") chartRef.destroy();
 
     return new Chart(ctx, {
       type: "pie",
@@ -675,7 +856,6 @@
       return chartRef;
     }
 
-    // Mapear label -> rank (posición por tamaño)
     const rankByLabel = new Map(tree.map((d, idx) => [d.label, idx]));
 
     const makeBgFn = () =>
@@ -688,9 +868,7 @@
         return COLORS.treemapBase;
       };
 
-    if (chartRef && typeof chartRef.destroy === "function") {
-      chartRef.destroy();
-    }
+    if (chartRef && typeof chartRef.destroy === "function") chartRef.destroy();
 
     return new Chart(ctx, {
       type: "treemap",
@@ -743,144 +921,7 @@
   }
 
   // ------------------------------------------------------------------
-  // Mapa de "Procesos por provincia" con Leaflet
-  // ------------------------------------------------------------------
-  function initProvinciaMap() {
-    const mapEl = document.getElementById("dimProvinciaMap");
-    if (!mapEl) return;
-    if (typeof L === "undefined") {
-      console.warn(
-        "[Dimensiones] Leaflet (L) no está disponible. El mapa no se mostrará."
-      );
-      return;
-    }
-
-    provMap = L.map(mapEl, {
-      zoomControl: false,
-      attributionControl: false,
-    }).setView([-38.4, -64.8], 3.8);
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 7,
-      minZoom: 3,
-    }).addTo(provMap);
-
-    fetch(GEOJSON_PROVINCIAS_URL, {
-      headers: { Accept: "application/json" },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
-      .then((geo) => {
-        if (geo && Array.isArray(geo.features)) {
-          PROV_GEOJSON = geo;
-          console.log(
-            "[Dimensiones] GeoJSON de provincias cargado:",
-            geo.features.length,
-            "features"
-          );
-          redrawProvinciaChoropleth();
-        } else {
-          console.warn(
-            "[Dimensiones] provincias_argentina.geojson no tiene el formato esperado."
-          );
-        }
-      })
-      .catch((err) => {
-        console.error(
-          "[Dimensiones] Error cargando provincias_argentina.geojson",
-          err
-        );
-      });
-  }
-
-  function redrawProvinciaChoropleth() {
-    if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
-
-    const dimProv = LAST_FILTERED.dimProv || [];
-
-    const countsByName = new Map();
-    dimProv.forEach((d) => {
-      const name = normalize(d.label);
-      const prev = countsByName.get(name) || 0;
-      countsByName.set(name, prev + (d.count || 0));
-    });
-
-    if (provGeoLayer) {
-      provGeoLayer.remove();
-      provGeoLayer = null;
-    }
-
-    const entries = Array.from(countsByName.entries());
-    let maxKey = null;
-    let maxCount = 0;
-    for (const [k, v] of entries) {
-      if (v > maxCount) {
-        maxCount = v;
-        maxKey = k;
-      }
-    }
-
-    function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#E5EEF5";
-      const t = v / maxCount;
-
-      if (t > 0.75) return "#2F7AA8";
-      if (t > 0.5) return COLORS.regular;
-      if (t > 0.25) return COLORS.regularSoft;
-      return "#E5EEF5";
-    }
-
-    provGeoLayer = L.geoJSON(PROV_GEOJSON, {
-      style: (feature) => {
-        const props = feature.properties || {};
-        const rawName =
-          props.provincia ||
-          props.nombre ||
-          props.NOMBRE ||
-          props.name ||
-          "";
-        const key = normalize(rawName);
-        const value = countsByName.get(key) || 0;
-
-        const isTop = maxKey && key === maxKey && value > 0;
-
-        return {
-          color: "#ffffff",
-          weight: 1,
-          fillColor: isTop ? COLORS.emergency : colorFor(value),
-          fillOpacity: value > 0 ? 0.9 : 0.4,
-        };
-      },
-      onEachFeature(feature, layer) {
-        const props = feature.properties || {};
-        const rawName =
-          props.provincia ||
-          props.nombre ||
-          props.NOMBRE ||
-          props.name ||
-          "Sin nombre";
-        const key = normalize(rawName);
-        const value = countsByName.get(key) || 0;
-        layer.bindTooltip(
-          `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
-          {
-            direction: "top",
-            sticky: true,
-          }
-        );
-      },
-    }).addTo(provMap);
-
-    const bounds = provGeoLayer.getBounds();
-    if (bounds.isValid()) {
-      provMap.fitBounds(bounds, { padding: [10, 10] });
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Actualizar toda la UI (KPI + gráficos + mapa)
+  // Actualizar UI completa
   // ------------------------------------------------------------------
   function updateUI() {
     if (!RAW || !RAW.ok || !RAW.has_file) {
@@ -896,6 +937,7 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
+    // Timeline
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -937,27 +979,18 @@
             },
           },
           plugins: {
-            legend: {
-              display: true,
-              position: "top",
-            },
+            legend: { display: true, position: "top" },
           },
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
             if (!elements.length) return;
-
             const el = elements[0];
             const dsIndex = el.datasetIndex;
             let target = "todos";
-
             if (dsIndex === 0) target = "emergencia";
             else if (dsIndex === 1) target = "regular";
-
             const current = getChipGroupValue(swEstado);
-            if (current === target) {
-              target = "todos";
-            }
-
+            if (current === target) target = "todos";
             setChipGroupValue(swEstado, target);
             updateUI();
           },
@@ -965,8 +998,10 @@
       );
     }
 
+    // Mapa
     redrawProvinciaChoropleth();
 
+    // Treemap tipo
     if (ctxTipo) {
       const src = [...F.dimTipo]
         .map((d) => ({
@@ -984,6 +1019,7 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
+    // Barras repartición/estado
     if (ctxRepEstado) {
       const src = [...F.dimRepEstado]
         .map((r) => ({
@@ -1002,16 +1038,8 @@
         ctxRepEstado,
         labels,
         [
-          {
-            label: "EMERGENCIA",
-            data: emData,
-            backgroundColor: COLORS.emergency,
-          },
-          {
-            label: "REGULAR",
-            data: rgData,
-            backgroundColor: COLORS.regular,
-          },
+          { label: "EMERGENCIA", data: emData, backgroundColor: COLORS.emergency },
+          { label: "REGULAR", data: rgData, backgroundColor: COLORS.regular },
         ],
         {
           indexAxis: "y",
@@ -1026,36 +1054,22 @@
             y: {
               stacked: true,
               grid: { display: false },
-              ticks: {
-                autoSkip: false,
-                font: { size: 10 },
-              },
+              ticks: { autoSkip: false, font: { size: 10 } },
             },
           },
           plugins: {
-            legend: {
-              position: "top",
-              labels: {
-                font: { size: 11 },
-              },
-            },
+            legend: { position: "top", labels: { font: { size: 11 } } },
           },
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
             if (!elements.length) return;
-
             const el = elements[0];
             const dsIndex = el.datasetIndex;
             let target = "todos";
-
             if (dsIndex === 0) target = "emergencia";
             else if (dsIndex === 1) target = "regular";
-
             const current = getChipGroupValue(swEstado);
-            if (current === target) {
-              target = "todos";
-            }
-
+            if (current === target) target = "todos";
             setChipGroupValue(swEstado, target);
             updateUI();
           },
@@ -1063,6 +1077,7 @@
       );
     }
 
+    // Torta estado
     if (ctxEstadoPie) {
       const labels = F.dimEstado.map((e) => e.estado || "");
       const data = F.dimEstado.map((e) => e.count || 0);
@@ -1075,33 +1090,22 @@
         {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: "bottom",
-            },
-          },
+          plugins: { legend: { position: "bottom" } },
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
-
             if (!elements.length) {
               setChipGroupValue(swEstado, "todos");
               updateUI();
               return;
             }
-
             const el = elements[0];
             const labelRaw = chart.data.labels[el.index] || "";
             const label = labelRaw.toString().toUpperCase();
-
             let target = "todos";
             if (label.includes("EMERGENCIA")) target = "emergencia";
             else if (label.includes("REGULAR")) target = "regular";
-
             const current = getChipGroupValue(swEstado);
-            if (current === target) {
-              target = "todos";
-            }
-
+            if (current === target) target = "todos";
             setChipGroupValue(swEstado, target);
             updateUI();
           },
@@ -1113,21 +1117,27 @@
   // ------------------------------------------------------------------
   // Eventos de filtros
   // ------------------------------------------------------------------
+  function handleDateInputChange() {
+    // cuando cambian los inputs manualmente, actualizamos slider y recargamos
+    syncSliderWithInputsFromDomain();
+    fetchDataFiltered();
+  }
+
   function bindFilters() {
     if (dateFromEl) {
-      dateFromEl.addEventListener("change", fetchData);
+      dateFromEl.addEventListener("change", handleDateInputChange);
     }
     if (dateToEl) {
-      dateToEl.addEventListener("change", fetchData);
+      dateToEl.addEventListener("change", handleDateInputChange);
     }
     if (selPlataforma) {
-      selPlataforma.addEventListener("change", fetchData);
+      selPlataforma.addEventListener("change", fetchDataFiltered);
     }
     if (selReparticion) {
-      selReparticion.addEventListener("change", fetchData);
+      selReparticion.addEventListener("change", fetchDataFiltered);
     }
     if (selCuenta) {
-      selCuenta.addEventListener("change", fetchData);
+      selCuenta.addEventListener("change", fetchDataFiltered);
     }
 
     if (rangeMinEl) {
@@ -1142,52 +1152,11 @@
   }
 
   // ------------------------------------------------------------------
-  // Rango de fecha por defecto:
-  //   - Desde: hoy + 3 días hábiles
-  //   - Hasta: sin límite (se completa luego al máximo disponible)
-  // ------------------------------------------------------------------
-  function setDefaultDateRangeIfEmpty() {
-    if (!dateFromEl || !dateToEl) return;
-
-    // Solo aplicamos el default si ambos están vacíos
-    if (dateFromEl.value || dateToEl.value) return;
-
-    const today = new Date();
-
-    function addBusinessDays(date, days) {
-      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      let remaining = days;
-      while (remaining > 0) {
-        d.setDate(d.getDate() + 1);
-        const day = d.getDay(); // 0 = domingo, 6 = sábado
-        if (day !== 0 && day !== 6) {
-          remaining -= 1;
-        }
-      }
-      return d;
-    }
-
-    const fromDate = addBusinessDays(today, 3); // 👉 3 días hábiles hacia adelante
-
-    function toISO(d) {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      return `${y}-${m}-${dd}`;
-    }
-
-    dateFromEl.value = toISO(fromDate);
-    // Dejamos dateToEl vacío => la API devuelve todo lo posterior
-    dateToEl.value = "";
-  }
-
-  // ------------------------------------------------------------------
   // Inicialización
   // ------------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     bindFilters();
-    setDefaultDateRangeIfEmpty();
     initProvinciaMap();
-    fetchData();
+    fetchDomainAndInit(); // primero dominio, luego vista inicial filtrada
   });
 })();
