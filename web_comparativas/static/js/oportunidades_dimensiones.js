@@ -1,6 +1,7 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-1");  // 👈 línea nueva para probar
+  console.log("[Dimensiones] JS cargado v-colores-2");
+
   // ------------------------------------------------------------------
   // Helpers generales
   // ------------------------------------------------------------------
@@ -116,16 +117,12 @@
   }
 
   // ------------------------------------------------------------------
-  // Estado global (datos crudos + gráficos + mapa)
+  // Paleta de colores Dimensiones
   // ------------------------------------------------------------------
-  const API_BASE_URL = "/api/oportunidades/dimensiones";
-  const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
-
-  // 🎨 Paleta de colores Dimensiones
   const COLORS = {
     // EMERGENCIA: azul corporativo
     emergency: "#064066",
-    emergencySoft: "#0B527F", // relleno un poco más suave
+    emergencySoft: "#0B527F",
 
     // REGULAR: azul agua marina suave
     regular: "#6CC4E0",
@@ -135,43 +132,40 @@
     treemap: "#8CC5EA",
   };
 
-  // Plugin para forzar la paleta de colores en los charts de Dimensiones
+  // ------------------------------------------------------------------
+  // Plugin global que fuerza la paleta SOLO en los charts de Dimensiones
+  // ------------------------------------------------------------------
   if (typeof window !== "undefined" && window.Chart) {
     window.Chart.register({
       id: "dimensionesColors",
-      beforeUpdate(chart) {
+      afterUpdate(chart) {
         const canvas = chart.canvas || {};
         const id = canvas.id || "";
 
         // Solo tocamos los gráficos de esta pantalla
         if (!/^dimChart/.test(id)) return;
 
-        // Barras y torta
+        // Ajustamos datasets según EMERGENCIA / REGULAR
         chart.data.datasets.forEach((ds) => {
           const label = (ds.label || "").toString().toUpperCase();
 
-          // Torta de "Proceso por estado" (2 sectores: EMERGENCIA / REGULAR)
+          // Torta de estado: 2 sectores EMERGENCIA / REGULAR
           if (chart.config.type === "pie") {
-            if (
-              chart.data.labels &&
-              chart.data.labels.length === 2 &&
-              !Array.isArray(ds.backgroundColor)
-            ) {
+            if (chart.data.labels && chart.data.labels.length === 2) {
               ds.backgroundColor = [COLORS.emergency, COLORS.regular];
+              ds.borderColor = "#ffffff";
             }
-            return; // no seguimos para pie
+            return;
           }
 
-          // Barras: timeline + repartición y estado
+          const isHorizontal = chart.options.indexAxis === "y";
+
           if (label.includes("EMERGENCIA")) {
-            // Timeline: usamos versión soft, barras horizontales: versión fuerte
-            const isHorizontal = chart.options.indexAxis === "y";
             ds.backgroundColor = isHorizontal
               ? COLORS.emergency
               : COLORS.emergencySoft;
             ds.borderColor = COLORS.emergency;
           } else if (label.includes("REGULAR")) {
-            const isHorizontal = chart.options.indexAxis === "y";
             ds.backgroundColor = isHorizontal
               ? COLORS.regular
               : COLORS.regularSoft;
@@ -180,7 +174,15 @@
         });
       },
     });
+
+    console.log("[Dimensiones] Plugin de colores registrado", COLORS);
   }
+
+  // ------------------------------------------------------------------
+  // Estado global (datos crudos + gráficos + mapa)
+  // ------------------------------------------------------------------
+  const API_BASE_URL = "/api/oportunidades/dimensiones";
+  const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
   let RAW = null;
   let LAST_FILTERED = null;
@@ -322,10 +324,10 @@
       : [];
     let dimEstado = Array.isArray(dims.estado) ? dims.estado : [];
 
-    const pamiVal = getChipGroupValue(swPAMI);   // todos | pami | otras
-    const estVal = getChipGroupValue(swEstado);  // todos | emergencia | regular
+    const pamiVal = getChipGroupValue(swPAMI); // todos | pami | otras
+    const estVal = getChipGroupValue(swEstado); // todos | emergencia | regular
 
-    // 1) Filtro PAMI
+    // 1) Filtro PAMI solo en repartición+estado
     if (pamiVal !== "todos") {
       dimRepEstado = dimRepEstado.filter((row) => {
         const isPami = isPAMIName(row.label);
@@ -419,7 +421,7 @@
           })
           .filter((r) => r.total > 0);
 
-        // b) Torta global: solo filas del estado seleccionado
+        // b) Torta global
         dimEstado = dimEstado.filter(
           (e) =>
             (e.estado || "").toString().toUpperCase() === wanted
@@ -509,7 +511,7 @@
         datasets: [
           {
             data,
-            backgroundColor: [COLORS.emergency, COLORS.regular],
+            // el plugin se encarga de los colores
           },
         ],
       },
@@ -664,14 +666,14 @@
     const values = Array.from(countsByName.values());
     const maxCount = values.length ? Math.max(...values) : 0;
 
-    // Escala en azules / agua marina
+    // Escala en azules suaves (agua marina)
     function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#E5F3FB"; // azul muy clarito
+      if (maxCount <= 0 || v <= 0) return "#E5EEF5";
       const t = v / maxCount;
-      if (t > 0.75) return "#0B527F";   // azul fuerte
-      if (t > 0.5) return "#2F8AB8";    // intermedio
-      if (t > 0.25) return "#6CC4E0";   // agua marina
-      return "#BFE9F6";                 // muy suave
+      if (t > 0.75) return COLORS.emergency; // más oscuro
+      if (t > 0.5) return "#2F7AA8";
+      if (t > 0.25) return COLORS.regular;
+      return COLORS.regularSoft;
     }
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
@@ -689,7 +691,7 @@
           color: "#ffffff",
           weight: 1,
           fillColor: colorFor(value),
-          fillOpacity: value > 0 ? 0.9 : 0.3,
+          fillOpacity: value > 0 ? 0.9 : 0.4,
         };
       },
       onEachFeature(feature, layer) {
@@ -774,7 +776,7 @@
             y: {
               stacked: true,
               beginAtZero: true,
-              grid: { color: "rgba(148, 163, 184, 0.25)" },
+              grid: { color: "rgba(148, 163, 184, 0.3)" },
             },
           },
           plugins: {
@@ -801,7 +803,7 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-    // 4) Proceso por repartición y estado
+    // 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
     if (ctxRepEstado) {
       const src = [...F.dimRepEstado]
         .map((r) => ({
@@ -880,6 +882,7 @@
               position: "bottom",
             },
           },
+          // clic en la torta = cambiar chips de Estado
           onClick: function (evt, elements, chart) {
             if (!swEstado) return;
 
