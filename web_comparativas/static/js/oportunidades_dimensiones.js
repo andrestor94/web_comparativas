@@ -134,6 +134,53 @@
     treemap: "#8CC5EA",
   };
 
+  // Plugin para forzar la paleta de colores en los charts de Dimensiones
+  if (typeof window !== "undefined" && window.Chart) {
+    window.Chart.register({
+      id: "dimensionesColors",
+      beforeUpdate(chart) {
+        const canvas = chart.canvas || {};
+        const id = canvas.id || "";
+
+        // Solo tocamos los gráficos de esta pantalla
+        if (!/^dimChart/.test(id)) return;
+
+        // Barras y torta
+        chart.data.datasets.forEach((ds) => {
+          const label = (ds.label || "").toString().toUpperCase();
+
+          // Torta de "Proceso por estado" (2 sectores: EMERGENCIA / REGULAR)
+          if (chart.config.type === "pie") {
+            if (
+              chart.data.labels &&
+              chart.data.labels.length === 2 &&
+              !Array.isArray(ds.backgroundColor)
+            ) {
+              ds.backgroundColor = [COLORS.emergency, COLORS.regular];
+            }
+            return; // no seguimos para pie
+          }
+
+          // Barras: timeline + repartición y estado
+          if (label.includes("EMERGENCIA")) {
+            // Timeline: usamos versión soft, barras horizontales: versión fuerte
+            const isHorizontal = chart.options.indexAxis === "y";
+            ds.backgroundColor = isHorizontal
+              ? COLORS.emergency
+              : COLORS.emergencySoft;
+            ds.borderColor = COLORS.emergency;
+          } else if (label.includes("REGULAR")) {
+            const isHorizontal = chart.options.indexAxis === "y";
+            ds.backgroundColor = isHorizontal
+              ? COLORS.regular
+              : COLORS.regularSoft;
+            ds.borderColor = COLORS.regular;
+          }
+        });
+      },
+    });
+  }
+
   let RAW = null;
   let LAST_FILTERED = null;
 
