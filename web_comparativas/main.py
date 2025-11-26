@@ -1941,7 +1941,7 @@ def api_oportunidades_dimensiones(
     # KPIs generales para mostrar arriba en Dimensiones
     kpis = _opp_compute_kpis(df_filtered)
 
-    # columnas candidatas para cada eje
+        # columnas candidatas para cada eje
     buyer_col = _opp_pick(
         df_filtered,
         ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"],
@@ -1954,7 +1954,7 @@ def api_oportunidades_dimensiones(
         df_filtered,
         ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
     )
-        cuenta_col = _opp_pick(
+    cuenta_col = _opp_pick(
         df_filtered,
         ["Cuenta", "N° Cuenta", "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro"],
     )
@@ -1964,9 +1964,17 @@ def api_oportunidades_dimensiones(
     )
     presu_col = _opp_pick(
         df_filtered,
-        ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"],
+        [
+            "Presupuesto oficial",
+            "Presupuesto",
+            "Monto",
+            "Importe Total",
+            "Total Presupuesto",
+            "Monto Total",
+            "Importe",
+        ],
     )
-    # 👉 NUEVO: tipo de proceso / modalidad / procedimiento
+    # 👉 tipo de proceso / modalidad / procedimiento
     tipo_col = _opp_pick(
         df_filtered,
         ["Tipo", "Modalidad", "Procedimiento"],
