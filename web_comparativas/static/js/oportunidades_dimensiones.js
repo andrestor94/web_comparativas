@@ -782,7 +782,7 @@
       kProcesos.textContent = String(F.procesosCount || 0);
     }
 
-    // 1) Apertura de procesos en el tiempo
+        // 1) Apertura de procesos en el tiempo
     if (ctxTimeline) {
       const labels = F.dimFecha.map((d) => d.date || "");
       const emData = F.dimFecha.map((d) => d.emergencia || 0);
@@ -829,6 +829,27 @@
               position: "top",
             },
           },
+          // 👉 Clic en una barra = filtra por EMERGENCIA / REGULAR
+          onClick: function (evt, elements, chart) {
+            if (!swEstado) return;
+            if (!elements.length) return;
+
+            const el = elements[0];
+            const dsIndex = el.datasetIndex; // 0 = EMERGENCIA, 1 = REGULAR
+            let target = "todos";
+
+            if (dsIndex === 0) target = "emergencia";
+            else if (dsIndex === 1) target = "regular";
+
+            const current = getChipGroupValue(swEstado);
+            // Si ya estaba en ese estado, volver a "todos"
+            if (current === target) {
+              target = "todos";
+            }
+
+            setChipGroupValue(swEstado, target);
+            updateUI();
+          },
         }
       );
     }
@@ -854,7 +875,7 @@
       charts.tipo = createOrUpdateTreemap(charts.tipo, ctxTipo, tree);
     }
 
-    // 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
+        // 4) Proceso por repartición y estado (barras apiladas HORIZONTALES)
     if (ctxRepEstado) {
       const src = [...F.dimRepEstado]
         .map((r) => ({
@@ -910,6 +931,26 @@
                 font: { size: 11 },
               },
             },
+          },
+          // 👉 Clic en una barra horizontal = filtra por estado
+          onClick: function (evt, elements, chart) {
+            if (!swEstado) return;
+            if (!elements.length) return;
+
+            const el = elements[0];
+            const dsIndex = el.datasetIndex; // 0 = EMERGENCIA, 1 = REGULAR
+            let target = "todos";
+
+            if (dsIndex === 0) target = "emergencia";
+            else if (dsIndex === 1) target = "regular";
+
+            const current = getChipGroupValue(swEstado);
+            if (current === target) {
+              target = "todos";
+            }
+
+            setChipGroupValue(swEstado, target);
+            updateUI();
           },
         }
       );
