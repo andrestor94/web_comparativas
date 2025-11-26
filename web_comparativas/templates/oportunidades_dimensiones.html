@@ -227,9 +227,10 @@
   }
 
   /* Bloque de gráficos medio: timeline + MAPA */
-  .dim-row-middle{
+    .dim-row-middle{
     display:grid;
-    grid-template-columns:1fr 1.2fr;
+    /* Timeline más ancho (1.4fr) y mapa más angosto (0.9fr) */
+    grid-template-columns:1.4fr 0.9fr;
     gap:12px;
     align-items:stretch;
   }
