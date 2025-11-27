@@ -717,23 +717,58 @@
       });
   }
 
-  function redrawProvinciaChoropleth() {
+    function redrawProvinciaChoropleth() {
     if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
     const dimProv = LAST_FILTERED.dimProv || [];
 
+    // 1) Sumamos procesos por provincia, siendo flexibles con los campos
     const countsByName = new Map();
+
     dimProv.forEach((d) => {
-      const name = normalize(d.label);
-      const prev = countsByName.get(name) || 0;
-      countsByName.set(name, prev + (d.count || 0));
+      if (!d) return;
+
+      // Nombre de provincia (de la dimensión PROVINCIA)
+      const rawName =
+        d.label ||
+        d.provincia ||
+        d.nombre ||
+        d.NOMBRE ||
+        d.name ||
+        "";
+      const key = normalize(rawName);
+      if (!key) return;
+
+      // Cantidad de procesos (usamos count, total o emergencia+regular)
+      const em =
+        typeof d.emergencia === "number"
+          ? d.emergencia
+          : typeof d.EMERGENCIA === "number"
+          ? d.EMERGENCIA
+          : 0;
+      const rg =
+        typeof d.regular === "number"
+          ? d.regular
+          : typeof d.REGULAR === "number"
+          ? d.REGULAR
+          : 0;
+
+      let count = 0;
+      if (typeof d.count === "number") count = d.count;
+      else if (typeof d.total === "number") count = d.total;
+      else count = em + rg;
+
+      const prev = countsByName.get(key) || 0;
+      countsByName.set(key, prev + (count || 0));
     });
 
+    // Si ya había una capa dibujada, la removemos
     if (provGeoLayer) {
       provGeoLayer.remove();
       provGeoLayer = null;
     }
 
+    // 2) Detectamos la provincia con mayor cantidad de procesos
     const entries = Array.from(countsByName.entries());
     let maxKey = null;
     let maxCount = 0;
@@ -744,14 +779,10 @@
       }
     }
 
-    function colorFor(v) {
-      if (maxCount <= 0 || v <= 0) return "#E5EEF5";
-      const t = v / maxCount;
-      if (t > 0.75) return "#2F7AA8";
-      if (t > 0.5) return COLORS.regular;
-      if (t > 0.25) return COLORS.regularSoft;
-      return "#E5EEF5";
-    }
+    // Colores: provincia top = azul oscuro, resto con procesos = azul claro
+    const COLOR_TOP = COLORS.emergency;      // azul oscuro
+    const COLOR_OTHER = COLORS.regularSoft; // azul claro
+    const COLOR_EMPTY = "#E5EEF5";          // sin procesos
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
       style: (feature) => {
@@ -764,13 +795,18 @@
           "";
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
-        const isTop = maxKey && key === maxKey && value > 0;
+        const hasData = value > 0;
+        const isTop = hasData && maxKey && key === maxKey;
 
         return {
           color: "#ffffff",
           weight: 1,
-          fillColor: isTop ? COLORS.emergency : colorFor(value),
-          fillOpacity: value > 0 ? 0.9 : 0.4,
+          fillColor: !hasData
+            ? COLOR_EMPTY
+            : isTop
+            ? COLOR_TOP
+            : COLOR_OTHER,
+          fillOpacity: !hasData ? 0.25 : isTop ? 0.95 : 0.85,
         };
       },
       onEachFeature(feature, layer) {
@@ -783,6 +819,7 @@
           "Sin nombre";
         const key = normalize(rawName);
         const value = countsByName.get(key) || 0;
+
         layer.bindTooltip(
           `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
           {
@@ -794,7 +831,7 @@
     }).addTo(provMap);
 
     const bounds = provGeoLayer.getBounds();
-    if (bounds.isValid()) {
+    if (bounds && bounds.isValid()) {
       provMap.fitBounds(bounds, { padding: [10, 10] });
     }
   }
