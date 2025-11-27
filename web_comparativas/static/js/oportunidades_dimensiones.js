@@ -831,7 +831,7 @@
         const key = normalizeProvinceName(rawName);
         const value = countsByName.get(key) || 0;
         const hasData = value > 0;
-        const isTop = hasData && maxKey && key === maxKey;
+        const isTop = hasData && value === maxCount;
 
         return {
           color: "#ffffff",
