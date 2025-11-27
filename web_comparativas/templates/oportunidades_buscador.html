@@ -4,14 +4,11 @@
 {% block extra_head %}
 <style>
   :root{
-    /* Paleta Suizo (igual que Dimensiones) */
-    --sa-azul: var(--brand-azul, #064066);
-    --sa-azul-alt: var(--brand-azul-alt, #5274ce);
-    --sa-azul-claro: var(--brand-azul-claro, #6886c4);
-    --sa-blanco: #ffffff;
-    --sa-gris-soft: #f3f4f6;
-    --sa-gris-borde: #e5e7eb;
-    --sa-texto: #111827;
+    /* Paleta Dimensiones */
+    --dim-emergency:      #064066;
+    --dim-emergency-soft: #0B527F;
+    --dim-regular:        #6CC4E0;
+    --dim-regular-soft:   #BFE9F6;
   }
 
   .muted{color:#6b7280;font-size:14px}
@@ -26,44 +23,29 @@
     overflow:visible; /* deja salir los desplegables */
   }
 
-  /* Tarjeta de filtros de Buscador, mismo look que Dimensiones */
+  /* Tarjeta grande de filtros, igual concepto que Dimensiones */
   .opp-filters-card{
-    background:#f5f7ff;      /* azul muy suave, como en Dimensiones */
-    border-color:#dbeafe;    /* borde celeste */
+    background:var(--dim-regular-soft,#BFE9F6);  /* azul clarito */
+    border-color:#dbeafe;
   }
 
-  /* Botón principal (mismo azul que Dimensiones) */
   .btn{
-    background:var(--sa-azul-alt,#5274ce);
+    background:var(--sa-azul-btn,#5274ce);
     color:#fff;
     border:0;
     border-radius:10px;
     padding:8px 12px;
     cursor:pointer;
     font-size:14px;
-    font-weight:500;
   }
-  .btn:hover{
-    background:var(--sa-azul,#064066);
-  }
-  .btn:disabled{
-    opacity:.5;
-    cursor:not-allowed;
-  }
-
-  /* Botón tipo enlace (Limpiar / Exportar CSV) */
+  .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn-link{
     background:transparent;
     border:0;
-    color:var(--sa-azul-alt,#5274ce);
+    color:var(--sa-azul-btn,#5274ce);
     cursor:pointer;
     font-size:14px;
   }
-  .btn-link:hover{
-    text-decoration:underline;
-    color:var(--sa-azul,#064066);
-  }
-
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .stack-nowrap{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
 
@@ -71,7 +53,7 @@
   .field input,
   .field select{
     width:100%;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border:1px solid #e5e7eb;
     border-radius:10px;
     padding:3px 8px;
     background:#fff;
@@ -81,8 +63,8 @@
 
   .badges>span{
     display:inline-block;
-    background:var(--sa-gris-soft,#f3f4f6);
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    background:#eef2f7;
+    border:1px solid #e5e7eb;
     padding:4px 8px;
     border-radius:999px;
     font-size:12px;
@@ -122,7 +104,7 @@
     align-items:center;
     gap:16px;
   }
-  .upload-title{font-size:16px;font-weight:600;margin:0;color:var(--sa-texto,#111827)}
+  .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
@@ -161,7 +143,7 @@
 
   /* Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado */
   .filters-row-secondary{
-    grid-column:1 / -1;      /* ocupa todo el ancho de la grilla */
+    grid-column:1 / -1;
     display:flex;
     gap:8px;
     margin-top:4px;
@@ -170,20 +152,19 @@
 
   /* KPI Procesos MÁS ANGOSTO en escritorio */
   .filters-row-secondary .mini-kpi{
-    flex:0 0 190px;   /* ancho fijo reducido */
+    flex:0 0 190px;
     max-width:190px;
   }
-
   .filters-row-secondary > *:not(.mini-kpi){
-    flex:1 1 0;       /* PAMI / Evaluación / Estado ocupan el resto del ancho */
+    flex:1 1 0;
   }
 
-  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (igual look que Dimensiones) */
+  /* RECTÁNGULO DE CADA FILTRO (ahora blancos, como en Dimensiones) */
   .filter-card{
-    background:#f3f6fc;
-    border:1px solid #c7d2fe;
+    background:#ffffff;
+    border:1px solid #dbeafe;
     border-radius:12px;
-    padding:3px 8px;
+    padding:6px 10px;
     min-height:56px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
   }
@@ -191,45 +172,36 @@
     font-size:10px;
     margin:0 0 3px;
     color:#1f2937;
-    text-transform:uppercase;
-    letter-spacing:.04em;
   }
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
-    padding:3px 8px;
+    padding:4px 10px;
     min-height:52px;
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#b4c6fc;
+    border-color:#c7d2fe;
   }
-  .filter-card--compact h5{
-    margin-bottom:2px;
-  }
-
-  .filter-card--compact .field{
-    margin-top:0;
-  }
+  .filter-card--compact h5{margin-bottom:2px;}
+  .filter-card--compact .field{margin-top:0;}
   .filter-card--compact .field select{
     height:26px;
     font-size:12px;
   }
 
-  /* Filtro Fecha compacto */
+  /* Filtro Fecha */
   .filter-card--date{
-    padding:4px 8px;
+    padding:6px 10px;
     display:flex;
     flex-direction:column;
     gap:4px;
   }
-  .filter-card--date .dates-row{
-    margin-bottom:2px;
-  }
+  .filter-card--date .dates-row{margin-bottom:2px;}
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
     min-width:0;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border:1px solid #e5e7eb;
     border-radius:10px;
     padding:3px 8px;
     background:#fff;
@@ -245,11 +217,12 @@
     display:none;
   }
 
+  /* Mini KPI Procesos con azul Dimensiones */
   .mini-kpi{
-    background:#eef2ff;
-    border:1px solid #c7d2fe;
+    background:rgba(188,233,246,0.9);              /* ~ regularSoft */
+    border:1px solid var(--dim-regular,#6CC4E0);
     border-radius:12px;
-    padding:4px 8px;
+    padding:6px 10px;
   }
   .mini-kpi h4{
     margin:0 0 2px;
@@ -261,7 +234,7 @@
   .mini-kpi .v{
     font-weight:800;
     font-size:20px;
-    color:var(--sa-azul,#064066);
+    color:var(--dim-emergency,#064066);
   }
 
   /* Buscador: ocupa toda la fila de la grilla */
@@ -279,10 +252,9 @@
     width:100%;
     height:40px;
     padding:10px 38px 10px 34px;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border:1px solid #e5e7eb;
     border-radius:12px;
     font-size:14px;
-    background:#fff;
   }
   .searchbox .ico{
     position:absolute;
@@ -303,7 +275,7 @@
     font-size:14px;
   }
 
-  /* Slider doble compacto */
+  /* Slider doble compacto (misma gama azul que Dimensiones) */
   .range-wrap{position:relative;height:20px}
   .range-wrap input[type=range]{
     position:absolute;
@@ -319,7 +291,7 @@
     -webkit-appearance:none;
     height:14px;width:14px;
     border-radius:50%;
-    background:var(--sa-azul-alt,#5274ce);
+    background:var(--dim-emergency,#064066);
     border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.08);
   }
@@ -328,21 +300,21 @@
     height:14px;width:14px;
     border:0;
     border-radius:50%;
-    background:var(--sa-azul-alt,#5274ce);
+    background:var(--dim-emergency,#064066);
   }
   .range-track{
     position:absolute;
     left:0;right:0;
     top:8px;
     height:3px;
-    background:#e5e7eb;
+    background:#e0f2fe;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
     top:8px;
     height:3px;
-    background:#c7d2fe;
+    background:var(--dim-regular,#6CC4E0);
     border-radius:999px;
   }
 
@@ -356,18 +328,23 @@
     font-size:12px;
     cursor:pointer;
     transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease;
-    color:#374151;
   }
   .chip:hover{
     border-color:#94a3ff;
     box-shadow:0 0 0 1px rgba(82,116,206,.16);
   }
-  .chip.is-on,
-  .chip.active{
-    background:var(--sa-azul-alt,#5274ce);
-    border-color:var(--sa-azul-alt,#5274ce);
-    color:#fff;
-    box-shadow:0 0 0 1px rgba(82,116,206,.28);
+  /* Chip activo – azul oscuro Suizo, como en Dimensiones */
+  .chip.is-on{
+    background:var(--dim-emergency,#064066);
+    border-color:var(--dim-emergency,#064066);
+    color:#ffffff;
+    box-shadow:0 0 0 1px rgba(6,64,102,.25);
+  }
+  /* En ESTADO, cuando está seleccionado REGULAR usamos el celeste Dimensiones */
+  #swEstado .chip[data-val="regular"].is-on{
+    background:var(--dim-regular,#6CC4E0);
+    border-color:var(--dim-regular,#6CC4E0);
+    color:#064066;
   }
 
   /* === NUEVOS ESTILOS PARA DECISIÓN === */
@@ -392,22 +369,22 @@
     white-space:nowrap;
   }
   .decision-pill.is-accepted{
-    background:#dcfce7;       /* verde pastel claro */
+    background:#dcfce7;
     border-color:#bbf7d0;
     color:#166534;
   }
   .decision-pill.is-rejected{
-    background:#fee2e2;       /* rojo pastel claro */
+    background:#fee2e2;
     border-color:#fecaca;
     color:#991b1b;
   }
 
   /* Colores de fila según decisión */
   tr.row-decision-accepted{
-    background:#dcfce7;       /* verde pastel */
+    background:#dcfce7;
   }
   tr.row-decision-rejected{
-    background:#fee2e2;       /* rojo pastel */
+    background:#fee2e2;
   }
 
   /* Tabla */
@@ -490,7 +467,7 @@
   }
   .pill{
     display:inline-block;
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border:1px solid #e5e7eb;
     background:#f8fafc;
     border-radius:999px;
     padding:3px 8px;
@@ -498,7 +475,7 @@
   }
 
   .page-size-select{
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    border:1px solid #e5e7eb;
     background:#f8fafc;
     border-radius:999px;
     padding:2px 6px;
