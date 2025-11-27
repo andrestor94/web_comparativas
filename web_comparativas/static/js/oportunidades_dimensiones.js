@@ -821,11 +821,14 @@
     maxCount
   );
 
-  const COLOR_EMPTY = "#E5EEF5";         // sin procesos
-  const COLOR_TOP_FILL = COLORS.emergency;   // azul oscuro
-  const COLOR_TOP_BORDER = COLORS.emergency; // borde azul oscuro
+  const COLOR_EMPTY = "#E5EEF5";              // sin procesos
+  const COLOR_TOP_FILL = COLORS.emergency;    // azul oscuro
+  const COLOR_TOP_BORDER = COLORS.emergency;  // borde azul oscuro
   const COLOR_OTHER_FILL = COLORS.regularSoft; // azul claro
   const COLOR_OTHER_BORDER = COLORS.regular;   // borde celeste
+
+  // Bounds SOLO de las provincias con datos
+  let dataBounds = null;
 
   provGeoLayer = L.geoJSON(PROV_GEOJSON, {
     style: (feature) => {
@@ -863,7 +866,7 @@
           weight: 3,
           fill: true,
           fillColor: COLOR_TOP_FILL,
-          fillOpacity: 1,   // opaco total
+          fillOpacity: 1,
         };
       }
 
@@ -901,16 +904,33 @@
         }
       );
 
-      // Aseguramos que la provincia top quede por encima de las demás
+      // Acumulamos bounds SOLO de provincias con datos
+      if (value > 0) {
+        const b = layer.getBounds && layer.getBounds();
+        if (b && b.isValid && b.isValid()) {
+          if (!dataBounds) dataBounds = b;
+          else dataBounds.extend(b);
+        }
+      }
+
+      // La provincia top arriba de todo
       if (isTop && layer.bringToFront) {
         layer.bringToFront();
       }
     },
   }).addTo(provMap);
 
-  const bounds = provGeoLayer.getBounds();
-  if (bounds && bounds.isValid()) {
-    provMap.fitBounds(bounds, { padding: [10, 10] });
+  // 3) Zoom a donde hay procesos (si existe), si no al mapa completo
+  if (dataBounds && dataBounds.isValid && dataBounds.isValid()) {
+    provMap.fitBounds(dataBounds, {
+      padding: [15, 15],
+      maxZoom: 6,
+    });
+  } else {
+    const bounds = provGeoLayer.getBounds();
+    if (bounds && bounds.isValid()) {
+      provMap.fitBounds(bounds, { padding: [10, 10] });
+    }
   }
 }
 
