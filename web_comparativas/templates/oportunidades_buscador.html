@@ -3,30 +3,17 @@
 
 {% block extra_head %}
 <style>
-  :root{
-    /* Paleta Dimensiones */
-    --dim-emergency:      #064066;
-    --dim-emergency-soft: #0B527F;
-    --dim-regular:        #6CC4E0;
-    --dim-regular-soft:   #BFE9F6;
-  }
-
   .muted{color:#6b7280;font-size:14px}
   .muted.small{font-size:13px}
 
+  /* Card principal: SIEMPRE fondo blanco */
   .card{
-    background:var(--sa-blanco,#fff);
-    border:1px solid var(--sa-gris-borde,#e5e7eb);
+    background:#ffffff; /* fuerza blanco como en Dimensiones */
+    border:1px solid #c7d2fe;
     border-radius:14px;
     padding:16px 18px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
     overflow:visible; /* deja salir los desplegables */
-  }
-
-  /* Tarjeta grande de filtros, igual concepto que Dimensiones */
-  .opp-filters-card{
-    background:var(--dim-regular-soft,#BFE9F6);  /* azul clarito */
-    border-color:#dbeafe;
   }
 
   .btn{
@@ -132,7 +119,12 @@
     display:flex;
     flex-direction:column;
     gap:8px;
+    background:#eaf2ff;              /* mismo panel azul suave que Dimensiones */
+    border-radius:14px;
+    padding:12px 14px 14px;
+    border:1px solid #c7d2fe;
   }
+
   .filters-grid{
     display:grid;
     grid-template-columns:1.2fr repeat(4,minmax(0,1fr));
@@ -143,7 +135,7 @@
 
   /* Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado */
   .filters-row-secondary{
-    grid-column:1 / -1;
+    grid-column:1 / -1;      /* ocupa todo el ancho de la grilla */
     display:flex;
     gap:8px;
     margin-top:4px;
@@ -152,19 +144,20 @@
 
   /* KPI Procesos MÁS ANGOSTO en escritorio */
   .filters-row-secondary .mini-kpi{
-    flex:0 0 190px;
+    flex:0 0 190px;   /* ancho fijo reducido */
     max-width:190px;
   }
+
   .filters-row-secondary > *:not(.mini-kpi){
-    flex:1 1 0;
+    flex:1 1 0;       /* PAMI / Evaluación / Estado ocupan el resto del ancho */
   }
 
-  /* RECTÁNGULO DE CADA FILTRO (ahora blancos, como en Dimensiones) */
+  /* RECTÁNGULO BASE DE TODOS LOS FILTROS: igual estilo Dimensiones */
   .filter-card{
-    background:#ffffff;
-    border:1px solid #dbeafe;
+    background:#f9fbff;           /* tarjetas claras como en Dimensiones */
+    border:1px solid #d4e2ff;
     border-radius:12px;
-    padding:6px 10px;
+    padding:3px 8px;
     min-height:56px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
   }
@@ -176,28 +169,37 @@
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
   .filter-card--compact{
-    padding:4px 10px;
+    padding:3px 8px;
     min-height:52px;
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#c7d2fe;
+    border-color:#b4c6fc;
+    background:#ffffff;           /* como los combos de Dimensiones */
   }
-  .filter-card--compact h5{margin-bottom:2px;}
-  .filter-card--compact .field{margin-top:0;}
+  .filter-card--compact h5{
+    margin-bottom:2px;
+  }
+
+  .filter-card--compact .field{
+    margin-top:0;
+  }
   .filter-card--compact .field select{
     height:26px;
     font-size:12px;
   }
 
-  /* Filtro Fecha */
+  /* Filtro Fecha compacto */
   .filter-card--date{
-    padding:6px 10px;
+    padding:4px 8px;
     display:flex;
     flex-direction:column;
     gap:4px;
+    background:#f9fbff;
   }
-  .filter-card--date .dates-row{margin-bottom:2px;}
+  .filter-card--date .dates-row{
+    margin-bottom:2px;
+  }
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
     min-width:0;
@@ -217,12 +219,11 @@
     display:none;
   }
 
-  /* Mini KPI Procesos con azul Dimensiones */
   .mini-kpi{
-    background:rgba(188,233,246,0.9);              /* ~ regularSoft */
-    border:1px solid var(--dim-regular,#6CC4E0);
+    background:#eef2ff;
+    border:1px solid #c7d2fe;
     border-radius:12px;
-    padding:6px 10px;
+    padding:4px 8px;
   }
   .mini-kpi h4{
     margin:0 0 2px;
@@ -234,7 +235,7 @@
   .mini-kpi .v{
     font-weight:800;
     font-size:20px;
-    color:var(--dim-emergency,#064066);
+    color:var(--sa-text,#064066);
   }
 
   /* Buscador: ocupa toda la fila de la grilla */
@@ -244,6 +245,9 @@
     gap:10px;
     align-items:center;
     width:100%;
+    background:#f9fbff;
+    border-radius:12px;
+    border:1px solid #d4e2ff;
   }
 
   /* Barra de búsqueda */
@@ -255,6 +259,7 @@
     border:1px solid #e5e7eb;
     border-radius:12px;
     font-size:14px;
+    background:#ffffff;
   }
   .searchbox .ico{
     position:absolute;
@@ -275,7 +280,7 @@
     font-size:14px;
   }
 
-  /* Slider doble compacto (misma gama azul que Dimensiones) */
+  /* Slider doble compacto */
   .range-wrap{position:relative;height:20px}
   .range-wrap input[type=range]{
     position:absolute;
@@ -291,7 +296,7 @@
     -webkit-appearance:none;
     height:14px;width:14px;
     border-radius:50%;
-    background:var(--dim-emergency,#064066);
+    background:var(--sa-azul-btn,#5274ce);
     border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.08);
   }
@@ -300,21 +305,21 @@
     height:14px;width:14px;
     border:0;
     border-radius:50%;
-    background:var(--dim-emergency,#064066);
+    background:var(--sa-azul-btn,#5274ce);
   }
   .range-track{
     position:absolute;
     left:0;right:0;
     top:8px;
     height:3px;
-    background:#e0f2fe;
+    background:#e5e7eb;
     border-radius:999px;
   }
   .range-fill{
     position:absolute;
     top:8px;
     height:3px;
-    background:var(--dim-regular,#6CC4E0);
+    background:#c7d2fe;
     border-radius:999px;
   }
 
@@ -327,24 +332,17 @@
     padding:6px 10px;
     font-size:12px;
     cursor:pointer;
-    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease;
+    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
   }
   .chip:hover{
     border-color:#94a3ff;
     box-shadow:0 0 0 1px rgba(82,116,206,.16);
   }
-  /* Chip activo – azul oscuro Suizo, como en Dimensiones */
   .chip.is-on{
-    background:var(--dim-emergency,#064066);
-    border-color:var(--dim-emergency,#064066);
-    color:#ffffff;
-    box-shadow:0 0 0 1px rgba(6,64,102,.25);
-  }
-  /* En ESTADO, cuando está seleccionado REGULAR usamos el celeste Dimensiones */
-  #swEstado .chip[data-val="regular"].is-on{
-    background:var(--dim-regular,#6CC4E0);
-    border-color:var(--dim-regular,#6CC4E0);
-    color:#064066;
+    background:#dbeafe;
+    border-color:#5274ce; /* azul botón */
+    color:#1f3a8a;
+    box-shadow:0 0 0 1px rgba(82,116,206,.28);
   }
 
   /* === NUEVOS ESTILOS PARA DECISIÓN === */
@@ -369,22 +367,22 @@
     white-space:nowrap;
   }
   .decision-pill.is-accepted{
-    background:#dcfce7;
+    background:#dcfce7;       /* verde pastel claro */
     border-color:#bbf7d0;
     color:#166534;
   }
   .decision-pill.is-rejected{
-    background:#fee2e2;
+    background:#fee2e2;       /* rojo pastel claro */
     border-color:#fecaca;
     color:#991b1b;
   }
 
   /* Colores de fila según decisión */
   tr.row-decision-accepted{
-    background:#dcfce7;
+    background:#dcfce7;       /* verde pastel */
   }
   tr.row-decision-rejected{
-    background:#fee2e2;
+    background:#fee2e2;       /* rojo pastel */
   }
 
   /* Tabla */
@@ -393,6 +391,7 @@
     max-height:55vh;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
+    background:#ffffff; /* tabla sobre blanco */
   }
   table.table{
     width:100%;
@@ -464,6 +463,7 @@
     margin-top:10px;
     gap:12px;
     flex-wrap:wrap;
+    background:#ffffff; /* igual que Dimensiones */
   }
   .pill{
     display:inline-block;
@@ -593,7 +593,7 @@
   {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
-  <div class="card opp-filters-card">
+  <div class="card" style="border-color:#c7d2fe;">
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
@@ -876,7 +876,6 @@
 
 <!-- Config inicial para el JS -->
 <script>
-  window.OPP = window.OPP || {};
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
     initialDateFrom: null,
