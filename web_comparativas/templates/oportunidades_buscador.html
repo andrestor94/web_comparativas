@@ -6,33 +6,56 @@
   .muted{color:#6b7280;font-size:14px}
   .muted.small{font-size:13px}
 
-  /* Card principal: SIEMPRE fondo blanco */
+  /* === PALETA COMPARTIDA CON DIMENSIONES (tomada de oportunidades_dimensiones.js) === */
+  :root{
+    --dim-emergency:      #064066;  /* COLORS.emergency */
+    --dim-emergency-soft: #0B527F;  /* COLORS.emergencySoft */
+    --dim-regular:        #6CC4E0;  /* COLORS.regular */
+    --dim-regular-soft:   #BFE9F6;  /* COLORS.regularSoft */
+    --dim-treemap-dark1:  #064066;  /* COLORS.treemapDark1 */
+    --dim-treemap-dark2:  #1E5A8A;  /* COLORS.treemapDark2 */
+    --dim-treemap-dark3:  #3F7FB0;  /* COLORS.treemapDark3 */
+    --dim-treemap-base:   #8CC5EA;  /* COLORS.treemapBase */
+
+    /* botón azul que ya usas en todo el sitio */
+    --sa-azul-btn:        #5274ce;
+  }
+
+  /* Card principal: fondo blanco (igual que Dimensiones) */
   .card{
-    background:#ffffff; /* fuerza blanco como en Dimensiones */
-    border:1px solid #c7d2fe;
+    background:#ffffff;
+    border:1px solid #d4e2ff;
     border-radius:14px;
     padding:16px 18px;
     box-shadow:0 1px 2px rgba(15,23,42,.04);
-    overflow:visible; /* deja salir los desplegables */
+    overflow:visible;
   }
 
+  /* Botón principal: mismo azul que en Dimensiones (azul botón / emergenciaSoft) */
   .btn{
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--dim-emergency-soft);
     color:#fff;
     border:0;
     border-radius:10px;
     padding:8px 12px;
     cursor:pointer;
     font-size:14px;
+    box-shadow:0 1px 2px rgba(15,23,42,.18);
+  }
+  .btn:hover{
+    filter:brightness(0.97);
   }
   .btn:disabled{opacity:.5;cursor:not-allowed}
+
   .btn-link{
     background:transparent;
     border:0;
-    color:var(--sa-azul-btn,#5274ce);
+    color:var(--sa-azul-btn);
     cursor:pointer;
     font-size:14px;
   }
+  .btn-link:hover{text-decoration:underline;}
+
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .stack-nowrap{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
 
@@ -114,15 +137,19 @@
     gap:10px;
   }
 
-  /* Barra superior: filtros + KPI */
+  /* ============================
+     PANEL SUPERIOR DE FILTROS
+     ============================ */
+
+  /* Banda celeste igual en ambos dashboards (Dimensiones + Buscador) */
   .topbar{
     display:flex;
     flex-direction:column;
     gap:8px;
-    background:#eaf2ff;              /* mismo panel azul suave que Dimensiones */
+    background:var(--dim-regular-soft);          /* COLORS.regularSoft */
     border-radius:14px;
     padding:12px 14px 14px;
-    border:1px solid #c7d2fe;
+    border:1px solid var(--dim-treemap-base);    /* COLORS.treemapBase */
   }
 
   .filters-grid{
@@ -135,27 +162,27 @@
 
   /* Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado */
   .filters-row-secondary{
-    grid-column:1 / -1;      /* ocupa todo el ancho de la grilla */
+    grid-column:1 / -1;
     display:flex;
     gap:8px;
     margin-top:4px;
     align-items:stretch;
   }
 
-  /* KPI Procesos MÁS ANGOSTO en escritorio */
+  /* KPI Procesos más angosto en escritorio */
   .filters-row-secondary .mini-kpi{
-    flex:0 0 190px;   /* ancho fijo reducido */
+    flex:0 0 190px;
     max-width:190px;
   }
 
   .filters-row-secondary > *:not(.mini-kpi){
-    flex:1 1 0;       /* PAMI / Evaluación / Estado ocupan el resto del ancho */
+    flex:1 1 0;
   }
 
-  /* RECTÁNGULO BASE DE TODOS LOS FILTROS: igual estilo Dimensiones */
+  /* Tarjetas de filtros: mismo estilo que Dimensiones */
   .filter-card{
-    background:#f9fbff;           /* tarjetas claras como en Dimensiones */
-    border:1px solid #d4e2ff;
+    background:#ffffff;                          /* tarjetas blancas sobre banda celeste */
+    border:1px solid var(--dim-treemap-base);    /* azul treemap */
     border-radius:12px;
     padding:3px 8px;
     min-height:56px;
@@ -167,39 +194,34 @@
     color:#1f2937;
   }
 
-  /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
+  /* Versión compacta para combos (Plataforma / Operador / Cuenta / Repartición) */
   .filter-card--compact{
     padding:3px 8px;
     min-height:52px;
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#b4c6fc;
-    background:#ffffff;           /* como los combos de Dimensiones */
+    border-color:var(--dim-treemap-base);
+    background:#ffffff;
   }
   .filter-card--compact h5{
     margin-bottom:2px;
   }
-
-  .filter-card--compact .field{
-    margin-top:0;
-  }
+  .filter-card--compact .field{margin-top:0;}
   .filter-card--compact .field select{
     height:26px;
     font-size:12px;
   }
 
-  /* Filtro Fecha compacto */
+  /* Filtro Fecha */
   .filter-card--date{
     padding:4px 8px;
     display:flex;
     flex-direction:column;
     gap:4px;
-    background:#f9fbff;
+    background:#ffffff;
   }
-  .filter-card--date .dates-row{
-    margin-bottom:2px;
-  }
+  .filter-card--date .dates-row{margin-bottom:2px;}
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
     min-width:0;
@@ -214,14 +236,13 @@
     font-size:11px;
     padding:2px 8px;
   }
-  /* Ocultar etiquetas inferiores de rango de fecha (repetitivas) */
-  .filter-card--date .dates-labels{
-    display:none;
-  }
+  /* en Dimensiones esas etiquetas no se ven: las ocultamos */
+  .filter-card--date .dates-labels{display:none;}
 
+  /* KPI Procesos: mismos tonos que Dimensiones */
   .mini-kpi{
-    background:#eef2ff;
-    border:1px solid #c7d2fe;
+    background:var(--dim-regular-soft);
+    border:1px solid var(--dim-treemap-base);
     border-radius:12px;
     padding:4px 8px;
   }
@@ -230,24 +251,24 @@
     font-size:11px;
     text-transform:uppercase;
     letter-spacing:.04em;
-    color:#4b5563;
+    color:#1f2937;
   }
   .mini-kpi .v{
     font-weight:800;
     font-size:20px;
-    color:var(--sa-text,#064066);
+    color:var(--dim-emergency);
   }
 
-  /* Buscador: ocupa toda la fila de la grilla */
+  /* Tarjeta de búsqueda + botones (igual estilo de tarjetas) */
   .search-card{
     display:grid;
     grid-template-columns:minmax(0,4fr) auto;
     gap:10px;
     align-items:center;
     width:100%;
-    background:#f9fbff;
+    background:#ffffff;
     border-radius:12px;
-    border:1px solid #d4e2ff;
+    border:1px solid var(--dim-treemap-base);
   }
 
   /* Barra de búsqueda */
@@ -280,7 +301,7 @@
     font-size:14px;
   }
 
-  /* Slider doble compacto */
+  /* Slider doble: usamos azul de la paleta para el fill */
   .range-wrap{position:relative;height:20px}
   .range-wrap input[type=range]{
     position:absolute;
@@ -296,7 +317,7 @@
     -webkit-appearance:none;
     height:14px;width:14px;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--dim-emergency-soft);
     border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.08);
   }
@@ -305,7 +326,7 @@
     height:14px;width:14px;
     border:0;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--dim-emergency-soft);
   }
   .range-track{
     position:absolute;
@@ -319,38 +340,48 @@
     position:absolute;
     top:8px;
     height:3px;
-    background:#c7d2fe;
+    background:var(--dim-treemap-base);  /* COLORS.treemapBase */
     border-radius:999px;
   }
 
-  /* Chips */
+  /* ============================
+     Chips (Todos / PAMI / Otras / Estado / Evaluación)
+     ============================ */
   .chips{display:flex;gap:6px;flex-wrap:wrap}
+
   .chip{
-    border:1px solid #cbd5f5;
-    background:#ffffff;
+    border:1px solid #d1d5db;
+    background:#f9fafb;
     border-radius:999px;
     padding:6px 10px;
     font-size:12px;
     cursor:pointer;
-    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
+    transition:
+      background .15s ease,
+      border-color .15s ease,
+      box-shadow .15s ease,
+      color .15s ease;
   }
   .chip:hover{
-    border-color:#94a3ff;
-    box-shadow:0 0 0 1px rgba(82,116,206,.16);
+    border-color:var(--sa-azul-btn);
+    box-shadow:0 0 0 1px rgba(82,116,206,.18);
   }
   .chip.is-on{
-    background:#dbeafe;
-    border-color:#5274ce; /* azul botón */
-    color:#1f3a8a;
-    box-shadow:0 0 0 1px rgba(82,116,206,.28);
+    background:var(--sa-azul-btn);  /* mismo azul de chips en Dimensiones */
+    border-color:var(--sa-azul-btn);
+    color:#ffffff;
+    box-shadow:0 0 0 1px rgba(82,116,206,.32);
   }
 
-  /* === NUEVOS ESTILOS PARA DECISIÓN === */
+  /* grupo de evaluación (mismas chips) */
   .decision-filter-group .chip{
     padding:5px 10px;
     font-size:12px;
   }
 
+  /* ============================
+     Píldoras de decisión en la tabla
+     ============================ */
   .decision-cell{
     display:flex;
     justify-content:center;
@@ -367,31 +398,33 @@
     white-space:nowrap;
   }
   .decision-pill.is-accepted{
-    background:#dcfce7;       /* verde pastel claro */
+    background:#dcfce7;
     border-color:#bbf7d0;
     color:#166534;
   }
   .decision-pill.is-rejected{
-    background:#fee2e2;       /* rojo pastel claro */
+    background:#fee2e2;
     border-color:#fecaca;
     color:#991b1b;
   }
 
   /* Colores de fila según decisión */
   tr.row-decision-accepted{
-    background:#dcfce7;       /* verde pastel */
+    background:#dcfce7;
   }
   tr.row-decision-rejected{
-    background:#fee2e2;       /* rojo pastel */
+    background:#fee2e2;
   }
 
-  /* Tabla */
+  /* ============================
+     Tabla
+     ============================ */
   .table-wrap{
     overflow:auto;
     max-height:55vh;
     border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
-    background:#ffffff; /* tabla sobre blanco */
+    background:#ffffff;
   }
   table.table{
     width:100%;
@@ -431,14 +464,12 @@
     width:12ch;
     white-space:nowrap;
   }
-  /* Columna 6 = Decisión (más ancha) */
   .table th:nth-child(6),
   .table td:nth-child(6){
     width:18ch;
     white-space:nowrap;
     text-align:center;
   }
-  /* Columna 7 = Enlace de pliego */
   .table th:nth-child(7), .table td:nth-child(7){
     width:10ch;
     white-space:nowrap;
@@ -455,7 +486,9 @@
   .link-ico{text-decoration:none}
   .link-ico:hover{text-decoration:underline}
 
-  /* Paginación */
+  /* ============================
+     Paginación
+     ============================ */
   .pager{
     display:flex;
     justify-content:space-between;
@@ -463,7 +496,7 @@
     margin-top:10px;
     gap:12px;
     flex-wrap:wrap;
-    background:#ffffff; /* igual que Dimensiones */
+    background:#ffffff;
   }
   .pill{
     display:inline-block;
@@ -512,7 +545,6 @@
     .filters-row-secondary > *{
       flex:1 1 50%;
     }
-    /* En pantallas chicas, Procesos se comporta como los demás */
     .filters-row-secondary .mini-kpi{
       flex:1 1 50%;
       max-width:none;
@@ -593,14 +625,13 @@
   {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
-  <div class="card" style="border-color:#c7d2fe;">
+  <div class="card" style="border-color:#d4e2ff;">
     <div class="topbar mb-3">
       <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
         <!-- Fecha -->
         <div class="filter-card filter-card--date" aria-labelledby="lblFecha">
           <h5 id="lblFecha">Fecha</h5>
 
-          <!-- DOS CAMPOS DE FECHA EN LA MISMA FILA -->
           <div class="stack-nowrap dates-row">
             <input id="fDateFrom" type="date" aria-label="Fecha desde">
             <input id="fDateTo" type="date" aria-label="Fecha hasta">
@@ -613,7 +644,6 @@
             <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
           </div>
 
-          <!-- Etiquetas del rango (siempre en línea) -->
           <div class="stack-nowrap dates-labels" style="justify-content:space-between;margin-top:2px">
             <span class="pill" id="lblFrom">—</span>
             <span class="pill" id="lblTo">—</span>
@@ -660,7 +690,7 @@
           </div>
         </div>
 
-        <!-- Fila secundaria: Procesos + PAMI/Otras + Evaluación + Estado -->
+        <!-- Fila secundaria -->
         <div class="filters-row-secondary">
           <!-- KPI Procesos -->
           <div class="mini-kpi" role="status" aria-live="polite"
@@ -701,7 +731,7 @@
           </div>
         </div>
 
-        <!-- Buscar: AHORA DENTRO DE LA GRILLA, OCUPANDO TODAS LAS COLUMNAS -->
+        <!-- Buscar + acciones -->
         <div class="filter-card search-card" style="margin-top:6px; grid-column:1 / -1;">
           <div class="searchbox">
             <span class="ico" aria-hidden="true">🔎</span>
@@ -811,7 +841,7 @@
             <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
             <td title="{{ tipo }}">{{ tipo }}</td>
 
-            <!-- NUEVA COLUMNA: DECISIÓN -->
+            <!-- Columna DECISIÓN -->
             <td class="opp-decision" data-decision-cell>
               <div class="decision-cell">
                 <button type="button"
@@ -897,7 +927,7 @@
       reparticion: 'fReparticion',
       swPAMI: 'swPAMI',
       swEstado: 'swEstado',
-      swDecision: 'swDecision',      // NUEVO filtro decisión
+      swDecision: 'swDecision',
       dateFrom: 'fDateFrom',
       dateTo: 'fDateTo',
       rMin: 'fRangeMin',
