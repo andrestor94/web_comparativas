@@ -753,155 +753,166 @@
   }
 
   function redrawProvinciaChoropleth() {
-    if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
+  if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
-    const dimProv = LAST_FILTERED.dimProv || [];
+  const dimProv = LAST_FILTERED.dimProv || [];
 
-    // 1) Sumamos procesos por provincia, siendo flexibles con los campos
-    const countsByName = new Map();
+  // 1) Sumamos procesos por provincia, siendo flexibles con los campos
+  const countsByName = new Map();
 
-    dimProv.forEach((d) => {
-      if (!d) return;
+  dimProv.forEach((d) => {
+    if (!d) return;
 
-      // Nombre de provincia (de la dimensión PROVINCIA)
-      const rawName =
-        d.label ||
-        d.provincia ||
-        d.nombre ||
-        d.NOMBRE ||
-        d.name ||
-        "";
-      const key = normalizeProvinceName(rawName);
-      if (!key) return;
+    const rawName =
+      d.label ||
+      d.provincia ||
+      d.nombre ||
+      d.NOMBRE ||
+      d.name ||
+      "";
+    const key = normalizeProvinceName(rawName);
+    if (!key) return;
 
-      // Cantidad de procesos (usamos count, total o emergencia+regular)
-      const em =
-        typeof d.emergencia === "number"
-          ? d.emergencia
-          : typeof d.EMERGENCIA === "number"
-          ? d.EMERGENCIA
-          : 0;
-      const rg =
-        typeof d.regular === "number"
-          ? d.regular
-          : typeof d.REGULAR === "number"
-          ? d.REGULAR
-          : 0;
+    const em =
+      typeof d.emergencia === "number"
+        ? d.emergencia
+        : typeof d.EMERGENCIA === "number"
+        ? d.EMERGENCIA
+        : 0;
+    const rg =
+      typeof d.regular === "number"
+        ? d.regular
+        : typeof d.REGULAR === "number"
+        ? d.REGULAR
+        : 0;
 
-      let count = 0;
-      if (typeof d.count === "number") count = d.count;
-      else if (typeof d.total === "number") count = d.total;
-      else count = em + rg;
+    let count = 0;
+    if (typeof d.count === "number") count = d.count;
+    else if (typeof d.total === "number") count = d.total;
+    else count = em + rg;
 
-      const prev = countsByName.get(key) || 0;
-      countsByName.set(key, prev + (count || 0));
-    });
+    const prev = countsByName.get(key) || 0;
+    countsByName.set(key, prev + (count || 0));
+  });
 
-    // Si ya había una capa dibujada, la removemos
-    if (provGeoLayer) {
-      provGeoLayer.remove();
-      provGeoLayer = null;
-    }
+  // Si ya había una capa dibujada, la removemos
+  if (provGeoLayer) {
+    provGeoLayer.remove();
+    provGeoLayer = null;
+  }
 
-    // 2) Detectamos la provincia con mayor cantidad de procesos
-    const entries = Array.from(countsByName.entries());
-    let maxKey = null;
-    let maxCount = 0;
-    for (const [k, v] of entries) {
-      if (v > maxCount) {
-        maxCount = v;
-        maxKey = k;
-      }
-    }
-
-    console.log(
-      "[Dimensiones][Mapa] countsByName",
-      Object.fromEntries(countsByName),
-      "maxKey:",
-      maxKey,
-      "maxCount:",
-      maxCount
-    );
-
-    // Colores base
-    const COLOR_EMPTY = "#E5EEF5"; // sin procesos
-    const COLOR_TOP_FILL = COLORS.emergency; // azul oscuro
-    const COLOR_TOP_BORDER = COLORS.emergency;
-    const COLOR_OTHER_FILL = COLORS.regularSoft; // azul claro
-    const COLOR_OTHER_BORDER = COLORS.regular;
-
-    provGeoLayer = L.geoJSON(PROV_GEOJSON, {
-      style: (feature) => {
-        const props = feature.properties || {};
-        const rawName =
-          props.provincia ||
-          props.nombre ||
-          props.NOMBRE ||
-          props.name ||
-          "";
-        const key = normalizeProvinceName(rawName);
-        const value = countsByName.get(key) || 0;
-        const hasData = value > 0;
-
-        // Provincia top = la que tiene el valor máximo
-        const isTop =
-          hasData &&
-          (value === maxCount || (maxKey && key === maxKey));
-
-        if (!hasData) {
-          // Provincias sin procesos: muy claritas
-          return {
-            color: "#d1d5db",
-            weight: 1,
-            fillColor: COLOR_EMPTY,
-            fillOpacity: 0.25,
-          };
-        }
-
-        if (isTop) {
-          // PROVINCIA CON MÁS PROCESOS → AZUL OSCURO BIEN MARCADO
-          return {
-            color: COLOR_TOP_BORDER, // borde azul oscuro
-            weight: 3,
-            fillColor: COLOR_TOP_FILL, // relleno azul oscuro
-            fillOpacity: 0.95,
-          };
-        }
-
-        // Resto de provincias con procesos → azul claro
-        return {
-          color: COLOR_OTHER_BORDER, // borde celeste
-          weight: 1.5,
-          fillColor: COLOR_OTHER_FILL, // relleno celeste claro
-          fillOpacity: 0.85,
-        };
-      },
-      onEachFeature(feature, layer) {
-        const props = feature.properties || {};
-        const rawName =
-          props.provincia ||
-          props.nombre ||
-          props.NOMBRE ||
-          props.name ||
-          "Sin nombre";
-        const key = normalizeProvinceName(rawName);
-        const value = countsByName.get(key) || 0;
-
-        layer.bindTooltip(
-          `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
-          {
-            direction: "top",
-            sticky: true,
-          }
-        );
-      },
-    }).addTo(provMap);
-
-    const bounds = provGeoLayer.getBounds();
-    if (bounds && bounds.isValid()) {
-      provMap.fitBounds(bounds, { padding: [10, 10] });
+  // 2) Detectamos la provincia con mayor cantidad de procesos
+  const entries = Array.from(countsByName.entries());
+  let maxKey = null;
+  let maxCount = 0;
+  for (const [k, v] of entries) {
+    if (v > maxCount) {
+      maxCount = v;
+      maxKey = k;
     }
   }
+
+  console.log(
+    "[Dimensiones][Mapa] countsByName",
+    Object.fromEntries(countsByName),
+    "maxKey:",
+    maxKey,
+    "maxCount:",
+    maxCount
+  );
+
+  const COLOR_EMPTY = "#E5EEF5";         // sin procesos
+  const COLOR_TOP_FILL = COLORS.emergency;   // azul oscuro
+  const COLOR_TOP_BORDER = COLORS.emergency; // borde azul oscuro
+  const COLOR_OTHER_FILL = COLORS.regularSoft; // azul claro
+  const COLOR_OTHER_BORDER = COLORS.regular;   // borde celeste
+
+  provGeoLayer = L.geoJSON(PROV_GEOJSON, {
+    style: (feature) => {
+      const props = feature.properties || {};
+      const rawName =
+        props.provincia ||
+        props.nombre ||
+        props.NOMBRE ||
+        props.name ||
+        "";
+      const key = normalizeProvinceName(rawName);
+      const value = countsByName.get(key) || 0;
+      const hasData = value > 0;
+
+      const isTop =
+        hasData &&
+        maxCount > 0 &&
+        (value === maxCount || (maxKey && key === maxKey));
+
+      if (!hasData) {
+        // Provincias sin procesos: muy claras
+        return {
+          color: "#d1d5db",
+          weight: 1,
+          fill: true,
+          fillColor: COLOR_EMPTY,
+          fillOpacity: 0.25,
+        };
+      }
+
+      if (isTop) {
+        // PROVINCIA CON MÁS PROCESOS → TODO AZUL OSCURO
+        return {
+          color: COLOR_TOP_BORDER,
+          weight: 3,
+          fill: true,
+          fillColor: COLOR_TOP_FILL,
+          fillOpacity: 1,   // opaco total
+        };
+      }
+
+      // Resto de provincias con procesos → azul claro
+      return {
+        color: COLOR_OTHER_BORDER,
+        weight: 1.5,
+        fill: true,
+        fillColor: COLOR_OTHER_FILL,
+        fillOpacity: 0.85,
+      };
+    },
+    onEachFeature(feature, layer) {
+      const props = feature.properties || {};
+      const rawName =
+        props.provincia ||
+        props.nombre ||
+        props.NOMBRE ||
+        props.name ||
+        "Sin nombre";
+      const key = normalizeProvinceName(rawName);
+      const value = countsByName.get(key) || 0;
+
+      const isTop =
+        value > 0 &&
+        maxCount > 0 &&
+        (value === maxCount || (maxKey && key === maxKey));
+
+      // Tooltip
+      layer.bindTooltip(
+        `${rawName}: ${value.toLocaleString("es-AR")} procesos`,
+        {
+          direction: "top",
+          sticky: true,
+        }
+      );
+
+      // Aseguramos que la provincia top quede por encima de las demás
+      if (isTop && layer.bringToFront) {
+        layer.bringToFront();
+      }
+    },
+  }).addTo(provMap);
+
+  const bounds = provGeoLayer.getBounds();
+  if (bounds && bounds.isValid()) {
+    provMap.fitBounds(bounds, { padding: [10, 10] });
+  }
+}
 
   // ------------------------------------------------------------------
   // Creación / actualización de gráficos
