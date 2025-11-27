@@ -3,8 +3,20 @@
 
 {% block extra_head %}
 <style>
+  :root{
+    /* Paleta Suizo (igual que Dimensiones) */
+    --sa-azul: var(--brand-azul, #064066);
+    --sa-azul-alt: var(--brand-azul-alt, #5274ce);
+    --sa-azul-claro: var(--brand-azul-claro, #6886c4);
+    --sa-blanco: #ffffff;
+    --sa-gris-soft: #f3f4f6;
+    --sa-gris-borde: #e5e7eb;
+    --sa-texto: #111827;
+  }
+
   .muted{color:#6b7280;font-size:14px}
   .muted.small{font-size:13px}
+
   .card{
     background:var(--sa-blanco,#fff);
     border:1px solid var(--sa-gris-borde,#e5e7eb);
@@ -13,23 +25,39 @@
     box-shadow:0 1px 2px rgba(15,23,42,.04);
     overflow:visible; /* deja salir los desplegables */
   }
+
+  /* Botón principal (mismo azul que Dimensiones) */
   .btn{
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--sa-azul-alt,#5274ce);
     color:#fff;
     border:0;
     border-radius:10px;
     padding:8px 12px;
     cursor:pointer;
     font-size:14px;
+    font-weight:500;
   }
-  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn:hover{
+    background:var(--sa-azul,#064066);
+  }
+  .btn:disabled{
+    opacity:.5;
+    cursor:not-allowed;
+  }
+
+  /* Botón tipo enlace (Limpiar / Exportar CSV) */
   .btn-link{
     background:transparent;
     border:0;
-    color:var(--sa-azul-btn,#5274ce);
+    color:var(--sa-azul-alt,#5274ce);
     cursor:pointer;
     font-size:14px;
   }
+  .btn-link:hover{
+    text-decoration:underline;
+    color:var(--sa-azul,#064066);
+  }
+
   .stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .stack-nowrap{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
 
@@ -37,7 +65,7 @@
   .field input,
   .field select{
     width:100%;
-    border:1px solid #e5e7eb;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:10px;
     padding:3px 8px;
     background:#fff;
@@ -47,8 +75,8 @@
 
   .badges>span{
     display:inline-block;
-    background:#eef2f7;
-    border:1px solid #e5e7eb;
+    background:var(--sa-gris-soft,#f3f4f6);
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     padding:4px 8px;
     border-radius:999px;
     font-size:12px;
@@ -88,7 +116,7 @@
     align-items:center;
     gap:16px;
   }
-  .upload-title{font-size:16px;font-weight:600;margin:0;color:#111827}
+  .upload-title{font-size:16px;font-weight:600;margin:0;color:var(--sa-texto,#111827)}
   .upload-meta{text-align:right;font-size:12px}
   .upload-meta .badges{margin-top:4px}
 
@@ -144,10 +172,10 @@
     flex:1 1 0;       /* PAMI / Evaluación / Estado ocupan el resto del ancho */
   }
 
-  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (más bajo, con azul más notorio) */
+  /* RECTÁNGULO BASE DE TODOS LOS FILTROS (igual look que Dimensiones) */
   .filter-card{
-    background:#f3f6fc; /* un poco más azul que antes */
-    border:1px solid #c7d2fe; /* borde azul suave */
+    background:#f3f6fc;
+    border:1px solid #c7d2fe;
     border-radius:12px;
     padding:3px 8px;
     min-height:56px;
@@ -156,7 +184,9 @@
   .filter-card h5{
     font-size:10px;
     margin:0 0 3px;
-    color:#1f2937; /* título un poco más oscuro */
+    color:#1f2937;
+    text-transform:uppercase;
+    letter-spacing:.04em;
   }
 
   /* Versión compacta para Plataforma / Operador / Cuenta / Repartición */
@@ -166,7 +196,7 @@
     display:flex;
     flex-direction:column;
     justify-content:center;
-    border-color:#b4c6fc; /* un poco más marcado que el general */
+    border-color:#b4c6fc;
   }
   .filter-card--compact h5{
     margin-bottom:2px;
@@ -193,7 +223,7 @@
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
     min-width:0;
-    border:1px solid #e5e7eb;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:10px;
     padding:3px 8px;
     background:#fff;
@@ -225,7 +255,7 @@
   .mini-kpi .v{
     font-weight:800;
     font-size:20px;
-    color:var(--sa-text,#064066);
+    color:var(--sa-azul,#064066);
   }
 
   /* Buscador: ocupa toda la fila de la grilla */
@@ -243,9 +273,10 @@
     width:100%;
     height:40px;
     padding:10px 38px 10px 34px;
-    border:1px solid #e5e7eb;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     border-radius:12px;
     font-size:14px;
+    background:#fff;
   }
   .searchbox .ico{
     position:absolute;
@@ -282,7 +313,7 @@
     -webkit-appearance:none;
     height:14px;width:14px;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--sa-azul-alt,#5274ce);
     border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.08);
   }
@@ -291,7 +322,7 @@
     height:14px;width:14px;
     border:0;
     border-radius:50%;
-    background:var(--sa-azul-btn,#5274ce);
+    background:var(--sa-azul-alt,#5274ce);
   }
   .range-track{
     position:absolute;
@@ -318,16 +349,18 @@
     padding:6px 10px;
     font-size:12px;
     cursor:pointer;
-    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease;
+    transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,color .15s ease;
+    color:#374151;
   }
   .chip:hover{
     border-color:#94a3ff;
     box-shadow:0 0 0 1px rgba(82,116,206,.16);
   }
-  .chip.is-on{
-    background:#dbeafe;
-    border-color:#5274ce; /* azul botón */
-    color:#1f3a8a;
+  .chip.is-on,
+  .chip.active{
+    background:var(--sa-azul-alt,#5274ce);
+    border-color:var(--sa-azul-alt,#5274ce);
+    color:#fff;
     box-shadow:0 0 0 1px rgba(82,116,206,.28);
   }
 
@@ -419,7 +452,7 @@
   /* Columna 6 = Decisión (más ancha) */
   .table th:nth-child(6),
   .table td:nth-child(6){
-    width:18ch;        /* antes 11ch */
+    width:18ch;
     white-space:nowrap;
     text-align:center;
   }
@@ -451,7 +484,7 @@
   }
   .pill{
     display:inline-block;
-    border:1px solid #e5e7eb;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     background:#f8fafc;
     border-radius:999px;
     padding:3px 8px;
@@ -459,7 +492,7 @@
   }
 
   .page-size-select{
-    border:1px solid #e5e7eb;
+    border:1px solid var(--sa-gris-borde,#e5e7eb);
     background:#f8fafc;
     border-radius:999px;
     padding:2px 6px;
@@ -860,6 +893,7 @@
 
 <!-- Config inicial para el JS -->
 <script>
+  window.OPP = window.OPP || {};
   window.OPP_UI = {
     pageSize: {{ page_size or 20 }},
     initialDateFrom: null,
