@@ -1,6 +1,6 @@
 // static/js/oportunidades_dimensiones.js
 (function () {
-  console.log("[Dimensiones] JS cargado v-colores-6");
+  console.log("[Dimensiones] JS cargado v-colores-7-mapa-top");
 
   // ------------------------------------------------------------------
   // Helpers generales
@@ -499,9 +499,9 @@
     const defaultToStr = DATE_DOMAIN[maxIndex];
 
     const fromStr =
-      (dateFromEl && dateFromEl.value) ? dateFromEl.value : defaultFromStr;
+      dateFromEl && dateFromEl.value ? dateFromEl.value : defaultFromStr;
     const toStr =
-      (dateToEl && dateToEl.value) ? dateToEl.value : defaultToStr;
+      dateToEl && dateToEl.value ? dateToEl.value : defaultToStr;
 
     let idxFrom = findIndexForDateStr(fromStr, 0);
     let idxTo = findIndexForDateStr(toStr, maxIndex);
@@ -752,7 +752,7 @@
       });
   }
 
-    function redrawProvinciaChoropleth() {
+  function redrawProvinciaChoropleth() {
     if (!provMap || !PROV_GEOJSON || !LAST_FILTERED) return;
 
     const dimProv = LAST_FILTERED.dimProv || [];
@@ -814,10 +814,21 @@
       }
     }
 
-    // Colores: provincia top = azul oscuro, resto con procesos = azul claro
-    const COLOR_TOP = COLORS.emergency;      // azul oscuro
-    const COLOR_OTHER = COLORS.regularSoft; // azul claro
-    const COLOR_EMPTY = "#E5EEF5";          // sin procesos
+    console.log(
+      "[Dimensiones][Mapa] countsByName",
+      Object.fromEntries(countsByName),
+      "maxKey:",
+      maxKey,
+      "maxCount:",
+      maxCount
+    );
+
+    // Colores base
+    const COLOR_EMPTY = "#E5EEF5"; // sin procesos
+    const COLOR_TOP_FILL = COLORS.emergency; // azul oscuro
+    const COLOR_TOP_BORDER = COLORS.emergency;
+    const COLOR_OTHER_FILL = COLORS.regularSoft; // azul claro
+    const COLOR_OTHER_BORDER = COLORS.regular;
 
     provGeoLayer = L.geoJSON(PROV_GEOJSON, {
       style: (feature) => {
@@ -831,17 +842,38 @@
         const key = normalizeProvinceName(rawName);
         const value = countsByName.get(key) || 0;
         const hasData = value > 0;
-        const isTop = hasData && value === maxCount;
 
+        // Provincia top = la que tiene el valor máximo
+        const isTop =
+          hasData &&
+          (value === maxCount || (maxKey && key === maxKey));
+
+        if (!hasData) {
+          // Provincias sin procesos: muy claritas
+          return {
+            color: "#d1d5db",
+            weight: 1,
+            fillColor: COLOR_EMPTY,
+            fillOpacity: 0.25,
+          };
+        }
+
+        if (isTop) {
+          // PROVINCIA CON MÁS PROCESOS → AZUL OSCURO BIEN MARCADO
+          return {
+            color: COLOR_TOP_BORDER, // borde azul oscuro
+            weight: 3,
+            fillColor: COLOR_TOP_FILL, // relleno azul oscuro
+            fillOpacity: 0.95,
+          };
+        }
+
+        // Resto de provincias con procesos → azul claro
         return {
-          color: "#ffffff",
-          weight: 1,
-          fillColor: !hasData
-            ? COLOR_EMPTY
-            : isTop
-            ? COLOR_TOP
-            : COLOR_OTHER,
-          fillOpacity: !hasData ? 0.25 : isTop ? 0.95 : 0.85,
+          color: COLOR_OTHER_BORDER, // borde celeste
+          weight: 1.5,
+          fillColor: COLOR_OTHER_FILL, // relleno celeste claro
+          fillOpacity: 0.85,
         };
       },
       onEachFeature(feature, layer) {
@@ -1110,7 +1142,11 @@
         ctxRepEstado,
         labels,
         [
-          { label: "EMERGENCIA", data: emData, backgroundColor: COLORS.emergency },
+          {
+            label: "EMERGENCIA",
+            data: emData,
+            backgroundColor: COLORS.emergency,
+          },
           { label: "REGULAR", data: rgData, backgroundColor: COLORS.regular },
         ],
         {
