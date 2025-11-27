@@ -25,6 +25,41 @@
       .toLowerCase()
       .trim();
 
+  // Normalización especial para nombres de provincia (datos vs GeoJSON)
+  function normalizeProvinceName(name) {
+    let s = normalize(name);
+    if (!s) return "";
+
+    // Sacamos palabras como "provincia de", "prov.", "pcia", etc.
+    s = s
+      .replace(/\bprovincia de\b/g, "")
+      .replace(/\bprovincia\b/g, "")
+      .replace(/\bprov\./g, "")
+      .replace(/\bprov\b/g, "")
+      .replace(/\bpcia\b/g, "")
+      .replace(/\bde la\b/g, " ")
+      .replace(/\bde los\b/g, " ")
+      .replace(/\bde las\b/g, " ")
+      .replace(/\bde\b/g, " ");
+
+    // Casos especiales
+    if (
+      s.includes("ciudad autonoma") ||
+      s.includes("capital federal") ||
+      s.includes("caba")
+    ) {
+      s = "caba";
+    }
+
+    if (s.includes("tierra del fuego")) {
+      s = "tierra del fuego";
+    }
+
+    // Compactar espacios
+    s = s.replace(/\s+/g, " ").trim();
+    return s;
+  }
+
   function isPAMIName(rep) {
     const r = normalize(rep);
     if (!r) return false;
@@ -736,7 +771,7 @@
         d.NOMBRE ||
         d.name ||
         "";
-      const key = normalize(rawName);
+      const key = normalizeProvinceName(rawName);
       if (!key) return;
 
       // Cantidad de procesos (usamos count, total o emergencia+regular)
@@ -793,7 +828,7 @@
           props.NOMBRE ||
           props.name ||
           "";
-        const key = normalize(rawName);
+        const key = normalizeProvinceName(rawName);
         const value = countsByName.get(key) || 0;
         const hasData = value > 0;
         const isTop = hasData && maxKey && key === maxKey;
@@ -817,7 +852,7 @@
           props.NOMBRE ||
           props.name ||
           "Sin nombre";
-        const key = normalize(rawName);
+        const key = normalizeProvinceName(rawName);
         const value = countsByName.get(key) || 0;
 
         layer.bindTooltip(
