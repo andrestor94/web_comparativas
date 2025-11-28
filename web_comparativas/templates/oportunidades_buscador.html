@@ -180,14 +180,19 @@
   }
 
   /* Tarjetas de filtros: mismo estilo que Dimensiones */
-  .filter-card{
-    background:#ffffff;                          /* tarjetas blancas sobre banda celeste */
-    border:1px solid var(--dim-treemap-base);    /* azul treemap */
-    border-radius:12px;
-    padding:3px 8px;
-    min-height:56px;
-    box-shadow:0 1px 2px rgba(15,23,42,.04);
-  }
+  /* Tarjetas con degradé suave (igual estética que Dimensiones) */
+.filter-card{
+  background:linear-gradient(
+    135deg,
+    rgba(191,233,246,0.95) 0%,
+    #ffffff 70%
+  );
+  border:1px solid var(--dim-treemap-base);
+  border-radius:12px;
+  padding:3px 8px;
+  min-height:56px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
+}
   .filter-card h5{
     font-size:10px;
     margin:0 0 3px;
@@ -196,14 +201,18 @@
 
   /* Versión compacta para combos (Plataforma / Operador / Cuenta / Repartición) */
   .filter-card--compact{
-    padding:3px 8px;
-    min-height:52px;
-    display:flex;
-    flex-direction:column;
-    justify-content:center;
-    border-color:var(--dim-treemap-base);
-    background:#ffffff;
-  }
+  padding:3px 8px;
+  min-height:52px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  border-color:var(--dim-treemap-base);
+  background:linear-gradient(
+    135deg,
+    rgba(191,233,246,0.95) 0%,
+    #ffffff 70%
+  );
+}
   .filter-card--compact h5{
     margin-bottom:2px;
   }
@@ -215,12 +224,16 @@
 
   /* Filtro Fecha */
   .filter-card--date{
-    padding:4px 8px;
-    display:flex;
-    flex-direction:column;
-    gap:4px;
-    background:#ffffff;
-  }
+  padding:4px 8px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  background:linear-gradient(
+    135deg,
+    rgba(191,233,246,0.95) 0%,
+    #ffffff 70%
+  );
+}
   .filter-card--date .dates-row{margin-bottom:2px;}
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
@@ -241,11 +254,15 @@
 
   /* KPI Procesos: mismos tonos que Dimensiones */
   .mini-kpi{
-    background:var(--dim-regular-soft);
-    border:1px solid var(--dim-treemap-base);
-    border-radius:12px;
-    padding:4px 8px;
-  }
+  background:linear-gradient(
+    135deg,
+    var(--dim-regular-soft) 0%,
+    #ffffff 70%
+  );
+  border:1px solid var(--dim-treemap-base);
+  border-radius:12px;
+  padding:4px 8px;
+}
   .mini-kpi h4{
     margin:0 0 2px;
     font-size:11px;
@@ -367,11 +384,15 @@
     box-shadow:0 0 0 1px rgba(82,116,206,.18);
   }
   .chip.is-on{
-    background:var(--sa-azul-btn);  /* mismo azul de chips en Dimensiones */
-    border-color:var(--sa-azul-btn);
-    color:#ffffff;
-    box-shadow:0 0 0 1px rgba(82,116,206,.32);
-  }
+  background:linear-gradient(
+    135deg,
+    var(--dim-emergency) 0%,
+    var(--sa-azul-btn) 100%
+  );
+  border-color:var(--dim-emergency);
+  color:#ffffff;
+  box-shadow:0 0 0 1px rgba(6,64,102,.35);
+}
 
   /* grupo de evaluación (mismas chips) */
   .decision-filter-group .chip{
