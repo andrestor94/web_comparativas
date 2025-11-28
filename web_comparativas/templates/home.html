@@ -183,17 +183,17 @@
   <div class="kpi-grid">
     <div class="kpi-card text-center">
       <div class="kpi-title">Total</div>
-      <div class="kpi-value">{{ opp_total }}</div>
+      <div class="kpi-value" id="kOppTotal">{{ opp_total }}</div>
       <div class="kpi-sub">Oportunidades cargadas</div>
     </div>
     <div class="kpi-card text-center">
       <div class="kpi-title">Aceptadas</div>
-      <div class="kpi-value">{{ opp_accepted }}</div>
+      <div class="kpi-value" id="kOppAccepted">{{ opp_accepted }}</div>
       <div class="kpi-sub">Marcadas como aceptadas</div>
     </div>
     <div class="kpi-card text-center">
       <div class="kpi-title">No vistas</div>
-      <div class="kpi-value">{{ opp_unseen }}</div>
+      <div class="kpi-value" id="kOppUnseen">{{ opp_unseen }}</div>
       <div class="kpi-sub">Sin evaluar todavía</div>
     </div>
   </div>
@@ -283,6 +283,56 @@
     </div>
   </div>
 </div>
+
+<script>
+  (function () {
+    try {
+      var totalEl   = document.getElementById("kOppTotal");
+      var accEl     = document.getElementById("kOppAccepted");
+      var unseenEl  = document.getElementById("kOppUnseen");
+
+      if (!totalEl || !accEl || !unseenEl) return;
+
+      var total = parseInt((totalEl.textContent || "0").trim(), 10);
+      if (isNaN(total)) total = 0;
+
+      // Misma clave que usa oportunidades_buscador.js
+      var STORAGE_KEY = "wc_opp_decisions_v1_/oportunidades/buscador";
+      var raw = window.localStorage ? window.localStorage.getItem(STORAGE_KEY) : null;
+      if (!raw) {
+        // Si nunca se marcó nada, asumimos todo "no visto"
+        accEl.textContent = "0";
+        unseenEl.textContent = String(total);
+        return;
+      }
+
+      var map;
+      try {
+        map = JSON.parse(raw) || {};
+      } catch (e) {
+        map = {};
+      }
+
+      var accepted = 0;
+      var rejected = 0;
+
+      Object.keys(map).forEach(function (k) {
+        var v = map[k];
+        if (v === "aceptado") accepted++;
+        else if (v === "rechazado") rejected++;
+      });
+
+      var unseen = total - accepted - rejected;
+      if (unseen < 0) unseen = 0;
+
+      accEl.textContent    = String(accepted);
+      unseenEl.textContent = String(unseen);
+    } catch (err) {
+      // En caso de error, no rompemos el panel
+      console.error("Error calculando KPIs de oportunidades en Home:", err);
+    }
+  })();
+</script>
 
 {% if (total_all|int == 0) %}
   <div class="alert alert-info mt-3" role="alert">
