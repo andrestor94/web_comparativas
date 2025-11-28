@@ -17,6 +17,11 @@
     --dim-treemap-dark3:  #3F7FB0;  /* COLORS.treemapDark3 */
     --dim-treemap-base:   #8CC5EA;  /* COLORS.treemapBase */
 
+    /* derivados suaves para las tarjetas (muy parecido a Dimensiones) */
+    --dim-card-from:  #f3f8ff;
+    --dim-card-mid:   #e3f1ff;
+    --dim-band-fill:  #eaf4ff;
+
     /* botón azul que ya usas en todo el sitio */
     --sa-azul-btn:        #5274ce;
   }
@@ -31,7 +36,7 @@
     overflow:visible;
   }
 
-  /* Botón principal: mismo azul que en Dimensiones (azul botón / emergenciaSoft) */
+  /* Botón principal */
   .btn{
     background:var(--dim-emergency-soft);
     color:#fff;
@@ -138,19 +143,19 @@
   }
 
   /* ============================
-   PANEL SUPERIOR DE FILTROS
-   ============================ */
+     PANEL SUPERIOR DE FILTROS
+     ============================ */
 
-/* Contenedor neutro: deja ver el fondo blanco de la card */
-.topbar{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  background:#ffffff;          /* ahora el recuadro es blanco, no celeste */
-  border-radius:14px;
-  padding:12px 14px 14px;
-  border:1px solid #d4e2ff;    /* borde azul suave como Dimensiones */
-}
+  /* Contenedor neutro, como en Dimensiones */
+  .topbar{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    background:#ffffff;
+    border-radius:14px;
+    padding:12px 14px 14px;
+    border:1px solid #d4e2ff;
+  }
 
   .filters-grid{
     display:grid;
@@ -174,25 +179,24 @@
     flex:0 0 190px;
     max-width:190px;
   }
-
   .filters-row-secondary > *:not(.mini-kpi){
     flex:1 1 0;
   }
 
-  /* Tarjetas con degradé usando la misma paleta que Dimensiones */
-.filter-card{
-  background:linear-gradient(
-    135deg,
-    var(--dim-regular-soft) 0%,
-    var(--dim-treemap-base) 65%,
-    #ffffff 100%
-  );
-  border:1px solid var(--dim-treemap-base);
-  border-radius:12px;
-  padding:3px 8px;
-  min-height:56px;
-  box-shadow:0 1px 2px rgba(15,23,42,.04);
-}
+  /* Tarjetas con degradé muy suave (como en Dimensiones) */
+  .filter-card{
+    background:linear-gradient(
+      180deg,
+      var(--dim-card-from) 0%,
+      var(--dim-card-mid) 48%,
+      #ffffff 100%
+    );
+    border:1px solid #d4e2ff;
+    border-radius:12px;
+    padding:3px 8px;
+    min-height:56px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
   .filter-card h5{
     font-size:10px;
     margin:0 0 3px;
@@ -201,19 +205,19 @@
 
   /* Versión compacta para combos (Plataforma / Operador / Cuenta / Repartición) */
   .filter-card--compact{
-  padding:3px 8px;
-  min-height:52px;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  border-color:var(--dim-treemap-base);
-  background:linear-gradient(
-    135deg,
-    var(--dim-regular-soft) 0%,
-    var(--dim-treemap-base) 65%,
-    #ffffff 100%
-  );
-}
+    padding:3px 8px;
+    min-height:52px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    background:linear-gradient(
+      180deg,
+      var(--dim-card-from) 0%,
+      var(--dim-card-mid) 48%,
+      #ffffff 100%
+    );
+    border-color:#d4e2ff;
+  }
   .filter-card--compact h5{
     margin-bottom:2px;
   }
@@ -223,19 +227,31 @@
     font-size:12px;
   }
 
+  /* Tarjetas tipo “banda celeste” para PAMI y Estado,
+     como en Dimensiones */
+  .filter-card--band{
+    background:linear-gradient(
+      180deg,
+      var(--dim-band-fill) 0%,
+      #f8fbff 60%,
+      #ffffff 100%
+    );
+    border-color:#d4e2ff;
+  }
+
   /* Filtro Fecha */
   .filter-card--date{
-  padding:4px 8px;
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-  background:linear-gradient(
-    135deg,
-    var(--dim-regular-soft) 0%,
-    var(--dim-treemap-base) 65%,
-    #ffffff 100%
-  );
-}
+    padding:4px 8px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    background:linear-gradient(
+      180deg,
+      var(--dim-card-from) 0%,
+      var(--dim-card-mid) 48%,
+      #ffffff 100%
+    );
+  }
   .filter-card--date .dates-row{margin-bottom:2px;}
   .filter-card--date .dates-row input[type="date"]{
     flex:1 1 0;
@@ -251,20 +267,19 @@
     font-size:11px;
     padding:2px 8px;
   }
-  /* en Dimensiones esas etiquetas no se ven: las ocultamos */
   .filter-card--date .dates-labels{display:none;}
 
-  /* KPI Procesos: mismos tonos que Dimensiones */
+  /* KPI Procesos */
   .mini-kpi{
-  background:linear-gradient(
-    135deg,
-    var(--dim-regular-soft) 0%,
-    #ffffff 80%
-  );
-  border:1px solid var(--dim-treemap-base);
-  border-radius:12px;
-  padding:4px 8px;
-}
+    background:linear-gradient(
+      180deg,
+      var(--dim-band-fill) 0%,
+      #ffffff 80%
+    );
+    border:1px solid #d4e2ff;
+    border-radius:12px;
+    padding:4px 8px;
+  }
   .mini-kpi h4{
     margin:0 0 2px;
     font-size:11px;
@@ -278,7 +293,7 @@
     color:var(--dim-emergency);
   }
 
-  /* Tarjeta de búsqueda + botones (igual estilo de tarjetas) */
+  /* Tarjeta de búsqueda + botones (blanca, como en Dimensiones) */
   .search-card{
     display:grid;
     grid-template-columns:minmax(0,4fr) auto;
@@ -287,7 +302,7 @@
     width:100%;
     background:#ffffff;
     border-radius:12px;
-    border:1px solid var(--dim-treemap-base);
+    border:1px solid #d4e2ff;
   }
 
   /* Barra de búsqueda */
@@ -320,7 +335,7 @@
     font-size:14px;
   }
 
-  /* Slider doble: usamos azul de la paleta para el fill */
+  /* Slider doble */
   .range-wrap{position:relative;height:20px}
   .range-wrap input[type=range]{
     position:absolute;
@@ -359,7 +374,7 @@
     position:absolute;
     top:8px;
     height:3px;
-    background:var(--dim-treemap-base);  /* COLORS.treemapBase */
+    background:var(--dim-treemap-base);
     border-radius:999px;
   }
 
@@ -386,17 +401,16 @@
     box-shadow:0 0 0 1px rgba(82,116,206,.18);
   }
   .chip.is-on{
-  background:linear-gradient(
-    135deg,
-    var(--dim-emergency-soft) 0%,
-    var(--dim-treemap-dark3) 100%
-  );
-  border-color:var(--dim-emergency);
-  color:#ffffff;
-  box-shadow:0 0 0 1px rgba(6,64,102,.40);
-}
+    background:linear-gradient(
+      135deg,
+      var(--dim-emergency-soft) 0%,
+      var(--dim-treemap-dark3) 100%
+    );
+    border-color:var(--dim-emergency);
+    color:#ffffff;
+    box-shadow:0 0 0 1px rgba(6,64,102,.40);
+  }
 
-  /* grupo de evaluación (mismas chips) */
   .decision-filter-group .chip{
     padding:5px 10px;
     font-size:12px;
@@ -431,7 +445,6 @@
     color:#991b1b;
   }
 
-  /* Colores de fila según decisión */
   tr.row-decision-accepted{
     background:#dcfce7;
   }
@@ -590,7 +603,6 @@
     {% endif %}
   </div>
 
-  {# === SOLO ADMIN VE EL BLOQUE DE CARGA === #}
   {% if user and ((user.role or '')|lower == 'admin') %}
   <!-- Upload -->
   <div class="card mb-4 upload-card">
@@ -645,7 +657,6 @@
     </form>
   </div>
   {% endif %}
-  {# === FIN SOLO ADMIN === #}
 
   <!-- Dashboard -->
   <div class="card" style="border-color:#d4e2ff;">
@@ -723,7 +734,7 @@
           </div>
 
           <!-- Repartición: PAMI u Otras -->
-          <div class="filter-card">
+          <div class="filter-card filter-card--band">
             <h5>Repartición: PAMI u Otras</h5>
             <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
               <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
@@ -733,7 +744,7 @@
           </div>
 
           <!-- Evaluación -->
-          <div class="filter-card decision-filter-group">
+          <div class="filter-card">
             <h5>Evaluación</h5>
             <div class="chips" id="swDecision" role="group" aria-label="Filtro evaluación">
               <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
@@ -744,7 +755,7 @@
           </div>
 
           <!-- Estado -->
-          <div class="filter-card">
+          <div class="filter-card filter-card--band">
             <h5>Estado</h5>
             <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
               <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
