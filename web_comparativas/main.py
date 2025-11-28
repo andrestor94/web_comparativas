@@ -1380,7 +1380,7 @@ def _home_collect(user: User):
     # KPIs según visibilidad
     kpis = kpis_for_home(db_session, user)
 
-    # cargas visibles (auditor ve todas)
+    # cargas visibles (auditor ve todas), ordenadas de más nueva a más vieja
     q_all = uploads_visible_ext(db_session, user).order_by(
         UploadModel.created_at.desc()
     )
@@ -1394,13 +1394,14 @@ def _home_collect(user: User):
         s = (st or "").lower()
         return s in ("done", "dashboard", "finalizado", "tablero")
 
+    # listas de apoyo
     pending = [u for u in uploads if _is_pending(u.status)]
     done = [u for u in uploads if _is_done(u.status)]
 
-    # últimos finalizados (visibles)
-    last_done = vis_recent_done(db_session, user, limit=3)
+    # últimos 5 procesos (cualquier estado)
+    last_done = uploads[:5]
 
-    # “recent_done” en últimas 24h
+    # “recent_done” en últimas 24h (solo los finalizados)
     now = dt.datetime.utcnow()
     recent_done_24h = [
         u
@@ -1408,17 +1409,17 @@ def _home_collect(user: User):
         if u.updated_at and (now - u.updated_at).total_seconds() < 86400
     ]
 
-        return {
+    return {
         "uploads": uploads,
         "pending": pending,
         "done": done,
-        "last_done": list(last_done),
+        "last_done": last_done,
         "recent_done": recent_done_24h,
         "total_all": int(kpis.get("total", 0)),
         "total_pending": int(kpis.get("pending", 0)),
         "total_done": int(kpis.get("done", 0)),
 
-        # KPIs de Oportunidades (por ahora en 0; los conectamos bien en el próximo paso)
+        # KPIs de Oportunidades (por ahora en 0, luego los conectamos)
         "opp_total": 0,
         "opp_accepted": 0,
         "opp_unseen": 0,
