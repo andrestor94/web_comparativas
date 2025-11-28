@@ -179,13 +179,13 @@
     flex:1 1 0;
   }
 
-  /* Tarjetas de filtros: mismo estilo que Dimensiones */
-  /* Tarjetas con degradé suave (igual estética que Dimensiones) */
+  /* Tarjetas con degradé usando la misma paleta que Dimensiones */
 .filter-card{
   background:linear-gradient(
     135deg,
-    rgba(191,233,246,0.95) 0%,
-    #ffffff 70%
+    var(--dim-regular-soft) 0%,
+    var(--dim-treemap-base) 65%,
+    #ffffff 100%
   );
   border:1px solid var(--dim-treemap-base);
   border-radius:12px;
@@ -209,8 +209,9 @@
   border-color:var(--dim-treemap-base);
   background:linear-gradient(
     135deg,
-    rgba(191,233,246,0.95) 0%,
-    #ffffff 70%
+    var(--dim-regular-soft) 0%,
+    var(--dim-treemap-base) 65%,
+    #ffffff 100%
   );
 }
   .filter-card--compact h5{
@@ -230,8 +231,9 @@
   gap:4px;
   background:linear-gradient(
     135deg,
-    rgba(191,233,246,0.95) 0%,
-    #ffffff 70%
+    var(--dim-regular-soft) 0%,
+    var(--dim-treemap-base) 65%,
+    #ffffff 100%
   );
 }
   .filter-card--date .dates-row{margin-bottom:2px;}
@@ -257,7 +259,7 @@
   background:linear-gradient(
     135deg,
     var(--dim-regular-soft) 0%,
-    #ffffff 70%
+    #ffffff 80%
   );
   border:1px solid var(--dim-treemap-base);
   border-radius:12px;
@@ -386,12 +388,12 @@
   .chip.is-on{
   background:linear-gradient(
     135deg,
-    var(--dim-emergency) 0%,
-    var(--sa-azul-btn) 100%
+    var(--dim-emergency-soft) 0%,
+    var(--dim-treemap-dark3) 100%
   );
   border-color:var(--dim-emergency);
   color:#ffffff;
-  box-shadow:0 0 0 1px rgba(6,64,102,.35);
+  box-shadow:0 0 0 1px rgba(6,64,102,.40);
 }
 
   /* grupo de evaluación (mismas chips) */
