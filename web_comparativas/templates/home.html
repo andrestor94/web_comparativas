@@ -93,7 +93,7 @@
 <!-- ======= FIN TARJETAS ======= -->
 
 <div class="grid" style="gap: 16px; grid-template-columns: repeat(12,1fr);">
-  <div class="span-12 span-lg-7">
+  <div class="span-12">
     <div class="card">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -143,72 +143,6 @@
               </tbody>
             </table>
           </div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  {# Pendientes/por revisar #}
-  <div class="span-12 span-lg-5">
-    <div class="card">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="m-0">Pendientes / en proceso</h5>
-          <div class="d-flex align-items-center gap-2">
-            <a class="btn btn-sm btn-ghost" href="/cargas/historial?status=pending">Solo pendientes</a>
-            <a class="btn btn-sm btn-ghost" href="/cargas/historial">Ver más</a>
-          </div>
-        </div>
-
-        {% if not pending or pending|length == 0 %}
-          <div class="text-subtle py-3">No hay procesos pendientes en este momento.</div>
-        {% else %}
-          <ul class="list-unstyled m-0">
-            {% for up in pending %}
-              {% set st = (up.status or '')|lower %}
-              <li class="d-flex align-items-start justify-content-between py-2 border-bottom">
-                <div class="me-3">
-                  <div class="fw-semibold">{{ up.proceso_nro or '—' }}</div>
-                  <div class="text-subtle small">
-                    {{ up.platform_hint or '' }} {% if up.buyer_hint %}· {{ up.buyer_hint }}{% endif %}
-                    {% if up.status %}
-                      · <span class="badge bg-warning-subtle text-warning">
-                          {{ step_labels.get(st, up.status)|capitalize }}
-                        </span>
-                    {% endif %}
-                  </div>
-                </div>
-                <div class="flex-shrink-0">
-                  <a class="btn btn-sm btn-ghost" href="/cargas/{{ up.id }}">Seguir</a>
-                </div>
-              </li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  {# Notificaciones (completados en últimas 24h) #}
-  <div class="span-12" id="notificaciones">
-    <div class="card">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="m-0">Notificaciones</h5>
-          <a class="btn btn-sm btn-ghost" href="/cargas/historial">Historial</a>
-        </div>
-        {% if not recent_done or recent_done|length == 0 %}
-          <div class="text-subtle py-2">Sin notificaciones recientes.</div>
-        {% else %}
-          <ul class="list-unstyled m-0">
-            {% for up in recent_done %}
-              <li class="py-2 border-bottom">
-                ✅ Proceso <strong>{{ up.proceso_nro or up.id }}</strong> finalizado.
-                <a href="/tablero/{{ up.id }}" class="ms-2">Abrir tablero</a>
-                <span class="text-subtle small ms-2">{{ up.original_filename or '' }}</span>
-              </li>
-            {% endfor %}
-          </ul>
         {% endif %}
       </div>
     </div>
