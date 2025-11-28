@@ -138,19 +138,19 @@
   }
 
   /* ============================
-     PANEL SUPERIOR DE FILTROS
-     ============================ */
+   PANEL SUPERIOR DE FILTROS
+   ============================ */
 
-  /* Banda celeste igual en ambos dashboards (Dimensiones + Buscador) */
-  .topbar{
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-    background:var(--dim-regular-soft);          /* COLORS.regularSoft */
-    border-radius:14px;
-    padding:12px 14px 14px;
-    border:1px solid var(--dim-treemap-base);    /* COLORS.treemapBase */
-  }
+/* Contenedor neutro: deja ver el fondo blanco de la card */
+.topbar{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  background:#ffffff;          /* ahora el recuadro es blanco, no celeste */
+  border-radius:14px;
+  padding:12px 14px 14px;
+  border:1px solid #d4e2ff;    /* borde azul suave como Dimensiones */
+}
 
   .filters-grid{
     display:grid;
