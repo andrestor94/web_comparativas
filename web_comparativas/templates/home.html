@@ -55,66 +55,174 @@
 
 <!-- ======= TARJETAS HORIZONTALES ======= -->
 <style>
+  :root{
+    /* fallback por si no está definido en base.html */
+    --sa-azul:       var(--brand-azul, #064066);
+    --sa-azul-alt:   var(--brand-azul-alt, #5274ce);
+    --sa-azul-claro: var(--brand-azul-claro, #6886c4);
+    --sa-panel-bg:   #f9fafb;
+    --sa-borde-soft: #e5e7eb;
+  }
+
+  .panel-section{
+    background: var(--sa-panel-bg);
+    border-radius: 18px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.08);
+    border: 1px solid var(--sa-borde-soft);
+  }
+
+  .panel-section + .panel-section{
+    margin-top: 0.75rem;
+  }
+
+  .panel-opp{
+    border-top: 4px solid var(--sa-azul-alt);
+  }
+
+  .panel-proc{
+    border-top: 4px solid var(--sa-azul);
+  }
+
+  .panel-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:0.75rem;
+  }
+
+  .panel-title{
+    font-size:1rem;
+    font-weight:600;
+    color:var(--sa-azul);
+  }
+
+  .panel-subtitle{
+    font-size:0.8rem;
+    color:#6b7280;
+  }
+
   .kpi-card {
     flex: 1;
-    min-width: 200px;
-    background: var(--bs-card-bg);
-    border-radius: 0.75rem;
-    box-shadow: var(--bs-box-shadow-sm);
-    padding: 1rem 1.25rem;
-    transition: 0.2s ease;
+    min-width: 220px;
+    background: #ffffff;
+    border-radius: 0.9rem;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+    padding: 0.9rem 1.1rem;
+    transition: 0.18s ease;
+    border: 1px solid #e5e7eb;
   }
-  .kpi-card:hover { transform: translateY(-2px); }
-  .kpi-grid { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem; }
-  .kpi-title { font-size: 0.875rem; color: var(--bs-secondary); }
-  .kpi-value { font-size: 2rem; font-weight: 700; }
-  .kpi-sub { font-size: 0.875rem; color: var(--bs-secondary); }
 
-  .action-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(15,23,42,0.10);
+  }
+
+  .kpi-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .kpi-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #6b7280;
+    margin-bottom: 0.25rem;
+  }
+
+  .kpi-value {
+    font-size: 1.9rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .kpi-sub {
+    font-size: 0.8rem;
+    color: #6b7280;
+    margin-top: 0.15rem;
+  }
+
+  /* acentos de color */
+  .panel-opp .kpi-value{
+    color: var(--sa-azul-alt);
+  }
+
+  .panel-opp .kpi-card:nth-child(3) .kpi-value{
+    color: #d97706; /* No vistas en ámbar suave */
+  }
+
+  .panel-proc .kpi-card:nth-child(1) .kpi-value{
+    color: var(--sa-azul);
+  }
+  .panel-proc .kpi-card:nth-child(2) .kpi-value{
+    color: #16a34a; /* completados en verde */
+  }
+  .panel-proc .kpi-card:nth-child(3) .kpi-value{
+    color: var(--sa-azul-claro);
+  }
+
+  .action-buttons { 
+    display: flex; 
+    justify-content: flex-end; 
+    gap: 0.5rem; 
+  }
 </style>
 
 {# ===== KPIs OPORTUNIDADES ===== #}
-<div class="d-flex justify-content-between align-items-center mb-2">
-  <h5 class="m-0">Oportunidades</h5>
-  <a class="btn btn-sm btn-ghost" href="/oportunidades/buscador">Ir al buscador</a>
-</div>
-<div class="kpi-grid mb-3">
-  <div class="kpi-card text-center">
-    <div class="kpi-title">Total</div>
-    <div class="kpi-value text-primary">{{ opp_total }}</div>
-    <div class="kpi-sub">Oportunidades cargadas</div>
+<div class="panel-section panel-opp">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Oportunidades</div>
+      <div class="panel-subtitle">Resumen rápido del archivo de oportunidades cargado</div>
+    </div>
+    <a class="btn btn-sm btn-ghost" href="/oportunidades/buscador">Ir al buscador</a>
   </div>
-  <div class="kpi-card text-center">
-    <div class="kpi-title">Aceptadas</div>
-    <div class="kpi-value text-success">{{ opp_accepted }}</div>
-    <div class="kpi-sub">Marcadas como aceptadas</div>
-  </div>
-  <div class="kpi-card text-center">
-    <div class="kpi-title">No vistas</div>
-    <div class="kpi-value text-warning">{{ opp_unseen }}</div>
-    <div class="kpi-sub">Sin evaluar todavía</div>
+  <div class="kpi-grid">
+    <div class="kpi-card text-center">
+      <div class="kpi-title">Total</div>
+      <div class="kpi-value">{{ opp_total }}</div>
+      <div class="kpi-sub">Oportunidades cargadas</div>
+    </div>
+    <div class="kpi-card text-center">
+      <div class="kpi-title">Aceptadas</div>
+      <div class="kpi-value">{{ opp_accepted }}</div>
+      <div class="kpi-sub">Marcadas como aceptadas</div>
+    </div>
+    <div class="kpi-card text-center">
+      <div class="kpi-title">No vistas</div>
+      <div class="kpi-value">{{ opp_unseen }}</div>
+      <div class="kpi-sub">Sin evaluar todavía</div>
+    </div>
   </div>
 </div>
 
 {# ===== KPIs PROCESOS ===== #}
-<div class="d-flex justify-content-between align-items-center mb-2">
-  <h5 class="m-0">Procesos</h5>
-</div>
-<div class="kpi-grid">
-  <div class="kpi-card text-center">
-    <div class="kpi-title">Pendientes</div>
-    <div class="kpi-value">{{ total_pending }}</div>
-    <div class="kpi-sub">Procesos por terminar o revisar</div>
+<div class="panel-section panel-proc">
+  <div class="panel-header">
+    <div>
+      <div class="panel-title">Procesos</div>
+      <div class="panel-subtitle">Estado general de las cargas de Mercado Público</div>
+    </div>
   </div>
-  <div class="kpi-card text-center">
-    <div class="kpi-title">Completados</div>
-    <div class="kpi-value text-success">{{ total_done }}</div>
-    <div class="kpi-sub">Procesos listos</div>
-  </div>
-  <div class="kpi-card text-center">
-    <div class="kpi-title">Total cargas</div>
-    <div class="kpi-value text-primary">{{ total_all }}</div>
-    <div class="kpi-sub">Historial completo</div>
+  <div class="kpi-grid">
+    <div class="kpi-card text-center">
+      <div class="kpi-title">Pendientes</div>
+      <div class="kpi-value">{{ total_pending }}</div>
+      <div class="kpi-sub">Procesos por terminar o revisar</div>
+    </div>
+    <div class="kpi-card text-center">
+      <div class="kpi-title">Completados</div>
+      <div class="kpi-value">{{ total_done }}</div>
+      <div class="kpi-sub">Procesos listos</div>
+    </div>
+    <div class="kpi-card text-center">
+      <div class="kpi-title">Total cargas</div>
+      <div class="kpi-value">{{ total_all }}</div>
+      <div class="kpi-sub">Historial completo</div>
+    </div>
   </div>
 </div>
 <!-- ======= FIN TARJETAS ======= -->
