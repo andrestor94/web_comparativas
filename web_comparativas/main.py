@@ -1408,7 +1408,7 @@ def _home_collect(user: User):
         if u.updated_at and (now - u.updated_at).total_seconds() < 86400
     ]
 
-    return {
+        return {
         "uploads": uploads,
         "pending": pending,
         "done": done,
@@ -1417,6 +1417,11 @@ def _home_collect(user: User):
         "total_all": int(kpis.get("total", 0)),
         "total_pending": int(kpis.get("pending", 0)),
         "total_done": int(kpis.get("done", 0)),
+
+        # KPIs de Oportunidades (por ahora en 0; los conectamos bien en el próximo paso)
+        "opp_total": 0,
+        "opp_accepted": 0,
+        "opp_unseen": 0,
     }
 
 # ======================================================================

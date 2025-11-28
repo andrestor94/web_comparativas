@@ -73,6 +73,51 @@
   .action-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
 </style>
 
+{# ===== KPIs OPORTUNIDADES ===== #}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h5 class="m-0">Oportunidades</h5>
+  <a class="btn btn-sm btn-ghost" href="/oportunidades/buscador">Ir al buscador</a>
+</div>
+<div class="kpi-grid mb-3">
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Total</div>
+    <div class="kpi-value text-primary">{{ opp_total }}</div>
+    <div class="kpi-sub">Oportunidades cargadas</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Aceptadas</div>
+    <div class="kpi-value text-success">{{ opp_accepted }}</div>
+    <div class="kpi-sub">Marcadas como aceptadas</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">No vistas</div>
+    <div class="kpi-value text-warning">{{ opp_unseen }}</div>
+    <div class="kpi-sub">Sin evaluar todavía</div>
+  </div>
+</div>
+
+{# ===== KPIs PROCESOS ===== #}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h5 class="m-0">Procesos</h5>
+</div>
+<div class="kpi-grid">
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Pendientes</div>
+    <div class="kpi-value">{{ total_pending }}</div>
+    <div class="kpi-sub">Procesos por terminar o revisar</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Completados</div>
+    <div class="kpi-value text-success">{{ total_done }}</div>
+    <div class="kpi-sub">Procesos listos</div>
+  </div>
+  <div class="kpi-card text-center">
+    <div class="kpi-title">Total cargas</div>
+    <div class="kpi-value text-primary">{{ total_all }}</div>
+    <div class="kpi-sub">Historial completo</div>
+  </div>
+</div>
+
 <div class="kpi-grid">
   <div class="kpi-card text-center">
     <div class="kpi-title">Pendientes</div>
