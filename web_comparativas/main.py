@@ -1376,8 +1376,9 @@ def _apply_visibility(qry, user: User):
 def _home_collect(user: User):
     """
     Compila los datos del panel con visibilidad por grupos.
+    Incluye KPIs de procesos + KPIs de oportunidades.
     """
-    # KPIs según visibilidad
+    # KPIs de procesos según visibilidad
     kpis = kpis_for_home(db_session, user)
 
     # cargas visibles (auditor ve todas), ordenadas de más nueva a más vieja
@@ -1409,6 +1410,56 @@ def _home_collect(user: User):
         if u.updated_at and (now - u.updated_at).total_seconds() < 86400
     ]
 
+    # ------------------------------------------------------------------
+    # KPIs de OPORTUNIDADES (mismo archivo maestro que Buscador)
+    # ------------------------------------------------------------------
+    opp_total = 0
+    opp_accepted = 0
+    opp_unseen = 0
+
+    try:
+        df_opp = _opp_load_df()
+    except Exception:
+        df_opp = None
+
+    if df_opp is not None and not df_opp.empty:
+        # total de oportunidades = total de filas del maestro
+        opp_total = int(len(df_opp))
+
+        # intentamos localizar la columna de evaluación
+        eval_col = _opp_pick(
+            df_opp,
+            [
+                "Evaluación",
+                "Evaluacion",
+                "Estado Evaluación",
+                "Estado evaluacion",
+                "Estado evaluación",
+                "Evaluation",
+            ],
+        )
+
+        if eval_col:
+            # normalizamos texto
+            series = (
+                df_opp[eval_col]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            )
+
+            # aceptadas: contiene 'acept'
+            opp_accepted = int(series.str.contains("acept", na=False).sum())
+
+            # rechazadas: contiene 'rechaz'
+            opp_rejected = int(series.str.contains("rechaz", na=False).sum())
+
+            # no vistas = total - (aceptadas + rechazadas)
+            opp_unseen = max(0, opp_total - opp_accepted - opp_rejected)
+        else:
+            # si no hay columna de evaluación, consideramos todas como "no vistas"
+            opp_unseen = opp_total
+
     return {
         "uploads": uploads,
         "pending": pending,
@@ -1419,10 +1470,10 @@ def _home_collect(user: User):
         "total_pending": int(kpis.get("pending", 0)),
         "total_done": int(kpis.get("done", 0)),
 
-        # KPIs de Oportunidades (por ahora en 0, luego los conectamos)
-        "opp_total": 0,
-        "opp_accepted": 0,
-        "opp_unseen": 0,
+        # KPIs de Oportunidades
+        "opp_total": opp_total,
+        "opp_accepted": opp_accepted,
+        "opp_unseen": opp_unseen,
     }
 
 # ======================================================================
