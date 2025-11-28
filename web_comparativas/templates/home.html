@@ -4,16 +4,8 @@
 {# Normalizo el rol una sola vez #}
 {% set r = (user.role or user.rol or '')|lower %}
 
-{# Acciones rápidas en el header (únicas) #}
-{% block toolbar_actions %}
-  {% if r in ['admin','analista','supervisor'] %}
-    <a class="btn btn-sm btn-primary" href="/cargas/nueva">+ Nueva carga</a>
-  {% endif %}
-  <a class="btn btn-sm btn-outline-secondary" href="/cargas/historial">Ver historial</a>
-  {% if r == 'admin' %}
-    <a class="btn btn-sm btn-ghost" href="/usuarios">Usuarios</a>
-  {% endif %}
-{% endblock %}
+{# Acciones rápidas en el header (home sin botones) #}
+{% block toolbar_actions %}{% endblock %}
 
 {# Avisos compactos en el top #}
 {% block notifications %}

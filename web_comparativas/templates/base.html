@@ -295,36 +295,34 @@
           </form>
 
           {# ===== Botón global "Resetear procesos" (solo admin, arriba) ===== #}
-          {% if user and r == 'admin' %}
-            <button type="button"
-                    class="btn btn-link text-danger fw-semibold d-none d-md-inline"
-                    data-bs-toggle="modal"
-                    data-bs-target="#resetUploadsModal">
-              Resetear procesos
-            </button>
-          {% endif %}
+{% if user and r == 'admin' %}
+  <button type="button"
+          class="btn btn-link text-danger fw-semibold d-none d-md-inline"
+          data-bs-toggle="modal"
+          data-bs-target="#resetUploadsModal">
+    Resetear procesos
+  </button>
+{% endif %}
 
-          <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
-            {% if user %}
-              {% if user_display is defined %}
-                <span>{{ user_display(user) }}</span>
-              {% else %}
-                <span>{{ _display_name or '—' }}</span>
-              {% endif %}
+<div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
+  {% if user %}
+    {% if user_display is defined %}
+      <span>{{ user_display(user) }}</span>
+    {% else %}
+      <span>{{ _display_name or '—' }}</span>
+    {% endif %}
 
-              <!-- pill de rol -->
-              <span class="top-user-pill">
-                {{ (r or '')|capitalize }}
-              </span>
+    <!-- pill de rol -->
+    <span class="top-user-pill">
+      {{ (r or '')|capitalize }}
+    </span>
 
-              <a href="/mi/password"
-                 class="text-decoration-none small {% if request.url.path.startswith('/mi/password') %}fw-semibold text-primary{% else %}text-muted{% endif %}">
-                 Cambiar contraseña
-              </a>
-            {% else %}
-              Invitado
-            {% endif %}
-          </div>
+    {# Se quitó el link "Cambiar contraseña" de la barra superior #}
+
+  {% else %}
+    Invitado
+  {% endif %}
+</div>
         </div>
       </header>
 
