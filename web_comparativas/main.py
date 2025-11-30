@@ -11,6 +11,7 @@ import unicodedata
 import re
 import logging
 from types import SimpleNamespace
+from web_comparativas.usage_service import log_usage_event
 from typing import Any, Optional, List, Dict
 from dotenv import load_dotenv
 load_dotenv()
@@ -1559,7 +1560,17 @@ def mercado_publico_home(
     """
     Home (panel principal) del Mercado Público.
     """
-    return _render_mercado_publico_home(request, user)
+    response = _render_mercado_publico_home(request, user)
+
+    # === LOG USO: vista de la pantalla principal ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="mercado_publico_home",
+        request=request,
+    )
+
+    return response
 
 
 @app.get("/mercado-publico/web-comparativas", response_class=HTMLResponse)
@@ -1573,7 +1584,17 @@ def mercado_publico_web_comparativas(
     Home específico de Web Comparativas dentro de Mercado Público.
     Reutiliza el mismo panel principal.
     """
-    return _render_mercado_publico_home(request, user)
+    response = _render_mercado_publico_home(request, user)
+
+    # === LOG USO: vista de Web Comparativa ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="web_comparativa_home",
+        request=request,
+    )
+
+    return response
 
 
 @app.get("/mercado-publico/oportunidades", response_class=HTMLResponse)
@@ -1590,7 +1611,17 @@ def mercado_publico_oportunidades(
         "request": request,
         "user": user,
     }
-    return templates.TemplateResponse("oportunidades.html", ctx)
+    response = templates.TemplateResponse("oportunidades.html", ctx)
+
+    # === LOG USO: vista del módulo Oportunidades ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_home",
+        request=request,
+    )
+
+    return response
 
 
 @app.get("/mercado-publico/reporte-perfiles", response_class=HTMLResponse)
@@ -1607,7 +1638,17 @@ def mercado_publico_reporte_perfiles(
         "request": request,
         "user": user,
     }
-    return templates.TemplateResponse("reporte_perfiles.html", ctx)
+    response = templates.TemplateResponse("reporte_perfiles.html", ctx)
+
+    # === LOG USO: vista de Reporte de perfiles ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="reporte_perfiles",
+        request=request,
+    )
+
+    return response
 
 @app.get("/mercado-publico/seguimiento-usuarios", response_class=HTMLResponse)
 def mercado_publico_seguimiento_usuarios(
@@ -1698,7 +1739,17 @@ def oportunidades_buscador(
             "<p>No hay archivo maestro aún. Subí un Excel para habilitar el dashboard.</p>"
             "</div>"
         )
-        return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+        response = _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+        # LOG USO
+        log_usage_event(
+            user=user,
+            action_type="page_view",
+            section="oportunidades_buscador",
+            request=request,
+        )
+
+        return response
 
     # A partir de acá dejamos todos los filtros al FRONT (JS)
     df_filtered = df_all.copy()
@@ -1760,7 +1811,17 @@ def oportunidades_buscador(
         "<p>Dashboard cargado.</p>"
         "</div>"
     )
-    return _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+    response = _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+    # LOG USO
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_buscador",
+        request=request,
+    )
+
+    return response
 
 @app.get("/api/oportunidades/buscador", response_class=JSONResponse)
 def api_oportunidades_buscador(
@@ -1936,6 +1997,17 @@ async def oportunidades_buscador_upload(
 ):
     # guarda y calcula filas
     rows = _save_oportunidades_excel(file)
+
+    # LOG USO: carga de archivo maestro
+    log_usage_event(
+        user=user,
+        action_type="file_upload",
+        section="oportunidades_buscador",
+        resource_id=file.filename,
+        extra_data={"rows": rows},
+        request=request,
+    )
+
     # redirige al GET que arma KPIs/tabla (evita 'kpis undefined')
     url = request.url_for("oportunidades_buscador")
     url = str(url) + "?uploaded=1"
@@ -2276,7 +2348,17 @@ def oportunidades_dimensiones(
         "<p>Pantalla en construcción. Aquí armamos tableros por ejes/dimensiones (comprador, provincia, plataforma, etc.).</p>"
         "</div>"
     )
-    return _render_or_fallback("oportunidades_dimensiones.html", ctx, fallback_html)
+    response = _render_or_fallback("oportunidades_dimensiones.html", ctx, fallback_html)
+
+    # LOG USO
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_dimensiones",
+        request=request,
+    )
+
+    return response
 
 
 # ======================================================================
