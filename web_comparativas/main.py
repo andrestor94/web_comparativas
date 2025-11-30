@@ -11,7 +11,7 @@ import unicodedata
 import re
 import logging
 from types import SimpleNamespace
-from web_comparativas.usage_service import log_usage_event
+from web_comparativas.usage_service import log_usage_event, get_usage_summary
 from typing import Any, Optional, List, Dict
 from dotenv import load_dotenv
 load_dotenv()
@@ -1666,6 +1666,46 @@ def mercado_publico_seguimiento_usuarios(
         "user": user,
     }
     return templates.TemplateResponse("seguimiento_usuarios.html", ctx)
+
+# ======================================================================
+# API: Seguimiento de usuarios (uso de la interfaz)
+# ======================================================================
+
+from fastapi import Query  # si no lo tenés ya importado arriba
+
+@app.get("/api/usage/summary", response_class=JSONResponse)
+def api_usage_summary(
+    request: Request,
+    date_from: str = Query("", description="Fecha desde (YYYY-MM-DD o dd/mm/YYYY)"),
+    date_to: str = Query("", description="Fecha hasta (YYYY-MM-DD o dd/mm/YYYY)"),
+    role: str = Query("analistas_y_supervisores", description="analistas | supervisores | analistas_y_supervisores"),
+    view: str = Query("day", description="Resolución temporal (por ahora 'day')"),
+    user: User = Depends(
+        # Solo roles que pueden ver Seguimiento de usuarios
+        require_roles("admin", "supervisor", "auditor")
+    ),
+):
+    """
+    Devuelve el resumen de uso para el módulo de Seguimiento de usuarios.
+    Se basa en la tabla usage_events y respeta la visibilidad del usuario.
+    """
+    summary = get_usage_summary(
+        current_user=user,
+        date_from=date_from,
+        date_to=date_to,
+        role_filter=role,
+        view=view,
+    )
+
+    # (Opcional) Log de que entró al módulo de seguimiento
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="seguimiento_usuarios_api",
+        request=request,
+    )
+
+    return JSONResponse({"ok": True, **summary})
 
 
 # ======================================================================
