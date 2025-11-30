@@ -106,6 +106,10 @@ class User(Base):
     unit_business = Column("business_unit", String(120), nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
 
+    # Relaciones con métricas de uso
+    usage_events = relationship("UsageEvent", back_populates="user", lazy="selectin")
+    usage_sessions = relationship("UsageSession", back_populates="user", lazy="selectin")
+
     # ---- Helpers de rol/unidad ----
     def _role_norm(self) -> str:
         return (self.role or "").strip().lower()
@@ -502,6 +506,85 @@ class Comment(Base):
         if len(body_preview) > 24:
             body_preview = body_preview[:24] + "…"
         return f"<Comment id={self.id} up={self.upload_id} by={self.author_user_id} '{body_preview}'>"
+
+
+# ---------- Métricas de uso: eventos y sesiones ----------
+class UsageEvent(Base):
+    """
+    Evento granular de uso de la interfaz.
+    Cada acción relevante genera un registro acá.
+    """
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Momento exacto del evento
+    timestamp = Column(DateTime, nullable=False, index=True, default=dt.datetime.utcnow)
+
+    # Sesión lógica del usuario
+    session_id = Column(String(64), nullable=False, index=True)
+
+    # Usuario y rol asociado
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_role = Column(String(32), nullable=False, index=True)
+
+    # Qué pasó y dónde pasó
+    action_type = Column(String(50), nullable=False, index=True)   # login, page_view, file_upload, etc.
+    section = Column(String(100), nullable=True, index=True)       # home, buscador, dimensiones, etc.
+    resource_id = Column(String(100), nullable=True)               # id de proceso / archivo, si aplica
+
+    # Duración aproximada de la acción (ms, opcional)
+    duration_ms = Column(Integer, nullable=True)
+
+    # Datos extra en JSON (filtros aplicados, parámetros, etc.)
+    extra_data = Column(JSON, nullable=True)
+
+    # Datos técnicos
+    ip = Column(String(50), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    # Relación con el usuario
+    user = relationship("User", back_populates="usage_events")
+
+    def __repr__(self) -> str:
+        return f"<UsageEvent id={self.id} user={self.user_id} action={self.action_type!r} section={self.section!r}>"
+
+
+class UsageSession(Base):
+    """
+    Resumen agregado de una sesión de trabajo del usuario.
+    Una sesión agrupa muchos UsageEvent.
+    """
+    __tablename__ = "usage_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Identificador lógico de la sesión
+    session_id = Column(String(64), nullable=False, unique=True, index=True)
+
+    # Usuario y rol
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_role = Column(String(32), nullable=False, index=True)
+
+    # Tiempos
+    start_time = Column(DateTime, nullable=False, index=True, default=dt.datetime.utcnow)
+    end_time = Column(DateTime, nullable=True, index=True)
+
+    # Minutos totales / activos / inactivos
+    duration_minutes = Column(Float, nullable=True)
+    active_minutes = Column(Float, nullable=True)
+    idle_minutes = Column(Float, nullable=True)
+
+    # Métricas agregadas dentro de la sesión
+    files_uploaded = Column(Integer, nullable=False, default=0)
+    actions_count = Column(Integer, nullable=False, default=0)
+    sections_visited = Column(Integer, nullable=False, default=0)
+
+    # Relación con el usuario
+    user = relationship("User", back_populates="usage_sessions")
+
+    def __repr__(self) -> str:
+        return f"<UsageSession id={self.id} user={self.user_id} session={self.session_id!r}>"
 
 
 # ----------------------------------------------------------------------
@@ -968,6 +1051,24 @@ def _ensure_upload_uploader_snapshot_columns():
         pass
 
 
+def _ensure_usage_indexes():
+    """
+    Índices básicos para tablas de métricas de uso.
+    No es crítico si falla; solo mejora performance de consultas.
+    """
+    try:
+        idx_sql = [
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_user_time ON usage_events(user_id, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_action ON usage_events(action_type)",
+            "CREATE INDEX IF NOT EXISTS idx_usage_sessions_user_start ON usage_sessions(user_id, start_time)",
+        ]
+        with engine.begin() as conn:
+            for sql in idx_sql:
+                conn.execute(text(sql))
+    except Exception:
+        pass
+
+
 # --------- Bootstrap de admin desde variables de entorno ---------
 def _bootstrap_admin_from_env():
     """
@@ -1039,6 +1140,7 @@ def init_db():
     _ensure_comments_indexes()
     _ensure_email_notifications_indexes()
     _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
+    _ensure_usage_indexes()  # <-- índices para métricas de uso
     _bootstrap_admin_from_env()  # <-- crea admin si tenés ADMIN_EMAIL/PASSWORD
     _bootstrap_reset_password_from_env()  # <-- configura contraseña RESET si hay RESET_PASSWORD
 
