@@ -1546,6 +1546,18 @@ def _render_mercado_publico_home(request: Request, user: User):
     }
     return templates.TemplateResponse("home.html", ctx)
 
+def _parse_iso_date(s: str | None) -> dt.date | None:
+    """
+    Convierte 'YYYY-MM-DD' a date.
+    Devuelve None si viene vacío o formato inválido.
+    """
+    if not s:
+        return None
+    try:
+        return dt.datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
 
 # ======================================================================
 # MERCADO PÚBLICO: rutas principales
