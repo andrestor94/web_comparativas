@@ -58,15 +58,16 @@
     <div>
       <div class="seg-filters-label mb-1">Rango de fechas</div>
       <div class="d-flex gap-2">
-        <input type="date" class="form-control form-control-sm" id="seg-date-from">
-        <input type="date" class="form-control form-control-sm" id="seg-date-to">
+        {# ⬇⬇⬇ IDs que usa el JS #}
+        <input type="date" class="form-control form-control-sm" id="usage-date-from">
+        <input type="date" class="form-control form-control-sm" id="usage-date-to">
       </div>
     </div>
 
     <div>
       <div class="seg-filters-label mb-1">Rol</div>
-      <select class="form-select form-select-sm" id="seg-role">
-        <option value="all">Analistas y Supervisores</option>
+      <select class="form-select form-select-sm" id="usage-role">
+        <option value="analistas_y_supervisores">Analistas y Supervisores</option>
         <option value="analista">Solo analistas</option>
         <option value="supervisor">Solo supervisores</option>
       </select>
@@ -74,7 +75,7 @@
 
     <div>
       <div class="seg-filters-label mb-1">Equipo / grupo</div>
-      <select class="form-select form-select-sm" id="seg-team">
+      <select class="form-select form-select-sm" id="usage-team">
         <option value="all">Todos los equipos</option>
         {# Más adelante acá se inyectan grupos reales #}
       </select>
@@ -82,7 +83,7 @@
 
     <div>
       <div class="seg-filters-label mb-1">Vista temporal</div>
-      <select class="form-select form-select-sm" id="seg-time-grain">
+      <select class="form-select form-select-sm" id="usage-view">
         <option value="day">Día</option>
         <option value="week">Semana</option>
         <option value="month">Mes</option>
@@ -90,7 +91,7 @@
     </div>
 
     <div class="ms-auto">
-      <button class="btn btn-sm btn-primary">
+      <button class="btn btn-sm btn-primary" id="usage-apply-filters">
         Aplicar filtros
       </button>
     </div>
@@ -102,29 +103,37 @@
   <div class="col-6 col-md-3">
     <div class="seg-card seg-kpi">
       <div class="seg-kpi-label">Usuarios activos</div>
-      <div class="seg-kpi-value">–</div>
-      <div class="seg-kpi-sub">Con al menos una sesión en el período</div>
+      <div class="seg-kpi-value" id="usage-kpi-active-users">–</div>
+      <div class="seg-kpi-sub" id="usage-kpi-active-users-hint">
+        Con al menos una sesión en el período
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
     <div class="seg-card seg-kpi">
       <div class="seg-kpi-label">Archivos cargados</div>
-      <div class="seg-kpi-value">–</div>
-      <div class="seg-kpi-sub">Total de cargas realizadas</div>
+      <div class="seg-kpi-value" id="usage-kpi-uploads">–</div>
+      <div class="seg-kpi-sub" id="usage-kpi-uploads-hint">
+        Total de cargas realizadas
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
     <div class="seg-card seg-kpi">
       <div class="seg-kpi-label">Horas activas</div>
-      <div class="seg-kpi-value">–</div>
-      <div class="seg-kpi-sub">Tiempo de interacción en la interfaz</div>
+      <div class="seg-kpi-value" id="usage-kpi-hours">–</div>
+      <div class="seg-kpi-sub" id="usage-kpi-hours-hint">
+        Tiempo de interacción en la interfaz
+      </div>
     </div>
   </div>
   <div class="col-6 col-md-3">
     <div class="seg-card seg-kpi">
       <div class="seg-kpi-label">Índice productividad prom.</div>
-      <div class="seg-kpi-value">–</div>
-      <div class="seg-kpi-sub">Promedio de todos los usuarios</div>
+      <div class="seg-kpi-value" id="usage-kpi-productivity">–</div>
+      <div class="seg-kpi-sub" id="usage-kpi-productivity-hint">
+        Promedio de todos los usuarios
+      </div>
     </div>
   </div>
 </div>
@@ -452,4 +461,9 @@
 
 </div>
 
+{% endblock %}
+
+{# ==== JS específico del módulo ==== #}
+{% block extra_js %}
+  <script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}" defer></script>
 {% endblock %}
