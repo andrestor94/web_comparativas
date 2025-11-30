@@ -244,6 +244,14 @@
           </a>
         {% endif %}
 
+        <!-- Seguimiento usuarios (solo roles != analista) -->
+        {% if user and r in ['admin','supervisor','auditor'] %}
+          <a href="/mercado-publico/seguimiento-usuarios"
+             class="nav-link {% if request.url.path.startswith('/mercado-publico/seguimiento-usuarios') %}active{% endif %}">
+             Seguimiento usuarios
+          </a>
+        {% endif %}
+
         <!-- Usuarios (solo admin) -->
         {% if user and r == 'admin' %}
           <a href="/usuarios"

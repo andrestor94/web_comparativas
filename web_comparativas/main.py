@@ -1609,6 +1609,24 @@ def mercado_publico_reporte_perfiles(
     }
     return templates.TemplateResponse("reporte_perfiles.html", ctx)
 
+@app.get("/mercado-publico/seguimiento-usuarios", response_class=HTMLResponse)
+def mercado_publico_seguimiento_usuarios(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Seguimiento de Usuarios (uso interno).
+    Solo visible para roles distintos de Analista.
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("seguimiento_usuarios.html", ctx)
+
+
 # ======================================================================
 # OPORTUNIDADES: Buscador & Dimensiones
 # ======================================================================
