@@ -384,6 +384,9 @@
 {% endblock %}
 
 {% block extra_js %}
-  <!-- Usamos ApexCharts que ya tenés cargado para otros dashboards -->
-  <script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}"></script>
+  {# 1) Librería de gráficos #}
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+  {# 2) JS específico de Seguimiento de usuarios #}
+  <script src="{{ url_for('static', path='/js/seguimiento_usuarios.js') }}"></script>
 {% endblock %}
