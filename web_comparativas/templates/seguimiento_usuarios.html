@@ -474,9 +474,12 @@
 {% endblock %}
 
 {% block extra_scripts %}
-  {# Asumimos que ApexCharts ya está cargado globalmente en base.html.
-     Si no, podrías agregar:
-     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-  #}
+  {{ super() }}
+
+  <!-- Test rápido: si esto NO aparece en la consola, el bloque no se está ejecutando -->
+  <script>
+    console.log("[seguimiento_usuarios] bloque extra_scripts OK");
+  </script>
+
   <script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}"></script>
 {% endblock %}
