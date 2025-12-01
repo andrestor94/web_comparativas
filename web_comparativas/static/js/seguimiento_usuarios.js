@@ -1,245 +1,121 @@
 // static/js/seguimiento_usuarios.js
 (function () {
-  console.log("[Seguimiento usuarios] JS cargado");
+  console.log("[SeguimientoUsuarios] JS cargado v1");
 
+  // Helpers --------------------------------------------------------------
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  // ---------------------------------------------------------------------------
-  // Elementos
-  // ---------------------------------------------------------------------------
-  const $dateFrom = $("#su-date-from");
-  const $dateTo = $("#su-date-to");
-  const $role = $("#su-role");
-  const $team = $("#su-team");
-  const $view = $("#su-view");
-  const $apply = $("#su-apply");
+  const numberOrZero = (v) => (v == null || isNaN(Number(v)) ? 0 : Number(v));
 
-  const $kpiActiveUsers = $("#su-kpi-active-users");
-  const $kpiFiles = $("#su-kpi-files");
-  const $kpiHours = $("#su-kpi-hours");
-  const $kpiProductivity = $("#su-kpi-productivity");
+  const fmtInt = (v) => numberOrZero(v).toString();
 
-  const $kpiActiveUsersCap = $("#su-kpi-active-users-caption");
-  const $kpiFilesCap = $("#su-kpi-files-caption");
-  const $kpiHoursCap = $("#su-kpi-hours-caption");
-  const $kpiProductivityCap = $("#su-kpi-productivity-caption");
+  const fmtDecimal = (v, decimals = 1) => {
+    const n = numberOrZero(v);
+    return n.toLocaleString("es-AR", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  };
 
-  const $tableBody = $("#su-table-users-body");
-  const $error = $("#su-error");
+  const fmtPercent = (v) => {
+    const n = numberOrZero(v) * (v > 1 ? 1 : 100); // si backend ya manda 0-1
+    return n.toLocaleString("es-AR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
 
-  const $weekdayWrapper = $("#su-chart-weekday-wrapper");
-  const $weekdayEmpty = $("#su-chart-weekday-empty");
-  const $rolesWrapper = $("#su-chart-roles-wrapper");
-  const $rolesEmpty = $("#su-chart-roles-empty");
-  const $heatmapWrapper = $("#su-chart-heatmap-wrapper");
-  const $heatmapEmpty = $("#su-chart-heatmap-empty");
-  const $sectionsWrapper = $("#su-chart-sections-wrapper");
-  const $sectionsEmpty = $("#su-chart-sections-empty");
+  const fmtDateTime = (s) => {
+    if (!s) return "—";
+    // Intentamos parsear ISO; si falla, devolvemos tal cual
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
-  // ---------------------------------------------------------------------------
-  // Estado de charts (para reusar instancias)
-  // ---------------------------------------------------------------------------
-  let weekdayChart = null;
-  let rolesChart = null;
-  let heatmapChart = null;
-  let sectionsChart = null;
+  // Tabs manuales (no dependemos de JS de Bootstrap) ---------------------
+  const tabButtons = $$("[data-usage-tab-target]");
+  const tabPanels = $$("[data-usage-tab-panel]");
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-  function safeNumber(value, decimals = 0) {
-    const n = Number(value);
-    if (Number.isNaN(n)) return 0;
-    return Number(n.toFixed(decimals));
+  function activateTab(targetSelector) {
+    tabButtons.forEach((btn) => {
+      const isActive = btn.dataset.usageTabTarget === targetSelector;
+      btn.classList.toggle("active", isActive);
+    });
+
+    tabPanels.forEach((panel) => {
+      const selector = "#" + panel.id;
+      const isActive = selector === targetSelector;
+      panel.classList.toggle("show", isActive);
+      panel.classList.toggle("active", isActive);
+    });
   }
 
-  function setError(msg) {
-    if (!msg) {
-      $error.classList.add("d-none");
-      $error.textContent = "";
-    } else {
-      $error.classList.remove("d-none");
-      $error.textContent = msg;
-    }
+  tabButtons.forEach((btn) => {
+    btn.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      const target = btn.dataset.usageTabTarget;
+      if (!target) return;
+      activateTab(target);
+    });
+  });
+
+  if (tabButtons.length) {
+    activateTab(tabButtons[0].dataset.usageTabTarget);
   }
 
-  function toggleEmpty(wrapper, emptyEl, hasData) {
-    if (!wrapper || !emptyEl) return;
-    if (hasData) {
-      emptyEl.classList.add("d-none");
-    } else {
-      emptyEl.classList.remove("d-none");
-    }
+  // Referencias a elementos ----------------------------------------------
+  const filtersForm = $("#usage-filters-form");
+  const applyBtn = $("#usage-apply-filters");
+
+  const cardActiveUsers = $("#card-active-users");
+  const cardFiles = $("#card-files");
+  const cardActiveHours = $("#card-active-hours");
+  const cardProductivity = $("#card-productivity");
+
+  const cardActiveUsersSub = $("#card-active-users-sub");
+  const cardFilesSub = $("#card-files-sub");
+  const cardActiveHoursSub = $("#card-active-hours-sub");
+  const cardProductivitySub = $("#card-productivity-sub");
+
+  const tbodyUsers = $("#usage-users-tbody");
+
+  // Charts (ApexCharts) ---------------------------------------------------
+  let chartWeekday = null;
+  let chartRoles = null;
+  let chartSections = null;
+  let chartHeatmap = null;
+
+  function ensureApex(el) {
+    if (!el) return false;
+    if (window.ApexCharts) return true;
+    el.innerHTML =
+      '<div class="usage-empty">No se pudieron cargar los gráficos (ApexCharts no disponible).</div>';
+    return false;
   }
 
-  // Intenta ser compatible con varios nombres de campos posibles del backend
-  function getKpis(data) {
-    return (
-      data.kpis ||
-      data.summary ||
-      {
-        active_users: 0,
-        uploaded_files: 0,
-        active_hours: 0,
-        productivity_index: 0,
-      }
-    );
-  }
+  function buildWeekdayChart(items) {
+    const el = $("#usage-chart-weekday");
+    if (!ensureApex(el)) return;
 
-  function getCharts(data) {
-    return data.charts || data.series || {};
-  }
+    const labels =
+      items && items.length
+        ? items.map((it) => it.label || it.weekday || it.day || "")
+        : ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-  function getPerUserRows(data) {
-    if (data.per_user && Array.isArray(data.per_user.rows)) {
-      return data.per_user.rows;
-    }
-    if (Array.isArray(data.per_user)) return data.per_user;
-    if (Array.isArray(data.users)) return data.users;
-    if (data.users && Array.isArray(data.users.rows)) return data.users.rows;
-    return [];
-  }
-
-  // ---------------------------------------------------------------------------
-  // Construcción de URL a /api/usage/summary
-  // ---------------------------------------------------------------------------
-  function buildSummaryUrl() {
-    const params = new URLSearchParams();
-
-    const from = $dateFrom.value;
-    const to = $dateTo.value;
-    const role = $role.value;
-    const team = $team.value;
-    const view = $view.value || "day";
-
-    if (from) {
-      // Dos nombres para aumentar chances de compatibilidad con el backend
-      params.set("date_from", from);
-      params.set("start_date", from);
-    }
-    if (to) {
-      params.set("date_to", to);
-      params.set("end_date", to);
-    }
-    if (role) params.set("role", role);
-    if (team) {
-      params.set("team_id", team);
-      params.set("group_id", team);
-    }
-    params.set("granularity", view);
-    params.set("view", view);
-
-    return "/api/usage/summary?" + params.toString();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render KPIs
-  // ---------------------------------------------------------------------------
-  function renderKpis(data) {
-    const kpis = getKpis(data);
-
-    const activeUsers =
-      kpis.active_users ??
-      kpis.users_active ??
-      kpis.users ??
-      kpis.total_users ??
-      0;
-    const uploadedFiles =
-      kpis.uploaded_files ??
-      kpis.files ??
-      kpis.cargas ??
-      kpis.files_uploaded ??
-      0;
-    const activeHours =
-      kpis.active_hours ??
-      kpis.hours ??
-      kpis.hours_active ??
-      kpis.total_hours ??
-      0;
-    const productivity =
-      kpis.productivity_index ??
-      kpis.productivity ??
-      kpis.productivity_avg ??
-      0;
-
-    $kpiActiveUsers.textContent = safeNumber(activeUsers).toString();
-    $kpiFiles.textContent = safeNumber(uploadedFiles).toString();
-    $kpiHours.textContent = safeNumber(activeHours, 1).toString().replace(".", ",");
-    $kpiProductivity.textContent = safeNumber(productivity, 2)
-      .toString()
-      .replace(".", ",");
-
-    // Mensajes de caption flexibles, según haya o no datos
-    if (activeUsers > 0) {
-      $kpiActiveUsersCap.textContent =
-        "Cantidad de usuarios con al menos una sesión en el rango.";
-    } else {
-      $kpiActiveUsersCap.textContent =
-        "Sin actividad registrada en el rango seleccionado.";
-    }
-
-    if (uploadedFiles > 0) {
-      $kpiFilesCap.textContent =
-        "Archivos cargados por Analistas y Supervisores en el rango.";
-    } else {
-      $kpiFilesCap.textContent =
-        "Todavía no se registraron cargas en el rango seleccionado.";
-    }
-
-    if (activeHours > 0) {
-      $kpiHoursCap.textContent =
-        "Horas activas estimadas a partir de los eventos de uso.";
-    } else {
-      $kpiHoursCap.textContent =
-        "Sin tiempo activo registrado en el rango seleccionado.";
-    }
-
-    if (productivity > 0) {
-      $kpiProductivityCap.textContent =
-        "Índice de productividad promedio basado en sesiones, horas y cargas.";
-    } else {
-      $kpiProductivityCap.textContent =
-        "Cuando haya más actividad, vas a ver acá un índice promedio.";
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render gráficos
-  // ---------------------------------------------------------------------------
-
-  function renderWeekdayChart(charts) {
-    const raw =
-      charts.weekday_activity ||
-      charts.activity_by_weekday ||
-      charts.activity_by_day ||
-      [];
-
-    if (!raw || raw.length === 0) {
-      toggleEmpty($weekdayWrapper, $weekdayEmpty, false);
-      if (weekdayChart) weekdayChart.updateSeries([]);
-      return;
-    }
-
-    toggleEmpty($weekdayWrapper, $weekdayEmpty, true);
-
-    const categories = raw.map(
-      (r) =>
-        r.label ||
-        r.weekday_label ||
-        r.weekday ||
-        r.day_name ||
-        r.day ||
-        ""
-    );
-    const values = raw.map(
-      (r) =>
-        r.value ??
-        r.events ??
-        r.count ??
-        r.sessions ??
-        0
-    );
+    const values =
+      items && items.length
+        ? items.map((it) =>
+            numberOrZero(it.sessions || it.count || it.events || 0)
+          )
+        : labels.map(() => 0);
 
     const options = {
       chart: {
@@ -249,59 +125,63 @@
       },
       series: [
         {
-          name: "Eventos",
+          name: "Sesiones",
           data: values,
         },
       ],
       xaxis: {
-        categories,
+        categories: labels,
       },
       dataLabels: { enabled: false },
-      grid: { strokeDashArray: 3 },
+      stroke: { width: 2 },
+      grid: { strokeDashArray: 4 },
+      tooltip: {
+        y: {
+          formatter: (v) => `${v} sesión${v === 1 ? "" : "es"}`,
+        },
+      },
     };
 
-    if (weekdayChart) {
-      weekdayChart.updateOptions(options);
-    } else if (window.ApexCharts) {
-      weekdayChart = new ApexCharts(
-        document.querySelector("#su-chart-weekday"),
-        options
-      );
-      weekdayChart.render();
+    if (chartWeekday) {
+      chartWeekday.updateOptions({
+        xaxis: options.xaxis,
+        series: options.series,
+      });
+    } else {
+      chartWeekday = new ApexCharts(el, options);
+      chartWeekday.render();
     }
   }
 
-  function renderRolesChart(charts) {
-    const raw =
-      charts.roles_comparison ||
-      charts.roles ||
-      charts.by_role ||
-      [];
+  function buildRolesChart(items) {
+    const el = $("#usage-chart-roles");
+    if (!ensureApex(el)) return;
 
-    if (!raw || raw.length === 0) {
-      toggleEmpty($rolesWrapper, $rolesEmpty, false);
-      if (rolesChart) rolesChart.updateSeries([]);
-      return;
-    }
+    const roles =
+      items && items.length
+        ? items.map((it) => it.role || it.label || "")
+        : ["Analistas", "Supervisores"];
 
-    toggleEmpty($rolesWrapper, $rolesEmpty, true);
+    const sessions =
+      items && items.length
+        ? items.map((it) => numberOrZero(it.sessions || it.count || 0))
+        : roles.map(() => 0);
 
-    const categories = raw.map((r) => r.role_label || r.role || r.label || "");
-    const sessions = raw.map(
-      (r) => r.sessions ?? r.events ?? r.count ?? 0
-    );
-    const hours = raw.map(
-      (r) => r.hours ?? r.active_hours ?? 0
-    );
-    const files = raw.map(
-      (r) => r.files ?? r.uploaded_files ?? r.cargas ?? 0
-    );
+    const hours =
+      items && items.length
+        ? items.map((it) => numberOrZero(it.active_hours || it.hours || 0))
+        : roles.map(() => 0);
+
+    const files =
+      items && items.length
+        ? items.map((it) => numberOrZero(it.files_uploaded || it.files || 0))
+        : roles.map(() => 0);
 
     const options = {
       chart: {
         type: "bar",
-        height: 200,
         stacked: true,
+        height: 260,
         toolbar: { show: false },
       },
       series: [
@@ -309,60 +189,138 @@
         { name: "Horas activas", data: hours },
         { name: "Archivos", data: files },
       ],
-      xaxis: {
-        categories,
-      },
+      xaxis: { categories: roles },
       dataLabels: { enabled: false },
-      grid: { strokeDashArray: 3 },
-      legend: { position: "top" },
+      grid: { strokeDashArray: 4 },
+      tooltip: {
+        shared: true,
+        intersect: false,
+      },
     };
 
-    if (rolesChart) {
-      rolesChart.updateOptions(options);
-    } else if (window.ApexCharts) {
-      rolesChart = new ApexCharts(
-        document.querySelector("#su-chart-roles"),
-        options
-      );
-      rolesChart.render();
+    if (chartRoles) {
+      chartRoles.updateOptions({
+        xaxis: options.xaxis,
+        series: options.series,
+      });
+    } else {
+      chartRoles = new ApexCharts(el, options);
+      chartRoles.render();
     }
   }
 
-  function renderHeatmapChart(charts) {
-    const raw =
-      charts.heatmap_day_hour ||
-      charts.day_hour_heatmap ||
-      charts.heatmap ||
-      [];
+  function buildSectionsChart(items) {
+    const el = $("#usage-chart-sections");
+    if (!ensureApex(el)) return;
 
-    if (!raw || raw.length === 0) {
-      toggleEmpty($heatmapWrapper, $heatmapEmpty, false);
-      if (heatmapChart) heatmapChart.updateSeries([]);
+    const labels =
+      items && items.length
+        ? items.map((it) => it.section || it.label || it.name || "")
+        : ["Home", "Web Comparativa", "Oportunidades", "Reporte perfiles"];
+
+    const values =
+      items && items.length
+        ? items.map((it) => numberOrZero(it.events || it.count || 0))
+        : labels.map(() => 0);
+
+    const options = {
+      chart: {
+        type: "bar",
+        height: 260,
+        toolbar: { show: false },
+      },
+      plotOptions: {
+        bar: {
+          horizontal: true,
+        },
+      },
+      series: [{ name: "Eventos", data: values }],
+      xaxis: { categories: labels },
+      dataLabels: { enabled: false },
+      grid: { strokeDashArray: 4 },
+      tooltip: {
+        y: {
+          formatter: (v) => `${v} evento${v === 1 ? "" : "s"}`,
+        },
+      },
+    };
+
+    if (chartSections) {
+      chartSections.updateOptions({
+        xaxis: options.xaxis,
+        series: options.series,
+      });
+    } else {
+      chartSections = new ApexCharts(el, options);
+      chartSections.render();
+    }
+  }
+
+  function buildHeatmapChart(items) {
+    const el = $("#usage-chart-heatmap");
+    if (!ensureApex(el)) return;
+
+    // Esperamos algo tipo: [{ day: "Lun", hour: 9, value: 3 }, ...]
+    // Si el backend devuelve otra forma, intentamos mapear igual.
+    if (!items || !items.length) {
+      const html =
+        '<div class="usage-empty">Aún no hay datos suficientes para el heatmap día / hora.</div>';
+      el.innerHTML = html;
+      if (chartHeatmap) {
+        chartHeatmap.destroy();
+        chartHeatmap = null;
+      }
       return;
     }
 
-    toggleEmpty($heatmapWrapper, $heatmapEmpty, true);
+    const daysOrder = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-    // Esperamos algo tipo [{day: 'Lun', hour: '09-10', value: 3}, ...]
-    const byDay = {};
-    for (const item of raw) {
+    const grouped = {};
+    for (const raw of items) {
       const day =
-        item.day_label ||
-        item.day_name ||
-        item.day ||
-        item.weekday ||
-        "—";
-      const hour = item.hour_label || item.hour_range || item.hour || "";
-      const value = safeNumber(
-        item.value ?? item.events ?? item.count ?? 0
-      );
-      if (!byDay[day]) byDay[day] = [];
-      byDay[day].push({ x: hour, y: value });
+        raw.day_label ||
+        raw.day ||
+        raw.weekday ||
+        raw.label ||
+        "Otros";
+      const hour =
+        raw.hour_label != null
+          ? raw.hour_label
+          : raw.hour != null
+          ? raw.hour
+          : raw.bucket ||
+            0;
+      const value = numberOrZero(raw.value || raw.count || raw.events || 0);
+      if (!grouped[day]) grouped[day] = {};
+      grouped[day][hour] = value;
     }
 
-    const series = Object.entries(byDay).map(([day, data]) => ({
+    const sortedDays = Object.keys(grouped).sort((a, b) => {
+      const ia = daysOrder.indexOf(a);
+      const ib = daysOrder.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    const hoursSet = new Set();
+    sortedDays.forEach((d) => {
+      Object.keys(grouped[d]).forEach((h) => hoursSet.add(h));
+    });
+    const hours = Array.from(hoursSet).sort(
+      (a, b) => Number(a) - Number(b)
+    );
+
+    const series = sortedDays.map((day) => ({
       name: day,
-      data,
+      data: hours.map((h) => {
+        const v = grouped[day][h];
+        return {
+          x: `${h}:00`,
+          y: numberOrZero(v),
+        };
+      }),
     }));
 
     const options = {
@@ -371,261 +329,222 @@
         height: 260,
         toolbar: { show: false },
       },
+      dataLabels: { enabled: false },
       series,
-      dataLabels: { enabled: false },
-      grid: { strokeDashArray: 3 },
-    };
-
-    if (heatmapChart) {
-      heatmapChart.updateOptions(options);
-    } else if (window.ApexCharts) {
-      heatmapChart = new ApexCharts(
-        document.querySelector("#su-chart-heatmap"),
-        options
-      );
-      heatmapChart.render();
-    }
-  }
-
-  function renderSectionsChart(charts) {
-    const raw =
-      charts.sections ||
-      charts.sections_usage ||
-      charts.most_used_sections ||
-      [];
-
-    if (!raw || raw.length === 0) {
-      toggleEmpty($sectionsWrapper, $sectionsEmpty, false);
-      if (sectionsChart) sectionsChart.updateSeries([]);
-      return;
-    }
-
-    toggleEmpty($sectionsWrapper, $sectionsEmpty, true);
-
-    // Tomamos top 8
-    const top = raw.slice(0, 8);
-    const categories = top.map(
-      (r) => r.section_label || r.section || r.label || ""
-    );
-    const values = top.map(
-      (r) => r.count ?? r.events ?? r.views ?? 0
-    );
-
-    const options = {
-      chart: {
-        type: "bar",
-        height: 200,
-        toolbar: { show: false },
-      },
-      series: [{ name: "Eventos", data: values }],
-      xaxis: { categories },
-      dataLabels: { enabled: false },
-      grid: { strokeDashArray: 3 },
-      plotOptions: {
-        bar: {
-          horizontal: true,
+      xaxis: { type: "category" },
+      tooltip: {
+        y: {
+          formatter: (v) => `${v} evento${v === 1 ? "" : "s"}`,
         },
       },
     };
 
-    if (sectionsChart) {
-      sectionsChart.updateOptions(options);
-    } else if (window.ApexCharts) {
-      sectionsChart = new ApexCharts(
-        document.querySelector("#su-chart-sections"),
-        options
+    if (chartHeatmap) {
+      chartHeatmap.updateOptions({
+        series: options.series,
+        xaxis: options.xaxis,
+      });
+    } else {
+      chartHeatmap = new ApexCharts(el, options);
+      chartHeatmap.render();
+    }
+  }
+
+  // Tarjetas y tabla ------------------------------------------------------
+  function updateCards(cardsRaw) {
+    const cards = cardsRaw || {};
+    const activeUsers = numberOrZero(
+      cards.active_users || cards.users || cards.total_users || 0
+    );
+    const files = numberOrZero(
+      cards.files_uploaded || cards.files || cards.uploads || 0
+    );
+    const hours = numberOrZero(
+      cards.active_hours || cards.hours || cards.time_active || 0
+    );
+    const productivity =
+      cards.productivity_index != null
+        ? Number(cards.productivity_index)
+        : cards.productivity != null
+        ? Number(cards.productivity)
+        : 0;
+
+    if (cardActiveUsers)
+      cardActiveUsers.textContent = fmtInt(activeUsers);
+    if (cardFiles) cardFiles.textContent = fmtInt(files);
+    if (cardActiveHours)
+      cardActiveHours.textContent = fmtDecimal(hours, 1);
+    if (cardProductivity)
+      cardProductivity.textContent = fmtPercent(productivity);
+
+    if (cardActiveUsersSub) {
+      cardActiveUsersSub.textContent =
+        activeUsers > 0
+          ? "Usuarios con al menos una sesión en el rango seleccionado."
+          : "Sin actividad registrada en el rango seleccionado.";
+    }
+    if (cardFilesSub) {
+      cardFilesSub.textContent =
+        files > 0
+          ? "Archivos subidos por Analistas y Supervisores en el período."
+          : "Todavía no se registraron cargas en el rango seleccionado.";
+    }
+    if (cardActiveHoursSub) {
+      cardActiveHoursSub.textContent =
+        hours > 0
+          ? "Tiempo total aproximado con actividad en la interfaz."
+          : "Sin tiempo activo registrado en el rango seleccionado.";
+    }
+    if (cardProductivitySub) {
+      cardProductivitySub.textContent =
+        productivity > 0
+          ? "Índice promedio basado en sesiones, horas y cargas."
+          : "Cuando haya más actividad, vas a ver acá un índice promedio.";
+    }
+  }
+
+  function renderUsersTable(rowsRaw) {
+    if (!tbodyUsers) return;
+
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+
+    if (!rows.length) {
+      tbodyUsers.innerHTML =
+        '<tr><td colspan="8" class="usage-empty">Aún no hay registros de actividad para mostrar en la tabla.</td></tr>';
+      return;
+    }
+
+    const html = rows
+      .map((r) => {
+        const name = r.name || r.username || r.user || "—";
+        const role =
+          r.role_label || r.role || r.rol || "—";
+        const sessions = fmtInt(r.sessions || r.sesiones || 0);
+        const activeDays = fmtInt(
+          r.active_days || r.dias_activos || 0
+        );
+        const hours = fmtDecimal(
+          r.active_hours || r.hours || 0,
+          1
+        );
+        const files = fmtInt(
+          r.files_uploaded || r.files || r.cargas || 0
+        );
+        const prod = fmtPercent(
+          r.productivity_index || r.productivity || 0
+        );
+        const lastAccess = fmtDateTime(
+          r.last_access || r.ultimo_acceso
+        );
+
+        return `
+          <tr>
+            <td>${name}</td>
+            <td>${role}</td>
+            <td class="text-center">${sessions}</td>
+            <td class="text-center">${activeDays}</td>
+            <td class="text-center">${hours}</td>
+            <td class="text-center">${files}</td>
+            <td class="text-center">${prod}</td>
+            <td class="text-center">${lastAccess}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    tbodyUsers.innerHTML = html;
+  }
+
+  // Carga de datos desde /api/usage/summary -------------------------------
+  async function loadSummary() {
+    try {
+      const params = new URLSearchParams();
+
+      const dateFrom = $("#flt-date-from")?.value || "";
+      const dateTo = $("#flt-date-to")?.value || "";
+      const role = $("#flt-role")?.value || "";
+      const team = $("#flt-team")?.value || "";
+      const gran = $("#flt-granularity")?.value || "";
+
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      if (role) params.set("role", role);
+      if (team) params.set("team", team);
+      if (gran) params.set("granularity", gran);
+
+      const qs = params.toString();
+      const url = "/api/usage/summary" + (qs ? "?" + qs : "");
+
+      console.log("[SeguimientoUsuarios] Fetch", url);
+
+      const resp = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+
+      if (!resp.ok) {
+        throw new Error(
+          "HTTP " + resp.status + " " + resp.statusText
+        );
+      }
+
+      const data = await resp.json();
+      console.log("[SeguimientoUsuarios] summary payload", data);
+
+      // Intentamos ser flexibles con los nombres de campos
+      updateCards(data.cards || data.summary || {});
+
+      buildWeekdayChart(
+        data.activity_by_weekday ||
+          data.activity_weekday ||
+          data.activity ||
+          []
       );
-      sectionsChart.render();
+      buildRolesChart(
+        data.sessions_by_role ||
+          data.roles ||
+          data.by_role ||
+          []
+      );
+      buildSectionsChart(
+        data.top_sections ||
+          data.sections ||
+          data.sections_top ||
+          []
+      );
+      buildHeatmapChart(
+        data.heatmap ||
+          data.heatmap_matrix ||
+          data.heatmap_data ||
+          []
+      );
+      renderUsersTable(
+        data.users ||
+          data.by_user ||
+          data.users_summary ||
+          []
+      );
+    } catch (err) {
+      console.error(
+        "[SeguimientoUsuarios] Error al cargar summary",
+        err
+      );
     }
   }
 
-  function renderCharts(data) {
-    const charts = getCharts(data);
-    renderWeekdayChart(charts);
-    renderRolesChart(charts);
-    renderHeatmapChart(charts);
-    renderSectionsChart(charts);
+  // Eventos de filtros ----------------------------------------------------
+  if (filtersForm) {
+    filtersForm.addEventListener("submit", (evt) => {
+      evt.preventDefault();
+      loadSummary();
+    });
   }
-
-  // ---------------------------------------------------------------------------
-  // Render tabla por usuario
-  // ---------------------------------------------------------------------------
-  function renderTable(data) {
-    const rows = getPerUserRows(data);
-
-    // Limpia tbody
-    $tableBody.innerHTML = "";
-
-    if (!rows || rows.length === 0) {
-      const tr = document.createElement("tr");
-      tr.className = "su-empty-row";
-      const td = document.createElement("td");
-      td.colSpan = 8;
-      td.style.textAlign = "left";
-      td.style.color = "#9ca3af";
-      td.textContent =
-        "Aún no hay registros de actividad para mostrar en la tabla.";
-      tr.appendChild(td);
-      $tableBody.appendChild(tr);
-      return;
-    }
-
-    for (const r of rows) {
-      const tr = document.createElement("tr");
-
-      const tdUser = document.createElement("td");
-      tdUser.textContent =
-        r.user_display ||
-        r.user_name ||
-        r.username ||
-        r.email ||
-        "—";
-      tr.appendChild(tdUser);
-
-      const tdRole = document.createElement("td");
-      const spanRole = document.createElement("span");
-      spanRole.className = "su-badge-role";
-      spanRole.textContent = (r.role_label || r.role || "").toString();
-      tdRole.appendChild(spanRole);
-      tr.appendChild(tdRole);
-
-      const tdSessions = document.createElement("td");
-      tdSessions.textContent = (r.sessions ?? r.login_count ?? r.events ?? 0).toString();
-      tr.appendChild(tdSessions);
-
-      const tdActiveDays = document.createElement("td");
-      tdActiveDays.textContent = (r.active_days ?? r.days ?? 0).toString();
-      tr.appendChild(tdActiveDays);
-
-      const tdHours = document.createElement("td");
-      tdHours.textContent = safeNumber(
-        r.active_hours ?? r.hours ?? 0,
-        1
-      )
-        .toString()
-        .replace(".", ",");
-      tr.appendChild(tdHours);
-
-      const tdFiles = document.createElement("td");
-      tdFiles.textContent = (r.files ?? r.uploaded_files ?? r.cargas ?? 0).toString();
-      tr.appendChild(tdFiles);
-
-      const tdProd = document.createElement("td");
-      tdProd.textContent = safeNumber(
-        r.productivity_index ?? r.productivity ?? 0,
-        2
-      )
-        .toString()
-        .replace(".", ",");
-      tr.appendChild(tdProd);
-
-      const tdLast = document.createElement("td");
-      tdLast.textContent = r.last_access_display || r.last_access || "—";
-      tr.appendChild(tdLast);
-
-      $tableBody.appendChild(tr);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Tabs UI
-  // ---------------------------------------------------------------------------
-  function initTabs() {
-    const tabs = $$(".su-tab");
-    const panels = $$(".su-tab-panel");
-
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const name = tab.dataset.tab;
-        tabs.forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
-
-        panels.forEach((p) => {
-          if (p.id === "su-tab-" + name) {
-            p.classList.remove("d-none");
-          } else {
-            p.classList.add("d-none");
-          }
-        });
-      });
+  if (applyBtn) {
+    applyBtn.addEventListener("click", (evt) => {
+      evt.preventDefault();
+      loadSummary();
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Fetch inicial
-  // ---------------------------------------------------------------------------
-  async function fetchSummary() {
-    setError(null);
-
-    const url = buildSummaryUrl();
-    console.log("[Seguimiento usuarios] Fetch:", url);
-
-    let res;
-    try {
-      res = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-        },
-      });
-    } catch (err) {
-      console.error(err);
-      setError("No se pudo conectar con el servidor de seguimiento.");
-      return;
-    }
-
-    if (!res.ok) {
-      setError("Error al obtener los datos de uso (" + res.status + ").");
-      return;
-    }
-
-    let data;
-    try {
-      data = await res.json();
-    } catch (err) {
-      console.error(err);
-      setError("La respuesta del servidor no es un JSON válido.");
-      return;
-    }
-
-    try {
-      renderKpis(data);
-      renderCharts(data);
-      renderTable(data);
-    } catch (err) {
-      console.error(err);
-      setError("Ocurrió un error al renderizar el tablero de uso.");
-    }
-  }
-
-  function initFiltersDefaults() {
-    // Por defecto: últimos 30 días
-    const today = new Date();
-    const toISO = (d) => d.toISOString().slice(0, 10);
-
-    const to = toISO(today);
-    const fromDate = new Date(today);
-    fromDate.setDate(fromDate.getDate() - 29);
-    const from = toISO(fromDate);
-
-    if (!$dateFrom.value) $dateFrom.value = from;
-    if (!$dateTo.value) $dateTo.value = to;
-  }
-
-  function init() {
-    initFiltersDefaults();
-    initTabs();
-
-    $apply.addEventListener("click", () => {
-      fetchSummary();
-    });
-
-    // Primera carga
-    fetchSummary();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  // Primera carga
+  loadSummary();
 })();

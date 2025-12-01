@@ -1,485 +1,389 @@
 {% extends "base.html" %}
-{% block title %}Seguimiento de usuarios{% endblock %}
+{% block title %}Panel{% endblock %}
 
 {% block extra_head %}
 <style>
-  .su-container {
-    padding: 24px 28px 40px;
-  }
-
-  .su-filters-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: flex-end;
+  .usage-filters-bar {
+    background: #f9fafb;
+    border-radius: 14px;
+    padding: 16px 18px;
     margin-bottom: 18px;
+    border: 1px solid #e5e7eb;
   }
-
-  .su-filters-bar .form-label {
-    font-size: 13px;
-    margin-bottom: 4px;
-    color: #6b7280;
-  }
-
-  .su-filters-bar .form-control,
-  .su-filters-bar .form-select {
-    font-size: 13px;
-    padding: 6px 10px;
-    border-radius: 8px;
-  }
-
-  .su-filters-bar .btn-primary {
-    border-radius: 10px;
-    font-size: 14px;
-    padding: 7px 18px;
-    background: #5274ce;
-    border: none;
-  }
-
-  .su-kpis-row {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-    margin-bottom: 22px;
-  }
-
-  @media (max-width: 1100px) {
-    .su-kpis-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 700px) {
-    .su-kpis-row {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .su-kpi-card {
+  .usage-card {
     background: #ffffff;
     border-radius: 14px;
     border: 1px solid #e5e7eb;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
     padding: 14px 16px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    height: 100%;
   }
-
-  .su-kpi-label {
+  .usage-card-title {
     font-size: 13px;
     color: #6b7280;
     margin-bottom: 4px;
   }
-
-  .su-kpi-value {
-    font-size: 26px;
+  .usage-card-value {
+    font-size: 22px;
     font-weight: 600;
-    color: #064066;
-    line-height: 1.1;
+    color: #111827;
   }
-
-  .su-kpi-caption {
-    font-size: 11px;
-    color: #9ca3af;
-    margin-top: 2px;
-  }
-
-  .su-tabs {
-    display: flex;
-    align-items: center;
-    border-bottom: 1px solid #e5e7eb;
-    margin-bottom: 14px;
-    gap: 14px;
-    font-size: 14px;
-  }
-
-  .su-tab {
-    padding: 8px 12px;
+  .usage-tabs .nav-link {
     border-radius: 999px;
-    cursor: pointer;
+    padding: 6px 14px;
+    font-size: 14px;
     color: #4b5563;
-    border: 1px solid transparent;
-    white-space: nowrap;
   }
-
-  .su-tab.active {
-    background: #e0e7ff;
-    border-color: #c7d2fe;
-    color: #064066;
-    font-weight: 500;
+  .usage-tabs .nav-link.active {
+    background: #5274ce;
+    color: #fff;
   }
-
-  .su-main-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.1fr);
-    gap: 14px;
-    margin-top: 6px;
-  }
-
-  @media (max-width: 1200px) {
-    .su-main-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .su-card {
+  .usage-panel {
     background: #ffffff;
     border-radius: 14px;
     border: 1px solid #e5e7eb;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
-    padding: 14px 16px 10px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    height: 100%;
   }
-
-  .su-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .su-card-title {
+  .usage-panel-header {
     font-size: 14px;
-    font-weight: 500;
-    color: #111827;
+    font-weight: 600;
+    margin-bottom: 2px;
   }
-
-  .su-card-subtitle {
+  .usage-panel-sub {
     font-size: 12px;
-    color: #9ca3af;
-  }
-
-  .su-card-body {
-    min-height: 180px;
-  }
-
-  .su-card-body.sm {
-    min-height: 140px;
-  }
-
-  .su-empty {
-    font-size: 12px;
-    color: #9ca3af;
-    padding-top: 20px;
-  }
-
-  /* Tabla resumen por usuario */
-  .su-table-wrapper {
-    margin-top: 8px;
-    overflow-x: auto;
-  }
-
-  .su-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-  }
-
-  .su-table th,
-  .su-table td {
-    padding: 6px 8px;
-    border-bottom: 1px solid #e5e7eb;
-    white-space: nowrap;
-  }
-
-  .su-table th {
-    text-align: left;
-    font-weight: 500;
     color: #6b7280;
-    background-color: #f9fafb;
+    margin-bottom: 10px;
   }
-
-  .su-table td {
-    color: #111827;
+  .usage-chart {
+    min-height: 220px;
   }
-
-  .su-badge-role {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
+  .usage-table-wrap {
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    padding: 0;
+    overflow: hidden;
+  }
+  .usage-table-wrap table {
+    margin-bottom: 0;
+    font-size: 13px;
+  }
+  .usage-table-wrap thead {
+    background: #f9fafb;
+  }
+  .usage-table-wrap th {
     font-weight: 500;
-    background: #eff6ff;
-    color: #1d4ed8;
+    color: #4b5563;
   }
-
-  .su-error {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #b91c1c;
+  .usage-empty {
+    font-size: 13px;
+    color: #6b7280;
+    padding: 16px;
+    text-align: center;
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="su-container">
+<div class="container-fluid py-3">
+
   <h1 class="h4 mb-3">Seguimiento de usuarios</h1>
 
-  <!-- Barra de filtros -->
-  <div class="su-filters-bar">
-    <div>
-      <label class="form-label" for="su-date-from">Rango de fechas</label>
-      <div class="d-flex gap-1">
-        <input id="su-date-from" type="date" class="form-control" />
-        <input id="su-date-to" type="date" class="form-control" />
+  <!-- Filtros -->
+  <form id="usage-filters-form" class="usage-filters-bar">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rango de fechas (desde)</label>
+        <input type="date"
+               id="flt-date-from"
+               name="date_from"
+               class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rango de fechas (hasta)</label>
+        <input type="date"
+               id="flt-date-to"
+               name="date_to"
+               class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa">
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rol</label>
+        <select id="flt-role" name="role" class="form-select form-select-sm">
+          <option value="">Analistas y Supervisores</option>
+          <option value="analista">Analistas</option>
+          <option value="supervisor">Supervisores</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Equipo / grupo</label>
+        <select id="flt-team" name="team" class="form-select form-select-sm">
+          <option value="">Todos los equipos</option>
+          <!-- si después querés, populamos esto con datos reales -->
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Vista temporal</label>
+        <select id="flt-granularity" name="granularity" class="form-select form-select-sm">
+          <option value="day">Día</option>
+          <option value="week">Semana</option>
+          <option value="month">Mes</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2 text-md-end">
+        <button id="usage-apply-filters"
+                type="submit"
+                class="btn btn-primary btn-sm mt-2 mt-md-0">
+          Aplicar filtros
+        </button>
       </div>
     </div>
-
-    <div>
-      <label class="form-label" for="su-role">Rol</label>
-      <select id="su-role" class="form-select">
-        <option value="">Analistas y Supervisores</option>
-        <option value="analista">Sólo analistas</option>
-        <option value="supervisor">Sólo supervisores</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="form-label" for="su-team">Equipo / grupo</label>
-      <select id="su-team" class="form-select">
-        <option value="">Todos los equipos</option>
-        <!-- Si en el futuro quieres, aquí puedes inyectar opciones dinámicas -->
-      </select>
-    </div>
-
-    <div>
-      <label class="form-label" for="su-view">Vista temporal</label>
-      <select id="su-view" class="form-select">
-        <option value="day">Día</option>
-        <option value="week">Semana</option>
-        <option value="month">Mes</option>
-      </select>
-    </div>
-
-    <div>
-      <button id="su-apply" class="btn btn-primary">
-        Aplicar filtros
-      </button>
-    </div>
-  </div>
+  </form>
 
   <!-- KPIs -->
-  <div class="su-kpis-row">
-    <div class="su-kpi-card">
-      <div class="su-kpi-label">Usuarios activos</div>
-      <div id="su-kpi-active-users" class="su-kpi-value">0</div>
-      <div class="su-kpi-caption" id="su-kpi-active-users-caption">
-        Sin actividad registrada en el rango seleccionado.
+  <div class="row g-2 mb-3">
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Usuarios activos</div>
+        <div class="usage-card-value" id="card-active-users">0</div>
+        <div class="small text-muted" id="card-active-users-sub">
+          Sin actividad registrada en el rango seleccionado.
+        </div>
       </div>
     </div>
-
-    <div class="su-kpi-card">
-      <div class="su-kpi-label">Archivos cargados</div>
-      <div id="su-kpi-files" class="su-kpi-value">0</div>
-      <div class="su-kpi-caption" id="su-kpi-files-caption">
-        Todavía no se registraron cargas en el rango seleccionado.
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Archivos cargados</div>
+        <div class="usage-card-value" id="card-files">0</div>
+        <div class="small text-muted" id="card-files-sub">
+          Todavía no se registraron cargas en el rango seleccionado.
+        </div>
       </div>
     </div>
-
-    <div class="su-kpi-card">
-      <div class="su-kpi-label">Horas activas</div>
-      <div id="su-kpi-hours" class="su-kpi-value">0,0</div>
-      <div class="su-kpi-caption" id="su-kpi-hours-caption">
-        Sin tiempo activo registrado en el rango seleccionado.
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Horas activas</div>
+        <div class="usage-card-value" id="card-active-hours">0,0</div>
+        <div class="small text-muted" id="card-active-hours-sub">
+          Sin tiempo activo registrado en el rango seleccionado.
+        </div>
       </div>
     </div>
-
-    <div class="su-kpi-card">
-      <div class="su-kpi-label">Índice productividad prom.</div>
-      <div id="su-kpi-productivity" class="su-kpi-value">0,00</div>
-      <div class="su-kpi-caption" id="su-kpi-productivity-caption">
-        Cuando haya más actividad, vas a ver acá un índice promedio.
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Índice productividad prom.</div>
+        <div class="usage-card-value" id="card-productivity">0,00</div>
+        <div class="small text-muted" id="card-productivity-sub">
+          Cuando haya más actividad, vas a ver acá un índice promedio.
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Tabs -->
-  <div class="su-tabs">
-    <div class="su-tab active" data-tab="overview">Resumen general</div>
-    <div class="su-tab" data-tab="by-user">Por usuario</div>
-    <div class="su-tab" data-tab="comparative">Comparativo</div>
-    <div class="su-tab" data-tab="efficiency">Rendimiento y eficiencia</div>
-    <div class="su-tab" data-tab="system">Actividad del sistema</div>
-    <div class="su-tab" data-tab="alerts">Configuración y alertas</div>
-  </div>
+  <ul class="nav nav-pills usage-tabs mb-3" id="usage-tabs">
+    <li class="nav-item">
+      <button class="nav-link active"
+              type="button"
+              data-usage-tab-target="#usage-tab-summary">
+        Resumen general
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link"
+              type="button"
+              data-usage-tab-target="#usage-tab-by-user">
+        Por usuario
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link"
+              type="button"
+              data-usage-tab-target="#usage-tab-comparative">
+        Comparativo
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link"
+              type="button"
+              data-usage-tab-target="#usage-tab-performance">
+        Rendimiento y eficiencia
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link"
+              type="button"
+              data-usage-tab-target="#usage-tab-system">
+        Actividad del sistema
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link"
+              type="button"
+              data-usage-tab-target="#usage-tab-config">
+        Configuración y alertas
+      </button>
+    </li>
+  </ul>
 
-  <!-- Contenido de tabs (por ahora sólo usamos Resumen general) -->
-  <div id="su-tab-overview" class="su-tab-panel">
-    <div class="su-main-grid">
-      <div class="d-flex flex-column gap-3">
-        <!-- Actividad por día de la semana -->
-        <div class="su-card">
-          <div class="su-card-header">
-            <div>
-              <div class="su-card-title">Actividad por día de la semana</div>
-              <div class="su-card-subtitle">
-                Eventos de uso agregados por día (Lun–Dom).
-              </div>
+  <!-- Panels -->
+  <div class="tab-content">
+
+    <!-- 1. Resumen general -->
+    <div id="usage-tab-summary"
+         class="tab-pane show active"
+         data-usage-tab-panel>
+      <div class="row g-2">
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel">
+            <div class="usage-panel-header">Actividad por día de la semana</div>
+            <div class="usage-panel-sub">
+              Eventos de uso agregados por día (Lun–Dom).
             </div>
+            <div id="usage-chart-weekday" class="usage-chart"></div>
           </div>
-          <div class="su-card-body" id="su-chart-weekday-wrapper">
-            <div id="su-chart-weekday"></div>
-            <div class="su-empty d-none" id="su-chart-weekday-empty">
-              Todavía no hay datos de actividad en este rango.
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel">
+            <div class="usage-panel-header">Heatmap día / hora</div>
+            <div class="usage-panel-sub">
+              Intensidad de eventos por franja horaria y día.
             </div>
+            <div id="usage-chart-heatmap" class="usage-chart"></div>
           </div>
         </div>
 
-        <!-- Analistas vs Supervisores -->
-        <div class="su-card">
-          <div class="su-card-header">
-            <div>
-              <div class="su-card-title">Analistas vs Supervisores</div>
-              <div class="su-card-subtitle">
-                Comparación de sesiones, horas activas y cargas por rol.
-              </div>
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel mt-2">
+            <div class="usage-panel-header">Analistas vs Supervisores</div>
+            <div class="usage-panel-sub">
+              Comparación de sesiones, horas activas y cargas por rol.
             </div>
-          </div>
-          <div class="su-card-body sm" id="su-chart-roles-wrapper">
-            <div id="su-chart-roles"></div>
-            <div class="su-empty d-none" id="su-chart-roles-empty">
-              No hay actividad registrada por rol en el rango seleccionado.
-            </div>
+            <div id="usage-chart-roles" class="usage-chart"></div>
           </div>
         </div>
-      </div>
-
-      <div class="d-flex flex-column gap-3">
-        <!-- Heatmap día / hora -->
-        <div class="su-card">
-          <div class="su-card-header">
-            <div>
-              <div class="su-card-title">Heatmap día / hora</div>
-              <div class="su-card-subtitle">
-                Intensidad de eventos por franja horaria y día.
-              </div>
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel mt-2">
+            <div class="usage-panel-header">Secciones más usadas</div>
+            <div class="usage-panel-sub">
+              Vistas y acciones por sección de la interfaz.
             </div>
-          </div>
-          <div class="su-card-body" id="su-chart-heatmap-wrapper">
-            <div id="su-chart-heatmap"></div>
-            <div class="su-empty d-none" id="su-chart-heatmap-empty">
-              Aún no hay suficientes eventos para construir el mapa de calor.
-            </div>
-          </div>
-        </div>
-
-        <!-- Secciones más usadas -->
-        <div class="su-card">
-          <div class="su-card-header">
-            <div>
-              <div class="su-card-title">Secciones más usadas</div>
-              <div class="su-card-subtitle">
-                Vistas y acciones por sección de la interfaz.
-              </div>
-            </div>
-          </div>
-          <div class="su-card-body sm" id="su-chart-sections-wrapper">
-            <div id="su-chart-sections"></div>
-            <div class="su-empty d-none" id="su-chart-sections-empty">
-              Todavía no hay secciones con actividad en este rango.
-            </div>
+            <div id="usage-chart-sections" class="usage-chart"></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Resumen por usuario -->
-    <div class="su-card mt-3">
-      <div class="su-card-header">
-        <div>
-          <div class="su-card-title">Resumen por usuario</div>
-          <div class="su-card-subtitle">
-            Detalle de actividad por persona: sesiones, horas activas, archivos y productividad.
-          </div>
+    <!-- 2. Por usuario -->
+    <div id="usage-tab-by-user"
+         class="tab-pane"
+         data-usage-tab-panel>
+      <div class="usage-panel mb-2">
+        <div class="usage-panel-header mb-1">Resumen por usuario</div>
+        <div class="usage-panel-sub">
+          Detalle de actividad por persona: sesiones, horas activas, archivos cargados,
+          índice de productividad y último acceso.
         </div>
-      </div>
-      <div class="su-card-body">
-        <div class="su-table-wrapper">
-          <table class="su-table">
+        <div class="usage-table-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
             <thead>
               <tr>
                 <th>Usuario</th>
                 <th>Rol</th>
-                <th>Sesiones</th>
-                <th>Días activos</th>
-                <th>Horas activas</th>
-                <th>Archivos cargados</th>
-                <th>Índice productividad</th>
-                <th>Último acceso</th>
+                <th class="text-center">Sesiones</th>
+                <th class="text-center">Días activos</th>
+                <th class="text-center">Horas activas</th>
+                <th class="text-center">Archivos cargados</th>
+                <th class="text-center">Índice productividad</th>
+                <th class="text-center">Último acceso</th>
               </tr>
             </thead>
-            <tbody id="su-table-users-body">
-              <tr class="su-empty-row">
-                <td colspan="8" style="text-align:left; color:#9ca3af;">
+            <tbody id="usage-users-tbody">
+              <tr>
+                <td colspan="8" class="usage-empty">
                   Aún no hay registros de actividad para mostrar en la tabla.
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div id="su-error" class="su-error d-none"></div>
       </div>
     </div>
-  </div>
 
-  <!-- Otros tabs (por ahora placeholders, se activan/desactivan por JS) -->
-  <div id="su-tab-by-user" class="su-tab-panel d-none">
-    <div class="su-card">
-      <div class="su-card-body">
-        <div class="su-empty">
-          Próximamente vas a tener acá vistas más detalladas por usuario.
+    <!-- 3. Comparativo -->
+    <div id="usage-tab-comparative"
+         class="tab-pane"
+         data-usage-tab-panel>
+      <div class="usage-panel">
+        <div class="usage-panel-header">Comparativo</div>
+        <div class="usage-panel-sub">
+          Espacio reservado para comparativos adicionales (por equipo, por repartición, etc.).
+        </div>
+        <div class="usage-empty">
+          Próximamente vamos a sumar gráficos comparativos más avanzados.
         </div>
       </div>
     </div>
-  </div>
 
-  <div id="su-tab-comparative" class="su-tab-panel d-none">
-    <div class="su-card">
-      <div class="su-card-body">
-        <div class="su-empty">
-          Este tab mostrará comparativos entre equipos, grupos y periodos.
+    <!-- 4. Rendimiento y eficiencia -->
+    <div id="usage-tab-performance"
+         class="tab-pane"
+         data-usage-tab-panel>
+      <div class="usage-panel">
+        <div class="usage-panel-header">Rendimiento y eficiencia</div>
+        <div class="usage-panel-sub">
+          Métricas de performance por usuario / equipo (tiempos, cuellos de botella, etc.).
+        </div>
+        <div class="usage-empty">
+          Próximamente vamos a sumar métricas de eficiencia más detalladas.
         </div>
       </div>
     </div>
-  </div>
 
-  <div id="su-tab-efficiency" class="su-tab-panel d-none">
-    <div class="su-card">
-      <div class="su-card-body">
-        <div class="su-empty">
-          Acá vas a ver métricas de eficiencia y productividad más avanzadas.
+    <!-- 5. Actividad del sistema -->
+    <div id="usage-tab-system"
+         class="tab-pane"
+         data-usage-tab-panel>
+      <div class="usage-panel">
+        <div class="usage-panel-header">Actividad del sistema</div>
+        <div class="usage-panel-sub">
+          Logs agregados de eventos globales de la interfaz.
+        </div>
+        <div class="usage-empty">
+          Próximamente vamos a mostrar acá eventos globales (errores, picos de carga, etc.).
         </div>
       </div>
     </div>
-  </div>
 
-  <div id="su-tab-system" class="su-tab-panel d-none">
-    <div class="su-card">
-      <div class="su-card-body">
-        <div class="su-empty">
-          En esta sección se van a mostrar eventos del sistema y auditorías técnicas.
+    <!-- 6. Configuración y alertas -->
+    <div id="usage-tab-config"
+         class="tab-pane"
+         data-usage-tab-panel>
+      <div class="usage-panel">
+        <div class="usage-panel-header">Configuración y alertas</div>
+        <div class="usage-panel-sub">
+          Reglas de alertas y configuraciones del módulo de seguimiento.
+        </div>
+        <div class="usage-empty">
+          Próximamente vamos a permitir configurar alertas de baja actividad, etc.
         </div>
       </div>
     </div>
-  </div>
 
-  <div id="su-tab-alerts" class="su-tab-panel d-none">
-    <div class="su-card">
-      <div class="su-card-body">
-        <div class="su-empty">
-          Acá podrás configurar umbrales de alertas y notificaciones del módulo.
-        </div>
-      </div>
-    </div>
-  </div>
+  </div> <!-- /tab-content -->
+
 </div>
 {% endblock %}
 
-{% block extra_scripts %}
-  {{ super() }}
-
-  <!-- Test rápido: si esto NO aparece en la consola, el bloque no se está ejecutando -->
-  <script>
-    console.log("[seguimiento_usuarios] bloque extra_scripts OK");
-  </script>
-
+{% block extra_js %}
+  <!-- Usamos ApexCharts que ya tenés cargado para otros dashboards -->
   <script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}"></script>
 {% endblock %}
