@@ -2771,7 +2771,7 @@ def historial_cargas(
         error = str(e)
         users_options = []
 
-    # info de paginación
+        # info de paginación
     can_view_all = True
     showing_from = 0 if total == 0 else (page - 1) * page_size + 1
     showing_to = min(total, page * page_size)
@@ -2791,7 +2791,7 @@ def historial_cargas(
         "filename": filename or "",
     }
 
-        ctx = {
+    ctx = {
         "request": request,
         "user": user,
         "rows": rows,
