@@ -1,6 +1,6 @@
 // static/js/seguimiento_usuarios.js
 (function () {
-  console.log("[SeguimientoUsuarios] JS cargado v1");
+  console.log("[SeguimientoUsuarios] JS cargado v2");
 
   // Helpers --------------------------------------------------------------
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -28,7 +28,6 @@
 
   const fmtDateTime = (s) => {
     if (!s) return "—";
-    // Intentamos parsear ISO; si falla, devolvemos tal cual
     const d = new Date(s);
     if (isNaN(d.getTime())) return s;
     return d.toLocaleString("es-AR", {
@@ -75,6 +74,7 @@
   const filtersForm = $("#usage-filters-form");
   const applyBtn = $("#usage-apply-filters");
 
+  // KPIs
   const cardActiveUsers = $("#card-active-users");
   const cardFiles = $("#card-files");
   const cardActiveHours = $("#card-active-hours");
@@ -85,7 +85,18 @@
   const cardActiveHoursSub = $("#card-active-hours-sub");
   const cardProductivitySub = $("#card-productivity-sub");
 
-  const tbodyUsers = $("#usage-users-tbody");
+  // Pestaña "Por usuario": mini-cards + tabla
+  const byUserTbody = $("#su-users-byuser-tbody");
+
+  const suDetailName = $("#su-user-detail-name");
+  const suDetailRoleTeam = $("#su-user-detail-role-team");
+  const suDetailSessions = $("#su-user-detail-sessions");
+  const suDetailDays = $("#su-user-detail-days");
+  const suDetailHours = $("#su-user-detail-hours");
+  const suDetailProductivity = $("#su-user-detail-productivity");
+  const suDetailLastAccess = $("#su-user-detail-last-access");
+
+  let byUserRowsCache = []; // para poder seleccionar usuario al hacer click
 
   // Charts (ApexCharts) ---------------------------------------------------
   let chartWeekday = null;
@@ -260,8 +271,6 @@
     const el = $("#usage-chart-heatmap");
     if (!ensureApex(el)) return;
 
-    // Esperamos algo tipo: [{ day: "Lun", hour: 9, value: 3 }, ...]
-    // Si el backend devuelve otra forma, intentamos mapear igual.
     if (!items || !items.length) {
       const html =
         '<div class="usage-empty">Aún no hay datos suficientes para el heatmap día / hora.</div>';
@@ -288,8 +297,7 @@
           ? raw.hour_label
           : raw.hour != null
           ? raw.hour
-          : raw.bucket ||
-            0;
+          : raw.bucket || 0;
       const value = numberOrZero(raw.value || raw.count || raw.events || 0);
       if (!grouped[day]) grouped[day] = {};
       grouped[day][hour] = value;
@@ -350,7 +358,7 @@
     }
   }
 
-  // Tarjetas y tabla ------------------------------------------------------
+  // Tarjetas KPIs ---------------------------------------------------------
   function updateCards(cardsRaw) {
     const cards = cardsRaw || {};
     const activeUsers = numberOrZero(
@@ -403,19 +411,102 @@
     }
   }
 
-  function renderUsersTable(rowsRaw) {
-    if (!tbodyUsers) return;
+  // Pestaña Por usuario ---------------------------------------------------
+
+  function resetUserDetail() {
+    if (suDetailName)
+      suDetailName.textContent = "Seleccioná un usuario de la tabla";
+    if (suDetailRoleTeam) suDetailRoleTeam.textContent = "\u00a0";
+    if (suDetailSessions) suDetailSessions.textContent = "—";
+    if (suDetailDays) suDetailDays.textContent = "—";
+    if (suDetailHours) suDetailHours.textContent = "—";
+    if (suDetailProductivity) suDetailProductivity.textContent = "—";
+    if (suDetailLastAccess) suDetailLastAccess.textContent = "Último acceso: —";
+  }
+
+  function updateUserDetailFromRow(r) {
+    if (!r) {
+      resetUserDetail();
+      return;
+    }
+
+    const name = r.name || r.username || r.user || "—";
+    const role =
+      r.role_label || r.role || r.rol || "";
+    const team =
+      r.team_label || r.team || r.equipo || "";
+
+    const sessions = fmtInt(r.sessions || r.sesiones || 0);
+    const activeDays = fmtInt(r.active_days || r.dias_activos || 0);
+    const hours = fmtDecimal(r.active_hours || r.hours || 0, 1);
+    const prod = fmtPercent(
+      r.productivity_index || r.productivity || 0
+    );
+    const lastAccess = fmtDateTime(
+      r.last_access || r.ultimo_acceso
+    );
+
+    if (suDetailName) suDetailName.textContent = name;
+
+    if (suDetailRoleTeam) {
+      if (role && team) {
+        suDetailRoleTeam.textContent = `${role} · ${team}`;
+      } else if (role) {
+        suDetailRoleTeam.textContent = role;
+      } else if (team) {
+        suDetailRoleTeam.textContent = team;
+      } else {
+        suDetailRoleTeam.textContent = "\u00a0";
+      }
+    }
+
+    if (suDetailSessions) suDetailSessions.textContent = sessions;
+    if (suDetailDays) suDetailDays.textContent = activeDays;
+    if (suDetailHours) suDetailHours.textContent = hours;
+    if (suDetailProductivity) suDetailProductivity.textContent = prod;
+    if (suDetailLastAccess)
+      suDetailLastAccess.textContent = `Último acceso: ${lastAccess}`;
+  }
+
+  function attachByUserRowHandlers() {
+    if (!byUserTbody) return;
+
+    const trs = $$("tr[data-user-index]", byUserTbody);
+    trs.forEach((tr) => {
+      tr.addEventListener("click", () => {
+        const idx = Number(tr.dataset.userIndex);
+        const row = byUserRowsCache[idx];
+        updateUserDetailFromRow(row);
+
+        // resaltamos fila seleccionada
+        trs.forEach((t) => t.classList.remove("table-active"));
+        tr.classList.add("table-active");
+      });
+    });
+
+    // auto-seleccionar el primero si hay datos
+    if (trs.length > 0 && byUserRowsCache.length > 0) {
+      trs[0].click();
+    } else {
+      resetUserDetail();
+    }
+  }
+
+  function renderByUserTable(rowsRaw) {
+    if (!byUserTbody) return;
 
     const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    byUserRowsCache = rows;
 
     if (!rows.length) {
-      tbodyUsers.innerHTML =
+      byUserTbody.innerHTML =
         '<tr><td colspan="8" class="usage-empty">Aún no hay registros de actividad para mostrar en la tabla.</td></tr>';
+      resetUserDetail();
       return;
     }
 
     const html = rows
-      .map((r) => {
+      .map((r, idx) => {
         const name = r.name || r.username || r.user || "—";
         const role =
           r.role_label || r.role || r.rol || "—";
@@ -438,21 +529,22 @@
         );
 
         return `
-          <tr>
+          <tr data-user-index="${idx}" style="cursor:pointer">
             <td>${name}</td>
             <td>${role}</td>
-            <td class="text-center">${sessions}</td>
-            <td class="text-center">${activeDays}</td>
-            <td class="text-center">${hours}</td>
-            <td class="text-center">${files}</td>
-            <td class="text-center">${prod}</td>
-            <td class="text-center">${lastAccess}</td>
+            <td class="text-end">${sessions}</td>
+            <td class="text-end">${activeDays}</td>
+            <td class="text-end">${hours}</td>
+            <td class="text-end">${files}</td>
+            <td class="text-end">${prod}</td>
+            <td>${lastAccess}</td>
           </tr>
         `;
       })
       .join("");
 
-    tbodyUsers.innerHTML = html;
+    byUserTbody.innerHTML = html;
+    attachByUserRowHandlers();
   }
 
   // Carga de datos desde /api/usage/summary -------------------------------
@@ -490,9 +582,10 @@
       const data = await resp.json();
       console.log("[SeguimientoUsuarios] summary payload", data);
 
-      // Intentamos ser flexibles con los nombres de campos
+      // KPIs
       updateCards(data.cards || data.summary || {});
 
+      // Gráficos (Resumen general)
       buildWeekdayChart(
         data.activity_by_weekday ||
           data.activity_weekday ||
@@ -517,7 +610,9 @@
           data.heatmap_data ||
           []
       );
-      renderUsersTable(
+
+      // Pestaña Por usuario
+      renderByUserTable(
         data.users ||
           data.by_user ||
           data.users_summary ||

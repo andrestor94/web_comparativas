@@ -84,6 +84,25 @@
     padding: 16px;
     text-align: center;
   }
+
+  /* ==== Detalle "Por usuario" ==== */
+  .usage-user-detail-title {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 2px;
+  }
+  .usage-user-detail-main {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .usage-user-detail-sub {
+    font-size: 12px;
+    color: #6b7280;
+  }
 </style>
 {% endblock %}
 
@@ -286,35 +305,88 @@
     <div id="usage-tab-by-user"
          class="tab-pane"
          data-usage-tab-panel>
-      <div class="usage-panel mb-2">
-        <div class="usage-panel-header mb-1">Resumen por usuario</div>
-        <div class="usage-panel-sub">
-          Detalle de actividad por persona: sesiones, horas activas, archivos cargados,
-          índice de productividad y último acceso.
+
+      <!-- Encabezado -->
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="usage-panel-header mb-1">Por usuario</div>
+          <div class="usage-panel-sub mb-0">
+            Detalle de actividad por persona: sesiones, días activos, horas activas, archivos cargados,
+            índice de productividad y último acceso.
+          </div>
         </div>
-        <div class="usage-table-wrap">
-          <table class="table table-sm table-hover align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Usuario</th>
-                <th>Rol</th>
-                <th class="text-center">Sesiones</th>
-                <th class="text-center">Días activos</th>
-                <th class="text-center">Horas activas</th>
-                <th class="text-center">Archivos cargados</th>
-                <th class="text-center">Índice productividad</th>
-                <th class="text-center">Último acceso</th>
-              </tr>
-            </thead>
-            <tbody id="usage-users-tbody">
-              <tr>
-                <td colspan="8" class="usage-empty">
-                  Aún no hay registros de actividad para mostrar en la tabla.
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      </div>
+
+      <!-- Mini-cards de detalle del usuario seleccionado -->
+      <div class="row g-2 mb-3" id="usage-user-detail-row">
+        <div class="col-12 col-md-4 col-lg-3">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Usuario seleccionado</div>
+            <div id="su-user-detail-name" class="usage-user-detail-main">
+              Seleccioná un usuario de la tabla
+            </div>
+            <div id="su-user-detail-role-team" class="usage-user-detail-sub mt-1">
+              &nbsp;
+            </div>
+          </div>
         </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Sesiones</div>
+            <div id="su-user-detail-sessions" class="usage-user-detail-main">—</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Días activos</div>
+            <div id="su-user-detail-days" class="usage-user-detail-main">—</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Horas activas</div>
+            <div id="su-user-detail-hours" class="usage-user-detail-main">—</div>
+            <div class="usage-user-detail-sub mt-1">en el rango seleccionado</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-3">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Productividad</div>
+            <div id="su-user-detail-productivity" class="usage-user-detail-main">—</div>
+            <div id="su-user-detail-last-access" class="usage-user-detail-sub mt-1">
+              Último acceso: —
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabla de resumen por usuario -->
+      <div class="usage-table-wrap">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Rol</th>
+              <th class="text-end">Sesiones</th>
+              <th class="text-end">Días activos</th>
+              <th class="text-end">Horas activas</th>
+              <th class="text-end">Archivos cargados</th>
+              <th class="text-end">Índice productividad</th>
+              <th>Último acceso</th>
+            </tr>
+          </thead>
+          <tbody id="su-users-byuser-tbody">
+            <tr>
+              <td colspan="8" class="usage-empty">
+                Aún no hay registros de actividad para mostrar en la tabla.
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
