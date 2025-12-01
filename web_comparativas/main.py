@@ -2424,10 +2424,20 @@ def nueva_carga(
     """
     Muestra el formulario para cargar un nuevo archivo.
     """
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "upload_form.html",
         {"request": request, "user": user},
     )
+
+    # 👇 NUEVO: log de vista del formulario de carga
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_nueva",
+        request=request,
+    )
+
+    return response
 
 
 @app.post("/cargas", response_class=HTMLResponse)
@@ -2511,7 +2521,7 @@ async def crear_carga(
             status_code=303,
         )
 
-    # Crear la carga nueva
+        # Crear la carga nueva
     up = UploadModel(
         user_id=user.id,
         proceso_nro=proceso_nro_clean,
@@ -2530,6 +2540,21 @@ async def crear_carga(
     )
     db_session.add(up)
     db_session.commit()
+
+    # 👇 NUEVO: log de creación de carga
+    log_usage_event(
+        user=user,
+        action_type="file_upload",
+        section="cargas_crear",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "filename": file.filename,
+            "bytes": len(file_bytes),
+            "proceso_nro": proceso_nro_clean or "",
+            "cuenta_nro": (cuenta_nro or "").strip(),
+        },
+    )
 
     # Procesar en segundo plano
     background_tasks.add_task(classify_and_process, up.id, {})
@@ -2766,7 +2791,7 @@ def historial_cargas(
         "filename": filename or "",
     }
 
-    ctx = {
+        ctx = {
         "request": request,
         "user": user,
         "rows": rows,
@@ -2785,7 +2810,25 @@ def historial_cargas(
         "showing_to": showing_to,
         "filters": flt,
     }
-    return templates.TemplateResponse("uploads_list.html", ctx)
+
+    response = templates.TemplateResponse("uploads_list.html", ctx)
+
+    # 👇 NUEVO: log de vista del historial
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_historial",
+        request=request,
+        extra_data={
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "q": q or "",
+            "status": status or "",
+        },
+    )
+
+    return response
 
 
 # ======================================================================
@@ -2822,14 +2865,26 @@ def view_upload(
     except Exception as e:
         logger.warning("No se pudo disparar notificación en /cargas/{id}: %s", e)
 
-    ctx = {
+        ctx = {
         "request": request,
         "user": user,
         "upload": upload,
         "upload_steps": PROCESS_STEPS_LOC,
         "dup": request.query_params.get("dup") == "1",  # <-- 👈 NUEVO
     }
-    return templates.TemplateResponse("upload_show.html", ctx)
+    response = templates.TemplateResponse("upload_show.html", ctx)
+
+    # 👇 NUEVO: log de vista de detalle de proceso
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_detalle",
+        request=request,
+        resource_id=str(upload.id),
+        extra_data={"status": upload.status},
+    )
+
+    return response
 
 
 # ======================================================================
@@ -3526,6 +3581,19 @@ def api_tablero_ranking(
                 "positions": positions,
             }
         )
+
+        # 👇 NUEVO: log de consulta de ranking
+    log_usage_event(
+        user=user,
+        action_type="api_call",
+        section="tablero_ranking",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "max_positions": max_positions,
+            "total_rows": len(rows_out),
+        },
+    )
 
     return JSONResponse(
         {
@@ -4331,13 +4399,13 @@ def tablero_show(
         )
     ]
 
-    # URL JSON que consume dashboard.html para la tabla de ranking
+        # URL JSON que consume dashboard.html para la tabla de ranking
     rank_api_url = f"/api/tablero/{upload_id}/ranking"
 
     # ✅ NUEVO: URL para descargar el PDF del proceso
     pdf_url = f"/reportes/proceso/{upload_id}"
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
@@ -4369,6 +4437,23 @@ def tablero_show(
             "pdf_url": pdf_url,  # 👈 ahora SÍ existe
         },
     )
+
+    # 👇 NUEVO: log de vista del tablero
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="tablero",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "status": up.status,
+            "rows_total": rows_total,
+            "bidders": kpis.get("bidders", 0),
+            "items": kpis.get("items", 0),
+        },
+    )
+
+    return response
 
 # ======================================================================
 # ADMIN: RESET DE PROCESOS / CARGAS
@@ -4453,11 +4538,30 @@ def login_submit(
     request.session["role"] = (u.role or "").lower()
     request.session["name"] = user_display(u)
 
+    # 👇 NUEVO: log de inicio de sesión
+    log_usage_event(
+        user=u,
+        action_type="login",
+        section="auth",
+        request=request,
+        extra_data={"email": u.email},
+    )
+
     return RedirectResponse("/", status_code=303)
 
 
 @app.get("/logout", include_in_schema=False)
 def logout(request: Request):
+    # 👇 NUEVO: log de logout si hay usuario
+    u = get_current_user(request)
+    if u:
+        log_usage_event(
+            user=u,
+            action_type="logout",
+            section="auth",
+            request=request,
+        )
+
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
 
@@ -4673,6 +4777,19 @@ def descargar_archivo_original(
     filename = p.name
 
     # Tipo genérico; Excel lo abre igual
+        # Nombre de archivo para la descarga
+    filename = p.name
+
+    # 👇 NUEVO: log de descarga de original
+    log_usage_event(
+        user=user,
+        action_type="download_original",
+        section="cargas_original",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"filename": filename},
+    )
+
     return FileResponse(
         str(p),
         filename=filename,
@@ -4712,9 +4829,19 @@ def descargar_normalizado(
             detail="Disponible cuando el admin finalice el proceso.",
         )
 
-    norm_path = services.get_normalized_path(up)
+        norm_path = services.get_normalized_path(up)
     if not norm_path or not norm_path.exists():
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    # 👇 NUEVO: log de descarga de normalized
+    log_usage_event(
+        user=user,
+        action_type="download_normalized",
+        section="normalized_download",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"filename": norm_path.name},
+    )
 
     return FileResponse(
         str(norm_path),
@@ -4861,11 +4988,23 @@ def descargar_reporte_proceso(
 
     # 10) Devolverlo como descarga
     filename = f"informe_proceso_{upload_id}.pdf"
+        # ... después de generar pdf_bytes = render_informe_comparativas(data_pdf)
+
+    # 👇 NUEVO: log de descarga de reporte PDF
+    log_usage_event(
+        user=user,
+        action_type="download_pdf",
+        section="reporte_proceso",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"proceso_nro": proceso_nro},
+    )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
+            "Content-Disposition": f'attachment; filename="reporte_proceso_{upload_id}.pdf"'
         },
     )
 
