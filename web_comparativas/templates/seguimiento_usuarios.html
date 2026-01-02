@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+{% block title %}Panel{% endblock %}
+
+{% block extra_head %}
+<style>
+  :root {
+    --sa-azul: #064066;
+    /* Suizo Argentina Primary Blue */
+    --sa-azul-2: #5274ce;
+    /* Suizo Argentina Secondary Blue */
+    --sa-azul-light: #6886c4;
+    /* Suizo Argentina Light Blue */
+    --tech-bg: #f8fafc;
+    --tech-card-bg: #ffffff;
+    --tech-border: #e2e8f0;
+    --tech-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    --tech-shadow-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  }
+
+  body {
+    background-color: var(--tech-bg);
+  }
+
+  .usage-filters-bar {
+    background: var(--tech-card-bg);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    border: 1px solid var(--tech-border);
+    box-shadow: var(--tech-shadow);
+    transition: all 0.3s ease;
+  }
+
+  .usage-filters-bar:hover {
+    box-shadow: var(--tech-shadow-hover);
+    border-color: #cbd5e1;
+  }
+
+  .usage-card {
+    background: var(--tech-card-bg);
+    border-radius: 16px;
+    border: 1px solid var(--tech-border);
+    padding: 20px;
+    box-shadow: var(--tech-shadow);
+    height: 100%;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .usage-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--tech-shadow-hover);
+    border-color: #cbd5e1;
+  }
+
+  .usage-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--sa-azul);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .usage-card:hover::before {
+    opacity: 1;
+  }
+
+  .usage-card-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 8px;
+  }
+
+  .usage-card-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--sa-azul);
+    line-height: 1.2;
+    margin-bottom: 4px;
+  }
+
+  .usage-tabs .nav-link {
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #64748b;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+  }
+
+  .usage-tabs .nav-link:hover {
+    background-color: #f1f5f9;
+    color: var(--sa-azul);
+  }
+
+  .usage-tabs .nav-link.active {
+    background: var(--sa-azul-2);
+    color: #fff;
+    box-shadow: 0 4px 6px -1px rgba(82, 116, 206, 0.3);
+  }
+
+  .usage-panel {
+    background: var(--tech-card-bg);
+    border-radius: 16px;
+    border: 1px solid var(--tech-border);
+    padding: 24px;
+    box-shadow: var(--tech-shadow);
+    height: 100%;
+    transition: all 0.3s ease;
+  }
+
+  .usage-panel:hover {
+    box-shadow: var(--tech-shadow-hover);
+  }
+
+  .usage-panel-header {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .usage-panel-header::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--sa-azul-2);
+  }
+
+  .usage-panel-sub {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 16px;
+  }
+
+  .usage-chart {
+    min-height: 280px;
+  }
+
+  .usage-table-wrap {
+    background: var(--tech-card-bg);
+    border-radius: 16px;
+    border: 1px solid var(--tech-border);
+    box-shadow: var(--tech-shadow);
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .usage-table-wrap table {
+    margin-bottom: 0;
+    font-size: 14px;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .usage-table-wrap thead {
+    background: #f1f5f9;
+  }
+
+  .usage-table-wrap th {
+    font-weight: 600;
+    color: #475569;
+    padding: 16px;
+    border-bottom: 1px solid var(--tech-border);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+
+  .usage-table-wrap td {
+    padding: 16px;
+    border-bottom: 1px solid var(--tech-border);
+    color: #334155;
+    vertical-align: middle;
+  }
+
+  .usage-table-wrap tr:last-child td {
+    border-bottom: none;
+  }
+
+  .usage-table-wrap tbody tr {
+    transition: background-color 0.2s ease;
+  }
+
+  .usage-table-wrap tbody tr:hover {
+    background-color: #f8fafc;
+  }
+
+  .usage-table-wrap tbody tr.table-active {
+    background-color: #eff6ff;
+    /* Light blue tint */
+  }
+
+  .usage-empty {
+    font-size: 14px;
+    color: #94a3b8;
+    padding: 32px;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* ==== Detalle "Por usuario" ==== */
+  .usage-user-detail-title {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 2px;
+  }
+
+  .usage-user-detail-main {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .usage-user-detail-sub {
+    font-size: 12px;
+    color: #6b7280;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+  <h1 class="h4 mb-3">Seguimiento de usuarios</h1>
+
+  <!-- Filtros -->
+  <form id="usage-filters-form" class="usage-filters-bar">
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rango de fechas (desde)</label>
+        <input type="date" id="flt-date-from" name="date_from" class="form-control form-control-sm"
+          placeholder="dd/mm/aaaa">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rango de fechas (hasta)</label>
+        <input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm"
+          placeholder="dd/mm/aaaa">
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Rol</label>
+        <select id="flt-role" name="role" class="form-select form-select-sm">
+          <option value="">Analistas y Supervisores</option>
+          <option value="analista">Analistas</option>
+          <option value="supervisor">Supervisores</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Equipo / grupo</label>
+        <select id="flt-team" name="team" class="form-select form-select-sm">
+          <option value="">Todos los equipos</option>
+          <!-- si después querés, populamos esto con datos reales -->
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label mb-1 small">Vista temporal</label>
+        <select id="flt-granularity" name="granularity" class="form-select form-select-sm">
+          <option value="day">Día</option>
+          <option value="week">Semana</option>
+          <option value="month">Mes</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-3 col-lg-2 text-md-end">
+        <button id="usage-apply-filters" type="submit" class="btn btn-primary btn-sm mt-2 mt-md-0">
+          Aplicar filtros
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <!-- KPIs -->
+  <div class="row g-2 mb-3">
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Usuarios activos</div>
+        <div class="usage-card-value" id="card-active-users">0</div>
+        <div class="small text-muted" id="card-active-users-sub">
+          Sin actividad registrada en el rango seleccionado.
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Archivos cargados</div>
+        <div class="usage-card-value" id="card-files">0</div>
+        <div class="small text-muted" id="card-files-sub">
+          Todavía no se registraron cargas en el rango seleccionado.
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Horas activas</div>
+        <div class="usage-card-value" id="card-active-hours">0,0</div>
+        <div class="small text-muted" id="card-active-hours-sub">
+          Sin tiempo activo registrado en el rango seleccionado.
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-3">
+      <div class="usage-card">
+        <div class="usage-card-title">Índice productividad prom.</div>
+        <div class="usage-card-value" id="card-productivity">0,00</div>
+        <div class="small text-muted" id="card-productivity-sub">
+          Cuando haya más actividad, vas a ver acá un índice promedio.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <ul class="nav nav-pills usage-tabs mb-3" id="usage-tabs">
+    <li class="nav-item">
+      <button class="nav-link active" type="button" data-usage-tab-target="#usage-tab-summary">
+        Resumen general
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" type="button" data-usage-tab-target="#usage-tab-by-user">
+        Por usuario
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" type="button" data-usage-tab-target="#usage-tab-comparative">
+        Comparativo
+      </button>
+    </li>
+
+  </ul>
+
+  <!-- Panels -->
+  <div class="tab-content">
+
+    <!-- 1. Resumen general -->
+    <div id="usage-tab-summary" class="tab-pane show active" data-usage-tab-panel>
+      <div class="row g-2">
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel">
+            <div class="usage-panel-header">Actividad por día de la semana</div>
+            <div class="usage-panel-sub">
+              Eventos de uso agregados por día (Lun–Dom).
+            </div>
+            <div id="usage-chart-weekday" class="usage-chart"></div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel">
+            <div class="usage-panel-header">Heatmap día / hora</div>
+            <div class="usage-panel-sub">
+              Intensidad de eventos por franja horaria y día.
+            </div>
+            <div id="usage-chart-heatmap" class="usage-chart"></div>
+          </div>
+        </div>
+
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel mt-2">
+            <div class="usage-panel-header">Analistas vs Supervisores</div>
+            <div class="usage-panel-sub">
+              Comparación de sesiones, horas activas y cargas por rol.
+            </div>
+            <div id="usage-chart-roles" class="usage-chart"></div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="usage-panel mt-2">
+            <div class="usage-panel-header">Secciones más usadas</div>
+            <div class="usage-panel-sub">
+              Vistas y acciones por sección de la interfaz.
+            </div>
+            <div id="usage-chart-sections" class="usage-chart"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Por usuario -->
+    <div id="usage-tab-by-user" class="tab-pane" data-usage-tab-panel>
+
+      <!-- Encabezado -->
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+          <div class="usage-panel-header mb-1">Por usuario</div>
+          <div class="usage-panel-sub mb-0">
+            Detalle de actividad por persona: sesiones, días activos, horas activas, archivos cargados,
+            índice de productividad y último acceso.
+          </div>
+        </div>
+      </div>
+
+      <!-- Mini-cards de detalle del usuario seleccionado -->
+      <div class="row g-2 mb-3" id="usage-user-detail-row">
+        <div class="col-12 col-md-4 col-lg-3">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Usuario seleccionado</div>
+            <div id="su-user-detail-name" class="usage-user-detail-main">
+              Seleccioná un usuario de la tabla
+            </div>
+            <div id="su-user-detail-role-team" class="usage-user-detail-sub mt-1">
+              &nbsp;
+            </div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Sesiones</div>
+            <div id="su-user-detail-sessions" class="usage-user-detail-main">—</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Días activos</div>
+            <div id="su-user-detail-days" class="usage-user-detail-main">—</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-2">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Horas activas</div>
+            <div id="su-user-detail-hours" class="usage-user-detail-main">—</div>
+            <div class="usage-user-detail-sub mt-1">en el rango seleccionado</div>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-2 col-lg-3">
+          <div class="usage-card">
+            <div class="usage-user-detail-title">Productividad</div>
+            <div id="su-user-detail-productivity" class="usage-user-detail-main">—</div>
+            <div id="su-user-detail-last-access" class="usage-user-detail-sub mt-1">
+              Último acceso: —
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabla de resumen por usuario -->
+      <div class="usage-table-wrap">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Rol</th>
+              <th class="text-end">Sesiones</th>
+              <th class="text-end">Días activos</th>
+              <th class="text-end">Horas activas</th>
+              <th class="text-end">Archivos cargados</th>
+              <th class="text-end">Índice productividad</th>
+              <th>Último acceso</th>
+            </tr>
+          </thead>
+          <tbody id="su-users-byuser-tbody">
+            <tr>
+              <td colspan="8" class="usage-empty">
+                Aún no hay registros de actividad para mostrar en la tabla.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. Comparativo -->
+    <div id="usage-tab-comparative" class="tab-pane" data-usage-tab-panel>
+      <div class="usage-panel">
+        <div class="usage-panel-header">Comparativo</div>
+        <div class="usage-panel-sub">
+          Espacio reservado para comparativos adicionales (por equipo, por repartición, etc.).
+        </div>
+        <div class="usage-empty">
+          Próximamente vamos a sumar gráficos comparativos más avanzados.
+        </div>
+      </div>
+    </div>
+
+
+
+  </div> <!-- /tab-content -->
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{# 1) Librería de gráficos #}
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+{# 2) JS específico de Seguimiento de usuarios #}
+<script src="{{ url_for('static', path='/js/seguimiento_usuarios.js') }}"></script>
+{% endblock %}

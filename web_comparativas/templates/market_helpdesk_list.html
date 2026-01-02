@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Mesa de Ayuda – {% if market_context == 'private' %}Mercado Privado{% else %}Mercado Público{% endif
+%}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .consulta-status {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.75rem;
+        border-radius: 99px;
+        text-transform: uppercase;
+    }
+
+    .status-abierto {
+        background: rgba(59, 130, 246, 0.1);
+        color: #2563eb;
+        border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .status-pendiente {
+        background: rgba(245, 158, 11, 0.1);
+        color: #d97706;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .status-resuelto {
+        background: rgba(16, 185, 129, 0.1);
+        color: #059669;
+        border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .status-cerrado {
+        background: rgba(148, 163, 184, 0.1);
+        color: #475569;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .priority-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+    }
+
+    .priority-alta {
+        background-color: #dc2626;
+        box-shadow: 0 0 4px rgba(220, 38, 38, 0.4);
+    }
+
+    .priority-media {
+        background-color: #f59e0b;
+    }
+
+    .priority-baja {
+        background-color: #3b82f6;
+    }
+
+    .consulta-row {
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .consulta-row:hover {
+        background-color: #f8fafc;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="h3 fw-bold text-dark mb-1">Mesa de Ayuda</h1>
+        <p class="text-muted small mb-0">Gestión de consultas y soporte.</p>
+    </div>
+    {% if (user.role or '')|lower != 'auditor' %}
+    <div>
+        <a href="{{ request.path }}/new" class="btn btn-primary d-flex align-items-center gap-2">
+            <i class="bi bi-plus-lg"></i> Nueva Consulta
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+{% if request.query_params.get('ok') == 'deleted' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    Consulta eliminada correctamente.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+<div class="alert alert-danger alert-dismissible fade show" role="alert">
+    Error: {{ request.query_params.get('err') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            {% if not tickets or tickets|length == 0 %}
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-chat-square-text mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
+                Aún no hay consultas creadas.
+                {% if (user.role or '')|lower != 'auditor' %}
+                <div class="mt-2">
+                    <a href="{{ request.path }}/new" class="text-primary text-decoration-underline">Iniciar una
+                        consulta</a>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-light">
+                    <tr>
+                        <th class="ps-3" style="width: 60px;">ID</th>
+                        <th>Asunto</th>
+                        {% if is_admin %}
+                        <th>Usuario</th>
+                        {% endif %}
+                        <th>Categoría</th>
+                        <th>Prioridad</th>
+                        <th>Estado</th>
+                        <th>Última act.</th>
+                        <th class="text-end pe-3"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tickets %}
+                    {% if market_context == 'private' %}
+                    {% set ticket_url = '/mercado-privado/helpdesk/' ~ t.id %}
+                    {% else %}
+                    {% set ticket_url = '/mercado-publico/helpdesk/' ~ t.id %}
+                    {% endif %}
+                    <tr class="consulta-row" onclick="window.location='{{ ticket_url }}'">
+                        <td class="ps-3 text-muted small">#{{ t.id }}</td>
+                        <td class="fw-medium text-dark">
+                            {{ t.title }}
+                        </td>
+                        {% if is_admin %}
+                        <td class="small text-muted">
+                            {{ t.user.email }}
+                        </td>
+                        {% endif %}
+                        <td>
+                            <span
+                                class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal px-2 py-1"
+                                style="font-size: 0.7rem;">
+                                {{ t.category|capitalize }}
+                            </span>
+                        </td>
+                        <td>
+                            {% set p_cls = 'priority-media' %}
+                            {% if t.priority == 'alta' %}{% set p_cls = 'priority-alta' %}{% endif %}
+                            {% if t.priority == 'baja' %}{% set p_cls = 'priority-baja' %}{% endif %}
+                            <div class="d-flex align-items-center small text-muted">
+                                <span class="priority-dot {{ p_cls }}"></span>
+                                {{ t.priority|capitalize }}
+                            </div>
+                        </td>
+                        <td>
+                            {% set s_cls = 'status-abierto' %}
+                            {% if t.status == 'pendiente' %}{% set s_cls = 'status-pendiente' %}{% endif %}
+                            {% if t.status == 'resuelto' %}{% set s_cls = 'status-resuelto' %}{% endif %}
+                            {% if t.status == 'cerrado' %}{% set s_cls = 'status-cerrado' %}{% endif %}
+                            <span class="consulta-status {{ s_cls }}">{{ t.status }}</span>
+                        </td>
+                        <td class="text-muted small">
+                            {{ t.updated_at.strftime('%d/%m %H:%M') }}
+                        </td>
+                        <td class="text-end pe-3 text-muted">
+                            <i class="bi bi-chevron-right"></i>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

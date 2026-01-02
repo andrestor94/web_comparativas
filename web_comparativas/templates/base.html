@@ -1,19 +1,19 @@
 <!doctype html>
 {% if user %}
-  {% set _display_name = (user.name or user.full_name or user.nombre) %}
-  {% if not _display_name %}
-    {% set _email = user.email|default('') %}
-    {% set parts = _email|split('@') %}
-    {% set _alias = (parts[0] if parts|length > 0 else '') %}
-    {% set _alias = _alias|replace('.',' ')|replace('_',' ')|replace('-',' ') %}
-    {% set _display_name = _alias|title %}
-  {% endif %}
-{% else %}
-  {% set _display_name = '' %}
+{% set _display_name = (user.name or user.full_name or user.nombre) %}
+{% if not _display_name %}
+{% set _email = user.email|default('') %}
+{% set parts = _email|split('@') %}
+{% set _alias = (parts[0] if parts|length > 0 else '') %}
+{% set _alias = _alias|replace('.',' ')|replace('_',' ')|replace('-',' ') %}
+{% set _display_name = _alias|title %}
 {% endif %}
-<html lang="es"
-      data-user-role="{{ (user and (user.role or ''))|lower }}"
-      data-user-display="{{ _display_name or 'Yo' }}">
+{% else %}
+{% set _display_name = '' %}
+{% endif %}
+<html lang="es" data-user-role="{{ (user and (user.role or ''))|lower }}"
+  data-user-display="{{ _display_name or 'Yo' }}">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -21,16 +21,25 @@
   <meta name="theme-color" content="#eeede8" />
   <title>{% block title %}Web Comparativas{% endblock %}</title>
 
+  <!-- Google Fonts: Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+
   <!-- Bootstrap CSS -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
   <!-- Tema personalizado (global) + cache-busting -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=20251028-1">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=20251209-pro">
+
 
   <!-- ========== Notificaciones SA (UI) ========== -->
   <style>
     /* ===== pill del usuario (header, arriba a la derecha) ===== */
-    .top-user-pill{
+    .top-user-pill {
       background-color: #6886c4;
       color: #ffffff;
       border-radius: 9999px;
@@ -43,6 +52,7 @@
       line-height: 1.1;
       white-space: nowrap;
     }
+
     .top-user-pill span,
     .top-user-pill i,
     .top-user-pill svg {
@@ -50,153 +60,409 @@
     }
 
     /* ===== Notificaciones SA ===== */
-    #toast-root{
-      position:fixed; right:16px; bottom:16px; z-index:4000;
-      display:flex; flex-direction:column; gap:10px; pointer-events:none;
+    #toast-root {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 4000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
     }
-    .sa-toast{
-      pointer-events:auto; background:var(--sa-blanco,#fff); color:var(--sa-text,#064066);
-      border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px;
-      box-shadow:var(--shadow-2,0 10px 32px rgba(6,64,102,.12));
-      padding:12px 14px 10px; width:min(360px, 90vw); transform:translateY(8px);
-      animation:sa-toast-in .18s ease-out both;
-    }
-    .sa-toast--out{ animation:sa-toast-out .18s ease-in both; }
-    .sa-toast__head{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .sa-toast__title{ font-weight:700; font-size:15px; }
-    .sa-toast__body{ font-size:14px; margin-top:4px; }
-    .sa-toast__footer{ margin-top:8px; }
-    .sa-toast__action{
-      background:#eef2f7; border:1px solid #e5e7eb; border-radius:8px;
-      padding:6px 10px; font-weight:600; cursor:pointer;
-    }
-    .sa-toast__close{
-      background:transparent; border:0; font-size:18px; line-height:1; cursor:pointer; color:#64748b;
-    }
-    .sa-toast__bar{
-      height:3px; width:100%; margin-top:8px; transform-origin:left center; transform:scaleX(1);
-      border-radius:2px; opacity:.9;
-    }
-    @keyframes sa-toast-in{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)}}
-    @keyframes sa-toast-out{ from{opacity:1; transform:translateY(0)} to{opacity:0; transform:translateY(6px)}}
 
-    #banner-root{
-      position:fixed; top:70px; left:50%; transform:translateX(-50%);
-      z-index:3500; display:flex; flex-direction:column; gap:8px; width:min(820px,94vw);
+    .sa-toast {
+      pointer-events: auto;
+      background: var(--sa-blanco, #fff);
+      color: var(--sa-text, #064066);
+      border: 1px solid var(--sa-gris-borde, #e5e7eb);
+      border-radius: 12px;
+      box-shadow: var(--shadow-2, 0 10px 32px rgba(6, 64, 102, .12));
+      padding: 12px 14px 10px;
+      width: min(360px, 90vw);
+      transform: translateY(8px);
+      animation: sa-toast-in .18s ease-out both;
     }
-    .sa-banner{
-      display:flex; align-items:center; gap:10px; background:var(--sa-gris-soft,#eef2f7);
-      border:1px solid var(--sa-gris-borde,#e5e7eb); border-radius:12px; padding:10px 12px;
-      box-shadow:var(--shadow-1,0 3px 14px rgba(6,64,102,.06));
+
+    .sa-toast--out {
+      animation: sa-toast-out .18s ease-in both;
     }
-    .sa-banner__dot{ width:10px; height:10px; border-radius:999px; flex:0 0 auto; }
-    .sa-banner__msg{ color:var(--sa-text,#064066); font-size:14px; }
-    .sa-banner__close{ margin-left:auto; background:transparent; border:0; font-size:18px; cursor:pointer; color:#64748b; }
+
+    .sa-toast__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .sa-toast__title {
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .sa-toast__body {
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .sa-toast__footer {
+      margin-top: 8px;
+    }
+
+    .sa-toast__action {
+      background: #eef2f7;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .sa-toast__close {
+      background: transparent;
+      border: 0;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      color: #64748b;
+    }
+
+    .sa-toast__bar {
+      height: 3px;
+      width: 100%;
+      margin-top: 8px;
+      transform-origin: left center;
+      transform: scaleX(1);
+      border-radius: 2px;
+      opacity: .9;
+    }
+
+    @keyframes sa-toast-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes sa-toast-out {
+      from {
+        opacity: 1;
+        transform: translateY(0)
+      }
+
+      to {
+        opacity: 0;
+        transform: translateY(6px)
+      }
+    }
+
+    #banner-root {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3500;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: min(820px, 94vw);
+    }
+
+    .sa-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--sa-gris-soft, #eef2f7);
+      border: 1px solid var(--sa-gris-borde, #e5e7eb);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow-1, 0 3px 14px rgba(6, 64, 102, .06));
+    }
+
+    .sa-banner__dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    .sa-banner__msg {
+      color: var(--sa-text, #064066);
+      font-size: 14px;
+    }
+
+    .sa-banner__close {
+      margin-left: auto;
+      background: transparent;
+      border: 0;
+      font-size: 18px;
+      cursor: pointer;
+      color: #64748b;
+    }
+
+    /* ====== Sidebar: toggler con caret (seguro) ====== */
+    .nav-link-toggle {
+      cursor: pointer;
+      background: transparent;
+      color: inherit;
+      border: 0;
+      text-align: left;
+      width: 100%;
+      padding: .375rem .75rem;
+      border-radius: .375rem;
+    }
+
+    .nav-link-toggle .caret {
+      font-size: .9rem;
+      transition: transform .18s ease;
+    }
+
+    .nav-link-toggle[aria-expanded="true"] .caret {
+      transform: rotate(90deg);
+    }
+
+    /* submenú con sangría */
+    .nav .submenu a.nav-link {
+      padding-left: 1.75rem;
+    }
   </style>
   <!-- ========== /Notificaciones SA (UI) ========== -->
 
   {% block extra_head %}{% endblock %}
   {% block page_skin %}{% endblock %}
 </head>
+
 <body>
   <div class="app d-flex" style="min-height:100vh">
     <!-- Sidebar -->
     <aside class="sidebar" role="navigation" aria-label="Menú lateral">
-      <div class="brand px-3 py-3 fw-semibold border-bottom">Web Comparativas</div>
-
-      {% if user %}
-        {% set r = (user.role or user.rol or '')|lower %}
+      {% if market_context == 'private' %}
+      <div class="brand px-3 py-3 fw-semibold border-bottom" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado
+      </div>
       {% else %}
-        {% set r = '' %}
+      <div class="brand px-3 py-3 fw-semibold border-bottom">Mercado Público</div>
       {% endif %}
 
-      {% set _pending = total_pending|default(None) %}
-      {% set _done = total_done|default(None) %}
+      {% if user %}
+      {% set r = (user.role or user.rol or '')|lower %}
+      {% else %}
+      {% set r = '' %}
+      {% endif %}
 
       <nav class="nav flex-column px-3 py-2 gap-1">
-        <a href="/"
-           class="nav-link {% if request.url.path == '/' or request.url.path.startswith('/inicio') or request.url.path.startswith('/home') %}active{% endif %}">
-           Inicio
+
+        {% if market_context == 'private' %}
+        <!-- ================= MENÚ MERCADO PRIVADO ================= -->
+
+        <!-- Home -->
+        <a href="/mercado-privado" class="nav-link {% if request.url.path == '/mercado-privado' %}active{% endif %}">
+          Home
         </a>
 
-        {% if user and r in ['admin','analista','supervisor'] %}
-          <a href="/cargas/nueva"
-             class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
-             <span>Nueva carga</span>
-          </a>
+        <!-- Dimensionamiento de mercado -->
+        <a href="/mercado-privado/dimensiones"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/dimensiones') %}active{% endif %}">
+          Dimensionamiento
+        </a>
+
+        <!-- Reporte perfiles (Reutilizado) -->
+        {% if user and r in ['admin','supervisor','auditor'] %}
+        <a href="/mercado-privado/reporte-perfiles"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/reporte-perfiles') %}active{% endif %}">
+          Reporte perfiles
+        </a>
         {% endif %}
 
-        {# ===== Nuevo ítem: Cargas externas (no visible para auditor) ===== #}
-        {% if user and r in ['admin','analista','supervisor'] %}
-          {% set is_ext = request.url.path.startswith('/cargas/externas') %}
-          <a href="/cargas/externas"
-             class="nav-link {% if is_ext %}active{% endif %}">
-             Cargas externas
-          </a>
+        <!-- Mesa de ayuda (Reutilizado) -->
+        {% if user and r in ['analista','supervisor','auditor'] %}
+        {% set is_comments = request.url.path.startswith('/mercado-privado/comentarios') %}
+        <a href="/mercado-privado/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
+          id="cmMenuLink" title="Mesa de ayuda">
+          <span>Mesa de ayuda</span>
+          <span class="ms-2">
+            <span id="cmMenuBadge" class="badge rounded-pill bg-primary-subtle text-primary"
+              style="display:none">0</span>
+          </span>
+        </a>
         {% endif %}
 
-        {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {# 👉 Ajuste: Historial NO se activa en /cargas/nueva #}
+        <!-- Mi contraseña -->
+        <a href="/mercado-privado/mi-password"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/mi-password') %}active{% endif %}">
+          Mi contraseña
+        </a>
+
+        {% else %}
+        <!-- ================= MENÚ MERCADO PÚBLICO (DEFAULT) ================= -->
+
+        {% set _pending = total_pending|default(None) %}
+        {% set _done = total_done|default(None) %}
+
+        {# --- Abrir automáticamente los submenús si estamos en alguna de sus rutas --- #}
+        {% set wc_expand =
+        request.url.path.startswith('/mercado-publico/web-comparativas')
+        or request.url.path.startswith('/cargas')
+        or request.url.path == '/historial'
+        or request.url.path.startswith('/tablero')
+        or request.url.path.startswith('/grupos') %}
+
+        {% set op_expand =
+        request.url.path.startswith('/oportunidades')
+        or request.url.path.startswith('/mercado-publico/oportunidades') %}
+
+        <!-- Home Mercado Público -->
+        <a href="/mercado-publico" class="nav-link {% if request.url.path == '/mercado-publico' %}active{% endif %}">
+          Home
+        </a>
+
+        <!-- ====== Web Comparativa (submenú colapsable) ====== -->
+        <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
+          href="#wcMenu" role="button" aria-expanded="false" aria-controls="wcMenu">
+          <span>Comparativa</span>
+          <span class="caret">▸</span>
+        </a>
+
+        <div id="wcMenu" class="collapse submenu">
+
+
+          <!-- Sección: PRINCIPALES -->
+          <div class="px-3 mt-3 mb-1 text-uppercase"
+            style="font-size: 0.65rem; letter-spacing: 0.5px; font-weight: 700; color: rgba(255,255,255,0.65);">
+            Principales
+          </div>
+
+          {% if user and r in ['admin','analista','supervisor'] %}
+          <a href="/otras-fuentes/nueva"
+            class="nav-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
+            Nueva carga
+          </a>
+          {% endif %}
+
+          <div class="px-3 mt-3 mb-1 text-uppercase"
+            style="font-size: 0.65rem; letter-spacing: 0.5px; font-weight: 700; color: rgba(255,255,255,0.65);">
+            Otras Fuentes
+          </div>
+          <a href="/otras-fuentes-externas"
+            class="nav-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
+            Nueva carga
+          </a>
+
+          <!-- Separador -->
+          <div class="my-2 border-top border-white opacity-10 mx-3"></div>
+
+          {% if user and r in ['admin','analista','supervisor','auditor'] %}
           {% set is_hist =
-            request.url.path.startswith('/cargas/historial')
-            or request.url.path == '/historial'
-            or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva') and not request.url.path.startswith('/cargas/externas'))
-            or request.url.path.startswith('/tablero/')
-          %}
+          request.url.path.startswith('/cargas/historial')
+          or request.url.path == '/historial'
+          or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
+          or request.url.path.startswith('/tablero/') %}
           <a href="/cargas/historial"
-             class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
-             <span>Historial</span>
-             <span class="ms-2">
-               {% if _pending is not none and _pending|int > 0 %}
-                 <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
-               {% endif %}
-               {% if _done is not none and _done|int > 0 %}
-                 <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
-               {% endif %}
-             </span>
-          </a>
-        {% endif %}
-
-        {% if user and r in ['admin','analista','supervisor','auditor'] %}
-          {% set is_comments = request.url.path.startswith('/comentarios') %}
-          <a href="/comentarios"
-             class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
-             id="cmMenuLink" title="Mesa de ayuda">
-            <span>Mesa de ayuda</span>
+            class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
+            <span>Historial</span>
             <span class="ms-2">
-              <span id="cmMenuBadge" class="badge rounded-pill bg-primary-subtle text-primary" style="display:none">0</span>
+              {% if _pending is not none and _pending|int > 0 %}
+              <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
+              {% endif %}
+              {% if _done is not none and _done|int > 0 %}
+              <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
+              {% endif %}
             </span>
           </a>
-        {% endif %}
+          {% endif %}
 
-        {% if user and r in ['admin','supervisor'] %}
+          {% if user and r in ['admin','supervisor'] %}
           {% set is_groups = request.url.path.startswith('/grupos') %}
-          <a href="/grupos"
-             class="nav-link {% if is_groups %}active{% endif %}">
-             Grupos
+          <a href="/grupos" class="nav-link {% if is_groups %}active{% endif %}">
+            Grupos
           </a>
+          {% endif %}
+        </div>
+        <!-- ====== /Web Comparativa ====== -->
+
+        <!-- ====== Oportunidades (submenú colapsable) ====== -->
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+        <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
+          href="#opMenu" role="button" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
+          <span>Oportunidades</span>
+          <span class="caret">▸</span>
+        </a>
+
+        <div id="opMenu" class="collapse submenu {% if op_expand %}show{% endif %}">
+          <a href="/oportunidades/buscador"
+            class="nav-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
+            Buscador
+          </a>
+          <a href="/oportunidades/dimensiones"
+            class="nav-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
+            Dimensiones
+          </a>
+        </div>
+        {% endif %}
+        <!-- ====== /Oportunidades ====== -->
+
+        <!-- Reporte perfiles -->
+        {% if user and r in ['admin','supervisor','auditor'] %}
+        <a href="/mercado-publico/reporte-perfiles"
+          class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
+          Reporte perfiles
+        </a>
         {% endif %}
 
-        {% if user and r == 'admin' %}
-          <a href="/usuarios"
-             class="nav-link {% if 'usuarios' in request.url.path %}active{% endif %}">
-             Usuarios
-          </a>
-        {% endif %}
-
+        <!-- Mesa de ayuda -->
+        <!-- Mesa de ayuda (SIC) -->
         {% if user %}
-          <a href="/mi/password"
-             class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
-             Mi contraseña
-          </a>
+        {% if (r in ['analista', 'supervisor', 'auditor']) %}
+        <a href="/mercado-publico/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/mercado-publico/helpdesk') %}active{% endif %}"
+          title="Mesa de ayuda">
+          <span>Mesa de ayuda</span>
+        </a>
+        {% elif (r == 'admin') %}
+        <a href="/sic/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}"
+          title="Mesa de ayuda">
+          <span>Mesa de ayuda (SIC)</span>
+          <span class="ms-2">
+            <i class="bi bi-box-arrow-up-right" style="font-size: 0.7em;"></i>
+          </span>
+        </a>
         {% endif %}
+        {% endif %}
+
+
+
+
+
+
+
+        <!-- Mi contraseña -->
+        {% if user %}
+        <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          Mi contraseña
+        </a>
+        {% endif %}
+
+        {% endif %} <!-- End if market_context -->
+
       </nav>
 
       <div class="signout mt-auto px-3 py-3 border-top">
         {% if user %}
-          <a class="btn btn-outline-danger w-100" href="/logout">Salir</a>
+        <div class="small fw-semibold mb-2 text-muted px-1" style="font-size:0.7rem;">
+          Volver a la selección
+        </div>
+        {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
+        <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/">Cambiar Mercado</a>
+        {% endif %}
+        <a class="btn btn-outline-danger w-100 btn-sm" href="/logout">Salir</a>
         {% else %}
-          <a class="btn btn-primary w-100" href="/login">Ingresar</a>
+        <a class="btn btn-primary w-100" href="/login">Ingresar</a>
         {% endif %}
       </div>
     </aside>
@@ -209,51 +475,61 @@
 
         <div class="d-none d-md-flex align-items-center gap-2">
           {% block toolbar_actions %}
-            {% if user and (user.role or '')|lower in ['admin','supervisor']
-                  and request.url.path.startswith('/grupos')
-                  and request.url.path != '/grupos/nuevo' %}
-              <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
-            {% endif %}
+          {% if user and (user.role or '')|lower in ['admin','supervisor']
+          and request.url.path.startswith('/grupos')
+          and request.url.path != '/grupos/nuevo' %}
+          <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
+          {% endif %}
           {% endblock %}
         </div>
 
         <div class="ms-auto d-flex align-items-center gap-3">
+
+
+
           <form class="search position-relative" role="search" aria-label="Buscar en historial" id="app-search-form">
-            <input class="form-control form-control-sm pe-5" id="app-search-input"
-                   type="search" placeholder="Buscar…" aria-label="Buscar"
-                   value="{{ q|default('') }}" />
+            <input class="form-control form-control-sm pe-5" id="app-search-input" type="search" placeholder="Buscar…"
+              aria-label="Buscar" value="{{ q|default('') }}" />
             <span class="position-absolute top-50 end-0 translate-middle-y pe-2 text-muted">🔎</span>
           </form>
 
-          {# ===== Botón global "Resetear procesos" (solo admin, arriba) ===== #}
-          {% if user and r == 'admin' %}
-            <button type="button"
-                    class="btn btn-link text-danger fw-semibold d-none d-md-inline"
-                    data-bs-toggle="modal"
-                    data-bs-target="#resetUploadsModal">
-              Resetear procesos
-            </button>
-          {% endif %}
+
 
           <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
+
+            <!-- Notificaciones Icon -->
             {% if user %}
-              {% if user_display is defined %}
-                <span>{{ user_display(user) }}</span>
-              {% else %}
-                <span>{{ _display_name or '—' }}</span>
-              {% endif %}
-
-              <!-- pill de rol -->
-              <span class="top-user-pill">
-                {{ (r or '')|capitalize }}
-              </span>
-
-              <a href="/mi/password"
-                 class="text-decoration-none small {% if request.url.path.startswith('/mi/password') %}fw-semibold text-primary{% else %}text-muted{% endif %}">
-                 Cambiar contraseña
+            <div class="position-relative me-2" id="nav-notif-container">
+              <a href="/notifications" class="text-secondary opacity-75 hover-opacity-100" title="Notificaciones">
+                <i class="bi bi-bell-fill fs-5"></i>
+                <span id="nav-notif-badge"
+                  class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger border border-white p-1"
+                  style="display:none;font-size:0.6rem;">
+                  <span class="visually-hidden">New alerts</span>
+                </span>
               </a>
+            </div>
+            {% endif %}
+
+            {% if user %}
+            {% if user_display is defined %}
+            <span>{{ user_display(user) }}</span>
             {% else %}
-              Invitado
+            <span>{{ _display_name or '—' }}</span>
+            {% endif %}
+
+            <!-- pill de rol -->
+            <span class="top-user-pill">
+              {{ (r or '')|capitalize }}
+            </span>
+
+            {# Se quitó el link "Cambiar contraseña" de la barra superior #}
+
+            <!-- Toggle Dark Mode (Tech/Pill) -->
+
+
+            {% else %}
+            Invitado
             {% endif %}
           </div>
         </div>
@@ -271,43 +547,7 @@
     </main>
   </div>
 
-  {# ===== Modal global para resetear procesos (solo admin) ===== #}
-  {% if user and r == 'admin' %}
-  <div class="modal fade" id="resetUploadsModal" tabindex="-1"
-       aria-labelledby="resetUploadsLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content border-0">
-        <div class="modal-header bg-danger text-white">
-          <h5 class="modal-title" id="resetUploadsLabel">Resetear procesos</h5>
-          <button type="button" class="btn-close btn-close-white"
-                  data-bs-dismiss="modal" aria-label="Cerrar"></button>
-        </div>
-        <form method="post" action="/admin/reset_uploads">
-          <div class="modal-body">
-            <p class="mb-3 small">
-              Esta acción está pensada para limpiar procesos de prueba o rearmar el entorno.
-              <strong>No se puede deshacer.</strong> Los procesos seleccionados se eliminarán de forma permanente.
-            </p>
-            <div class="mb-3">
-              <label for="resetPasswordInput" class="form-label">Contraseña de administrador</label>
-              <input type="password"
-                     name="password"
-                     id="resetPasswordInput"
-                     class="form-control"
-                     placeholder="Ingresá tu contraseña actual"
-                     required
-                     autocomplete="current-password">
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-            <button type="submit" class="btn btn-danger">Sí, resetear procesos</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-  {% endif %}
+
 
   <!-- Contenedores de notificaciones -->
   <div id="banner-root" aria-live="polite" aria-atomic="true"></div>
@@ -321,24 +561,25 @@
 
   <script>
     // ====== Usuario (expuesto a JS global + data-attrs en <html>) ======
-    (function(){
+    (function () {
       const APP_USER = {
-        role: {{ ((user and (user.role or user.rol or ''))|lower)|tojson }},
-        display: {{ (_display_name or 'Yo')|tojson }},
-        email: {{ (user and user.email or '')|tojson }}
+        role: {{ ((user and(user.role or user.rol or ''))| lower)| tojson
+    }},
+    display: { { (_display_name or 'Yo')| tojson } },
+    email: { { (user and user.email or '')| tojson } }
       };
-      window.APP_USER = APP_USER;
+    window.APP_USER = APP_USER;
 
-      const rootEl = document.documentElement;
-      if (!rootEl.dataset.userRole)    rootEl.dataset.userRole = APP_USER.role || '';
-      if (!rootEl.dataset.userDisplay) rootEl.dataset.userDisplay = APP_USER.display || 'Yo';
+    const rootEl = document.documentElement;
+    if (!rootEl.dataset.userRole) rootEl.dataset.userRole = APP_USER.role || '';
+    if (!rootEl.dataset.userDisplay) rootEl.dataset.userDisplay = APP_USER.display || 'Yo';
 
-      const wc = document.getElementById('wc-comments-panel');
-      if (wc) {
-        if (!wc.dataset.userRole)    wc.dataset.userRole = APP_USER.role || '';
-        if (!wc.dataset.userDisplay) wc.dataset.userDisplay = APP_USER.display || 'Yo';
-      }
-    })();
+    const wc = document.getElementById('wc-comments-panel');
+    if (wc) {
+      if (!wc.dataset.userRole) wc.dataset.userRole = APP_USER.role || '';
+      if (!wc.dataset.userDisplay) wc.dataset.userDisplay = APP_USER.display || 'Yo';
+    }
+    }) ();
 
     // ====== Buscador superior → historial ======
     (function () {
@@ -358,8 +599,32 @@
 
     // ====== Badge "Mesa de ayuda" (abiertos) ======
     (function () {
+      // ... (existing code if any, irrelevant here, just place at end of script block)
+    })();
+
+    // ====== CONFIRMACION MANUAL (si el onclick inline falla) ======
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest('.btn-delete-group')) {
+        e.preventDefault();
+        const btn = e.target.closest('.btn-delete-group');
+        const name = btn.dataset.name || 'este grupo';
+        if (confirm(`¿Eliminar el grupo ${name}? Esta acción no se puede deshacer.`)) {
+          window.location.href = btn.href;
+        }
+      }
+      if (e.target && e.target.closest('.btn-remove-member')) {
+        e.preventDefault();
+        const btn = e.target.closest('.btn-remove-member');
+        const name = btn.dataset.name || 'este usuario';
+        if (confirm(`¿Quitar a ${name} del grupo?`)) {
+          window.location.href = btn.href;
+        }
+      }
+    });
+
+    (function () {
       const badge = document.getElementById('cmMenuBadge');
-      const link  = document.getElementById('cmMenuLink');
+      const link = document.getElementById('cmMenuLink');
       if (!badge || !link) return;
 
       async function refresh() {
@@ -381,18 +646,44 @@
             badge.style.display = 'none';
           }
           link.title = `Mesa de ayuda · Abiertos: ${open}`;
-        } catch {}
+        } catch { }
       }
 
       refresh();
       setInterval(refresh, 60000);
     })();
 
+    // ====== Badge "Notificaciones" (System) ======
+    (function () {
+      const badge = document.getElementById('nav-notif-badge');
+      if (!badge) return;
+
+      async function checkNotifs() {
+        try {
+          const r = await fetch('/notifications/unread-count');
+          if (!r.ok) return;
+          const data = await r.json();
+          const count = data.count || 0;
+
+          if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : count;
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        } catch (e) { console.error('Error checking notifications', e); }
+      }
+
+      checkNotifs();
+      // Poll every 30 seconds
+      setInterval(checkNotifs, 30000);
+    })();
+
     // ====== Helper global: Enter = enviar / Shift+Enter = salto ======
-    (function(){
-      function bindEnterSubmit(textarea, form){
+    (function () {
+      function bindEnterSubmit(textarea, form) {
         if (!textarea || !form || textarea.dataset._enterBound) return;
-        textarea.addEventListener('keydown', function(e){
+        textarea.addEventListener('keydown', function (e) {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             const txt = (textarea.value || '').trim();
@@ -409,7 +700,7 @@
       const fm = document.getElementById('cmReplyForm');
       if (ta && fm) bindEnterSubmit(ta, fm);
 
-      document.addEventListener('shown.bs.offcanvas', function(){
+      document.addEventListener('shown.bs.offcanvas', function () {
         const t = document.getElementById('cmReplyBody');
         const f = document.getElementById('cmReplyForm');
         if (t && f) bindEnterSubmit(t, f);
@@ -438,25 +729,28 @@
   {% endif %}
 
   {% if reset_err %}
-  {% set _reset_err_msg = reset_err if reset_err is string else 'No se pudo resetear los procesos. Verificá la contraseña e intentá nuevamente.' %}
+  {% set _reset_err_msg = reset_err if reset_err is string else 'No se pudo resetear los procesos. Verificá la
+  contraseña e intentá nuevamente.' %}
   <script>
     window.addEventListener('DOMContentLoaded', function () {
-      var msg = {{ _reset_err_msg|tojson }};
-      if (window.Notify && Notify.toastError) {
-        Notify.toastError('No se pudo resetear', msg);
-      } else {
-        var box = document.getElementById('flash-container');
-        if (box) {
-          box.innerHTML =
-            '<div class="alert alert-danger alert-dismissible fade show" role="alert">'
-            + msg +
-            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
-        }
+      var msg = {{ _reset_err_msg| tojson
+    }};
+    if (window.Notify && Notify.toastError) {
+      Notify.toastError('No se pudo resetear', msg);
+    } else {
+      var box = document.getElementById('flash-container');
+      if (box) {
+        box.innerHTML =
+          '<div class="alert alert-danger alert-dismissible fade show" role="alert">'
+          + msg +
+          '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
       }
+    }
     });
   </script>
   {% endif %}
 
   {% block extra_js %}{% endblock %}
 </body>
+
 </html>

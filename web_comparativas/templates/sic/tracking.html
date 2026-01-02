@@ -1,0 +1,325 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}Seguimiento de Usuarios – S.I.C{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Override or specific styles for tracking page */
+    .usage-filters-bar {
+        background: var(--sic-card-bg);
+        border-radius: 16px;
+        padding: 20px 24px;
+        margin-bottom: 24px;
+        border: 1px solid var(--sic-border);
+        backdrop-filter: blur(10px);
+    }
+
+    .sic-card {
+        /* Ensure stats cards align */
+        height: 100%;
+        min-height: 140px;
+    }
+
+    .usage-card-title {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 600;
+        color: var(--sic-text-muted);
+        margin-bottom: 8px;
+    }
+
+    .usage-card-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--sic-highlight);
+        /* Use SIC highlight */
+        line-height: 1.2;
+        margin-bottom: 4px;
+    }
+
+    /* Tabs styling adaptation */
+    .nav-pills .nav-link {
+        color: var(--sic-text-muted);
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .nav-pills .nav-link.active {
+        background-color: var(--sic-highlight);
+        color: #fff;
+    }
+
+    .nav-pills .nav-link:hover:not(.active) {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: #fff;
+    }
+
+    /* Charts panel */
+    .usage-chart {
+        min-height: 280px;
+    }
+
+    .usage-panel-header {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #fff;
+    }
+
+    .usage-panel-header::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: var(--sic-highlight);
+    }
+
+    .usage-panel-sub {
+        font-size: 13px;
+        color: var(--sic-text-muted);
+        margin-bottom: 16px;
+    }
+
+    /* User detail styling */
+    .usage-user-detail-title {
+        font-size: 13px;
+        color: var(--sic-text-muted);
+        margin-bottom: 2px;
+    }
+
+    .usage-user-detail-main {
+        font-size: 15px;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .usage-user-detail-sub {
+        font-size: 12px;
+        color: var(--sic-text-muted);
+    }
+
+    .usage-empty {
+        font-size: 14px;
+        color: var(--sic-text-muted);
+        padding: 32px;
+        text-align: center;
+        font-style: italic;
+    }
+
+    /* Fix for dark mode date inputs */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+        filter: invert(1);
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h1 class="h3 fw-bold mb-1">Seguimiento de usuarios</h1>
+        <p class="text-white-50 small mb-0">Monitoreo de actividad y adopción de la plataforma.</p>
+    </div>
+</div>
+
+<!-- Filtros -->
+<form id="usage-filters-form" class="usage-filters-bar">
+    <div class="row g-2 align-items-end">
+        <div class="col-6 col-md-3 col-lg-2">
+            <label class="form-label mb-1 small text-white-50">Rango de fechas (desde)</label>
+            <input type="date" id="flt-date-from" name="date_from"
+                class="form-control form-control-sm form-control-sic">
+        </div>
+        <div class="col-6 col-md-3 col-lg-2">
+            <label class="form-label mb-1 small text-white-50">Rango de fechas (hasta)</label>
+            <input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm form-control-sic">
+        </div>
+
+        <div class="col-6 col-md-3 col-lg-2">
+            <label class="form-label mb-1 small text-white-50">Rol</label>
+            <select id="flt-role" name="role" class="form-select form-select-sm form-select-sic">
+                <option value="">Analistas y Supervisores</option>
+                <option value="analista">Analistas</option>
+                <option value="supervisor">Supervisores</option>
+            </select>
+        </div>
+
+        <div class="col-6 col-md-3 col-lg-2">
+            <label class="form-label mb-1 small text-white-50">Equipo / grupo</label>
+            <select id="flt-team" name="team" class="form-select form-select-sm form-select-sic">
+                <option value="">Todos los equipos</option>
+                <!-- si después querés, populamos esto con datos reales -->
+            </select>
+        </div>
+
+        <div class="col-6 col-md-3 col-lg-2">
+            <label class="form-label mb-1 small text-white-50">Vista temporal</label>
+            <select id="flt-granularity" name="granularity" class="form-select form-select-sm form-select-sic">
+                <option value="day">Día</option>
+                <option value="week">Semana</option>
+                <option value="month">Mes</option>
+            </select>
+        </div>
+
+        <div class="col-6 col-md-3 col-lg-2 text-md-end d-flex gap-2 justify-content-end">
+            <button id="usage-refresh-btn" type="button" class="btn btn-sic-outline btn-sm mt-2 mt-md-0"
+                title="Actualizar datos ahora" onclick="window.sicRefreshTracking && window.sicRefreshTracking()">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+            <button id="usage-apply-filters" type="submit" class="btn btn-sic-primary btn-sm mt-2 mt-md-0 w-100">
+                Aplicar filtros
+            </button>
+        </div>
+    </div>
+</form>
+
+<!-- KPIs -->
+<div class="row g-3 mb-4">
+    <div class="col-12 col-md-4">
+        <div class="sic-card">
+            <div class="usage-card-title">Usuarios activos</div>
+            <div class="usage-card-value" id="card-active-users">0</div>
+            <div class="small text-white-50" id="card-active-users-sub">
+                Sin actividad registrada en el rango seleccionado.
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="sic-card">
+            <div class="usage-card-title">Archivos cargados</div>
+            <div class="usage-card-value" id="card-files">0</div>
+            <div class="small text-white-50" id="card-files-sub">
+                Todavía no se registraron cargas en el rango seleccionado.
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4">
+        <div class="sic-card">
+            <div class="usage-card-title">Horas activas</div>
+            <div class="usage-card-value" id="card-active-hours">0,0</div>
+            <div class="small text-white-50" id="card-active-hours-sub">
+                Sin tiempo activo registrado en el rango seleccionado.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<ul class="nav nav-pills usage-tabs mb-4" id="usage-tabs">
+    <li class="nav-item">
+        <button class="nav-link active" type="button" data-usage-tab-target="#usage-tab-summary">
+            Resumen general
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" type="button" data-usage-tab-target="#usage-tab-by-user">
+            Por usuario
+        </button>
+    </li>
+</ul>
+
+<!-- Panels -->
+<div class="tab-content">
+
+    <!-- 1. Resumen general -->
+    <div id="usage-tab-summary" class="tab-pane show active" data-usage-tab-panel>
+        <div class="row g-3">
+            <div class="col-12 col-lg-6">
+                <div class="sic-card">
+                    <div class="usage-panel-header">Actividad por día de la semana</div>
+                    <div class="usage-panel-sub">
+                        Eventos de uso agregados por día (Lun–Dom).
+                    </div>
+                    <div id="usage-chart-weekday" class="usage-chart"></div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <div class="sic-card">
+                    <div class="usage-panel-header">Usuario vs Usuario</div>
+                    <div class="usage-panel-sub">
+                        Eventos y horas activas por usuario.
+                    </div>
+                    <div id="usage-chart-roles" class="usage-chart"></div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-6">
+                <div class="sic-card">
+                    <div class="usage-panel-header">Eventos día/hora</div>
+                    <div class="usage-panel-sub">
+                        Intensidad de eventos por franja horaria y día.
+                    </div>
+                    <div id="usage-chart-heatmap" class="usage-chart"></div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <div class="sic-card">
+                    <div class="usage-panel-header">Secciones más usadas</div>
+                    <div class="usage-panel-sub">
+                        Vistas y acciones por sección de la interfaz.
+                    </div>
+                    <div id="usage-chart-sections" class="usage-chart"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Por usuario -->
+    <div id="usage-tab-by-user" class="tab-pane" data-usage-tab-panel>
+
+        <!-- Encabezado -->
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <div class="h5 text-white mb-1">Por usuario</div>
+                <div class="small text-white-50 mb-0">
+                    Detalle de actividad por persona: sesiones, días activos, horas activas y último acceso.
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de resumen por usuario -->
+        <div class="sic-card p-0 overflow-hidden mt-3">
+            <div class="table-responsive">
+                <table class="sic-table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Usuario</th>
+                            <th>Rol</th>
+                            <th class="text-end">Sesiones</th>
+                            <th class="text-end">Días activos</th>
+                            <th class="text-end">Horas activas</th>
+                            <th class="text-end">Archivos cargados</th>
+                            <th>Último acceso</th>
+                        </tr>
+                    </thead>
+                    <tbody id="su-users-byuser-tbody">
+                        <tr>
+                            <td colspan="7" class="usage-empty">
+                                Aún no hay registros de actividad para mostrar en la tabla.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{# 1) Librería de gráficos #}
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+
+{# 2) JS específico de Seguimiento de usuarios #}
+<script src="{{ url_for('static', path='/js/seguimiento_usuarios.js') }}?v=sic2025"></script>
+{% endblock %}

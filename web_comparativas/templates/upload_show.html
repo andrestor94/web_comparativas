@@ -3,402 +3,721 @@
 
 {% block extra_head %}
 <style>
-  .meta-row{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.5rem}
-  .badge-soft{background:rgba(82,116,206,.1);color:#2a3f7c;border:1px solid rgba(82,116,206,.2)}
-  .badge-ok{background:rgba(34,160,107,.12);color:#1d6447;border:1px solid rgba(34,160,107,.2)}
-  .badge-err{background:rgba(220,53,69,.10);color:#842029;border:1px solid rgba(220,53,69,.25)}
-  .muted{color:#6c757d}
-  .tiny{font-size:.85rem}
-  .card{border-radius:14px}
+  /* === Variables & Base === */
+  :root {
+    --suizo-blue: #003366;
+    --suizo-red: #E30613;
+    --text-dark: #212529;
+    --text-muted: #6c757d;
+  }
 
-  .stepper-container{position:relative;margin-top:1.5rem;padding:2rem 1rem 1rem;min-height:120px}
-  .timeline{position:absolute;left:6%;right:6%;top:52px;height:4px;background:var(--bs-gray-300);border-radius:999px;overflow:hidden}
-  .timeline .fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,#6aa5ff,#04436a);transition:width .3s ease}
+  .text-suizo-blue {
+    color: var(--suizo-blue);
+  }
 
-  .stepper{display:flex;justify-content:space-between;position:relative;z-index:2}
-  .step{text-align:center;width:100%}
-  .step .circle{width:60px;height:60px;border-radius:50%;border:3px solid var(--bs-gray-400);background:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin:0 auto;transition:.2s ease}
-  .step.done .circle{border-color:#22a06b}
-  .step.current .circle{border-color:#5274ce;box-shadow:0 0 0 6px rgba(82,116,206,.15)}
-  .step .label{margin-top:.5rem;font-size:.9rem;font-weight:500;color:#333}
+  .text-suizo-red {
+    color: var(--suizo-red);
+  }
 
-  .btn-icon{display:inline-flex;align-items:center;gap:.5rem}
-  .alert-compact{padding:.5rem .75rem;margin-bottom:0}
-  details.debug summary{cursor:pointer}
+  /* === Header Card === */
+  .header-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    border-left: 5px solid var(--suizo-blue);
+  }
+
+  .header-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--suizo-blue);
+    margin-bottom: 0.5rem;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #f1f3f5;
+  }
+
+  .meta-item {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .meta-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+
+  .meta-value {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-dark);
+  }
+
+  /* === Stepper === */
+  .stepper-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    padding: 3rem 1rem;
+    margin-bottom: 2rem;
+    overflow: hidden;
+    /* Evitar scrollbar */
+  }
+
+  .stepper-container {
+    position: relative;
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .stepper-track {
+    position: absolute;
+    top: 20px;
+    height: 4px;
+    background-color: #e9ecef;
+    z-index: 1;
+    border-radius: 4px;
+    left: 0;
+    right: 0;
+  }
+
+  .stepper-progress-bar {
+    position: absolute;
+    top: 20px;
+    height: 4px;
+    background-color: var(--suizo-blue);
+    z-index: 2;
+    width: 0%;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 51, 102, 0.2);
+  }
+
+  .stepper-items {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    z-index: 3;
+  }
+
+  .step-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    position: relative;
+  }
+
+  .step-circle {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #dee2e6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #adb5bd;
+    font-weight: 700;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    z-index: 4;
+  }
+
+  .step-label {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-align: center;
+    max-width: 120px;
+    line-height: 1.3;
+    transition: color 0.3s ease;
+  }
+
+  /* Estados Stepper */
+  .step-item.current .step-circle {
+    border-color: var(--suizo-blue);
+    color: var(--suizo-blue);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(0, 51, 102, 0.1);
+    transform: scale(1.1);
+  }
+
+  .step-item.current .step-label {
+    color: var(--suizo-blue);
+    font-weight: 700;
+  }
+
+  .step-item.done .step-circle {
+    background: var(--suizo-blue);
+    border-color: var(--suizo-blue);
+    color: #fff;
+  }
+
+  .step-item.done .step-label {
+    color: var(--suizo-blue);
+    font-weight: 600;
+  }
+
+  .step-item.error .step-circle {
+    border-color: var(--suizo-red);
+    color: var(--suizo-red);
+  }
+
+  .step-item.error .step-label {
+    color: var(--suizo-red);
+  }
+
+  @keyframes pulse-blue {
+    0% {
+      box-shadow: 0 0 0 0 rgba(0, 51, 102, 0.4);
+    }
+
+    70% {
+      box-shadow: 0 0 0 10px rgba(0, 51, 102, 0);
+    }
+
+    100% {
+      box-shadow: 0 0 0 0 rgba(0, 51, 102, 0);
+    }
+  }
+
+  .step-item.current .step-circle {
+    animation: pulse-blue 2s infinite;
+  }
+
+  /* === Modern Buttons === */
+  .btn-suizo-primary {
+    background-color: var(--suizo-blue);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    box-shadow: 0 4px 6px rgba(0, 51, 102, 0.2);
+    transition: all 0.2s ease;
+  }
+
+  .btn-suizo-primary:hover:not(.disabled) {
+    background-color: #002244;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 51, 102, 0.25);
+    color: #fff;
+  }
+
+  .btn-suizo-primary.disabled {
+    background-color: #aeb9cc;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+
+  .btn-suizo-secondary {
+    background-color: transparent;
+    border: 2px solid #dee2e6;
+    color: var(--text-muted);
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+  }
+
+  .btn-suizo-secondary:hover {
+    border-color: var(--suizo-blue);
+    color: var(--suizo-blue);
+    background: #f8f9fa;
+  }
+
+  .btn-suizo-outline-red {
+    background-color: transparent;
+    border: 2px solid #f8d7da;
+    color: var(--suizo-red);
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+  }
+
+  .btn-suizo-outline-red:hover {
+    background-color: #fff5f5;
+    border-color: var(--suizo-red);
+  }
+
+  .btn-icon-gap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* Utils */
+  .tiny {
+    font-size: 0.85rem;
+  }
+
+  details.debug summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  /* Badges para el grid */
+  .status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 99px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: #f8f9fa;
+    color: #495057;
+  }
+
+  .status-badge.ok {
+    background: #d3f9d8;
+    color: #0b7285;
+  }
+
+  .status-badge.err {
+    background: #ffe3e3;
+    color: #c92a2a;
+  }
+
+  .status-badge.info {
+    background: #e7f5ff;
+    color: #1864ab;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 {% set U = upload if upload is defined else up %}
-<div class="container py-4">
+<div class="container py-5">
 
-  {# 👇 AVISO si venís de un duplicado #}
-  {% if dup %}
-    <div class="alert alert-warning d-flex align-items-center gap-2 mb-3" role="alert" style="border-radius:12px;">
-      <i class="bi bi-exclamation-triangle-fill"></i>
+  {# 👇 Header Section #}
+  <div class="header-card">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
       <div>
-        Este proceso ya estaba cargado. Te mostramos el que ya existía para evitar duplicados.
+        <div class="text-uppercase text-muted fw-bold"
+          style="font-size:0.75rem; letter-spacing:1px; margin-bottom:4px;">
+          Detalle del Proceso
+        </div>
+        <h1 class="header-title">
+          Proceso N° {{ U.proceso_nro or (U.id|string) }}
+        </h1>
+      </div>
+
+      <div class="text-end">
+        <span id="headerStatusBadge" class="status-badge info">Cargando...</span>
       </div>
     </div>
+
+    <div class="meta-grid">
+      <div class="meta-item">
+        <span class="meta-label">Fecha Apertura</span>
+        <span class="meta-value">{{ U.apertura_fecha or "—" }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Plataforma</span>
+        <span class="meta-value" id="metaAdapter">{{ U.platform_hint or "—" }}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Actualización</span>
+        <span class="meta-value">
+          <span id="lastUpd">—</span> <small id="lastUpdRel" class="text-muted fw-normal">(-)</small>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  {# 👇 Aviso Duplicado #}
+  {% if dup %}
+  <div class="alert alert-warning d-flex align-items-center gap-3 shadow-sm border-0"
+    style="border-radius:12px; background:#fff3cd; color:#664d03;">
+    <i class="bi bi-exclamation-triangle-fill fs-4"></i>
+    <div>
+      <strong>Proceso duplicado.</strong> Te mostramos el registro existente.
+    </div>
+  </div>
   {% endif %}
 
-  <h1 class="m-0">Proceso #{{ U.proceso_nro or "—" }}</h1>
-  <div class="text-subtle">
-    Plataforma: {{ U.platform_hint or "—" }} · Apertura: {{ U.apertura_fecha or "—" }}
+  <div id="errorBanner" class="alert alert-danger d-flex align-items-center gap-3 shadow-sm border-0 d-none"
+    style="border-radius:12px;">
+    <i class="bi bi-x-circle-fill fs-4"></i>
+    <div>Ocurrió un error. Revisá el diagnóstico abajo o reintentá.</div>
   </div>
 
-  <div class="meta-row tiny">
-    <span>Estado: <span id="statusChip" class="badge badge-soft">Pendiente</span></span>
-    <span>Adapter: <span id="adapterChip" class="badge bg-light border text-muted">—</span></span>
-    <span id="normChip" class="badge bg-light border text-muted">normalized.xlsx: —</span>
-    <span class="muted">Última actualización: <span id="lastUpd">—</span> <span id="lastUpdRel" class="muted">(—)</span></span>
-  </div>
-
-  <div id="errorBanner" class="alert alert-danger alert-compact mt-3 d-none">
-    Ocurrió un error durante el procesamiento. Revisá el registro y reintentá la carga si es necesario.
-  </div>
-
-  <!-- ===== SEGUIMIENTO ===== -->
-  <div class="card p-4 mt-4">
+  {# 👇 Stepper Section #}
+  <div class="stepper-card">
     <div class="stepper-container">
-      <div class="timeline"><div class="fill" id="tlFill"></div></div>
-      <div class="stepper" id="stepper"></div>
+      <div class="stepper-track" id="stepperTrack"></div>
+      <div class="stepper-progress-bar" id="tlFill"></div>
+      <div class="stepper-items" id="stepper"></div>
     </div>
 
-    <div class="text-center mt-3 text-muted tiny" id="noStepsMsg" style="display:none;">
-      No se pudo obtener el progreso. Verificá si el proceso está en cola o si la API de seguimiento responde correctamente.
+    <div class="text-center mt-4 text-muted tiny" id="noStepsMsg" style="display:none;">
+      No se pudo cargar el progreso.
     </div>
+  </div>
 
-    <div class="d-flex flex-wrap align-items-center gap-3 mt-4 justify-content-between">
-      <div class="d-flex flex-wrap gap-2">
-        <a id="btnDashboard" class="btn btn-primary btn-lg btn-icon disabled"
-           href="/tablero/{{ U.id }}" aria-disabled="true" title="Disponible según permisos">
-          Ver tablero
-        </a>
-        <a id="btnDownload" class="btn btn-outline-success btn-lg btn-icon disabled"
-           href="/descargas/{{ U.id }}" aria-disabled="true" title="Disponible según permisos">
-          Descargar normalized.xlsx
-        </a>
-        {% if user and (user.role or '').lower() == 'admin' %}
-        <a id="btnOriginal" class="btn btn-outline-secondary btn-lg btn-icon"
-           href="/cargas/{{ U.id }}/original" target="_blank"
-           title="Descargar el archivo original subido por el usuario">
-          Descargar archivo original
-        </a>
-        {% endif %}
-        <button id="btnRefresh" type="button" class="btn btn-outline-secondary btn-lg btn-icon">
-          Refrescar <span class="tiny muted">(R)</span>
-        </button>
-      </div>
+  {# 👇 Actions Section #}
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-5">
+
+    <div class="d-flex flex-wrap gap-3">
+      <a id="btnDashboard" class="btn btn-suizo-primary btn-icon-gap disabled" href="/tablero/{{ U.id }}"
+        aria-disabled="true">
+        <i class="bi bi-bar-chart-fill"></i> Ver Tablero
+      </a>
+
+      <a id="btnDownload" class="btn btn-suizo-secondary btn-icon-gap disabled" href="/descargas/{{ U.id }}"
+        aria-disabled="true">
+        <i class="bi bi-file-earmark-excel"></i> Descargar Excel
+      </a>
 
       {% if user and (user.role or '').lower() == 'admin' %}
-      <div class="d-flex gap-2">
-        <button id="btnPrev" class="btn btn-outline-secondary">
-          <i class="bi bi-skip-backward-fill"></i> Retroceder
-        </button>
-        <button id="btnNext" class="btn btn-outline-primary">
-          <i class="bi bi-skip-forward-fill"></i> Avanzar
-        </button>
-      </div>
+      <a id="btnOriginal" class="btn btn-suizo-secondary btn-icon-gap" href="/cargas/{{ U.id }}/original"
+        target="_blank">
+        <i class="bi bi-file-earmark-zip"></i> Archivo Original
+      </a>
       {% endif %}
+
+      <button id="btnRefresh" type="button" class="btn btn-suizo-secondary btn-icon-gap">
+        <i class="bi bi-arrow-clockwise"></i> Refrescar
+      </button>
     </div>
 
-    <div class="mt-2 tiny muted">
-      Tip: agregá <code>?autoredir=1</code> a la URL para entrar al tablero automáticamente cuando esté listo.
+    {% if user and (user.role or '').lower() == 'admin' %}
+    <div class="d-flex gap-2 p-2 rounded bg-white shadow-sm border">
+      <button id="btnPrev" class="btn btn-sm btn-link text-muted text-decoration-none">
+        <i class="bi bi-chevron-left"></i> Retroceder
+      </button>
+      <div class="vr"></div>
+      <button id="btnNext" class="btn btn-sm btn-link text-suizo-blue text-decoration-none fw-bold">
+        Avanzar <i class="bi bi-chevron-right"></i>
+      </button>
     </div>
+    {% endif %}
+  </div>
 
-    <details class="mt-3 tiny muted" id="dbgBox">
-      <summary>Ver diagnóstico</summary>
-      <pre class="mt-2" id="dbgJson" style="white-space:pre-wrap"></pre>
+  <div class="d-flex justify-content-between align-items-center mt-3">
+    <div class="form-check form-switch text-muted tiny">
+      <input class="form-check-input" type="checkbox" id="toggleAutoRedir" style="cursor:pointer;">
+      <label class="form-check-label" for="toggleAutoRedir" style="cursor:pointer;">
+        Abrir tablero automáticamente al finalizar
+      </label>
+    </div>
+    <details class="debug">
+      <summary>Diagnóstico técnico</summary>
+      <pre class="mt-2 p-3 bg-light rounded border" id="dbgJson"
+        style="font-size:0.75rem; white-space:pre-wrap; max-height:200px; overflow:auto;"></pre>
     </details>
   </div>
+
 </div>
 
 <script>
-/* ===================== Setup y utilidades ===================== */
-const uploadId = Number({{ U.id or 0 }});
-const PROC_LABEL = {{ (U.proceso_nro or ("#" ~ U.id))|tojson }};
-const stepper = document.getElementById("stepper");
-const tlFill = document.getElementById("tlFill");
-const btnDash = document.getElementById("btnDashboard");
-const btnDown = document.getElementById("btnDownload");
-const btnRef = document.getElementById("btnRefresh");
-const statusChip = document.getElementById("statusChip");
-const adapterChip = document.getElementById("adapterChip");
-const normChip = document.getElementById("normChip");
-const lastUpd = document.getElementById("lastUpd");
-const lastUpdRel = document.getElementById("lastUpdRel");
-const errorBanner = document.getElementById("errorBanner");
-const dbgJson = document.getElementById("dbgJson");
-const noStepsMsg = document.getElementById("noStepsMsg");
+  /* ===================== Setup y utilidades ===================== */
+  const uploadId = Number({{ U.id or 0 }});
+  const PROC_LABEL = {{ (U.proceso_nro or("N° " ~U.id))| tojson }};
 
-const btnPrev = document.getElementById("btnPrev");
-const btnNext = document.getElementById("btnNext");
+  // Elements
+  const stepper = document.getElementById("stepper");
+  const tlFill = document.getElementById("tlFill");
+  const stepperTrack = document.getElementById("stepperTrack");
 
-const params = new URLSearchParams(location.search);
-const AUTO_REDIR = params.get("autoredir") === "1";
+  const btnDash = document.getElementById("btnDashboard");
+  const btnDown = document.getElementById("btnDownload");
+  const btnRef = document.getElementById("btnRefresh");
 
-const STATUS_LABEL = {
-  pending: "Pendiente",
-  classifying: "Validado y clasificado",
-  processing: "Procesando",
-  reviewing: "En revisión",
-  dashboard: "Tablero",
-  done: "Finalizado",
-  error: "Error"
-};
+  const headerStatusBadge = document.getElementById("headerStatusBadge");
+  const metaAdapter = document.getElementById("metaAdapter");
 
-const FALLBACK_STEPS = [
-  {key:"pending",label:"Pendiente"},
-  {key:"classifying",label:"Validado y clasificado"},
-  {key:"processing",label:"Procesando"},
-  {key:"reviewing",label:"En revisión"},
-  {key:"dashboard",label:"Tablero"},
-  {key:"done",label:"Finalizado"}
-];
+  const lastUpd = document.getElementById("lastUpd");
+  const lastUpdRel = document.getElementById("lastUpdRel");
+  const errorBanner = document.getElementById("errorBanner");
+  const dbgJson = document.getElementById("dbgJson");
+  const noStepsMsg = document.getElementById("noStepsMsg");
 
-function setStatusBadge(key){
-  const label = STATUS_LABEL[key] || key || "—";
-  statusChip.textContent = label;
-  statusChip.className = "badge";
-  if (key === "error") statusChip.classList.add("badge-err");
-  else if (["dashboard","done"].includes(key)) statusChip.classList.add("badge-ok");
-  else if (["processing","classifying","reviewing"].includes(key)) statusChip.classList.add("badge-soft");
-  else statusChip.classList.add("bg-light","border","text-muted");
-}
-function setAdapterBadge(adapter){
-  adapterChip.textContent = adapter || "—";
-  adapterChip.className = "badge " + (adapter ? "badge-soft" : "bg-light border text-muted");
-}
-function setNormalized(isReady, allowed){
-  const allow = (typeof allowed === "boolean") ? allowed : !!isReady;
-  let label = "normalized.xlsx: " + (isReady ? "listo" : "—");
-  if (isReady && !allow) label += " (bloqueado)";
-  normChip.textContent = label;
-  normChip.className = "badge " + (isReady ? "badge-ok" : "bg-light border text-muted");
+  const btnPrev = document.getElementById("btnPrev");
+  const btnNext = document.getElementById("btnNext");
 
-  if (allow) {
-    btnDown.classList.remove("disabled");
-    btnDown.removeAttribute("aria-disabled");
-    btnDown.title = "Descargar normalized.xlsx";
-  } else {
-    btnDown.classList.add("disabled");
-    btnDown.setAttribute("aria-disabled","true");
-    btnDown.title = isReady ? "Disponible cuando el admin finalice el proceso" : "Aún no generado";
-  }
-}
-function fmtRel(d){
-  const s = Math.max(0, ((Date.now()-d)/1000)|0);
-  if (s<5) return "justo ahora";
-  if (s<60) return `${s}s`;
-  const m = (s/60)|0; if (m<60) return `${m}m`;
-  const h = (m/60)|0; if (h<24) return `${h}h`;
-  const dd = (h/24)|0; return `${dd}d`;
-}
-let lastUpdateTs=null;
-function setLastUpd(){
-  const d=new Date();
-  lastUpdateTs=d;
-  lastUpd.textContent=d.toLocaleTimeString();
-  lastUpdRel.textContent=`(${fmtRel(d)})`;
-}
-setInterval(()=>{if(lastUpdateTs) lastUpdRel.textContent=`(${fmtRel(lastUpdateTs)})`;},5000);
-function toggleError(show){errorBanner.classList.toggle("d-none",!show);}
+  const params = new URLSearchParams(location.search);
 
-/* ===================== Estado/Stepper ===================== */
-let lastState = {steps:FALLBACK_STEPS,index:0,status:"pending",total:FALLBACK_STEPS.length};
+  // Auto Redir Logic
+  const toggleAutoRedir = document.getElementById("toggleAutoRedir");
+  // 1. URL priority, 2. LocalStorage, 3. Default false
+  const urlAuto = params.get("autoredir") === "1";
+  const storedAuto = localStorage.getItem("status_autoredir") === "true";
+  let shouldAutoRedir = urlAuto || storedAuto;
 
-function renderSteps(data){
-  lastState = data && data.ok ? data : (data || lastState);
-
-  stepper.innerHTML = "";
-  const steps = (lastState.steps && lastState.steps.length) ? lastState.steps : FALLBACK_STEPS;
-  noStepsMsg.style.display = (lastState.steps && lastState.steps.length) ? "none" : "block";
-
-  steps.forEach((s,i)=>{
-    const el=document.createElement("div");
-    const done=s.done===true||(lastState.index!=null&&i<=Number(lastState.index));
-    const current=s.current===true||(lastState.index!=null&&i===Number(lastState.index));
-    el.className="step"+(done?" done":"")+(current?" current":"");
-    el.innerHTML=`<div class="circle" title="${s.label||s.key}">${i+1}</div><div class="label">${s.label||s.key}</div>`;
-    stepper.appendChild(el);
-  });
-
-  const idx = Number((lastState.index!=null?lastState.index:0));
-  const total = Number((lastState.total!=null?lastState.total:(steps.length||1)));
-  const pct = Math.max(0,Math.min(100,Math.round((idx/Math.max(1,total-1))*100)));
-  tlFill.style.width = pct + "%";
-
-  if(lastState.can_open_dashboard){
-    btnDash.classList.remove("disabled");
-    btnDash.removeAttribute("aria-disabled");
-    btnDash.title = "Ver tablero";
-    if(AUTO_REDIR&&lastState.dashboard_url){window.location.replace(lastState.dashboard_url);}
-  }else{
-    btnDash.classList.add("disabled");
-    btnDash.setAttribute("aria-disabled","true");
-    btnDash.title = "Disponible cuando el admin lo habilite";
-  }
-
-  setNormalized(!!lastState.normalized_ready, !!lastState.can_download_normalized);
-
-  const idxNum = Number((lastState.index!=null?lastState.index:0));
-  const totalNum = Number((lastState.total!=null?lastState.total:(steps.length||1)));
-  if (btnPrev) btnPrev.disabled = (idxNum <= 0);
-  if (btnNext) btnNext.disabled = (idxNum >= totalNum - 1);
-
-  setStatusBadge(lastState.status);
-  setAdapterBadge(lastState.adapter || "—");
-  setLastUpd();
-  toggleError(String(lastState.status||"").toLowerCase()==="error");
-}
-
-/* ===================== Notificaciones (UI) ===================== */
-let firstPaint = true;
-let currentBanner = null;
-
-function showBanner(msg, type="info", sticky=true){
-  if (!window.Notify || typeof window.Notify.banner!=="function") return;
-  try { if (currentBanner && currentBanner.remove) currentBanner.remove(); } catch {}
-  currentBanner = window.Notify.banner({ message: msg, type, sticky });
-}
-function clearBanner(){
-  try { if (currentBanner && currentBanner.remove) currentBanner.remove(); } catch {}
-  currentBanner = null;
-}
-
-function handleNotify(prevStatus, newStatus, data, isFirst){
-  if (!window.Notify) return;
-  const s = String(newStatus||"").toLowerCase();
-  const total = (data && data.total!=null) ? Number(data.total) :
-                (data && data.steps ? data.steps.length : FALLBACK_STEPS.length);
-  const idx = (data && data.index!=null) ? Number(data.index)+1 : null;
-  const stepText = (idx && total) ? ` · Paso ${idx}/${total}` : "";
-  const human = STATUS_LABEL[s] || s;
-
-  if (s === "done" || s === "dashboard") {
-    clearBanner();
-    const url = (data && data.dashboard_url) ? data.dashboard_url : (`/tablero/${uploadId}`);
-    window.Notify.toast({
-      type: "success",
-      title: "¡Finalizado!",
-      message: `${PROC_LABEL} listo. Ya podés ver el tablero.`,
-      actionText: "Abrir tablero",
-      onAction: () => location.href = url
+  // Update UI & Storage
+  if (toggleAutoRedir) {
+    toggleAutoRedir.checked = shouldAutoRedir;
+    toggleAutoRedir.addEventListener("change", (e) => {
+      shouldAutoRedir = e.target.checked;
+      localStorage.setItem("status_autoredir", shouldAutoRedir);
     });
-    return;
   }
-  if (s === "error") {
-    clearBanner();
-    window.Notify.toast({
-      type: "error",
-      title: "Error en el proceso",
-      message: `${PROC_LABEL}: ocurrió un error. Revisá el estado o intentá nuevamente.`,
-      actionText: "Ver estado",
-      onAction: () => location.reload()
+
+  // State
+  let lastState = { index: 0, status: "pending", steps: [] };
+  let notifiedDone = false; // Prevents duplicate done notifications
+
+  const STATUS_LABEL = {
+    pending: "Pendiente",
+    classifying: "Validado",
+    processing: "Procesando",
+    reviewing: "En revisión",
+    dashboard: "Tablero Listo",
+    done: "Finalizado",
+    error: "Error"
+  };
+
+  const FALLBACK_STEPS = [
+    { key: "pending", label: "Pendiente" },
+    { key: "classifying", label: "Validado" },
+    { key: "processing", label: "Procesando" },
+    { key: "reviewing", label: "Revisión" },
+    { key: "dashboard", label: "Tablero" },
+    { key: "done", label: "Finalizado" }
+  ];
+
+  /* ===================== Render Logic ===================== */
+
+  function updateHeader(data) {
+    const s = String(data.status || "").toLowerCase();
+    const label = STATUS_LABEL[s] || s;
+
+    headerStatusBadge.textContent = label;
+    headerStatusBadge.className = "status-badge";
+
+    if (["dashboard", "done"].includes(s)) headerStatusBadge.classList.add("ok");
+    else if (s === "error") headerStatusBadge.classList.add("err");
+    else headerStatusBadge.classList.add("info");
+
+    metaAdapter.textContent = data.adapter || "—";
+
+    // Normalized Button State
+    const isReady = !!data.normalized_ready;
+    if (isReady) {
+      btnDown.classList.remove("disabled");
+      btnDown.removeAttribute("aria-disabled");
+    } else {
+      btnDown.classList.add("disabled");
+      btnDown.setAttribute("aria-disabled", "true");
+    }
+  }
+
+  function renderSteps(data) {
+    lastState = data && data.ok ? data : (data || lastState);
+    const steps = (lastState.steps && lastState.steps.length) ? lastState.steps : FALLBACK_STEPS;
+
+    // Update Header
+    updateHeader(lastState);
+
+    // Clear & Rebuild Stepper
+    stepper.innerHTML = "";
+    noStepsMsg.style.display = (steps.length > 0) ? "none" : "block";
+
+    const idx = Number(lastState.index != null ? lastState.index : 0);
+    const status = String(lastState.status || "").toLowerCase();
+    const isError = status === "error";
+    const isDone = status === "done" || status === "dashboard";
+
+    steps.forEach((s, i) => {
+      const el = document.createElement("div");
+
+      const past = i < idx;
+      const current = i === idx;
+
+      let cls = "step-item";
+      if (past || (current && isDone)) cls += " done";
+      else if (current) cls += " current";
+      if (current && isError) cls += " error";
+      el.className = cls;
+
+      // Icons
+      let icon = (i + 1);
+      if (current && isError) icon = '<i class="bi bi-exclamation-lg"></i>';
+      else if (past || (current && isDone)) icon = '<i class="bi bi-check-lg" style="font-size:1.4rem"></i>';
+
+      el.innerHTML = `
+        <div class="step-circle" title="${s.label || s.key}">${icon}</div>
+        <div class="step-label">${s.label || s.key}</div>
+      `;
+      stepper.appendChild(el);
     });
-    return;
+
+    // --- ALIGNMENT FIX ---
+    // Calculate the center position of the first and last step
+    const stepCount = steps.length || 1;
+    const halfStepPercent = (100 / stepCount) / 2;
+
+    // Adjust Track & Bar Layout
+    stepperTrack.style.left = `${halfStepPercent}%`;
+    stepperTrack.style.width = `${100 - (100 / stepCount)}%`;
+
+    tlFill.style.left = `${halfStepPercent}%`;
+
+    // Calculate Fill %
+    // We want 0% to be just a dot at start, 100% to fill the whole line
+    const totalSegments = stepCount - 1;
+    let pct = 0;
+    if (totalSegments > 0) {
+      pct = (idx / totalSegments) * 100;
+    }
+    pct = Math.max(0, Math.min(100, pct));
+    // Scale width relative to the constrained track width
+    // Actually tlFill is positioned same as track, so width=100% means full track
+    // But since `idx` is 0-based index steps, we map 0..totalSegments -> 0..100%
+    // Note: If isDone, we might want full 100% even if index is last
+    tlFill.style.width = `calc(${100 - (100 / stepCount)}% * ${pct / 100})`;
+
+
+    // Dashboard Button
+    if (lastState.can_open_dashboard) {
+      btnDash.classList.remove("disabled");
+      btnDash.removeAttribute("aria-disabled");
+      // Use dynamic flag
+      if (shouldAutoRedir && lastState.dashboard_url) window.location.replace(lastState.dashboard_url);
+    } else {
+      btnDash.classList.add("disabled");
+      btnDash.setAttribute("aria-disabled", "true");
+    }
+
+    // Admin buttons state
+    if (btnPrev) btnPrev.disabled = (idx <= 0);
+    if (btnNext) btnNext.disabled = (idx >= stepCount - 1);
+
+    toggleError(isError);
+    setLastUpd();
   }
 
-  // Estados intermedios: banner superior
-  const t = (s==="processing" || s==="reviewing") ? "warning" : "info";
-  const msg = `${PROC_LABEL} está en “${human}”${stepText}.`;
-  if (isFirst) {
-    showBanner(msg, t, true);
-  } else if (String(prevStatus||"").toLowerCase() !== s) {
-    showBanner(msg, t, true);
+  /* ===================== Time & Utils ===================== */
+  let lastUpdateTs = null;
+  function setLastUpd() {
+    const d = new Date();
+    lastUpdateTs = d;
+    lastUpd.textContent = d.toLocaleTimeString();
+    lastUpdRel.textContent = `(justo ahora)`;
   }
-}
+  function fmtRel(d) {
+    const s = Math.max(0, ((Date.now() - d) / 1000) | 0);
+    if (s < 5) return "justo ahora";
+    if (s < 60) return `${s}s`;
+    const m = (s / 60) | 0; if (m < 60) return `${m}m`;
+    return `${(m / 60) | 0}h`;
+  }
+  setInterval(() => { if (lastUpdateTs) lastUpdRel.textContent = `(${fmtRel(lastUpdateTs)})`; }, 5000);
+  function toggleError(show) { errorBanner.classList.toggle("d-none", !show); }
 
-/* ===================== Polling ===================== */
-let delay=600,maxDelay=2500,stopped=false;
-renderSteps({steps:FALLBACK_STEPS,index:0,status:"pending",total:FALLBACK_STEPS.length});
+  /* ===================== Notificaciones (Fix Duplicate) ===================== */
+  let currentBanner = null;
+  function showBanner(msg, type = "info", sticky = true) {
+    if (!window.Notify) return;
+    try { if (currentBanner?.remove) currentBanner.remove(); } catch { }
+    currentBanner = window.Notify.banner({ message: msg, type, sticky });
+  }
 
-async function fetchStatusAndRender(){
-  try{
-    const r=await fetch(`/api/cargas/${uploadId}/status`,{cache:"no-store"});
-    if(r.ok){
-      const j=await r.json();
-      if(j&&j.ok){
-        const prev = lastState.status;
-        renderSteps(j);
-        dbgJson.textContent=JSON.stringify(j,null,2);
-        const s=String(j.status||"").toLowerCase();
-        handleNotify(prev, s, j, firstPaint);
-        firstPaint = false;
+  function handleNotify(prevStatus, newStatus, data) {
+    if (!window.Notify) return;
+    const s = String(newStatus || "").toLowerCase();
 
-        if(["done","dashboard","error"].includes(s)){stopped=true;return;}
-        delay=600;
-      }else{
-        delay=Math.min(maxDelay,delay+300);
+    // 1) Done/Dashboard (Only once)
+    if (s === "done" || s === "dashboard") {
+      if (notifiedDone) return; // Prevent duplicate
+      notifiedDone = true;
+      try { if (currentBanner?.remove) currentBanner.remove(); } catch { }
+
+      const url = data.dashboard_url || `/tablero/${uploadId}`;
+      window.Notify.toast({
+        type: "success",
+        title: "¡Proceso Finalizado!",
+        message: `${PROC_LABEL} está listo para visualizar.`,
+        actionText: "Ver Tablero",
+        onAction: () => location.href = url
+      });
+      return;
+    }
+
+    // 2) Error
+    if (s === "error") {
+      notifiedDone = false; // Reset if error occurs after done (weird but possible)
+      window.Notify.toast({
+        type: "error",
+        title: "Error Detectado",
+        message: "Hubo un problema procesando el archivo.",
+        actionText: "Reintentar",
+        onAction: () => location.reload()
+      });
+      return;
+    }
+
+    // 3) Progress
+    const human = STATUS_LABEL[s] || s;
+    const msg = `${PROC_LABEL}: Estado actual ${human}.`;
+    // Only show banner if status changed
+    if (prevStatus !== s) {
+      showBanner(msg, "info", true);
+    }
+  }
+
+  /* ===================== Polling ===================== */
+  let delay = 1000, maxDelay = 5000, stopped = false;
+
+  async function fetchStatusAndRender() {
+    try {
+      const r = await fetch(`/api/cargas/${uploadId}/status`, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.ok) {
+          const prev = lastState.status;
+          renderSteps(j);
+          dbgJson.textContent = JSON.stringify(j, null, 2);
+
+          handleNotify(prev, String(j.status || "").toLowerCase(), j);
+
+          if (["done", "dashboard", "error"].includes(String(j.status))) {
+            stopped = true;
+          }
+        }
       }
-    }else{
-      delay=Math.min(maxDelay,delay+400);
-    }
-  }catch(e){
-    console.error(e);
-    delay=Math.min(maxDelay,delay+500);
+    } catch (e) { console.error(e); }
   }
-}
 
-async function tick(){
-  await fetchStatusAndRender();
-  if(!stopped){
-    const eff=document.hidden?Math.max(delay,2000):delay;
-    setTimeout(tick,eff);
-  }
-}
-
-btnRef.addEventListener("click",()=>{delay=0;stopped=false;tick();});
-document.addEventListener("keydown",(ev)=>{if(ev.key.toLowerCase()==="r"){ev.preventDefault();btnRef.click();}});
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)delay=600;});
-
-/* ===== Fallback inteligente ante 409 ===== */
-async function goBackToProcessing() {
-  const cur = (lastState && typeof lastState.index==='number') ? lastState.index : 0;
-  const keys = (lastState && lastState.steps) ? lastState.steps.map(s=>s.key) : FALLBACK_STEPS.map(s=>s.key);
-  const processingIdx = Math.max(0, keys.indexOf('processing'));
-
-  let times = Math.max(0, cur - processingIdx);
-  while (times-- > 0) {
-    const fd = new FormData();
-    fd.append("action","prev");
-    await fetch(`/api/cargas/${uploadId}/avance`, { method:"POST", body: fd }).catch(()=>{});
-  }
-  await fetchStatusAndRender();
-}
-
-/* ===== Botones admin (si hay) ===== */
-async function move(action){
-  try{
-    const fd = new FormData();
-    fd.append("action", action);
-    const r = await fetch(`/api/cargas/${uploadId}/avance`, {
-      method: "POST",
-      body: fd
-    });
-
-    if (r.status === 409) {
-      await goBackToProcessing();
-      delay = 0; stopped = false; tick();
-      return;
-    }
-
-    const j = await r.json().catch(()=>null);
-    if(!r.ok || !j || !j.ok){
-      const msg = (j && (j.msg||j.error)) || `Error HTTP ${r.status}`;
-      console.warn("No se pudo cambiar de estado:", msg);
-      return;
-    }
+  async function tick() {
     await fetchStatusAndRender();
-  }catch(e){ console.error(e); }
-}
-if(btnPrev){ btnPrev.addEventListener("click", ()=> move("prev")); }
-if(btnNext){ btnNext.addEventListener("click", ()=> move("next")); }
+    if (!stopped) setTimeout(tick, delay);
+  }
 
-window.addEventListener("DOMContentLoaded", async () => {
-  await fetchStatusAndRender();
-  tick();
-});
+  // Event Listeners
+  btnRef.addEventListener("click", () => { stopped = false; tick(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+
+  // Admin Controls
+  async function move(action) {
+    const fd = new FormData(); fd.append("action", action);
+    await fetch(`/api/cargas/${uploadId}/avance`, { method: "POST", body: fd });
+    tick();
+  }
+  if (btnPrev) btnPrev.addEventListener("click", () => move("prev"));
+  if (btnNext) btnNext.addEventListener("click", () => move("next"));
+
+  // Init
+  window.addEventListener("DOMContentLoaded", () => {
+    // Initial Render
+    renderSteps({ steps: FALLBACK_STEPS, index: 0, status: "pending" });
+    tick();
+  });
 </script>
 {% endblock %}

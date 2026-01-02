@@ -6,41 +6,90 @@
 {% block extra_head %}
 <style>
   /* Contenedor visual de la barra de filtros */
-  .filters-card{
-    padding:.75rem 1rem;
-    border:1px solid var(--sa-gris-borde, #e5e7eb);
-    background:var(--sa-gris-soft, #f8fafc);
-    border-radius:.5rem;
+  .filters-card {
+    padding: 1rem;
+    border: 1px solid var(--ink-200);
+    background: #ffffff;
+    border-radius: var(--radius-md);
+    /* Flat: no shadow */
   }
+
   /* Grid responsivo: reparte los filtros en varias columnas */
-  .filters-grid{
-    display:grid;
-    grid-template-columns:repeat(12, 1fr);
-    gap:.5rem .75rem;
-    align-items:end; /* alinear controles por la base */
+  .filters-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 0.75rem;
+    align-items: end;
+    /* alinear controles por la base */
   }
-  @media (max-width:1400px){ .filters-grid{ grid-template-columns:repeat(8, 1fr); } }
-  @media (max-width:992px){  .filters-grid{ grid-template-columns:repeat(6, 1fr); } }
-  @media (max-width:768px){  .filters-grid{ grid-template-columns:repeat(4, 1fr); } }
-  @media (max-width:576px){  .filters-grid{ grid-template-columns:repeat(2, 1fr); } }
+
+  @media (max-width:1400px) {
+    .filters-grid {
+      grid-template-columns: repeat(8, 1fr);
+    }
+  }
+
+  @media (max-width:992px) {
+    .filters-grid {
+      grid-template-columns: repeat(6, 1fr);
+    }
+  }
+
+  @media (max-width:768px) {
+    .filters-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  @media (max-width:576px) {
+    .filters-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
 
   /* Utilidades para spans */
-  .col-span-2{ grid-column:span 2; }
-  .col-span-3{ grid-column:span 3; }
-  .col-span-4{ grid-column:span 4; }
-  .col-span-6{ grid-column:span 6; }
-  .col-span-12{ grid-column:1 / -1; }
+  .col-span-2 {
+    grid-column: span 2;
+  }
+
+  .col-span-3 {
+    grid-column: span 3;
+  }
+
+  .col-span-4 {
+    grid-column: span 4;
+  }
+
+  .col-span-6 {
+    grid-column: span 6;
+  }
+
+  .col-span-12 {
+    grid-column: 1 / -1;
+  }
 
   /* Botonera al extremo derecho del grid */
-  .btn-group-actions{
-    justify-self:end;
-    display:flex;
-    gap:.5rem;
+  .btn-group-actions {
+    justify-self: end;
+    display: flex;
+    gap: 0.5rem;
   }
 
   /* Ajustes visuales menores */
   .filters-grid .form-control,
-  .filters-grid .form-select{ min-height: calc(1.5em + .5rem + 2px); }
+  .filters-grid .form-select {
+    min-height: 32px;
+    /* Match standard inputs */
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+  }
+
+  .filters-grid .form-control:focus,
+  .filters-grid .form-select:focus {
+    border-color: var(--secondary-500);
+    box-shadow: 0 0 0 2px rgba(82, 116, 206, 0.15);
+  }
 </style>
 {% endblock %}
 
@@ -48,71 +97,71 @@
 
 {# ===================== Estados (canónicos y alias) ===================== #}
 {% set STATUS_LABELS = status_labels or {
-  'pending':     'Pendiente',
-  'classifying': 'Validado y clasificado',
-  'processing':  'Procesando',
-  'reviewing':   'En revisión',
-  'dashboard':   'Tablero',
-  'done':        'Finalizado',
-  'error':       'Error'
+'pending': 'Pendiente',
+'classifying': 'Validado y clasificado',
+'processing': 'Procesando',
+'reviewing': 'En revisión',
+'dashboard': 'Tablero',
+'done': 'Finalizado',
+'error': 'Error'
 } %}
 
 {% set STATUS_ALIAS = {
-  'extracting':  'processing',
-  'failed':      'error',
-  'classified':  'classifying',
-  'analyzing':   'reviewing'
+'extracting': 'processing',
+'failed': 'error',
+'classified': 'classifying',
+'analyzing': 'reviewing'
 } %}
 
 {% set STATUS_BADGE = {
-  'pending':     'bg-warning-subtle text-warning',
-  'classifying': 'bg-info-subtle text-info',
-  'processing':  'bg-info-subtle text-info',
-  'reviewing':   'bg-primary-subtle text-primary',
-  'dashboard':   'bg-primary-subtle text-primary',
-  'done':        'bg-success-subtle text-success',
-  'error':       'bg-danger-subtle text-danger'
+'pending': 'bg-warning-subtle text-warning',
+'classifying': 'bg-info-subtle text-info',
+'processing': 'bg-info-subtle text-info',
+'reviewing': 'bg-primary-subtle text-primary',
+'dashboard': 'bg-primary-subtle text-primary',
+'done': 'bg-success-subtle text-success',
+'error': 'bg-danger-subtle text-danger'
 } %}
 
 {% macro norm_status(s) -%}{{ (s or '')|lower|trim }}{%- endmacro %}
 {% macro canonical_status(s) -%}
-  {%- set k = norm_status(s) -%}
-  {{ STATUS_ALIAS.get(k, k) }}
+{%- set k = norm_status(s) -%}
+{{ STATUS_ALIAS.get(k, k) }}
 {%- endmacro %}
 
 {# ===== Helper para mostrar "Subido por" con snapshot estable ===== #}
 {% macro uploader_label(r, owner) -%}
-  {%- set snap_name = r.uploaded_by_name or '' -%}
-  {%- set snap_mail = r.uploaded_by_email or '' -%}
-  {%- if snap_name %}
-    {{ snap_name }}
-  {%- elif snap_mail %}
-    {{ snap_mail }}
-  {%- elif owner %}
-    {%- if user_display is defined -%}
-      {{ user_display(owner) }}
-    {%- else -%}
-      {{ owner.full_name or owner.name or (owner.email.split('@')[0]|title) }}
-    {%- endif -%}
-  {%- else -%}
-    —
-  {%- endif -%}
+{%- set snap_name = r.uploaded_by_name or '' -%}
+{%- set snap_mail = r.uploaded_by_email or '' -%}
+{%- if snap_name %}
+{{ snap_name }}
+{%- elif snap_mail %}
+{{ snap_mail }}
+{%- elif owner %}
+{%- if user_display is defined -%}
+{{ user_display(owner) }}
+{%- else -%}
+{{ owner.full_name or owner.name or (owner.email.split('@')[0]|title) }}
+{%- endif -%}
+{%- else -%}
+—
+{%- endif -%}
 {%- endmacro %}
 
 {# ----------------- Helpers para armar la query de paginación ----------------- #}
 {% set f = filters or {} %}
 {% set base_qs = (
-  'q=' ~ (f.q|default('')|urlencode) ~
-  '&status=' ~ (f.status|default('')|urlencode) ~
-  '&created_from=' ~ (f.created_from|default('')|urlencode) ~
-  '&created_to=' ~ (f.created_to|default('')|urlencode) ~
-  '&uploader_id=' ~ (f.uploader_id|default('')|urlencode) ~
-  '&proceso=' ~ (f.proceso|default('')|urlencode) ~
-  '&cuenta=' ~ (f.cuenta|default('')|urlencode) ~
-  '&platform=' ~ (f.platform|default('')|urlencode) ~
-  '&buyer=' ~ (f.buyer|default('')|urlencode) ~
-  '&province=' ~ (f.province|default('')|urlencode) ~
-  '&filename=' ~ (f.filename|default('')|urlencode)
+'q=' ~ (f.q|default('')|urlencode) ~
+'&status=' ~ (f.status|default('')|urlencode) ~
+'&created_from=' ~ (f.created_from|default('')|urlencode) ~
+'&created_to=' ~ (f.created_to|default('')|urlencode) ~
+'&uploader_id=' ~ (f.uploader_id|default('')|urlencode) ~
+'&proceso=' ~ (f.proceso|default('')|urlencode) ~
+'&cuenta=' ~ (f.cuenta|default('')|urlencode) ~
+'&platform=' ~ (f.platform|default('')|urlencode) ~
+'&buyer=' ~ (f.buyer|default('')|urlencode) ~
+'&province=' ~ (f.province|default('')|urlencode) ~
+'&filename=' ~ (f.filename|default('')|urlencode)
 ) %}
 
 {# ======= Título ======= #}
@@ -125,8 +174,7 @@
   <form class="filters-grid" method="get" action="">
     <!-- Búsqueda -->
     <div class="col-span-4">
-      <input class="form-control form-control-sm" type="search" name="q" placeholder="Buscar…"
-             value="{{ f.q or '' }}">
+      <input class="form-control form-control-sm" type="search" name="q" placeholder="Buscar…" value="{{ f.q or '' }}">
     </div>
 
     <!-- Estado -->
@@ -134,9 +182,9 @@
       <select class="form-select form-select-sm" name="status">
         <option value="">Todos los estados</option>
         {% for key, label in STATUS_LABELS.items() %}
-          <option value="{{ key }}" {{ (norm_status(f.status) == key) and 'selected' or '' }}>
-            {{ label }}
-          </option>
+        <option value="{{ key }}" {{ (norm_status(f.status)==key) and 'selected' or '' }}>
+          {{ label }}
+        </option>
         {% endfor %}
       </select>
     </div>
@@ -145,7 +193,7 @@
     <div class="col-span-2">
       <select class="form-select form-select-sm" name="page_size">
         {% for ps in [10,20,50,100] %}
-          <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }} / pág.</option>
+        <option value="{{ ps }}" {% if page_size==ps %}selected{% endif %}>{{ ps }} / pág.</option>
         {% endfor %}
       </select>
     </div>
@@ -153,11 +201,11 @@
     <!-- Desde / Hasta -->
     <div class="col-span-3">
       <input type="date" class="form-control form-control-sm" name="created_from" placeholder="Desde"
-             value="{{ f.created_from or '' }}">
+        value="{{ f.created_from or '' }}">
     </div>
     <div class="col-span-3">
       <input type="date" class="form-control form-control-sm" name="created_to" placeholder="Hasta"
-             value="{{ f.created_to or '' }}">
+        value="{{ f.created_to or '' }}">
     </div>
 
     <!-- Subido por (solo admins/permiso) -->
@@ -166,9 +214,9 @@
       <select class="form-select form-select-sm" name="uploader_id">
         <option value="">Subido por (todos)</option>
         {% for u in (users_options or []) %}
-          <option value="{{ u.id }}" {% if f.uploader_id and (f.uploader_id|string) == (u.id|string) %}selected{% endif %}>
-            {{ u.label }}
-          </option>
+        <option value="{{ u.id }}" {% if f.uploader_id and (f.uploader_id|string)==(u.id|string) %}selected{% endif %}>
+          {{ u.label }}
+        </option>
         {% endfor %}
       </select>
     </div>
@@ -176,32 +224,28 @@
 
     <!-- N° proceso / Cuenta -->
     <div class="col-span-2">
-      <input class="form-control form-control-sm" name="proceso" placeholder="N° proceso"
-             value="{{ f.proceso or '' }}">
+      <input class="form-control form-control-sm" name="proceso" placeholder="N° proceso" value="{{ f.proceso or '' }}">
     </div>
     <div class="col-span-2">
-      <input class="form-control form-control-sm" name="cuenta" placeholder="Cuenta"
-             value="{{ f.cuenta or '' }}">
+      <input class="form-control form-control-sm" name="cuenta" placeholder="Cuenta" value="{{ f.cuenta or '' }}">
     </div>
 
     <!-- Plataforma / Comprador -->
     <div class="col-span-2">
       <input class="form-control form-control-sm" name="platform" placeholder="Plataforma"
-             value="{{ f.platform or '' }}">
+        value="{{ f.platform or '' }}">
     </div>
     <div class="col-span-3">
-      <input class="form-control form-control-sm" name="buyer" placeholder="Comprador"
-             value="{{ f.buyer or '' }}">
+      <input class="form-control form-control-sm" name="buyer" placeholder="Comprador" value="{{ f.buyer or '' }}">
     </div>
 
     <!-- Provincia / Archivo -->
     <div class="col-span-3">
       <input class="form-control form-control-sm" name="province" placeholder="Provincia/Municipio"
-             value="{{ f.province or '' }}">
+        value="{{ f.province or '' }}">
     </div>
     <div class="col-span-3">
-      <input class="form-control form-control-sm" name="filename" placeholder="Archivo"
-             value="{{ f.filename or '' }}">
+      <input class="form-control form-control-sm" name="filename" placeholder="Archivo" value="{{ f.filename or '' }}">
     </div>
 
     <!-- Acciones -->
@@ -213,7 +257,7 @@
 </div>
 
 {% if error %}
-  <div class="alert alert-danger">{{ error }}</div>
+<div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
 <div class="card">
@@ -238,50 +282,51 @@
         </thead>
         <tbody>
           {% for r in rows %}
-            {% set owner = users_by_id.get(r.user_id) if users_by_id else None %}
-            {% set st_canon = canonical_status(r.status) %}
-            {% set st_label = STATUS_LABELS.get(st_canon, (r.status or '—')|capitalize) %}
-            {% set st_badge = STATUS_BADGE.get(st_canon, 'bg-secondary text-white') %}
-            <tr>
-              <td>{{ r.id }}</td>
-              <td>{{ r.proceso_nro or '—' }}</td>
-              <td>{{ r.apertura_fecha or '—' }}</td>
-              <td>{{ r.cuenta_nro or '—' }}</td>
-              <td>{{ r.platform_hint or '—' }}</td>
-              <td>{{ r.buyer_hint or '—' }}</td>
-              <td>{{ r.province_hint or '—' }}</td>
-              <td class="text-truncate" style="max-width:260px" title="{{ r.original_filename or '' }}">{{ r.original_filename or '—' }}</td>
-              <td>
-                <span class="badge {{ st_badge }}">{{ st_label }}</span>
-              </td>
-              <td title="{{ r.uploaded_by_email or (owner and owner.email) or '' }}">
-                {{ uploader_label(r, owner) }}
-              </td>
-              <td>
-                {% if r.created_at %}
-                  {% if r.created_at is string %}
-                    {{ r.created_at }}
-                  {% else %}
-                    {{ r.created_at.strftime('%Y-%m-%d %H:%M') }}
-                  {% endif %}
-                {% else %} — {% endif %}
-              </td>
-              <td class="text-end">
-                <div class="btn-group btn-group-sm">
-                  <a class="btn btn-outline-secondary" href="/cargas/{{ r.id }}">Ver</a>
-                  {% set tablero_ready = st_canon in ['dashboard','done'] %}
-                  <a class="btn btn-outline-primary {{ '' if tablero_ready else 'disabled' }}"
-                     href="{{ '/tablero/' ~ r.id if tablero_ready else '#' }}"
-                     title="{{ 'Abrir tablero' if tablero_ready else 'Aún no disponible (espere a “Tablero” o “Finalizado”)' }}">
-                    Tablero
-                  </a>
-                </div>
-              </td>
-            </tr>
+          {% set owner = users_by_id.get(r.user_id) if users_by_id else None %}
+          {% set st_canon = canonical_status(r.status) %}
+          {% set st_label = STATUS_LABELS.get(st_canon, (r.status or '—')|capitalize) %}
+          {% set st_badge = STATUS_BADGE.get(st_canon, 'bg-secondary text-white') %}
+          <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.proceso_nro or '—' }}</td>
+            <td>{{ r.apertura_fecha or '—' }}</td>
+            <td>{{ r.cuenta_nro or '—' }}</td>
+            <td>{{ r.platform_hint or '—' }}</td>
+            <td>{{ r.buyer_hint or '—' }}</td>
+            <td>{{ r.province_hint or '—' }}</td>
+            <td class="text-truncate" style="max-width:260px" title="{{ r.original_filename or '' }}">{{
+              r.original_filename or '—' }}</td>
+            <td>
+              <span class="badge {{ st_badge }}">{{ st_label }}</span>
+            </td>
+            <td title="{{ r.uploaded_by_email or (owner and owner.email) or '' }}">
+              {{ uploader_label(r, owner) }}
+            </td>
+            <td>
+              {% if r.created_at %}
+              {% if r.created_at is string %}
+              {{ r.created_at }}
+              {% else %}
+              {{ r.created_at.strftime('%Y-%m-%d %H:%M') }}
+              {% endif %}
+              {% else %} — {% endif %}
+            </td>
+            <td class="text-end">
+              <div class="btn-group btn-group-sm">
+                <a class="btn btn-outline-secondary" href="/cargas/{{ r.id }}">Ver</a>
+                {% set tablero_ready = st_canon in ['dashboard','done'] %}
+                <a class="btn btn-outline-primary {{ '' if tablero_ready else 'disabled' }}"
+                  href="{{ '/tablero/' ~ r.id if tablero_ready else '#' }}"
+                  title="{{ 'Abrir tablero' if tablero_ready else 'Aún no disponible (espere a “Tablero” o “Finalizado”)' }}">
+                  Tablero
+                </a>
+              </div>
+            </td>
+          </tr>
           {% else %}
-            <tr>
-              <td colspan="12" class="text-center text-muted py-4">No hay cargas para mostrar.</td>
-            </tr>
+          <tr>
+            <td colspan="12" class="text-center text-muted py-4">No hay cargas para mostrar.</td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
@@ -292,34 +337,33 @@
         Mostrando {{ showing_from }}–{{ showing_to }} de {{ total }}.
         {% if f.q %} · Búsqueda: “{{ f.q }}”{% endif %}
         {% if f.status %}
-          · Estado: {{ STATUS_LABELS.get(norm_status(f.status), f.status|capitalize) }}
+        · Estado: {{ STATUS_LABELS.get(norm_status(f.status), f.status|capitalize) }}
         {% endif %}
       </div>
 
       <nav aria-label="Paginación">
         <ul class="pagination pagination-sm mb-0">
-          {% set prev_disabled = (page <= 1) %}
-          {% set next_disabled = (page >= pages) %}
+          {% set prev_disabled = (page <= 1) %} {% set next_disabled=(page>= pages) %}
 
-          <li class="page-item {{ 'disabled' if prev_disabled }}">
-            <a class="page-link"
-               href="{{ (not prev_disabled) and ('/cargas/historial?' ~ base_qs ~ '&page=' ~ (page-1) ~ '&page_size=' ~ page_size) or '#' }}"
-               tabindex="-1" aria-disabled="{{ 'true' if prev_disabled else 'false' }}">«</a>
-          </li>
-
-          {% set start_p = [1, page-2]|max %}
-          {% set end_p = [pages, page+2]|min %}
-          {% for p in range(start_p, end_p + 1) %}
-            <li class="page-item {{ 'active' if p == page }}">
+            <li class="page-item {{ 'disabled' if prev_disabled }}">
               <a class="page-link"
-                 href="/cargas/historial?{{ base_qs }}&page={{ p }}&page_size={{ page_size }}">{{ p }}</a>
+                href="{{ (not prev_disabled) and ('/cargas/historial?' ~ base_qs ~ '&page=' ~ (page-1) ~ '&page_size=' ~ page_size) or '#' }}"
+                tabindex="-1" aria-disabled="{{ 'true' if prev_disabled else 'false' }}">«</a>
             </li>
-          {% endfor %}
 
-          <li class="page-item {{ 'disabled' if next_disabled }}">
-            <a class="page-link"
-               href="{{ (not next_disabled) and ('/cargas/historial?' ~ base_qs ~ '&page=' ~ (page+1) ~ '&page_size=' ~ page_size) or '#' }}">»</a>
-          </li>
+            {% set start_p = [1, page-2]|max %}
+            {% set end_p = [pages, page+2]|min %}
+            {% for p in range(start_p, end_p + 1) %}
+            <li class="page-item {{ 'active' if p == page }}">
+              <a class="page-link" href="/cargas/historial?{{ base_qs }}&page={{ p }}&page_size={{ page_size }}">{{ p
+                }}</a>
+            </li>
+            {% endfor %}
+
+            <li class="page-item {{ 'disabled' if next_disabled }}">
+              <a class="page-link"
+                href="{{ (not next_disabled) and ('/cargas/historial?' ~ base_qs ~ '&page=' ~ (page+1) ~ '&page_size=' ~ page_size) or '#' }}">»</a>
+            </li>
         </ul>
       </nav>
     </div>

@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}Consulta #{{ ticket.id }} – Mesa de Ayuda{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Chat Layout */
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        padding: 1rem 0 100px 0;
+        min-height: 400px;
+    }
+
+    .chat-bubble-row {
+        display: flex;
+        gap: 1rem;
+        max-width: 85%;
+        animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .chat-bubble-row.me {
+        margin-left: auto;
+        flex-direction: row-reverse;
+    }
+
+    .chat-bubble-row.them {
+        margin-right: auto;
+    }
+
+    .chat-bubble {
+        padding: 1.25rem;
+        border-radius: 18px;
+        line-height: 1.6;
+        font-size: 0.95rem;
+        position: relative;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    .chat-bubble-row.me .chat-bubble {
+        background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .chat-bubble-row.them .chat-bubble {
+        background: #f1f5f9;
+        border: 1px solid #e2e8f0;
+        color: #1e293b;
+        border-bottom-left-radius: 4px;
+    }
+
+    .chat-meta {
+        font-size: 0.7rem;
+        color: #64748b;
+        margin-top: 0.5rem;
+        font-weight: 500;
+        opacity: 0.8;
+    }
+
+    .chat-input-area {
+        position: sticky;
+        bottom: 20px;
+        background: #ffffff;
+        padding: 1rem;
+        border: 1px solid #e2e8f0;
+        margin-top: auto;
+        border-radius: 16px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        z-index: 100;
+    }
+
+    .consulta-sidebar {
+        position: sticky;
+        top: 90px;
+    }
+
+    .consulta-header-card {
+        background: #fff;
+        border-left: 4px solid #2563eb;
+        padding: 1.5rem;
+        border-radius: 0 16px 16px 0;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row h-100">
+    <!-- Main Chat Area -->
+    <div class="col-12 col-lg-8 mb-4 mb-lg-0 d-flex flex-column">
+        <div class="d-flex align-items-center mb-4">
+            <a href="{{ request.url.path.rsplit('/', 1)[0] }}" class="btn btn-sm btn-outline-secondary me-3 border-0"
+                title="Volver">
+                <i class="bi bi-arrow-left fs-5"></i>
+            </a>
+            <div class="consulta-header-card w-100 mb-0 d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="text-muted small fw-bold tracking-wider">CONSULTA #{{ ticket.id }}</span>
+                    </div>
+                    <h1 class="h4 fw-bold mb-1 text-dark">{{ ticket.title }}</h1>
+                    <div class="d-flex align-items-center gap-3 small text-muted">
+                        <span
+                            class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 fw-normal">
+                            {{ ticket.category|capitalize }}
+                        </span>
+                        <span><i class="bi bi-clock me-1"></i> {{ ticket.created_at.strftime('%d/%m/%Y %H:%M')
+                            }}</span>
+                    </div>
+                </div>
+
+                {% if ticket.status == 'abierto' %}
+                <div class="text-end d-none d-md-block">
+                    <span class="d-block text-success fw-bold small"><i class="bi bi-check-circle me-1"></i> En
+                        curso</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <!-- Messages -->
+            {% for msg in ticket.messages %}
+            {% set is_me = (msg.user_id == user.id) %}
+            <div class="chat-bubble-row {{ 'me' if is_me else 'them' }} mb-2">
+                <div class="d-flex flex-column {{ 'align-items-end' if is_me else 'align-items-start' }} w-100">
+                    <div class="mb-1 d-flex align-items-center gap-2 px-1">
+                        {% if is_me %}
+                        <span class="small text-muted opacity-75 fw-medium">Tú</span>
+                        {% else %}
+                        <span class="small text-muted fw-medium">{{ msg.user.email.split('@')[0]|capitalize }}</span>
+                        {% if "admin" in (msg.user.role or "").lower() %}
+                        <span
+                            class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25 py-0 px-1"
+                            style="font-size: 0.6rem;">SUPPORT</span>
+                        {% endif %}
+                        {% endif %}
+                        <span class="text-muted small" style="font-size: 0.65rem;">{{ msg.created_at.strftime('%H:%M')
+                            }}</span>
+                    </div>
+
+                    <div class="chat-bubble py-2 px-3 shadow-sm"
+                        style="border-radius: 12px; {{ 'border-top-right-radius: 2px;' if is_me else 'border-top-left-radius: 2px;' }} max-width: 100%;">
+                        {{ msg.message }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if ticket.status != 'cerrado' %}
+        {% if (user.role or '')|lower != 'auditor' %}
+        <!-- Reply Box -->
+        <div class="chat-input-area">
+            <form action="{{ request.url.path }}/reply" method="POST" id="chatForm">
+                <div class="input-group">
+                    <textarea name="message" id="chatInput" class="form-control border-0 shadow-none py-3 bg-light"
+                        rows="1" placeholder="Escribe una respuesta... (Enter para enviar)" style="resize: none;"
+                        required></textarea>
+                    <button type="submit" class="btn btn-primary px-4 d-flex align-items-center">
+                        <i class="bi bi-send fs-5"></i>
+                    </button>
+                </div>
+                <div class="text-muted small mt-2 ps-1">
+                    <i class="bi bi-info-circle me-1"></i> Shift + Enter para nueva línea
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <!-- Auditor View Only Message -->
+        <div class="alert alert-info mt-5 bg-opacity-10 border-opacity-25 text-center text-muted p-4 rounded-4">
+            <i class="bi bi-eye mb-2 d-block fs-3"></i>
+            Modo lectura (Auditor).
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-secondary mt-5 bg-opacity-10 border-opacity-25 text-center text-muted p-4 rounded-4">
+            <i class="bi bi-lock mb-2 d-block fs-3"></i>
+            Esta consulta está cerrada.
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar Info -->
+    <div class="col-12 col-lg-4">
+        <div class="consulta-sidebar">
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body">
+                    <h5 class="fw-bold fs-6 mb-4 text-dark border-bottom pb-3">Detalles de la Consulta</h5>
+
+                    <div class="d-flex align-items-center justify-content-between mb-4 p-3 rounded-3 bg-light">
+                        <!-- Status -->
+                        <div class="d-flex flex-column gap-1">
+                            <span class="text-muted text-uppercase fw-bold"
+                                style="font-size: 0.65rem; letter-spacing: 1px;">Estado</span>
+                            <div class="d-flex align-items-center gap-2">
+                                {% if ticket.status == 'abierto' %}
+                                <div class="rounded-circle bg-primary" style="width: 8px; height: 8px;"></div>
+                                <span class="text-primary fw-medium small tracking-wide">Abierto</span>
+                                {% elif ticket.status == 'pendiente' %}
+                                <div class="rounded-circle bg-warning" style="width: 8px; height: 8px;"></div>
+                                <span class="text-warning fw-medium small tracking-wide">Pendiente</span>
+                                {% elif ticket.status == 'resuelto' %}
+                                <div class="rounded-circle bg-success" style="width: 8px; height: 8px;"></div>
+                                <span class="text-success fw-medium small tracking-wide">Resuelto</span>
+                                {% else %}
+                                <div class="rounded-circle bg-secondary" style="width: 8px; height: 8px;"></div>
+                                <span class="text-secondary fw-medium small tracking-wide text-capitalize">{{
+                                    ticket.status }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="vr my-1"></div>
+
+                        <!-- Priority -->
+                        <div class="d-flex flex-column gap-1 text-end">
+                            <span class="text-muted text-uppercase fw-bold"
+                                style="font-size: 0.65rem; letter-spacing: 1px;">Prioridad</span>
+                            <div class="d-flex align-items-center justify-content-end gap-2">
+                                {% if ticket.priority == 'alta' %}
+                                <span class="text-danger fw-medium small tracking-wide">Alta</span>
+                                <i class="bi bi-exclamation-triangle-fill text-danger small"></i>
+                                {% elif ticket.priority == 'baja' %}
+                                <span class="text-info fw-medium small tracking-wide">Baja</span>
+                                <i class="bi bi-arrow-down-circle-fill text-info small"></i>
+                                {% else %}
+                                <span class="text-warning fw-medium small tracking-wide">Media</span>
+                                <i class="bi bi-dash-circle-fill text-warning small"></i>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-3">
+                        <!-- User info concealed -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const chatInput = document.getElementById('chatInput');
+
+        if (chatInput) {
+            chatInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (this.value.trim() !== '') {
+                        document.getElementById('chatForm').submit();
+                    }
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

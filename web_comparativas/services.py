@@ -344,7 +344,7 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
                 f"Suba un .xlsx/.xls/.csv/.pdf o verifique original_path."
             )
 
-        valid_ext = {".xlsx", ".xls", ".csv", ".pdf"}
+        valid_ext = {".xlsx", ".xls", ".csv", ".pdf", ".zip"}
         if file_path.suffix.lower() not in valid_ext:
             raise RuntimeError(f"Formato de archivo no admitido: {file_path.suffix}. Solo se aceptan {', '.join(valid_ext)}")
 
@@ -414,6 +414,21 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
             plat = str((meta_eff.get("platform") or up.platform_hint or "")).upper()
             if plat in {"COMPRAR", "BAC", "PBAC"}:
                 _set_status_by_id(upload_id, "done")
+        
+        # --- Notificación al usuario ---
+        if up.user_id:
+            try:
+                from .notifications_service import create_notification
+                create_notification(
+                    db_session,
+                    user_id=up.user_id,
+                    title="Procesamiento completado",
+                    message=f"El archivo {up.original_filename} ha sido procesado correctamente (Proceso: {up.proceso_nro}).",
+                    category="processing",
+                    link=f"/tablero/{up.id}"
+                )
+            except Exception as e:
+                logger.warning(f"No se pudo crear notificación: {e}")
 
         return {"normalized_path": str(normalized_path), "summary": summary}
 

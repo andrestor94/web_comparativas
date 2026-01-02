@@ -1,34 +1,16 @@
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
-[ALERTA] Error al procesar upload 31: El resultado del procesamiento está vacío o no es un DataFrame válido.
+[ALERTA] Error al procesar upload 31: No se encontró archivo fuente en C:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2\data\uploads\a36c1e07-039c-40bd-a883-4f461e609ff3. Suba un .xlsx/.xls/.csv/.pdf o verifique original_path.
+[ALERTA] Error al procesar upload 31: No se encontró archivo fuente en C:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2\data\uploads\a36c1e07-039c-40bd-a883-4f461e609ff3. Suba un .xlsx/.xls/.csv/.pdf o verifique original_path.
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .csv, .pdf, .xls, .xlsx
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .csv, .pdf, .xls, .xlsx
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .csv, .pdf, .xls, .xlsx
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .xlsx, .csv, .xls, .pdf
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .xlsx, .csv, .xls, .pdf
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .xlsx, .csv, .xls, .pdf
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .xlsx, .csv, .xls, .pdf
+[ALERTA] Error al procesar upload 38: Formato de archivo no admitido: .zip. Solo se aceptan .xlsx, .csv, .xls, .pdf
+[ALERTA] Error al procesar upload 2: openpyxl does not support .zip file format, please check you can open it with Excel first. Supported formats are: .xlsx,.xlsm,.xltx,.xltm
+[ALERTA] Error al procesar upload 2: openpyxl does not support .zip file format, please check you can open it with Excel first. Supported formats are: .xlsx,.xlsm,.xltx,.xltm
+[ALERTA] Error al procesar upload 3: SIPROSA Ranking: el ZIP no contiene Excels 'Ranking' (.xlsx/.xls/.xlsm).
+[ALERTA] Error al procesar upload 4: SIPROSA Ranking: el ZIP no contiene Excels 'Ranking' (.xlsx/.xls/.xlsm).
+[ALERTA] Error al procesar upload 6: openpyxl does not support .pdf file format, please check you can open it with Excel first. Supported formats are: .xlsx,.xlsm,.xltx,.xltm
+[ALERTA] Error al procesar upload 4: SIPROSA Ranking: el ZIP no contiene Excels 'Ranking' (.xlsx/.xls/.xlsm).
