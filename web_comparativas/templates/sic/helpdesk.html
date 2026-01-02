@@ -1,0 +1,243 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}Mesa de Ayuda – S.I.C{% endblock %}
+
+{% block extra_css %}
+<style>
+    .consulta-status {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.75rem;
+        border-radius: 99px;
+        text-transform: uppercase;
+    }
+
+    .status-abierto {
+        background: rgba(59, 130, 246, 0.15);
+        color: #60a5fa;
+        border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .status-pendiente {
+        background: rgba(245, 158, 11, 0.15);
+        color: #fbbf24;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .status-resuelto {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .status-cerrado {
+        background: rgba(148, 163, 184, 0.15);
+        color: #94a3b8;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .priority-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+    }
+
+    .priority-alta {
+        background-color: #ef4444;
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+    }
+
+    .priority-media {
+        background-color: #f59e0b;
+    }
+
+    .priority-baja {
+        background-color: #3b82f6;
+    }
+
+    .consulta-row {
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h1 class="h3 fw-bold mb-1">Mesa de Ayuda</h1>
+        <p class="text-white-50 small mb-0">Gestión de consultas, soporte y comunicación con administración.</p>
+    </div>
+</div>
+{% if (user.role or '')|lower != 'auditor' %}
+<div class="col-auto">
+    <a href="/sic/helpdesk/new" class="btn btn-sic-primary d-flex align-items-center gap-2">
+        <i class="ph-bold ph-plus"></i> Nueva Consulta
+    </a>
+</div>
+{% endif %}
+</div>
+
+{% if request.query_params.get('ok') == 'deleted' %}
+<div class="alert alert-success alert-dismissible fade show bg-success bg-opacity-10 border-success border-opacity-25 text-white mb-4"
+    role="alert">
+    <i class="ph-bold ph-check-circle me-2"></i> Consulta eliminada correctamente.
+    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+<div class="alert alert-danger alert-dismissible fade show bg-danger bg-opacity-10 border-danger border-opacity-25 text-white mb-4"
+    role="alert">
+    <i class="ph-bold ph-warning-circle me-2"></i> Error: {{ request.query_params.get('err') }}
+    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<div class="sic-card p-0 overflow-hidden">
+    <div class="table-responsive">
+        {% if not tickets or tickets|length == 0 %}
+        <div class="text-center text-white-50 py-5">
+            <i class="ph-bold ph-chats-teardrop mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
+            Aún no hay consultas creadas.
+            <div class="mt-2">
+                <a href="/sic/helpdesk/new" class="text-white text-decoration-underline">Iniciar una consulta</a>
+            </div>
+        </div>
+        {% else %}
+        <table class="sic-table mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th>Asunto</th>
+                    {% if is_admin or (user.role or '')|lower == 'auditor' %}
+                    <th>Usuario</th>
+                    {% endif %}
+                    <th>Categoría</th>
+                    <th>Prioridad</th>
+                    <th>Estado</th>
+                    <th>Última act.</th>
+                    {% if is_admin %}
+                    <th class="text-end" style="width: 50px;"></th>
+                    {% endif %}
+                    <th class="text-end" style="width: 50px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in tickets %}
+                <tr class="consulta-row" onclick="window.location='/sic/helpdesk/{{ t.id }}'">
+                    <td class="text-white-50 small">#{{ t.id }}</td>
+                    <td class="fw-medium text-white">
+                        <div class="d-flex align-items-center">
+                            {{ t.title }}
+                        </div>
+                    </td>
+                    {% if is_admin or (user.role or '')|lower == 'auditor' %}
+                    <td class="small text-white-50">
+                        {{ t.user.email }}
+                    </td>
+                    {% endif %}
+                    <td>
+                        <span
+                            class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal px-2 py-1"
+                            style="font-size: 0.7rem;">
+                            {{ t.category|capitalize }}
+                        </span>
+                    </td>
+                    <td>
+                        {% set p_cls = 'priority-media' %}
+                        {% if t.priority == 'alta' %}{% set p_cls = 'priority-alta' %}{% endif %}
+                        {% if t.priority == 'baja' %}{% set p_cls = 'priority-baja' %}{% endif %}
+                        <div class="d-flex align-items-center small text-white-50">
+                            <span class="priority-dot {{ p_cls }}"></span>
+                            {{ t.priority|capitalize }}
+                        </div>
+                    </td>
+                    <td>
+                        {% set s_cls = 'status-abierto' %}
+                        {% if t.status == 'pendiente' %}{% set s_cls = 'status-pendiente' %}{% endif %}
+                        {% if t.status == 'resuelto' %}{% set s_cls = 'status-resuelto' %}{% endif %}
+                        {% if t.status == 'cerrado' %}{% set s_cls = 'status-cerrado' %}{% endif %}
+                        <span class="consulta-status {{ s_cls }}">{{ t.status }}</span>
+                    </td>
+                    <td class="text-white-50 small">
+                        {{ t.updated_at.strftime('%d/%m %H:%M') }}
+                    </td>
+                    {% if is_admin %}
+                    <td class="text-end" onclick="event.stopPropagation();">
+                        <button type="button" onclick="confirmDelete({{ t.id }}); event.stopPropagation();"
+                            class="btn btn-sm text-danger p-0 border-0 bg-transparent hover:text-white"
+                            title="Eliminar">
+                            <i class="ph-bold ph-trash"></i>
+                        </button>
+                    </td>
+                    {% endif %}
+                    <td class="text-end text-white-50">
+                        <i class="ph-bold ph-caret-right"></i>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+</div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true" style="backdrop-filter: blur(5px);">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg"
+            style="background: rgba(30, 41, 59, 0.95); color: white; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-body p-4 text-center">
+                <div class="mb-3">
+                    <div class="rounded-circle bg-danger bg-opacity-10 d-inline-flex align-items-center justify-content-center"
+                        style="width: 64px; height: 64px;">
+                        <i class="ph-bold ph-trash text-danger" style="font-size: 32px;"></i>
+                    </div>
+                </div>
+                <h5 class="fw-bold mb-2">¿Estás seguro?</h5>
+                <p class="text-white-50 mb-4 small">Esta acción eliminará la consulta de forma permanente y no se puede
+                    deshacer.</p>
+
+                <div class="d-flex gap-2 justify-content-center">
+                    <button type="button" class="btn btn-sic-ghost px-4" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" id="confirmDeleteBtn" class="btn btn-danger px-4">Sí, eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let deleteConsultaId = null;
+    let deleteModal = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const modalEl = document.getElementById('deleteModal');
+        if (modalEl) {
+            deleteModal = new bootstrap.Modal(modalEl);
+        }
+
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function () {
+                if (deleteConsultaId) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/sic/helpdesk/' + deleteConsultaId + '/delete';
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            });
+        }
+    });
+
+    function confirmDelete(id) {
+        deleteConsultaId = id;
+        if (deleteModal) {
+            deleteModal.show();
+        }
+    }
+</script>
+{% endblock %}

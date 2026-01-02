@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Notificaciones - Web Comparativas{% endblock %}
+
+{% block header_title %}
+<div class="d-flex align-items-center gap-2">
+    <i class="bi bi-bell-fill text-primary"></i>
+    <span>Centro de Notificaciones</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+
+            <!-- Toolbar -->
+            <div class="d-flex align-items-center justify-content-between mb-4">
+                <h5 class="mb-0 text-muted">Tus últimas notificaciones</h5>
+                <button class="btn btn-sm btn-outline-primary" id="btn-mark-all-read">
+                    <i class="bi bi-check-all me-1"></i> Marcar todas como leídas
+                </button>
+            </div>
+
+            <!-- List -->
+            <div class="notification-list d-flex flex-column gap-3" id="notification-list">
+                {% if notifications %}
+                {% for n in notifications %}
+                <div class="card border-0 shadow-sm notification-card {% if not n.is_read %}unread{% endif %}"
+                    data-id="{{ n.id }}" data-link="{{ n.link or '' }}">
+                    <div class="card-body d-flex align-items-start gap-3 p-3">
+                        <!-- Icon setup based on category -->
+                        <div class="notification-icon flex-shrink-0">
+                            {% if n.category == 'helpdesk' %}
+                            <span
+                                class="icon-box bg-info-subtle text-info rounded-circle d-flex align-items-center justify-content-center"
+                                style="width: 40px; height: 40px;">
+                                <i class="bi bi-chat-left-text-fill"></i>
+                            </span>
+                            {% elif n.category == 'processing' %}
+                            <span
+                                class="icon-box bg-success-subtle text-success rounded-circle d-flex align-items-center justify-content-center"
+                                style="width: 40px; height: 40px;">
+                                <i class="bi bi-file-earmark-check-fill"></i>
+                            </span>
+                            {% else %}
+                            <span
+                                class="icon-box bg-primary-subtle text-primary rounded-circle d-flex align-items-center justify-content-center"
+                                style="width: 40px; height: 40px;">
+                                <i class="bi bi-bell-fill"></i>
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h6 class="mb-1 fw-bold text-dark">{{ n.title }}</h6>
+                                <small class="text-muted ms-2" style="font-size: 0.75rem;">
+                                    {{ n.created_at.strftime('%d/%m %H:%M') }}
+                                </small>
+                            </div>
+                            <p class="mb-1 text-secondary small" style="line-height: 1.4;">{{ n.message }}</p>
+
+                            {% if n.link %}
+                            <div class="mt-2">
+                                <span class="text-primary small fw-medium" style="cursor:pointer;">
+                                    Ver detalle <i class="bi bi-arrow-right-short"></i>
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        {% if not n.is_read %}
+                        <div class="unread-dot position-absolute top-50 end-0 translate-middle-y me-3">
+                            <span class="badge bg-primary rounded-circle p-1">
+                                <span class="visually-hidden">No leído</span>
+                            </span>
+                        </div>
+                        {% endif %}
+
+                        <!-- Delete Button (New) -->
+                        <button
+                            class="btn btn-sm btn-link text-danger position-absolute top-0 end-0 mt-4 me-1 btn-delete-notif"
+                            style="font-size: 0.85rem; opacity: 0; transition: opacity 0.2s;"
+                            title="Eliminar notificación" data-id="{{ n.id }}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-bell-slash display-4 opacity-25"></i>
+                    <p class="mt-3 mb-0">No tenés notificaciones nuevas.</p>
+                </div>
+                {% endif %}
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+    .notification-card {
+        transition: all 0.2s ease;
+        border: 1px solid rgba(0, 0, 0, 0.05) !important;
+        background: #fff;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .notification-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+    }
+
+    /* Show delete button on hover */
+    .notification-card:hover .btn-delete-notif {
+        opacity: 1 !important;
+    }
+
+    .notification-card.unread {
+        background: #f8fbff;
+        /* Very light blue tint */
+        border-left: 3px solid var(--bs-primary) !important;
+    }
+
+    /* Click animation effect */
+    .notification-card:active {
+        transform: scale(0.99);
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+
+        // Handle delete button click
+        document.querySelectorAll('.btn-delete-notif').forEach(btn => {
+            btn.addEventListener('click', function (e) {
+                // Stop propagation so we don't trigger the card click
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (!confirm('¿Eliminar esta notificación?')) return;
+
+                const id = this.dataset.id;
+                const card = this.closest('.notification-card');
+
+                // Optimistic removal
+                if (card) {
+                    card.style.transition = 'all 0.3s';
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateX(20px)';
+                    setTimeout(() => card.remove(), 300);
+                }
+
+                fetch(`/notifications/${id}`, { method: 'DELETE' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.ok) console.error('Error deleting notification');
+                    })
+                    .catch(e => console.error(e));
+            });
+        });
+
+        // Handle click on notification card
+        const cards = document.querySelectorAll('.notification-card');
+        cards.forEach(card => {
+            card.addEventListener('click', function (e) {
+                // If we clicked the delete button, do nothing (handled above)
+                if (e.target.closest('.btn-delete-notif')) return;
+
+                const id = this.dataset.id;
+                const link = this.dataset.link;
+
+                // Visual feedback that something is happening
+                this.style.opacity = '0.6';
+                this.style.pointerEvents = 'none'; // prevent double clicks
+
+                const doRedirect = () => {
+                    // Check if link is valid (not empty, not None string)
+                    if (link && link !== 'None' && link.trim() !== '') {
+                        window.location.href = link;
+                    } else {
+                        // If no link, just update UI to show as read
+                        this.style.opacity = '1';
+                        this.style.pointerEvents = 'auto'; // restore
+                        this.classList.remove('unread');
+                        const dot = this.querySelector('.unread-dot');
+                        if (dot) dot.remove();
+                    }
+                };
+
+                // Mark as read asynchronously
+                fetch(`/notifications/${id}/read`, { method: 'POST' })
+                    .then(r => r.json())
+                    .catch(err => console.error('Error marking read:', err))
+                    .finally(() => {
+                        // Proceed with navigation regardless of server success/fail
+                        doRedirect();
+                    });
+            });
+        });
+
+        // Mark all as read
+        const btnAll = document.getElementById('btn-mark-all-read');
+        if (btnAll) {
+            btnAll.addEventListener('click', function () {
+                if (!confirm('¿Marcar todas como leídas?')) return;
+
+                // Visual feedback
+                const icon = this.querySelector('i');
+                if (icon) icon.className = 'spinner-border spinner-border-sm me-1';
+
+                fetch('/notifications/read-all', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.ok) {
+                            window.location.reload();
+                        }
+                    });
+            });
+        }
+
+    });
+</script>
+{% endblock %}

@@ -7,15 +7,15 @@
   <h2 class="m-0">Grupos</h2>
   {% set role = (user.role or '')|lower %}
   {% if role in ['admin','supervisor'] %}
-    <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
+  <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
   {% endif %}
 </div>
 
 {% if ok %}
-  <div class="alert alert-success py-2">Acción realizada: {{ ok }}</div>
+<div class="alert alert-success py-2">Acción realizada: {{ ok }}</div>
 {% endif %}
 {% if err %}
-  <div class="alert alert-danger py-2">Error: {{ err }}</div>
+<div class="alert alert-danger py-2">Error: {{ err }}</div>
 {% endif %}
 
 <div class="table-responsive">
@@ -31,26 +31,28 @@
       </tr>
     </thead>
     <tbody>
-    {% if groups and groups|length > 0 %}
+      {% if groups and groups|length > 0 %}
       {% for g in groups %}
-        <tr>
-          <td>{{ g.name }}</td>
-          <td>{{ g.business_unit or '—' }}</td>
-          <td>{{ g.memberships|length }}</td>
-          <td>{{ g.created_by.full_name or g.created_by.name or g.created_by.email }}</td>
-          <td>{{ (g.created_at or '') }}</td>
-          <td class="text-end">
-            <a class="btn btn-sm btn-outline-primary" href="/grupos/{{ g.id }}/editar">Editar</a>
-            <a class="btn btn-sm btn-outline-danger" href="/grupos/{{ g.id }}/eliminar"
-               onclick="return confirm('¿Eliminar el grupo {{ g.name }}? Esta acción no se puede deshacer.');">
-               Eliminar
-            </a>
-          </td>
-        </tr>
+      <tr>
+        <td>{{ g.name }}</td>
+        <td>{{ g.business_unit or '—' }}</td>
+        <td>{{ g.memberships|length }}</td>
+        <td>{{ g.created_by.full_name or g.created_by.name or g.created_by.email }}</td>
+        <td>{{ (g.created_at or '') }}</td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary" href="/grupos/{{ g.id }}/editar">Editar</a>
+          <a class="btn btn-sm btn-outline-danger btn-delete-group" href="/grupos/{{ g.id }}/eliminar"
+            data-name="{{ g.name }}">
+            Eliminar
+          </a>
+        </td>
+      </tr>
       {% endfor %}
-    {% else %}
-      <tr><td colspan="6" class="text-muted">No hay grupos aún.</td></tr>
-    {% endif %}
+      {% else %}
+      <tr>
+        <td colspan="6" class="text-muted">No hay grupos aún.</td>
+      </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>

@@ -1,0 +1,139 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}{{ 'Nuevo usuario' if is_new else 'Editar usuario' }} – S.I.C{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-center">
+    <div class="sic-card" style="max-width:720px; width:100%;">
+
+        <h2 class="h4 fw-bold mb-4 text-white">{{ 'Nuevo usuario' if is_new else 'Editar usuario' }}</h2>
+
+        {# ====== Mensajes globales de error (crear/editar) ====== #}
+        {% if error %}
+        <div class="alert alert-danger mb-4">{{ error }}</div>
+        {% elif errors %}
+        <div class="alert alert-danger mb-4">
+            <ul class="m-0">
+                {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {# ====== Feedback de cambio de contraseña (via querystring) ====== #}
+        {% if perror == 'short' %}
+        <div class="alert alert-warning mb-4">La nueva contraseña debe tener al menos 8 caracteres.</div>
+        {% elif perror == 'nomatch' %}
+        <div class="alert alert-warning mb-4">Las contraseñas no coinciden.</div>
+        {% elif perror == 'fail' %}
+        <div class="alert alert-danger mb-4">No se pudo actualizar la contraseña. Intenta nuevamente.</div>
+        {% elif pok %}
+        <div class="alert alert-success mb-4">Contraseña actualizada correctamente.</div>
+        {% endif %}
+
+        {# ---------- Form principal: crear/editar ---------- #}
+        <form method="post" action="/sic/users/{{ 'new' if is_new else form.id ~ '/update' }}" class="d-grid gap-3 mb-4"
+            autocomplete="off">
+
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="name">Nombre completo</label>
+                <input class="form-control form-control-sic" id="name" name="name"
+                    value="{{ (form.full_name or form.name or form.nombre) or '' }}" required
+                    placeholder="Nombre y apellido">
+            </div>
+
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="email">Email</label>
+                <input class="form-control form-control-sic" id="email" type="email" name="email"
+                    value="{{ form.email or '' }}" {% if not allow_edit_email %}readonly
+                    style="opacity: 0.6; cursor: not-allowed;" {% endif %} {% if is_new %}required{% endif %}>
+                {% if allow_edit_email %}
+                <div class="text-white-50 small mt-1">Puedes modificarlo si lo necesitas.</div>
+                {% else %}
+                <div class="text-white-50 small mt-1">El email no puede modificarse aquí.</div>
+                {% endif %}
+            </div>
+
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="role">Rol</label>
+                {% set r = (form.role or '')|lower %}
+                {# Normaliza 'visor' heredado como 'auditor' #}
+                {% if r == 'visor' %}{% set r = 'auditor' %}{% endif %}
+                <select class="form-select form-select-sic" id="role" name="role" required>
+                    <option value="admin" {% if r=='admin' %}selected{% endif %}>Administrador</option>
+                    <option value="supervisor" {% if r=='supervisor' %}selected{% endif %}>Supervisor</option>
+                    <option value="analista" {% if r=='analista' %}selected{% endif %}>Analista</option>
+                    <option value="auditor" {% if r=='auditor' %}selected{% endif %}>Auditor</option>
+                </select>
+                <div class="text-white-50 small mt-1">
+                    • <strong>Administrador:</strong> acceso total.<br>
+                    • <strong>Supervisor:</strong> puede cargar y ver todo, sin crear usuarios.<br>
+                    • <strong>Analista:</strong> puede cargar y ver solo sus procesos.<br>
+                    • <strong>Auditor:</strong> solo lectura de todos los procesos.
+                </div>
+            </div>
+
+            {# ====== Unidad de Negocio ====== #}
+            {% set bu_opts = (business_units if business_units is defined else [
+            'Productos Hospitalarios',
+            'Estética Médica y Reconstructiva',
+            'Tratamientos Especiales',
+            'Otros'
+            ]) %}
+            {% set bu_val = (form.unit_business or 'Otros') %}
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="unit_business">Unidad de Negocio</label>
+                <select class="form-select form-select-sic" id="unit_business" name="unit_business" required>
+                    {% for opt in bu_opts %}
+                    <option value="{{ opt }}" {% if opt==bu_val %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">Clasifica al usuario según la unidad de negocio a la que
+                    pertenece.</div>
+            </div>
+
+            {# ====== Apartado / Segmentación ====== #}
+            {% set scope_val = (form.access_scope or 'todos') %}
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="access_scope">Apartado (Alcance)</label>
+                <select class="form-select form-select-sic" id="access_scope" name="access_scope" required>
+                    <option value="todos" {% if scope_val=='todos' %}selected{% endif %}>Todos (Público + Privado)
+                    </option>
+                    <option value="publico" {% if scope_val=='publico' %}selected{% endif %}>Mercado Público</option>
+                    <option value="privado" {% if scope_val=='privado' %}selected{% endif %}>Mercado Privado</option>
+                </select>
+                <div class="text-white-50 small mt-1">Define si el usuario opera solo en un mercado específico o en
+                    ambos.</div>
+            </div>
+
+            <div class="span-12 d-flex gap-2">
+                <a class="btn btn-sic-ghost" href="/sic/users">Volver</a>
+                <button class="btn btn-sic-primary" type="submit">{{ 'Crear' if is_new else 'Guardar' }}</button>
+            </div>
+
+        </form>
+
+        {# ---------- Cambiar contraseña (solo edición) ---------- #}
+        {% if not is_new and form and form.id %}
+        <div class="p-3 rounded-3" style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
+            <h6 class="mb-3 text-white">Cambiar contraseña</h6>
+            <form method="post" action="/sic/users/{{ form.id }}/password" class="row g-2 align-items-center">
+                <div class="col-12 col-md-5">
+                    <input class="form-control form-control-sm form-control-sic" name="nueva" type="password"
+                        minlength="8" placeholder="Nueva contraseña" required>
+                </div>
+                <div class="col-12 col-md-5">
+                    <input class="form-control form-control-sm form-control-sic" name="confirmar" type="password"
+                        minlength="8" placeholder="Confirmar contraseña" required>
+                </div>
+                <div class="col-12 col-md-2 text-end">
+                    <button class="btn btn-sm btn-sic-primary w-100" type="submit">Actualizar</button>
+                </div>
+            </form>
+            <div class="text-white-50 small mt-2">Mínimo 8 caracteres.</div>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+{% endblock %}

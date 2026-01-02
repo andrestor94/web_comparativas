@@ -1,0 +1,71 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}Nueva Consulta – S.I.C{% endblock %}
+
+{% block extra_css %}
+<style>
+    .form-control-sic::placeholder {
+        color: rgba(255, 255, 255, 0.7) !important;
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="d-flex align-items-center mb-4">
+            <a href="/sic/helpdesk" class="btn btn-sm btn-sic-ghost me-3">
+                <i class="ph-bold ph-arrow-left"></i>
+            </a>
+            <div>
+                <h1 class="h3 fw-bold mb-1">Nueva Consulta</h1>
+                <p class="text-white-50 small mb-0">Describe tu consulta o problema para que podamos ayudarte.</p>
+            </div>
+        </div>
+
+        <div class="sic-card">
+            <form action="/sic/helpdesk/new" method="POST">
+                <div class="mb-3">
+                    <label class="form-label text-white-50 small">Asunto</label>
+                    <input type="text" name="title" class="form-control form-control-sic" required
+                        placeholder="Ej. Error al cargar archivo de ventas">
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label text-white-50 small">Categoría</label>
+                        <select name="category" class="form-select form-select-sic">
+                            <option value="consulta">Consulta General</option>
+                            <option value="error">Reporte de Error</option>
+                            <option value="sugerencia">Sugerencia</option>
+                            <option value="acceso">Problema de Acceso</option>
+                            <option value="otro">Otro</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label text-white-50 small">Prioridad</label>
+                        <select name="priority" class="form-select form-select-sic">
+                            <option value="baja">Baja</option>
+                            <option value="media" selected>Media</option>
+                            <option value="alta">Alta</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label text-white-50 small">Mensaje inicial</label>
+                    <textarea name="message" class="form-control form-control-sic" rows="5" required
+                        placeholder="Describe detalladamente lo que sucede..."></textarea>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="/sic/helpdesk" class="btn btn-sic-ghost">Cancelar</a>
+                    <button type="submit" class="btn btn-sic-primary">
+                        Enviar Consulta <i class="ph-bold ph-paper-plane-right ms-2"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,188 @@
+{% extends "sic/base_sic.html" %}
+
+{% block extra_css %}
+<style>
+    .hero-title {
+        font-size: 3rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        background: linear-gradient(to right, #fff, #94a3b8);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+        color: var(--sic-text-muted);
+        font-size: 1.1rem;
+        margin-bottom: 3rem;
+    }
+
+    /* GRID SYSTEM */
+    .sic-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        padding-bottom: 3rem;
+    }
+
+    /* Card enhancements specific to home */
+    .sic-card {
+        display: flex;
+        flex-direction: column;
+        text-decoration: none;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .sic-card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(59, 130, 246, 0.4);
+        background: rgba(30, 41, 59, 0.9);
+        box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+    }
+
+    .sic-card:hover::after {
+        opacity: 1;
+    }
+
+    .sic-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: radial-gradient(600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(59, 130, 246, 0.1), transparent 40%);
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+    }
+
+    .icon-box {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        color: var(--sic-highlight);
+        margin-bottom: 1.25rem;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .sic-card:hover .icon-box {
+        background: var(--sic-highlight);
+        color: #fff;
+        border-color: var(--sic-highlight);
+    }
+
+    .card-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: #fff;
+    }
+
+    .card-desc {
+        color: var(--sic-text-muted);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        flex-grow: 1;
+    }
+
+    .card-arrow {
+        margin-top: 1.5rem;
+        color: var(--sic-highlight);
+        font-weight: 600;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        opacity: 0.8;
+        transition: opacity 0.2s;
+    }
+
+    .sic-card:hover .card-arrow {
+        opacity: 1;
+        transform: translateX(4px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="text-center py-5">
+        <h1 class="hero-title">Soporte de Inteligencia Comercial</h1>
+        <p class="hero-subtitle">Centro de control unificado para gestión de usuarios, soporte y monitoreo del sistema.
+        </p>
+    </div>
+
+    <div class="sic-grid">
+
+        <!-- Mesa de ayuda -->
+        <a href="/sic/helpdesk" class="sic-card">
+            <div class="icon-box">
+                <i class="bi bi-life-preserver"></i>
+            </div>
+            <h3 class="card-title">Mesa de ayuda</h3>
+            <p class="card-desc">
+                Gestión de consultas, reporte de incidentes y base de conocimiento para resolución de problemas.
+            </p>
+            <div class="card-arrow">
+                Acceder <i class="bi bi-arrow-right"></i>
+            </div>
+        </a>
+
+        <!-- Seguimiento de usuarios -->
+        <a href="/sic/tracking" class="sic-card">
+            <div class="icon-box">
+                <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <h3 class="card-title">Seguimiento de usuarios</h3>
+            <p class="card-desc">
+                Analíticas de uso, monitoreo de actividad en tiempo real y métricas de adopción de la plataforma.
+            </p>
+            <div class="card-arrow">
+                Ver métricas <i class="bi bi-arrow-right"></i>
+            </div>
+        </a>
+
+
+        <!-- Usuarios -->
+        <a href="/sic/users" class="sic-card">
+            <div class="icon-box">
+                <i class="bi bi-people-fill"></i>
+            </div>
+            <h3 class="card-title">Gestión de Usuarios</h3>
+            <p class="card-desc">
+                Administración de permisos, roles, altas y bajas. Control de accesos por unidad de negocio.
+            </p>
+            <div class="card-arrow">
+                Administrar <i class="bi bi-arrow-right"></i>
+            </div>
+        </a>
+
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Mouse movement effect for cards
+    document.querySelectorAll('.sic-card').forEach(card => {
+        card.onmousemove = e => {
+            const rect = card.getBoundingClientRect(),
+                x = e.clientX - rect.left,
+                y = e.clientY - rect.top;
+
+            card.style.setProperty('--mouse-x', `${x}px`);
+            card.style.setProperty('--mouse-y', `${y}px`);
+        };
+    });
+</script>
+{% endblock %}

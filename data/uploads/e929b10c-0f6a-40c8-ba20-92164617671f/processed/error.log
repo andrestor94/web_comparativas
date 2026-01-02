@@ -1,0 +1,1 @@
+Error al procesar upload 6: openpyxl does not support .pdf file format, please check you can open it with Excel first. Supported formats are: .xlsx,.xlsm,.xltx,.xltm

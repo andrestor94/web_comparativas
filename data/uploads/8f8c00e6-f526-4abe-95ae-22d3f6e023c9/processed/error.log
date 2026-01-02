@@ -1,0 +1,1 @@
+Error al procesar upload 2: openpyxl does not support .zip file format, please check you can open it with Excel first. Supported formats are: .xlsx,.xlsm,.xltx,.xltm

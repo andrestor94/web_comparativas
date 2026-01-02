@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}Dimensionamiento – Mercado Privado{% endblock %}
+
+{% block extra_head %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}">
+
+<div class="tech-dashboard-grid animate-enter">
+
+    <!-- 1. Header Area -->
+    <div class="tech-header">
+        <div class="tech-title">
+            <h2>Dimensionamiento</h2>
+            <p>Análisis de competencia (Bionexo + Portada)</p>
+        </div>
+        <div id="dashboardControls" style="display:none;">
+            <button id="resetBtn" class="btn btn-outline-secondary btn-sm"
+                style="border-radius: 99px; font-size: 0.75rem;">
+                <i class="ph-bold ph-arrow-counter-clockwise me-1"></i> Cargar otro
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. Upload Zone (Initial State) -->
+    {% if (user.role or '')|lower != 'auditor' %}
+    <div id="uploadContainer" class="tech-card"
+        style="grid-column: span 12; margin: 0.5rem 0; text-align: center; padding: 2rem;">
+        <h3 class="h5 fw-bold mb-3" style="color: var(--tech-blue-dark);">Cargar Datos</h3>
+        <p class="text-muted mb-4 small">Selecciona ambos archivos para generar el tablero.</p>
+
+        <div class="d-flex justify-content-center gap-4 flex-wrap">
+            <!-- JSON Input -->
+            <div class="p-3 border rounded bg-light" style="width: 250px;">
+                <i class="ph-duotone ph-file-code text-primary mb-2" style="font-size: 2rem;"></i>
+                <h6 class="small fw-bold">Archivo JSON</h6>
+                <input type="file" id="jsonFileInput" class="form-control form-control-sm mt-2" accept=".json">
+            </div>
+
+            <!-- Excel Input -->
+            <div class="p-3 border rounded bg-light" style="width: 250px;">
+                <i class="ph-duotone ph-file-xls text-success mb-2" style="font-size: 2rem;"></i>
+                <h6 class="small fw-bold">Archivo Excel</h6>
+                <input type="file" id="excelFileInput" class="form-control form-control-sm mt-2" accept=".xlsx, .xls">
+            </div>
+        </div>
+
+        <button id="processBtn" class="btn btn-primary rounded-pill px-4 mt-4 shadow-sm" disabled>
+            <i class="ph-bold ph-play me-2"></i> Procesar y Generar
+        </button>
+    </div>
+    {% else %}
+    <div class="tech-card" style="grid-column: span 12; text-align: center; padding: 1rem;">
+        <p class="text-muted m-0"><i class="ph-bold ph-eye me-2"></i>Modo Auditor: Carga de datos deshabilitada.</p>
+    </div>
+    {% endif %}
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay"
+        style="display:none; position: fixed; top:0; left:0; width:100%; height:100%; background: var(--bg-glass); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(5px);">
+        <div class="spinner-border text-primary spinner-border-sm" role="status"></div>
+        <h6 class="mt-2 text-primary fw-bold" id="loadingText">Procesando...</h6>
+    </div>
+
+    <!-- 3. Dashboard Content -->
+    <div id="dashboardContent" style="display: none;">
+
+        <!-- Toolbar / Filters -->
+        <div class="tech-toolbar">
+            <div class="filter-group">
+                <label>Cliente</label>
+                <select id="filterClient" class="tech-select">
+                    <option value="all">Todas</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Provincia</label>
+                <select id="filterProvince" class="tech-select">
+                    <option value="all">Todas</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Categoría</label>
+                <select id="filterCategory" class="tech-select">
+                    <option value="all">Todas</option>
+                </select>
+            </div>
+
+            <div class="vr mx-2 bg-secondary opacity-10"></div>
+
+            <div class="filter-group">
+                <label>Rango Fecha</label>
+                <div class="d-flex gap-1">
+                    <input type="date" id="dateStart" class="form-control form-control-sm border-0 shadow-sm"
+                        style="width: 105px;">
+                    <input type="date" id="dateEnd" class="form-control form-control-sm border-0 shadow-sm"
+                        style="width: 105px;">
+                </div>
+            </div>
+
+            <div class="vr mx-2 bg-secondary opacity-10"></div>
+
+            <div class="filter-group">
+                <label>¿Identificado?</label>
+                <select id="filterIdentified" class="tech-select" style="width: 100px;">
+                    <option value="all">Todos</option>
+                    <option value="yes">Sí</option>
+                    <option value="no">No</option>
+                </select>
+            </div>
+
+            <div class="vr mx-2 bg-secondary opacity-10"></div>
+
+            <div class="filter-group">
+                <label>¿Cliente?</label>
+                <select id="filterIsClient" class="tech-select" style="width: 100px;">
+                    <option value="all">Todos</option>
+                    <option value="yes" selected>Sí</option>
+                    <option value="no">No</option>
+                </select>
+            </div>
+
+            <div class="ms-auto d-flex align-items-center gap-3">
+                <div class="form-check form-switch d-flex align-items-center gap-2 m-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="toggleVolume"
+                        style="cursor: pointer;">
+                    <label class="form-check-label mb-0" for="toggleVolume"
+                        style="font-size: 0.75rem; font-weight: 700; color: var(--tech-blue-mid); text-transform: uppercase;">
+                        Ver valorizado ($)
+                    </label>
+                </div>
+
+                <div class="filter-group">
+                    <label>Buscar</label>
+                    <div class="input-group input-group-sm shadow-sm rounded-pill overflow-hidden"
+                        style="width: 150px;">
+                        <span class="input-group-text bg-white border-0 ps-3 pe-1"><i
+                                class="ph-bold ph-magnifying-glass text-muted" style="font-size: 0.8rem;"></i></span>
+                        <input type="text" id="searchGlobal" class="form-control border-0 shadow-none ps-1"
+                            placeholder="...">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPIs row -->
+        <div class="tech-kpi-area" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="tech-card kpi-modern">
+                <div class="kpi-icon"><i class="ph-duotone ph-users"></i></div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiClients">-</div>
+                    <div class="kpi-label">Clientes</div>
+                </div>
+            </div>
+            <div class="tech-card kpi-modern">
+                <div class="kpi-icon" style="color: var(--tech-blue-mid); background: rgba(30, 92, 138, 0.1);"><i
+                        class="ph-duotone ph-briefcase"></i></div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiProcesses">-</div>
+                    <div class="kpi-label">Procesos Únicos</div>
+                </div>
+            </div>
+            <div class="tech-card kpi-modern">
+                <div class="kpi-icon" style="color: var(--tech-blue-bright); background: rgba(82, 116, 206, 0.1);"><i
+                        class="ph-duotone ph-tag"></i></div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiFamilies">-</div>
+                    <div class="kpi-label">Familias</div>
+                </div>
+            </div>
+            <div class="tech-card kpi-modern">
+                <div class="kpi-icon" style="color: var(--tech-cyan); background: rgba(56, 189, 248, 0.1);"><i
+                        class="ph-duotone ph-currency-dollar"></i></div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiVolume">-</div>
+                    <div class="kpi-label">Volumen ($)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 1: Area (8) + Pie (4) -->
+        <div class="tech-card area-full" style="height: 280px;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-trend-up me-2"></i>Evolución (Renglón por Categoría)</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="areaChart"></canvas>
+            </div>
+        </div>
+
+        <div class="tech-card area-third" style="height: 280px;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-chart-pie-slice me-2"></i>Resultado por Renglón</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="pieChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Row 2: List (4) + Map (4) + Bar (4) -->
+        <div class="tech-card area-third" style="height: 260px;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-list-numbers me-2"></i>Top Familias</span>
+            </div>
+            <div id="familyListContainer" style="overflow-y: auto; height: 100%;">
+                <!-- Dynamic List -->
+            </div>
+        </div>
+
+        <!-- Map / Province Chart -->
+        <div class="tech-card area-third" style="height: 260px;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-map-pin me-2"></i>Distribución Geográfica</span>
+            </div>
+            <div class="chart-container" style="padding: 0;">
+                <div id="mapContainer" style="width: 100%; height: 100%;"></div>
+            </div>
+        </div>
+
+        <div class="tech-card area-third" style="height: 260px;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-chart-bar me-2"></i>Clientes por Resultado</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="barClientChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Row 3: Pivot Table (12) -->
+        <div class="tech-card" style="grid-column: span 12; height: 300px; padding: 0; overflow: hidden;">
+            <div class="tech-card-title">
+                <span><i class="ph-duotone ph-table me-2"></i>Consumo de familia por mes</span>
+            </div>
+            <div class="table-responsive h-100" style="padding-bottom: 3rem;">
+                <table class="tech-table" id="pivotTable">
+                    <thead id="pivotHeader"></thead>
+                    <tbody id="pivotBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=2"></script>
+{% endblock %}

@@ -11,6 +11,7 @@ import unicodedata
 import re
 import logging
 from types import SimpleNamespace
+from web_comparativas.usage_service import log_usage_event, get_usage_summary
 from typing import Any, Optional, List, Dict
 from dotenv import load_dotenv
 load_dotenv()
@@ -71,8 +72,24 @@ from .models import (
     BUSINESS_UNITS,
     Group,
     GroupMember,
+    GroupMember,
     normalize_proceso_nro,
+    normalize_unit_business,
+    Ticket,
+    TicketMessage,
+    UsageEvent,
+    UsageSession,
+    SavedView,
+    Comment,
+    EmailNotification,
+    NormalizedFile,
+    Run,
+    Dashboard,
+    ChatChannel,
+    ChatMember,
+    ChatMessage,
 )
+from .auth import hash_password, verify_password
 
 # Visibilidad por grupos
 from .visibility_service import (
@@ -137,13 +154,16 @@ from .rankings import build_ranked_positions  # (se deja import para compatibili
 # Comentarios / Feedback (API)
 from .api_comments import router as comments_router
 
+# 👉 NUEVO: Router S.I.C (Soporte de Inteligencia Comercial)
+from .routers.sic_router import router as sic_router
+from .routers.dimensiones_router import router as dimensiones_router
+
 # 👉 NUEVO: capa de correo (opcional, no rompe si no existe)
 try:
     from . import email_service as _email_svc
 except Exception:
     # si no existe el archivo, no rompemos la app
     _email_svc = None
-
 
 # ======================================================================
 # DEPENDENCIAS / SESIÓN
@@ -167,6 +187,11 @@ def get_db():
 # ======================================================================
 logger = logging.getLogger("wc.auth")
 logger.setLevel(logging.INFO)
+if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+    fh = logging.FileHandler("debug_groups.log")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("[%(name)s] [%(levelname)s] %(message)s"))
+    logger.addHandler(fh)
 
 
 # ======================================================================
@@ -176,9 +201,352 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI()
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"REQUEST {request.method} {request.url.path}")
+    response = await call_next(request)
+    return response
+
+# Incluir routers
+app.include_router(sic_router)
+app.include_router(dimensiones_router)
+
+# 👉 NUEVO: Router de Notificaciones
+from .routers.notifications_router import router as notifications_router
+app.include_router(notifications_router)
+
+
+# === [Oportunidades - Buscador] ===
+OPP_DIR  = BASE_DIR / "data" / "oportunidades"
+OPP_DIR.mkdir(parents=True, exist_ok=True)
+OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
+
+def _save_oportunidades_excel(file: UploadFile) -> int:
+    name = (file.filename or "").lower()
+    if not name.endswith(".xlsx"):
+        raise HTTPException(
+            status_code=400,
+            detail="Formato no permitido. Subí un Excel .xlsx (no .xls)"
+        )
+    tmp_path = OPP_DIR / f"tmp_{uuid.uuid4().hex}.xlsx"
+    with tmp_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+    tmp_path.replace(OPP_FILE)
+    try:
+        df = pd.read_excel(OPP_FILE, dtype=str, engine="openpyxl")
+        return int(len(df))
+    except Exception:
+        return -1
+
+
+def _oportunidades_status() -> dict:
+    """
+    Devuelve metadata para la vista (si hay archivo, filas, última actualización).
+    """
+    info = {"has_file": False, "rows": None, "last_updated_str": None}
+    if OPP_FILE.exists():
+        info["has_file"] = True
+        try:
+            df = pd.read_excel(OPP_FILE, dtype=str)
+            info["rows"] = int(len(df))
+        except Exception:
+            info["rows"] = None
+
+        mtime = dt.datetime.fromtimestamp(OPP_FILE.stat().st_mtime)
+        info["last_updated_str"] = mtime.strftime("%d/%m/%Y %H:%M")
+    return info
+
 # Estados que consideramos “finalizados” para habilitar tablero/descarga a no-admin
 FINAL_STATES = {"done", "finalizado", "dashboard", "tablero"}
 
+# === [Oportunidades - Helpers de dashboard] ==============================
+def _opp_norm(s: str) -> str:
+    s = unicodedata.normalize("NFD", str(s or ""))
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[\s._/\-]+", "", s.strip().lower())
+
+def _opp_pick(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    cols = {_opp_norm(c): c for c in df.columns}
+    for cand in candidates:
+        c = cols.get(_opp_norm(cand))
+        if c:
+            return c
+    return None
+
+def _opp_parse_number(x) -> float:
+    if x is None:
+        return 0.0
+    s = str(x).strip()
+    if not s:
+        return 0.0
+    # quita miles con punto, acepta coma como decimal
+    s = re.sub(r"\.(?=\d{3}(\D|$))", "", s)
+    s = s.replace(",", ".")
+    try:
+        v = float(s)
+        return v if np.isfinite(v) else 0.0
+    except Exception:
+        return 0.0
+
+def _opp_parse_date(s) -> dt.date | None:
+    if s is None:
+        return None
+    t = str(s).strip()
+    if not t:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return dt.datetime.strptime(t, fmt).date()
+        except Exception:
+            pass
+    try:
+        return dt.datetime.fromisoformat(t).date()
+    except Exception:
+        return None
+
+def _opp_load_df() -> pd.DataFrame | None:
+    if not OPP_FILE.exists():
+        return None
+    try:
+        df = pd.read_excel(OPP_FILE, dtype=str, engine="openpyxl").fillna("")
+        # normaliza encabezados visuales (conservamos los originales)
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # --- PRE-CÁLCULO DE COLUMNAS NORMALIZADAS (OPTIMIZACIÓN) ---
+        # 1. Fechas (_dt)
+        fecha_col = _opp_pick(
+            df,
+            ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
+        )
+        if fecha_col:
+            # Parseo vectorizado (o map si es complejo, pero se hace 1 sola vez)
+            df["_dt"] = df[fecha_col].apply(_opp_parse_date)
+        else:
+            df["_dt"] = pd.NaT
+
+        # 2. Presupuesto (_budget)
+        presu_col = _opp_pick(
+            df,
+            [
+                "Presupuesto oficial",
+                "Presupuesto",
+                "Monto",
+                "Importe Total",
+                "Total Presupuesto",
+                "Monto Total",
+                "Importe",
+            ],
+        )
+        if presu_col:
+            df["_budget"] = df[presu_col].map(_opp_parse_number)
+        else:
+            df["_budget"] = 0.0
+
+        # 3. Estado Normalizado (_state) => EMERGENCIA / REGULAR
+        estado_col = _opp_pick(df, ["Estado", "Tipo Proceso", "Carácter"])
+        if estado_col:
+            # La lógica es: si contiene "emerg" (case insensitive) -> EMERGENCIA, sino REGULAR
+            s_lower = df[estado_col].astype(str).str.lower().fillna("")
+            df["_state"] = np.where(
+                s_lower.str.contains("emerg"), "EMERGENCIA", "REGULAR"
+            )
+        else:
+            df["_state"] = "REGULAR"
+
+        return df
+    except Exception as e:
+        print("[_opp_load_df] Error:", e)
+        return None
+
+
+def _opp_apply_filters(
+    df: pd.DataFrame,
+    q: str,
+    buyer: str,
+    platform: str,
+    province: str,
+    date_from: str,
+    date_to: str,
+    process_type: str = "",
+    cuenta: str = "",
+) -> pd.DataFrame:
+    # Usamos copy para no afectar el cache global, pero ya trae _dt, _budget, _state
+    out = df.copy()
+
+    # columnas candidatas
+    buyer_col = _opp_pick(
+        out,
+        [
+            "Comprador",
+            "Repartición",
+            "Entidad",
+            "Organismo",
+            "Unidad Compradora",
+            "Buyer",
+        ],
+    )
+    platf_col = _opp_pick(
+        out,
+        ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
+    )
+    prov_col = _opp_pick(
+        out,
+        [
+            "Provincia",
+            "Provincia/Municipio",
+            "Municipio",
+            "Jurisdicción",
+            "Localidad",
+            "Departamento",
+        ],
+    )
+    # fecha_col se usa para pickear, pero usamos _dt para filtrar
+    fecha_col = _opp_pick(
+        out,
+        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
+    )
+    desc_col = _opp_pick(
+        out,
+        ["Descripción", "Descripcion", "Objeto", "Detalle", "Renglón", "Renglon"],
+    )
+    proc_col = _opp_pick(
+        out,
+        ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"],
+    )
+    cuenta_col = _opp_pick(
+        out,
+        [
+            "Código",
+            "Codigo",
+            "Cuenta",
+            "N° Cuenta",
+            "Nro Cuenta",
+            "Cuenta Nro",
+            "Número",
+            "Numero",
+            "N°",
+            "Nro",
+        ],
+    )
+
+    # búsqueda libre
+    if q.strip():
+        like = q.strip().lower()
+        cols_buscar = [
+            c
+            for c in [desc_col, buyer_col, platf_col, prov_col, proc_col, cuenta_col]
+            if c
+        ]
+        if cols_buscar:
+            m = False
+            for c in cols_buscar:
+                m = m | out[c].astype(str).str.lower().str.contains(like, na=False)
+            out = out[m]
+
+    # filtros por campo
+    if buyer.strip() and buyer_col:
+        out = out[
+            out[buyer_col]
+            .astype(str)
+            .str.contains(buyer.strip(), case=False, na=False)
+        ]
+    if platform.strip() and platf_col:
+        out = out[
+            out[platf_col]
+            .astype(str)
+            .str.contains(platform.strip(), case=False, na=False)
+        ]
+    if province.strip() and prov_col:
+        out = out[
+            out[prov_col]
+            .astype(str)
+            .str.contains(province.strip(), case=False, na=False)
+        ]
+    if cuenta.strip() and cuenta_col:
+        out = out[
+            out[cuenta_col]
+            .astype(str)
+            .str.contains(cuenta.strip(), case=False, na=False)
+        ]
+
+    # rango de fechas (OPTIMIZADO: usa _dt)
+    if "_dt" in out.columns and (date_from.strip() or date_to.strip()):
+        # Aseguramos que _dt sea datetime (o NaT)
+        # (Ya debería venir listo de _opp_load_df)
+        dates = out["_dt"]
+
+        if date_from.strip():
+            dfm = _opp_parse_date(date_from.strip())
+            if dfm:
+                # dfm es date, dates son date/NaT. Comparamos directo.
+                # Ojo: pd.NaT >= date es False (normalmente).
+                out = out[dates >= dfm]
+        if date_to.strip():
+            dtm = _opp_parse_date(date_to.strip())
+            if dtm:
+                out = out[dates <= dtm]
+
+    # filtro por Tipo / Modalidad
+    tipo_col = _opp_pick(out, ["Tipo", "Modalidad", "Procedimiento"])
+    if process_type.strip() and tipo_col:
+        out = out[
+            out[tipo_col]
+            .astype(str)
+            .str.contains(process_type.strip(), case=False, na=False)
+        ]
+
+    return out
+
+def _opp_compute_kpis(df: pd.DataFrame) -> dict:
+    if df is None or df.empty:
+        return {
+            "total_rows": 0,
+            "buyers": 0,
+            "platforms": 0,
+            "provinces": 0,
+            "budget_total": 0.0,
+            "date_min": "",
+            "date_max": "",
+        }
+
+    buyer_col = _opp_pick(df, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    platf_col = _opp_pick(df, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    prov_col  = _opp_pick(df, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    fecha_col = _opp_pick(df, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    presu_col = _opp_pick(df, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
+
+    k = {
+        "total_rows": int(len(df)),
+        "buyers": int(df[buyer_col].astype(str).str.strip().str.lower().nunique()) if buyer_col else 0,
+        "platforms": int(df[platf_col].astype(str).str.strip().str.lower().nunique()) if platf_col else 0,
+        "provinces": int(df[prov_col].astype(str).str.strip().str.lower().nunique()) if prov_col else 0,
+        "budget_total": 0.0,
+        "date_min": "",
+        "date_max": "",
+    }
+
+    if presu_col:
+        k["budget_total"] = float(pd.Series(df[presu_col]).map(_opp_parse_number).sum())
+
+    if fecha_col:
+        fechas = pd.Series(df[fecha_col]).map(_opp_parse_date)
+        try:
+            fmin = fechas.dropna().min()
+            fmax = fechas.dropna().max()
+            k["date_min"] = fmin.strftime("%d/%m/%Y") if isinstance(fmin, dt.date) else ""
+            k["date_max"] = fmax.strftime("%d/%m/%Y") if isinstance(fmax, dt.date) else ""
+        except Exception:
+            pass
+
+    return k
+
+
+# === Helper de render: usa plantilla si existe, sino cae a HTML simple ===
+def _render_or_fallback(template_name: str, ctx: dict, fallback_html: str):
+    tpath = BASE_DIR / "templates" / template_name
+    if tpath.exists():
+        return templates.TemplateResponse(template_name, ctx)
+    return HTMLResponse(fallback_html)
 
 # ======================================================================
 # PDF / REPORTES – CONFIG
@@ -472,6 +840,12 @@ async def attach_user_to_state(request: Request, call_next):
     return response
 
 
+# === [Tracking Middleware] ===
+# Agregamos el middleware de tracking "encima" del de auth.
+from web_comparativas.middleware.tracking import TrackingMiddleware
+app.add_middleware(TrackingMiddleware)
+
+
 # ======================================================================
 # SESIONES (cookies)
 # ======================================================================
@@ -494,6 +868,8 @@ app.mount(
 # Rutas de Comentarios (REST + SSE)
 app.include_router(comments_router)
 
+# Rutas de S.I.C
+app.include_router(sic_router)
 
 # ======================================================================
 # CONTROL DE CICLO DE VIDA DE LA SESIÓN SQLALCHEMY
@@ -533,32 +909,7 @@ async def db_session_lifecycle(request: Request, call_next):
 # ======================================================================
 # AUTENTICACIÓN Y ROLES
 # ======================================================================
-pwd_context = CryptContext(
-    schemes=["bcrypt", "pbkdf2_sha256"],
-    deprecated="auto",
-)
 
-
-def hash_password(p: str) -> str:
-    return pwd_context.hash(p)
-
-
-def verify_password(p: str, h) -> bool:
-    """
-    Verifica una contraseña. Soporta hashes viejos (texto plano) por compatibilidad.
-    """
-    if not h:
-        return False
-
-    hs = h.decode() if isinstance(h, (bytes, bytearray)) else str(h)
-
-    try:
-        if hs.startswith("$"):
-            return pwd_context.verify(p, hs)
-        # fallback: contraseña en texto plano guardada en DB
-        return hs == p
-    except Exception:
-        return hs == p
 
 def verify_reset_password(user: User, password: str) -> bool:
     """
@@ -1132,11 +1483,12 @@ def _apply_visibility(qry, user: User):
 def _home_collect(user: User):
     """
     Compila los datos del panel con visibilidad por grupos.
+    Incluye KPIs de procesos + KPIs de oportunidades.
     """
-    # KPIs según visibilidad
+    # KPIs de procesos según visibilidad
     kpis = kpis_for_home(db_session, user)
 
-    # cargas visibles (auditor ve todas)
+    # cargas visibles (auditor ve todas), ordenadas de más nueva a más vieja
     q_all = uploads_visible_ext(db_session, user).order_by(
         UploadModel.created_at.desc()
     )
@@ -1150,13 +1502,14 @@ def _home_collect(user: User):
         s = (st or "").lower()
         return s in ("done", "dashboard", "finalizado", "tablero")
 
+    # listas de apoyo
     pending = [u for u in uploads if _is_pending(u.status)]
     done = [u for u in uploads if _is_done(u.status)]
 
-    # últimos finalizados (visibles)
-    last_done = vis_recent_done(db_session, user, limit=3)
+    # últimos 5 procesos (cualquier estado)
+    last_done = uploads[:5]
 
-    # “recent_done” en últimas 24h
+    # “recent_done” en últimas 24h (solo los finalizados)
     now = dt.datetime.utcnow()
     recent_done_24h = [
         u
@@ -1164,31 +1517,503 @@ def _home_collect(user: User):
         if u.updated_at and (now - u.updated_at).total_seconds() < 86400
     ]
 
+    # ------------------------------------------------------------------
+    # KPIs de OPORTUNIDADES (mismo archivo maestro que Buscador)
+    # ------------------------------------------------------------------
+    opp_total = 0
+    opp_accepted = 0
+    opp_unseen = 0
+
+    try:
+        df_opp = _opp_load_df()
+    except Exception:
+        df_opp = None
+
+    if df_opp is not None and not df_opp.empty:
+        # total de oportunidades = total de filas del maestro
+        opp_total = int(len(df_opp))
+
+        # intentamos localizar la columna de evaluación
+        eval_col = _opp_pick(
+            df_opp,
+            [
+                "Evaluación",
+                "Evaluacion",
+                "Estado Evaluación",
+                "Estado evaluacion",
+                "Estado evaluación",
+                "Evaluation",
+            ],
+        )
+
+        if eval_col:
+            # normalizamos texto
+            series = (
+                df_opp[eval_col]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+            )
+
+            # aceptadas: contiene 'acept'
+            opp_accepted = int(series.str.contains("acept", na=False).sum())
+
+            # rechazadas: contiene 'rechaz'
+            opp_rejected = int(series.str.contains("rechaz", na=False).sum())
+
+            # no vistas = total - (aceptadas + rechazadas)
+            opp_unseen = max(0, opp_total - opp_accepted - opp_rejected)
+        else:
+            # si no hay columna de evaluación, consideramos todas como "no vistas"
+            opp_unseen = opp_total
+
     return {
         "uploads": uploads,
         "pending": pending,
         "done": done,
-        "last_done": list(last_done),
+        "last_done": last_done,
         "recent_done": recent_done_24h,
         "total_all": int(kpis.get("total", 0)),
         "total_pending": int(kpis.get("pending", 0)),
         "total_done": int(kpis.get("done", 0)),
+
+        # KPIs de Oportunidades
+        "opp_total": opp_total,
+        "opp_accepted": opp_accepted,
+        "opp_unseen": opp_unseen,
     }
 
-
 # ======================================================================
-# HOME: vista principal
+# HOME: selección de Mercado (Menú principal)
 # ======================================================================
 @app.get("/", response_class=HTMLResponse)
-def home(
+def markets_home(
     request: Request,
     user: User = Depends(
         require_roles("admin", "analista", "supervisor", "auditor")
     ),
 ):
     """
-    Página de inicio: muestra el resumen de cargas (pendientes, en proceso, finalizadas),
-    **restringido por visibilidad de grupos**.
+    Pantalla principal: permite elegir Mercado Público o Mercado Privado.
+    Solo Admin, Supervisor y Auditor pueden ver esta pantalla.
+    Analistas son redirigidos automáticamente a su mercado.
+    """
+    role = (user.role or "").lower()
+    
+    # Analistas no deben ver el SIEM, redirigir a su mercado
+    if role == "analista":
+        scope = (user.access_scope or "").strip().lower()
+        
+        if scope == "privado":
+            return RedirectResponse("/mercado-privado", status_code=303)
+        elif scope == "todos":
+            # Si tiene acceso a ambos, deja ver la pantalla de selección
+            pass
+        else:
+            # Por defecto (scope='publico' o vacío) va a Mercado Público
+            return RedirectResponse("/mercado-publico", status_code=303)
+    
+    # Admin y Supervisor ven el SIEM
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("markets_home.html", ctx)
+
+
+# ======================================================================
+# MERCADO PRIVADO (placeholder)
+# ======================================================================
+@app.get("/mercado-privado", response_class=HTMLResponse)
+def mercado_privado_home(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Home del Mercado Privado.
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("mercado_privado_home.html", ctx)
+
+
+@app.get("/mercado-privado/dimensiones", response_class=HTMLResponse)
+def mercado_privado_dimensiones(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Placeholder View para Dimensionamiento de Mercado (Privado).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("mercado_privado_dimensiones.html", ctx)
+
+
+@app.get("/mercado-publico/helpdesk", response_class=HTMLResponse)
+def mercado_publico_helpdesk(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Mesa de ayuda específica para Mercado Público.
+    Muestra tickets propios (o todos si es admin/supervisor/auditor) usando template nativo.
+    """
+    # Roles que ven todo (Auditor added as per read-only req, though usually read-only implies viewing)
+    is_privileged = user.has_role("admin", "auditor")
+    
+    q = db_session.query(Ticket)
+    if not is_privileged:
+        q = q.filter(Ticket.user_id == user.id)
+    
+    tickets = q.order_by(Ticket.updated_at.desc()).all()
+    
+    ctx = {
+        "request": request,
+        "user": user,
+        "tickets": tickets,
+        "is_admin": is_privileged,
+        # 'market_context' defaults to public in base.html if not set to 'private'
+    }
+    return templates.TemplateResponse("market_helpdesk_list.html", ctx)
+
+
+@app.get("/mercado-publico/helpdesk/new", response_class=HTMLResponse)
+def mercado_publico_helpdesk_new(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    return templates.TemplateResponse("market_helpdesk_form.html", ctx)
+
+
+@app.post("/mercado-publico/helpdesk/new")
+def mercado_publico_helpdesk_create(
+    request: Request,
+    title: str = Form(...),
+    category: str = Form("consulta"),
+    priority: str = Form("media"),
+    message: str = Form(...),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor")
+    ),
+):
+    try:
+        # Create Ticket
+        ticket = Ticket(
+            user_id=user.id,
+            title=title,
+            category=category,
+            priority=priority,
+            status="abierto"
+        )
+        db_session.add(ticket)
+        db_session.flush() # Get ID
+
+        # Create First Message
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=message
+        )
+        db_session.add(msg)
+        db_session.commit()
+        
+        return RedirectResponse("/mercado-publico/helpdesk?ok=created", status_code=303)
+    except Exception as e:
+        db_session.rollback()
+        return RedirectResponse(f"/mercado-publico/helpdesk/new?err={str(e)}", status_code=303)
+
+
+@app.get("/mercado-publico/helpdesk/{ticket_id}", response_class=HTMLResponse)
+def mercado_publico_helpdesk_detail(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        return RedirectResponse("/mercado-publico/helpdesk?err=not_found", status_code=303)
+    
+    # Permission Check: Must own ticket or be privileged
+    is_privileged = user.has_role("admin", "auditor")
+    if ticket.user_id != user.id and not is_privileged:
+         return RedirectResponse("/mercado-publico/helpdesk?err=access_denied", status_code=303)
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "ticket": ticket,
+    }
+    return templates.TemplateResponse("market_helpdesk_detail.html", ctx)
+
+
+@app.post("/mercado-publico/helpdesk/{ticket_id}/reply")
+def mercado_publico_helpdesk_reply(
+    request: Request,
+    ticket_id: int,
+    message: str = Form(...),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor")
+    ),
+):
+    ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        return RedirectResponse("/mercado-publico/helpdesk?err=not_found", status_code=303)
+    
+    # Permission Check: Must own ticket or be privileged
+    is_privileged = user.has_role("admin", "supervisor")
+    if ticket.user_id != user.id and not is_privileged:
+         return RedirectResponse("/mercado-publico/helpdesk?err=access_denied", status_code=303)
+
+    try:
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=message
+        )
+        db_session.add(msg)
+        db_session.commit()
+        return RedirectResponse(f"/mercado-publico/helpdesk/{ticket_id}", status_code=303)
+    except Exception as e:
+        db_session.rollback()
+        return RedirectResponse(f"/mercado-publico/helpdesk/{ticket_id}?err={str(e)}", status_code=303)
+
+
+# --- HELP DESK (MERCADO PRIVADO) ---
+@app.get("/mercado-privado/helpdesk", response_class=HTMLResponse)
+def mercado_privado_helpdesk(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    is_privileged = user.has_role("admin", "auditor")
+    
+    q = db_session.query(Ticket)
+    if not is_privileged:
+        q = q.filter(Ticket.user_id == user.id)
+    
+    tickets = q.order_by(Ticket.updated_at.desc()).all()
+    
+    ctx = {
+        "request": request,
+        "user": user,
+        "tickets": tickets,
+        "is_admin": is_privileged,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("market_helpdesk_list.html", ctx)
+
+
+@app.get("/mercado-privado/helpdesk/new", response_class=HTMLResponse)
+def mercado_privado_helpdesk_new(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("market_helpdesk_form.html", ctx)
+
+
+@app.post("/mercado-privado/helpdesk/new")
+def mercado_privado_helpdesk_create(
+    request: Request,
+    title: str = Form(...),
+    category: str = Form("consulta"),
+    priority: str = Form("media"),
+    message: str = Form(...),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    try:
+        # Create Ticket
+        ticket = Ticket(
+            user_id=user.id,
+            title=title,
+            category=category,
+            priority=priority,
+            status="abierto"
+        )
+        db_session.add(ticket)
+        db_session.flush() # Get ID
+
+        # Create First Message
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=message
+        )
+        db_session.add(msg)
+        db_session.commit()
+        
+        return RedirectResponse("/mercado-privado/helpdesk?ok=created", status_code=303)
+    except Exception as e:
+        db_session.rollback()
+        return RedirectResponse(f"/mercado-privado/helpdesk/new?err={str(e)}", status_code=303)
+
+
+@app.get("/mercado-privado/helpdesk/{ticket_id}", response_class=HTMLResponse)
+def mercado_privado_helpdesk_detail(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        return RedirectResponse("/mercado-privado/helpdesk?err=not_found", status_code=303)
+    
+    # Permission Check
+    is_privileged = user.has_role("admin", "auditor")
+    if ticket.user_id != user.id and not is_privileged:
+         return RedirectResponse("/mercado-privado/helpdesk?err=access_denied", status_code=303)
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "ticket": ticket,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("market_helpdesk_detail.html", ctx)
+
+
+@app.post("/mercado-privado/helpdesk/{ticket_id}/reply")
+def mercado_privado_helpdesk_reply(
+    request: Request,
+    ticket_id: int,
+    message: str = Form(...),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor")
+    ),
+):
+    ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        return RedirectResponse("/mercado-privado/helpdesk?err=not_found", status_code=303)
+    
+    # Permission Check
+    is_privileged = user.has_role("admin") # Reply usually strictly limited or owner. 
+    # But wait, original code allowed supervisor. If we remove supervisor from privileged view, can they reply?
+    # Requirement: "solo tiene que ver los que el cargue". Implies full interaction with own tickets.
+    # The logic below is: if ticket.user_id != user.id and not is_privileged: return access_denied.
+    # So if own ticket, they pass. If not own ticket, they need privilege.
+    # We remove supervisor from privilege to prevent replying to others' tickets.
+    is_privileged = user.has_role("admin") 
+    
+    # Wait, Auditor shouldn't reply? Usually Auditor is read-only.
+    # Leaving Auditor out of reply privilege is safer. Only Admin should reply to any ticket.
+    # Supervisors/Analysts reply to their own.
+    
+    if ticket.user_id != user.id and not is_privileged:
+         return RedirectResponse("/mercado-privado/helpdesk?err=access_denied", status_code=303)
+
+    try:
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=message
+        )
+        db_session.add(msg)
+        db_session.commit()
+        return RedirectResponse(f"/mercado-privado/helpdesk/{ticket_id}", status_code=303)
+    except Exception as e:
+        db_session.rollback()
+        return RedirectResponse(f"/mercado-privado/helpdesk/{ticket_id}?err={str(e)}", status_code=303)
+    except Exception as e:
+        db_session.rollback()
+        return RedirectResponse(f"/mercado-privado/helpdesk/new?err={str(e)}", status_code=303)
+
+
+
+@app.get("/mercado-privado/reporte-perfiles", response_class=HTMLResponse)
+def mercado_privado_reporte_perfiles(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Reporte de Perfiles (Privado).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("reporte_perfiles.html", ctx)
+
+
+@app.get("/mercado-privado/comentarios", response_class=HTMLResponse)
+def mercado_privado_comentarios(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Mesa de ayuda / Comentarios (Privado).
+    Renderiza directamente la plantilla de comentarios con el contexto privado.
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("comments_inbox.html", ctx)
+
+
+@app.get("/mercado-privado/mi-password", response_class=HTMLResponse)
+def mercado_privado_mi_password(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Mi contraseña (Privado).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+        "error": request.query_params.get("error") or "",
+        "ok": request.query_params.get("ok") or "",
+    }
+    return templates.TemplateResponse("account_password.html", ctx)
+
+# ======================================================================
+# MERCADO PÚBLICO: helpers comunes
+# ======================================================================
+def _render_mercado_publico_home(request: Request, user: User):
+    """
+    Panel principal del Mercado Público.
+    Por ahora muestra el resumen de Web Comparativas.
     """
     data = _home_collect(user)
 
@@ -1206,42 +2031,857 @@ def home(
         "request": request,
         "user": user,
         "step_labels": step_labels,
+        "market_context": "public",
         **data,
     }
     return templates.TemplateResponse("home.html", ctx)
+
+def _parse_iso_date(s: str | None) -> dt.date | None:
+    """
+    Convierte 'YYYY-MM-DD' a date.
+    Devuelve None si viene vacío o formato inválido.
+    """
+    if not s:
+        return None
+    try:
+        return dt.datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+# ======================================================================
+# MERCADO PÚBLICO: rutas principales
+# ======================================================================
+@app.get("/mercado-publico", response_class=HTMLResponse)
+def mercado_publico_home(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Home (panel principal) del Mercado Público.
+    """
+    response = _render_mercado_publico_home(request, user)
+
+    # === LOG USO: vista de la pantalla principal ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="mercado_publico_home",
+        request=request,
+    )
+
+    return response
+
+
+@app.get("/mercado-publico/web-comparativas", response_class=HTMLResponse)
+def mercado_publico_web_comparativas(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Home específico de Web Comparativas dentro de Mercado Público.
+    Reutiliza el mismo panel principal.
+    """
+    response = _render_mercado_publico_home(request, user)
+
+    # === LOG USO: vista de Web Comparativa ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="web_comparativa_home",
+        request=request,
+    )
+
+    return response
+
+
+@app.get("/mercado-publico/oportunidades", response_class=HTMLResponse)
+def mercado_publico_oportunidades(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Oportunidades (placeholder).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    response = templates.TemplateResponse("oportunidades.html", ctx)
+
+    # === LOG USO: vista del módulo Oportunidades ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_home",
+        request=request,
+    )
+
+    return response
+
+
+@app.get("/mercado-publico/reporte-perfiles", response_class=HTMLResponse)
+def mercado_publico_reporte_perfiles(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "supervisor", "auditor")
+    ),
+):
+    """
+    Módulo Reporte de Perfiles (placeholder).
+    """
+    ctx = {
+        "request": request,
+        "user": user,
+    }
+    response = templates.TemplateResponse("reporte_perfiles.html", ctx)
+
+    # === LOG USO: vista de Reporte de perfiles ===
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="reporte_perfiles",
+        request=request,
+    )
+
+    return response
+
+
+
+# ======================================================================
+# API: Seguimiento de usuarios (uso de la interfaz)
+# ======================================================================
+
+from fastapi import Query  # si no lo tenés ya importado arriba
+
+
+
+
+# ======================================================================
+# OPORTUNIDADES: Buscador & Dimensiones
+# ======================================================================
+
+@app.get("/oportunidades/buscador", response_class=HTMLResponse)
+def oportunidades_buscador(
+    request: Request,
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    page: int = Query(1, ge=1),          # ya no lo usamos para cortar filas
+    page_size: int = Query(20, ge=10, le=200),
+    uploaded: int = Query(0),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    opp_info = _oportunidades_status()
+    toast_msg = None
+    if uploaded:
+        filas = opp_info.get("rows")
+        toast_msg = (
+            f"Archivo cargado correctamente. Filas: {filas}"
+            if filas is not None
+            else "Archivo cargado correctamente."
+        )
+
+    df_all = _opp_load_df()
+
+    # Si no hay archivo maestro todavía, devolvemos el fallback
+    if df_all is None or df_all.empty:
+        ctx = {
+            "request": request,
+            "user": user,
+            "opp": opp_info,
+            "toast": toast_msg,
+            "kpis": {
+                "total_rows": 0,
+                "buyers": 0,
+                "platforms": 0,
+                "provinces": 0,
+                "budget_total": 0.0,
+                "date_min": "",
+                "date_max": "",
+            },
+            "filters": {
+                "q": q,
+                "buyer": buyer,
+                "platform": platform,
+                "province": province,
+                "date_from": date_from,
+                "date_to": date_to,
+            },
+            "table_cols": [],
+            "table_rows": [],
+            "total": 0,
+            "page": 1,
+            "pages": 1,
+            "page_size": page_size,
+            "showing_from": 0,
+            "showing_to": 0,
+        }
+        fallback_html = (
+            "<div style='font-family:system-ui;padding:32px;'>"
+            "<h2>Oportunidades · Buscador</h2>"
+            "<p>No hay archivo maestro aún. Subí un Excel para habilitar el dashboard.</p>"
+            "</div>"
+        )
+        response = _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+        # LOG USO
+        log_usage_event(
+            user=user,
+            action_type="page_view",
+            section="oportunidades_buscador",
+            request=request,
+        )
+
+        return response
+
+    # A partir de acá dejamos todos los filtros al FRONT (JS)
+    df_filtered = df_all.copy()
+
+    # Seguimos calculando los KPIs por si los querés usar luego
+    kpis = _opp_compute_kpis(df_filtered)
+
+    def _san(v):
+        """Sanea valores para enviarlos al template."""
+        try:
+            import pandas as pd  # por si no está en el scope local
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v)
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    # Enviamos TODAS las columnas y TODAS las filas al HTML
+    table_cols = list(df_filtered.columns)
+    table_rows = []
+    for _, rec in df_filtered.iterrows():
+        row = {}
+        for col in table_cols:
+            row[col] = _san(rec.get(col, ""))
+        table_rows.append(row)
+
+    total = len(table_rows)
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "opp": opp_info,
+        "toast": toast_msg,
+        "kpis": kpis,
+        "filters": {
+            "q": q or "",
+            "buyer": buyer or "",
+            "platform": platform or "",
+            "province": province or "",
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+        },
+        "table_cols": table_cols,
+        "table_rows": table_rows,
+        "total": total,
+        # La paginación real ahora la maneja el JS.
+        # Dejamos estos campos fijos para que no molesten.
+        "page": 1,
+        "pages": 1,
+        "page_size": page_size,
+        "showing_from": 0 if total == 0 else 1,
+        "showing_to": total,
+    }
+
+    fallback_html = (
+        "<div style='font-family:system-ui;padding:32px;'>"
+        "<h2>Oportunidades · Buscador</h2>"
+        "<p>Dashboard cargado.</p>"
+        "</div>"
+    )
+    response = _render_or_fallback("oportunidades_buscador.html", ctx, fallback_html)
+
+    # LOG USO
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_buscador",
+        request=request,
+    )
+
+    return response
+
+@app.get("/api/oportunidades/buscador", response_class=JSONResponse)
+def api_oportunidades_buscador(
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    process_type: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=10, le=200),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    API JSON para el Buscador de Oportunidades.
+    Devuelve KPIs + filas paginadas en formato lista de dicts.
+    """
+    def _san_str(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v or "")
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    opp_info = _oportunidades_status()
+
+    df_all = _opp_load_df()
+    if df_all is None or df_all.empty:
+        return JSONResponse(
+            {
+                "ok": True,
+                "has_file": False,
+                "opp": opp_info,
+                "kpis": {
+                    "total_rows": 0,
+                    "buyers": 0,
+                    "platforms": 0,
+                    "provinces": 0,
+                    "budget_total": 0.0,
+                    "date_min": "",
+                    "date_max": "",
+                },
+                "filters": {
+                    "q": q or "",
+                    "buyer": buyer or "",
+                    "platform": platform or "",
+                    "province": province or "",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                    "cuenta": cuenta or "",
+                },
+                "total": 0,
+                "page": 1,
+                "pages": 1,
+                "page_size": page_size,
+                "from": 0,
+                "to": 0,
+                "rows": [],
+            }
+        )
+
+    # aplicar filtros
+    df_filtered = _opp_apply_filters(df_all, q, buyer, platform, province, date_from, date_to, process_type)
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas candidatas (igual que en la vista HTML)
+    proc_col   = _opp_pick(df_filtered, ["N° Proceso", "Nro Proceso", "Proceso", "Expediente"])
+    fecha_col  = _opp_pick(df_filtered, ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"])
+    buyer_col  = _opp_pick(df_filtered, ["Comprador", "Repartición", "Entidad", "Organismo", "Unidad Compradora", "Buyer"])
+    prov_col   = _opp_pick(df_filtered, ["Provincia", "Provincia/Municipio", "Municipio", "Jurisdicción", "Localidad", "Departamento"])
+    platf_col  = _opp_pick(df_filtered, ["Plataforma", "Portal", "Origen", "Sistema", "Platform"])
+    presu_col  = _opp_pick(df_filtered, ["Presupuesto oficial", "Presupuesto", "Monto", "Importe Total", "Total Presupuesto", "Monto Total", "Importe"])
+    desc_col   = _opp_pick(df_filtered, ["Descripción", "Descripcion", "Objeto", "Detalle"])
+    # 👉 NUEVO: columna para Tipo / Modalidad / Procedimiento
+    tipo_col   = _opp_pick(df_filtered, ["Tipo", "Modalidad", "Procedimiento"])
+
+    total = int(len(df_filtered))
+    pages = max(1, int(np.ceil(total / page_size)))
+    if page > pages:
+        page = pages
+    start = (page - 1) * page_size
+    end = min(total, start + page_size)
+    df_page = df_filtered.iloc[start:end].copy()
+
+    rows_json = []
+
+    for _, rec in df_page.iterrows():
+        # Proceso
+        v_proc = _san_str(rec.get(proc_col, "")) if proc_col else ""
+
+        # Fecha -> siempre dd/mm/YYYY si se puede
+        raw_fecha = rec.get(fecha_col, "") if fecha_col else ""
+        d = _opp_parse_date(raw_fecha)
+        v_fecha = d.strftime("%d/%m/%Y") if d else _san_str(raw_fecha)
+
+        # Comprador
+        v_buyer = _san_str(rec.get(buyer_col, "")) if buyer_col else ""
+
+        # Provincia / Municipio
+        v_prov = _san_str(rec.get(prov_col, "")) if prov_col else ""
+
+        # Plataforma
+        v_platf = _san_str(rec.get(platf_col, "")) if platf_col else ""
+
+        # Presupuesto: numérico + string formateado
+        if presu_col:
+            raw_presu = rec.get(presu_col, "")
+            presu_num = _opp_parse_number(raw_presu)
+            presu_fmt = (
+                f"$ {presu_num:,.2f}"
+                .replace(",", "X")
+                .replace(".", ",")
+                .replace("X", ".")
+            )
+        else:
+            presu_num = 0.0
+            presu_fmt = ""
+
+        # Descripción / Objeto
+        v_desc = _san_str(rec.get(desc_col, "")) if desc_col else ""
+
+        # 👉 NUEVO: Tipo de proceso / modalidad / procedimiento
+        v_tipo = _san_str(rec.get(tipo_col, "")) if tipo_col else ""
+
+        rows_json.append(
+            {
+                "proceso": v_proc,
+                "fecha": v_fecha,
+                "comprador": v_buyer,
+                "provincia": v_prov,
+                "plataforma": v_platf,
+                "presupuesto": presu_num,
+                "presupuesto_fmt": presu_fmt,
+                "descripcion": v_desc,
+                "tipo": v_tipo,   # 👈 NUEVO CAMPO
+            }
+        )
+
+    showing_from = 0 if total == 0 else (start + 1)
+    showing_to = end
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "has_file": True,
+            "opp": opp_info,
+            "kpis": kpis,
+            "filters": {
+                "q": q or "",
+                "buyer": buyer or "",
+                "platform": platform or "",
+                "province": province or "",
+                "date_from": date_from or "",
+                "date_to": date_to or "",
+                "cuenta": cuenta or "",
+            },
+            "total": total,
+            "page": page,
+            "pages": pages,
+            "page_size": page_size,
+            "from": showing_from,
+            "to": showing_to,
+            "rows": rows_json,
+        }
+    )
+
+@app.post("/oportunidades/buscador/upload")
+async def oportunidades_buscador_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    # ⬇⬇⬇ SOLO ADMIN PUEDE SUBIR / REEMPLAZAR EL ARCHIVO
+    user: User = Depends(require_roles("admin")),
+):
+    # guarda y calcula filas
+    rows = _save_oportunidades_excel(file)
+
+    # LOG USO: carga de archivo maestro
+    log_usage_event(
+        user=user,
+        action_type="file_upload",
+        section="oportunidades_buscador",
+        resource_id=file.filename,
+        extra_data={"rows": rows},
+        request=request,
+    )
+
+    # redirige al GET que arma KPIs/tabla (evita 'kpis undefined')
+    url = request.url_for("oportunidades_buscador")
+    url = str(url) + "?uploaded=1"
+    return RedirectResponse(url, status_code=303)
+
+@app.get("/api/oportunidades/dimensiones", response_class=JSONResponse)
+def api_oportunidades_dimensiones(
+    q: str = Query(""),
+    buyer: str = Query(""),
+    platform: str = Query(""),
+    province: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    process_type: str = Query(""),
+    cuenta: str = Query(""),
+
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    API JSON para el dashboard de Dimensiones.
+    Usa la versión OPTIMIZADA (pre-cálculo) para evitar parseos en cada request.
+    """
+
+    def _san_str(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s = str(v or "")
+        return s.replace("<", "&lt;").replace(">", "&gt;")
+
+    opp_info = _oportunidades_status()
+
+    df_all = _opp_load_df()
+    if df_all is None or df_all.empty:
+        return JSONResponse(
+            {
+                "ok": True,
+                "has_file": False,
+                "opp": opp_info,
+                "kpis": {
+                    "total_rows": 0,
+                    "buyers": 0,
+                    "platforms": 0,
+                    "provinces": 0,
+                    "budget_total": 0.0,
+                    "date_min": "",
+                    "date_max": "",
+                },
+                "filters": {
+                    "q": q or "",
+                    "buyer": buyer or "",
+                    "platform": platform or "",
+                    "province": province or "",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                    "cuenta": cuenta or "",
+                },
+                "dimensions": {
+                    "comprador": [],
+                    "provincia": [],
+                    "plataforma": [],
+                    "cuenta": [],
+                    "fecha_apertura": [],
+                    "tipo_proceso": [],
+                    "reparticion_estado": [],
+                    "estado": [],
+                },
+            }
+        )
+
+    # 👉 aplicamos los mismos filtros que en el buscador
+    df_filtered = _opp_apply_filters(
+        df_all, q, buyer, platform, province, date_from, date_to, process_type, cuenta
+    )
+
+    # KPIs generales
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas candidatas para cada eje
+    buyer_col = _opp_pick(
+        df_filtered,
+        [
+            "Comprador",
+            "Repartición",
+            "Entidad",
+            "Organismo",
+            "Unidad Compradora",
+            "Buyer",
+        ],
+    )
+    prov_col = _opp_pick(
+        df_filtered,
+        [
+            "Provincia",
+            "Provincia/Municipio",
+            "Municipio",
+            "Jurisdicción",
+            "Localidad",
+            "Departamento",
+        ],
+    )
+    platf_col = _opp_pick(
+        df_filtered,
+        ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
+    )
+    cuenta_col = _opp_pick(
+        df_filtered,
+        [
+            "Código",
+            "Codigo",
+            "Cuenta",
+            "N° Cuenta",
+            "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro",
+        ],
+    )
+    fecha_col = _opp_pick(
+        df_filtered,
+        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
+    )
+    presu_col = _opp_pick(
+        df_filtered,
+        [
+            "Presupuesto oficial",
+            "Presupuesto",
+            "Monto",
+            "Importe Total",
+            "Total Presupuesto",
+            "Monto Total",
+            "Importe",
+        ],
+    )
+    tipo_col = _opp_pick(
+        df_filtered,
+        ["Tipo", "Modalidad", "Procedimiento"],
+    )
+    estado_col = _opp_pick(
+        df_filtered,
+        ["Estado", "Tipo Proceso", "Carácter"],
+    )
+
+    # ------------- helpers internos OPTIMIZADOS usando groupby -----------------
+
+    def _agg_dimension(col_name: str | None):
+        """
+        Devuelve lista de dicts: [{label, count, budget}, ...]
+        """
+        if not col_name:
+            return []
+        
+        # Agrupamos por la columna elegida.
+        grp = (
+            df_filtered.groupby(col_name)
+            .agg(count=(col_name, "size"), budget=("_budget", "sum"))
+            .reset_index()
+        )
+        
+        out = []
+        for _, row in grp.iterrows():
+            label = _san_str(row[col_name]).strip() or "(Sin dato)"
+            out.append(
+                {
+                    "label": label,
+                    "count": int(row["count"]),
+                    "budget": float(row["budget"]),
+                }
+            )
+
+        out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
+        return out[:50]
+
+    def _agg_time_series():
+        """
+        Serie temporal por _dt con desglose por _state.
+        """
+        if "_dt" not in df_filtered.columns or "_state" not in df_filtered.columns:
+            return []
+
+        df_ok = df_filtered.dropna(subset=["_dt"])
+        if df_ok.empty:
+            return []
+
+        grp = (
+            df_ok.groupby(["_dt", "_state"])
+            .agg(count=("_state", "size"), budget=("_budget", "sum"))
+            .reset_index()
+        )
+
+        temp_map = {}
+        for _, row in grp.iterrows():
+            d = row["_dt"]
+            st = row["_state"]
+            c = int(row["count"])
+            b = float(row["budget"])
+
+            if d not in temp_map:
+                temp_map[d] = {"EMERGENCIA": 0, "REGULAR": 0, "budget": 0.0}
+            
+            if st in temp_map[d]:
+                temp_map[d][st] += c
+            else:
+                temp_map[d]["REGULAR"] += c
+            
+            temp_map[d]["budget"] += b
+
+        out = []
+        for d, vals in temp_map.items():
+            d_str = d.strftime("%Y-%m-%d")
+            em = vals["EMERGENCIA"]
+            rg = vals["REGULAR"]
+            out.append(
+                {
+                    "date": d_str,
+                    "count": em + rg,
+                    "budget": vals["budget"],
+                    "emergencia": em,
+                    "regular": rg,
+                }
+            )
+
+        out.sort(key=lambda r: r["date"])
+        return out
+
+    def _agg_reparticion_estado(buyer_col_name: str | None):
+        """
+        Agrupación por Repartición + Estado.
+        """
+        if not buyer_col_name:
+            return [], []
+
+        if "_state" not in df_filtered.columns:
+            return [], []
+
+        grp = (
+            df_filtered.groupby([buyer_col_name, "_state"])
+            .size()
+            .reset_index(name="count")
+        )
+        
+        rep_map = {}
+        total_estado = {"EMERGENCIA": 0, "REGULAR": 0}
+
+        for _, row in grp.iterrows():
+            label_raw = row[buyer_col_name]
+            st = row["_state"]
+            c = int(row["count"])
+            
+            # aseguramos keys
+            if st not in total_estado:
+                 # por si viene un estado raro no normalizado 
+                 # (aunque _opp_load_df debería haberlo cubierto)
+                 continue 
+
+            total_estado[st] += c
+
+            label = _san_str(label_raw).strip() or "(Sin dato)"
+            if label not in rep_map:
+                rep_map[label] = {"EMERGENCIA": 0, "REGULAR": 0}
+            
+            if st in rep_map[label]:
+                rep_map[label][st] += c
+            else:
+                rep_map[label]["REGULAR"] += c
+
+        out = [
+            {
+                "label": label,
+                "emergencia": vals["EMERGENCIA"],
+                "regular": vals["REGULAR"],
+                "total": vals["EMERGENCIA"] + vals["REGULAR"],
+            }
+            for label, vals in rep_map.items()
+        ]
+        out.sort(key=lambda r: r["total"], reverse=True)
+        out = out[:20]
+
+        dim_estado = [
+            {"estado": "EMERGENCIA", "count": total_estado["EMERGENCIA"]},
+            {"estado": "REGULAR", "count": total_estado["REGULAR"]},
+        ]
+        return out, dim_estado
+
+    # ------------- construir dimensiones -----------------
+
+    dim_comprador = _agg_dimension(buyer_col)
+    dim_provincia = _agg_dimension(prov_col)
+    dim_plataforma = _agg_dimension(platf_col)
+    dim_cuenta = _agg_dimension(cuenta_col)
+    dim_fecha = _agg_time_series()
+    dim_tipo = _agg_dimension(tipo_col)
+
+    dim_rep_estado, dim_estado_pie = _agg_reparticion_estado(buyer_col)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "has_file": True,
+            "opp": opp_info,
+            "kpis": kpis,
+            "filters": {
+                "q": q or "",
+                "buyer": buyer or "",
+                "platform": platform or "",
+                "province": province or "",
+                "date_from": date_from or "",
+                "date_to": date_to or "",
+                "cuenta": cuenta or "",
+            },
+            "dimensions": {
+                "comprador": dim_comprador,
+                "provincia": dim_provincia,
+                "plataforma": dim_plataforma,
+                "cuenta": dim_cuenta,
+                "fecha_apertura": dim_fecha,
+                "tipo_proceso": dim_tipo,
+                "reparticion_estado": dim_rep_estado,
+                "estado": dim_estado_pie,
+            },
+        }
+    )
+@app.get("/oportunidades/dimensiones", response_class=HTMLResponse)
+def oportunidades_dimensiones(
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Vista de Dimensiones (análisis por ejes: región, comprador, cuenta, plataforma, etc.).
+    """
+    ctx = {"request": request, "user": user}
+    fallback_html = (
+        "<div style='font-family:system-ui;padding:32px;'>"
+        "<h2>Oportunidades · Dimensiones</h2>"
+        "<p>Pantalla en construcción. Aquí armamos tableros por ejes/dimensiones (comprador, provincia, plataforma, etc.).</p>"
+        "</div>"
+    )
+    response = _render_or_fallback("oportunidades_dimensiones.html", ctx, fallback_html)
+
+    # LOG USO
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="oportunidades_dimensiones",
+        request=request,
+    )
+
+    return response
 
 
 # ======================================================================
 # CARGAS – NUEVA / CREAR
 # ======================================================================
-# Pantalla de Cargas externas (formulario de Microsoft Forms)
-@app.get("/cargas/externas", response_class=HTMLResponse)
-def cargas_externas(
-    request: Request,
-    # 👉 mismos roles que "Nueva carga": admin, analista y supervisor
-    user: User = Depends(require_roles("admin", "analista", "supervisor")),
-):
-    """
-    Muestra la pantalla de 'Cargas externas' con el formulario de Microsoft Forms
-    embebido en la plantilla cargas_externas.html.
-    """
-    return templates.TemplateResponse(
-        "cargas_externas.html",
-        {"request": request, "user": user},
-    )
-
 @app.get("/cargas/nueva", response_class=HTMLResponse)
-def nueva_carga(
+async def form_nueva_carga(
     request: Request,
-    user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
 ):
     """
     Muestra el formulario para cargar un nuevo archivo.
     """
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "upload_form.html",
         {"request": request, "user": user},
     )
+
+    # 👇 NUEVO: log de vista del formulario de carga
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_nueva",
+        request=request,
+    )
+
+    return response
 
 
 @app.post("/cargas", response_class=HTMLResponse)
@@ -1259,30 +2899,95 @@ async def crear_carga(
     plataforma: str = Form(""),
     comprador: str = Form(""),
     provincia: str = Form(""),
-    # Archivo
-    file: UploadFile = File(...),
-    user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    # Archivo (generico)
+    file: UploadFile = File(None),
+    # Archivos específicos La Pampa
+    file_comparativa: UploadFile = File(None),
+    file_pliego: UploadFile = File(None),
+    # Archivos específicos Siprosa
+    file_siprosa_1: UploadFile = File(None),
+    file_siprosa_2: UploadFile = File(None),
+    file_siprosa_3: UploadFile = File(None),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
 ):
     """
     Crea una carga y dispara el procesamiento en segundo plano.
     También evita duplicados usando el proceso_nro normalizado.
     """
+    # Carpeta base donde se guardan los uploads
     base_dir = Path("data/uploads")
     base_dir.mkdir(parents=True, exist_ok=True)
 
+    # Carpeta única para esta carga
     uid = str(uuid.uuid4())
     upload_dir = base_dir / uid
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Leer el archivo en memoria (bytes)
-    file_bytes = await file.read()
+    # Fallback: si los hints ocultos vienen vacíos, usar los visibles
+    platform_hint = (platform_hint or plataforma).strip()
+    buyer_hint = (buyer_hint or comprador).strip()
+    province_hint = (province_hint or provincia).strip()
 
-    # Guardar archivo subido en disco (como hasta ahora, para no romper nada)
-    file_path = upload_dir / file.filename
+    # --- Lógica específica por plataforma (unificada) ---
+    final_filename = ""
+    file_bytes = b""
+
+    # Caso especial: LA_PAMPA
+    if platform_hint == "LA_PAMPA":
+        if not file_comparativa or not file_comparativa.filename:
+             return TemplateResponse("upload_form.html", {"request": request, "error": "Falta archivo Comparativa para La Pampa."}, status_code=400)
+        if not file_pliego or not file_pliego.filename:
+             return TemplateResponse("upload_form.html", {"request": request, "error": "Falta archivo Pliego para La Pampa."}, status_code=400)
+        
+        import zipfile
+        import io
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            c_bytes = await file_comparativa.read()
+            zf.writestr(file_comparativa.filename, c_bytes)
+            p_bytes = await file_pliego.read()
+            zf.writestr(file_pliego.filename, p_bytes)
+            
+        mem_zip.seek(0)
+        file_bytes = mem_zip.read()
+        final_filename = f"la_pampa_{uuid.uuid4().hex[:8]}.zip"
+        
+    # Caso especial: SIPROSA
+    elif platform_hint == "SIPROSA":
+        if not file_siprosa_1 or not file_siprosa_1.filename or not file_siprosa_2 or not file_siprosa_2.filename or not file_siprosa_3 or not file_siprosa_3.filename:
+             return TemplateResponse("upload_form.html", {"request": request, "error": "Faltan archivos de Siprosa (se requieren 3)."}, status_code=400)
+
+        import zipfile
+        import io
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            b1 = await file_siprosa_1.read()
+            zf.writestr(file_siprosa_1.filename, b1)
+            b2 = await file_siprosa_2.read()
+            zf.writestr(file_siprosa_2.filename, b2)
+            b3 = await file_siprosa_3.read()
+            zf.writestr(file_siprosa_3.filename, b3)
+            
+        mem_zip.seek(0)
+        file_bytes = mem_zip.read()
+        final_filename = f"siprosa_{uuid.uuid4().hex[:8]}.zip"
+
+    else:
+        # Caso genérico
+        if not file or not file.filename:
+            return TemplateResponse("upload_form.html", {"request": request, "error": "Debe cargar un archivo."}, status_code=400)
+        
+        final_filename = file.filename
+        file_bytes = await file.read()
+
+    # --- Fin lógica por plataforma ---
+
+    # Guardar archivo subido en disco
+    file_path = upload_dir / final_filename
     with open(file_path, "wb") as f:
         f.write(file_bytes)
 
-    # Normalizar fecha
+    # Normalizar fecha de apertura
     def _norm_date(s: str) -> str:
         s = (s or "").strip()
         if not s:
@@ -1290,49 +2995,50 @@ async def crear_carga(
         # formato AAAA-MM-DD
         if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
             return s
-        # formato DD/MM/AAAA
+        # formato DD/MM/AAAA o DD-MM-AAAA
         m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
         if m:
             d, mm, y = map(int, m.groups())
             return f"{y:04d}-{mm:02d}-{d:02d}"
         return s
 
-    # Fallback: si los ocultos vienen vacíos, usar los visibles
+    # Fallback: si los hints ocultos vienen vacíos, usar los visibles
     platform_hint = (platform_hint or plataforma).strip()
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
 
-    # 👇 **NUEVO**: normalizamos el número de proceso para detectar duplicados
+    # Normalizamos el número de proceso para detectar duplicados
     proceso_nro_clean = (proceso_nro or "").strip() or None
     proceso_key = normalize_proceso_nro(proceso_nro_clean)
 
+    # Si hay clave normalizada, buscamos si ya existe una carga con ese proceso
+    existing = None
     if proceso_key:
-        # buscar si ya existe una carga con este proceso
         existing = (
             db_session.query(UploadModel)
             .filter(func.upper(func.trim(UploadModel.proceso_key)) == proceso_key)
             .order_by(UploadModel.created_at.desc())
             .first()
         )
-        if existing:
-            # 👈 no creamos nada, redirigimos a la existente
-            return RedirectResponse(
-                f"/cargas/{existing.id}?dup=1",
-                status_code=303,
-            )
 
-    # Crear la carga
-        up = UploadModel(
-        id=None,
+    if existing:
+        # No creamos nada nuevo: redirigimos al proceso existente
+        return RedirectResponse(
+            f"/cargas/{existing.id}?dup=1",
+            status_code=303,
+        )
+
+        # Crear la carga nueva
+    up = UploadModel(
         user_id=user.id,
         proceso_nro=proceso_nro_clean,
-        proceso_key=proceso_key,  # guardamos la key normalizada
+        proceso_key=proceso_key,  # puede ser None si no hay proceso cargado
         apertura_fecha=_norm_date(apertura_fecha) or None,
         cuenta_nro=(cuenta_nro or "").strip() or None,
         platform_hint=platform_hint or None,
         buyer_hint=buyer_hint or None,
         province_hint=province_hint or None,
-        original_filename=file.filename,
+        original_filename=final_filename,
         original_path=str(file_path),
         base_dir=str(upload_dir),
         status="pending",
@@ -1342,8 +3048,275 @@ async def crear_carga(
     db_session.add(up)
     db_session.commit()
 
+    # 👇 NUEVO: log de creación de carga
+    log_usage_event(
+        user=user,
+        action_type="file_upload",
+        section="cargas_crear",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "filename": file.filename,
+            "bytes": len(file_bytes),
+            "proceso_nro": proceso_nro_clean or "",
+            "cuenta_nro": (cuenta_nro or "").strip(),
+        },
+    )
+
     # Procesar en segundo plano
-    background_tasks.add_task(classify_and_process, up.id, {})
+    background_tasks.add_task(classify_and_process, up.id, {}, touch_status=True)
+
+    return RedirectResponse(f"/cargas/{up.id}", status_code=303)
+
+
+
+# ======================================================================
+# OTRAS FUENTES (EXTERNO - MS FORMS)
+# ======================================================================
+@app.get("/otras-fuentes-externas", response_class=HTMLResponse)
+def page_otras_fuentes_externas(
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Muestra la página con el iframe de Microsoft Forms.
+    """
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="otras_fuentes_externas",
+        request=request,
+    )
+    return templates.TemplateResponse(
+        "iframe_otras_fuentes.html",
+        {"request": request, "user": user},
+    )
+
+
+# ======================================================================
+# OTRAS FUENTES
+# ======================================================================
+
+@app.get("/otras-fuentes/nueva", response_class=HTMLResponse)
+async def form_nueva_carga_otras_fuentes(
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Muestra el formulario para cargar un nuevo archivo (Principales).
+    """
+    response = templates.TemplateResponse(
+        "upload_form_otras_fuentes.html",
+        {"request": request, "user": user},
+    )
+
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="otras_fuentes_nueva",
+        request=request,
+    )
+
+    return response
+
+
+@app.post("/otras-fuentes", response_class=HTMLResponse)
+async def crear_carga_otras_fuentes(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    # Campos visibles
+    proceso_nro: str = Form(""),
+    apertura_fecha: str = Form(""),
+    cuenta_nro: str = Form(""),
+    # Hints (ocultos) + visibles (fallback)
+    platform_hint: str = Form(""),
+    buyer_hint: str = Form(""),
+    province_hint: str = Form(""),
+    plataforma: str = Form(""),
+    comprador: str = Form(""),
+    provincia: str = Form(""),
+    # Archivo (generico)
+    file: UploadFile = File(None),
+    # Archivos específicos La Pampa
+    file_comparativa: UploadFile = File(None),
+    file_pliego: UploadFile = File(None),
+    # Archivos específicos Siprosa
+    file_siprosa_1: UploadFile = File(None),
+    file_siprosa_2: UploadFile = File(None),
+    file_siprosa_3: UploadFile = File(None),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """
+    Maneja la carga de 'Principales'.
+    Por ahora guarda el archivo y crea el registro, pero NO dispara la normalización estándar
+    ya que requiere scripts específicos.
+    """
+    # Fallback: si los hints ocultos vienen vacíos, usar los visibles
+    platform_hint = (platform_hint or plataforma).strip()
+    buyer_hint = (buyer_hint or comprador).strip()
+    province_hint = (province_hint or provincia).strip()
+
+    # Caso especial: LA_PAMPA
+    if platform_hint == "LA_PAMPA":
+        if not file_comparativa or not file_comparativa.filename:
+            raise HTTPException(400, "Falta archivo Comparativa para La Pampa.")
+        if not file_pliego or not file_pliego.filename:
+            raise HTTPException(400, "Falta archivo Pliego para La Pampa.")
+        
+        # En vez de guardar 2 archivos sueltos, creamos un ZIP con ellos
+        # para que el adapter 'la_pampa.py' lo reciba como un solo .zip
+        import zipfile
+        import io
+        
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Leer y escribir comparativa
+            c_bytes = await file_comparativa.read()
+            zf.writestr(file_comparativa.filename, c_bytes)
+            
+            # Leer y escribir pliego
+            p_bytes = await file_pliego.read()
+            zf.writestr(file_pliego.filename, p_bytes)
+            
+        mem_zip.seek(0)
+        zip_bytes = mem_zip.read()
+        
+        # Preparamos variables para guardar
+        final_filename = f"la_pampa_{uuid.uuid4().hex[:8]}.zip"
+        file_bytes = zip_bytes
+        
+    # Caso especial: SIPROSA
+    elif platform_hint == "SIPROSA":
+        if not file_siprosa_1 or not file_siprosa_1.filename:
+            raise HTTPException(400, "Falta archivo Siprosa 1")
+        if not file_siprosa_2 or not file_siprosa_2.filename:
+            raise HTTPException(400, "Falta archivo Siprosa 2")
+        if not file_siprosa_3 or not file_siprosa_3.filename:
+            raise HTTPException(400, "Falta archivo Siprosa 3")
+
+        # Crear ZIP con los 3 excels
+        import zipfile
+        import io
+        
+        mem_zip = io.BytesIO()
+        with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Leer y escribir archivo 1
+            b1 = await file_siprosa_1.read()
+            zf.writestr(file_siprosa_1.filename, b1)
+            
+            # Leer y escribir archivo 2
+            b2 = await file_siprosa_2.read()
+            zf.writestr(file_siprosa_2.filename, b2)
+
+            # Leer y escribir archivo 3
+            b3 = await file_siprosa_3.read()
+            zf.writestr(file_siprosa_3.filename, b3)
+            
+        mem_zip.seek(0)
+        zip_bytes = mem_zip.read()
+        
+        final_filename = f"siprosa_{uuid.uuid4().hex[:8]}.zip"
+        file_bytes = zip_bytes
+
+    else:
+        # Caso genérico
+        if not file or not file.filename:
+             raise HTTPException(400, "Debe subir un archivo.")
+        
+        final_filename = file.filename
+        file_bytes = await file.read()
+
+    # Carpeta base donde se guardan los uploads
+    base_dir = Path("data/uploads")
+    # --- Fin lógica por plataforma ---
+
+    # Creamos la carpeta
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / final_filename
+
+    with open(file_path, "wb") as f:
+        f.write(file_bytes)
+
+    # Normalizar fecha de apertura
+    def _norm_date(s: str) -> str:
+        s = (s or "").strip()
+        if not s:
+            return ""
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            return s
+        m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
+        if m:
+            d, mm, y = map(int, m.groups())
+            return f"{y:04d}-{mm:02d}-{d:02d}"
+        return s
+
+
+
+    # Normalizamos el número de proceso para detectar duplicados
+    proceso_nro_clean = (proceso_nro or "").strip() or None
+    proceso_key = normalize_proceso_nro(proceso_nro_clean)
+
+    # Si hay clave normalizada, buscamos si ya existe una carga con ese proceso
+    existing = None
+    if proceso_key:
+        existing = (
+            db_session.query(UploadModel)
+            .filter(func.upper(func.trim(UploadModel.proceso_key)) == proceso_key)
+            .order_by(UploadModel.created_at.desc())
+            .first()
+        )
+
+    if existing:
+        # No creamos nada nuevo: redirigimos al proceso existente
+        return RedirectResponse(
+            f"/cargas/{existing.id}?dup=1",
+            status_code=303,
+        )
+
+    # Crear la carga nueva (source=other implicito por ahora, o podríamos agregar un campo si el modelo lo soportara)
+    up = UploadModel(
+        user_id=user.id,
+        proceso_nro=proceso_nro_clean,
+        proceso_key=proceso_key,
+        apertura_fecha=_norm_date(apertura_fecha) or None,
+        cuenta_nro=(cuenta_nro or "").strip() or None,
+        platform_hint=platform_hint or None,
+        buyer_hint=buyer_hint or None,
+        province_hint=province_hint or None,
+        original_filename=final_filename,
+        original_path=str(file_path),
+        base_dir=str(upload_dir),
+        status="pending", 
+        created_at=dt.datetime.utcnow(),
+        updated_at=dt.datetime.utcnow(),
+    )
+    db_session.add(up)
+    db_session.commit()
+
+    # Log de creación
+    log_usage_event(
+        user=user,
+        action_type="file_upload",
+        section="otas_fuentes_crear",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "filename": final_filename,
+            "bytes": len(file_bytes),
+            "proceso_nro": proceso_nro_clean or "",
+            "cuenta_nro": (cuenta_nro or "").strip(),
+            "source": "otras_fuentes"
+        },
+    )
+
+    # Disparamos classify_and_process. 
+    # El registry.yml se encargará de despachar a la pampa u otros si matchea.
+    # Si no matchea nada, caerá en default o error, pero el flujo debe continuar.
+    metadata = {
+        "filename": final_filename,
+        "platform": platform_hint,
+    }
+    background_tasks.add_task(classify_and_process, up.id, metadata, touch_status=True)
 
     return RedirectResponse(f"/cargas/{up.id}", status_code=303)
 
@@ -1557,7 +3530,7 @@ def historial_cargas(
         error = str(e)
         users_options = []
 
-    # info de paginación
+        # info de paginación
     can_view_all = True
     showing_from = 0 if total == 0 else (page - 1) * page_size + 1
     showing_to = min(total, page * page_size)
@@ -1596,7 +3569,25 @@ def historial_cargas(
         "showing_to": showing_to,
         "filters": flt,
     }
-    return templates.TemplateResponse("uploads_list.html", ctx)
+
+    response = templates.TemplateResponse("uploads_list.html", ctx)
+
+    # 👇 NUEVO: log de vista del historial
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_historial",
+        request=request,
+        extra_data={
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "q": q or "",
+            "status": status or "",
+        },
+    )
+
+    return response
 
 
 # ======================================================================
@@ -1640,7 +3631,19 @@ def view_upload(
         "upload_steps": PROCESS_STEPS_LOC,
         "dup": request.query_params.get("dup") == "1",  # <-- 👈 NUEVO
     }
-    return templates.TemplateResponse("upload_show.html", ctx)
+    response = templates.TemplateResponse("upload_show.html", ctx)
+
+    # 👇 NUEVO: log de vista de detalle de proceso
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="cargas_detalle",
+        request=request,
+        resource_id=str(upload.id),
+        extra_data={"status": upload.status},
+    )
+
+    return response
 
 
 # ======================================================================
@@ -2176,9 +4179,77 @@ def _to_num(x) -> float:
         return 0.0
 
 
+@app.get("/api/descargar-final/{upload_id}/{filename}")
+def api_descargar_final(
+    upload_id: int,
+    filename: str,
+    request: Request,
+    user: User = Depends(require_roles("admin", "analista", "auditor", "supervisor")),
+):
+    """
+    Ruta alternativa para forzar descarga correcta.
+    Incluye {filename} en la URL para asegurar que el navegador vea la extensión .xlsx.
+    """
+    up = db_session.get(UploadModel, upload_id)
+    if not up:
+        raise HTTPException(status_code=404, detail="Proceso no encontrado")
+
+    norm_path = services.get_normalized_path(up)
+    if not norm_path or not norm_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    # Log usage
+    log_usage_event(
+        user=user,
+        action_type="download_normalized_api",
+        section="normalized_download",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"filename": norm_path.name},
+    )
+
+    # --- FILE RESPONSE STRATEGY (ON STATIC COPY) ---
+    logger.info(f"Descargando archivo para upload_id={upload_id}")
+    
+    # 1. Prepare destination
+    static_dl_dir = BASE_DIR / "static" / "temp_dl"
+    static_dl_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 2. Copy file
+    safe_filename = f"normalized_{upload_id}.xlsx"
+    dest_path = static_dl_dir / safe_filename
+    
+    # Log original path
+    logger.info(f"Origen: {norm_path} -> Destino: {dest_path}")
+    
+    # Always overwrite to ensure fresh content
+    if dest_path.exists():
+        try:
+            dest_path.unlink()
+        except Exception as e:
+            logger.warning(f"No se pudo borrar temporal: {e}")
+
+    shutil.copy2(norm_path, dest_path)
+    
+    # 3. Return FileResponse with EXPLICIT forced headers
+    # We set Content-Type and Content-Disposition manually to override anything else.
+    return FileResponse(
+        path=dest_path,
+        filename=safe_filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )
+
+
 @app.get("/api/tablero/{upload_id}/ranking", response_class=JSONResponse)
 def api_tablero_ranking(
     upload_id: int,
+    request: Request,
     max_positions: Optional[int] = Query(
         None, description="Limitar cantidad de puestos por renglón"
     ),
@@ -2246,6 +4317,10 @@ def api_tablero_ranking(
     qty_off_col = _find(
         lambda s: "cantidad" in s and ("ofertad" in s or "ofrec" in s)
     )
+    # 👉 NUEVO: intentar buscar columna de Rubro
+    rubro_col = _find(
+        lambda s: s in {"rubro", "rubo", "clase", "ramo"}
+    )
 
     def _to_num_local(x):
         try:
@@ -2297,6 +4372,13 @@ def api_tablero_ranking(
         if (qty_req > 0) and (r["cantidad"] <= 0):
             r["cantidad"] = float(qty_req)
 
+        # 👉 NUEVO: Rubro (solo si no se seteó antes o está vacío)
+        if rubro_col and not r.get("rubro"):
+            # Tomamos el valor de la fila actual
+            val_rubro = str(rec.get(rubro_col, "")).strip()
+            if val_rubro:
+                r["rubro"] = val_rubro
+
         cur = r["offers"].get(prov)
         if (cur is None) or (unit < cur["precio"]):
             r["offers"][prov] = {
@@ -2331,12 +4413,26 @@ def api_tablero_ranking(
             {
                 "nro": r["nro"],
                 "descripcion": r["descripcion"],
+                "rubro": r.get("rubro", ""),  # 👈 NUEVO
                 "cantidad": float(
                     r["cantidad"] if r["cantidad"] > 0 else 1.0
                 ),
                 "positions": positions,
             }
         )
+
+    # 👇 NUEVO: log de consulta de ranking
+    log_usage_event(
+        user=user,
+        action_type="api_call",
+        section="tablero_ranking",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "max_positions": max_positions,
+            "total_rows": len(rows_out),
+        },
+    )
 
     return JSONResponse(
         {
@@ -2970,7 +5066,7 @@ def tablero_show(
     if not up:
         return HTMLResponse("Carga no encontrada", status_code=404)
 
-        # 🔒 Verificar visibilidad por grupos (auditor ve todo).
+    # 🔒 Verificar visibilidad por grupos (auditor ve todo).
     # Si el proceso es del propio usuario, SIEMPRE permitir.
     vis_ids = visible_user_ids_ext(db_session, user)
     if (up.user_id != user.id) and (up.user_id not in vis_ids):
@@ -3142,13 +5238,13 @@ def tablero_show(
         )
     ]
 
-    # URL JSON que consume dashboard.html para la tabla de ranking
+        # URL JSON que consume dashboard.html para la tabla de ranking
     rank_api_url = f"/api/tablero/{upload_id}/ranking"
 
     # ✅ NUEVO: URL para descargar el PDF del proceso
     pdf_url = f"/reportes/proceso/{upload_id}"
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
@@ -3181,53 +5277,113 @@ def tablero_show(
         },
     )
 
+    # 👇 NUEVO: log de vista del tablero
+    log_usage_event(
+        user=user,
+        action_type="page_view",
+        section="tablero",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={
+            "status": up.status,
+            "rows_total": rows_total,
+            "bidders": kpis.get("bidders", 0),
+            "items": kpis.get("items", 0),
+        },
+    )
+
+    return response
+
 # ======================================================================
 # ADMIN: RESET DE PROCESOS / CARGAS
 # ======================================================================
-@app.post("/admin/reset_uploads")
-def admin_reset_uploads(
+# ======================================================================
+# ADMIN: FACTORY RESET (Borrado total)
+# ======================================================================
+@app.post("/admin/factory_reset")
+def admin_factory_reset(
     request: Request,
     password: str = Form(...),
     user: User = Depends(require_roles("admin")),
 ):
     """
-    Elimina TODAS las cargas (UploadModel) y borra la carpeta data/uploads.
-    SOLO para admin y pidiendo una contraseña especial (verify_reset_password).
-    Se pensó para usarse desde un botón + modal en la interfaz.
+    Elimina TODA la información operativa del sistema:
+    - Cargas (Uploads), archivos y carpetas.
+    - Tickets de mesa de ayuda.
+    - Grupos y permisos.
+    - Historial de uso, logs, comentarios.
+    - Oportunidades y dimensiones cargadas.
+    
+    Mantiene:
+    - Usuarios y sus contraseñas.
     """
-    # 1) Validar contraseña de seguridad
+    # 1) Validar contraseña (seguridad crítica)
     if not verify_reset_password(user, password):
-        # Podés leer estos flags en home.html para mostrar un toast/mensaje
-        return RedirectResponse(
-            "/?reset_err=bad_password",
-            status_code=303,
-        )
-
-    base_dir = Path("data/uploads")
+        return RedirectResponse("/sic?reset_err=bad_password", status_code=303)
 
     try:
-        # 2) Borrar registros de UploadModel
+        # 2) Limpieza de Base de Datos
+        # Orden importante para respetar Foreign Keys (aunque cascade ayude)
+        
+        # --- Módulos Satélite ---
+        db_session.query(TicketMessage).delete()
+        db_session.query(Ticket).delete()
+        db_session.query(ChatMessage).delete()
+        db_session.query(ChatMember).delete()
+        db_session.query(ChatChannel).delete()
+        
+        # --- Métricas y Comentarios ---
+        db_session.query(UsageEvent).delete()
+        db_session.query(UsageSession).delete()
+        db_session.query(Comment).delete()
+        db_session.query(EmailNotification).delete()
+        
+        # --- Configuración de Usuario ---
+        db_session.query(SavedView).delete()
+        db_session.query(GroupMember).delete()
+        db_session.query(Group).delete()
+
+        # --- Cargas y Procesos (Core) ---
+        db_session.query(Dashboard).delete()
+        db_session.query(NormalizedFile).delete()
+        db_session.query(Run).delete()
         db_session.query(UploadModel).delete()
+        
         db_session.commit()
 
-        # 3) Borrar los archivos físicos
-        if base_dir.exists():
-            shutil.rmtree(base_dir)
-        base_dir.mkdir(parents=True, exist_ok=True)
+        # 3) Limpieza de Archivos (Filesystem)
+        data_dir = BASE_DIR / "data"
+        uploads_dir = data_dir / "uploads"
+        
+        # Borrar uploads recursivamente
+        if uploads_dir.exists():
+            shutil.rmtree(uploads_dir)
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Borrar archivos de datos específicos (Oportunidades, Dimensiones, Logs)
+        files_to_remove = [
+            "oportunidades.xlsx", 
+            "oportunidades.csv",
+            "dimensiones.json", 
+            "alerts_admin.log",
+            "errors.log"
+        ]
+        
+        for fname in files_to_remove:
+            fpath = data_dir / fname
+            if fpath.exists():
+                try:
+                    fpath.unlink()
+                except Exception:
+                    pass
 
-        # 4) Volver al home con flag de OK
-        return RedirectResponse(
-            "/?reset_ok=1",
-            status_code=303,
-        )
+        # 4) Redirección con éxito
+        return RedirectResponse("/sic?reset_ok=1", status_code=303)
+
     except Exception as e:
         db_session.rollback()
-        # Limitamos el mensaje de error para que no rompa la URL
-        msg = str(e).replace(" ", "_")[:180]
-        return RedirectResponse(
-            f"/?reset_err={msg}",
-            status_code=303,
-        )
+        msg = str(e).replace(" ", "_")[:200]
+        return RedirectResponse(f"/sic?reset_err={msg}", status_code=303)
 
 # ======================================================================
 # LOGIN / AUTENTICACIÓN
@@ -3264,11 +5420,41 @@ def login_submit(
     request.session["role"] = (u.role or "").lower()
     request.session["name"] = user_display(u)
 
-    return RedirectResponse("/", status_code=303)
+    # 👇 NUEVO: log de inicio de sesión
+    log_usage_event(
+        user=u,
+        action_type="login",
+        section="auth",
+        request=request,
+        extra_data={"email": u.email},
+    )
+
+    # Redirect logic based on Role and Business Unit
+    target_url = "/"
+    role = (u.role or "").lower()
+    bu = (u.unit_business or "").strip()
+
+    if role in ("analista", "supervisor"):
+        if bu == "Mercado Público":
+            target_url = "/mercado-publico"
+        elif bu == "Mercado Privado":
+            target_url = "/mercado-privado"
+    
+    return RedirectResponse(target_url, status_code=303)
 
 
 @app.get("/logout", include_in_schema=False)
 def logout(request: Request):
+    # 👇 NUEVO: log de logout si hay usuario
+    u = get_current_user(request)
+    if u:
+        log_usage_event(
+            user=u,
+            action_type="logout",
+            section="auth",
+            request=request,
+        )
+
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
 
@@ -3484,6 +5670,19 @@ def descargar_archivo_original(
     filename = p.name
 
     # Tipo genérico; Excel lo abre igual
+        # Nombre de archivo para la descarga
+    filename = p.name
+
+    # 👇 NUEVO: log de descarga de original
+    log_usage_event(
+        user=user,
+        action_type="download_original",
+        section="cargas_original",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"filename": filename},
+    )
+
     return FileResponse(
         str(p),
         filename=filename,
@@ -3495,6 +5694,7 @@ def descargar_archivo_original(
 # ======================================================================
 @app.get("/descargas/{upload_id}")
 def descargar_normalizado(
+    request: Request,
     upload_id: int,
     user: User = Depends(
         require_roles("admin", "analista", "auditor", "supervisor")
@@ -3527,13 +5727,26 @@ def descargar_normalizado(
     if not norm_path or not norm_path.exists():
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
-    return FileResponse(
-        str(norm_path),
-        filename=f"normalized_{upload_id}.xlsx",
-        media_type=(
-            "application/vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
+    # 👇 NUEVO: log de descarga de normalized
+    log_usage_event(
+        user=user,
+        action_type="download_normalized",
+        section="normalized_download",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"filename": norm_path.name},
+    )
+
+    # Force filename by reading bytes and sending raw Response
+    # This bypasses any FileResponse magic that might be overriding headers or filename
+    content = norm_path.read_bytes()
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="normalized_{upload_id}.xlsx"',
+            "Content-Length": str(len(content)),
+        },
     )
 
 
@@ -3672,11 +5885,23 @@ def descargar_reporte_proceso(
 
     # 10) Devolverlo como descarga
     filename = f"informe_proceso_{upload_id}.pdf"
+        # ... después de generar pdf_bytes = render_informe_comparativas(data_pdf)
+
+    # 👇 NUEVO: log de descarga de reporte PDF
+    log_usage_event(
+        user=user,
+        action_type="download_pdf",
+        section="reporte_proceso",
+        request=request,
+        resource_id=str(up.id),
+        extra_data={"proceso_nro": proceso_nro},
+    )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
+            "Content-Disposition": f'attachment; filename="reporte_proceso_{upload_id}.pdf"'
         },
     )
 
@@ -3730,243 +5955,10 @@ def informe_pdf(
 # ======================================================================
 # USUARIOS
 # ======================================================================
-def normalize_unit_business(val: str) -> str:
-    """
-    Devuelve un valor válido dentro de BUSINESS_UNITS.
-    """
-    if not val:
-        return "Otros"
-    v = str(val).strip()
-    alias = {
-        "Hospitalario Publico": "Productos Hospitalarios",
-        "Hospitalario Público": "Productos Hospitalarios",
-        "Hospitalario Privado": "Productos Hospitalarios",
-    }
-    v = alias.get(v, v)
-    return v if v in BUSINESS_UNITS else "Otros"
 
 
-@app.get("/usuarios", response_class=HTMLResponse)
-def usuarios_list_view(
-    request: Request,
-    user: User = Depends(require_roles("admin")),
-):
-    error = None
-    users = []
-    try:
-        q = db_session.query(User)
-        if hasattr(User, "created_at"):
-            q = q.order_by(User.created_at.desc(), User.email.asc())
-        else:
-            q = q.order_by(User.email.asc())
-        users = q.all()
-    except Exception as e:
-        db_session.rollback()
-        error = str(e)
-
-    ok = request.query_params.get("ok")
-    err = request.query_params.get("err")
-
-    return templates.TemplateResponse(
-        "users_list.html",
-        {
-            "request": request,
-            "user": user,
-            "users": users,
-            "error": error,
-            "ok": ok,
-            "err": err,
-        },
-    )
 
 
-@app.get("/usuarios/nuevo", response_class=HTMLResponse)
-def usuarios_nuevo_view(
-    request: Request,
-    user: User = Depends(require_roles("admin")),
-):
-    business_units = list(BUSINESS_UNITS)
-    form = SimpleNamespace(
-        id=None,
-        email="",
-        name="",
-        full_name="",
-        role="analista",
-        unit_business="Otros",
-    )
-    return templates.TemplateResponse(
-        "users_form.html",
-        {
-            "request": request,
-            "user": user,
-            "form": form,
-            "is_new": True,
-            "allow_edit_email": True,
-            "business_units": business_units,
-        },
-    )
-
-
-@app.post("/usuarios/nuevo/actualizar")
-def usuarios_crear(
-    request: Request,
-    email: str = Form(...),
-    name: str = Form(""),
-    role: str = Form("analista"),
-    password: str = Form("TuClaveFuerte123"),
-    unit_business: str = Form("Otros"),
-    user: User = Depends(require_roles("admin")),
-):
-    email = (email or "").strip().lower()
-    role = (role or "").strip().lower()
-    unit_ok = normalize_unit_business(unit_business)
-
-    if not email:
-        return RedirectResponse("/usuarios?err=email_vacio", status_code=303)
-
-    try:
-        exists = (
-            db_session.query(User)
-            .filter(func.lower(User.email) == email)
-            .first()
-        )
-        if exists:
-            return RedirectResponse("/usuarios?err=email_existe", status_code=303)
-
-        u = User(
-            email=email,
-            name=(name or "").strip() or email.split("@")[0],
-            role=role,
-            password_hash=hash_password(password),
-            created_at=dt.datetime.utcnow(),
-            unit_business=unit_ok,
-        )
-        db_session.add(u)
-        db_session.commit()
-        return RedirectResponse("/usuarios?ok=created", status_code=303)
-    except Exception as e:
-        db_session.rollback()
-        return RedirectResponse(f"/usuarios?err={str(e)}", status_code=303)
-
-
-@app.get("/usuarios/{user_id}/editar", response_class=HTMLResponse)
-def usuarios_editar_view(
-    request: Request,
-    user_id: int,
-    user: User = Depends(require_roles("admin")),
-):
-    u = db_session.get(User, user_id)
-    if not u:
-        return RedirectResponse("/usuarios?err=not_found", status_code=303)
-
-    business_units = list(BUSINESS_UNITS)
-    if not hasattr(u, "unit_business") or u.unit_business is None:
-        try:
-            u.unit_business = "Otros"
-            db_session.commit()
-        except Exception:
-            db_session.rollback()
-
-    return templates.TemplateResponse(
-        "users_form.html",
-        {
-            "request": request,
-            "user": user,
-            "form": u,
-            "is_new": False,
-            "allow_edit_email": False,
-            "business_units": business_units,
-        },
-    )
-
-
-@app.post("/usuarios/{user_id}/actualizar")
-def usuarios_actualizar(
-    request: Request,
-    user_id: int,
-    name: str = Form(""),
-    role: str = Form("analista"),
-    unit_business: str = Form("Otros"),
-    user: User = Depends(require_roles("admin")),
-):
-    u = db_session.get(User, user_id)
-    if not u:
-        return RedirectResponse("/usuarios?err=not_found", status_code=303)
-
-    unit_ok = normalize_unit_business(unit_business)
-
-    try:
-        u.name = (name or "").strip()
-        u.role = (role or "").strip().lower()
-        if hasattr(u, "unit_business"):
-            u.unit_business = unit_ok
-        db_session.commit()
-        return RedirectResponse("/usuarios?ok=updated", status_code=303)
-    except Exception as e:
-        db_session.rollback()
-        return RedirectResponse(f"/usuarios?err={str(e)}", status_code=303)
-
-
-@app.post("/usuarios/{user_id}/password")
-def usuarios_cambiar_password(
-    request: Request,
-    user_id: int,
-    nueva: str = Form(...),
-    confirmar: str = Form(...),
-    user: User = Depends(require_roles("admin")),
-):
-    if nueva != confirmar:
-        return RedirectResponse(
-            f"/usuarios/{user_id}/editar?perror=nomatch",
-            status_code=303,
-        )
-    if len(nueva) < 8:
-        return RedirectResponse(
-            f"/usuarios/{user_id}/editar?perror=short",
-            status_code=303,
-        )
-    try:
-        u = db_session.get(User, user_id)
-        if not u:
-            return RedirectResponse("/usuarios?err=not_found", status_code=303)
-        u.password_hash = hash_password(nueva)
-        db_session.commit()
-        return RedirectResponse(
-            f"/usuarios/{user_id}/editar?pok=1",
-            status_code=303,
-        )
-    except Exception:
-        db_session.rollback()
-        return RedirectResponse(
-            f"/usuarios/{user_id}/editar?perror=fail",
-            status_code=303,
-        )
-
-
-@app.get("/usuarios/{user_id}/borrar")
-def usuarios_borrar(
-    request: Request,
-    user_id: int,
-    user: User = Depends(require_roles("admin")),
-):
-    u = db_session.get(User, user_id)
-    if not u:
-        return RedirectResponse("/usuarios?err=not_found", status_code=303)
-
-    if u.id == user.id:
-        return RedirectResponse("/usuarios?err=cannot_self", status_code=303)
-
-    admins = db_session.query(User).filter(User.role == "admin").count()
-    if u.role == "admin" and admins <= 1:
-        return RedirectResponse("/usuarios?err=last_admin", status_code=303)
-
-    try:
-        db_session.delete(u)
-        db_session.commit()
-        return RedirectResponse("/usuarios?ok=deleted", status_code=303)
-    except Exception:
-        db_session.rollback()
-        return RedirectResponse("/usuarios?err=delete_failed", status_code=303)
 
 
 # ======================================================================
@@ -4341,6 +6333,8 @@ def grupos_member_remove(
                 status_code=303,
             )
 
+    logger.info(f"[GRUPOS] User {user.id} removing member {member_id} from group {group_id}")
+
     try:
         db_session.delete(m)
         db_session.commit()
@@ -4379,11 +6373,19 @@ def grupos_delete(
                 detail="Se requieren permisos elevados en el grupo",
             )
 
-    db_session.query(GroupMember).filter(
-        GroupMember.group_id == g.id
-    ).delete()
-    db_session.delete(g)
-    db_session.commit()
+    # logger debug
+    logger.info(f"[GRUPOS] User {user.id} deleting group {group_id}")
+
+    try:
+        # Trust cascade, but can also explicit delete if needed.
+        # db_session.query(GroupMember).filter(GroupMember.group_id == g.id).delete()
+        db_session.delete(g)
+        db_session.commit()
+    except Exception as e:
+        db_session.rollback()
+        logger.error(f"[GRUPOS] Error deleting group {group_id}: {e}")
+        return RedirectResponse(f"/grupos?err={str(e)}", status_code=303)
+
     return RedirectResponse("/grupos?ok=deleted", status_code=303)
 
 

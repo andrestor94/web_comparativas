@@ -27,6 +27,16 @@ BUSINESS_UNITS = [
     "Otros",
 ]
 
+def normalize_unit_business(v: str) -> str:
+    v = (v or "").strip()
+    alias = {
+        "Hospitalario Publico": "Productos Hospitalarios",
+        "Hospitalario Público": "Productos Hospitalarios",
+        "Hospitalario Privado": "Productos Hospitalarios",
+    }
+    v = alias.get(v, v)
+    return v if v in BUSINESS_UNITS else "Otros"
+
 # ----------------------------------------------------------------------
 # Configuración de la DB (local o Render)
 # ----------------------------------------------------------------------
@@ -59,12 +69,6 @@ print(
     f"(database={engine.url.database})"
 )
 
-# Session factory + scoped_session
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
-db_session = scoped_session(SessionLocal)
-
-Base = declarative_base()
-
 # Activar foreign keys en SQLite
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_conn, connection_record):
@@ -72,6 +76,12 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+
+# Session factory + scoped_session
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+db_session = scoped_session(SessionLocal)
+
+Base = declarative_base()
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -105,6 +115,13 @@ class User(Base):
     # Atributo del ORM = unit_business; columna física = business_unit
     unit_business = Column("business_unit", String(120), nullable=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    
+    # Campo para Segmentación de Acceso: "Mercado Publico", "Mercado Privado", "Todos"
+    access_scope = Column(String, default="todos")
+
+    # Relaciones con métricas de uso
+    usage_events = relationship("UsageEvent", back_populates="user", lazy="selectin")
+    usage_sessions = relationship("UsageSession", back_populates="user", lazy="selectin")
 
     # ---- Helpers de rol/unidad ----
     def _role_norm(self) -> str:
@@ -349,6 +366,25 @@ class Dashboard(Base):
     # upload = relationship("Upload", backref="dashboards")
 
 
+# ---------- Notificaciones System ----------
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    category = Column(String(50), default="system", index=True)  # helpdesk, system, processing
+    link = Column(String(500), nullable=True)  # URL action
+    is_read = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+
+    user = relationship("User", backref="notifications")
+
+    def __repr__(self) -> str:
+        return f"<Notification id={self.id} user={self.user_id} title={self.title!r}>"
+
+
 # ---------- Log de notificaciones por email (idempotencia) ----------
 class EmailNotification(Base):
     __tablename__ = "email_notifications"
@@ -461,8 +497,7 @@ class AppConfig(Base):
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow,
                         nullable=False, index=True)
 
-    def __repr__(self) -> str:
-        return f"<AppConfig key={self.key!r} value={self.value!r}>"
+
 
 
 # ---------- Comentarios / Feedback ----------
@@ -502,6 +537,155 @@ class Comment(Base):
         if len(body_preview) > 24:
             body_preview = body_preview[:24] + "…"
         return f"<Comment id={self.id} up={self.upload_id} by={self.author_user_id} '{body_preview}'>"
+
+
+# ---------- Métricas de uso: eventos y sesiones ----------
+class UsageEvent(Base):
+    """
+    Evento granular de uso de la interfaz.
+    Cada acción relevante genera un registro acá.
+    """
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Momento exacto del evento
+    timestamp = Column(DateTime, nullable=False, index=True, default=dt.datetime.utcnow)
+
+    # Sesión lógica del usuario
+    session_id = Column(String(64), nullable=False, index=True)
+
+    # Usuario y rol asociado
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_role = Column(String(32), nullable=False, index=True)
+
+    # Qué pasó y dónde pasó
+    action_type = Column(String(50), nullable=False, index=True)   # login, page_view, file_upload, etc.
+    section = Column(String(100), nullable=True, index=True)       # home, buscador, dimensiones, etc.
+    resource_id = Column(String(100), nullable=True)               # id de proceso / archivo, si aplica
+
+    # Duración aproximada de la acción (ms, opcional)
+    duration_ms = Column(Integer, nullable=True)
+
+    # Datos extra en JSON (filtros aplicados, parámetros, etc.)
+    extra_data = Column(JSON, nullable=True)
+
+    # Datos técnicos
+    ip = Column(String(50), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    # Relación con el usuario
+    user = relationship("User", back_populates="usage_events")
+
+    def __repr__(self) -> str:
+        return f"<UsageEvent id={self.id} user={self.user_id} action={self.action_type!r} section={self.section!r}>"
+
+
+class UsageSession(Base):
+    """
+    Resumen agregado de una sesión de trabajo del usuario.
+    Una sesión agrupa muchos UsageEvent.
+    """
+    __tablename__ = "usage_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Identificador lógico de la sesión
+    session_id = Column(String(64), nullable=False, unique=True, index=True)
+
+    # Usuario y rol
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_role = Column(String(32), nullable=False, index=True)
+
+    # Tiempos
+    start_time = Column(DateTime, nullable=False, index=True, default=dt.datetime.utcnow)
+    end_time = Column(DateTime, nullable=True, index=True)
+
+    # Minutos totales / activos / inactivos
+    duration_minutes = Column(Float, nullable=True)
+    active_minutes = Column(Float, nullable=True)
+    idle_minutes = Column(Float, nullable=True)
+
+    # Métricas agregadas dentro de la sesión
+    files_uploaded = Column(Integer, nullable=False, default=0)
+    actions_count = Column(Integer, nullable=False, default=0)
+    sections_visited = Column(Integer, nullable=False, default=0)
+
+    # Relación con el usuario
+    user = relationship("User", back_populates="usage_sessions")
+
+    def __repr__(self) -> str:
+        return f"<UsageSession id={self.id} user={self.user_id} session={self.session_id!r}>"
+
+
+    def __repr__(self) -> str:
+        return f"<UsageSession id={self.id} user={self.user_id} session={self.session_id!r}>"
+
+
+# ----------------------------------------------------------------------
+# Chat System (Teams-like)
+# ----------------------------------------------------------------------
+
+class ChatChannel(Base):
+    """
+    Canal de chat. Puede ser 'direct' (1 a 1) o 'group'.
+    """
+    __tablename__ = "chat_channels"
+
+    id = Column(Integer, primary_key=True)
+    type = Column(String(20), default="direct", nullable=False) # direct, group
+    name = Column(String(100), nullable=True) # Para grupos
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False, index=True)
+
+    members = relationship("ChatMember", back_populates="channel", cascade="all, delete-orphan", lazy="selectin")
+    messages = relationship("ChatMessage", back_populates="channel", cascade="all, delete-orphan", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<ChatChannel id={self.id} type={self.type!r}>"
+
+
+class ChatMember(Base):
+    """
+    Miembros de un canal.
+    """
+    __tablename__ = "chat_members"
+    __table_args__ = (
+        UniqueConstraint("channel_id", "user_id", name="uq_chat_member"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(Integer, ForeignKey("chat_channels.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    joined_at = Column(DateTime, default=dt.datetime.utcnow)
+    last_read_at = Column(DateTime, default=dt.datetime.utcnow) # Para saber qué mensajes son nuevos
+
+    channel = relationship("ChatChannel", back_populates="members")
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<ChatMember channel={self.channel_id} user={self.user_id}>"
+
+
+class ChatMessage(Base):
+    """
+    Mensajes de chat.
+    """
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    channel_id = Column(Integer, ForeignKey("chat_channels.id"), nullable=False, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    content = Column(Text, nullable=True) # Puede ser nulo si solo es attachment
+    attachment_path = Column(String, nullable=True) # Path al archivo/imagen
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+
+    channel = relationship("ChatChannel", back_populates="messages")
+    sender = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<ChatMessage id={self.id} channel={self.channel_id} sender={self.sender_id}>"
+
 
 # ----------------------------------------------------------------------
 # Helpers de visibilidad (utilizables desde vistas/rutas)
@@ -967,6 +1151,24 @@ def _ensure_upload_uploader_snapshot_columns():
         pass
 
 
+def _ensure_usage_indexes():
+    """
+    Índices básicos para tablas de métricas de uso.
+    No es crítico si falla; solo mejora performance de consultas.
+    """
+    try:
+        idx_sql = [
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_user_time ON usage_events(user_id, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_action ON usage_events(action_type)",
+            "CREATE INDEX IF NOT EXISTS idx_usage_sessions_user_start ON usage_sessions(user_id, start_time)",
+        ]
+        with engine.begin() as conn:
+            for sql in idx_sql:
+                conn.execute(text(sql))
+    except Exception:
+        pass
+
+
 # --------- Bootstrap de admin desde variables de entorno ---------
 def _bootstrap_admin_from_env():
     """
@@ -1038,6 +1240,7 @@ def init_db():
     _ensure_comments_indexes()
     _ensure_email_notifications_indexes()
     _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
+    _ensure_usage_indexes()  # <-- índices para métricas de uso
     _bootstrap_admin_from_env()  # <-- crea admin si tenés ADMIN_EMAIL/PASSWORD
     _bootstrap_reset_password_from_env()  # <-- configura contraseña RESET si hay RESET_PASSWORD
 
@@ -1062,3 +1265,41 @@ def get_admin_or_auditor_emails(session) -> List[str]:
             out.append(e)
             seen.add(e)
     return out
+
+
+# ----------------------------------------------------------------------
+# S.I.C Help Desk Models
+# ----------------------------------------------------------------------
+class Ticket(Base):
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    title = Column(String, nullable=False)
+    category = Column(String, default="consulta") # error, sugerencia, consulta, acceso
+    priority = Column(String, default="media")    # baja, media, alta
+    status = Column(String, default="abierto")    # abierto, pendiente, resuelto, cerrado
+    
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="tickets")
+    messages = relationship("TicketMessage", back_populates="ticket", cascade="all, delete-orphan", order_by="TicketMessage.created_at")
+
+class TicketMessage(Base):
+    __tablename__ = "ticket_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    message = Column(Text, nullable=False)
+    is_internal = Column(Boolean, default=False)  # Para notas internas de admins si se quisiera
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    # Relationships
+    ticket = relationship("Ticket", back_populates="messages")
+    user = relationship("User")
+

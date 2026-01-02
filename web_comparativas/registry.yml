@@ -17,6 +17,18 @@ sources:
       filename_regex: '.*\.(xlsx|xls|xlsb|csv)$'
     handler: 'web_comparativas.adapters.portales:normalize_comprar'
 
+  - id: LA_PAMPA
+    when:
+      platform: ['LA_PAMPA']
+      filename_regex: '.*\.(zip)$'
+    handler: 'web_comparativas.adapters.la_pampa:normalize_la_pampa'
+
+  - id: SIPROSA
+    when:
+      platform: ['SIPROSA']
+      filename_regex: '.*\.(zip)$'
+    handler: 'web_comparativas.adapters.siprosa:normalize_siprosa_ranking'
+
   - id: DEFAULT
     when: {}
     handler: 'web_comparativas.adapters.portales:normalize_bac'

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}S.I.C – Soporte de Inteligencia Comercial{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <!-- Iconos Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <style>
+        :root {
+            /* Palette specific to S.I.C - darker, more tech */
+            --sic-bg: #0f172a;
+            --sic-card-bg: rgba(30, 41, 59, 0.7);
+            --sic-border: rgba(148, 163, 184, 0.1);
+            --sic-highlight: #3b82f6;
+            /* Modern Blue */
+            --sic-accent: #6366f1;
+            /* Indigo */
+            --sic-text: #f8fafc;
+            --sic-text-muted: #94a3b8;
+            --glass-blur: 16px;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--sic-bg);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.15) 0px, transparent 50%);
+            color: var(--sic-text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-attachment: fixed;
+        }
+
+        .navbar-sic {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(var(--glass-blur));
+            border-bottom: 1px solid var(--sic-border);
+            height: 70px;
+        }
+
+        .brand-logo {
+            font-weight: 800;
+            font-size: 1.5rem;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sic-badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 99px;
+            font-weight: 600;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            margin-left: 1rem;
+        }
+
+        .nav-link {
+            color: var(--sic-text-muted);
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            color: #fff;
+        }
+
+        /* Common Components */
+        .sic-card {
+            display: block;
+            text-decoration: none;
+            background: var(--sic-card-bg);
+            border: 1px solid var(--sic-border);
+            border-radius: 16px;
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+            color: #fff;
+        }
+
+        .btn-sic-primary {
+            background: var(--sic-highlight);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-sic-primary:hover {
+            background: var(--sic-accent);
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        .btn-sic-ghost {
+            background: transparent;
+            color: var(--sic-text-muted);
+            border: 1px solid var(--sic-border);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-sic-ghost:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            border-color: var(--sic-text-muted);
+        }
+
+        /* Table Styles for SIC */
+        .sic-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.9rem;
+        }
+
+        .sic-table th {
+            text-align: left;
+            padding: 1rem;
+            color: var(--sic-text-muted);
+            font-weight: 600;
+            border-bottom: 1px solid var(--sic-border);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        .sic-table td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--sic-border);
+            color: var(--sic-text);
+        }
+
+        .sic-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .form-control-sic {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--sic-border);
+            color: #fff;
+            border-radius: 8px;
+        }
+
+        .form-control-sic:focus {
+            background: rgba(15, 23, 42, 0.8);
+            border-color: var(--sic-highlight);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            color: #fff;
+        }
+
+        .form-select-sic {
+            background-color: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--sic-border);
+            color: #fff;
+            border-radius: 8px;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+        }
+
+        .form-select-sic:focus {
+            background-color: rgba(15, 23, 42, 0.8);
+            border-color: var(--sic-highlight);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            color: #fff;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+
+</head>
+
+<body>
+
+    <nav class="navbar navbar-sic fixed-top">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="/sic">
+                <i class="ph-bold ph-chart-polar" style="color: #60a5fa; font-size: 1.5rem;"></i>
+                <span class="brand-logo">S.I.C</span>
+                <span class="sic-badge">BETA</span>
+            </a>
+
+            <div class="d-flex align-items-center gap-4">
+                <div class="d-none d-md-flex gap-3 me-3">
+                    <a href="/sic/helpdesk"
+                        class="nav-link small {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}">Mesa
+                        de ayuda</a>
+                    <a href="/sic/tracking"
+                        class="nav-link small {% if request.url.path.startswith('/sic/tracking') %}active{% endif %}">Seguimiento</a>
+                    <a href="/sic/users"
+                        class="nav-link small {% if request.url.path.startswith('/sic/users') %}active{% endif %}">Usuarios</a>
+                </div>
+
+                {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+                <button type="button" class="btn btn-link text-danger fw-bold small text-decoration-none px-0 me-3"
+                    data-bs-toggle="modal" data-bs-target="#resetFactoryModal"
+                    title="Borrar todo y volver a estado inicial">
+                    <i class="bi bi-trash3-fill me-1"></i>Resetear Interfaz
+                </button>
+                {% endif %}
+
+                {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+                <!-- Bell for Admin in SIC -->
+                <div class="position-relative me-3" id="nav-notif-container">
+                    <a href="/notifications" class="text-secondary opacity-75 hover-opacity-100" title="Notificaciones">
+                        <i class="bi bi-bell-fill fs-5" style="color: var(--sic-text-muted);"></i>
+                        <span id="nav-notif-badge"
+                            class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger border border-white p-1"
+                            style="display:none;font-size:0.6rem;">
+                            <span class="visually-hidden">New alerts</span>
+                        </span>
+                    </a>
+                </div>
+                {% endif %}
+
+                <a href="/" class="nav-link text-decoration-none small">Volver a SIEM</a>
+                <div class="d-flex align-items-center gap-2 text-white small">
+                    <div
+                        style="width: 32px; height: 32px; background: rgba(255,255,255,0.1); border-radius: 50%; display:flex; align-items:center; justify-content:center;">
+                        <i class="ph-bold ph-user"></i>
+                    </div>
+                    <span>{{ user_display(user) if user else 'Admin' }}</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 py-5 mt-5">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Modal Factory Reset -->
+    {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+    <div class="modal fade text-dark" id="resetFactoryModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>Resetear Interfaz</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+                <form method="post" action="/admin/factory_reset">
+                    <div class="modal-body p-4">
+                        <div class="alert alert-warning border-0 bg-warning-subtle text-warning-emphasis mb-4">
+                            <strong>¡CUIDADO!</strong> Esta acción es destructiva e irreversible.
+                        </div>
+                        <p>Se eliminará toda la información de la base de datos y archivos, restaurando el sistema a
+                            "<strong>cero</strong>" (estado inicial).</p>
+
+                        <div class="card bg-light border-0 mb-3 small">
+                            <div class="card-body">
+                                <h6 class="fw-bold mb-2 text-danger">Se eliminará:</h6>
+                                <ul class="list-unstyled mb-0 text-muted ps-2" style="border-left: 3px solid #dc3545;">
+                                    <li class="mb-1">❌ Todas las licitaciones y archivos (Público/Privado).</li>
+                                    <li class="mb-1">❌ Tickets de Mesa de Ayuda.</li>
+                                    <li class="mb-1">❌ Grupos y permisos asignados.</li>
+                                    <li class="mb-1">❌ Logs de historial y actividad.</li>
+                                    <li class="mb-0">❌ Oportunidades cargadas.</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <p class="mb-3 small text-muted">Nota: Los <strong>Usuarios</strong> y sus claves de acceso se
+                            conservarán.</p>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Contraseña de Administrador</label>
+                            <input type="password" name="password" class="form-control" required
+                                autocomplete="current-password" placeholder="Confirmar contraseña">
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light">
+                        <button type="button" class="btn btn-outline-secondary"
+                            data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-danger fw-bold">Confirmar Reset Interfaz</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Factory Reset Toast & Logic -->
+    {% if request.query_params.get("reset_ok") %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // 1. Limpiar almacenamiento local (Factory Reset real)
+            try {
+                localStorage.clear();
+                sessionStorage.clear();
+                console.log("App storage cleared (Factory Reset).");
+            } catch (e) { console.error("Error clearing storage:", e); }
+
+            // 2. Mostrar mensaje de éxito
+            const toastHTML = `
+            <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090">
+              <div class="toast show align-items-center text-white bg-success border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                  <div class="toast-body">
+                    <i class="bi bi-check-circle-fill me-2"></i>
+                    <strong>Reset de Interfaz Completado</strong><br>
+                    <span class="small opacity-75">El sistema se ha reiniciado a su estado original.</span>
+                  </div>
+                  <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+              </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', toastHTML);
+        });
+    </script>
+    {% endif %}
+
+    {% if request.query_params.get("reset_err") %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const errMsg = "{{ request.query_params.get('reset_err')|e }}";
+            const toastHTML = `
+            <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090">
+              <div class="toast show align-items-center text-white bg-danger border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                  <div class="toast-body">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Error en Reset</strong><br>
+                    <span class="small opacity-75">${errMsg}</span>
+                  </div>
+                  <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+              </div>
+            </div>`;
+            document.body.insertAdjacentHTML('beforeend', toastHTML);
+        });
+    </script>
+    {% endif %}
+
+    <script>
+        // ====== Badge "Notificaciones" (System) ======
+        (function () {
+            const badge = document.getElementById('nav-notif-badge');
+            if (!badge) return;
+
+            async function checkNotifs() {
+                try {
+                    const r = await fetch('/notifications/unread-count');
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    const count = data.count || 0;
+
+                    if (count > 0) {
+                        badge.textContent = count > 99 ? '99+' : count;
+                        badge.style.display = '';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                } catch (e) { console.error('Error checking notifications', e); }
+            }
+
+            checkNotifs();
+            // Poll every 30 seconds
+            setInterval(checkNotifs, 30000);
+        })();
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

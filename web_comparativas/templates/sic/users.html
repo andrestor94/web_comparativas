@@ -1,0 +1,282 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}Usuarios – S.I.C{% endblock %}
+
+{% block extra_css %}
+<style>
+    .badge-sic {
+        font-weight: 500;
+        padding: 0.35em 0.65em;
+        border-radius: 6px;
+        font-size: 0.75em;
+        letter-spacing: 0.02em;
+    }
+
+    .badge-sic-admin {
+        background: rgba(239, 68, 68, 0.15);
+        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    .badge-sic-supervisor {
+        background: rgba(139, 92, 246, 0.15);
+        color: #c4b5fd;
+        border: 1px solid rgba(139, 92, 246, 0.2);
+    }
+
+    .badge-sic-analista {
+        background: rgba(59, 130, 246, 0.15);
+        color: #93c5fd;
+        border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+
+    .badge-sic-auditor {
+        background: rgba(148, 163, 184, 0.15);
+        color: #cbd5e1;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h1 class="h3 fw-bold mb-1">Gestión de Usuarios</h1>
+        <p class="text-white-50 small mb-0">Administración de accesos y roles de la plataforma.</p>
+    </div>
+    <div class="col-auto">
+        {% if (user.role or '')|lower != 'auditor' %}
+        <a href="/sic/users/new" class="btn btn-sic-primary d-flex align-items-center gap-2">
+            <i class="ph-bold ph-plus"></i> Nuevo usuario
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+{# ====== Alertas de feedback ====== #}
+{% if ok == 'created' %}
+<div class="alert alert-success d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-check-circle"></i> Usuario creado correctamente.
+</div>
+{% elif ok == 'updated' %}
+<div class="alert alert-success d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-check-circle"></i> Usuario actualizado correctamente.
+</div>
+{% elif ok == 'deleted' %}
+<div class="alert alert-success d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-check-circle"></i> Usuario eliminado.
+</div>
+{% endif %}
+
+{% if err == 'not_found' %}
+<div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-warning"></i> Usuario no encontrado.
+</div>
+{% elif err == 'cannot_self' %}
+<div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-warning"></i> No puedes eliminarte a ti mismo.
+</div>
+{% elif err == 'last_admin' %}
+<div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-warning"></i> No puedes eliminar el último administrador.
+</div>
+{% elif err == 'delete_failed' %}
+<div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-x-circle"></i> Ocurrió un error al eliminar el usuario.
+</div>
+{% elif err %}
+<div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-x-circle"></i> Ocurrió un error: {{ err }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+    <i class="ph-bold ph-x-circle"></i> {{ error }}
+</div>
+{% endif %}
+
+<div class="sic-card p-0 overflow-hidden">
+    <div class="table-responsive">
+        {% if not users or users|length == 0 %}
+        <div class="text-center text-white-50 py-5">
+            <i class="ph-bold ph-users mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
+            No hay usuarios cargados todavía.
+            <div class="mt-2">
+                <a href="/sic/users/new" class="text-white text-decoration-underline">Crear el primero</a>
+            </div>
+        </div>
+        {% else %}
+
+        <table class="sic-table mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th style="width:80px">ID</th>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                    <th style="width:140px">Rol</th>
+                    <th style="width:180px">Creado</th>
+                    {% if (user.role or '')|lower != 'auditor' %}
+                    <th class="text-end" style="width:180px">Acciones</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                {# --- Normalización de nombre --- #}
+                {% set _n = (u.name if u.name else (u.full_name if u.full_name else (u.nombre if u.nombre else ''))) %}
+                {% set _n = _n.strip() if _n else '' %}
+                {% if not _n %}
+                {% set _alias = (u.email.split('@')[0] if u.email else '') %}
+                {% set _alias = _alias.replace('.', ' ').replace('_', ' ').replace('-', ' ') %}
+                {% set _n = _alias.title() %}
+                {% endif %}
+
+                {# --- Rol normalizado --- #}
+                {% set _rol = (u.role if u.role else (u.rol if u.rol else ''))|trim|lower %}
+                {% if _rol == 'visor' %}{% set _rol = 'auditor' %}{% endif %}
+
+                {# --- Badge según rol --- #}
+                {% if _rol == 'admin' %}
+                {% set rol_badge_class = 'badge-sic badge-sic-admin' %}
+                {% elif _rol == 'supervisor' %}
+                {% set rol_badge_class = 'badge-sic badge-sic-supervisor' %}
+                {% elif _rol == 'analista' %}
+                {% set rol_badge_class = 'badge-sic badge-sic-analista' %}
+                {% elif _rol == 'auditor' %}
+                {% set rol_badge_class = 'badge-sic badge-sic-auditor' %}
+                {% else %}
+                {% set rol_badge_class = 'badge-sic badge-sic-auditor' %}
+                {% endif %}
+
+                <tr>
+                    <td class="text-white-50 small">#{{ u.id }}</td>
+                    <td class="fw-medium text-white">{{ _n or '—' }}</td>
+                    <td class="text-white-50">{{ u.email or '—' }}</td>
+                    <td><span class="{{ rol_badge_class }}">{{ _rol|capitalize }}</span></td>
+                    <td class="text-white-50 small">
+                        {% if u.created_at %}
+                        {% if u.created_at is string %}
+                        {{ u.created_at }}
+                        {% else %}
+                        {{ u.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% endif %}
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    {% if (user.role or '')|lower != 'auditor' %}
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-2">
+                            <a class="btn btn-sm btn-sic-ghost" href="/sic/users/{{ u.id }}/edit" title="Editar">
+                                <i class="ph-bold ph-pencil-simple"></i>
+                            </a>
+                            {% if u.id == user.id %}
+                            <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip"
+                                title="No puedes eliminarte a ti mismo">
+                                <button class="btn btn-sm btn-sic-ghost disabled"
+                                    style="opacity: 0.5; cursor: not-allowed;">
+                                    <i class="ph-bold ph-trash"></i>
+                                </button>
+                            </span>
+                            {% else %}
+                            <button type="button" class="btn btn-sm btn-sic-ghost text-danger border-danger-subtle"
+                                onclick="showDeleteModal({{ u.id }}, '{{ u.email }}')" title="Eliminar">
+                                <i class="ph-bold ph-trash"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="p-3 border-top border-secondary border-opacity-10 text-white-50 small">
+            Total: {{ users|length }} usuario(s).
+        </div>
+
+        {% endif %}
+    </div>
+</div>
+
+</div>
+
+<!-- Modal de Confirmación -->
+<div class="modal fade" id="deleteUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background-color: #1e293b; border: 1px solid #334155; color: #f1f5f9;">
+            <div class="modal-header" style="border-bottom: 1px solid #334155;">
+                <h5 class="modal-title">Confirmar eliminación</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Estás seguro de que quieres eliminar al usuario <strong id="deleteUserEmail"
+                        class="text-white"></strong>?</p>
+                <p class="text-white-50 small mb-0">Esta acción no se puede deshacer.</p>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid #334155;">
+                <button type="button" class="btn btn-sic-ghost text-white-50" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="performDelete()">
+                    Eliminar usuario
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let targetUserId = null;
+    let deleteModal = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        deleteModal = new bootstrap.Modal(document.getElementById('deleteUserModal'));
+    });
+
+    function showDeleteModal(userId, userEmail) {
+        targetUserId = userId;
+        document.getElementById('deleteUserEmail').textContent = userEmail;
+        deleteModal.show();
+    }
+
+    function performDelete() {
+        if (!targetUserId) return;
+
+        const btn = document.getElementById('confirmDeleteBtn');
+        const originalContent = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Eliminando...';
+
+        const url = '/sic/users/' + targetUserId + '/delete';
+        console.log('Fetching:', url);
+
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+            .then(response => {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else if (response.ok) {
+                    window.location.reload();
+                } else {
+                    return response.text().then(text => {
+                        throw new Error(text || 'Error en la eliminación');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al eliminar: ' + error.message);
+                btn.innerHTML = originalContent;
+                btn.disabled = false;
+                deleteModal.hide();
+            });
+    }
+</script>
+{% endblock %}

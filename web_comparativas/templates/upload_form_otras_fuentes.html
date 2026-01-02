@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% block title %}Nueva carga – Web Comparativas{% endblock %}
+{% block header_title %}Nueva carga{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-center align-items-start py-4">
+    <div class="card shadow-sm" style="max-width:900px; width:100%;">
+        <div class="card-body">
+            <h2 class="mb-4 fw-semibold text-primary">Cargar archivo</h2>
+
+
+
+            <form action="/otras-fuentes" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm">
+                <!-- Reutilizamos estructura similar pero con action /otras-fuentes -->
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">N° de proceso</label>
+                    <input name="proceso_nro" class="form-control" placeholder="Ej. 45/356" required />
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Fecha de apertura</label>
+                    <input name="apertura_fecha" type="date" class="form-control" required />
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">N° de cuenta</label>
+                    <input name="cuenta_nro" id="n_cuenta" class="form-control" placeholder="Opcional" />
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Plataforma</label>
+                    <select name="plataforma" id="plataformaSel" class="form-select">
+                        <option value="">— Seleccionar —</option>
+                        <option value="BAC">BAC</option>
+                        <option value="COMPRAR">COMPRAR</option>
+                        <option value="PBAC">PBAC</option>
+                        <option value="LA_PAMPA">LA PAMPA</option>
+                        <option value="SIPROSA">SIPROSA</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Comprador</label>
+                    <input name="comprador" id="compradorInp" class="form-control"
+                        placeholder="Ej. HTAL. RAMON SARDA" />
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Provincia/Municipio</label>
+                    <input name="provincia" id="provinciaInp" class="form-control" placeholder="Ej. Buenos Aires" />
+                </div>
+
+                <div class="col-12" id="genericFileSection">
+                    <label class="form-label fw-semibold">Archivo</label>
+                    <input type="file" name="file" id="fileInput" class="form-control" accept=".pdf,.xls,.xlsx,.zip" />
+                    <div class="form-text">Formatos admitidos: PDF, Excel o ZIP.</div>
+                </div>
+
+                <!-- Sección específica para LA PAMPA (2 archivos) -->
+                <div class="col-12 d-none" id="laPampaFilesSection">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Archivo Comparativa (PDF)</label>
+                            <input type="file" name="file_comparativa" id="fileInputComparativa" class="form-control"
+                                accept=".pdf" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Archivo Pliego (PDF)</label>
+                            <input type="file" name="file_pliego" id="fileInputPliego" class="form-control"
+                                accept=".pdf" />
+                        </div>
+                    </div>
+                    <div class="form-text mt-2">Para La Pampa se requieren ambos PDFs por separado. el sistema los
+                        unirán internamente.</div>
+                </div>
+
+                <!-- Sección específica para SIPROSA (3 archivos) -->
+                <div class="col-12 d-none" id="siprosaFilesSection">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Archivo 1 (Excel)</label>
+                            <input type="file" name="file_siprosa_1" id="fileSiprosa1" class="form-control"
+                                accept=".xls,.xlsx,.xlsm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Archivo 2 (Excel)</label>
+                            <input type="file" name="file_siprosa_2" id="fileSiprosa2" class="form-control"
+                                accept=".xls,.xlsx,.xlsm" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Archivo 3 (Excel)</label>
+                            <input type="file" name="file_siprosa_3" id="fileSiprosa3" class="form-control"
+                                accept=".xls,.xlsx,.xlsm" />
+                        </div>
+                    </div>
+                    <div class="form-text mt-2">Para Siprosa se requieren 3 archivos Excel (Ranking). El sistema los
+                        procesará en conjunto.</div>
+                </div>
+
+                <input type="hidden" name="platform_hint" id="platform_hint" />
+                <input type="hidden" name="buyer_hint" id="buyer_hint" />
+                <input type="hidden" name="province_hint" id="province_hint" />
+
+                <div class="col-12 d-grid mt-3">
+                    <button class="btn btn-primary btn-lg">
+                        <i class="bi bi-upload me-2"></i> Subir archivo
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Script principal (Reutilizado) -->
+<script>
+    (function () {
+        const form = document.getElementById('uploadForm');
+        const plataforma = document.getElementById('plataformaSel');
+        const comprador = document.getElementById('compradorInp');
+        const provincia = document.getElementById('provinciaInp');
+        const cuenta = document.getElementById('n_cuenta');
+        const fileInput = document.getElementById('fileInput');
+
+        // La Pampa elements
+        const genericSection = document.getElementById('genericFileSection');
+        const pampaSection = document.getElementById('laPampaFilesSection');
+        const inputComp = document.getElementById('fileInputComparativa');
+        const inputPlie = document.getElementById('fileInputPliego');
+
+        // Siprosa elements
+        const siprosaSection = document.getElementById('siprosaFilesSection');
+        const inputSip1 = document.getElementById('fileSiprosa1');
+        const inputSip2 = document.getElementById('fileSiprosa2');
+        const inputSip3 = document.getElementById('fileSiprosa3');
+
+        const hPlatform = document.getElementById('platform_hint');
+        const hBuyer = document.getElementById('buyer_hint');
+        const hProvince = document.getElementById('province_hint');
+
+        // --- Lógica de toggle para La Pampa / Siprosa ---
+        function handlePlatformChange() {
+            const val = (plataforma && plataforma.value) ? plataforma.value : "";
+
+            // Reset visibilidad
+            if (genericSection) genericSection.classList.add('d-none');
+            if (pampaSection) pampaSection.classList.add('d-none');
+            if (siprosaSection) siprosaSection.classList.add('d-none');
+
+            // Reset required
+            if (fileInput) fileInput.removeAttribute('required');
+            if (inputComp) inputComp.removeAttribute('required');
+            if (inputPlie) inputPlie.removeAttribute('required');
+            if (inputSip1) inputSip1.removeAttribute('required');
+            if (inputSip2) inputSip2.removeAttribute('required');
+            if (inputSip3) inputSip3.removeAttribute('required');
+
+            if (val === 'LA_PAMPA') {
+                if (pampaSection) pampaSection.classList.remove('d-none');
+                if (inputComp) inputComp.setAttribute('required', 'required');
+                if (inputPlie) inputPlie.setAttribute('required', 'required');
+
+            } else if (val === 'SIPROSA') {
+                if (siprosaSection) siprosaSection.classList.remove('d-none');
+                if (inputSip1) inputSip1.setAttribute('required', 'required');
+                if (inputSip2) inputSip2.setAttribute('required', 'required');
+                if (inputSip3) inputSip3.setAttribute('required', 'required');
+
+            } else {
+                // Default: genérico
+                if (genericSection) genericSection.classList.remove('d-none');
+                if (fileInput) fileInput.setAttribute('required', 'required');
+            }
+
+            syncHints();
+        }
+
+        // --- Validación del archivo antes del envío ---
+        if (form && fileInput) {
+            form.addEventListener('submit', function (e) {
+                // Validación condicional
+                const pVal = (plataforma && plataforma.value) ? plataforma.value : "";
+
+                if (pVal === 'LA_PAMPA') {
+                    // Validar los 2 archivos de La Pampa
+                    if (!inputComp || !inputComp.files[0]) {
+                        alert("Falta archivo Comparativa.");
+                        e.preventDefault(); return false;
+                    }
+                    if (!inputPlie || !inputPlie.files[0]) {
+                        alert("Falta archivo Pliego.");
+                        e.preventDefault(); return false;
+                    }
+                    // Validar extensiones PDF
+                    const f1 = inputComp.files[0].name.toLowerCase();
+                    const f2 = inputPlie.files[0].name.toLowerCase();
+                    if (!f1.endsWith('.pdf') || !f2.endsWith('.pdf')) {
+                        alert("Para La Pampa ambos archivos deben ser PDF.");
+                        e.preventDefault(); return false;
+                    }
+                    return; // OK
+                }
+
+                if (pVal === 'SIPROSA') {
+                    // Validar los 3 archivos de Siprosa
+                    if (!inputSip1 || !inputSip1.files[0] || !inputSip2 || !inputSip2.files[0] || !inputSip3 || !inputSip3.files[0]) {
+                        alert("Faltan archivos de Siprosa (se requieren 3).");
+                        e.preventDefault(); return false;
+                    }
+                    // Validar extensiones Excel
+                    const s1 = inputSip1.files[0].name.toLowerCase();
+                    const s2 = inputSip2.files[0].name.toLowerCase();
+                    const s3 = inputSip3.files[0].name.toLowerCase();
+                    const validExcel = ['.xls', '.xlsx', '.xlsm'];
+
+                    function isExcel(name) {
+                        return validExcel.some(ext => name.endsWith(ext));
+                    }
+
+                    if (!isExcel(s1) || !isExcel(s2) || !isExcel(s3)) {
+                        alert("Para Siprosa todos los archivos deben ser Excel (.xls, .xlsx, .xlsm).");
+                        e.preventDefault(); return false;
+                    }
+                    return; // OK
+                }
+
+                // Validación estándar (si no es La Pampa ni Siprosa)
+                const file = fileInput.files[0];
+                if (!file) return; // si no seleccionó nada, el required del input ya se encarga
+
+                const validExt = ['pdf', 'xls', 'xlsx', 'zip'];
+                const ext = file.name.split('.').pop().toLowerCase();
+
+                if (!validExt.includes(ext)) {
+                    e.preventDefault(); // bloquea el envío
+                    alert(`⚠️ Archivo no permitido: "${file.name}".\n\nSolo se admiten formatos PDF, Excel (.xls/.xlsx) o ZIP.`);
+                    fileInput.value = ''; // limpia el input
+                    return false;
+                }
+
+                // opcional: tamaño máximo (ejemplo 25MB)
+                const maxSizeMB = 25;
+                if (file.size > maxSizeMB * 1024 * 1024) {
+                    e.preventDefault();
+                    alert(`⚠️ El archivo supera el tamaño máximo permitido (${maxSizeMB} MB).`);
+                    fileInput.value = '';
+                    return false;
+                }
+            });
+        }
+
+        // --- Sincronización de hints (igual que antes) ---
+        function syncHints() {
+            hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
+            hBuyer.value = (comprador && comprador.value ? comprador.value : '').trim();
+            hProvince.value = (provincia && provincia.value ? provincia.value : '').trim();
+        }
+
+        if (plataforma) {
+            plataforma.addEventListener('change', handlePlatformChange);
+            // Llamada inicial por si vuelve atrás o recarga con valor
+            // handlePlatformChange(); // Se puede llamar en DOMContentLoaded
+        }
+        if (comprador) comprador.addEventListener('input', syncHints);
+        if (provincia) provincia.addEventListener('input', syncHints);
+        window.addEventListener('DOMContentLoaded', function () {
+            syncHints();
+            handlePlatformChange();
+        });
+        if (form) form.addEventListener('submit', function () { syncHints(); });
+
+        // --- Autocompletar por N° de cuenta ---
+        if (cuenta) {
+            let ultimoBuscado = "";
+
+            async function buscarCliente(nro) {
+                try {
+                    const resp = await fetch(`/api/clientes/${encodeURIComponent(nro)}`);
+                    if (!resp.ok) return { ok: false };
+                    return await resp.json();
+                } catch (err) {
+                    console.warn("Error consultando cliente:", err);
+                    return { ok: false };
+                }
+            }
+
+            function rellenarCampos(data) {
+                if (!data) return;
+                if (comprador && data.comprador) comprador.value = data.comprador;
+                if (provincia && data.provincia) provincia.value = data.provincia;
+                syncHints();
+            }
+
+            function limpiarCamposAutocompletados() {
+                if (comprador) comprador.value = "";
+                if (provincia) provincia.value = "";
+                syncHints();
+            }
+
+            async function manejarCuenta() {
+                const valor = (cuenta.value || "").trim();
+                if (!valor) { limpiarCamposAutocompletados(); ultimoBuscado = ""; return; }
+                if (valor === ultimoBuscado) return;
+                ultimoBuscado = valor;
+
+                const res = await buscarCliente(valor);
+                if (res && res.ok && res.data) {
+                    rellenarCampos(res.data);
+                } else {
+                    limpiarCamposAutocompletados();
+                }
+            }
+
+            cuenta.addEventListener('blur', manejarCuenta);
+            cuenta.addEventListener('change', manejarCuenta);
+            cuenta.addEventListener('keyup', function (ev) {
+                const valor = (cuenta.value || "").trim();
+                if (ev.key === "Enter") manejarCuenta();
+                else if (valor.length >= 4) manejarCuenta();
+            });
+        }
+
+    })();
+</script>
+{% endblock %}

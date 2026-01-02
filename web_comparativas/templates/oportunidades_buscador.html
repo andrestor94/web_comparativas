@@ -1,0 +1,678 @@
+{% extends "base.html" %}
+{% block title %}Buscador{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* === BUSCADOR: TECH / FLAT THEME === */
+
+  /* Mantener variables de colores semánticos para lógica JS (semáforo) */
+  :root {
+    /* Mapeo a variables globales donde sea posible */
+    --dim-emergency: var(--brand-azul);
+    /* #064066 */
+    --dim-emergency-soft: var(--brand-azul-2);
+    /* #5274ce */
+    --dim-regular: #6CC4E0;
+    --dim-regular-soft: #BFE9F6;
+
+    --dim-treemap-dark1: var(--brand-azul);
+    --dim-treemap-dark2: var(--primary-600);
+    --dim-treemap-dark3: var(--brand-azul-light);
+    --dim-treemap-base: #8CC5EA;
+
+    --dim-card-from: #ffffff;
+    --dim-card-mid: #ffffff;
+    --dim-band-fill: #f8fafc;
+  }
+
+  /* Reset de overrides conflictivos */
+  .card {
+    /* Hereda del global app.theme.css (Flat, Bordered) */
+    background: #fff;
+    border: 1px solid var(--ink-200);
+    box-shadow: none !important;
+  }
+
+  /* Toolbar superior */
+  .topbar {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    background: #ffffff;
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    border: 1px solid var(--ink-200);
+  }
+
+  .filters-grid {
+    display: grid;
+    grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Tarjetas de filtro internas: FLAT, borde fino */
+  .filter-card,
+  .filter-card--compact,
+  .filter-card--band,
+  .filter-card--date {
+    background: #ffffff;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+    min-height: 56px;
+    box-shadow: none !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .filter-card h5,
+  .filter-card--compact h5,
+  .filter-card--band h5,
+  .filter-card--date h5 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--ink-500);
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.05em;
+  }
+
+  /* Inputs dentro de filtros */
+  .field input,
+  .field select,
+  .dates-row input {
+    width: 100%;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    background: #fff;
+    font-size: 0.85rem;
+    height: 32px;
+  }
+
+  .field input:focus,
+  .field select:focus {
+    border-color: var(--secondary-500);
+    outline: none;
+  }
+
+  /* Fila secundaria de filtros */
+  .filters-row-secondary {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto 1fr 2fr 1fr;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }
+
+  @media (max-width: 1200px) {
+    .filters-row-secondary {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .filters-row-secondary .mini-kpi {
+    /* Ya no es necesario flex basis */
+  }
+
+  /* KPI Procesos */
+  .mini-kpi {
+    background: #f8fafc;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .mini-kpi h4 {
+    margin: 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--ink-500);
+    font-weight: 700;
+  }
+
+  .mini-kpi .v {
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--primary-500);
+    font-family: 'Outfit', sans-serif;
+  }
+
+  /* Chips */
+  .chips {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+    /* Asegurar nowrap como habiamos arreglado */
+  }
+
+  .chip {
+    border: 1px solid var(--ink-200);
+    background: #fff;
+    color: var(--ink-700);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .chip:hover {
+    border-color: var(--secondary-500);
+    color: var(--secondary-500);
+  }
+
+  .chip.is-on {
+    background: var(--secondary-500);
+    border-color: var(--secondary-500);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* Slider & Search are now global in app.theme.css */
+
+  /* Toast & Upload (Legacy kept clean) */
+  .toast {
+    border: 1px solid #bbf7d0;
+    background: #dcfce7;
+    color: #14532d;
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+
+  /* Table Container */
+  .table-wrap {
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    margin-top: 1rem;
+  }
+
+  .table th {
+    background: var(--ink-050);
+    color: var(--ink-700);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--ink-200);
+  }
+
+  .table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--ink-100);
+    font-size: 0.9rem;
+  }
+
+  /* Decision Pills */
+  .decision-pill {
+    border-radius: 99px;
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+  }
+
+  .decision-pill.is-accepted {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .decision-pill.is-rejected {
+    background: #fee2e2;
+    color: #b91c1b;
+  }
+
+  /* Paginación */
+  .pager {
+    margin-top: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  @media (max-width: 1200px) {
+    .filters-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .filters-row-secondary {
+      flex-wrap: wrap;
+    }
+
+    .search-card {
+      flex-wrap: wrap;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-xxl py-4">
+  <h1 class="mb-1">Buscador</h1>
+
+  <!-- Región de avisos accesible -->
+  <div aria-live="polite" aria-atomic="true">
+    {% if toast %}
+    <div id="oppToast" class="toast" role="status">
+      <span>✅ {{ toast }}</span>
+      <button type="button" class="toast-close" aria-label="Cerrar aviso">&times;</button>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Upload (Tech Style - Compact Horizontal) -->
+  {% if (user.role or '')|lower == 'admin' %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+          <h2 class="h5 mb-1 fw-bold" style="color: var(--brand-azul);">Archivo - Reporte de Oportunidades</h2>
+          <div class="small" style="color: var(--ink-500);">
+            {% if opp.has_file %}
+            <span class="badge bg-success-subtle text-success">Activo</span>
+            <span class="ms-2">Actualizado: {{ opp.last_updated_str }} · {{ opp.rows }} filas</span>
+            {% else %}
+            <span class="badge bg-light text-dark border">Sin archivo</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <form action="/oportunidades/buscador/upload" method="post" enctype="multipart/form-data">
+        <div class="d-flex align-items-center gap-3">
+          <div class="upload-zone-tech flex-grow-1">
+            <input id="oppFile" type="file" name="file" accept=".xlsx,.xls"
+              onchange="document.getElementById('fileName').textContent = this.files[0]?.name || ''">
+            <div class="upload-zone-content">
+              <div class="upload-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16"
+                  style="display: block;">
+                  <path
+                    d="M4.406 1.342A5.53 5.53 0 0 1 8 0c2.69 0 4.923 2 5.166 4.579C14.758 4.804 16 6.137 16 7.773 16 9.569 14.502 11 12.687 11H10a.5.5 0 0 1 0-1h2.688C13.979 10 15 8.988 15 7.773c0-1.216-1.02-2.228-2.313-2.228h-.5v-.5C12.188 2.825 10.328 1 8 1a4.53 4.53 0 0 0-2.941 1.1c-.757.652-1.153 1.438-1.153 2.055v.448l-.445.049C2.064 4.805 1 5.952 1 7.318 1 8.785 2.23 10 3.781 10H6a.5.5 0 0 1 0 1H3.781C1.708 11 0 9.366 0 7.318c0-1.763 1.266-3.223 2.942-3.593.143-.863.698-1.723 1.464-2.383z" />
+                  <path
+                    d="M7.646 4.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V11.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3z" />
+                </svg>
+              </div>
+              <div class="upload-text-group">
+                <div class="upload-text">Seleccionar archivo o arrastrá aquí</div>
+                <div class="upload-hint">Formatos: .xlsx, .xls</div>
+                <div id="fileName" class="upload-file-name"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-column gap-2 align-items-end">
+            <button class="btn btn-primary d-flex align-items-center gap-2" type="submit" id="btnUpload"
+              style="min-width: 180px; white-space: nowrap;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path
+                  d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z" />
+                <path
+                  d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z" />
+              </svg>
+              Subir archivo
+            </button>
+            <div class="loading text-center small" id="upLoading" role="status" aria-live="polite"
+              style="display:none; color: var(--brand-azul);">
+              <div class="spinner-border spinner-border-sm" role="status"></div>
+              <span class="ms-2">Procesando...</span>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Dashboard -->
+  <div class="card" style="border-color:#d4e2ff;">
+    <div class="topbar mb-3">
+      <div class="filters-grid" role="group" aria-label="Filtros de búsqueda">
+        <!-- Fecha -->
+        <div class="filter-card filter-card--date" aria-labelledby="lblFecha">
+          <h5 id="lblFecha">Fecha</h5>
+
+          <div class="d-flex gap-2 mb-2">
+            <input id="fDateFrom" type="date" class="input-tech-date flex-fill" aria-label="Fecha desde">
+            <input id="fDateTo" type="date" class="input-tech-date flex-fill" aria-label="Fecha hasta">
+          </div>
+
+          <div class="range-wrap" aria-hidden="false" aria-label="Rango de fechas (slider)">
+            <div class="range-track"></div>
+            <div class="range-fill" id="dateFill"></div>
+            <input type="range" id="fRangeMin" min="0" max="100" value="0" step="1" aria-label="Límite inferior">
+            <input type="range" id="fRangeMax" min="0" max="100" value="100" step="1" aria-label="Límite superior">
+          </div>
+        </div>
+
+        <!-- Plataforma -->
+        <div class="filter-card filter-card--compact">
+          <h5>Plataforma</h5>
+          <div class="field">
+            <select id="fPlataforma" aria-label="Filtrar por plataforma">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Operador -->
+        <div class="filter-card filter-card--compact">
+          <h5>Operador</h5>
+          <div class="field">
+            <select id="fOperador" aria-label="Filtrar por operador">
+              <option value="">Todos</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Cuenta -->
+        <div class="filter-card filter-card--compact">
+          <h5>Cuenta</h5>
+          <div class="field">
+            <select id="fCuenta" aria-label="Filtrar por cuenta">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Repartición -->
+        <div class="filter-card filter-card--compact">
+          <h5>Repartición</h5>
+          <div class="field">
+            <select id="fReparticion" aria-label="Filtrar por repartición">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Fila secundaria -->
+        <div class="filters-row-secondary">
+          <!-- KPI Procesos -->
+          <div class="mini-kpi" role="status" aria-live="polite" aria-label="Cantidad de procesos filtrados">
+            <h4>Procesos</h4>
+            <div class="v" id="kProcesos">0</div>
+          </div>
+
+          <!-- Repartición: PAMI u Otras -->
+          <div class="filter-card filter-card--band">
+            <h5>Repartición: PAMI u Otras</h5>
+            <div class="chips" id="swPAMI" role="group" aria-label="Filtro PAMI">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="pami" aria-pressed="false">PAMI</button>
+              <button type="button" class="chip" data-val="otras" aria-pressed="false">Otras</button>
+            </div>
+          </div>
+
+          <!-- Evaluación -->
+          <div class="filter-card">
+            <h5>Evaluación</h5>
+            <div class="chips" id="swDecision" role="group" aria-label="Filtro evaluación">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="aceptado" aria-pressed="false">Aceptados</button>
+              <button type="button" class="chip" data-val="rechazado" aria-pressed="false">Rechazados</button>
+              <button type="button" class="chip" data-val="sin-marcar" aria-pressed="false">Sin marcar</button>
+            </div>
+          </div>
+
+          <!-- Estado -->
+          <div class="filter-card filter-card--band">
+            <h5>Estado</h5>
+            <div class="chips" id="swEstado" role="group" aria-label="Filtro estado">
+              <button type="button" class="chip is-on" data-val="todos" aria-pressed="true">Todos</button>
+              <button type="button" class="chip" data-val="emergencia" aria-pressed="false">Emergencia</button>
+              <button type="button" class="chip" data-val="regular" aria-pressed="false">Regular</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Buscar + acciones -->
+        <div class="search-box-tech" style="margin-top:6px; grid-column:1 / -1;">
+          <div class="input-group">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+              class="icon-search bi bi-search" viewBox="0 0 16 16">
+              <path
+                d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" />
+            </svg>
+            <input id="fBuscar" placeholder="Buscar por objeto..." autocomplete="off" aria-label="Buscar por objeto">
+            <button class="clear btn-tech-ghost" id="fClear" type="button" title="Limpiar búsqueda"
+              aria-label="Limpiar búsqueda" style="padding:0 8px;">✕</button>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary btn-sm" id="btnAplicar" type="button">Aplicar</button>
+            <button class="btn btn-tech-secondary" id="btnLimpiar" type="button">Limpiar</button>
+            <button class="btn btn-tech-ghost" id="btnExport" type="button" title="Exportar CSV">
+              <i class="bi bi-download"></i> CSV
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabla -->
+    <div class="table-wrap" role="region" aria-label="Resultados de oportunidades">
+      <table class="table" id="oppTable" role="table">
+        <thead>
+          <tr role="row">
+            <th scope="col">Número</th>
+            <th scope="col">Repartición</th>
+            <th scope="col">Objeto</th>
+            <th scope="col">Apertura</th>
+            <th scope="col">Tipo</th>
+            <th scope="col">Evaluación</th>
+            <th scope="col">Enlace de pliego</th>
+          </tr>
+        </thead>
+        <tbody id="oppTBody">
+          {% for row in table_rows %}
+          {% set numero =
+          row.get('Número')
+          or row.get('N° Proceso')
+          or row.get('Nro Proceso')
+          or row.get('Proceso')
+          %}
+          {% set reparticion =
+          row.get('Repartición')
+          or row.get('Comprador')
+          or row.get('Entidad Contratante')
+          or row.get('Organismo')
+          %}
+          {% set objeto =
+          row.get('Objeto')
+          or row.get('Objeto / Descripción')
+          or row.get('Descripción')
+          %}
+          {% set apertura_txt =
+          row.get('Apertura')
+          or row.get('Fecha Límite')
+          or row.get('Fecha de Cierre')
+          or row.get('Fecha de Apertura')
+          or row.get('Fecha')
+          %}
+          {% set tipo =
+          row.get('Tipo')
+          or row.get('Modalidad')
+          or row.get('Procedimiento')
+          %}
+          {% set plataforma =
+          row.get('Plataforma')
+          or row.get('Portal')
+          %}
+          {% set operador =
+          row.get('Operador')
+          or row.get('Responsable')
+          %}
+          {% set cuenta =
+          row.get('Cuenta')
+          or row.get('Número')
+          %}
+          {% set uape =
+          row.get('N° UAPE')
+          or row.get('Unidad Compra')
+          or row.get('Cod. UAPE')
+          %}
+          {% set estado_raw =
+          row.get('Estado')
+          or row.get('Tipo Proceso')
+          or row.get('Carácter')
+          %}
+          {% set enlace =
+          row.get('Enlace de pliego')
+          or row.get('Enlace')
+          or row.get('URL')
+          or row.get('Link')
+          %}
+
+          <tr data-numero="{{ numero|e }}" data-reparticion="{{ reparticion|e }}" data-objeto="{{ objeto|e }}"
+            data-apertura="{{ apertura_txt|e }}" data-tipo="{{ tipo|e }}" data-plataforma="{{ plataforma|e }}"
+            data-operador="{{ operador|e }}" data-cuenta="{{ cuenta|e }}" data-uape="{{ uape|e }}"
+            data-estado="{{ estado_raw|e }}" data-decision="sin-marcar" data-rowkey="{{ numero|e }}">
+            <td title="{{ numero }}">{{ numero }}</td>
+            <td title="{{ reparticion }}">{{ reparticion }}</td>
+            <td title="{{ objeto }}">{{ objeto }}</td>
+            <td title="{{ apertura_txt }}">{{ apertura_txt }}</td>
+            <td title="{{ tipo }}">{{ tipo }}</td>
+
+            <!-- Columna DECISIÓN -->
+            <td class="opp-decision" data-decision-cell>
+              <div class="decision-cell">
+                <button type="button" class="decision-pill js-decide" data-action="aceptar">
+                  Aceptar
+                </button>
+                <button type="button" class="decision-pill js-decide" data-action="rechazar">
+                  Rechazar
+                </button>
+              </div>
+            </td>
+
+            <td>
+              {% if enlace %}
+              <a class="link-ico" href="{{ enlace }}" target="_blank" rel="noopener noreferrer"
+                title="Abrir pliego en nueva pestaña">🔗</a>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+
+          {% if table_rows|length == 0 %}
+          <tr>
+            <td class="muted" colspan="7">Sin resultados para los filtros actuales.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="pager" role="navigation" aria-label="Paginación">
+      <div class="muted">
+        Mostrando <span id="showFrom">0</span>–<span id="showTo">0</span> de <span id="totalFound">0</span>
+      </div>
+
+      <div class="stack" style="align-items:center">
+        <span class="muted small">Filas por página:</span>
+        <select id="pageSizeSelect" class="page-size-select">
+          {% set _ps = page_size or 20 %}
+          <option value="20" {% if _ps==20 %}selected{% endif %}>20</option>
+          <option value="50" {% if _ps==50 %}selected{% endif %}>50</option>
+          <option value="100" {% if _ps==100 %}selected{% endif %}>100</option>
+          <option value="200" {% if _ps==200 %}selected{% endif %}>200</option>
+        </select>
+      </div>
+
+      <div class="stack">
+        <button class="btn" id="prevPage" type="button" disabled>Anterior</button>
+        <span class="muted">Página <span id="curPage">1</span> / <span id="maxPage">1</span></span>
+        <button class="btn" id="nextPage" type="button" disabled>Siguiente</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Config inicial para el JS -->
+<script>
+  window.OPP_UI = {
+    pageSize: {{ page_size or 20 }},
+  initialDateFrom: null,
+    initialDateTo: null,
+      els: {
+    file: 'oppFile',
+      drop: 'oppDrop',
+        btnUpload: 'btnUpload',
+          upLoading: 'upLoading',
+            buscar: 'fBuscar',
+              clear: 'fClear',
+                aplicar: 'btnAplicar',
+                  limpiar: 'btnLimpiar',
+      export: 'btnExport',
+      downloadCurrent: 'btnDownloadCurrent',
+        plataforma: 'fPlataforma',
+          operador: 'fOperador',
+            cuenta: 'fCuenta',
+              reparticion: 'fReparticion',
+                swPAMI: 'swPAMI',
+                  swEstado: 'swEstado',
+                    swDecision: 'swDecision',
+                      dateFrom: 'fDateFrom',
+                        dateTo: 'fDateTo',
+                          rMin: 'fRangeMin',
+                            rMax: 'fRangeMax',
+                              rFill: 'dateFill',
+                                lblFrom: 'lblFrom',
+                                  lblTo: 'lblTo',
+                                    kProcesos: 'kProcesos',
+                                      table: 'oppTable',
+                                        tbody: 'oppTBody',
+                                          pagerPrev: 'prevPage',
+                                            pagerNext: 'nextPage',
+                                              showFrom: 'showFrom',
+                                                showTo: 'showTo',
+                                                  totalFound: 'totalFound',
+                                                    curPage: 'curPage',
+                                                      maxPage: 'maxPage',
+                                                        pageSizeSelect: 'pageSizeSelect'
+  }
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var toast = document.getElementById('oppToast');
+    if (toast) {
+      var btn = toast.querySelector('.toast-close');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          toast.style.display = 'none';
+        });
+      }
+    }
+
+    var sel = document.getElementById('pageSizeSelect');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        var v = parseInt(this.value, 10) || 20;
+        if (window.OPP_UI) {
+          window.OPP_UI.pageSize = v;
+        }
+        if (window.OPP && typeof window.OPP.refreshPageSize === 'function') {
+          window.OPP.refreshPageSize(v);
+        } else {
+          document.dispatchEvent(
+            new CustomEvent('opp:pageSizeChanged', { detail: { pageSize: v } })
+          );
+        }
+      });
+    }
+  });
+</script>
+<script src="{{ url_for('static', path='/js/oportunidades_buscador.js') }}" defer></script>
+{% endblock %}

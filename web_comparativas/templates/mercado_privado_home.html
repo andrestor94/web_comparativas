@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Mercado Privado – Inicio{% endblock %}
+
+{% block content %}
+<!-- Custom CSS for Cards (Copied from Home) -->
+<style>
+    :root {
+        --sa-azul: #064066;
+        --sa-azul-alt: #5274ce;
+        --sa-panel-bg: #ffffff;
+        --sa-borde-soft: #e2e8f0;
+        --tech-blue-mid: #5274ce;
+    }
+
+    .panel-section {
+        background: var(--sa-panel-bg);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+        border: 1px solid var(--sa-borde-soft);
+    }
+
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .panel-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--sa-azul);
+        letter-spacing: .02em;
+    }
+
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+    }
+
+    .kpi-card {
+        background: #f8fafc;
+        border-radius: 0.75rem;
+        padding: 1.25rem;
+        border: 1px solid var(--sa-borde-soft);
+        transition: all 0.2s ease;
+        text-align: center;
+    }
+
+    .kpi-card:hover {
+        background: #fff;
+        border-color: var(--sa-azul-alt);
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+    }
+
+    .kpi-title {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        font-weight: 700;
+        color: #64748b;
+        margin-bottom: 0.5rem;
+    }
+
+    .kpi-value {
+        font-size: 2rem;
+        font-weight: 800;
+        color: var(--sa-azul);
+        line-height: 1.1;
+        font-family: 'Outfit', sans-serif;
+        margin-bottom: 0.25rem;
+    }
+
+    .kpi-sub {
+        font-size: 0.85rem;
+        color: #94a3b8;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="m-0 fw-bold" style="color: var(--sa-azul);">Mercado Privado</h2>
+</div>
+
+<!-- Alcance de Dimensionamiento Section -->
+<div class="panel-section" style="border-top: 4px solid var(--sa-azul-alt);">
+    <div class="panel-header">
+        <div class="panel-title">Alcance de dimensionamiento</div>
+    </div>
+    <div class="kpi-grid">
+        <!-- Card 1: Clientes -->
+        <div class="kpi-card">
+            <div class="kpi-title">Cantidad de clientes</div>
+            <div class="kpi-value" id="kpiClientsHome">-</div>
+            <div class="kpi-sub">Clientes identificados</div>
+        </div>
+        <!-- Card 2: Familias -->
+        <div class="kpi-card">
+            <div class="kpi-title">Cantidad de familias Suizo</div>
+            <div class="kpi-value" id="kpiFamiliesHome">-</div>
+            <div class="kpi-sub">Familias analizadas</div>
+        </div>
+        <!-- Card 3: Procesos -->
+        <div class="kpi-card">
+            <div class="kpi-title">Cantidad de procesos</div>
+            <div class="kpi-value" id="kpiProcessesHome">-</div>
+            <div class="kpi-sub">Procesos únicos</div>
+        </div>
+    </div>
+</div>
+
+
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const clientEl = document.getElementById('kpiClientsHome');
+        const familyEl = document.getElementById('kpiFamiliesHome');
+        const processEl = document.getElementById('kpiProcessesHome');
+
+        // Formatter
+        const fmt = new Intl.NumberFormat('es-AR');
+
+        try {
+            const raw = localStorage.getItem('mp_dimensiones_kpis');
+            if (raw) {
+                const data = JSON.parse(raw);
+                if (data) {
+                    clientEl.textContent = fmt.format(data.clients || 0);
+                    familyEl.textContent = fmt.format(data.families || 0);
+                    processEl.textContent = fmt.format(data.processes || 0);
+                }
+            } else {
+                // Default 0 if no data
+                clientEl.textContent = "0";
+                familyEl.textContent = "0";
+                processEl.textContent = "0";
+            }
+        } catch (e) {
+            console.warn("Error loading KPIs from localStorage", e);
+            clientEl.textContent = "0";
+            familyEl.textContent = "0";
+            processEl.textContent = "0";
+        }
+    });
+</script>
+{% endblock %}

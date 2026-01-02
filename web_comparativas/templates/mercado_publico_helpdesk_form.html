@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Nueva Consulta – Mercado Público{% endblock %}
+
+{% block extra_head %}
+<style>
+    .form-control::placeholder {
+        color: #6c757d;
+        opacity: 0.6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="d-flex align-items-center mb-4">
+            <a href="/mercado-publico/helpdesk" class="btn btn-sm btn-outline-secondary me-3">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <div>
+                <h1 class="h3 fw-bold mb-1">Nueva Consulta</h1>
+                <p class="text-muted small mb-0">Describe tu consulta o problema para que podamos ayudarte.</p>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <form action="/mercado-publico/helpdesk/new" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Asunto</label>
+                        <input type="text" name="title" class="form-control" required
+                            placeholder="Ej. Error al cargar archivo de ventas">
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label text-muted small">Categoría</label>
+                            <select name="category" class="form-select">
+                                <option value="consulta">Consulta General</option>
+                                <option value="error">Reporte de Error</option>
+                                <option value="sugerencia">Sugerencia</option>
+                                <option value="acceso">Problema de Acceso</option>
+                                <option value="otro">Otro</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label text-muted small">Prioridad</label>
+                            <select name="priority" class="form-select">
+                                <option value="baja">Baja</option>
+                                <option value="media" selected>Media</option>
+                                <option value="alta">Alta</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted small">Mensaje inicial</label>
+                        <textarea name="message" class="form-control" rows="5" required
+                            placeholder="Describe detalladamente lo que sucede..."></textarea>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2">
+                        <a href="/mercado-publico/helpdesk" class="btn btn-light">Cancelar</a>
+                        <button type="submit" class="btn btn-primary">
+                            Enviar Consulta <i class="bi bi-send ms-2"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

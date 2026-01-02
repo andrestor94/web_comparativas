@@ -1,0 +1,393 @@
+{% extends "sic/base_sic.html" %}
+{% block title %}Consulta #{{ ticket.id }} – S.I.C{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Chat Layout */
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        padding: 1rem 0;
+        min-height: 400px;
+    }
+
+    .chat-bubble-row {
+        display: flex;
+        gap: 1rem;
+        max-width: 85%;
+        animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .chat-bubble-row.me {
+        margin-left: auto;
+        flex-direction: row-reverse;
+    }
+
+    .chat-bubble-row.them {
+        margin-right: auto;
+    }
+
+
+
+    .chat-bubble {
+        padding: 1.25rem;
+        border-radius: 18px;
+        line-height: 1.6;
+        font-size: 0.95rem;
+        position: relative;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    .chat-bubble-row.me .chat-bubble {
+        background: linear-gradient(135deg, var(--sic-highlight) 0%, var(--sic-accent) 100%);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .chat-bubble-row.them .chat-bubble {
+        background: rgba(30, 41, 59, 0.9);
+        border: 1px solid var(--sic-border);
+        color: #e2e8f0;
+        border-bottom-left-radius: 4px;
+    }
+
+    .chat-meta {
+        font-size: 0.7rem;
+        color: var(--sic-text-muted);
+        margin-top: 0.5rem;
+        font-weight: 500;
+        opacity: 0.8;
+    }
+
+    .chat-input-area {
+        position: sticky;
+        bottom: 0;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(20px);
+        padding: 1.5rem;
+        border-top: 1px solid var(--sic-border);
+        margin-top: auto;
+        border-radius: 20px 20px 0 0;
+        margin-left: -1.5rem;
+        margin-right: -1.5rem;
+        margin-bottom: -1.5rem;
+        z-index: 100;
+    }
+
+    .consulta-sidebar {
+        position: sticky;
+        top: 90px;
+    }
+
+    .consulta-header-card {
+        background: linear-gradient(to right, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0) 80%);
+        border-left: 4px solid var(--sic-highlight);
+        padding: 1.5rem;
+        border-radius: 0 16px 16px 0;
+        margin-bottom: 2rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row h-100">
+    <!-- Main Chat Area -->
+    <div class="col-12 col-lg-8 mb-4 mb-lg-0 d-flex flex-column">
+        <div class="d-flex align-items-center mb-4">
+            <a href="/sic/helpdesk" class="btn btn-sm btn-sic-ghost me-3" title="Volver">
+                <i class="ph-bold ph-arrow-left"></i>
+            </a>
+            <div class="consulta-header-card w-100 mb-0 d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="text-white-50 small fw-bold tracking-wider">CONSULTA #{{ ticket.id }}</span>
+                    </div>
+                    <h1 class="h4 fw-bold mb-1 text-white">{{ ticket.title }}</h1>
+                    <div class="d-flex align-items-center gap-3 small text-white-50">
+                        <span
+                            class="badge bg-white bg-opacity-10 text-white border border-white border-opacity-10 fw-normal">
+                            {{ ticket.category|capitalize }}
+                        </span>
+                        <span><i class="ph-bold ph-clock me-1"></i> {{ ticket.created_at.strftime('%d/%m/%Y %H:%M')
+                            }}</span>
+                    </div>
+                </div>
+
+                {% if ticket.status == 'abierto' %}
+                <div class="text-end d-none d-md-block">
+                    <span class="d-block text-success fw-bold small"><i class="ph-bold ph-check-circle me-1"></i> En
+                        curso</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <!-- Messages -->
+            {% for msg in ticket.messages %}
+            {% set is_me = (msg.user_id == user.id) %}
+            <div class="chat-bubble-row {{ 'me' if is_me else 'them' }} mb-2">
+                <div class="d-flex flex-column {{ 'align-items-end' if is_me else 'align-items-start' }} w-100">
+                    <div class="mb-1 d-flex align-items-center gap-2 px-1">
+                        {% if is_me %}
+                        <span class="small text-white opacity-75 fw-medium">Tú</span>
+                        {% else %}
+                        <span class="small text-white fw-medium">{{ msg.user.email.split('@')[0]|capitalize }}</span>
+                        {% if "admin" in (msg.user.role or "").lower() %}
+                        <span
+                            class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25 py-0 px-1"
+                            style="font-size: 0.6rem;">ADMIN</span>
+                        {% endif %}
+                        {% endif %}
+                        <span class="text-white-50" style="font-size: 0.65rem;">{{ msg.created_at.strftime('%H:%M')
+                            }}</span>
+                    </div>
+
+                    <div class="chat-bubble py-2 px-3 shadow-sm {{ 'bg-gradient-to-br from-blue-600 to-indigo-600 border-0' if is_me else 'bg-slate-800 border-slate-700' }}"
+                        style="border-radius: 12px; {{ 'border-top-right-radius: 2px;' if is_me else 'border-top-left-radius: 2px;' }} max-width: 100%;">
+                        {{ msg.message }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if (ticket.status != 'cerrado' or is_admin) and (user.role or '')|lower != 'auditor' %}
+        <!-- Reply Box -->
+        <div class="chat-input-area">
+            <form action="/sic/helpdesk/{{ ticket.id }}/reply" method="POST" id="chatForm">
+                <div class="input-group">
+                    <textarea name="message" id="chatInput"
+                        class="form-control form-control-sic border-0 shadow-none py-3" rows="1"
+                        placeholder="Escribe una respuesta... (Enter para enviar)"
+                        style="resize: none; background: rgba(0,0,0,0.2);" required></textarea>
+                    <button type="submit" class="btn btn-sic-primary px-4 d-flex align-items-center">
+                        <i class="ph-bold ph-paper-plane-right fs-5"></i>
+                    </button>
+                </div>
+                <div class="text-white-50 small mt-2 ps-1">
+                    <i class="ph-bold ph-info me-1"></i> Shift + Enter para nueva línea
+                </div>
+            </form>
+        </div>
+        {% else %}
+        <div class="alert alert-secondary mt-5 bg-opacity-10 border-opacity-25 text-center text-white-50 p-4 rounded-4">
+            <i class="ph-bold ph-lock-key mb-2 d-block fs-3"></i>
+            Esta consulta está cerrada.
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar Info -->
+    <div class="col-12 col-lg-4">
+        <div class="consulta-sidebar">
+            <div class="sic-card mb-4 shadow-lg border-0 bg-gradient-to-b from-slate-800 to-slate-900">
+                <h5 class="fw-bold fs-6 mb-4 text-white border-bottom border-white border-opacity-10 pb-3">Detalles de
+                    la
+                    Consulta</h5>
+
+                <div class="d-flex align-items-center justify-content-between mb-4 p-3 rounded-3 border border-white border-opacity-10"
+                    style="background: rgba(0, 0, 0, 0.2); backdrop-filter: blur(5px);">
+                    <!-- Status -->
+                    <div class="d-flex flex-column gap-1">
+                        <span class="text-white-50 text-uppercase fw-bold"
+                            style="font-size: 0.65rem; letter-spacing: 1px;">Estado</span>
+                        <div class="d-flex align-items-center gap-2">
+                            {% if ticket.status == 'abierto' %}
+                            <div class="rounded-circle bg-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                                style="width: 8px; height: 8px; box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);"></div>
+                            <span class="text-white fw-medium small tracking-wide">Abierto</span>
+                            {% elif ticket.status == 'pendiente' %}
+                            <div class="rounded-circle bg-warning shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+                                style="width: 8px; height: 8px; box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);"></div>
+                            <span class="text-white fw-medium small tracking-wide">Pendiente</span>
+                            {% elif ticket.status == 'resuelto' %}
+                            <div class="rounded-circle bg-success shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                                style="width: 8px; height: 8px; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);"></div>
+                            <span class="text-white fw-medium small tracking-wide">Resuelto</span>
+                            {% else %}
+                            <div class="rounded-circle bg-secondary" style="width: 8px; height: 8px;"></div>
+                            <span class="text-white fw-medium small tracking-wide text-capitalize">{{ ticket.status
+                                }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="vr bg-white bg-opacity-10 my-1"></div>
+
+                    <!-- Priority -->
+                    <div class="d-flex flex-column gap-1 text-end">
+                        <span class="text-white-50 text-uppercase fw-bold"
+                            style="font-size: 0.65rem; letter-spacing: 1px;">Prioridad</span>
+                        <div class="d-flex align-items-center justify-content-end gap-2">
+                            {% if ticket.priority == 'alta' %}
+                            <span class="text-white fw-medium small tracking-wide">Alta</span>
+                            <i class="ph-fill ph-warning text-danger"
+                                style="filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));"></i>
+                            {% elif ticket.priority == 'baja' %}
+                            <span class="text-white fw-medium small tracking-wide">Baja</span>
+                            <i class="ph-fill ph-arrow-down text-info"
+                                style="filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));"></i>
+                            {% else %}
+                            <span class="text-white fw-medium small tracking-wide">Media</span>
+                            <i class="ph-fill ph-minus text-warning"
+                                style="filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));"></i>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Action: Delete -->
+                {% if is_admin %}
+                <div class="mt-4 pt-3 border-top border-white border-opacity-10">
+                    <div id="deleteContainer">
+                        <button type="button" onclick="showDeleteModal()"
+                            class="btn btn-sm btn-outline-danger w-100 d-flex align-items-center justify-content-center gap-2 border-opacity-25 text-opacity-75 hover:bg-danger">
+                            <i class="ph-bold ph-trash"></i> Eliminar Consulta
+                        </button>
+                        <div id="deleteError" class="text-danger small mt-2 text-center" style="display:none;"></div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Status Control (Admin/User) -->
+            <div class="sic-card bg-transparent border border-white border-opacity-10">
+                {% if is_admin %}
+                <form action="/sic/helpdesk/{{ ticket.id }}/status" method="POST">
+                    <label class="small text-white-50 d-block mb-3">Actualizar Estado</label>
+                    <select name="status" class="form-select form-select-sm form-select-sic mb-3"
+                        onchange="this.form.submit()">
+                        <option value="abierto" {% if ticket.status=='abierto' %}selected{% endif %}>🟢 Abierto</option>
+                        <option value="pendiente" {% if ticket.status=='pendiente' %}selected{% endif %}>🟡 Pendiente
+                        </option>
+                        <option value="resuelto" {% if ticket.status=='resuelto' %}selected{% endif %}>🔵 Resuelto
+                        </option>
+                        <option value="cerrado" {% if ticket.status=='cerrado' %}selected{% endif %}>⚫ Cerrado</option>
+                    </select>
+                </form>
+                {% endif %}
+
+                {% if not is_admin and ticket.status != 'cerrado' and (user.role or '')|lower != 'auditor' %}
+                <form action="/sic/helpdesk/{{ ticket.id }}/status" method="POST">
+                    <input type="hidden" name="status" value="resuelto">
+                    <button type="submit"
+                        class="btn btn-sm btn-sic-ghost w-100 text-success border-success border-opacity-25 hover:bg-success hover:text-white">
+                        <i class="ph-bold ph-check-circle me-2"></i> Marcar Resuelto
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            <div class="text-center mt-3">
+                <p class="small text-white-50 opacity-50" style="font-size: 0.7rem;">
+                    ID Usuario: {{ ticket.user_id }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+</script>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true" style="backdrop-filter: blur(5px);">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg"
+            style="background: rgba(30, 41, 59, 0.95); color: white; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-body p-4 text-center">
+                <div class="mb-3">
+                    <div class="rounded-circle bg-danger bg-opacity-10 d-inline-flex align-items-center justify-content-center"
+                        style="width: 64px; height: 64px;">
+                        <i class="ph-bold ph-trash text-danger" style="font-size: 32px;"></i>
+                    </div>
+                </div>
+                <h5 class="fw-bold mb-2">¿Estás seguro?</h5>
+                <p class="text-white-50 mb-4 small">Esta acción eliminará la consulta de forma permanente y no se puede
+                    deshacer.</p>
+
+                <div class="d-flex gap-2 justify-content-center">
+                    <button type="button" class="btn btn-sic-ghost px-4" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" onclick="performDelete({{ ticket.id }})" class="btn btn-danger px-4">Sí,
+                        eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const chatInput = document.getElementById('chatInput');
+
+        if (chatInput) {
+            chatInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (this.value.trim() !== '') {
+                        document.getElementById('chatForm').submit();
+                    }
+                }
+            });
+        }
+    });
+
+    function showDeleteModal() {
+        new bootstrap.Modal(document.getElementById('deleteModal')).show();
+    }
+
+    function performDelete(consultaId) {
+        // Hide modal
+        const modalEl = document.getElementById('deleteModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) {
+            modal.hide();
+        }
+
+        const btn = document.querySelector('#deleteContainer button');
+        const errDiv = document.getElementById('deleteError');
+        const originalText = btn.innerHTML;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Eliminando...';
+        errDiv.style.display = 'none';
+
+        fetch(`/sic/helpdesk/${consultaId}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+            .then(response => {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else if (response.ok) {
+                    window.location.href = '/sic/helpdesk?ok=deleted';
+                } else {
+                    throw new Error('Error al eliminar');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                errDiv.style.display = 'block';
+                errDiv.textContent = 'Error: No se pudo eliminar la consulta. Verifique consola.';
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            });
+    }
+</script>
+{% endblock %}
