@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: web-comparativas-app
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn web_comparativas.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: RENDER
+        value: "true"
+      - key: PYTHON_VERSION
+        value: "3.10" # Based on .python-version if it exists

@@ -207,6 +207,7 @@ from web_comparativas.migrations import ensure_access_scope_column
 
 @app.on_event("startup")
 def run_startup_migrations():
+    print("[MIGRATION] Ejecutando evento startup de migraciones...", flush=True)
     ensure_access_scope_column()
 
 # --- DB SESSION MIDDLEWARE ---

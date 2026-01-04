@@ -8,24 +8,26 @@ def ensure_access_scope_column():
     Esto es para soportar la migración en Render (PostgreSQL) y local (SQLite).
     """
     try:
-        print("[MIGRATION] Iniciando inspección con inspect(engine)...")
+    try:
+        print("[MIGRATION] Iniciando inspección con inspect(engine)...", flush=True)
         insp = inspect(engine)
         
-        print("[MIGRATION] Obteniendo lista de tablas...")
+        print("[MIGRATION] Obteniendo lista de tablas...", flush=True)
         table_names = insp.get_table_names()
         
         # Verificar si existe la tabla users
         if "users" not in table_names:
-            print("[MIGRATION] Tabla 'users' no encontrada. Saltando migración.")
+            print("[MIGRATION] Tabla 'users' no encontrada. Saltando migración.", flush=True)
             return
 
-        print("[MIGRATION] Obteniendo columnas de 'users'...")
+        print("[MIGRATION] Obteniendo columnas de 'users'...", flush=True)
         cols = [c["name"] for c in insp.get_columns("users")]
         if "access_scope" in cols:
-            print("[MIGRATION] La columna 'access_scope' ya existe en 'users'.")
+            print("[MIGRATION] La columna 'access_scope' ya existe en 'users'.", flush=True)
             return
 
-        print("[MIGRATION] Agregando columna 'access_scope' a tabla 'users'...")
+        print("[MIGRATION] Agregando columna 'access_scope' a tabla 'users'...", flush=True)
+
         
         # Detectar el motor para ajustar la sintaxis si fuera necesario
         # (Aunque ADD COLUMN funciona igual en PG y SQLite modernos para columnas simples)
@@ -40,10 +42,10 @@ def ensure_access_scope_column():
                 text("ALTER TABLE users ADD COLUMN access_scope VARCHAR(50) DEFAULT 'todos'")
             )
             
-        print("[MIGRATION] Columna 'access_scope' agregada exitosamente.")
+        print("[MIGRATION] Columna 'access_scope' agregada exitosamente.", flush=True)
 
     except Exception as e:
-        print(f"[MIGRATION] Error intentando agregar columna: {e}")
+        print(f"[MIGRATION] Error intentando agregar columna: {e}", flush=True)
         # No re-lanzamos la excepción para no impedir el arranque si es algo menor,
         # pero esto es crítico si el código lo usa.
         # En este caso, dejamos el log.

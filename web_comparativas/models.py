@@ -56,7 +56,12 @@ else:
     SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE.as_posix()}"
 
 # Engine
-connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+else:
+    # Timeout de conexión corto para fallar rápido si no responde
+    connect_args = {"connect_timeout": 10}
+
 engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args=connect_args, future=True)
 
 # Banderas útiles para saber qué backend estamos usando
