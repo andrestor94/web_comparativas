@@ -282,7 +282,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Incluir routers
-app.include_router(sic_router)
+# app.include_router(sic_router)
 # app.include_router(dimensiones_router)
 
 # 👉 NUEVO: Router de Notificaciones
