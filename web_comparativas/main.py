@@ -203,7 +203,8 @@ build_ranked_positions = MockObject()
 print("DEBUG: Comments API SKIPPED (Isolating Hang)", flush=True)
 
 # 👉 NUEVO: Router S.I.C (Soporte de Inteligencia Comercial)
-from .routers.sic_router import router as sic_router
+# from .routers.sic_router import router as sic_router
+print("DEBUG: SIC Router IMPORT SKIPPED (Real Isolation)", flush=True)
 # from .routers.dimensiones_router import router as dimensiones_router
 print("DEBUG: Dimensiones Router SKIPPED (Deployment Debug)", flush=True)
 
