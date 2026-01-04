@@ -2,6 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+# === MOCKS FOR DEBUGGING HANG (Top Level) ===
+class MockObject:
+    def __getattr__(self, name):
+        return MockObject()
+    def __call__(self, *args, **kwargs):
+        return MockObject()
+
 import os
 import shutil
 import uuid
@@ -22,16 +30,10 @@ load_dotenv()
 # === LIBRERÍAS DE TERCEROS / FRAMEWORKS ===
 # import numpy as np
 # import pandas as pd
-# import numpy as np
-# import pandas as pd
 print("DEBUG: Pandas/Numpy SKIPPED (Deployment Optimization)", flush=True)
 
 # === MOCKS FOR DEBUGGING HANG ===
-class MockObject:
-    def __getattr__(self, name):
-        return MockObject()
-    def __call__(self, *args, **kwargs):
-        return MockObject()
+
 
 try:
     import pandas as pd
