@@ -870,34 +870,36 @@ CLIENTES_PATH = Path(__file__).with_name("data") / "BASE_CLIENTES_SUIZO.xlsx"
 # Cargamos el Excel una sola vez al iniciar la app
 _clientes_index: dict[str, dict] = {}
 
-if CLIENTES_PATH.exists():
-    df_clientes = pd.read_excel(CLIENTES_PATH).fillna("")
-    # Ojo: en el Excel la columna viene como "Nombre Fantasia " (con espacio)
-    for _, row in df_clientes.iterrows():
-        nro = str(row.get("N° Cuenta", "")).strip()
-        if not nro:
-            continue
-
-        _clientes_index[nro] = {
-            # Esto lo vamos a usar para el campo "Comprador"
-            "comprador": str(row.get("Nombre Fantasia ", "")).strip().strip('"'),
-            # Esto lo vamos a usar para el campo "Provincia/Municipio"
-            "provincia": str(row.get("Provincia", "")).strip(),
-            # Lo dejo preparado por si después agregamos "plataforma" en el Excel
-            "plataforma": "",
-        }
-else:
-    print(f"[WARN] No se encontró el archivo de clientes en {CLIENTES_PATH}")
+# if CLIENTES_PATH.exists():
+#     df_clientes = pd.read_excel(CLIENTES_PATH).fillna("")
+#     # Ojo: en el Excel la columna viene como "Nombre Fantasia " (con espacio)
+#     for _, row in df_clientes.iterrows():
+#         nro = str(row.get("N° Cuenta", "")).strip()
+#         if not nro:
+#             continue
+#
+#         _clientes_index[nro] = {
+#             # Esto lo vamos a usar para el campo "Comprador"
+#             "comprador": str(row.get("Nombre Fantasia ", "")).strip().strip('"'),
+#             # Esto lo vamos a usar para el campo "Provincia/Municipio"
+#             "provincia": str(row.get("Provincia", "")).strip(),
+#             # Lo dejo preparado por si después agregamos "plataforma" en el Excel
+#             "plataforma": "",
+#         }
+# else:
+#     print(f"[WARN] No se encontró el archivo de clientes en {CLIENTES_PATH}")
+print("DEBUG: Clients loading SKIPPED (Hang Fix)", flush=True)
 
 
 @app.get("/api/clientes/{n_cuenta}")
 def api_get_cliente_por_cuenta(n_cuenta: str):
-    """Devuelve los datos del cliente para autocompletar el formulario."""
-    key = n_cuenta.strip()
-    data = _clientes_index.get(key)
-    if not data:
-        return {"ok": False, "msg": "Cliente no encontrado"}
-    return {"ok": True, "data": data}
+    return {"ok": False, "msg": "Client search disabled"}
+#     """Devuelve los datos del cliente para autocompletar el formulario."""
+#     key = n_cuenta.strip()
+#     data = _clientes_index.get(key)
+#     if not data:
+#         return {"ok": False, "msg": "Cliente no encontrado"}
+#     return {"ok": True, "data": data}
 
 
 # ======================================================================
