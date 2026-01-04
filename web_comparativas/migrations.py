@@ -7,7 +7,7 @@ def ensure_access_scope_column():
     Si no la tiene, la agrega (ALTER TABLE).
     Esto es para soportar la migración en Render (PostgreSQL) y local (SQLite).
     """
-    try:
+
     try:
         print("[MIGRATION] Iniciando inspección con inspect(engine)...", flush=True)
         insp = inspect(engine)
