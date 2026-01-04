@@ -940,7 +940,7 @@ app.mount(
 )
 
 # Rutas de Comentarios (REST + SSE)
-app.include_router(comments_router)
+# app.include_router(comments_router)
 
 # Rutas de S.I.C
 app.include_router(sic_router)
