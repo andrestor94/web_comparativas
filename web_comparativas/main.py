@@ -245,11 +245,12 @@ def get_db():
 # ======================================================================
 logger = logging.getLogger("wc.auth")
 logger.setLevel(logging.INFO)
-if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
-    fh = logging.FileHandler("debug_groups.log")
-    fh.setLevel(logging.INFO)
-    fh.setFormatter(logging.Formatter("[%(name)s] [%(levelname)s] %(message)s"))
-    logger.addHandler(fh)
+# if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+#     fh = logging.FileHandler("debug_groups.log")
+#     fh.setLevel(logging.INFO)
+#     fh.setFormatter(logging.Formatter("[%(name)s] [%(levelname)s] %(message)s"))
+#     logger.addHandler(fh)
+print("DEBUG: Logging FileHandler SKIPPED", flush=True)
 
 
 # ======================================================================
