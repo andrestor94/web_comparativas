@@ -943,7 +943,7 @@ app.mount(
 # app.include_router(comments_router)
 
 # Rutas de S.I.C
-app.include_router(sic_router)
+# app.include_router(sic_router)
 
 # ======================================================================
 # CONTROL DE CICLO DE VIDA DE LA SESIÓN SQLALCHEMY
