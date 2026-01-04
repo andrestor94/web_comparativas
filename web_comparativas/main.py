@@ -199,7 +199,8 @@ sv_delete_view = MockObject()
 build_ranked_positions = MockObject()
 
 # Comentarios / Feedback (API)
-from .api_comments import router as comments_router
+# from .api_comments import router as comments_router
+print("DEBUG: Comments API SKIPPED (Isolating Hang)", flush=True)
 
 # 👉 NUEVO: Router S.I.C (Soporte de Inteligencia Comercial)
 from .routers.sic_router import router as sic_router
