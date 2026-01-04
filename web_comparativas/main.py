@@ -66,6 +66,7 @@ from sqlalchemy.orm import Session
 # Modelos
 from .models import (
     init_db,
+    SessionLocal,
     Upload as UploadModel,
     db_session,
     User,
@@ -200,6 +201,27 @@ if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI()
+
+# --- MIGRACIONES ---
+from web_comparativas.migrations import ensure_access_scope_column
+
+@app.on_event("startup")
+def run_startup_migrations():
+    ensure_access_scope_column()
+
+# --- DB SESSION MIDDLEWARE ---
+@app.middleware("http")
+async def db_session_lifecycle(request: Request, call_next):
+    request.state.db = SessionLocal()
+    try:
+        response = await call_next(request)
+        request.state.db.commit()
+        return response
+    except Exception:
+        request.state.db.rollback()
+        raise
+    finally:
+        request.state.db.close()
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
