@@ -157,7 +157,8 @@ from .api_comments import router as comments_router
 
 # 👉 NUEVO: Router S.I.C (Soporte de Inteligencia Comercial)
 from .routers.sic_router import router as sic_router
-from .routers.dimensiones_router import router as dimensiones_router
+# from .routers.dimensiones_router import router as dimensiones_router
+print("DEBUG: Dimensiones Router SKIPPED (Deployment Debug)", flush=True)
 
 # 👉 NUEVO: capa de correo (opcional, no rompe si no existe)
 # try:
@@ -234,11 +235,12 @@ async def log_requests(request: Request, call_next):
 
 # Incluir routers
 app.include_router(sic_router)
-app.include_router(dimensiones_router)
+# app.include_router(dimensiones_router)
 
 # 👉 NUEVO: Router de Notificaciones
-from .routers.notifications_router import router as notifications_router
-app.include_router(notifications_router)
+# from .routers.notifications_router import router as notifications_router
+# app.include_router(notifications_router)
+print("DEBUG: Notifications Router SKIPPED (Deployment Debug)", flush=True)
 
 
 # === [Oportunidades - Buscador] ===
