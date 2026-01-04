@@ -301,7 +301,7 @@ print("DEBUG: Notifications Router SKIPPED (Deployment Debug)", flush=True)
 
 # === [Oportunidades - Buscador] ===
 OPP_DIR  = BASE_DIR / "data" / "oportunidades"
-OPP_DIR.mkdir(parents=True, exist_ok=True)
+# OPP_DIR.mkdir(parents=True, exist_ok=True)
 OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
 
 def _save_oportunidades_excel(file: UploadFile) -> int:
@@ -636,7 +636,7 @@ def _render_or_fallback(template_name: str, ctx: dict, fallback_html: str):
 # ======================================================================
 # carpeta donde vamos a guardar los PDF generados
 REPORTS_DIR = BASE_DIR / "reports"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+# REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # tu plantilla real (la que está en static/reports)
 PDF_TEMPLATE_PATH = BASE_DIR / "static" / "reports" / "Informe Comparativas.pdf"
@@ -927,8 +927,9 @@ async def attach_user_to_state(request: Request, call_next):
 
 # === [Tracking Middleware] ===
 # Agregamos el middleware de tracking "encima" del de auth.
-from web_comparativas.middleware.tracking import TrackingMiddleware
-app.add_middleware(TrackingMiddleware)
+# from web_comparativas.middleware.tracking import TrackingMiddleware
+# app.add_middleware(TrackingMiddleware)
+print("DEBUG: Tracking Middleware SKIPPED", flush=True)
 
 
 # ======================================================================
