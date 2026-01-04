@@ -128,12 +128,17 @@ from .models import (
 from .auth import hash_password, verify_password
 
 # Visibilidad por grupos
-from .visibility_service import (
-    uploads_visible_query,
-    visible_user_ids,
-    kpis_for_home,
-    recent_done as vis_recent_done,
-)
+# from .visibility_service import (
+#     uploads_visible_query,
+#     visible_user_ids,
+#     kpis_for_home,
+#     recent_done as vis_recent_done,
+# )
+print("DEBUG: Visibility Service SKIPPED", flush=True)
+uploads_visible_query = MockObject()
+visible_user_ids = MockObject()
+kpis_for_home = MockObject()
+vis_recent_done = MockObject()
 
 # === Visibilidad extendida para AUDITOR ================================
 def _is_auditor(user: User) -> bool:
@@ -255,7 +260,8 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI()
 
 # --- MIGRACIONES ---
-from web_comparativas.migrations import ensure_access_scope_column
+# from web_comparativas.migrations import ensure_access_scope_column
+ensure_access_scope_column = MockObject()
 
 @app.on_event("startup")
 def run_startup_migrations():
