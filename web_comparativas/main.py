@@ -1,5 +1,6 @@
 # === main.py ==================================================
 from __future__ import annotations
+print("DEBUG: Starting main.py imports...", flush=True)
 
 from pathlib import Path
 import os
@@ -160,11 +161,12 @@ from .routers.sic_router import router as sic_router
 from .routers.dimensiones_router import router as dimensiones_router
 
 # 👉 NUEVO: capa de correo (opcional, no rompe si no existe)
-try:
-    from . import email_service as _email_svc
-except Exception:
-    # si no existe el archivo, no rompemos la app
-    _email_svc = None
+# try:
+#     from . import email_service as _email_svc
+# except Exception:
+#     # si no existe el archivo, no rompemos la app
+#     _email_svc = None
+print("DEBUG: Email service import blocked", flush=True)
 
 # ======================================================================
 # DEPENDENCIAS / SESIÓN
@@ -199,8 +201,15 @@ if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
 # CONFIGURACIÓN BASE DE LA APP
 # ======================================================================
 BASE_DIR = Path(__file__).resolve().parent
+print("DEBUG: Setup templates...", flush=True)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+print("DEBUG: Creating FastAPI app...", flush=True)
 app = FastAPI()
+
+@app.get("/ping")
+def ping():
+    return {"status": "ok", "mode": "maintenance"}
+
 
 # --- MIGRACIONES ---
 from web_comparativas.migrations import ensure_access_scope_column
@@ -232,12 +241,14 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Incluir routers
-app.include_router(sic_router)
-app.include_router(dimensiones_router)
+# app.include_router(sic_router)
+# app.include_router(dimensiones_router)
+print("DEBUG: Routers blocked for debugging", flush=True)
 
 # 👉 NUEVO: Router de Notificaciones
-from .routers.notifications_router import router as notifications_router
-app.include_router(notifications_router)
+# from .routers.notifications_router import router as notifications_router
+# app.include_router(notifications_router)
+print("DEBUG: Notifications router blocked", flush=True)
 
 
 # === [Oportunidades - Buscador] ===
