@@ -11,29 +11,60 @@ import unicodedata
 import re
 import logging
 from types import SimpleNamespace
-from web_comparativas.usage_service import log_usage_event, get_usage_summary
+# from web_comparativas.usage_service import log_usage_event, get_usage_summary
+print("DEBUG: Usage Service SKIPPED", flush=True)
+log_usage_event = MockObject()
+get_usage_summary = MockObject()
 from typing import Any, Optional, List, Dict
 from dotenv import load_dotenv
 load_dotenv()
 
 # === LIBRERÍAS DE TERCEROS / FRAMEWORKS ===
-import numpy as np
-import pandas as pd
+# import numpy as np
+# import pandas as pd
+# import numpy as np
+# import pandas as pd
+print("DEBUG: Pandas/Numpy SKIPPED (Deployment Optimization)", flush=True)
+
+# === MOCKS FOR DEBUGGING HANG ===
+class MockObject:
+    def __getattr__(self, name):
+        return MockObject()
+    def __call__(self, *args, **kwargs):
+        return MockObject()
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = MockObject()
+
+try:
+    import numpy as np
+except ImportError:
+    np = MockObject()
+
 
 # === [PDF reportes] ===
 import io
 
-try:
-    # si está instalado pypdf (nombre nuevo)
-    from pypdf import PdfReader, PdfWriter
-except ImportError:
-    # fallback si tu entorno tiene PyPDF2
-    from PyPDF2 import PdfReader, PdfWriter
-
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.colors import Color
+# try:
+#     # si está instalado pypdf (nombre nuevo)
+#     from pypdf import PdfReader, PdfWriter
+# except ImportError:
+#     # fallback si tu entorno tiene PyPDF2
+#     from PyPDF2 import PdfReader, PdfWriter
+#
+# from reportlab.pdfgen import canvas
+# from reportlab.pdfbase import pdfmetrics
+# from reportlab.pdfbase.ttfonts import TTFont
+# from reportlab.lib.colors import Color
+print("DEBUG: PDF/Reportlab SKIPPED", flush=True)
+canvas = MockObject()
+pdfmetrics = MockObject()
+TTFont = MockObject()
+Color = MockObject()
+PdfReader = MockObject()
+PdfWriter = MockObject()
 
 from fastapi import (
     FastAPI,
@@ -132,25 +163,38 @@ def visible_user_ids_ext(session, user: User):
 
 
 # Servicios de procesamiento
-from .services import (
-    classify_and_process,
-    PROCESS_STEPS,
-    get_status as svc_get_status,
-)
-from . import services
+# from .services import (
+#     classify_and_process,
+#     PROCESS_STEPS,
+#     get_status as svc_get_status,
+# )
+# from . import services
+print("DEBUG: Services Module SKIPPED", flush=True)
+services = MockObject()
+classify_and_process = MockObject()
+PROCESS_STEPS = {}
+svc_get_status = MockObject()
 
 # 👉 NUEVO: servicios de “vistas guardadas”
-from .services import (
-    list_views as sv_list_views,
-    get_default_view as sv_get_default_view,
-    get_view as sv_get_view,
-    save_view as sv_save_view,
-    set_default_view as sv_set_default_view,
-    delete_view as sv_delete_view,
-)
+# from .services import (
+#     list_views as sv_list_views,
+#     get_default_view as sv_get_default_view,
+#     get_view as sv_get_view,
+#     save_view as sv_save_view,
+#     set_default_view as sv_set_default_view,
+#     delete_view as sv_delete_view,
+# )
+print("DEBUG: Saved Views Services SKIPPED", flush=True)
+sv_list_views = MockObject()
+sv_get_default_view = MockObject()
+sv_get_view = MockObject()
+sv_save_view = MockObject()
+sv_set_default_view = MockObject()
+sv_delete_view = MockObject()
 
 # Transformación de ranking para el Tablero (podemos usarla o no según DF)
-from .rankings import build_ranked_positions  # (se deja import para compatibilidad)
+# from .rankings import build_ranked_positions  # (se deja import para compatibilidad)
+build_ranked_positions = MockObject()
 
 # Comentarios / Feedback (API)
 from .api_comments import router as comments_router
