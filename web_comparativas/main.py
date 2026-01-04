@@ -35,15 +35,17 @@ print("DEBUG: Pandas/Numpy SKIPPED (Deployment Optimization)", flush=True)
 # === MOCKS FOR DEBUGGING HANG ===
 
 
-try:
-    import pandas as pd
-except ImportError:
-    pd = MockObject()
+# try:
+#     import pandas as pd
+# except ImportError:
+#     pd = MockObject()
+pd = MockObject()
 
-try:
-    import numpy as np
-except ImportError:
-    np = MockObject()
+# try:
+#     import numpy as np
+# except ImportError:
+#     np = MockObject()
+np = MockObject()
 
 
 # === [PDF reportes] ===
