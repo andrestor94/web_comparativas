@@ -8,13 +8,18 @@ def ensure_access_scope_column():
     Esto es para soportar la migración en Render (PostgreSQL) y local (SQLite).
     """
     try:
+        print("[MIGRATION] Iniciando inspección con inspect(engine)...")
         insp = inspect(engine)
         
+        print("[MIGRATION] Obteniendo lista de tablas...")
+        table_names = insp.get_table_names()
+        
         # Verificar si existe la tabla users
-        if "users" not in insp.get_table_names():
+        if "users" not in table_names:
             print("[MIGRATION] Tabla 'users' no encontrada. Saltando migración.")
             return
 
+        print("[MIGRATION] Obteniendo columnas de 'users'...")
         cols = [c["name"] for c in insp.get_columns("users")]
         if "access_scope" in cols:
             print("[MIGRATION] La columna 'access_scope' ya existe en 'users'.")
