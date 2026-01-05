@@ -17,6 +17,16 @@
     return null;
   };
 
+  // Debounce helper
+  function debounce(func, wait) {
+    let timeout;
+    return function (...args) {
+      const context = this;
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+  }
+
   const normalize = (s) =>
     (s || "")
       .toString()
@@ -616,8 +626,15 @@
     if (dateToEl && toDate) dateToEl.value = toDate;
 
     updateDateRangeFill();
-    fetchDataFiltered();
+    updateDateRangeFill();
+    // Reemplazamos la llamada directa por la versión debounced (más abajo)
+    debouncedFetch();
   }
+
+  // Creamos la función debounced fuera del handler para que mantenga su timer
+  const debouncedFetch = debounce(() => {
+    fetchDataFiltered();
+  }, 300);
 
   // ------------------------------------------------------------------
   // Transformación de datos según filtros PAMI / Estado
