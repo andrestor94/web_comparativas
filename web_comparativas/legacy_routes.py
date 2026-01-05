@@ -2941,7 +2941,7 @@ async def crear_carga(
     Tambi├®n evita duplicados usando el proceso_nro normalizado.
     """
     # Carpeta base donde se guardan los uploads
-    base_dir = Path("data/uploads")
+    upload_dir = Path("data/uploads")
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # Carpeta ├║nica para esta carga
@@ -3253,7 +3253,7 @@ async def crear_carga_otras_fuentes(
         file_bytes = await file.read()
 
     # Carpeta base donde se guardan los uploads
-    base_dir = Path("data/uploads")
+    upload_dir = Path("data/uploads")
     # --- Fin l├│gica por plataforma ---
 
     # Creamos la carpeta
