@@ -314,9 +314,59 @@ async def http_exception_handler(request, exc):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    if not request.state.user:
+        return RedirectResponse("/login", 303)
+
+    user = request.state.user
+    db = request.state.db
+    
+    # 1. KPIs de Cargas (Uploads)
+    # Filtro por scope? Por ahora "todos" o segun logica
+    query = db.query(Upload)
+    # Si quisieramos filtrar por usuario/scope, aqui iría.
+    
+    total_all = query.count()
+    total_pending = query.filter(Upload.status != "done").count()
+    total_done = query.filter(Upload.status == "done").count()
+    
+    # Ultimos completados
+    last_done = query.filter(Upload.status == "done").order_by(Upload.updated_at.desc()).limit(5).all()
+    # Recientes genericos (usamos lo mismo)
+    recent_done = last_done 
+
+    # 2. KPIs Oportunidades (leyendo Excel)
+    opp_total = 0
+    opp_accepted = 0 # Placeholder, se calcula en JS con info local, pero template pide variable
+    opp_unseen = 0   # Placeholder
+    
+    OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
+    if OPP_FILE.exists():
+        try:
+            import pandas as pd
+            df = pd.read_excel(OPP_FILE, engine="openpyxl")
+            opp_total = len(df)
+            opp_unseen = opp_total # Asumimos todo unseen backend, el JS lo corrige
+        except: pass
+
     return templates.TemplateResponse("home.html", {
         "request": request, 
-        "user": request.state.user
+        "user": user,
+        "total_all": total_all,
+        "total_pending": total_pending,
+        "total_done": total_done,
+        "last_done": last_done,
+        "recent_done": recent_done,
+        "opp_total": opp_total,
+        "opp_accepted": opp_accepted,
+        "opp_unseen": opp_unseen,
+        "reset_ok": request.query_params.get("reset_ok"),
+        "reset_err": request.query_params.get("reset_err"),
+        "step_labels": {
+            "pending": "Pendiente",
+            "processing": "Procesando",
+            "done": "Completado",
+            "error": "Error"
+        }
     })
 
 @app.get("/login", response_class=HTMLResponse)
