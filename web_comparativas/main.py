@@ -75,7 +75,9 @@ def _reset_session():
 
 # Helpers Auth
 def get_current_user(request: Request) -> Optional[User]:
+    print(f"[AUTH] Parsing session...", flush=True)
     uid = request.session.get("uid")
+    print(f"[AUTH] Session UID: {uid}", flush=True)
     if not uid: return None
     
     # Try using request.state.db if available
@@ -83,10 +85,15 @@ def get_current_user(request: Request) -> Optional[User]:
     
     try:
         if db:
-            return db.get(User, uid)
+            print(f"[AUTH] Using request.state.db to fetch User({uid})...", flush=True)
+            u = db.get(User, uid)
+            print(f"[AUTH] DB Fetch result: {u}", flush=True)
+            return u
         else:
+            print(f"[AUTH] FALLBACK global db_session fetch...", flush=True)
             return db_session.get(User, uid)
-    except:
+    except Exception as e:
+        print(f"[AUTH] ERROR Fetching User: {e}", flush=True)
         # Retry only if fallback
         if not db:
             _reset_session()
