@@ -381,24 +381,36 @@ def home(request: Request):
         "market_context": "public" # Force explicit context for template
     })
 
-# === MARKET SWITCHING & PRIVATE ROUTES ===
+@app.get("/markets", response_class=HTMLResponse)
+def markets_home(request: Request):
+    if not request.state.user:
+        return RedirectResponse("/login", 303)
+    return templates.TemplateResponse("markets_home.html", {
+        "request": request,
+        "user": request.state.user
+    })
+
+# === MARKET SWITCHING ===
 @app.get("/switch-market")
 def switch_market(request: Request):
-    curr = request.session.get("market_context", "public")
-    new_context = "private" if curr == "public" else "public"
-    request.session["market_context"] = new_context
-    
-    if new_context == "private":
-        return RedirectResponse("/mercado-privado", 303)
-    else:
-        return RedirectResponse("/", 303)
+    # Instead of toggle, go to Lobby
+    return RedirectResponse("/markets", 303)
+
+@app.get("/mercado-publico")
+def mercado_publico_entry(request: Request):
+    request.session["market_context"] = "public"
+    return RedirectResponse("/", 303)
+
+@app.get("/mercado-publico/web-comparativas")
+def mercado_publico_wc(request: Request):
+    request.session["market_context"] = "public"
+    return RedirectResponse("/", 303)
 
 @app.get("/mercado-privado", response_class=HTMLResponse)
 def mercado_privado_home(request: Request):
-    # Enforce Context
-    if request.session.get("market_context") != "private":
-        return RedirectResponse("/", 303)
-        
+    # Set context on entry
+    request.session["market_context"] = "private"
+    
     return templates.TemplateResponse("mercado_privado_home.html", {
         "request": request,
         "user": request.state.user,
