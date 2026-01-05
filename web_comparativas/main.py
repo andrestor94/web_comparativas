@@ -22,7 +22,7 @@ from sqlalchemy import func
 
 # === PROYECTO ===
 from web_comparativas.models import (
-    SessionLocal, db_session, User, init_db, Upload as UploadModel
+    SessionLocal, db_session, User, init_db, Upload
 )
 from web_comparativas.auth import hash_password, verify_password
 
