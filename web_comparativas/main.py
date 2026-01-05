@@ -61,7 +61,8 @@ def run_startup_migrations():
     print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
     print("[STARTUP] STAGE 17 - FORCE RESTART CONFIRMED", flush=True)
 
-# === MIDDLEWARES ===
+
+# === MIDDLEWARES + DEBUG ===
 def _reset_session():
     try:
         if hasattr(db_session, "remove"):
@@ -73,17 +74,29 @@ def _reset_session():
 
 @app.middleware("http")
 async def db_session_lifecycle(request: Request, call_next):
+    if request.url.path == "/healthz":
+        return await call_next(request)
+
+    print(f"[MW] DB Start: {request.url.path}", flush=True)
     _reset_session()
-    request.state.db = SessionLocal()
+    
     try:
+        request.state.db = SessionLocal()
+        print(f"[MW] Session Created", flush=True)
         response = await call_next(request)
+        print(f"[MW] Committing...", flush=True)
         request.state.db.commit()
+        print(f"[MW] Committed OK", flush=True)
         return response
-    except Exception:
-        request.state.db.rollback()
+    except Exception as e:
+        print(f"[MW] DB Error/Rollback: {e}", flush=True)
+        if hasattr(request.state, "db"):
+            request.state.db.rollback()
         raise
     finally:
-        request.state.db.close()
+        if hasattr(request.state, "db"):
+            request.state.db.close()
+        print(f"[MW] DB Closed", flush=True)
 
 # Helpers Auth
 def get_current_user(request: Request) -> Optional[User]:
@@ -110,9 +123,20 @@ templates.env.globals["user_display"] = user_display
 
 @app.middleware("http")
 async def attach_user_to_state(request: Request, call_next):
-    u = get_current_user(request)
-    request.state.user = u
-    request.state.user_display = user_display(u) if u else ""
+    if request.url.path == "/healthz":
+        request.state.user = None
+        return await call_next(request)
+
+    print(f"[MW] Auth Start", flush=True)
+    try:
+        u = get_current_user(request)
+        print(f"[MW] User Loaded: {u.email if u else 'None'}", flush=True)
+        request.state.user = u
+        request.state.user_display = user_display(u) if u else ""
+    except Exception as e:
+         print(f"[MW] Auth Error: {e}", flush=True)
+         request.state.user = None
+
     response = await call_next(request)
     return response
 
@@ -128,6 +152,11 @@ app.add_middleware(
     https_only=False,
     max_age=60*60*24*7,
 )
+
+@app.get("/healthz")
+def health_check():
+    return {"status": "ok", "stage": "19_debug"}
+
 
 # === ROUTERS ===
 from web_comparativas.routers.sic_router import router as sic_router
