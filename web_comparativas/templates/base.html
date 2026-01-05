@@ -565,8 +565,8 @@
       const APP_USER = {
         role: {{ ((user and(user.role or user.rol or ''))| lower)| tojson
     }},
-    display: { { (_display_name or 'Yo')| tojson } },
-    email: { { (user and user.email or '')| tojson } }
+    display: {{ (_display_name or 'Yo')| tojson }},
+    email: {{ (user and user.email or '')| tojson }}
       };
     window.APP_USER = APP_USER;
 
