@@ -338,11 +338,11 @@ def _opp_load_df() -> pd.DataFrame | None:
         # normaliza encabezados visuales (conservamos los originales)
         df.columns = [str(c).strip() for c in df.columns]
 
-        # --- PRE-C├üLCULO DE COLUMNAS NORMALIZADAS (OPTIMIZACI├ôN) ---
+        # --- PRE-CÁLCULO DE COLUMNAS NORMALIZADAS (OPTIMIZACIÓN) ---
         # 1. Fechas (_dt)
         fecha_col = _opp_pick(
             df,
-            ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicaci├│n", "Publicaci├│n"],
+            ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
         )
         if fecha_col:
             # Parseo vectorizado (o map si es complejo, pero se hace 1 sola vez)
@@ -369,9 +369,9 @@ def _opp_load_df() -> pd.DataFrame | None:
             df["_budget"] = 0.0
 
         # 3. Estado Normalizado (_state) => EMERGENCIA / REGULAR
-        estado_col = _opp_pick(df, ["Estado", "Tipo Proceso", "Car├ícter"])
+        estado_col = _opp_pick(df, ["Estado", "Tipo Proceso", "Carácter"])
         if estado_col:
-            # La l├│gica es: si contiene "emerg" (case insensitive) -> EMERGENCIA, sino REGULAR
+            # La lógica es: si contiene "emerg" (case insensitive) -> EMERGENCIA, sino REGULAR
             s_lower = df[estado_col].astype(str).str.lower().fillna("")
             df["_state"] = np.where(
                 s_lower.str.contains("emerg"), "EMERGENCIA", "REGULAR"
@@ -2554,7 +2554,7 @@ def api_oportunidades_dimensiones(
 ):
     """
     API JSON para el dashboard de Dimensiones.
-    Usa la versi├│n OPTIMIZADA (pre-c├ílculo) para evitar parseos en cada request.
+    Usa la versión OPTIMIZADA (pre-cálculo) para evitar parseos en cada request.
     """
 
     def _san_str(v):
@@ -2619,7 +2619,7 @@ def api_oportunidades_dimensiones(
         df_filtered,
         [
             "Comprador",
-            "Repartici├│n",
+            "Repartición",
             "Entidad",
             "Organismo",
             "Unidad Compradora",
@@ -2632,7 +2632,7 @@ def api_oportunidades_dimensiones(
             "Provincia",
             "Provincia/Municipio",
             "Municipio",
-            "Jurisdicci├│n",
+            "Jurisdicción",
             "Localidad",
             "Departamento",
         ],
@@ -2644,16 +2644,16 @@ def api_oportunidades_dimensiones(
     cuenta_col = _opp_pick(
         df_filtered,
         [
-            "C├│digo",
+            "Código",
             "Codigo",
             "Cuenta",
-            "N┬░ Cuenta",
-            "Nro Cuenta", "Cuenta Nro", "N├║mero", "Numero", "N┬░", "Nro",
+            "N° Cuenta",
+             "Nro Cuenta", "Cuenta Nro", "Número", "Numero", "N°", "Nro",
         ],
     )
     fecha_col = _opp_pick(
         df_filtered,
-        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicaci├│n", "Publicaci├│n"],
+        ["Fecha Apertura", "Apertura", "Fecha", "Fecha de Publicación", "Publicación"],
     )
     presu_col = _opp_pick(
         df_filtered,
@@ -2673,7 +2673,7 @@ def api_oportunidades_dimensiones(
     )
     estado_col = _opp_pick(
         df_filtered,
-        ["Estado", "Tipo Proceso", "Car├ícter"],
+        ["Estado", "Tipo Proceso", "Carácter"],
     )
 
     # ------------- helpers internos OPTIMIZADOS usando groupby -----------------
@@ -2760,7 +2760,7 @@ def api_oportunidades_dimensiones(
 
     def _agg_reparticion_estado(buyer_col_name: str | None):
         """
-        Agrupaci├│n por Repartici├│n + Estado.
+        Agrupación por Repartición + Estado.
         """
         if not buyer_col_name:
             return [], []
