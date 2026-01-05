@@ -117,7 +117,8 @@ async def attach_user_to_state(request: Request, call_next):
     return response
 
 # Tracking
-app.add_middleware(TrackingMiddleware)
+# app.add_middleware(TrackingMiddleware)
+print("DEBUG: TrackingMiddleware DISABLED for stability", flush=True)
 
 # Session
 app.add_middleware(
