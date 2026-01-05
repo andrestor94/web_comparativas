@@ -62,6 +62,7 @@ def run_startup_migrations():
     print("[STARTUP] STAGE 17 - FORCE RESTART CONFIRMED", flush=True)
 
 
+
 # === MIDDLEWARES + DEBUG ===
 def _reset_session():
     try:
@@ -72,12 +73,66 @@ def _reset_session():
     except Exception:
         pass
 
+# Helpers Auth
+def get_current_user(request: Request) -> Optional[User]:
+    uid = request.session.get("uid")
+    if not uid: return None
+    
+    # Try using request.state.db if available
+    db = getattr(request.state, "db", None)
+    
+    try:
+        if db:
+            return db.get(User, uid)
+        else:
+            return db_session.get(User, uid)
+    except:
+        # Retry only if fallback
+        if not db:
+            _reset_session()
+            try: return db_session.get(User, uid)
+            except: return None
+        return None
+
+def user_display(u: Optional[User]) -> str:
+    if not u: return ""
+    for attr in ("name", "full_name", "nombre"):
+        v = getattr(u, attr, None)
+        if v and str(v).strip(): return str(v).strip()
+    email = getattr(u, "email", "") or ""
+    alias = email.split("@")[0] if "@" in email else email
+    alias = re.sub(r"[._-]+", " ", alias).strip().title()
+    return alias or ""
+
+templates.env.globals["user_display"] = user_display
+
+# 1. AUTH MIDDLEWARE (Defined FIRST, so it runs INNER)
+@app.middleware("http")
+async def attach_user_to_state(request: Request, call_next):
+    if request.url.path == "/healthz":
+        request.state.user = None
+        return await call_next(request)
+
+    print(f"[MW] Auth Start (Inner)", flush=True)
+    try:
+        u = get_current_user(request)
+        print(f"[MW] User Loaded: {u.email if u else 'None'}", flush=True)
+        request.state.user = u
+        request.state.user_display = user_display(u) if u else ""
+    except Exception as e:
+         print(f"[MW] Auth Error: {e}", flush=True)
+         request.state.user = None
+
+    response = await call_next(request)
+    return response
+
+# 2. DB LIFECYCLE MIDDLEWARE (Defined LAST, so it runs OUTER)
 @app.middleware("http")
 async def db_session_lifecycle(request: Request, call_next):
     if request.url.path == "/healthz":
         return await call_next(request)
 
-    print(f"[MW] DB Start: {request.url.path}", flush=True)
+    print(f"[MW] DB Start (Outer): {request.url.path}", flush=True)
     _reset_session()
     
     try:
@@ -98,51 +153,10 @@ async def db_session_lifecycle(request: Request, call_next):
             request.state.db.close()
         print(f"[MW] DB Closed", flush=True)
 
-# Helpers Auth
-def get_current_user(request: Request) -> Optional[User]:
-    uid = request.session.get("uid")
-    if not uid: return None
-    try:
-        return db_session.get(User, uid)
-    except:
-        _reset_session()
-        try: return db_session.get(User, uid)
-        except: return None
-
-def user_display(u: Optional[User]) -> str:
-    if not u: return ""
-    for attr in ("name", "full_name", "nombre"):
-        v = getattr(u, attr, None)
-        if v and str(v).strip(): return str(v).strip()
-    email = getattr(u, "email", "") or ""
-    alias = email.split("@")[0] if "@" in email else email
-    alias = re.sub(r"[._-]+", " ", alias).strip().title()
-    return alias or ""
-
-templates.env.globals["user_display"] = user_display
-
-@app.middleware("http")
-async def attach_user_to_state(request: Request, call_next):
-    if request.url.path == "/healthz":
-        request.state.user = None
-        return await call_next(request)
-
-    print(f"[MW] Auth Start", flush=True)
-    try:
-        u = get_current_user(request)
-        print(f"[MW] User Loaded: {u.email if u else 'None'}", flush=True)
-        request.state.user = u
-        request.state.user_display = user_display(u) if u else ""
-    except Exception as e:
-         print(f"[MW] Auth Error: {e}", flush=True)
-         request.state.user = None
-
-    response = await call_next(request)
-    return response
-
 # Tracking
 # app.add_middleware(TrackingMiddleware)
 print("DEBUG: TrackingMiddleware DISABLED for stability", flush=True)
+
 
 # Session
 app.add_middleware(
