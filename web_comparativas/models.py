@@ -130,9 +130,13 @@ class User(Base):
     # Campo para Segmentación de Acceso: "Mercado Publico", "Mercado Privado", "Todos"
     access_scope = Column(String, default="todos")
 
-    # Relaciones con métricas de uso
-    usage_events = relationship("UsageEvent", back_populates="user", lazy="selectin")
-    usage_sessions = relationship("UsageSession", back_populates="user", lazy="selectin")
+    # Relaciones con métricas de uso (EVITAR eager load masivo)
+    # Antes: lazy="selectin" -> traía TODO el historial al cargar el usuario.
+    # Ahora: lazy="dynamic" -> devuelve un Query object, o lazy=True para carga bajo demanda si se accede.
+    # Usamos lazy="dynamic" para poder filtrar si fuese necesario, o simplemente "select" (True).
+    # Como son logs, mejor no cargarlos por defecto.
+    usage_events = relationship("UsageEvent", back_populates="user", lazy="select")
+    usage_sessions = relationship("UsageSession", back_populates="user", lazy="select")
 
     # ---- Helpers de rol/unidad ----
     def _role_norm(self) -> str:
