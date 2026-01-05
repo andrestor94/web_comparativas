@@ -54,12 +54,14 @@ from web_comparativas.migrations import ensure_access_scope_column
 @app.on_event("startup")
 def run_startup_migrations():
     print("[MIGRATION] Startup event...", flush=True)
-    # try:
-    #     ensure_access_scope_column()
-    # except Exception as e:
-    #     print(f"[MIGRATION] Warning: {e}", flush=True)
-    print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
-    print("[STARTUP] STAGE 17 - FORCE RESTART CONFIRMED", flush=True)
+    try:
+        ensure_access_scope_column()
+        print("[MIGRATION] SUCCESS: 'access_scope' checked/added.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning: {e}", flush=True)
+    
+    # print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
+    print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
 
 
 
