@@ -1004,16 +1004,14 @@
 <!-- 1) Datos iniciales para el treemap (fallback si no hay chart_prov directo) -->
 <script>
   (() => {
-    const direct = {{ chart_prov|default ([]) | tojson
-  }};
+    const direct = {{ chart_prov|default([]) | tojson }};
   if (Array.isArray(direct) && direct.length) {
     window.CHART_PROV = direct.map(d => ({
       label: String(d.label ?? d.name ?? '—'),
       value: +d.value || 0
     }));
   } else {
-    const L = {{ chart_suppliers_adj_labels|default ([]) | tojson
-  }};
+    const L = {{ chart_suppliers_adj_labels|default([]) | tojson }};
   const V = {{ chart_suppliers_adj_values|default ([]) | tojson }};
   const out = [];
   for (let i = 0; i < Math.min(L.length, V.length); i++) {
