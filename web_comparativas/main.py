@@ -59,6 +59,7 @@ def run_startup_migrations():
     # except Exception as e:
     #     print(f"[MIGRATION] Warning: {e}", flush=True)
     print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
+    print("[STARTUP] STAGE 17 - FORCE RESTART CONFIRMED", flush=True)
 
 # === MIDDLEWARES ===
 def _reset_session():
