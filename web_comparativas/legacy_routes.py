@@ -4272,6 +4272,68 @@ def api_descargar_final(
     )
 
 
+
+@router.post("/api/cargas/{upload_id}/restaurar", response_class=JSONResponse)
+async def api_restaurar_archivo(
+    upload_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(require_roles("admin")),
+):
+    """
+    Ruta para 'Restaurar' el archivo original cuando se ha perdido 
+    (ej. migración V1 sin archivos). Recibe el Excel, lo guarda en 
+    la ruta original y dispara el re-procesamiento.
+    """
+    up = db_session.get(UploadModel, upload_id)
+    if not up:
+        return JSONResponse({"ok": False, "error": "Proceso no encontrado"}, status_code=404)
+
+    # 1. Resolver ruta destino
+    # Intentamos usar original_path si existe en DB
+    orig_path_str = getattr(up, "original_path", None)
+    
+    # Si no tiene original_path, construimos uno nuevo
+    if not orig_path_str:
+        # Fallback a estructura estándar
+        base = services.PROJECT_ROOT / "data" / "uploads"
+        ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = f"{ts}_{file.filename}"
+        dest_path = base / safe_name
+        
+        # Actualizamos DB
+        up.original_path = str(dest_path)
+        up.original_filename = file.filename
+        up.base_dir = str(base) # aseguramos base
+        db_session.add(up)
+        db_session.commit()
+    else:
+        dest_path = services._abs_path(orig_path_str) or Path(orig_path_str)
+
+    # Asegurar directorio
+    if not dest_path.parent.exists():
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 2. Guardar archivo
+    try:
+        content = await file.read()
+        dest_path.write_bytes(content)
+        logger.info(f"Archivo restaurado para Upload {upload_id} en {dest_path}")
+    except Exception as e:
+        logger.error(f"Error al escribir archivo restaurado: {e}")
+        return JSONResponse({"ok": False, "error": f"Error I/O: {str(e)}"}, status_code=500)
+
+    # 3. Disparar procesamiento
+    try:
+        # Usamos services.classify_and_process
+        # touch_status=True para que actualice estados visualmente
+        services.classify_and_process(upload_id, metadata={}, touch_status=True)
+    except Exception as e:
+        logger.error(f"Error re-procesando Upload {upload_id}: {e}")
+        return JSONResponse({"ok": False, "error": f"Error procesamiento: {str(e)}"}, status_code=500)
+
+    return JSONResponse({"ok": True, "message": "Archivo restaurado y procesado correctamente."})
+
+
 @router.get("/api/tablero/{upload_id}/ranking", response_class=JSONResponse)
 def api_tablero_ranking(
     upload_id: int,
