@@ -458,7 +458,7 @@
           Volver a la selección
         </div>
         {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
-        <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/">Cambiar Mercado</a>
+        <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/switch-market">Cambiar Mercado</a>
         {% endif %}
         <a class="btn btn-outline-danger w-100 btn-sm" href="/logout">Salir</a>
         {% else %}

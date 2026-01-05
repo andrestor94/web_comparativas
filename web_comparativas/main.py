@@ -128,6 +128,9 @@ async def attach_user_to_state(request: Request, call_next):
         print(f"[MW] User Loaded: {u.email if u else 'None'}", flush=True)
         request.state.user = u
         request.state.user_display = user_display(u) if u else ""
+        
+        # Inject Market Context from Session
+        request.state.market_context = request.session.get("market_context", "public")
     except Exception as e:
          print(f"[MW] Auth Error: {e}", flush=True)
          request.state.user = None
@@ -322,6 +325,10 @@ def home(request: Request):
     user = request.state.user
     db = request.state.db
     
+    # Context Check: If Private, redirect to Private Home
+    if getattr(request.state, "market_context", "public") == "private":
+        return RedirectResponse("/mercado-privado", 303)
+
     # 1. KPIs de Cargas (Uploads)
     # Filtro por scope? Por ahora "todos" o segun logica
     query = db.query(Upload)
@@ -363,13 +370,52 @@ def home(request: Request):
         "opp_unseen": opp_unseen,
         "reset_ok": request.query_params.get("reset_ok"),
         "reset_err": request.query_params.get("reset_err"),
+        "reset_ok": request.query_params.get("reset_ok"),
+        "reset_err": request.query_params.get("reset_err"),
         "step_labels": {
             "pending": "Pendiente",
             "processing": "Procesando",
             "done": "Completado",
             "error": "Error"
-        }
+        },
+        "market_context": "public" # Force explicit context for template
     })
+
+# === MARKET SWITCHING & PRIVATE ROUTES ===
+@app.get("/switch-market")
+def switch_market(request: Request):
+    curr = request.session.get("market_context", "public")
+    new_context = "private" if curr == "public" else "public"
+    request.session["market_context"] = new_context
+    
+    if new_context == "private":
+        return RedirectResponse("/mercado-privado", 303)
+    else:
+        return RedirectResponse("/", 303)
+
+@app.get("/mercado-privado", response_class=HTMLResponse)
+def mercado_privado_home(request: Request):
+    # Enforce Context
+    if request.session.get("market_context") != "private":
+        return RedirectResponse("/", 303)
+        
+    return templates.TemplateResponse("mercado_privado_home.html", {
+        "request": request,
+        "user": request.state.user,
+        "market_context": "private"
+    })
+
+@app.get("/mercado-privado/dimensiones", response_class=HTMLResponse)
+def mercado_privado_dimensiones(request: Request):
+    if request.session.get("market_context") != "private":
+        return RedirectResponse("/", 303)
+        
+    return templates.TemplateResponse("mercado_privado_dimensiones.html", {
+        "request": request,
+        "user": request.state.user,
+        "market_context": "private"
+    })
+
 
 @app.get("/login", response_class=HTMLResponse)
 def login(request: Request):
