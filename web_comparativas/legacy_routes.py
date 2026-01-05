@@ -37,7 +37,6 @@ from reportlab.lib.colors import Color
 
 from fastapi import (
     APIRouter,
-    APIRouter,
     FastAPI,
     Request,
     UploadFile,
@@ -869,28 +868,28 @@ async def attach_user_to_state(request: Request, call_next):
 
 # === [Tracking Middleware] ===
 # Agregamos el middleware de tracking "encima" del de auth.
-from web_comparativas.middleware.tracking import TrackingMiddleware
-app.add_middleware(TrackingMiddleware)
+# from web_comparativas.middleware.tracking import TrackingMiddleware
+# app.add_middleware(TrackingMiddleware)
 
 
 # ======================================================================
 # SESIONES (cookies)
 # ======================================================================
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv("APP_SECRET", "dev-secret-123"),
-    session_cookie="wc_session",
-    same_site="lax",
-    https_only=False,
-    max_age=60 * 60 * 24 * 7,  # 7 d├¡as
-)
+# app.add_middleware(
+#     SessionMiddleware,
+#     secret_key=os.getenv("APP_SECRET", "dev-secret-123"),
+#     session_cookie="wc_session",
+#     same_site="lax",
+#     https_only=False,
+#     max_age=60 * 60 * 24 * 7,  # 7 d├¡as
+# )
 
 # Archivos est├íticos
-app.mount(
-    "/static",
-    StaticFiles(directory=str(BASE_DIR / "static")),
-    name="static",
-)
+# app.mount(
+#     "/static",
+#     StaticFiles(directory=str(BASE_DIR / "static")),
+#     name="static",
+# )
 
 # Rutas de Comentarios (REST + SSE)
 # # app.include_router(comments_router)
@@ -1003,7 +1002,7 @@ def require_roles(*roles: str):
 # ======================================================================
 # MANEJO GLOBAL DE HTTPException
 # ======================================================================
-@app.exception_handler(HTTPException)
+# @app.exception_handler(HTTPException)
 async def _http_exc_redirect_login(request: Request, exc: HTTPException):
     """
     Si es 401, vamos al login.
