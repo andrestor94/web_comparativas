@@ -53,11 +53,12 @@ from web_comparativas.migrations import ensure_access_scope_column
 
 @app.on_event("startup")
 def run_startup_migrations():
-    print("[MIGRATION] Checking schema...", flush=True)
-    try:
-        ensure_access_scope_column()
-    except Exception as e:
-        print(f"[MIGRATION] Warning: {e}", flush=True)
+    print("[MIGRATION] Startup event...", flush=True)
+    # try:
+    #     ensure_access_scope_column()
+    # except Exception as e:
+    #     print(f"[MIGRATION] Warning: {e}", flush=True)
+    print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
 
 # === MIDDLEWARES ===
 def _reset_session():
