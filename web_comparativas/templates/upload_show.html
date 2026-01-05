@@ -391,6 +391,15 @@
       </a>
       {% endif %}
 
+      {% if user and (user.role or '').lower() == 'admin' %}
+      <!-- RESTORE BUTTON (Fix missing files) -->
+      <button id="btnRestore" type="button" class="btn btn-suizo-outline-red btn-icon-gap">
+        <i class="bi bi-cloud-upload-fill"></i> Restaurar Archivo
+      </button>
+      <!-- Hidden Input for Restore -->
+      <input type="file" id="restoreFile" accept=".xlsx,.xls,.csv" hidden>
+      {% endif %}
+
       <button id="btnRefresh" type="button" class="btn btn-suizo-secondary btn-icon-gap">
         <i class="bi bi-arrow-clockwise"></i> Refrescar
       </button>
@@ -438,6 +447,8 @@
   const btnDash = document.getElementById("btnDashboard");
   const btnDown = document.getElementById("btnDownload");
   const btnRef = document.getElementById("btnRefresh");
+  const btnRestore = document.getElementById("btnRestore"); // Restore Button
+  const restoreFile = document.getElementById("restoreFile"); // Hidden Input
 
   const headerStatusBadge = document.getElementById("headerStatusBadge");
   const metaAdapter = document.getElementById("metaAdapter");
@@ -712,6 +723,50 @@
   }
   if (btnPrev) btnPrev.addEventListener("click", () => move("prev"));
   if (btnNext) btnNext.addEventListener("click", () => move("next"));
+
+  // Restore Logic
+  if (btnRestore && restoreFile) {
+    btnRestore.addEventListener("click", () => restoreFile.click());
+    restoreFile.addEventListener("change", async () => {
+      if (!restoreFile.files || !restoreFile.files[0]) return;
+      const file = restoreFile.files[0];
+
+      if (!confirm(`¿Confirmás restaurar el proceso con el archivo?\n\n${file.name}`)) {
+        restoreFile.value = ""; // reset
+        return;
+      }
+
+      // Show loading
+      btnRestore.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Subiendo...`;
+      btnRestore.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+
+        const r = await fetch(`/api/cargas/${uploadId}/restaurar`, {
+          method: "POST",
+          body: fd
+        });
+        const json = await r.json();
+
+        if (r.ok && json.ok) {
+          alert("¡Archivo restaurado! El proceso se está regenerando.");
+          location.reload();
+        } else {
+          alert("Error al restaurar: " + (json.error || "Desconocido"));
+          btnRestore.innerHTML = `<i class="bi bi-cloud-upload-fill"></i> Restaurar Archivo`;
+          btnRestore.disabled = false;
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Error de conexión al restaurar.");
+        btnRestore.innerHTML = `<i class="bi bi-cloud-upload-fill"></i> Restaurar Archivo`;
+        btnRestore.disabled = false;
+      }
+      restoreFile.value = "";
+    });
+  }
 
   // Init
   window.addEventListener("DOMContentLoaded", () => {
