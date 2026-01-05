@@ -68,7 +68,15 @@ else:
         "options": "-c statement_timeout=5000"
     }
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args=connect_args, future=True)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
+    connect_args=connect_args,
+    future=True
+)
 
 # Banderas útiles
 IS_SQLITE = engine.url.get_backend_name() == "sqlite"
