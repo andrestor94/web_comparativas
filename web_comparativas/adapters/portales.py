@@ -75,11 +75,11 @@ def _first_fixed_cols(row_headers):
             fixed["Alternativa"] = j
         elif "codigo" in t and "Código" not in fixed:
             fixed["Código"] = j
-        elif t.startswith("descripcion") and "Descripción" not in fixed:
+        elif ("descripcion" in t or "detalle" in t or "producto" in t) and "Descripción" not in fixed:
             fixed["Descripción"] = j
-        elif "cantidad solicitada" in t and "Cantidad solicitada" not in fixed:
+        elif ("cantidad" in t or "cant." in t) and ("solic" in t or "pedid" in t or ("ofert" not in t and "adjud" not in t)) and "Cantidad solicitada" not in fixed:
             fixed["Cantidad solicitada"] = j
-        elif "unidad de medida" in t and "Unidad de medida" not in fixed:
+        elif ("unidad" in t or "u. medida" in t or "unid." in t) and "Unidad de medida" not in fixed:
             fixed["Unidad de medida"] = j
     return fixed
 
@@ -109,13 +109,26 @@ def _map_cols_in_block(df, header_row_idx, start, end):
     for h, c in zip(hdrs, cols):
         if not h:
             continue
-        if "precio unitario" in h:
-            mapping["Precio unitario"] = c
-        elif "cantidad ofertada" in h:
-            mapping["Cantidad ofertada"] = c
-        elif "total por rengl" in h or h.startswith("total"):
+        # Precio unitario
+        if any(x in h for x in ("precio unitario", "p. unitario", "imp. unitario", "importe unitario", "precio")):
+            # Evitar confusiones con "precio total" si "unitario" no está, pero "precio" solo es arriesgado.
+            # Mejor orden: si tiene "unitario" es unitario.
+            if "total" not in h:
+                mapping["Precio unitario"] = c
+        
+        # Cantidad ofertada
+        # Ojo: en el bloque proveedor suele llamarse "cantidad" o "cantidad ofertada".
+        # En fixed cols está "cantidad solicitada".
+        if any(x in h for x in ("cantidad ofertada", "cant. ofertada", "cantidad", "cant.")):
+            if "solicitada" not in h:
+                mapping["Cantidad ofertada"] = c
+
+        # Total
+        if any(x in h for x in ("total por rengl", "importe total", "monto total")) or h.startswith("total"):
             mapping["Total por renglón"] = c
-        elif "especificacion" in h or "observacion" in h:
+        
+        # Specs
+        if "especificacion" in h or "observacion" in h or "marca" in h or "detalle" in h:
             mapping["Especificación técnica"] = c
     return mapping
 
