@@ -195,6 +195,10 @@ app.include_router(sic_router)
 app.include_router(dimensiones_router)
 app.include_router(notifications_router)
 app.include_router(comments_router)
+
+# === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
+from web_comparativas.legacy_routes import router as legacy_router
+app.include_router(legacy_router)
 # app.include_router(comments_ui_router) # Si se usa
 
 # === CLIENTES (LAZY LOADING FIX) ===
