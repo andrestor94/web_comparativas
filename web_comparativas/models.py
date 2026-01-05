@@ -55,23 +55,29 @@ if DATABASE_URL:
 else:
     SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE.as_posix()}"
 
-# Engine
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
-    # Timeout de conexión corto para fallar rápido si no responde
-    connect_args = {"connect_timeout": 10}
+    # Postgres en Render:
+    # 1. Timeout de conexión (TCP): 10s
+    # 2. SSL requerido
+    # 3. Timeout de consulta (statement): 5000ms para evitar hangs infinitos por bloqueos
+    connect_args = {
+        "connect_timeout": 10,
+        "sslmode": "require",
+        "options": "-c statement_timeout=5000"
+    }
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True, connect_args=connect_args, future=True)
 
-# Banderas útiles para saber qué backend estamos usando
+# Banderas útiles
 IS_SQLITE = engine.url.get_backend_name() == "sqlite"
 IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
 
-# Log visible en consola (sin credenciales)
 print(
-    f"[DB DEBUG] Backend activo: {engine.url.get_backend_name()} "
-    f"(database={engine.url.database})"
+    f"[DB DEBUG] Config: SSL=require, Timeout=5s. Backend: {engine.url.get_backend_name()} "
+    f"(database={engine.url.database})",
+    flush=True
 )
 
 # Activar foreign keys en SQLite
