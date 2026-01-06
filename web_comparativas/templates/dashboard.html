@@ -1004,14 +1004,16 @@
 <!-- 1) Datos iniciales para el treemap (fallback si no hay chart_prov directo) -->
 <script>
   (() => {
-    const direct = {{ chart_prov|default([]) | tojson }};
+    const direct = {{ chart_prov|default ([]) | tojson
+  }};
   if (Array.isArray(direct) && direct.length) {
     window.CHART_PROV = direct.map(d => ({
       label: String(d.label ?? d.name ?? '—'),
       value: +d.value || 0
     }));
   } else {
-    const L = {{ chart_suppliers_adj_labels|default([]) | tojson }};
+    const L = {{ chart_suppliers_adj_labels|default ([]) | tojson
+  }};
   const V = {{ chart_suppliers_adj_values|default ([]) | tojson }};
   const out = [];
   for (let i = 0; i < Math.min(L.length, V.length); i++) {
@@ -1634,6 +1636,24 @@
       renderChips();
     };
 
+    window.resetFilters = () => {
+      FILTERS.provider = null;
+      FILTERS.item = null;
+      FILTERS.rubro = null;
+      FILTERS.header = {};
+      FILTERS.posBuckets.clear();
+      // Restaurar columnas 1,2,3...
+      const max = DATA.max_pos || 0;
+      FILTERS.visCols = new Set([1, 2, 3].filter(n => n <= max));
+      buildHead(max);
+      updatePosButtonsUI();
+      if (elSearch) elSearch.value = '';
+      QUERY = '';
+      renderChips();
+      elInfo.dataset.page = 1;
+      renderAll();
+    };
+
 
     function buildPosCols(maxPos) {
       if (!elPosCols) return;
@@ -1959,7 +1979,14 @@
 
       if (!slice.length) {
         elBody.innerHTML =
-          `<tr><td colspan="${3 + maxPos * 4}" class="text-center text-muted py-4">No hay filas para mostrar.</td></tr>`;
+          `<tr><td colspan="${3 + maxPos * 4}" class="text-center text-muted py-5">
+            <div class="d-flex flex-column align-items-center gap-2">
+              <div>No hay filas para mostrar con los filtros actuales.</div>
+              <button class="btn btn-sm btn-outline-primary" onclick="window.resetFilters()">
+                 Mostrar todo / Resetear filtros
+              </button>
+            </div>
+          </td></tr>`;
       } else {
         elBody.innerHTML = slice.map(row => {
           const nro = row.nro ?? row.item ?? '';
@@ -3245,6 +3272,37 @@
         return;
       }
       await applyViewPayload(def.payload || {});
+
+      // [Dashboard Fix] Auto-Rescue: Si al aplicar la vista default nos quedamos sin filas, reseteamos.
+      const visible = filteredRows().length;
+      if (visible === 0 && (DATA.total_rows || 0) > 0) {
+        console.warn('[Views] La vista por defecto ocultó todas las filas. Reseteando filtros automáticamente.');
+
+        // Pequeño toast o notificación en consola
+        if (typeof window.Toast === 'function') {
+          window.Toast.fire({ icon: 'warning', title: 'Vista por defecto reseteada porque no mostraba datos.' });
+        }
+
+        // Reset manual de filtros
+        FILTERS.provider = null;
+        FILTERS.item = null;
+        FILTERS.rubro = null;
+        FILTERS.header = {};
+        FILTERS.posBuckets.clear();
+        // Restaurar columnas básicas
+        const max = DATA.max_pos || 0;
+        FILTERS.visCols = new Set([1, 2, 3].filter(n => n <= max));
+        buildHead(max);
+        updatePosButtonsUI();
+
+        // Limpiar inputs UI
+        if (elSearch) elSearch.value = '';
+        QUERY = '';
+
+        renderChips();
+        elInfo.dataset.page = 1;
+        renderAll();
+      }
     } catch (err) {
       console.error('[Views] Error applying default view:', err);
     }
