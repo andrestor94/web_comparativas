@@ -4364,51 +4364,72 @@ def api_tablero_ranking(
 
     cols = [str(c).strip() for c in df.columns]
 
-    def _find(pred):
-        for c in cols:
-            if pred(c.lower()):
-                return c
+    # Helper robusto para buscar columnas
+    dict_cols = { _norm_key(c): c for c in cols }
+
+    def _find_norm(candidates):
+        for cand in candidates:
+            # cand debe estar normalizado (sin acentos, minúscula)
+            if cand in dict_cols:
+                return dict_cols[cand]
         return None
 
-    item_col = _find(
-        lambda s: s
-        in {
-            "n┬░",
-            "nro",
-            "item",
-            "numero",
-            "n├║mero",
-            "rengl├│n",
-            "renglon",
-        }
-    )
-    desc_col = _find(lambda s: s.startswith("descrip"))
-    prov_col = _find(
-        lambda s: "proveedor" in s or "oferente" in s or "empresa" in s
-    )
-    price_col = (
-        _find(
-            lambda s: ("precio" in s and "unit" in s)
-            or "unitario" in s
-        )
-        or _find(
-            lambda s: (
-                "precio" in s
-                and "total" not in s
-                and "importe" not in s
-            )
-        )
-    )
-    qty_req_col = _find(
-        lambda s: "cantidad" in s and "solicit" in s
-    )
-    qty_off_col = _find(
-        lambda s: "cantidad" in s and ("ofertad" in s or "ofrec" in s)
-    )
-    # ­ƒæë NUEVO: intentar buscar columna de Rubro
-    rubro_col = _find(
-        lambda s: s in {"rubro", "rubo", "clase", "ramo"}
-    )
+    # 1. Item
+    item_col = _find_norm(["nro", "numero", "item", "renglon", "no", "id"])
+    
+    # 2. Desc
+    # Buscamos algo que empiece con desc
+    desc_col = None
+    for k, v in dict_cols.items():
+        if k.startswith("desc"):
+            desc_col = v
+            break
+            
+    # 3. Proveedor (prov, oferente, empresa)
+    prov_col = None
+    for k, v in dict_cols.items():
+        if any(x in k for x in ["proveedor", "oferente", "empresa", "supplier"]):
+            prov_col = v
+            break
+
+    # 4. Precio
+    # Lógica precio: que tenga "precio" y no "total" (salvo que diga "total" y "unitario"?)
+    # O "unitario"
+    price_col = None
+    for k, v in dict_cols.items():
+        if "unitario" in k or "unit" in k:
+            # Preferencia alta
+            price_col = v
+            break
+    
+    if not price_col:
+        # Buscamos "precio" genérico, evitando "total", "importe" si es posible
+        for k, v in dict_cols.items():
+            if "precio" in k:
+                if "total" not in k and "importe" not in k:
+                    price_col = v
+                    break
+    
+    # qty req
+    qty_req_col = None
+    for k, v in dict_cols.items():
+        if "cantidad" in k and ("solic" in k or "requer" in k or "pedid" in k):
+            qty_req_col = v
+            break
+    if not qty_req_col:
+         # fallback "cantidad" a secas
+        if "cantidad" in dict_cols:
+            qty_req_col = dict_cols["cantidad"]
+
+    # qty off
+    qty_off_col = None
+    for k, v in dict_cols.items():
+        if "cantidad" in k and ("ofert" in k or "ofrec" in k):
+            qty_off_col = v
+            break
+            
+    # rubro
+    rubro_col = _find_norm(["rubro", "clase", "ramo"])
 
     def _to_num_local(x):
         try:
