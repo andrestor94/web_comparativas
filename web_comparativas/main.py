@@ -210,17 +210,17 @@ def get_clientes_index():
     if _clientes_index_cache is not None:
         return _clientes_index_cache
     
-    print("DEBUG: Loading Clients Excel with dtype=str...", flush=True)
+    print("Loading Clients Excel with dtype=str...", flush=True)
     index = {}
     try:
         if CLIENTES_PATH.exists():
             import pandas as pd
-            # Force string to avoid float conversions (123 -> "123.0")
+            # Force string to avoid float (123 -> "123.0")
             df = pd.read_excel(CLIENTES_PATH, dtype=str).fillna("")
+            print(f"Clients loaded. Rows: {len(df)}", flush=True)
             
             for _, row in df.iterrows():
                 nro = str(row.get("N° Cuenta", "")).strip()
-                # Remove .0 if it exists
                 if nro.endswith(".0"): nro = nro[:-2]
                 
                 if not nro: continue
@@ -235,7 +235,7 @@ def get_clientes_index():
         print(f"[ERROR] Failed to load clients: {e}", flush=True)
     
     _clientes_index_cache = index
-    print("DEBUG: Clients Loaded.", flush=True)
+    print(f"Clients Index built. Count: {len(index)}", flush=True)
     return _clientes_index_cache
 
 @app.get("/api/clientes/{n_cuenta}")

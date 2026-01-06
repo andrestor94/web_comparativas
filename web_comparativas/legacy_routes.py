@@ -839,14 +839,14 @@ else:
     print(f"[WARN] No se encontr├│ el archivo de clientes en {CLIENTES_PATH}")
 
 
-@router.get("/api/clientes/{n_cuenta}")
-def api_get_cliente_por_cuenta(n_cuenta: str):
-    """Devuelve los datos del cliente para autocompletar el formulario."""
-    key = n_cuenta.strip()
-    data = _clientes_index.get(key)
-    if not data:
-        return {"ok": False, "msg": "Cliente no encontrado"}
-    return {"ok": True, "data": data}
+# @router.get("/api/clientes/{n_cuenta}")
+# def api_get_cliente_por_cuenta(n_cuenta: str):
+#     """Devuelve los datos del cliente para autocompletar el formulario."""
+#     key = n_cuenta.strip()
+#     data = _clientes_index.get(key)
+#     if not data:
+#         return {"ok": False, "msg": "Cliente no encontrado"}
+#     return {"ok": True, "data": data}
 
 
 # ======================================================================
