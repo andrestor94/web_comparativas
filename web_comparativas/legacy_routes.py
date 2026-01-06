@@ -5401,7 +5401,11 @@ def tablero_show(
             "table_rows": table_rows,
             "rows_total": rows_total,
             "rank_api_url": rank_api_url,
-            "pdf_url": pdf_url,  # ­ƒæê ahora S├ì existe
+            "pdf_url": pdf_url, 
+            # DEBUG INFO
+            "debug_version": f"v2.DEBUG.{int(dt.datetime.now().timestamp())}",
+            "debug_base_dir": str(getattr(up, "base_dir", "MISSING")),
+            "debug_norm_path": str(norm_path),
         },
     )
 
