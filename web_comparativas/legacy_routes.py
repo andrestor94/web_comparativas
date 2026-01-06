@@ -4292,18 +4292,22 @@ async def api_restaurar_archivo(
     # Intentamos usar original_path si existe en DB
     orig_path_str = getattr(up, "original_path", None)
     
-    # Si no tiene original_path, construimos uno nuevo
+    # Si no tiene original_path, construimos uno nuevo EN CARPETA ÚNICA (Aislamiento)
     if not orig_path_str:
-        # Fallback a estructura estándar
-        base = services.PROJECT_ROOT / "data" / "uploads"
+        # Generar ID único para carpeta
+        root_uploads = services.PROJECT_ROOT / "data" / "uploads"
+        uid = str(uuid.uuid4())
+        unique_dir = root_uploads / uid
+        unique_dir.mkdir(parents=True, exist_ok=True)
+
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = f"{ts}_{file.filename}"
-        dest_path = base / safe_name
+        dest_path = unique_dir / safe_name
         
         # Actualizamos DB
         up.original_path = str(dest_path)
         up.original_filename = file.filename
-        up.base_dir = str(base) # aseguramos base
+        up.base_dir = str(unique_dir) # IMPORTANTE: Base dir único
         db_session.add(up)
         db_session.commit()
     else:
@@ -5774,7 +5778,7 @@ def descargar_archivo_original(
             detail="No autorizado para ver este archivo.",
         )
 
-    # Ruta f├¡sica del archivo original
+    # Ruta física del archivo original (Robust path resolution)
     orig_path = getattr(up, "original_path", None)
     if not orig_path:
         raise HTTPException(
@@ -5782,35 +5786,36 @@ def descargar_archivo_original(
             detail="No hay archivo original registrado para esta carga.",
         )
 
-    p = Path(orig_path)
-    if not p.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="El archivo original no se encuentra en el servidor.",
+    try:
+        p = services._abs_path(orig_path) or Path(orig_path)
+        if not p.exists():
+            logger.warning(f"Download failed: File not found at {p}")
+            raise HTTPException(status_code=404, detail=f"El archivo original no se encuentra en el servidor ({p.name}).")
+            
+        # Nombre de archivo para la descarga
+        # Nombre de archivo para la descarga
+        filename = p.name
+
+        # Log
+        log_usage_event(
+            user=user,
+            action_type="download_original",
+            section="cargas_original",
+            request=request, 
+            resource_id=str(up.id),
+            extra_data={"filename": filename},
         )
 
-    # Nombre de archivo para la descarga
-    filename = p.name
-
-    # Tipo gen├®rico; Excel lo abre igual
-        # Nombre de archivo para la descarga
-    filename = p.name
-
-    # ­ƒæç NUEVO: log de descarga de original
-    log_usage_event(
-        user=user,
-        action_type="download_original",
-        section="cargas_original",
-        request=request,
-        resource_id=str(up.id),
-        extra_data={"filename": filename},
-    )
-
-    return FileResponse(
-        str(p),
-        filename=filename,
-        media_type="application/octet-stream",
-    )
+        return FileResponse(
+            str(p),
+            filename=filename,
+            media_type="application/octet-stream",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file {upload_id}: {e}")
+        raise HTTPException(status_code=404, detail="Error interno al recuperar el archivo.")
 
 # ======================================================================
 # DESCARGA normalized.xlsx
