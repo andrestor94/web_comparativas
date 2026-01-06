@@ -210,14 +210,19 @@ def get_clientes_index():
     if _clientes_index_cache is not None:
         return _clientes_index_cache
     
-    print("DEBUG: Loading Clients Excel...", flush=True)
+    print("DEBUG: Loading Clients Excel with dtype=str...", flush=True)
     index = {}
     try:
         if CLIENTES_PATH.exists():
             import pandas as pd
-            df = pd.read_excel(CLIENTES_PATH).fillna("")
+            # Force string to avoid float conversions (123 -> "123.0")
+            df = pd.read_excel(CLIENTES_PATH, dtype=str).fillna("")
+            
             for _, row in df.iterrows():
                 nro = str(row.get("N° Cuenta", "")).strip()
+                # Remove .0 if it exists
+                if nro.endswith(".0"): nro = nro[:-2]
+                
                 if not nro: continue
                 index[nro] = {
                     "comprador": str(row.get("Nombre Fantasia ", "")).strip().strip('"'),
@@ -225,9 +230,9 @@ def get_clientes_index():
                     "plataforma": ""
                 }
         else:
-            print(f"[WARN] Clientes file not found at {CLIENTES_PATH}")
+            print(f"[WARN] Clientes file not found at {CLIENTES_PATH}", flush=True)
     except Exception as e:
-        print(f"[ERROR] Failed to load clients: {e}")
+        print(f"[ERROR] Failed to load clients: {e}", flush=True)
     
     _clientes_index_cache = index
     print("DEBUG: Clients Loaded.", flush=True)
