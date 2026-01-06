@@ -10,7 +10,13 @@
 {# Avisos compactos en el top #}
 {% block notifications %}
 {% if recent_done and recent_done|length > 0 %}
-<div class="alert alert-success alert-dismissible fade show mt-2" role="alert">
+{# Calculamos firma única de este lote #}
+{% set sig_list = [] %}
+{% for x in recent_done %}{% set _ = sig_list.append(x.id|string) %}{% endfor %}
+{% set sig = sig_list|join('-') %}
+
+<div id="recentDoneAlert" class="alert alert-success alert-dismissible fade show mt-2" role="alert"
+  data-signature="{{ sig }}">
   <strong>Listos recientemente:</strong>
   {% for up in recent_done[:3] %}
   <span class="ms-2">• <a href="/tablero/{{ up.id }}" class="alert-link">
@@ -20,8 +26,29 @@
   {% if recent_done|length > 3 %}
   <span class="ms-2">… <a href="#notificaciones" class="alert-link">ver todas</a></span>
   {% endif %}
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar" id="btnCloseRecent"></button>
 </div>
+<script>
+  (function () {
+    var alertEl = document.getElementById('recentDoneAlert');
+    var btn = document.getElementById('btnCloseRecent');
+    if (alertEl && btn) {
+      var currentSig = alertEl.getAttribute('data-signature');
+      var storedSig = localStorage.getItem('min_dismissed_recent_sig');
+
+      // Si la firma es la misma, ocultamos de inmediato
+      if (storedSig === currentSig) {
+        alertEl.style.display = 'none'; // Lo ocultamos visualmente
+        alertEl.classList.remove('show'); // Por si acaso Bootstrap
+      }
+
+      // Al cerrar, guardamos la firma nueva
+      btn.addEventListener('click', function () {
+        localStorage.setItem('min_dismissed_recent_sig', currentSig);
+      });
+    }
+  })();
+</script>
 {% endif %}
 {% endblock %}
 
