@@ -28,63 +28,60 @@
                 {% for n in notifications %}
                 <div class="card border-0 shadow-sm notification-card {% if not n.is_read %}unread{% endif %}"
                     data-id="{{ n.id }}" data-link="{{ n.link or '' }}">
-                    <div class="card-body d-flex align-items-start gap-3 p-3">
-                        <!-- Icon setup based on category -->
-                        <div class="notification-icon flex-shrink-0">
+                    <div class="card-body d-flex align-items-center p-3">
+                        <!-- 1. Icon Section -->
+                        <div class="flex-shrink-0 me-3">
                             {% if n.category == 'helpdesk' %}
                             <span
-                                class="icon-box bg-info-subtle text-info rounded-circle d-flex align-items-center justify-content-center"
-                                style="width: 40px; height: 40px;">
-                                <i class="bi bi-chat-left-text-fill"></i>
+                                class="icon-box bg-info-subtle text-info rounded-circle d-flex align-items-center justify-content-center border border-info-subtle"
+                                style="width: 48px; height: 48px;">
+                                <i class="bi bi-chat-left-text-fill fs-5"></i>
                             </span>
                             {% elif n.category == 'processing' %}
                             <span
-                                class="icon-box bg-success-subtle text-success rounded-circle d-flex align-items-center justify-content-center"
-                                style="width: 40px; height: 40px;">
-                                <i class="bi bi-file-earmark-check-fill"></i>
+                                class="icon-box bg-success-subtle text-success rounded-circle d-flex align-items-center justify-content-center border border-success-subtle"
+                                style="width: 48px; height: 48px;">
+                                <i class="bi bi-file-earmark-check-fill fs-5"></i>
                             </span>
                             {% else %}
                             <span
-                                class="icon-box bg-primary-subtle text-primary rounded-circle d-flex align-items-center justify-content-center"
-                                style="width: 40px; height: 40px;">
-                                <i class="bi bi-bell-fill"></i>
+                                class="icon-box bg-primary-subtle text-primary rounded-circle d-flex align-items-center justify-content-center border border-primary-subtle"
+                                style="width: 48px; height: 48px;">
+                                <i class="bi bi-bell-fill fs-5"></i>
                             </span>
                             {% endif %}
                         </div>
 
-                        <div class="flex-grow-1">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <h6 class="mb-1 fw-bold text-dark">{{ n.title }}</h6>
-                                <small class="text-muted ms-2" style="font-size: 0.75rem;">
-                                    {{ n.created_at.strftime('%d/%m %H:%M') }}
+                        <!-- 2. Content Section -->
+                        <div class="flex-grow-1 min-vw-0 pe-3">
+                            <div class="d-flex justify-content-between align-items-baseline mb-1 gap-2">
+                                <h6 class="mb-0 fw-bold text-dark text-truncate">{{ n.title }}</h6>
+                                <small class="text-muted text-nowrap" style="font-size: 0.8rem;">
+                                    <i class="bi bi-clock me-1"></i>{{ n.created_at.strftime('%d/%m %H:%M') }}
                                 </small>
                             </div>
-                            <p class="mb-1 text-secondary small" style="line-height: 1.4;">{{ n.message }}</p>
+                            <p class="mb-1 text-secondary small text-break" style="line-height: 1.4;">{{ n.message }}
+                            </p>
 
                             {% if n.link %}
                             <div class="mt-2">
-                                <span class="text-primary small fw-medium" style="cursor:pointer;">
-                                    Ver detalle <i class="bi bi-arrow-right-short"></i>
+                                <span class="text-primary small fw-semibold d-inline-flex align-items-center gap-1"
+                                    style="cursor:pointer;">
+                                    Ver detalle <i class="bi bi-arrow-right"></i>
                                 </span>
                             </div>
                             {% endif %}
                         </div>
 
-                        {% if not n.is_read %}
-                        <div class="unread-dot position-absolute top-50 end-0 translate-middle-y me-3">
-                            <span class="badge bg-primary rounded-circle p-1">
-                                <span class="visually-hidden">No leído</span>
-                            </span>
+                        <!-- 3. Actions Section -->
+                        <div class="flex-shrink-0 border-start ps-3" style="border-color: rgba(0,0,0,0.08);">
+                            <button
+                                class="btn btn-outline-danger btn-sm rounded-pill btn-delete-notif d-flex align-items-center gap-2 px-3 py-1"
+                                title="Eliminar notificación" data-id="{{ n.id }}" style="transition: all 0.2s;">
+                                <i class="bi bi-trash-fill"></i>
+                                <span>Eliminar</span>
+                            </button>
                         </div>
-                        {% endif %}
-
-                        <!-- Delete Button (New) -->
-                        <button
-                            class="btn btn-sm btn-link text-danger position-absolute top-0 end-0 mt-4 me-1 btn-delete-notif"
-                            style="font-size: 0.85rem; opacity: 0; transition: opacity 0.2s;"
-                            title="Eliminar notificación" data-id="{{ n.id }}">
-                            <i class="bi bi-trash"></i>
-                        </button>
                     </div>
                 </div>
                 {% endfor %}
@@ -112,12 +109,12 @@
 
     .notification-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05) !important;
     }
 
-    /* Show delete button on hover */
-    .notification-card:hover .btn-delete-notif {
-        opacity: 1 !important;
+    .btn-delete-notif:hover {
+        background-color: #dc3545;
+        color: white !important;
     }
 
     .notification-card.unread {
