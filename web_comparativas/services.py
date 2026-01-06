@@ -204,10 +204,15 @@ def get_normalized_path(upload: UploadModel) -> Path | None:
     p = getattr(upload, "normalized_path", None)
     if p:
         return Path(p)
+    
     base_dir = getattr(upload, "base_dir", None)
-    if base_dir:
-        return (_abs_path(base_dir) or Path(base_dir)) / "processed" / "normalized.xlsx"
-    return None
+    base_dir_abs = _abs_path(base_dir) or (PROJECT_ROOT / "data" / "uploads")
+
+    # Match isolation logic from classify_and_process
+    if base_dir_abs == (PROJECT_ROOT / "data" / "uploads"):
+         return base_dir_abs / f"iso_{upload.id}" / "processed" / "normalized.xlsx"
+    
+    return base_dir_abs / "processed" / "normalized.xlsx"
 
 def normalized_exists(upload: UploadModel) -> bool:
     p = get_normalized_path(upload)
@@ -324,12 +329,33 @@ def advance_status(upload_id: int, *, force: bool = False) -> str:
 # ------------------------------------------------------------
 def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool = False):
     up = _get_upload(upload_id)
+    
+    # --- DEBUG LOG ---
+    try:
+        debug_log = PROJECT_ROOT / "debug_services.log"
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"\n--- [START] classify_and_process id={upload_id} ---\n")
+            f.write(f"Upload: {up}\n")
+            f.write(f"Original: {up.original_path}\n")
+            f.write(f"BaseDir (DB): {up.base_dir}\n")
+    except:
+        pass
+    # -----------------
 
     # NUEVO: asegurar snapshot del cargador al entrar al pipeline
     _ensure_uploader_snapshot(up)
 
     base_dir_abs = _abs_path(getattr(up, "base_dir", None)) or (PROJECT_ROOT / "data" / "uploads")
-    out_dir = base_dir_abs / "processed"
+    
+    # --- FIX: enforce isolation even if base_dir is shared ---
+    # If base_dir is the root uploads folder, force a subdirectory based on ID or UUID
+    # to prevents data leakage between processes.
+    if base_dir_abs == (PROJECT_ROOT / "data" / "uploads"):
+        # Fallback isolation
+        out_dir = base_dir_abs / f"iso_{upload_id}" / "processed"
+    else:
+        out_dir = base_dir_abs / "processed"
+    
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -365,11 +391,29 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
 
         href, script_id = _pick_handler(meta_eff)
 
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"Selected handler: {script_id} -> {href.module}:{href.func}\n")
+        except: pass
+        
         if touch_status:
             _set_status_by_id(upload_id, "processing")
         handler = getattr(importlib.import_module(href.module), href.func)
 
         result = handler(Path(file_path), meta_eff, out_dir)
+        
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                if isinstance(result, dict):
+                    summ = result.get("summary", {})
+                elif isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
+                    summ = result[1]
+                else:
+                    summ = {}
+                f.write(f"Function result summary keys: {list(summ.keys())}\n")
+                f.write(f"Total Offers: {summ.get('total_offers')}\n")
+        except: pass
+
         if isinstance(result, tuple):
             df, summary = result
         elif isinstance(result, dict):
