@@ -255,36 +255,68 @@
     }
   }
 </style>
-/* Custom overrides for TomSelect matching the theme */
-.ts-control {
-border: 1px solid var(--ink-200) !important;
-border-radius: var(--radius-sm) !important;
-padding: 8px 12px !important;
-font-size: 0.85rem !important;
-box-shadow: none !important;
-background-color: #fff;
-min-height: 38px;
-}
-.ts-control.focus {
-border-color: var(--secondary-500) !important;
-}
-.ts-dropdown {
-border-color: var(--ink-200) !important;
-border-radius: var(--radius-sm) !important;
-box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
-z-index: 1050; /* Ensure it floats above other elements */
-}
-.ts-dropdown .option {
-font-size: 0.85rem;
-padding: 6px 12px;
-}
-.ts-dropdown .option.active {
-background-color: var(--brand-azul-light) !important;
-color: var(--brand-azul) !important;
-}
-</style>
+{% endblock %}
+
+{% block extra_head_custom %}
 <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+
+<style>
+  /* Custom overrides for TomSelect - FIX & IMPROVE */
+  .ts-wrapper {
+    width: 100%;
+  }
+
+  /* Control (Input area) */
+  .ts-control {
+    border: 1px solid var(--ink-200) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 10px 14px !important;
+    /* Larger padding */
+    font-size: 0.95rem !important;
+    /* Larger font */
+    box-shadow: none !important;
+    background-color: #fff;
+    min-height: 44px;
+    /* Taller */
+  }
+
+  .ts-control.focus {
+    border-color: var(--secondary-500) !important;
+    box-shadow: 0 0 0 3px rgba(var(--secondary-500-rgb), 0.1) !important;
+  }
+
+  /* Dropdown Menu */
+  .ts-dropdown {
+    border-color: var(--ink-200) !important;
+    border-radius: var(--radius-sm) !important;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15) !important;
+    z-index: 9999 !important;
+    /* Fix overlap issues */
+    font-size: 0.95rem !important;
+    /* Consistent larger font */
+    margin-top: 4px !important;
+  }
+
+  .ts-dropdown .option {
+    padding: 10px 14px;
+    /* More breathing room */
+    line-height: 1.4;
+  }
+
+  .ts-dropdown .option.active {
+    background-color: var(--brand-azul-light) !important;
+    color: var(--brand-azul) !important;
+  }
+
+  /* Optgroups headers if any */
+  .ts-dropdown .optgroup-header {
+    font-size: 0.8rem;
+    color: var(--ink-500);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -684,6 +716,10 @@ color: var(--brand-azul) !important;
       dropdownDirection: 'down', // Force OPEN DOWNWARDS
       maxOptions: null,
       plugins: ['clear_button'],
+      // Append to body to avoid z-index/clipping issues in some containers
+      onDropdownOpen: function (dropdown) {
+        dropdown.style.zIndex = '9999';
+      }
     };
 
     // Helper to safely init if element exists
