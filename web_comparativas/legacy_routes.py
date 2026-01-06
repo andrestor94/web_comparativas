@@ -12,6 +12,7 @@ import re
 import logging
 from types import SimpleNamespace
 from web_comparativas.usage_service import log_usage_event, get_usage_summary
+from web_comparativas import services
 from typing import Any, Optional, List, Dict
 from dotenv import load_dotenv
 load_dotenv()
@@ -2941,12 +2942,12 @@ async def crear_carga(
     Tambi├®n evita duplicados usando el proceso_nro normalizado.
     """
     # Carpeta base donde se guardan los uploads
-    upload_dir = Path("data/uploads")
-    base_dir.mkdir(parents=True, exist_ok=True)
+    root_uploads = services.PROJECT_ROOT / "data" / "uploads"
+    root_uploads.mkdir(parents=True, exist_ok=True)
 
-    # Carpeta ├║nica para esta carga
+    # Carpeta única para esta carga (Aislamiento)
     uid = str(uuid.uuid4())
-    upload_dir = base_dir / uid
+    upload_dir = root_uploads / uid
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     # Fallback: si los hints ocultos vienen vac├¡os, usar los visibles
