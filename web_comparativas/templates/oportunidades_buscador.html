@@ -86,10 +86,11 @@
     width: 100%;
     border: 1px solid var(--ink-200);
     border-radius: var(--radius-sm);
-    padding: 4px 8px;
+    padding: 6px 12px;
     background: #fff;
     font-size: 0.85rem;
-    height: 32px;
+    min-height: 38px;
+    /* Standardize height */
   }
 
   .field input:focus,
@@ -254,6 +255,36 @@
     }
   }
 </style>
+/* Custom overrides for TomSelect matching the theme */
+.ts-control {
+border: 1px solid var(--ink-200) !important;
+border-radius: var(--radius-sm) !important;
+padding: 8px 12px !important;
+font-size: 0.85rem !important;
+box-shadow: none !important;
+background-color: #fff;
+min-height: 38px;
+}
+.ts-control.focus {
+border-color: var(--secondary-500) !important;
+}
+.ts-dropdown {
+border-color: var(--ink-200) !important;
+border-radius: var(--radius-sm) !important;
+box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+z-index: 1050; /* Ensure it floats above other elements */
+}
+.ts-dropdown .option {
+font-size: 0.85rem;
+padding: 6px 12px;
+}
+.ts-dropdown .option.active {
+background-color: var(--brand-azul-light) !important;
+color: var(--brand-azul) !important;
+}
+</style>
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -646,6 +677,28 @@
   };
 
   document.addEventListener('DOMContentLoaded', function () {
+    // === Initialize TomSelect for Searchable Dropdowns ===
+    const selectConfig = {
+      create: false,
+      sortField: { field: "text", direction: "asc" },
+      dropdownDirection: 'down', // Force OPEN DOWNWARDS
+      maxOptions: null,
+      plugins: ['clear_button'],
+    };
+
+    // Helper to safely init if element exists
+    const initTS = (id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        new TomSelect(el, selectConfig);
+      }
+    };
+
+    initTS('fPlataforma');
+    initTS('fOperador');
+    initTS('fCuenta');
+    initTS('fReparticion');
+
     var toast = document.getElementById('oppToast');
     if (toast) {
       var btn = toast.querySelector('.toast-close');
