@@ -279,22 +279,41 @@
     box-shadow: 0 0 0 3px rgba(var(--secondary-500-rgb), 0.1) !important;
   }
 
-  /* Dropdown Menu */
+  /* Dropdown Menu - FORCE ON TOP & EXPAND WIDTH */
   .ts-dropdown {
     border-color: var(--ink-200) !important;
     border-radius: var(--radius-sm) !important;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15) !important;
-    z-index: 9999 !important;
-    /* Fix overlap issues */
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25) !important;
+
+    /* Ensure it floats above EVERYTHING */
+    z-index: 10000 !important;
+    position: absolute !important;
+
+    /* Font sizing */
     font-size: 0.95rem !important;
-    /* Consistent larger font */
     margin-top: 4px !important;
+
+    /* WIDTH LOGIC: Expand to fit content, but at least as wide as input */
+    width: auto !important;
+    min-width: 100% !important;
+    max-width: 400px !important;
+    /* Cap it reasonably so it doesn't go off screen */
   }
 
   .ts-dropdown .option {
     padding: 10px 14px;
-    /* More breathing room */
     line-height: 1.4;
+    /* Prevent wrapping so it reads clearly like a table row */
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ts-dropdown-content {
+    /* Ensure scrolling if it gets too crazy tall */
+    max-height: 300px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
   }
 
   .ts-dropdown .option.active {
@@ -713,7 +732,9 @@
       plugins: ['clear_button'],
       // Append to body to avoid z-index/clipping issues in some containers
       onDropdownOpen: function (dropdown) {
-        dropdown.style.zIndex = '9999';
+        dropdown.style.zIndex = '10000';
+        dropdown.style.width = 'auto';
+        dropdown.style.minWidth = '100%';
       }
     };
 
