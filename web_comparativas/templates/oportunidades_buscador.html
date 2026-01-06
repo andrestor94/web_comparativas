@@ -293,20 +293,20 @@
     font-size: 0.95rem !important;
     margin-top: 4px !important;
 
-    /* WIDTH LOGIC: Expand to fit content, but at least as wide as input */
+    /* WIDTH LOGIC: Expand to fit content, but constrained */
     width: auto !important;
     min-width: 100% !important;
-    max-width: 400px !important;
-    /* Cap it reasonably so it doesn't go off screen */
+    max-width: 450px !important;
   }
 
   .ts-dropdown .option {
     padding: 10px 14px;
     line-height: 1.4;
-    /* Prevent wrapping so it reads clearly like a table row */
-    white-space: nowrap !important;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Allow wrapping for long text so it doesn't go off screen */
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    border-bottom: 1px solid var(--ink-050);
+    /* Separator for legibility */
   }
 
   .ts-dropdown-content {
@@ -727,14 +727,45 @@
     const selectConfig = {
       create: false,
       sortField: { field: "text", direction: "asc" },
-      dropdownDirection: 'down', // Force OPEN DOWNWARDS
+      dropdownDirection: 'down',
       maxOptions: null,
       plugins: ['clear_button'],
-      // Append to body to avoid z-index/clipping issues in some containers
+
+      // Fix Z-Index Stacking Context & Width
       onDropdownOpen: function (dropdown) {
+        // 1. Force styling on the dropdown itself
         dropdown.style.zIndex = '10000';
         dropdown.style.width = 'auto';
         dropdown.style.minWidth = '100%';
+        dropdown.style.maxWidth = '450px';
+        dropdown.style.whiteSpace = 'normal';
+
+        // 2. Smart Positioning: Prevent going off-screen right
+        const rect = dropdown.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+          dropdown.style.left = 'auto';
+          dropdown.style.right = '0';
+        } else {
+          dropdown.style.left = '0';
+          dropdown.style.right = 'auto';
+        }
+
+        // 2. BREAKOUT: Boost the parent container's Z-Index so it floating above siblings
+        const wrapper = this.wrapper; // The .ts-wrapper
+        const parentCard = wrapper.closest('.filter-card, .filter-card--compact, .filter-card--band');
+        if (parentCard) {
+          parentCard.style.zIndex = '1050'; // Bootstrap modal level
+          parentCard.style.position = 'relative'; // Ensure z-index applies
+        }
+      },
+      onDropdownClose: function (dropdown) {
+        // Reset parent z-index
+        const wrapper = this.wrapper;
+        const parentCard = wrapper.closest('.filter-card, .filter-card--compact, .filter-card--band');
+        if (parentCard) {
+          parentCard.style.zIndex = '';
+          parentCard.style.position = '';
+        }
       }
     };
 
