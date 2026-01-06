@@ -4423,8 +4423,22 @@ def api_tablero_ranking(
             return 0.0
 
     if not (item_col and desc_col and prov_col and price_col):
+        missing = []
+        if not item_col: missing.append("item")
+        if not desc_col: missing.append("desc")
+        if not prov_col: missing.append("prov")
+        if not price_col: missing.append("price")
+        
+        print(f"[API Ranking] {upload_id} -> FAILED mandatory column check. Missing: {missing}")
         return JSONResponse(
-            {"ok": True, "rows": [], "max_pos": 0, "total_rows": 0}
+            {
+                "ok": True, 
+                "rows": [], 
+                "max_pos": 0, 
+                "total_rows": 0, 
+                "debug_error": f"Columnas no detectadas: {', '.join(missing)}",
+                "available_cols": cols
+            }
         )
 
     # recorrer filas
