@@ -2567,7 +2567,7 @@
       elBody.innerHTML = '<tr><td class="text-center text-muted py-4">Cargando…</td></tr>';
       let data = null;
       try {
-        const res = await fetch(RANK_API, { headers: { 'accept': 'application/json' } });
+        const res = await fetch(RANK_API + '?_=' + Date.now(), { headers: { 'accept': 'application/json' } });
         if (res && res.ok) data = await res.json();
       } catch (_) { }
 
@@ -2630,7 +2630,14 @@
       }
 
       const max = DATA.max_pos || 0;
+      // [Dashboard Fix] Force clear filters on load to prevent ghost filtering
+      FILTERS.provider = null;
+      FILTERS.item = null;
+      FILTERS.rubro = null;
+      FILTERS.header = {};
+      FILTERS.posBuckets.clear();
       FILTERS.visCols = new Set([1, 2, 3].filter(n => n <= max));
+
       buildHead(max);
       buildPosCols(max);
 
@@ -3257,6 +3264,7 @@
   });
 
   // Auto-aplicar default al cargar
+  /*
   (async function autoApplyDefault() {
     try {
       const def = getDefaultLS();
@@ -3280,33 +3288,17 @@
 
         // Pequeño toast o notificación en consola
         if (typeof window.Toast === 'function') {
-          window.Toast.fire({ icon: 'warning', title: 'Vista por defecto reseteada porque no mostraba datos.' });
+           window.Toast.fire({ icon: 'warning', title: 'Vista por defecto reseteada porque no mostraba datos.' });
         }
 
         // Reset manual de filtros
-        FILTERS.provider = null;
-        FILTERS.item = null;
-        FILTERS.rubro = null;
-        FILTERS.header = {};
-        FILTERS.posBuckets.clear();
-        // Restaurar columnas básicas
-        const max = DATA.max_pos || 0;
-        FILTERS.visCols = new Set([1, 2, 3].filter(n => n <= max));
-        buildHead(max);
-        updatePosButtonsUI();
-
-        // Limpiar inputs UI
-        if (elSearch) elSearch.value = '';
-        QUERY = '';
-
-        renderChips();
-        elInfo.dataset.page = 1;
-        renderAll();
+        window.resetFilters();
       }
     } catch (err) {
       console.error('[Views] Error applying default view:', err);
     }
   })();
+  */
 
   window.__collectView = collectCurrentView;
   window.__applyView = applyViewPayload;
