@@ -2539,6 +2539,164 @@ async def oportunidades_buscador_upload(
     url = str(url) + "?uploaded=1"
     return RedirectResponse(url, status_code=303)
 
+# --- HELPERS AGREGACION GLOBAL (para POST y GET) ---
+def _san_str_simple(v):
+    try:
+        if pd.isna(v): return ""
+    except: pass
+    s = str(v or "")
+    return s.replace("<", "&lt;").replace(">", "&gt;")
+
+def _opp_agg_count(df: pd.DataFrame, col_name: str | None, top_n: int = 50):
+    if not col_name or df.empty:
+        return []
+    
+    # Agrupamos por la columna elegida.
+    # _budget ya debe existir en df (calculado en _opp_apply_filters o _opp_load_df -> no, _opp_apply_filters lo hace)
+    # Check dependencies: _opp_apply_filters creates _budget column? 
+    # Checking code: _opp_apply_filters lines 390+ calls _opp_parse_number/date but copies DF.
+    # Actually, in api_oportunidades_dimensiones (GET), the logic to add _budget/_dt/_state was INSIDE the function.
+    # In my POST endpoint, I am calling _opp_apply_filters... 
+    # WAIT. _opp_apply_filters DOES NOT compute _budget, _dt, _state.
+    # Those were computed manually inside api_oportunidades_dimensiones (lines 2800+ in GET).
+    # I MUST add the computation of _budget, _dt, _state to the POST endpoint OR to a helper.
+    
+    # Let's assume for now I will add the computation logic inside the functions or ensure it's in df.
+    # Ideally: add a helper _opp_enrich_df(df)
+    
+    if "_budget" not in df.columns:
+        # Fallback simplistic if not present (should be enriched before)
+        df["_budget"] = 0.0
+
+    grp = (
+        df.groupby(col_name)
+        .agg(count=(col_name, "size"), budget=("_budget", "sum"))
+        .reset_index()
+    )
+    
+    out = []
+    for _, row in grp.iterrows():
+        label = _san_str_simple(row[col_name]).strip() or "(Sin dato)"
+        out.append(
+            {
+                "label": label,
+                "count": int(row["count"]),
+                "budget": float(row["budget"]),
+            }
+        )
+
+    out.sort(key=lambda r: (r["budget"], r["count"]), reverse=True)
+    return out[:top_n]
+
+def _opp_agg_timeline(df: pd.DataFrame, date_col: str | None, state_col: str | None):
+    if not date_col or not state_col or df.empty:
+        return []
+
+    # Enriched columns check
+    if "_dt" not in df.columns:
+        # Try to compute on the fly? Better to enforce pre-computation.
+        return []
+    if "_state" not in df.columns:
+         return []
+
+    df_ok = df.dropna(subset=["_dt"])
+    if df_ok.empty:
+        return []
+
+    grp = (
+        df_ok.groupby(["_dt", "_state"])
+        .agg(count=("_state", "size"), budget=("_budget", "sum"))
+        .reset_index()
+    )
+
+    temp_map = {}
+    for _, row in grp.iterrows():
+        d = row["_dt"]
+        st = row["_state"]
+        c = int(row["count"])
+        b = float(row["budget"])
+
+        if d not in temp_map:
+            temp_map[d] = {"EMERGENCIA": 0, "REGULAR": 0, "budget": 0.0}
+        
+        if st in temp_map[d]:
+            temp_map[d][st] += c
+        else:
+            temp_map[d]["REGULAR"] += c
+        
+        temp_map[d]["budget"] += b
+
+    out = []
+    for d, vals in temp_map.items():
+        try:
+            d_str = d.strftime("%Y-%m-%d")
+        except:
+            continue
+        em = vals["EMERGENCIA"]
+        rg = vals["REGULAR"]
+        out.append(
+            {
+                "date": d_str,
+                "count": em + rg,
+                "budget": vals["budget"],
+                "emergencia": em,
+                "regular": rg,
+            }
+        )
+
+    out.sort(key=lambda r: r["date"])
+    return out
+
+def _opp_agg_stacked(df: pd.DataFrame, main_col: str | None, state_col: str | None, top_n: int = 10):
+    if not main_col or not state_col or df.empty:
+        return []
+        
+    if "_state" not in df.columns:
+        return []
+
+    # 1. Top N by count
+    try:
+        top_counts = df[main_col].value_counts().head(top_n)
+    except:
+        return []
+        
+    top_labels = top_counts.index.tolist()
+
+    df_top = df[df[main_col].isin(top_labels)]
+    
+    grp = (
+        df_top.groupby([main_col, "_state"])
+        .size()
+        .reset_index(name="count")
+    )
+    
+    res_map = {}
+    for _, row in grp.iterrows():
+        lbl = str(row[main_col])
+        st = row["_state"]
+        c = int(row["count"])
+        
+        if lbl not in res_map:
+            res_map[lbl] = {"EMERGENCIA": 0, "REGULAR": 0}
+        
+        # Match roughly
+        is_emerg = "emerg" in str(st).lower()
+        if is_emerg:
+            res_map[lbl]["EMERGENCIA"] += c
+        else:
+            res_map[lbl]["REGULAR"] += c
+
+    out = []
+    for lbl in top_labels:
+        str_lbl = str(lbl)
+        vals = res_map.get(str_lbl, {"EMERGENCIA": 0, "REGULAR": 0})
+        out.append({
+            "label": _san_str_simple(lbl),
+            "emergencia": vals["EMERGENCIA"],
+            "regular": vals["REGULAR"]
+        })
+    return out
+
 @router.post("/api/oportunidades/dimensiones/filter", response_class=JSONResponse)
 def api_oportunidades_dimensiones_filter(
     body: Dict[str, Any] = Body(...),
@@ -2687,6 +2845,43 @@ def api_oportunidades_dimensiones_filter(
         state_col = _opp_pick(
             df_filtered, ["Estado", "Tipo Proceso", "Carácter", "Urgencia"]
         )
+
+        # Presupuesto (necesario para _budget)
+        presu_col = _opp_pick(
+            df_filtered,
+            [
+                "Presupuesto oficial",
+                "Presupuesto",
+                "Monto",
+                "Importe Total",
+                "Total Presupuesto",
+                "Monto Total",
+                "Importe",
+            ],
+        )
+
+        # === ENRIQUECIMIENTO (Necesario para helpers de agregacion) ===
+        # 1. Fecha (_dt)
+        if date_col:
+            # Parseo vectorizado
+            df_filtered["_dt"] = df_filtered[date_col].apply(_opp_parse_date)
+        else:
+            df_filtered["_dt"] = pd.NaT
+
+        # 2. Presupuesto (_budget)
+        if presu_col:
+            df_filtered["_budget"] = df_filtered[presu_col].map(_opp_parse_number)
+        else:
+            df_filtered["_budget"] = 0.0
+
+        # 3. Estado Normalizado (_state) => EMERGENCIA / REGULAR
+        if state_col:
+            s_lower = df_filtered[state_col].astype(str).str.lower().fillna("")
+            df_filtered["_state"] = np.where(
+                s_lower.str.contains("emerg"), "EMERGENCIA", "REGULAR"
+            )
+        else:
+            df_filtered["_state"] = "REGULAR"
 
         # --- AGREGACIONES ---
         # Top 15 Compradores
