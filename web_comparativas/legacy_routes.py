@@ -2769,17 +2769,29 @@ def api_oportunidades_dimensiones_filter(
             s_num = df_all[col_num].astype(str).str.strip() if col_num else pd.Series([""] * len(df_all), index=df_all.index)
             s_ap = df_all[col_ap].astype(str).str.strip() if col_ap else pd.Series([""] * len(df_all), index=df_all.index)
             
-            df_all['__row_key'] = s_num + " | " + s_ap
+            # Vectorized key generation (much faster)
+            s_num = df_all[col_num].astype(str).str.strip() if col_num else pd.Series([""] * len(df_all), index=df_all.index)
+            s_ap = df_all[col_ap].astype(str).str.strip() if col_ap else pd.Series([""] * len(df_all), index=df_all.index)
             
+            df_all['__row_key'] = s_num + " | " + s_ap
+            df_all['__simple_key'] = s_num  # Fallback key
+
             # DEBUG LOGGING
             print(f"--- DEBUG KEYS ---")
             print(f"Decisions received (sample): {list(decisions.keys())[:5]}")
             print(f"Generated DF keys (sample): {df_all['__row_key'].head(5).tolist()}")
             if not df_all['__row_key'].isin(decisions.keys()).any() and decisions:
-                print("WARNING: No overlap found between DF keys and User Decisions!")
+                print("WARNING: No overlap found between strict DF keys and User Decisions!")
+            
+            # Dual Mapping Strategy: Strict Key -> Simple Key -> 'sin-marcar'
+            s_strict = df_all['__row_key'].map(decisions)
+            s_simple = df_all['__simple_key'].map(decisions)
+            
+            # Helper to check coverage
+            if not s_strict.notna().any() and s_simple.notna().any():
+                print("INFO: Simple key mapping found matches where strict key did not.")
 
-            # Map decisions
-            df_all['__user_decision'] = df_all['__row_key'].map(decisions).fillna('sin-marcar')
+            df_all['__user_decision'] = s_strict.combine_first(s_simple).fillna('sin-marcar')
         else:
             df_all['__user_decision'] = 'sin-marcar'
 
