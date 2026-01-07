@@ -330,56 +330,79 @@ def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional
 # =======================
 # Lector PLIEGO (tu versión)
 # =======================
-def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, float, float]:
-    num_pat = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
-    int_pat = re.compile(r"^\d{1,6}$")
+    # Clustering approach: Find vertical columns of numbers
+    
+    # 1. Identify ITEM column candidate (Leftmost vertical cluster of integers 1..9999)
+    # Filter words that are purely numeric and small (items usually are 1, 2, 3...)
+    item_cands = [w for w in words if re.fullmatch(r"^\d{1,5}$", w["text"]) and w["x0"] < 300]
+    
+    x_item = 56.0 # default
+    if item_cands:
+        # Simple Clustering
+        xs = sorted([w["x0"] for w in item_cands])
+        clusters = []
+        if xs:
+            curr_c = [xs[0]]
+            for x in xs[1:]:
+                if x - curr_c[-1] <= 10: # 10px tolerance
+                    curr_c.append(x)
+                else:
+                    clusters.append(curr_c)
+                    curr_c = [x]
+            clusters.append(curr_c)
+            # Pick the cluster with most elements that is somewhat to the left
+            best_c = max(clusters, key=len)
+            x_item = float(np.median(best_c))
 
-    y_tol = 1.8
-    def ybin(y): return round(y / y_tol) * y_tol
-    lines: Dict[float, List[dict]] = {}
-    for w in words or []:
-        lines.setdefault(ybin(w["top"]), []).append(w)
-
-    xs_item, xs_cgo, xs_qty = [], [], []
-    for _y, ws in lines.items():
-        nums = [w for w in sorted(ws, key=lambda t: t["x0"])
-                if num_pat.fullmatch(w["text"]) or int_pat.fullmatch(w["text"])]
-        if len(nums) < 3:
-            continue
-        if nums[0]["x0"] > 110:
-            continue
-        xs_item.append(nums[0]["x0"])
-        xs_cgo.append(nums[1]["x0"])
-        xs_qty.append(nums[2]["x0"])
-
-    if xs_item and xs_cgo and xs_qty:
-        x_item = float(np.median(xs_item))
-        x_cgo  = float(np.median(xs_cgo))
-        x_qty  = float(np.median(xs_qty))
-        x_unit = x_qty + 40.0
-        all_xs = [round(w["x0"], 1) for w in words]
-        x_desc = float(np.percentile(all_xs, 80)) if all_xs else (x_unit + 120.0)
-        return (x_item, x_cgo, x_qty, x_unit, x_desc)
-
-    # Fallback: estimate from distribution of ALL words
-    xs = sorted([w["x0"] for w in words])
-    if xs:
-        # Assuming layout: Item ~5%, Cgo ~15%, Qty ~25%, Unit ~40%, Desc ~60%
-        # These are rough guesses based on A4 page width ~595pts
-        # 56, 96, 146, 190, 270 (defaults)
-        # minimal dynamic adjustment:
-        x_item = float(np.percentile(xs, 5)) if len(xs) > 10 else 56.0
+    # 2. Identify QTY column candidate (Cluster of numbers with decimals or integers, to the right of item)
+    # Quantity usually has 2 decimals or look like big integers
+    qty_cands = [w for w in words if (NUM_EU_RE.fullmatch(w["text"]) or re.fullmatch(r"\d+", w["text"])) 
+                 and w["x0"] > (x_item + 30) and w["x0"] < 500]
+    
+    x_qty = x_item + 90.0 # default spacing
+    if qty_cands:
+         xs = sorted([w["x0"] for w in qty_cands])
+         clusters = []
+         if xs:
+            curr_c = [xs[0]]
+            for x in xs[1:]:
+                if x - curr_c[-1] <= 10:
+                    curr_c.append(x)
+                else:
+                    clusters.append(curr_c)
+                    curr_c = [x]
+            clusters.append(curr_c)
+            # Usually Qty is the dense column in the middle-ish
+            # We pick the one with most items, or maybe specific check?
+            # Let's pick the one distinct from Item
+            valid_clusters = [c for c in clusters if np.median(c) > (x_item + 40)]
+            if valid_clusters:
+                best_c = max(valid_clusters, key=len)
+                x_qty = float(np.median(best_c))
+    
+    # 3. Derive other anchors relative to Item and Qty
+    # Standard La Pampa: Item | Cgo | Qty | Unit | Desc
+    # Or: Item | Qty | ...
+    # We try to fit the Cgo in between if space permits, else assume it's close to Item
+    
+    if x_qty - x_item > 80:
+        x_cgo = x_item + (x_qty - x_item) * 0.4 # approx between
+    else:
         x_cgo = x_item + 40.0
-        x_qty = x_cgo + 50.0
-        x_unit = x_qty + 40.0
-        x_desc = x_unit + 60.0 # start description
-        
-        # Clamp to reasonable bounds to avoid extreme misinterpretation
-        x_item = max(20.0, min(x_item, 100.0))
-        return (x_item, x_cgo, x_qty, x_unit, x_desc)
+        x_qty = max(x_qty, x_cgo + 40.0)
 
-    # Hard fallback
-    x_item, x_cgo, x_qty, x_unit, x_desc = 56.0, 96.0, 146.0, 190.0, 270.0
+    x_unit = x_qty + 40.0
+    
+    # 4. Describe anchor (starts after Unit)
+    # Look for long text words
+    desc_cands = [w for w in words if len(w["text"]) > 3 and not re.match(r"^[\d.,]+$", w["text"]) and w["x0"] > x_qty]
+    if desc_cands:
+         xs_desc = sorted([w["x0"] for w in desc_cands])
+         x_desc = float(np.percentile(xs_desc, 10)) # Start of description block
+         x_desc = max(x_desc, x_unit + 10)
+    else:
+         x_desc = x_unit + 60.0
+
     return (x_item, x_cgo, x_qty, x_unit, x_desc)
 
 
@@ -472,14 +495,15 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
                 nums_on_line = [w for w in ws if NUM_EU_RE.fullmatch(w["text"]) or re.fullmatch(r"\d{1,6}", w["text"])]
                 nums_on_line.sort(key=lambda t: t["x0"])
 
-                is_item_line = any(re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 20 for w in nums_on_line)
+                # Relaxed tolerance for scanned docs: 35px
+                is_item_line = any(re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 35 for w in nums_on_line)
                 if is_item_line:
                     if last_row:
                         regs.append(last_row)
                         last_row = None
                         expect_unit_lines = 0
 
-                    item_candidates = [w for w in nums_on_line if re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 20]
+                    item_candidates = [w for w in nums_on_line if re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 35]
                     if not item_candidates:
                         continue
                     item_val = int(item_candidates[0]["text"])
