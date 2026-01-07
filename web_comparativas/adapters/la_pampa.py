@@ -361,12 +361,25 @@ def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, floa
         x_desc = float(np.percentile(all_xs, 80)) if all_xs else (x_unit + 120.0)
         return (x_item, x_cgo, x_qty, x_unit, x_desc)
 
-    xs = sorted(set(round(w["x0"], 1) for w in words))
+    # Fallback: estimate from distribution of ALL words
+    xs = sorted([w["x0"] for w in words])
     if xs:
-        p = np.percentile(xs, [5, 20, 40, 60, 75])
-        x_item, x_cgo, x_qty, x_unit, x_desc = float(p[0]), float(p[1]), float(p[2]), float(p[3]), float(p[4])
-    else:
-        x_item, x_cgo, x_qty, x_unit, x_desc = 56.0, 96.0, 146.0, 190.0, 270.0
+        # Assuming layout: Item ~5%, Cgo ~15%, Qty ~25%, Unit ~40%, Desc ~60%
+        # These are rough guesses based on A4 page width ~595pts
+        # 56, 96, 146, 190, 270 (defaults)
+        # minimal dynamic adjustment:
+        x_item = float(np.percentile(xs, 5)) if len(xs) > 10 else 56.0
+        x_cgo = x_item + 40.0
+        x_qty = x_cgo + 50.0
+        x_unit = x_qty + 40.0
+        x_desc = x_unit + 60.0 # start description
+        
+        # Clamp to reasonable bounds to avoid extreme misinterpretation
+        x_item = max(20.0, min(x_item, 100.0))
+        return (x_item, x_cgo, x_qty, x_unit, x_desc)
+
+    # Hard fallback
+    x_item, x_cgo, x_qty, x_unit, x_desc = 56.0, 96.0, 146.0, 190.0, 270.0
     return (x_item, x_cgo, x_qty, x_unit, x_desc)
 
 
