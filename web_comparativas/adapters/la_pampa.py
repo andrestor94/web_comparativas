@@ -352,8 +352,23 @@ def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, floa
                     curr_c = [x]
             clusters.append(curr_c)
             # Pick the cluster with most elements that is somewhat to the left
-            best_c = max(clusters, key=len)
-            x_item = float(np.median(best_c))
+            # IMPROVED: Prefer the LEFTMOST cluster that has a significant number of items (e.g. > 20% of max length)
+            # This avoids picking CGO (Code) column as ITEM if CGO is denser.
+            
+            # 1. Filter small clusters (noise)
+            max_len = max(len(c) for c in clusters)
+            significant_clusters = [c for c in clusters if len(c) >= max(3, max_len * 0.5)]
+            
+            # 2. Sort by position (Left -> Right)
+            significant_clusters.sort(key=lambda c: np.median(c))
+            
+            if significant_clusters:
+                best_c = significant_clusters[0] # Pick Leftmost
+                x_item = float(np.median(best_c))
+            else:
+                 # Fallback
+                best_c = max(clusters, key=len)
+                x_item = float(np.median(best_c))
 
     # 2. Identify QTY column candidate (Cluster of numbers with decimals or integers, to the right of item)
     # Quantity usually has 2 decimals or look like big integers
