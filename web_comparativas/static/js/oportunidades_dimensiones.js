@@ -1552,6 +1552,13 @@
 
     bindChipGroup(swPAMI, updateUI);
     bindChipGroup(swEstado, updateUI);
+
+    // NEW: Bind Evaluacion filter
+    if (swEvaluacion) {
+      bindChipGroup(swEvaluacion, () => {
+        fetchDataFiltered();
+      });
+    }
   }
 
   // ------------------------------------------------------------------

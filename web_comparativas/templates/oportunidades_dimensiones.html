@@ -206,8 +206,11 @@
 
   .dim-row-bottom {
     display: grid;
-    grid-template-columns: 1.1fr 1.3fr 0.8fr;
+    /* Use minmax to prevent blowout, auto-fit for wrapping if needed, or just standard 1fr */
+    grid-template-columns: repeat(3, 1fr);
     gap: 1rem;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll on container */
   }
 
   /* Charts (Flat Box) */
@@ -221,6 +224,8 @@
     gap: 8px;
     height: 100%;
     box-shadow: none !important;
+    overflow: hidden;
+    /* Ensure content doesn't protrude */
   }
 
   .chart-card h3 {
