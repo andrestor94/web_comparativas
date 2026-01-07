@@ -330,6 +330,7 @@ def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional
 # =======================
 # Lector PLIEGO (tu versión)
 # =======================
+def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, float, float]:
     # Clustering approach: Find vertical columns of numbers
     
     # 1. Identify ITEM column candidate (Leftmost vertical cluster of integers 1..9999)
