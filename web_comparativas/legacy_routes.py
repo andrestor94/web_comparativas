@@ -47,6 +47,7 @@ from fastapi import (
     Query,
     File,
     BackgroundTasks,
+    Body,
 )
 from fastapi.responses import (
     HTMLResponse,
@@ -2538,6 +2539,212 @@ async def oportunidades_buscador_upload(
     url = str(url) + "?uploaded=1"
     return RedirectResponse(url, status_code=303)
 
+@router.post("/api/oportunidades/dimensiones/filter", response_class=JSONResponse)
+def api_oportunidades_dimensiones_filter(
+    body: Dict[str, Any] = Body(...),
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor")
+    ),
+):
+    """
+    API JSON para el dashboard de Dimensiones (POST).
+    Recibe mapa de decisiones { "rowKey": "estado" } para filtrar.
+    """
+    # Extraer parámetros del body
+    q = body.get("q", "")
+    buyer = body.get("buyer", "")
+    platform = body.get("platform", "")
+    province = body.get("province", "")
+    date_from = body.get("date_from", "")
+    date_to = body.get("date_to", "")
+    process_type = body.get("process_type", "")
+    cuenta = body.get("cuenta", "")
+    evaluation = body.get("evaluation", "") # aceptado, rechazado, sin-marcar
+    limit_processed = body.get("limit_processed", False) # Flag para limitar resultados procesados
+    decisions = body.get("decisions", {})
+
+    opp_info = _oportunidades_status()
+
+    df_all = _opp_load_df()
+    if df_all is None or df_all.empty:
+        return JSONResponse(
+            {
+                "ok": True,
+                "has_file": False,
+                "opp": opp_info,
+                "kpis": {
+                    "total_rows": 0,
+                    "buyers": 0,
+                    "platforms": 0,
+                    "provinces": 0,
+                    "budget_total": 0.0,
+                    "date_min": "",
+                    "date_max": "",
+                },
+                "filters": {}, # Simpler return for empty
+                "dimensions": {
+                    "comprador": [],
+                    "provincia": [],
+                    "plataforma": [],
+                    "cuenta": [],
+                    "fecha_apertura": [],
+                    "tipo_proceso": [],
+                    "reparticion_estado": [],
+                    "estado": [],
+                },
+            }
+        )
+    
+    # --- LOGICA DE DECISIONES DE USUARIO ---
+    if decisions:
+        # Generar clave igual al frontend: row.get('Número') + " | " + row.get('Apertura')
+        # Cuidado: asegurar que coincida con buildRowKey de JS.
+        # En JS: n + " | " + a  (ambos trim)
+        
+        # Funcion helper para rowKey
+        def make_key(row):
+            n = str(row.get('Número') or row.get('N° Proceso') or row.get('Nro Proceso') or row.get('Proceso') or "").strip()
+            
+            # Apertura puede venir en varias columnas
+            a_val = (
+                row.get('Apertura') 
+                or row.get('Fecha Límite') 
+                or row.get('Fecha de Cierre') 
+                or row.get('Fecha de Apertura')
+                or row.get('Fecha') 
+                or ""
+            )
+            a = str(a_val).strip()
+            return f"{n} | {a}"
+
+        # Aplicamos la clave a todo el DF (puede ser costoso si es muy grande, pero son <50k rows usualmente)
+        df_all['__row_key'] = df_all.apply(make_key, axis=1)
+        
+        # Mapeamos la decision
+        # decisions es Dict[str, str]
+        df_all['__user_decision'] = df_all['__row_key'].map(decisions).fillna('sin-marcar')
+    else:
+        df_all['__user_decision'] = 'sin-marcar'
+
+    # --- FILTRO DE EVALUACION ---
+    if evaluation and evaluation != 'todos':
+        # evaluation values: 'aceptado', 'rechazado', 'sin-marcar'
+        df_all = df_all[df_all['__user_decision'] == evaluation]
+
+    # Aplicamos filtros standard
+    df_filtered = _opp_apply_filters(
+        df_all, q, buyer, platform, province, date_from, date_to, process_type, cuenta
+    )
+
+    # KPIs generales
+    kpis = _opp_compute_kpis(df_filtered)
+
+    # columnas candidatas para cada eje
+    buyer_col = _opp_pick(
+        df_filtered,
+        [
+            "Comprador",
+            "Repartición",
+            "Entidad",
+            "Organismo",
+            "Unidad Compradora",
+            "Buyer",
+        ],
+    )
+    prov_col = _opp_pick(
+        df_filtered,
+        [
+            "Provincia",
+            "Provincia/Municipio",
+            "Municipio",
+            "Jurisdicción",
+            "Localidad",
+            "Departamento",
+        ],
+    )
+    platf_col = _opp_pick(
+        df_filtered,
+        ["Plataforma", "Portal", "Origen", "Sistema", "Platform"],
+    )
+    cuenta_col = _opp_pick(
+        df_filtered,
+        [
+            "Código",
+            "Codigo",
+            "Cuenta",
+            "Número",
+            "Account",
+        ],
+    )
+    date_col = _opp_pick(
+        df_filtered,
+        ["Fecha de Apertura", "Apertura", "Fecha", "Date", "Fecha Límite"],
+    )
+    type_col = _opp_pick(
+        df_filtered, ["Tipo", "Tipo de Proceso", "Modalidad", "Procedimiento"]
+    )
+    # estado/urgencia para diferenciar emergencia
+    state_col = _opp_pick(
+        df_filtered, ["Estado", "Tipo Proceso", "Carácter", "Urgencia"]
+    )
+
+    # --- AGREGACIONES ---
+    # Top 15 Compradores
+    dim_comprador = _opp_agg_count(df_filtered, buyer_col, top_n=15)
+    
+    # Provincias (top 30 para cubrir mapa)
+    dim_provincia = _opp_agg_count(df_filtered, prov_col, top_n=30)
+    
+    # Plataforma (pocas)
+    dim_plataforma = _opp_agg_count(df_filtered, platf_col, top_n=20)
+    
+    # Cuenta (top 15)
+    dim_cuenta = _opp_agg_count(df_filtered, cuenta_col, top_n=15)
+    
+    # Fecha Apertura (timeline diario)
+    # Necesitamos split por estado (Emergencia vs Regular) para el timeline apilado
+    dim_fecha = _opp_agg_timeline(df_filtered, date_col, state_col)
+    
+    # Tipo Proceso (treemap)
+    dim_tipo = _opp_agg_count(df_filtered, type_col, top_n=20)
+    
+    # Repartición + Estado (stacked bar)
+    dim_rep_estado = _opp_agg_stacked(df_filtered, buyer_col, state_col, top_n=10)
+
+    # Estado general (pie)
+    dim_estado = _opp_agg_count(df_filtered, state_col, top_n=10)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "has_file": True,
+            "opp": opp_info,
+            "kpis": kpis,
+            "filters": {
+                "q": q,
+                "buyer": buyer,
+                "platform": platform,
+                "province": province,
+                "date_from": date_from,
+                "date_to": date_to,
+                "process_type": process_type,
+                "cuenta": cuenta,
+                "evaluation": evaluation,
+            },
+            "dimensions": {
+                "comprador": dim_comprador,
+                "provincia": dim_provincia,
+                "plataforma": dim_plataforma,
+                "cuenta": dim_cuenta,
+                "fecha_apertura": dim_fecha,
+                "tipo_proceso": dim_tipo,
+                "reparticion_estado": dim_rep_estado,
+                "estado": dim_estado,
+            },
+        }
+    )
+
+
 @router.get("/api/oportunidades/dimensiones", response_class=JSONResponse)
 def api_oportunidades_dimensiones(
     q: str = Query(""),
@@ -2548,6 +2755,7 @@ def api_oportunidades_dimensiones(
     date_to: str = Query(""),
     process_type: str = Query(""),
     cuenta: str = Query(""),
+    evaluation: str = Query(""), # por compatibilidad si se llama por GET
 
     user: User = Depends(
         require_roles("admin", "analista", "supervisor", "auditor")
