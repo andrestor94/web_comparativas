@@ -1,17 +1,16 @@
 # web_comparativas/adapters/la_pampa.py
-# Adapter "La Pampa" para integrarse al pipeline
+# Adapter "La Pampa" para integrarse al pipeline classify_and_process
 # Input esperado:
-#   - .zip con PDFs (comparativas + pliegos) adentro (modo original), O
-#   - .pdf suelto (comparativa o pliego): busca el PDF "compañero" en la misma carpeta, O
-#   - directorio: busca PDFs dentro
-#
-# Output: DataFrame en formato "estándar" para dashboard + archivos extra en processed/
+#   - .zip con PDFs (comparativas + pliegos) adentro
+#   - (opcional) .pdf suelto o directorio con PDFs: busca ambos en la misma carpeta (modo interfaz)
+# Output: DataFrame en formato "estándar" para dashboard + extras en processed/
 
 from __future__ import annotations
 
 import os
 import re
 import zipfile
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from decimal import Decimal, ROUND_HALF_UP
@@ -74,7 +73,7 @@ _UNIT_CANON = {
     "L": "L", "LITRO": "L", "ML": "ML", "CC": "CC",
     "KG": "KG", "G": "G",
     "M": "M", "METRO": "M",
-    "CM": "CM", "MM": "MM",
+    "CM": "CM", "MM": "MM"
 }
 
 _UNIT_DISPLAY = {
@@ -113,6 +112,38 @@ def _normalize_spaces(s: Optional[str]) -> Optional[str]:
         return None
     s2 = re.sub(r"\s+", " ", str(s)).strip()
     return s2 if s2 else None
+
+
+def _despace_letters(text: Optional[str]) -> Optional[str]:
+    """
+    Corrige textos con letras separadas: "E S TRIOL" -> "ESTRIOL"
+    (muy común en PDFs de pliegos)
+    """
+    if not text:
+        return None
+    toks = str(text).strip().split()
+    if not toks:
+        return None
+
+    out: List[str] = []
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
+        if len(tok) == 1 and tok.isalpha():
+            letters = []
+            while i < len(toks) and len(toks[i]) == 1 and toks[i].isalpha():
+                letters.append(toks[i])
+                i += 1
+            if i < len(toks):
+                out.append("".join(letters) + toks[i])
+                i += 1
+            else:
+                out.append("".join(letters))
+        else:
+            out.append(tok)
+            i += 1
+
+    return _normalize_spaces(" ".join(out))
 
 
 def _is_nan(x) -> bool:
@@ -174,7 +205,7 @@ def _parse_number_cell(val: Any, *, decimals: Optional[int] = None, for_quantity
 def _canonical_unidad(s: Optional[str]) -> Optional[str]:
     if s is None:
         return None
-    t = _normalize_spaces(s)
+    t = _normalize_spaces(_despace_letters(s) or s)
     if not t:
         return None
     up = t.upper()
@@ -197,7 +228,7 @@ def _unit_display(u: Any) -> Optional[str]:
 def _split_desc_and_unit_from_text(desc_raw: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if not desc_raw:
         return (None, None)
-    txt = _normalize_spaces(desc_raw) or ""
+    txt = _normalize_spaces(_despace_letters(desc_raw) or desc_raw) or ""
     if FOOTER_NOISE_RE.search(txt):
         return (None, None)
     t = re.sub(r"\$\s*\$", "$$", txt)
@@ -263,13 +294,13 @@ def _looks_like_comparativa_pdf(path: str) -> bool:
 
 def _looks_like_pliego_pdf(path: str) -> bool:
     name = os.path.basename(path).lower()
-    if ("-lp" in name) or ("pliego" in name):
+    if ("-lp" in name) or ("pliego" in name) or ("lic pub" in name) or ("exp" in name):
         return True
     try:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
             txt = (pdf.pages[0].extract_text() or "").upper()
-            return any(t in txt for t in ["ITEM", "ÍTEM", "RENGL", "DESCRIP", "UNIDAD"])
+            return any(t in txt for t in ["ITEM", "ÍTEM", "RENGL", "DESCRIP", "UNIDAD", "CGO", "CANTIDAD"])
     except Exception:
         return False
 
@@ -285,11 +316,11 @@ def _find_tag_in_filename(path: str) -> Optional[str]:
     return None
 
 
-def _pair_pliego_for_tag(tag: str, pliego_paths: List[str]) -> Optional[str]:
-    for p in pliego_paths:
+def _pair_pliego_for_tag(tag: str, pliegos: List[str]) -> Optional[str]:
+    for p in pliegos:
         if tag in os.path.basename(p):
             return p
-    for p in pliego_paths:
+    for p in pliegos:
         exp = _extract_expediente_from_pdf(p)
         if exp and _tag_expediente(exp) == tag:
             return p
@@ -297,15 +328,9 @@ def _pair_pliego_for_tag(tag: str, pliego_paths: List[str]) -> Optional[str]:
 
 
 # =======================
-# Input: ZIP / PDF / DIR
+# Input collector (ZIP / PDF / DIR) -> para interfaz
 # =======================
 def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional[Path]]:
-    """
-    Devuelve (pdf_paths, extract_dir)
-    - Si es ZIP: extrae a out_dir y devuelve PDFs desde extract_dir.
-    - Si es PDF: busca PDFs en la misma carpeta (no recursivo).
-    - Si es DIR: busca PDFs recursivo.
-    """
     input_path = Path(input_path)
 
     if input_path.is_dir():
@@ -319,8 +344,7 @@ def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional
         return (list(extract_dir.rglob("*.pdf")), extract_dir)
 
     if input_path.suffix.lower() == ".pdf":
-        # MUY IMPORTANTE: tu interfaz suele guardar los dos PDFs en la misma carpeta temporal.
-        # Entonces los levantamos desde ahí.
+        # en interfaz suele quedar el "par" en el mismo dir temporal
         base_dir = input_path.parent
         return (list(base_dir.glob("*.pdf")), None)
 
@@ -328,149 +352,95 @@ def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional
 
 
 # =======================
-# Lector PLIEGO (tu versión)
+# PLIEGO: Table-first + fallback al parser viejo
 # =======================
-def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, float, float]:
-    # Clustering approach: Find vertical columns of numbers
-    
-    # 1. Identify ITEM column candidate (Leftmost vertical cluster of integers 1..9999)
-    # Filter words that are purely numeric and small (items usually are 1, 2, 3...)
-    item_cands = [w for w in words if re.fullmatch(r"^\d{1,5}$", w["text"]) and w["x0"] < 300]
-    
-    x_item = 56.0 # default
-    if item_cands:
-        # Simple Clustering
-        xs = sorted([w["x0"] for w in item_cands])
-        clusters = []
-        if xs:
-            curr_c = [xs[0]]
-            for x in xs[1:]:
-                if x - curr_c[-1] <= 10: # 10px tolerance
-                    curr_c.append(x)
-                else:
-                    clusters.append(curr_c)
-                    curr_c = [x]
-            clusters.append(curr_c)
-            # Pick the cluster with most elements that is somewhat to the left
-            # IMPROVED: Prefer the LEFTMOST cluster that has a significant number of items (e.g. > 20% of max length)
-            # This avoids picking CGO (Code) column as ITEM if CGO is denser.
-            
-            # 1. Filter small clusters (noise)
-            max_len = max(len(c) for c in clusters)
-            significant_clusters = [c for c in clusters if len(c) >= max(3, max_len * 0.5)]
-            
-            # 2. Sort by position (Left -> Right)
-            significant_clusters.sort(key=lambda c: np.median(c))
-            
-            if significant_clusters:
-                best_c = significant_clusters[0] # Pick Leftmost
-                x_item = float(np.median(best_c))
-            else:
-                 # Fallback
-                best_c = max(clusters, key=len)
-                x_item = float(np.median(best_c))
-
-    # 2. Identify QTY column candidate (Cluster of numbers with decimals or integers, to the right of item)
-    # Quantity usually has 2 decimals or look like big integers
-    qty_cands = [w for w in words if (NUM_EU_RE.fullmatch(w["text"]) or re.fullmatch(r"\d+", w["text"])) 
-                 and w["x0"] > (x_item + 30) and w["x0"] < 500]
-    
-    x_qty = x_item + 90.0 # default spacing
-    if qty_cands:
-         xs = sorted([w["x0"] for w in qty_cands])
-         clusters = []
-         if xs:
-            curr_c = [xs[0]]
-            for x in xs[1:]:
-                if x - curr_c[-1] <= 10:
-                    curr_c.append(x)
-                else:
-                    clusters.append(curr_c)
-                    curr_c = [x]
-            clusters.append(curr_c)
-            # Usually Qty is the dense column in the middle-ish
-            # We pick the one with most items, or maybe specific check?
-            # Let's pick the one distinct from Item
-            valid_clusters = [c for c in clusters if np.median(c) > (x_item + 40)]
-            if valid_clusters:
-                best_c = max(valid_clusters, key=len)
-                x_qty = float(np.median(best_c))
-    
-    # 3. Derive other anchors relative to Item and Qty
-    # Standard La Pampa: Item | Cgo | Qty | Unit | Desc
-    # Or: Item | Qty | ...
-    # We try to fit the Cgo in between if space permits, else assume it's close to Item
-    
-    if x_qty - x_item > 80:
-        x_cgo = x_item + (x_qty - x_item) * 0.4 # approx between
-    else:
-        x_cgo = x_item + 40.0
-        x_qty = max(x_qty, x_cgo + 40.0)
-
-    x_unit = x_qty + 40.0
-    
-    # 4. Describe anchor (starts after Unit)
-    # Look for long text words
-    desc_cands = [w for w in words if len(w["text"]) > 3 and not re.match(r"^[\d.,]+$", w["text"]) and w["x0"] > x_qty]
-    if desc_cands:
-         xs_desc = sorted([w["x0"] for w in desc_cands])
-         x_desc = float(np.percentile(xs_desc, 10)) # Start of description block
-         x_desc = max(x_desc, x_unit + 10)
-    else:
-         x_desc = x_unit + 60.0
-
-    return (x_item, x_cgo, x_qty, x_unit, x_desc)
-
-
-def _build_cuts_from_anchors(x_item: float, x_cgo: float, x_qty: float, x_unit: float, x_desc: float) -> List[float]:
-    return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0]
-
-
-def _assign_band(x: float, cuts: List[float]) -> int:
-    if x < cuts[0]: return 0
-    if x < cuts[1]: return 1
-    if x < cuts[2]: return 2
-    if x < cuts[3]: return 3
-    return 4
-
-
-def _pick_qty_from_words(ws: List[dict], x_qty: float, x_unit: float) -> Optional[str]:
-    cands = [w for w in ws if NUM_EU_RE.fullmatch(w["text"])
-             and (x_qty - 40) <= w["x0"] <= (x_unit + 40)]
-    if not cands:
-        return None
-    mid = (x_qty + x_unit) / 2.0
-    w = min(cands, key=lambda t: abs(t["x0"] - mid))
-    return w["text"]
-
-
-def _extract_unit_and_b3desc(b3_words: List[dict]) -> Tuple[Optional[str], Optional[str]]:
-    if not b3_words:
-        return (None, None)
-    ws = sorted(b3_words, key=lambda t: t["x0"])
-    unit = None
-    unit_idx = None
-    for i, w in enumerate(ws):
-        cand = _canonical_unidad(w["text"])
-        if cand:
-            unit = cand
-            unit_idx = i
-            break
-    if unit is not None and unit_idx is not None:
-        rest = [w["text"] for w in ws[unit_idx + 1:]]
-        extra = _normalize_spaces(" ".join(rest)) if rest else None
-        return (unit, extra)
-    extra = _normalize_spaces(" ".join(w["text"] for w in ws))
-    return (None, extra if extra else None)
-
-
-def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
+def _leer_pliego_pdf_words_anchors(path_pdf: str) -> pd.DataFrame:
+    """
+    TU parser original por words/anchors (lo mantengo tal cual, como fallback).
+    """
     try:
         import pdfplumber
     except Exception as e:
         raise RuntimeError("Falta dependencia: instalar pdfplumber para leer pliegos PDF.") from e
 
     regs: List[Dict[str, Any]] = []
+
+    def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, float, float]:
+        num_pat = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
+        int_pat = re.compile(r"^\d{1,6}$")
+
+        y_tol = 1.8
+        def ybin(y): return round(y / y_tol) * y_tol
+        lines: Dict[float, List[dict]] = {}
+        for w in words or []:
+            lines.setdefault(ybin(w["top"]), []).append(w)
+
+        xs_item, xs_cgo, xs_qty = [], [], []
+        for _y, ws in lines.items():
+            nums = [w for w in sorted(ws, key=lambda t: t["x0"])
+                    if num_pat.fullmatch(w["text"]) or int_pat.fullmatch(w["text"])]
+            if len(nums) < 3:
+                continue
+            if nums[0]["x0"] > 110:
+                continue
+            xs_item.append(nums[0]["x0"])
+            xs_cgo.append(nums[1]["x0"])
+            xs_qty.append(nums[2]["x0"])
+
+        if xs_item and xs_cgo and xs_qty:
+            x_item = float(np.median(xs_item))
+            x_cgo  = float(np.median(xs_cgo))
+            x_qty  = float(np.median(xs_qty))
+            x_unit = x_qty + 40.0
+            all_xs = [round(w["x0"], 1) for w in words]
+            x_desc = float(np.percentile(all_xs, 80)) if all_xs else (x_unit + 120.0)
+            return (x_item, x_cgo, x_qty, x_unit, x_desc)
+
+        xs = sorted(set(round(w["x0"], 1) for w in words))
+        if xs:
+            p = np.percentile(xs, [5, 20, 40, 60, 75])
+            x_item, x_cgo, x_qty, x_unit, x_desc = float(p[0]), float(p[1]), float(p[2]), float(p[3]), float(p[4])
+        else:
+            x_item, x_cgo, x_qty, x_unit, x_desc = 56.0, 96.0, 146.0, 190.0, 270.0
+        return (x_item, x_cgo, x_qty, x_unit, x_desc)
+
+    def _build_cuts_from_anchors(x_item: float, x_cgo: float, x_qty: float, x_unit: float, x_desc: float) -> List[float]:
+        return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0]
+
+    def _assign_band(x: float, cuts: List[float]) -> int:
+        if x < cuts[0]: return 0
+        if x < cuts[1]: return 1
+        if x < cuts[2]: return 2
+        if x < cuts[3]: return 3
+        return 4
+
+    def _pick_qty_from_words(ws: List[dict], x_qty: float, x_unit: float) -> Optional[str]:
+        cands = [w for w in ws if NUM_EU_RE.fullmatch(w["text"])
+                 and (x_qty - 40) <= w["x0"] <= (x_unit + 40)]
+        if not cands:
+            return None
+        mid = (x_qty + x_unit) / 2.0
+        w = min(cands, key=lambda t: abs(t["x0"] - mid))
+        return w["text"]
+
+    def _extract_unit_and_b3desc(b3_words: List[dict]) -> Tuple[Optional[str], Optional[str]]:
+        if not b3_words:
+            return (None, None)
+        ws = sorted(b3_words, key=lambda t: t["x0"])
+        unit = None
+        unit_idx = None
+        for i, w in enumerate(ws):
+            cand = _canonical_unidad(w["text"])
+            if cand:
+                unit = cand
+                unit_idx = i
+                break
+        if unit is not None and unit_idx is not None:
+            rest = [w["text"] for w in ws[unit_idx + 1:]]
+            extra = _normalize_spaces(" ".join(rest)) if rest else None
+            return (unit, extra)
+        extra = _normalize_spaces(" ".join(w["text"] for w in ws))
+        return (None, extra if extra else None)
 
     with pdfplumber.open(path_pdf) as pdf:
         for page in pdf.pages:
@@ -504,6 +474,7 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
                 unit_from_b3, desc_prefix_b3 = _extract_unit_and_b3desc(band_words[3])
                 desc_txt_b4 = join_text(4)
 
+                # filtrar ruido
                 if cgo_txt and FOOTER_NOISE_RE.search(cgo_txt): cgo_txt = None
                 if qty_txt0 and FOOTER_NOISE_RE.search(qty_txt0): qty_txt0 = None
                 if desc_txt_b4 and FOOTER_NOISE_RE.search(desc_txt_b4): desc_txt_b4 = None
@@ -511,15 +482,14 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
                 nums_on_line = [w for w in ws if NUM_EU_RE.fullmatch(w["text"]) or re.fullmatch(r"\d{1,6}", w["text"])]
                 nums_on_line.sort(key=lambda t: t["x0"])
 
-                # Relaxed tolerance for scanned docs: 35px
-                is_item_line = any(re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 35 for w in nums_on_line)
+                is_item_line = any(re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 20 for w in nums_on_line)
                 if is_item_line:
                     if last_row:
                         regs.append(last_row)
                         last_row = None
                         expect_unit_lines = 0
 
-                    item_candidates = [w for w in nums_on_line if re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 35]
+                    item_candidates = [w for w in nums_on_line if re.fullmatch(r"\d{1,6}", w["text"]) and abs(w["x0"] - x_item) <= 20]
                     if not item_candidates:
                         continue
                     item_val = int(item_candidates[0]["text"])
@@ -634,100 +604,175 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
     return out[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]]
 
 
+def _leer_pliego_pdf_tables(path_pdf: str) -> pd.DataFrame:
+    """
+    Nuevo parser robusto (recomendado):
+    Lee pliegos por tablas con estrategia 'text' (muy estable en La Pampa).
+    """
+    try:
+        import pdfplumber
+    except Exception as e:
+        raise RuntimeError("Falta dependencia: instalar pdfplumber para leer pliegos PDF.") from e
+
+    def _compact_cell(c: Any) -> str:
+        return (c or "").replace(" ", "").replace("\n", "").upper()
+
+    def _find_start_startswith(hdr_row: List[Any], keyword: str) -> Optional[int]:
+        n = len(hdr_row)
+        for i in range(n):
+            win = "".join(_compact_cell(hdr_row[j]) for j in range(i, min(i + 10, n)))
+            if win.startswith(keyword):
+                return i
+        return None
+
+    table_settings = {
+        "vertical_strategy": "text",
+        "horizontal_strategy": "text",
+        "snap_tolerance": 3,
+        "join_tolerance": 3,
+        "edge_min_length": 3,
+        "min_words_vertical": 1,
+        "min_words_horizontal": 1,
+        "intersection_tolerance": 3,
+    }
+
+    regs: List[Dict[str, Any]] = []
+
+    with pdfplumber.open(path_pdf) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables(table_settings) or []
+            for table in tables:
+                hdr_idx = None
+                for i, row in enumerate(table[:120]):
+                    comp = "".join(_compact_cell(c) for c in row)
+                    if ("ITEM" in comp and "CGO" in comp and "CANTIDAD" in comp and "UNIDAD" in comp and "DESCRI" in comp):
+                        hdr_idx = i
+                        break
+                if hdr_idx is None:
+                    continue
+
+                hdr = table[hdr_idx]
+                item_s = _find_start_startswith(hdr, "ITEM") or 0
+                cgo_s = _find_start_startswith(hdr, "CGO")
+                cant_s = _find_start_startswith(hdr, "CANTIDAD") or _find_start_startswith(hdr, "CANT")
+                unid_s = _find_start_startswith(hdr, "UNIDAD")
+                desc_s = _find_start_startswith(hdr, "DESCRI")
+                nomb_s = _find_start_startswith(hdr, "NOMBRE")  # a veces está
+                if nomb_s is None:
+                    nomb_s = len(hdr)
+
+                if None in (cgo_s, cant_s, unid_s, desc_s):
+                    continue
+
+                item_cols = range(item_s, cgo_s)
+                cgo_cols = range(cgo_s, cant_s)
+                cant_cols = range(cant_s, unid_s)
+                unid_cols = range(unid_s, desc_s)
+                desc_cols = range(desc_s, nomb_s)
+
+                for row in table[hdr_idx + 1:]:
+                    # ITEM: primer entero en el bloque
+                    item_val = None
+                    for j in item_cols:
+                        if j < len(row) and row[j]:
+                            m = re.match(r"^\s*(\d{1,6})\s*$", str(row[j]))
+                            if m:
+                                item_val = int(m.group(1))
+                                break
+                    if item_val is None:
+                        continue
+
+                    # CGO: concatenar y dejar sólo dígitos
+                    cgo_txt = "".join((row[j] or "") for j in cgo_cols if j < len(row))
+                    cgo_txt = re.sub(r"[^\d]", "", cgo_txt) or None
+
+                    # CANTIDAD: parse EU
+                    qty_txt = "".join((row[j] or "") for j in cant_cols if j < len(row))
+                    qty_val = _parse_number_cell(qty_txt, decimals=2, for_quantity=True)
+
+                    # UNIDAD
+                    unit_txt = "".join((row[j] or "") for j in unid_cols if j < len(row))
+                    unidad_val = _canonical_unidad(unit_txt)
+
+                    # DESCRIPCION
+                    desc_txt = " ".join((row[j] or "") for j in desc_cols if j < len(row)).strip()
+                    desc_txt = _normalize_spaces(_despace_letters(desc_txt) or desc_txt)
+                    if desc_txt and FOOTER_NOISE_RE.search(desc_txt):
+                        desc_txt = None
+
+                    regs.append({
+                        "ITEM": item_val,
+                        "CGO": _normalize_spaces(cgo_txt),
+                        "CANTIDAD": qty_val,
+                        "DESCRIPCION": desc_txt,
+                        "UNIDAD": unidad_val,
+                    })
+
+    if not regs:
+        return pd.DataFrame(columns=["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"])
+
+    df = pd.DataFrame(regs)
+
+    # Colapsar por ITEM (mejor valor)
+    def _modo_str(series: pd.Series) -> Optional[str]:
+        s = series.dropna().astype(str).str.strip()
+        s = s[s != ""]
+        if s.empty:
+            return None
+        return s.value_counts(dropna=True).index[0]
+
+    def _longest_str(series: pd.Series) -> Optional[str]:
+        s = series.dropna().astype(str).str.strip()
+        s = s[s != ""]
+        if s.empty:
+            return None
+        return max(s, key=len)
+
+    def _modo_num(series: pd.Series) -> Optional[float]:
+        s = series.dropna().astype(float)
+        if s.empty:
+            return None
+        vc = s.round(6).value_counts()
+        cands = vc[vc == vc.max()].index.tolist()
+        return float(min(cands))
+
+    out = df.groupby("ITEM", as_index=False).agg({
+        "CGO": _modo_str,
+        "UNIDAD": _modo_str,
+        "DESCRIPCION": _longest_str,
+        "CANTIDAD": _modo_num,
+    })
+
+    out["CANTIDAD"] = out["CANTIDAD"].apply(lambda x: _round_half_up(float(x), 2) if x is not None else None)
+    out["CGO"] = out["CGO"].apply(_normalize_spaces)
+    out["UNIDAD"] = out["UNIDAD"].apply(_canonical_unidad)
+    out["DESCRIPCION"] = out["DESCRIPCION"].apply(_normalize_spaces)
+
+    return out[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]]
+
+
+def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
+    """
+    Wrapper: primero tablas (robusto), si falla cae a tu método original.
+    """
+    df = _leer_pliego_pdf_tables(path_pdf)
+    if df is not None and not df.empty and df["ITEM"].nunique() >= 20:
+        return df
+
+    # fallback
+    df2 = _leer_pliego_pdf_words_anchors(path_pdf)
+    return df2
+
+
 # =======================
-# Lector COMPARATIVA (reforzado POR PÁGINA)
+# COMPARATIVA (TU FUNCIÓN)
 # =======================
-_CODE_RE = re.compile(r"(\d+)\s*[-–—]\s*\d+\s*[-–—]\s*Alt\.?\s*(\d+)", re.IGNORECASE)
-_NUM_SCAN_RE = re.compile(r"\d{1,3}(?:\.\d{3})*(?:,\d+)?")  # EU style
+def leer_comparativa_pdf(path_pdf: str) -> pd.DataFrame:
+    try:
+        import pdfplumber
+    except Exception as e:
+        raise RuntimeError("Falta dependencia: instalar pdfplumber para leer comparativas PDF.") from e
 
-
-def _parse_comparativa_page_table(page) -> List[Dict[str, Any]]:
-    """
-    Intenta leer una página como tabla (grilla). Si no puede, devuelve [].
-    """
-    registros: List[Dict[str, Any]] = []
-    tbl = page.extract_table()
-    if not tbl:
-        return registros
-
-    best_i = None
-    best_cnt = 0
-    for i, row in enumerate(tbl[:12]):
-        if not row:
-            continue
-        cnt = sum(1 for c in row if c and _CODE_RE.search(str(c).replace("\n", " ")))
-        if cnt > best_cnt:
-            best_cnt = cnt
-            best_i = i
-
-    if best_i is None or best_cnt < 3:
-        return registros
-
-    header = tbl[best_i]
-    code_cols: List[int] = []
-    colcodes: Dict[int, Tuple[int, int, str]] = {}
-
-    for j, cell in enumerate(header):
-        if not cell:
-            continue
-        m = _CODE_RE.search(str(cell).replace("\n", " "))
-        if m:
-            item = int(m.group(1))
-            alt = int(m.group(2))
-            canon = f"{item}-0-Alt.{alt}"
-            code_cols.append(j)
-            colcodes[j] = (item, alt, canon)
-
-    if not code_cols:
-        return registros
-
-    last_provider: Optional[str] = None
-
-    for row in tbl[best_i + 1:]:
-        if not row:
-            continue
-
-        prov_cell = row[0] if len(row) > 0 else None
-        prov = _normalize_spaces(str(prov_cell).replace("\n", " ")) if prov_cell else None
-        if prov:
-            last_provider = prov
-        prov = prov or last_provider
-        if not prov:
-            continue
-
-        up = prov.upper()
-        if up.startswith(("TOTAL", "PROMEDIO", "PROVEEDOR")):
-            continue
-
-        for j in code_cols:
-            if j >= len(row):
-                continue
-            cell = row[j]
-            if not cell:
-                continue
-            mnum = _NUM_SCAN_RE.search(str(cell).replace("\n", " "))
-            if not mnum:
-                continue
-            pu = _parse_number_cell(mnum.group(0))
-            if pu is None:
-                continue
-
-            item, alt, canon = colcodes[j]
-            registros.append({
-                "PROVEEDOR": prov.strip(),
-                "ITEM": item,
-                "Alt": alt,
-                "PU": float(pu),
-                "ItemCode": canon,
-            })
-
-    return registros
-
-
-def _parse_comparativa_page_words(words: List[dict]) -> List[Dict[str, Any]]:
-    """
-    Tu método original (coords/words) aplicado a UNA página.
-    """
     registros: List[Dict[str, Any]] = []
     num_pat = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
 
@@ -743,177 +788,141 @@ def _parse_comparativa_page_words(words: List[dict]) -> List[Dict[str, Any]]:
             return (int(m2.group(1)), int(m2.group(2)))
         return (None, None)
 
-    code_words = []
-    for w in words:
-        it, al = _parse_item_alt_token_strict(w["text"])
-        if it is not None:
-            code_words.append(w)
-    if not code_words:
-        return registros
-
-    xs = sorted([w["x0"] for w in code_words])
-    cols_x = []
-    cluster = [xs[0]]
-    for x in xs[1:]:
-        if abs(x - float(np.mean(cluster))) <= 12:
-            cluster.append(x)
-        else:
-            cols_x.append(float(np.mean(cluster)))
-            cluster = [x]
-    cols_x.append(float(np.mean(cluster)))
-    code_cols = sorted(set(cols_x))
-
-    colcodes: Dict[int, Tuple[int, int, str]] = {}
-    for w in code_words:
-        idx = int(np.argmin([abs(w["x0"] - cx) for cx in code_cols]))
-        it, al = _parse_item_alt_token_strict(w["text"])
-        if it is not None and idx not in colcodes:
-            colcodes[idx] = (int(it), int(al), w["text"])
-
-    if not colcodes:
-        return registros
-
-    min_code_x = min(code_cols)
-    x_thresh = min_code_x - 12.0
-    x_left_limit = x_thresh + 25.0
-
-    y_tol = 1.8
-    def ybin(y): return round(y / y_tol) * y_tol
-
-    line_map: Dict[float, Dict[str, List[dict]]] = {}
-    for w in words:
-        y = ybin(w["top"])
-        obj = line_map.setdefault(y, {"left": [], "nums": [], "all": []})
-        obj["all"].append(w)
-
-        if w["x0"] < x_left_limit:
-            obj["left"].append(w)
-
-        if num_pat.fullmatch(w["text"]) and (w["x0"] >= (min_code_x - 5)):
-            obj["nums"].append(w)
-
-    ys = sorted(line_map.keys())
-
-    def _join_provider(ws: List[dict]) -> Optional[str]:
-        if not ws:
-            return None
-        ws_sorted = sorted(ws, key=lambda t: t["x0"])
-        has_letters = any(re.search(r"[A-Za-zÁÉÍÓÚÑ]", t["text"]) for t in ws_sorted)
-
-        keep = []
-        for t in ws_sorted:
-            tx = str(t["text"]).strip()
-            if not tx:
-                continue
-            if re.search(r"[A-Za-zÁÉÍÓÚÑ]", tx):
-                keep.append(tx)
-                continue
-            if has_letters and re.fullmatch(r"\d{1,3}", tx):
-                keep.append(tx)
-                continue
-        return _normalize_spaces(" ".join(keep))
-
-    def _get_provider(i: int) -> Optional[str]:
-        if line_map[ys[i]]["left"]:
-            p = _join_provider(line_map[ys[i]]["left"])
-            if p:
-                return p
-
-        for k in range(1, 6):
-            j = i - k
-            if j < 0:
-                break
-            if ys[i] - ys[j] > 60:
-                break
-            if line_map[ys[j]]["left"]:
-                p = _join_provider(line_map[ys[j]]["left"])
-                if p:
-                    return p
-
-        if i + 1 < len(ys) and (ys[i + 1] - ys[i] <= 24.0) and line_map[ys[i + 1]]["left"]:
-            p = _join_provider(line_map[ys[i + 1]]["left"])
-            if p:
-                return p
-        return None
-
-    for ii, y in enumerate(ys):
-        row = line_map[y]
-        if not row["nums"]:
-            continue
-
-        prov = _get_provider(ii)
-        if not prov:
-            continue
-
-        up = prov.upper()
-        if up.startswith("TOTAL") or up.startswith("PROMEDIO") or up.startswith("PROVEEDOR"):
-            continue
-
-        for numw in sorted(row["nums"], key=lambda t: t["x0"]):
-            idx = int(np.argmin([abs(numw["x0"] - cx) for cx in code_cols]))
-            if idx not in colcodes:
-                continue
-
-            if abs(numw["x0"] - code_cols[idx]) > 35:
-                continue
-
-            item, alt, rawtxt = colcodes[idx]
-            pu = _parse_number_cell(numw["text"])
-            if pu is None:
-                continue
-
-            registros.append({
-                "PROVEEDOR": prov.strip(),
-                "ITEM": int(item),
-                "Alt": int(alt),
-                "PU": float(pu),
-                "ItemCode": rawtxt or f"{item}-0-Alt.{alt}",
-            })
-
-    return registros
-
-
-def leer_comparativa_pdf(path_pdf: str) -> pd.DataFrame:
-    """
-    Refuerzo real: por cada página:
-      1) intenta tabla
-      2) si esa página no produce registros, intenta words/coords
-    Luego concatena y deduplica.
-    """
-    try:
-        import pdfplumber
-    except Exception as e:
-        raise RuntimeError("Falta dependencia: instalar pdfplumber para leer comparativas PDF.") from e
-
-    regs: List[Dict[str, Any]] = []
-
     with pdfplumber.open(path_pdf) as pdf:
         for page in pdf.pages:
-            page_regs = _parse_comparativa_page_table(page)
-            if not page_regs:
-                words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
-                if words:
-                    page_regs = _parse_comparativa_page_words(words)
-            regs.extend(page_regs)
+            words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+            if not words:
+                continue
+
+            code_words = []
+            for w in words:
+                it, al = _parse_item_alt_token_strict(w["text"])
+                if it is not None:
+                    code_words.append(w)
+            if not code_words:
+                continue
+
+            xs = sorted([w["x0"] for w in code_words])
+            cols_x = []
+            cluster = [xs[0]]
+            for x in xs[1:]:
+                if abs(x - float(np.mean(cluster))) <= 12:
+                    cluster.append(x)
+                else:
+                    cols_x.append(float(np.mean(cluster)))
+                    cluster = [x]
+            cols_x.append(float(np.mean(cluster)))
+            code_cols = sorted(set(cols_x))
+
+            colcodes: Dict[int, Tuple[int, int, str]] = {}
+            for w in code_words:
+                idx = int(np.argmin([abs(w["x0"] - cx) for cx in code_cols]))
+                it, al = _parse_item_alt_token_strict(w["text"])
+                if it is not None and idx not in colcodes:
+                    colcodes[idx] = (int(it), int(al), w["text"])
+
+            if not colcodes:
+                continue
+
+            min_code_x = min(code_cols)
+            x_thresh = min_code_x - 12.0
+            x_left_limit = x_thresh + 25.0
+
+            y_tol = 1.8
+            def ybin(y): return round(y / y_tol) * y_tol
+
+            line_map: Dict[float, Dict[str, List[dict]]] = {}
+            for w in words:
+                y = ybin(w["top"])
+                obj = line_map.setdefault(y, {"left": [], "nums": [], "all": []})
+                obj["all"].append(w)
+
+                if w["x0"] < x_left_limit:
+                    obj["left"].append(w)
+
+                if num_pat.fullmatch(w["text"]) and (w["x0"] >= (min_code_x - 5)):
+                    obj["nums"].append(w)
+
+            ys = sorted(line_map.keys())
+
+            def _join_provider(ws: List[dict]) -> Optional[str]:
+                if not ws:
+                    return None
+                ws_sorted = sorted(ws, key=lambda t: t["x0"])
+                has_letters = any(re.search(r"[A-Za-zÁÉÍÓÚÑ]", t["text"]) for t in ws_sorted)
+
+                keep = []
+                for t in ws_sorted:
+                    tx = str(t["text"]).strip()
+                    if not tx:
+                        continue
+                    if re.search(r"[A-Za-zÁÉÍÓÚÑ]", tx):
+                        keep.append(tx)
+                        continue
+                    if has_letters and re.fullmatch(r"\d{1,3}", tx):
+                        keep.append(tx)
+                        continue
+                return _normalize_spaces(" ".join(keep))
+
+            def _get_provider(i: int) -> Optional[str]:
+                if line_map[ys[i]]["left"]:
+                    p = _join_provider(line_map[ys[i]]["left"])
+                    if p:
+                        return p
+
+                for k in range(1, 6):
+                    j = i - k
+                    if j < 0:
+                        break
+                    if ys[i] - ys[j] > 60:
+                        break
+                    if line_map[ys[j]]["left"]:
+                        p = _join_provider(line_map[ys[j]]["left"])
+                        if p:
+                            return p
+
+                if i + 1 < len(ys) and (ys[i + 1] - ys[i] <= 24.0) and line_map[ys[i + 1]]["left"]:
+                    p = _join_provider(line_map[ys[i + 1]]["left"])
+                    if p:
+                        return p
+                return None
+
+            for ii, y in enumerate(ys):
+                row = line_map[y]
+                if not row["nums"]:
+                    continue
+
+                prov = _get_provider(ii)
+                if not prov:
+                    continue
+
+                up = prov.upper()
+                if up.startswith("TOTAL") or up.startswith("PROMEDIO") or up.startswith("PROVEEDOR"):
+                    continue
+
+                for numw in sorted(row["nums"], key=lambda t: t["x0"]):
+                    idx = int(np.argmin([abs(numw["x0"] - cx) for cx in code_cols]))
+                    if idx not in colcodes:
+                        continue
+
+                    if abs(numw["x0"] - code_cols[idx]) > 35:
+                        continue
+
+                    item, alt, rawtxt = colcodes[idx]
+                    pu = _parse_number_cell(numw["text"])
+                    if pu is None:
+                        continue
+
+                    registros.append({
+                        "PROVEEDOR": prov.strip(),
+                        "ITEM": int(item),
+                        "Alt": int(alt),
+                        "PU": float(pu),
+                        "ItemCode": rawtxt or f"{item}-0-Alt.{alt}",
+                    })
 
     cols = ["PROVEEDOR", "ITEM", "Alt", "PU", "ItemCode"]
-    if not regs:
-        return pd.DataFrame(columns=cols)
-
-    df = pd.DataFrame(regs, columns=cols)
-
-    # limpiar / deduplicar
-    df["PROVEEDOR"] = df["PROVEEDOR"].astype(str).map(lambda x: _normalize_spaces(x) or x).str.strip()
-    df["ITEM"] = pd.to_numeric(df["ITEM"], errors="coerce").astype("Int64")
-    df["Alt"] = pd.to_numeric(df["Alt"], errors="coerce").astype("Int64")
-    df["PU"] = pd.to_numeric(df["PU"], errors="coerce")
-
-    df = df.dropna(subset=["PROVEEDOR", "ITEM", "Alt", "PU"]).copy()
-    df["ITEM"] = df["ITEM"].astype(int)
-    df["Alt"] = df["Alt"].astype(int)
-
-    df = df.drop_duplicates(subset=["PROVEEDOR", "ITEM", "Alt", "PU"], keep="first").reset_index(drop=True)
-    return df
+    return pd.DataFrame(registros, columns=cols) if registros else pd.DataFrame(columns=cols)
 
 
 # =======================
@@ -962,41 +971,36 @@ def _build_standard_from_master(master_df: pd.DataFrame) -> pd.DataFrame:
 # =======================
 def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
     """
-    Firma pensada para el pipeline.
-    Ahora soporta:
-      - ZIP con PDFs
-      - PDF suelto (busca el compañero en el mismo dir)
-      - directorio con PDFs
+    Firma pensada para el pipeline: recibe path del archivo subido.
+    Espera ZIP con PDFs adentro (o PDF/carpeta si viene desde UI).
+    Devuelve dict con df (estándar) + summary.
     """
     input_path = Path(input_path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pdf_paths, extract_dir = _collect_pdfs(input_path, out_dir)
+    # 1) Extraer / recolectar PDFs
+    pdf_paths, _ = _collect_pdfs(input_path, out_dir)
     if not pdf_paths:
-        raise ValueError("La Pampa: no se encontraron PDFs para procesar.")
+        raise ValueError("La Pampa: no se encontraron PDFs.")
 
     # 2) Clasificar PDFs
     comparativas = [str(p) for p in pdf_paths if _looks_like_comparativa_pdf(str(p))]
     pliegos = [str(p) for p in pdf_paths if _looks_like_pliego_pdf(str(p))]
 
-    if not comparativas and not pliegos:
-        raise ValueError("La Pampa: no se detectaron PDFs de COMPARATIVA ni de PLIEGO.")
+    if not comparativas:
+        raise ValueError("La Pampa: no se detectaron PDFs de COMPARATIVA.")
+    if not pliegos:
+        raise ValueError("La Pampa: no se detectaron PDFs de PLIEGO.")
 
-    # 3) Pairing
+    # 3) Procesar parejas
     master_rows: List[pd.DataFrame] = []
     procesados = 0
     omitidos = 0
-    forced_pairs = 0
-    omitidos_sin_pliego = 0
-    omitidos_sin_tag = 0
-    omitidos_comp_vacia = 0
-    omitidos_pliego_vacio = 0
 
-    # Caso clave para tu interfaz: 1 comparativa + 1 pliego -> pair directo
+    # Caso UI típico: 1 comparativa + 1 pliego => pair directo
     if len(comparativas) == 1 and len(pliegos) == 1:
         pairs = [(comparativas[0], pliegos[0], "PAIR_UNICO")]
-        forced_pairs = 1
     else:
         pairs = []
         for comp in sorted(comparativas):
@@ -1004,50 +1008,54 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
             tag_name = _find_tag_in_filename(comp) or _tag_expediente(expediente)
             if not tag_name or tag_name == "SIN_TAG":
                 omitidos += 1
-                omitidos_sin_tag += 1
                 continue
             pliego_file = _pair_pliego_for_tag(tag_name, pliegos)
             if not pliego_file:
                 omitidos += 1
-                omitidos_sin_pliego += 1
                 continue
             pairs.append((comp, pliego_file, tag_name))
 
     if not pairs:
-        raise ValueError("La Pampa: no se pudo armar ninguna pareja comparativa+pliego.")
+        raise ValueError("La Pampa: no hubo parejas válidas comparativa+pliego.")
 
     for comp, pliego_file, tag_name in pairs:
         expediente = _extract_expediente_from_pdf(comp)
 
         df_pl = leer_pliego_pdf(pliego_file)
-        if df_pl.empty:
-            omitidos += 1
-            omitidos_pliego_vacio += 1
-            continue
+        if df_pl.empty or df_pl["ITEM"].nunique() < 20:
+            raise RuntimeError(f"La Pampa: el pliego se leyó vacío o incompleto: {os.path.basename(pliego_file)}")
 
         df_comp = leer_comparativa_pdf(comp)
         if df_comp.empty:
-            omitidos += 1
-            omitidos_comp_vacia += 1
-            continue
+            raise RuntimeError(f"La Pampa: la comparativa se leyó vacía: {os.path.basename(comp)}")
 
-        # 🔒 Refuerzo de tipos para merge
+        # normalizar tipos de ITEM para que el merge no falle
         df_pl = df_pl.copy()
         df_comp = df_comp.copy()
-        df_pl["ITEM"] = pd.to_numeric(df_pl["ITEM"], errors="coerce").astype("Int64")
-        df_comp["ITEM"] = pd.to_numeric(df_comp["ITEM"], errors="coerce").astype("Int64")
 
+        df_pl["ITEM"] = pd.to_numeric(df_pl["ITEM"], errors="coerce")
+        df_comp["ITEM"] = pd.to_numeric(df_comp["ITEM"], errors="coerce")
         df_pl = df_pl.dropna(subset=["ITEM"]).copy()
         df_comp = df_comp.dropna(subset=["ITEM"]).copy()
-
         df_pl["ITEM"] = df_pl["ITEM"].astype(int)
         df_comp["ITEM"] = df_comp["ITEM"].astype(int)
 
+        # Merge
         df = df_comp.merge(
             df_pl[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]],
             on="ITEM",
             how="left",
         )
+
+        # 🔥 Guardia anti-“normalized incompleto”
+        miss_desc = df["DESCRIPCION"].isna().mean() if "DESCRIPCION" in df.columns else 1.0
+        miss_qty = df["CANTIDAD"].isna().mean() if "CANTIDAD" in df.columns else 1.0
+        if (miss_desc > 0.50) or (miss_qty > 0.50):
+            raise RuntimeError(
+                "La Pampa: merge comparativa+pliego quedó incompleto "
+                f"(missing DESCRIPCION={miss_desc:.0%}, missing CANTIDAD={miss_qty:.0%}). "
+                "Esto indica que el pliego no se está parseando bien o no corresponde a la comparativa."
+            )
 
         df["EXPEDIENTE"] = expediente
         df["Tag"] = tag_name
@@ -1056,14 +1064,11 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
 
         df["TOTAL"] = df.apply(
             lambda r: (r["PU"] * r["CANTIDAD"]) if pd.notna(r.get("PU")) and pd.notna(r.get("CANTIDAD")) else None,
-            axis=1,
+            axis=1
         )
 
-        if not df.empty:
-            ranked = df.groupby(["ITEM", "Alt"])["PU"].rank(method="dense", ascending=True)
-            df["Posicion"] = ranked.mask(df["PU"].isna()).astype("Int64")
-        else:
-            df["Posicion"] = pd.Series(dtype="Int64")
+        ranked = df.groupby(["ITEM", "Alt"])["PU"].rank(method="dense", ascending=True)
+        df["Posicion"] = ranked.mask(df["PU"].isna()).astype("Int64")
 
         cols = [
             "Tag", "EXPEDIENTE",
@@ -1074,7 +1079,6 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
         for c in cols:
             if c not in df.columns:
                 df[c] = None
-
         df = df[cols].sort_values(["Tag", "ITEM", "Alt", "Posicion", "PROVEEDOR"], na_position="last").reset_index(drop=True)
 
         master_rows.append(df)
@@ -1088,20 +1092,22 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
     # 4) Convertir a estándar
     std_df = _build_standard_from_master(master_df)
 
-    # 5) Guardar extras
+    # 5) Guardar outputs (incluye normalized.xlsx)
+    master_xlsx = out_dir / "la_pampa_master.xlsx"
+    standar_xlsx = out_dir / "la_pampa_estandar.xlsx"
+    normalized_xlsx = out_dir / "normalized.xlsx"
+
     try:
-        master_xlsx = out_dir / "la_pampa_master.xlsx"
-        standar_xlsx = out_dir / "la_pampa_estandar.xlsx"
         with pd.ExcelWriter(master_xlsx, engine="openpyxl") as xw:
             master_df.to_excel(xw, sheet_name="Master", index=False)
         with pd.ExcelWriter(standar_xlsx, engine="openpyxl") as xw:
             std_df.to_excel(xw, sheet_name="Estandar", index=False)
-    except Exception:
-        pass
-
-    # Debug útil: cuántas filas quedaron sin datos del pliego
-    miss_pliego = int(master_df["DESCRIPCION"].isna().sum()) if "DESCRIPCION" in master_df.columns else int(len(master_df))
-    miss_cant = int(master_df["CANTIDAD"].isna().sum()) if "CANTIDAD" in master_df.columns else int(len(master_df))
+        with pd.ExcelWriter(normalized_xlsx, engine="openpyxl") as xw:
+            std_df.to_excel(xw, sheet_name="Normalized", index=False)
+    except Exception as e:
+        raise RuntimeError(
+            f"La Pampa: no se pudo escribir Excel en out_dir={out_dir}. Error: {e}\n{traceback.format_exc()}"
+        ) from e
 
     summary = {
         "platform": "LA_PAMPA",
@@ -1110,15 +1116,8 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
         "pliegos": len(pliegos),
         "pairs_processed": procesados,
         "pairs_skipped": omitidos,
-        "forced_pairs": forced_pairs,
-        "skipped_no_tag": omitidos_sin_tag,
-        "skipped_no_pliego_for_tag": omitidos_sin_pliego,
-        "skipped_pliego_empty": omitidos_pliego_vacio,
-        "skipped_comparativa_empty": omitidos_comp_vacia,
         "rows_standard": int(len(std_df)),
         "rows_master": int(len(master_df)),
-        "rows_missing_pliego_desc": miss_pliego,
-        "rows_missing_pliego_qty": miss_cant,
     }
 
     return {"df": std_df, "summary": summary}
