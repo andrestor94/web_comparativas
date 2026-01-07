@@ -2757,29 +2757,21 @@ def api_oportunidades_dimensiones_filter(
         
         # --- LOGICA DE DECISIONES DE USUARIO ---
         if decisions:
-            # Funcion helper para rowKey
-            def make_key(row):
-                # Usamos get con fallback seguro
-                def g(k): return row.get(k, "")
-                
-                n = str(g('Número') or g('N° Proceso') or g('Nro Proceso') or g('Proceso') or "").strip()
-                
-                # Apertura puede venir en varias columnas
-                a_val = (
-                    g('Apertura') 
-                    or g('Fecha Límite') 
-                    or g('Fecha de Cierre') 
-                    or g('Fecha de Apertura')
-                    or g('Fecha') 
-                    or ""
-                )
-                a = str(a_val).strip()
-                return f"{n} | {a}"
-
-            # Aplicamos la clave a todo el DF
-            df_all['__row_key'] = df_all.apply(make_key, axis=1)
+            # 1. Identificar columna Número
+            col_num = _opp_pick(df_all, ["Número", "N° Proceso", "Nro Proceso", "Proceso"])
+            # 2. Identificar columna Apertura
+            col_ap = _opp_pick(df_all, [
+                "Apertura", "Fecha Límite", "Fecha de Cierre", 
+                "Fecha de Apertura", "Fecha"
+            ])
             
-            # Mapeamos la decision
+            # Vectorized key generation (much faster)
+            s_num = df_all[col_num].astype(str).str.strip() if col_num else pd.Series([""] * len(df_all), index=df_all.index)
+            s_ap = df_all[col_ap].astype(str).str.strip() if col_ap else pd.Series([""] * len(df_all), index=df_all.index)
+            
+            df_all['__row_key'] = s_num + " | " + s_ap
+            
+            # Map decisions
             df_all['__user_decision'] = df_all['__row_key'].map(decisions).fillna('sin-marcar')
         else:
             df_all['__user_decision'] = 'sin-marcar'

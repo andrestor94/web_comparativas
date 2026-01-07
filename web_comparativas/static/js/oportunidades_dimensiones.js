@@ -1491,8 +1491,14 @@
 
     // Torta estado
     if (ctxEstadoPie) {
-      const labels = F.dimEstado.map((e) => e.estado || "");
+      const labels = F.dimEstado.map((e) => e.label || "");
       const data = F.dimEstado.map((e) => e.count || 0);
+
+      const bgColors = labels.map(l => {
+        const u = l.toUpperCase();
+        if (u.includes("EMERGENCIA")) return COLORS.emergency;
+        return COLORS.regular;
+      });
 
       charts.estadoPie = createOrUpdatePie(
         charts.estadoPie,
@@ -1500,6 +1506,7 @@
         labels,
         data,
         {
+          backgroundColor: bgColors,
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { position: "bottom" } },
