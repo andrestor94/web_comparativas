@@ -2771,6 +2771,13 @@ def api_oportunidades_dimensiones_filter(
             
             df_all['__row_key'] = s_num + " | " + s_ap
             
+            # DEBUG LOGGING
+            print(f"--- DEBUG KEYS ---")
+            print(f"Decisions received (sample): {list(decisions.keys())[:5]}")
+            print(f"Generated DF keys (sample): {df_all['__row_key'].head(5).tolist()}")
+            if not df_all['__row_key'].isin(decisions.keys()).any() and decisions:
+                print("WARNING: No overlap found between DF keys and User Decisions!")
+
             # Map decisions
             df_all['__user_decision'] = df_all['__row_key'].map(decisions).fillna('sin-marcar')
         else:
