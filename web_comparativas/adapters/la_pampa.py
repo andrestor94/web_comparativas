@@ -371,7 +371,7 @@ def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, floa
 
 
 def _build_cuts_from_anchors(x_item: float, x_cgo: float, x_qty: float, x_unit: float, x_desc: float) -> List[float]:
-    return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0
+    return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0]
 
 
 def _assign_band(x: float, cuts: List[float]) -> int:
