@@ -476,7 +476,16 @@
       });
 
       if (!res.ok) {
-        console.error("[Dimensiones] Error HTTP (filtrado)", res.status);
+        const errText = await res.text();
+        console.error("[Dimensiones] Error HTTP (filtrado)", res.status, errText);
+        try {
+          const errObj = JSON.parse(errText);
+          if (errObj && errObj.error) {
+            alert(`Error en servidor (Dimensiones):\n${errObj.error}`);
+          }
+        } catch (e) {
+          // ignore JSON parse error
+        }
         return;
       }
       const data = await res.json();
