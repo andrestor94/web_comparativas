@@ -17,6 +17,48 @@
     return null;
   };
 
+  // ============================================================
+  //  PERSISTENCIA DECISIONES (localStorage) - Copied from Buscador
+  // ============================================================
+  const STORAGE_KEY =
+    "wc_opp_decisions_v1_" + (window.location && window.location.pathname ? window.location.pathname.replace("/dimensiones", "/buscador") : "default"); // Hack: share same key as buscador (assuming pathname structure) or just use fixed key if suitable.
+  // Better: Use exact same key logic as buscador.js
+  // Buscador uses: "wc_opp_decisions_v1_" + pathname.
+  // If we are at /oportunidades/dimensiones, we want to read /oportunidades/buscador decisions?
+  // User said: "en el apartado de 'Buscador' hay una columna... lo que quiero es que ese mismo filtro este en 'dimensiones'"
+  // So we must share the key. Let's assume the key "wc_opp_decisions_v1_/oportunidades/buscador" is what we want if we are in ./dimensiones
+  // Robust approach: try to match common key.
+
+  // Update: Buscador path might vary. Let's use a adaptable key or standard one. 
+  // Buscador JS: "wc_opp_decisions_v1_" + window.location.pathname
+  // If user is at /oportunidades/buscador -> key ends in .../buscador
+  // We are at /oportunidades/dimensiones. We need to replce "dimensiones" with "buscador" to access same data.
+
+  function getDecisionStorageKey() {
+    const path = window.location.pathname || "";
+    // Si estamos en /mercado-privado/dimensiones -> /mercado-privado/buscador ?? (Check routes)
+    // Routes: /oportunidades/buscador vs /oportunidades/dimensiones.
+    // Replacement seems safe.
+    const targetPath = path.replace("dimensiones", "buscador");
+    return "wc_opp_decisions_v1_" + targetPath;
+  }
+
+  function loadDecisions() {
+    try {
+      const key = getDecisionStorageKey();
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (e) {
+      // ignorar
+    }
+    return {};
+  }
+
+  let decisionMap = loadDecisions();
+
+
   // Debounce helper
   function debounce(func, wait) {
     let timeout;
@@ -137,6 +179,7 @@
   // Chips
   const swPAMI = document.getElementById("swPAMI");
   const swEstado = document.getElementById("swEstado");
+  const swEvaluacion = document.getElementById("swEvaluacion"); // NEW
 
   // Chart canvases
   function getCtx(canvasId, containerId) {
@@ -242,7 +285,9 @@
   // ------------------------------------------------------------------
   // Estado global
   // ------------------------------------------------------------------
-  const API_BASE_URL = "/api/oportunidades/dimensiones";
+  // CHANGE: We now use a POST endpoint for filtering
+  const API_FILTER_URL = "/api/oportunidades/dimensiones/filter";
+  const API_BASE_URL = "/api/oportunidades/dimensiones"; // Keep for initial domain fetch (GET) if needed
   const GEOJSON_PROVINCIAS_URL = "/static/data/provincias_argentina.geojson";
 
   let RAW = null; // datos filtrados actuales
@@ -301,6 +346,9 @@
   let provMap = null;
   let provGeoLayer = null;
   let PROV_GEOJSON = null;
+
+  // New Global Filter for Evaluation
+  let FILTER_EVALUATION = "todos"; // todos | aceptado | rechazado | sin-marcar
 
   // ------------------------------------------------------------------
   // Selects de Plataforma / Cuenta / Repartición
@@ -386,18 +434,47 @@
     if (FILTER_TYPE) params.set("process_type", FILTER_TYPE);
     if (FILTER_PROV) params.set("province", FILTER_PROV);
 
-    return params.toString();
+    // Evaluation filter is passed in body now, but we can keep param helper if needed.
+    // We will build a body object instead.
+    return params;
+  }
+
+  // Helper to build Body object
+  function buildFilterBody() {
+    const body = {
+      decisions: decisionMap || {},
+      evaluation: getChipGroupValue(swEvaluacion),
+      q: "", // Not used in dimensions UI usually, but good to have
+      buyer: selReparticion ? selReparticion.value : "",
+      platform: selPlataforma ? selPlataforma.value : "",
+      province: FILTER_PROV,
+      date_from: dateFromEl ? dateFromEl.value : "",
+      date_to: dateToEl ? dateToEl.value : "",
+      process_type: FILTER_TYPE,
+      cuenta: selCuenta ? selCuenta.value : "",
+    };
+
+    if (uploadId) body.upload_id = uploadId;
+    return body;
   }
 
   // ------------------------------------------------------------------
-  // Fetch de datos FILTRADOS (usa date_from/date_to)
+  // Fetch de datos FILTRADOS (usa POST)
   // ------------------------------------------------------------------
   async function fetchDataFiltered() {
-    const qs = buildQueryString();
-    const url = qs ? `${API_BASE_URL}?${qs}` : API_BASE_URL;
+    // const qs = buildQueryString(); // Legacy
+    const bodyData = buildFilterBody();
 
     try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      const res = await fetch(API_FILTER_URL, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(bodyData)
+      });
+
       if (!res.ok) {
         console.error("[Dimensiones] Error HTTP (filtrado)", res.status);
         return;
@@ -795,6 +872,16 @@
       dimEstado,
       procesosCount,
     };
+  }
+
+  // ------------------------------------------------------------------
+  // Listener swEvaluacion
+  // ------------------------------------------------------------------
+  if (swEvaluacion) {
+    bindChipGroup(swEvaluacion, () => {
+      // debouncedFetch? Or direct? Direct is fine for click.
+      fetchDataFiltered();
+    });
   }
 
   // ------------------------------------------------------------------
