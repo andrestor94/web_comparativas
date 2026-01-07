@@ -1,6 +1,10 @@
 # web_comparativas/adapters/la_pampa.py
-# Adapter "La Pampa" para integrarse al pipeline classify_and_process (igual que Portales)
-# Input esperado: .zip con PDFs (comparativas + pliegos) adentro
+# Adapter "La Pampa" para integrarse al pipeline
+# Input esperado:
+#   - .zip con PDFs (comparativas + pliegos) adentro (modo original), O
+#   - .pdf suelto (comparativa o pliego): busca el PDF "compañero" en la misma carpeta, O
+#   - directorio: busca PDFs dentro
+#
 # Output: DataFrame en formato "estándar" para dashboard + archivos extra en processed/
 
 from __future__ import annotations
@@ -38,15 +42,15 @@ STANDARD_COLUMNS = [
 
 
 # =======================
-# Helpers (casi idénticos a tu script)
+# Helpers
 # =======================
 FOOTER_NOISE_RE = re.compile(
-    r'(Provincia\s+de\s+La\s+Pampa|DEPARTAMENTO\s+COMPRAS|CONTADURIA\s+GENERAL|'
-    r'Firma\s+y\s+Sello\s+del\s+Proponente|Domicilio\s+Legal)',
-    re.IGNORECASE
+    r"(Provincia\s+de\s+La\s+Pampa|DEPARTAMENTO\s+COMPRAS|CONTADURIA\s+GENERAL|"
+    r"Firma\s+y\s+Sello\s+del\s+Proponente|Domicilio\s+Legal)",
+    re.IGNORECASE,
 )
 
-NUM_EU_RE = re.compile(r'^\d{1,3}(?:\.\d{3})*(?:,\d+)?$')
+NUM_EU_RE = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
 
 _UNIT_CANON = {
     "UN": "UN", "UNI": "UN", "UNI.": "UN", "UN.": "UN", "U.": "UN", "UNIDAD": "UN",
@@ -70,7 +74,7 @@ _UNIT_CANON = {
     "L": "L", "LITRO": "L", "ML": "ML", "CC": "CC",
     "KG": "KG", "G": "G",
     "M": "M", "METRO": "M",
-    "CM": "CM", "MM": "MM"
+    "CM": "CM", "MM": "MM",
 }
 
 _UNIT_DISPLAY = {
@@ -207,7 +211,7 @@ def _split_desc_and_unit_from_text(desc_raw: Optional[str]) -> Tuple[Optional[st
 
 
 # =======================
-# Extract expediente/tag (igual idea que tu script)
+# Extract expediente/tag
 # =======================
 def _extract_expediente_from_pdf(path_pdf: str) -> str:
     try:
@@ -293,7 +297,38 @@ def _pair_pliego_for_tag(tag: str, pliego_paths: List[str]) -> Optional[str]:
 
 
 # =======================
-# Lectores PDF (copiados/adaptados de tu script)
+# Input: ZIP / PDF / DIR
+# =======================
+def _collect_pdfs(input_path: Path, out_dir: Path) -> Tuple[List[Path], Optional[Path]]:
+    """
+    Devuelve (pdf_paths, extract_dir)
+    - Si es ZIP: extrae a out_dir y devuelve PDFs desde extract_dir.
+    - Si es PDF: busca PDFs en la misma carpeta (no recursivo).
+    - Si es DIR: busca PDFs recursivo.
+    """
+    input_path = Path(input_path)
+
+    if input_path.is_dir():
+        return (list(input_path.rglob("*.pdf")), None)
+
+    if input_path.suffix.lower() == ".zip":
+        extract_dir = out_dir / f"la_pampa_extract_{input_path.stem}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(input_path, "r") as zf:
+            zf.extractall(extract_dir)
+        return (list(extract_dir.rglob("*.pdf")), extract_dir)
+
+    if input_path.suffix.lower() == ".pdf":
+        # MUY IMPORTANTE: tu interfaz suele guardar los dos PDFs en la misma carpeta temporal.
+        # Entonces los levantamos desde ahí.
+        base_dir = input_path.parent
+        return (list(base_dir.glob("*.pdf")), None)
+
+    raise ValueError("La Pampa: se espera un .zip, un .pdf o un directorio con PDFs.")
+
+
+# =======================
+# Lector PLIEGO (tu versión)
 # =======================
 def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, float, float]:
     num_pat = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
@@ -336,7 +371,7 @@ def _detect_column_anchors(words: List[dict]) -> Tuple[float, float, float, floa
 
 
 def _build_cuts_from_anchors(x_item: float, x_cgo: float, x_qty: float, x_unit: float, x_desc: float) -> List[float]:
-    return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0]
+    return [(x_item + x_cgo) / 2.0, (x_cgo + x_qty) / 2.0, (x_qty + x_unit) / 2.0, (x_unit + x_desc) / 2.0
 
 
 def _assign_band(x: float, cuts: List[float]) -> int:
@@ -412,13 +447,11 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
                 def join_text(idx: int) -> Optional[str]:
                     return _normalize_spaces(" ".join(t["text"] for t in band_words[idx]).strip()) if band_words[idx] else None
 
-                item_txt = join_text(0)
                 cgo_txt  = join_text(1)
                 qty_txt0 = join_text(2)
                 unit_from_b3, desc_prefix_b3 = _extract_unit_and_b3desc(band_words[3])
                 desc_txt_b4 = join_text(4)
 
-                # filtrar ruido
                 if cgo_txt and FOOTER_NOISE_RE.search(cgo_txt): cgo_txt = None
                 if qty_txt0 and FOOTER_NOISE_RE.search(qty_txt0): qty_txt0 = None
                 if desc_txt_b4 and FOOTER_NOISE_RE.search(desc_txt_b4): desc_txt_b4 = None
@@ -442,8 +475,6 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
                     cgo_val = None
                     if len(nums_on_line) >= 2:
                         cgo_val = nums_on_line[1]["text"]
-                    if cgo_val is not None and not (NUM_EU_RE.fullmatch(cgo_val) or re.fullmatch(r"\d{1,6}", cgo_val)):
-                        cgo_val = None
                     if cgo_val is None:
                         near_cgo = [w for w in nums_on_line if abs(w["x0"] - x_cgo) <= 20]
                         if near_cgo:
@@ -512,6 +543,7 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"])
 
+    # colapsar por ITEM (manteniendo lo mejor)
     def _modo_str(series: pd.Series) -> Optional[str]:
         s = series.dropna().astype(str).str.strip()
         s = s[s != ""]
@@ -549,12 +581,100 @@ def leer_pliego_pdf(path_pdf: str) -> pd.DataFrame:
     return out[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]]
 
 
-def leer_comparativa_pdf(path_pdf: str) -> pd.DataFrame:
-    try:
-        import pdfplumber
-    except Exception as e:
-        raise RuntimeError("Falta dependencia: instalar pdfplumber para leer comparativas PDF.") from e
+# =======================
+# Lector COMPARATIVA (reforzado POR PÁGINA)
+# =======================
+_CODE_RE = re.compile(r"(\d+)\s*[-–—]\s*\d+\s*[-–—]\s*Alt\.?\s*(\d+)", re.IGNORECASE)
+_NUM_SCAN_RE = re.compile(r"\d{1,3}(?:\.\d{3})*(?:,\d+)?")  # EU style
 
+
+def _parse_comparativa_page_table(page) -> List[Dict[str, Any]]:
+    """
+    Intenta leer una página como tabla (grilla). Si no puede, devuelve [].
+    """
+    registros: List[Dict[str, Any]] = []
+    tbl = page.extract_table()
+    if not tbl:
+        return registros
+
+    best_i = None
+    best_cnt = 0
+    for i, row in enumerate(tbl[:12]):
+        if not row:
+            continue
+        cnt = sum(1 for c in row if c and _CODE_RE.search(str(c).replace("\n", " ")))
+        if cnt > best_cnt:
+            best_cnt = cnt
+            best_i = i
+
+    if best_i is None or best_cnt < 3:
+        return registros
+
+    header = tbl[best_i]
+    code_cols: List[int] = []
+    colcodes: Dict[int, Tuple[int, int, str]] = {}
+
+    for j, cell in enumerate(header):
+        if not cell:
+            continue
+        m = _CODE_RE.search(str(cell).replace("\n", " "))
+        if m:
+            item = int(m.group(1))
+            alt = int(m.group(2))
+            canon = f"{item}-0-Alt.{alt}"
+            code_cols.append(j)
+            colcodes[j] = (item, alt, canon)
+
+    if not code_cols:
+        return registros
+
+    last_provider: Optional[str] = None
+
+    for row in tbl[best_i + 1:]:
+        if not row:
+            continue
+
+        prov_cell = row[0] if len(row) > 0 else None
+        prov = _normalize_spaces(str(prov_cell).replace("\n", " ")) if prov_cell else None
+        if prov:
+            last_provider = prov
+        prov = prov or last_provider
+        if not prov:
+            continue
+
+        up = prov.upper()
+        if up.startswith(("TOTAL", "PROMEDIO", "PROVEEDOR")):
+            continue
+
+        for j in code_cols:
+            if j >= len(row):
+                continue
+            cell = row[j]
+            if not cell:
+                continue
+            mnum = _NUM_SCAN_RE.search(str(cell).replace("\n", " "))
+            if not mnum:
+                continue
+            pu = _parse_number_cell(mnum.group(0))
+            if pu is None:
+                continue
+
+            item, alt, canon = colcodes[j]
+            registros.append({
+                "PROVEEDOR": prov.strip(),
+                "ITEM": item,
+                "Alt": alt,
+                "PU": float(pu),
+                "ItemCode": canon,
+            })
+
+    return registros
+
+
+def _parse_comparativa_page_words(words: List[dict]) -> List[Dict[str, Any]]:
+    """
+    Tu método original (coords/words) aplicado a UNA página.
+    """
     registros: List[Dict[str, Any]] = []
     num_pat = re.compile(r"^\d{1,3}(?:\.\d{3})*(?:,\d+)?$")
 
@@ -570,141 +690,177 @@ def leer_comparativa_pdf(path_pdf: str) -> pd.DataFrame:
             return (int(m2.group(1)), int(m2.group(2)))
         return (None, None)
 
+    code_words = []
+    for w in words:
+        it, al = _parse_item_alt_token_strict(w["text"])
+        if it is not None:
+            code_words.append(w)
+    if not code_words:
+        return registros
+
+    xs = sorted([w["x0"] for w in code_words])
+    cols_x = []
+    cluster = [xs[0]]
+    for x in xs[1:]:
+        if abs(x - float(np.mean(cluster))) <= 12:
+            cluster.append(x)
+        else:
+            cols_x.append(float(np.mean(cluster)))
+            cluster = [x]
+    cols_x.append(float(np.mean(cluster)))
+    code_cols = sorted(set(cols_x))
+
+    colcodes: Dict[int, Tuple[int, int, str]] = {}
+    for w in code_words:
+        idx = int(np.argmin([abs(w["x0"] - cx) for cx in code_cols]))
+        it, al = _parse_item_alt_token_strict(w["text"])
+        if it is not None and idx not in colcodes:
+            colcodes[idx] = (int(it), int(al), w["text"])
+
+    if not colcodes:
+        return registros
+
+    min_code_x = min(code_cols)
+    x_thresh = min_code_x - 12.0
+    x_left_limit = x_thresh + 25.0
+
+    y_tol = 1.8
+    def ybin(y): return round(y / y_tol) * y_tol
+
+    line_map: Dict[float, Dict[str, List[dict]]] = {}
+    for w in words:
+        y = ybin(w["top"])
+        obj = line_map.setdefault(y, {"left": [], "nums": [], "all": []})
+        obj["all"].append(w)
+
+        if w["x0"] < x_left_limit:
+            obj["left"].append(w)
+
+        if num_pat.fullmatch(w["text"]) and (w["x0"] >= (min_code_x - 5)):
+            obj["nums"].append(w)
+
+    ys = sorted(line_map.keys())
+
+    def _join_provider(ws: List[dict]) -> Optional[str]:
+        if not ws:
+            return None
+        ws_sorted = sorted(ws, key=lambda t: t["x0"])
+        has_letters = any(re.search(r"[A-Za-zÁÉÍÓÚÑ]", t["text"]) for t in ws_sorted)
+
+        keep = []
+        for t in ws_sorted:
+            tx = str(t["text"]).strip()
+            if not tx:
+                continue
+            if re.search(r"[A-Za-zÁÉÍÓÚÑ]", tx):
+                keep.append(tx)
+                continue
+            if has_letters and re.fullmatch(r"\d{1,3}", tx):
+                keep.append(tx)
+                continue
+        return _normalize_spaces(" ".join(keep))
+
+    def _get_provider(i: int) -> Optional[str]:
+        if line_map[ys[i]]["left"]:
+            p = _join_provider(line_map[ys[i]]["left"])
+            if p:
+                return p
+
+        for k in range(1, 6):
+            j = i - k
+            if j < 0:
+                break
+            if ys[i] - ys[j] > 60:
+                break
+            if line_map[ys[j]]["left"]:
+                p = _join_provider(line_map[ys[j]]["left"])
+                if p:
+                    return p
+
+        if i + 1 < len(ys) and (ys[i + 1] - ys[i] <= 24.0) and line_map[ys[i + 1]]["left"]:
+            p = _join_provider(line_map[ys[i + 1]]["left"])
+            if p:
+                return p
+        return None
+
+    for ii, y in enumerate(ys):
+        row = line_map[y]
+        if not row["nums"]:
+            continue
+
+        prov = _get_provider(ii)
+        if not prov:
+            continue
+
+        up = prov.upper()
+        if up.startswith("TOTAL") or up.startswith("PROMEDIO") or up.startswith("PROVEEDOR"):
+            continue
+
+        for numw in sorted(row["nums"], key=lambda t: t["x0"]):
+            idx = int(np.argmin([abs(numw["x0"] - cx) for cx in code_cols]))
+            if idx not in colcodes:
+                continue
+
+            if abs(numw["x0"] - code_cols[idx]) > 35:
+                continue
+
+            item, alt, rawtxt = colcodes[idx]
+            pu = _parse_number_cell(numw["text"])
+            if pu is None:
+                continue
+
+            registros.append({
+                "PROVEEDOR": prov.strip(),
+                "ITEM": int(item),
+                "Alt": int(alt),
+                "PU": float(pu),
+                "ItemCode": rawtxt or f"{item}-0-Alt.{alt}",
+            })
+
+    return registros
+
+
+def leer_comparativa_pdf(path_pdf: str) -> pd.DataFrame:
+    """
+    Refuerzo real: por cada página:
+      1) intenta tabla
+      2) si esa página no produce registros, intenta words/coords
+    Luego concatena y deduplica.
+    """
+    try:
+        import pdfplumber
+    except Exception as e:
+        raise RuntimeError("Falta dependencia: instalar pdfplumber para leer comparativas PDF.") from e
+
+    regs: List[Dict[str, Any]] = []
+
     with pdfplumber.open(path_pdf) as pdf:
         for page in pdf.pages:
-            words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
-            if not words:
-                continue
-
-            code_words = []
-            for w in words:
-                it, al = _parse_item_alt_token_strict(w["text"])
-                if it is not None:
-                    code_words.append(w)
-            if not code_words:
-                continue
-
-            xs = sorted([w["x0"] for w in code_words])
-            cols_x = []
-            cluster = [xs[0]]
-            for x in xs[1:]:
-                if abs(x - float(np.mean(cluster))) <= 12:
-                    cluster.append(x)
-                else:
-                    cols_x.append(float(np.mean(cluster)))
-                    cluster = [x]
-            cols_x.append(float(np.mean(cluster)))
-            code_cols = sorted(set(cols_x))
-
-            colcodes: Dict[int, Tuple[int, int, str]] = {}
-            for w in code_words:
-                idx = int(np.argmin([abs(w["x0"] - cx) for cx in code_cols]))
-                it, al = _parse_item_alt_token_strict(w["text"])
-                if it is not None and idx not in colcodes:
-                    colcodes[idx] = (int(it), int(al), w["text"])
-
-            if not colcodes:
-                continue
-
-            min_code_x = min(code_cols)
-            x_thresh = min_code_x - 12.0
-            x_left_limit = x_thresh + 25.0
-
-            y_tol = 1.8
-            def ybin(y): return round(y / y_tol) * y_tol
-
-            line_map: Dict[float, Dict[str, List[dict]]] = {}
-            for w in words:
-                y = ybin(w["top"])
-                obj = line_map.setdefault(y, {"left": [], "nums": [], "all": []})
-                obj["all"].append(w)
-
-                if w["x0"] < x_left_limit:
-                    obj["left"].append(w)
-
-                if num_pat.fullmatch(w["text"]) and (w["x0"] >= (min_code_x - 5)):
-                    obj["nums"].append(w)
-
-            ys = sorted(line_map.keys())
-
-            def _join_provider(ws: List[dict]) -> Optional[str]:
-                if not ws:
-                    return None
-                ws_sorted = sorted(ws, key=lambda t: t["x0"])
-                has_letters = any(re.search(r"[A-Za-zÁÉÍÓÚÑ]", t["text"]) for t in ws_sorted)
-
-                keep = []
-                for t in ws_sorted:
-                    tx = str(t["text"]).strip()
-                    if not tx:
-                        continue
-                    if re.search(r"[A-Za-zÁÉÍÓÚÑ]", tx):
-                        keep.append(tx)
-                        continue
-                    if has_letters and re.fullmatch(r"\d{1,3}", tx):
-                        keep.append(tx)
-                        continue
-                return _normalize_spaces(" ".join(keep))
-
-            def _get_provider(i: int) -> Optional[str]:
-                if line_map[ys[i]]["left"]:
-                    p = _join_provider(line_map[ys[i]]["left"])
-                    if p:
-                        return p
-
-                for k in range(1, 6):
-                    j = i - k
-                    if j < 0:
-                        break
-                    if ys[i] - ys[j] > 60:
-                        break
-                    if line_map[ys[j]]["left"]:
-                        p = _join_provider(line_map[ys[j]]["left"])
-                        if p:
-                            return p
-
-                if i + 1 < len(ys) and (ys[i + 1] - ys[i] <= 24.0) and line_map[ys[i + 1]]["left"]:
-                    p = _join_provider(line_map[ys[i + 1]]["left"])
-                    if p:
-                        return p
-                return None
-
-            for ii, y in enumerate(ys):
-                row = line_map[y]
-                if not row["nums"]:
-                    continue
-
-                prov = _get_provider(ii)
-                if not prov:
-                    continue
-
-                up = prov.upper()
-                if up.startswith("TOTAL") or up.startswith("PROMEDIO") or up.startswith("PROVEEDOR"):
-                    continue
-
-                for numw in sorted(row["nums"], key=lambda t: t["x0"]):
-                    idx = int(np.argmin([abs(numw["x0"] - cx) for cx in code_cols]))
-                    if idx not in colcodes:
-                        continue
-
-                    if abs(numw["x0"] - code_cols[idx]) > 35:
-                        continue
-
-                    item, alt, rawtxt = colcodes[idx]
-                    pu = _parse_number_cell(numw["text"])
-                    if pu is None:
-                        continue
-
-                    registros.append({
-                        "PROVEEDOR": prov.strip(),
-                        "ITEM": int(item),
-                        "Alt": int(alt),
-                        "PU": float(pu),
-                        "ItemCode": rawtxt or f"{item}-0-Alt.{alt}",
-                    })
+            page_regs = _parse_comparativa_page_table(page)
+            if not page_regs:
+                words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
+                if words:
+                    page_regs = _parse_comparativa_page_words(words)
+            regs.extend(page_regs)
 
     cols = ["PROVEEDOR", "ITEM", "Alt", "PU", "ItemCode"]
-    return pd.DataFrame(registros, columns=cols) if registros else pd.DataFrame(columns=cols)
+    if not regs:
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(regs, columns=cols)
+
+    # limpiar / deduplicar
+    df["PROVEEDOR"] = df["PROVEEDOR"].astype(str).map(lambda x: _normalize_spaces(x) or x).str.strip()
+    df["ITEM"] = pd.to_numeric(df["ITEM"], errors="coerce").astype("Int64")
+    df["Alt"] = pd.to_numeric(df["Alt"], errors="coerce").astype("Int64")
+    df["PU"] = pd.to_numeric(df["PU"], errors="coerce")
+
+    df = df.dropna(subset=["PROVEEDOR", "ITEM", "Alt", "PU"]).copy()
+    df["ITEM"] = df["ITEM"].astype(int)
+    df["Alt"] = df["Alt"].astype(int)
+
+    df = df.drop_duplicates(subset=["PROVEEDOR", "ITEM", "Alt", "PU"], keep="first").reset_index(drop=True)
+    return df
 
 
 # =======================
@@ -753,60 +909,92 @@ def _build_standard_from_master(master_df: pd.DataFrame) -> pd.DataFrame:
 # =======================
 def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
     """
-    Firma pensada para el pipeline: recibe path del archivo subido.
-    Espera ZIP con PDFs adentro.
-    Devuelve dict con df (estándar) + opcional summary.
+    Firma pensada para el pipeline.
+    Ahora soporta:
+      - ZIP con PDFs
+      - PDF suelto (busca el compañero en el mismo dir)
+      - directorio con PDFs
     """
     input_path = Path(input_path)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if input_path.suffix.lower() != ".zip":
-        raise ValueError("La Pampa: se espera un archivo .zip con PDFs (comparativas + pliegos) adentro.")
-
-    # 1) Extraer ZIP
-    extract_dir = out_dir / f"la_pampa_extract_{input_path.stem}"
-    extract_dir.mkdir(parents=True, exist_ok=True)
-
-    with zipfile.ZipFile(input_path, "r") as zf:
-        zf.extractall(extract_dir)
-
-    pdf_paths = [p for p in extract_dir.rglob("*.pdf")]
+    pdf_paths, extract_dir = _collect_pdfs(input_path, out_dir)
     if not pdf_paths:
-        raise ValueError("La Pampa: el ZIP no contiene PDFs.")
+        raise ValueError("La Pampa: no se encontraron PDFs para procesar.")
 
     # 2) Clasificar PDFs
     comparativas = [str(p) for p in pdf_paths if _looks_like_comparativa_pdf(str(p))]
     pliegos = [str(p) for p in pdf_paths if _looks_like_pliego_pdf(str(p))]
 
-    if not comparativas:
-        raise ValueError("La Pampa: no se detectaron PDFs de COMPARATIVA en el ZIP.")
-    if not pliegos:
-        raise ValueError("La Pampa: no se detectaron PDFs de PLIEGO en el ZIP.")
+    if not comparativas and not pliegos:
+        raise ValueError("La Pampa: no se detectaron PDFs de COMPARATIVA ni de PLIEGO.")
 
-    # 3) Procesar parejas por TAG
+    # 3) Pairing
     master_rows: List[pd.DataFrame] = []
     procesados = 0
     omitidos = 0
+    forced_pairs = 0
+    omitidos_sin_pliego = 0
+    omitidos_sin_tag = 0
+    omitidos_comp_vacia = 0
+    omitidos_pliego_vacio = 0
 
-    for comp in sorted(comparativas):
+    # Caso clave para tu interfaz: 1 comparativa + 1 pliego -> pair directo
+    if len(comparativas) == 1 and len(pliegos) == 1:
+        pairs = [(comparativas[0], pliegos[0], "PAIR_UNICO")]
+        forced_pairs = 1
+    else:
+        pairs = []
+        for comp in sorted(comparativas):
+            expediente = _extract_expediente_from_pdf(comp)
+            tag_name = _find_tag_in_filename(comp) or _tag_expediente(expediente)
+            if not tag_name or tag_name == "SIN_TAG":
+                omitidos += 1
+                omitidos_sin_tag += 1
+                continue
+            pliego_file = _pair_pliego_for_tag(tag_name, pliegos)
+            if not pliego_file:
+                omitidos += 1
+                omitidos_sin_pliego += 1
+                continue
+            pairs.append((comp, pliego_file, tag_name))
+
+    if not pairs:
+        raise ValueError("La Pampa: no se pudo armar ninguna pareja comparativa+pliego.")
+
+    for comp, pliego_file, tag_name in pairs:
         expediente = _extract_expediente_from_pdf(comp)
-        tag_name = _find_tag_in_filename(comp) or _tag_expediente(expediente)
-
-        if not tag_name or tag_name == "SIN_TAG":
-            omitidos += 1
-            continue
-
-        pliego_file = _pair_pliego_for_tag(tag_name, pliegos)
-        if not pliego_file:
-            omitidos += 1
-            continue
 
         df_pl = leer_pliego_pdf(pliego_file)
-        df_comp = leer_comparativa_pdf(comp)
+        if df_pl.empty:
+            omitidos += 1
+            omitidos_pliego_vacio += 1
+            continue
 
-        # Merge
-        df = df_comp.merge(df_pl[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]], on="ITEM", how="left")
+        df_comp = leer_comparativa_pdf(comp)
+        if df_comp.empty:
+            omitidos += 1
+            omitidos_comp_vacia += 1
+            continue
+
+        # 🔒 Refuerzo de tipos para merge
+        df_pl = df_pl.copy()
+        df_comp = df_comp.copy()
+        df_pl["ITEM"] = pd.to_numeric(df_pl["ITEM"], errors="coerce").astype("Int64")
+        df_comp["ITEM"] = pd.to_numeric(df_comp["ITEM"], errors="coerce").astype("Int64")
+
+        df_pl = df_pl.dropna(subset=["ITEM"]).copy()
+        df_comp = df_comp.dropna(subset=["ITEM"]).copy()
+
+        df_pl["ITEM"] = df_pl["ITEM"].astype(int)
+        df_comp["ITEM"] = df_comp["ITEM"].astype(int)
+
+        df = df_comp.merge(
+            df_pl[["ITEM", "CGO", "CANTIDAD", "DESCRIPCION", "UNIDAD"]],
+            on="ITEM",
+            how="left",
+        )
 
         df["EXPEDIENTE"] = expediente
         df["Tag"] = tag_name
@@ -815,7 +1003,7 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
 
         df["TOTAL"] = df.apply(
             lambda r: (r["PU"] * r["CANTIDAD"]) if pd.notna(r.get("PU")) and pd.notna(r.get("CANTIDAD")) else None,
-            axis=1
+            axis=1,
         )
 
         if not df.empty:
@@ -833,6 +1021,7 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
         for c in cols:
             if c not in df.columns:
                 df[c] = None
+
         df = df[cols].sort_values(["Tag", "ITEM", "Alt", "Posicion", "PROVEEDOR"], na_position="last").reset_index(drop=True)
 
         master_rows.append(df)
@@ -843,10 +1032,10 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
 
     master_df = pd.concat(master_rows, ignore_index=True)
 
-    # 4) Convertir a estándar (esto es lo que va a normalized.xlsx para dashboard)
+    # 4) Convertir a estándar
     std_df = _build_standard_from_master(master_df)
 
-    # 5) Guardar extras (opcional, útil para debugging)
+    # 5) Guardar extras
     try:
         master_xlsx = out_dir / "la_pampa_master.xlsx"
         standar_xlsx = out_dir / "la_pampa_estandar.xlsx"
@@ -857,6 +1046,10 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
     except Exception:
         pass
 
+    # Debug útil: cuántas filas quedaron sin datos del pliego
+    miss_pliego = int(master_df["DESCRIPCION"].isna().sum()) if "DESCRIPCION" in master_df.columns else int(len(master_df))
+    miss_cant = int(master_df["CANTIDAD"].isna().sum()) if "CANTIDAD" in master_df.columns else int(len(master_df))
+
     summary = {
         "platform": "LA_PAMPA",
         "files_total": len(pdf_paths),
@@ -864,7 +1057,15 @@ def normalize_la_pampa(input_path: Path, metadata: Dict[str, Any], out_dir: Path
         "pliegos": len(pliegos),
         "pairs_processed": procesados,
         "pairs_skipped": omitidos,
+        "forced_pairs": forced_pairs,
+        "skipped_no_tag": omitidos_sin_tag,
+        "skipped_no_pliego_for_tag": omitidos_sin_pliego,
+        "skipped_pliego_empty": omitidos_pliego_vacio,
+        "skipped_comparativa_empty": omitidos_comp_vacia,
         "rows_standard": int(len(std_df)),
+        "rows_master": int(len(master_df)),
+        "rows_missing_pliego_desc": miss_pliego,
+        "rows_missing_pliego_qty": miss_cant,
     }
 
     return {"df": std_df, "summary": summary}
