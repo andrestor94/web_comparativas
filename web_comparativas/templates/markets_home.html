@@ -274,6 +274,52 @@
             color: var(--sa-text-muted);
             transform: none;
         }
+
+        /* SPLASH SCREEN */
+        #splash-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 1;
+            transition: opacity 0.8s ease-out, visibility 0.8s ease-out;
+        }
+
+        #splash-logo {
+            width: 180px;
+            /* Adjust size as needed */
+            height: auto;
+            animation: pulse-logo 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-logo {
+            0% {
+                transform: scale(0.95);
+                opacity: 0.9;
+            }
+
+            50% {
+                transform: scale(1.05);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(0.95);
+                opacity: 0.9;
+            }
+        }
+
+        .splash-hidden {
+            opacity: 0 !important;
+            visibility: hidden;
+            pointer-events: none;
+        }
     </style>
 </head>
 
@@ -282,9 +328,9 @@
     <nav class="navbar navbar-custom fixed-top">
         <div class="container-fluid px-4">
             <a class="navbar-brand d-flex align-items-center gap-2" href="#">
-                <!-- Logo simplificado o icono -->
-                <i class="bi bi-activity" style="font-size: 1.5rem; color: var(--sa-azul);"></i>
-                <span>SIEM</span>
+                <!-- Logo SIEM -->
+                <img src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="Logo SIEM" style="height: 32px;">
+                <!-- <span>SIEM</span> (Optional text removal since logo has it usually, or keep if purely icon) -->
             </a>
 
             <div class="user-pill" title="{{ user.email if user else '' }}">
@@ -377,6 +423,21 @@
         </div>
     </div>
 
+    <!-- SPLASH SCREEN ELEMENT -->
+    <div id="splash-screen">
+        <img id="splash-logo" src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="Cargando SIEM..." />
+    </div>
+
+    <script>
+        // Splash logic
+        window.addEventListener('load', () => {
+            const splash = document.getElementById('splash-screen');
+            // Give it a moment to show the branding, then fade out
+            setTimeout(() => {
+                splash.classList.add('splash-hidden');
+            }, 1200); // 1.2s delay before fade
+        });
+    </script>
 </body>
 
 </html>
