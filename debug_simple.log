@@ -1,0 +1,7 @@
+[2026-01-06 13:46:35.838461] API Request for: 10884
+[2026-01-06 13:46:35.838999] Loading Clients Excel with dtype=str...
+[2026-01-06 13:46:35.839643] Using path: c:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2- ok\web_comparativas_v2- ok\web_comparativas_v2\web_comparativas\data\BASE_CLIENTES_SUIZO.xlsx Exists: True
+[2026-01-06 13:46:36.191279] Loaded DF. Shape: (1624, 12)
+[2026-01-06 13:46:36.262225] Index built. Keys sample: ['10884', '6798', '242939', '12736', '30405']
+[2026-01-06 13:46:36.262225] Clients Loaded. Count: 1624
+[2026-01-06 13:46:36.263738] Found: {'comprador': 'HOSPITAL FERREYRA', 'provincia': 'CORDOBA'}
