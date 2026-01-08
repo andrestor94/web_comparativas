@@ -2,13 +2,19 @@
 {% block title %}Ingresar – Web Comparativas{% endblock %}
 {% block content %}
 
-<div class="d-flex justify-content-center align-items-center" style="min-height: 70vh;">
+<div class="d-flex flex-column justify-content-center align-items-center" style="min-height: 80vh;">
+  <!-- Logo SIEM for Login Page -->
+  <div class="mb-4 text-center">
+    <img src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="SIEM"
+      style="height: 80px; width: auto; object-fit: contain;">
+  </div>
+
   <div class="card" style="max-width:420px; width:100%;">
     <div class="card-body">
       <h2 class="mb-4">Ingresar</h2>
 
       {% if error %}
-        <div class="alert alert-danger mb-3">{{ error }}</div>
+      <div class="alert alert-danger mb-3">{{ error }}</div>
       {% endif %}
 
       <form method="post" action="/login">
