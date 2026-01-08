@@ -241,14 +241,19 @@
     }
 
     .sidebar-logo {
-      height: 38px;
-      /* Adjust height to fit nicely */
+      height: 42px;
+      /* Slightly bigger */
       width: auto;
       object-fit: contain;
       align-self: flex-start;
       margin-bottom: 0.25rem;
       /* Subtle entry animation */
       animation: fade-in-logo 0.8s ease-out forwards;
+
+      /* Rendering fixes for pixelation */
+      image-rendering: -webkit-optimize-contrast;
+      transform: translateZ(0);
+      /* Trigger GPU */
     }
 
     .sidebar-market-label {

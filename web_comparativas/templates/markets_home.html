@@ -275,7 +275,7 @@
             transform: none;
         }
 
-        /* SPLASH SCREEN */
+        /* SPLASH SCREEN (PREMIUM) */
         #splash-screen {
             position: fixed;
             top: 0;
@@ -285,33 +285,95 @@
             background: #ffffff;
             z-index: 9999;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             opacity: 1;
-            transition: opacity 0.8s ease-out, visibility 0.8s ease-out;
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.6s ease;
+        }
+
+        #splash-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
         }
 
         #splash-logo {
-            width: 350px;
-            /* Adjust size as needed */
+            /* Bigger logo as requested */
+            width: 450px;
+            max-width: 80vw;
             height: auto;
-            animation: pulse-logo 2s infinite ease-in-out;
+
+            /* Premium Entry Animation: Blur + Fade + Scale */
+            opacity: 0;
+            filter: blur(10px);
+            transform: scale(0.95);
+            animation: logo-premium-entry 1.2s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+
+            /* Rendering optimization */
+            image-rendering: -webkit-optimize-contrast;
+            backface-visibility: hidden;
+            will-change: transform, opacity, filter;
         }
 
-        @keyframes pulse-logo {
-            0% {
-                transform: scale(0.95);
-                opacity: 0.9;
-            }
+        /* Subtle loading line below logo */
+        .splash-loader {
+            width: 60px;
+            height: 3px;
+            background: rgba(6, 64, 102, 0.1);
+            border-radius: 99px;
+            overflow: hidden;
+            position: relative;
 
-            50% {
-                transform: scale(1.05);
-                opacity: 1;
+            /* Fade in slightly later */
+            opacity: 0;
+            animation: fade-in-simple 0.8s ease-out 0.4s forwards;
+        }
+
+        .splash-loader::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 40%;
+            background: var(--sa-azul);
+            border-radius: 99px;
+            animation: loader-slide 1.5s infinite ease-in-out;
+        }
+
+        @keyframes logo-premium-entry {
+            0% {
+                opacity: 0;
+                filter: blur(10px);
+                transform: scale(0.95);
             }
 
             100% {
-                transform: scale(0.95);
-                opacity: 0.9;
+                opacity: 1;
+                filter: blur(0);
+                transform: scale(1);
+            }
+        }
+
+        @keyframes fade-in-simple {
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes loader-slide {
+            0% {
+                left: -40%;
+            }
+
+            50% {
+                left: 100%;
+            }
+
+            100% {
+                left: -40%;
             }
         }
 
@@ -425,17 +487,21 @@
 
     <!-- SPLASH SCREEN ELEMENT -->
     <div id="splash-screen">
-        <img id="splash-logo" src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="Cargando SIEM..." />
+        <div id="splash-content">
+            <img id="splash-logo" src="{{ url_for('static', path='img/logo_siem_azul.png') }}"
+                alt="SIEM - Sistema Integrado de Estimación de Mercados" />
+            <div class="splash-loader"></div>
+        </div>
     </div>
 
     <script>
         // Splash logic
         window.addEventListener('load', () => {
             const splash = document.getElementById('splash-screen');
-            // Give it a moment to show the branding, then fade out
+            // Longer duration to enjoy the premium animation (approx 2s total)
             setTimeout(() => {
                 splash.classList.add('splash-hidden');
-            }, 1200); // 1.2s delay before fade
+            }, 2200);
         });
     </script>
 </body>
