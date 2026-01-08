@@ -42,8 +42,10 @@
         .navbar-custom {
             background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
             border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-            height: 70px;
+            height: 80px;
+            /* Increased from 70px to fit bigger logo */
         }
 
         .navbar-brand span {
@@ -391,8 +393,9 @@
         <div class="container-fluid px-4">
             <a class="navbar-brand d-flex align-items-center gap-2" href="#">
                 <!-- Logo SIEM -->
-                <img src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="Logo SIEM" style="height: 32px;">
-                <!-- <span>SIEM</span> (Optional text removal since logo has it usually, or keep if purely icon) -->
+                <!-- Increased size for better visibility -->
+                <img src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="Logo SIEM"
+                    style="height: 48px; width: auto;">
             </a>
 
             <div class="user-pill" title="{{ user.email if user else '' }}">
