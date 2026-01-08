@@ -454,10 +454,8 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
 
         if touch_status:
             _set_status_by_id(upload_id, "reviewing")
-            _set_status_by_id(upload_id, "dashboard")
-            plat = str((meta_eff.get("platform") or up.platform_hint or "")).upper()
-            if plat in {"COMPRAR", "BAC", "PBAC"}:
-                _set_status_by_id(upload_id, "done")
+            # REMOVED: Auto-advance to dashboard/done
+            # The Admin must manually click "Avanzar" to go to dashboard.
         
         # --- Notificación al usuario ---
         if up.user_id:

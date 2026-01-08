@@ -4462,7 +4462,7 @@ def api_carga_avance(
         # si estamos en un estado que permite procesar, intentamos generarlo YA
         if st in ("processing", "reviewing"):
             try:
-                classify_and_process(upload_id, {})
+                classify_and_process(upload_id, {}, touch_status=True)
                 db_session.refresh(up)
                 if _needs_processing(up):
                     return JSONResponse(
@@ -4511,7 +4511,7 @@ def api_carga_avance(
     try:
         if new_status == "processing" and _needs_processing(up):
             if background_tasks is not None:
-                background_tasks.add_task(classify_and_process, up.id, {})
+                background_tasks.add_task(classify_and_process, up.id, {}, touch_status=True)
             else:
                 import threading
 
