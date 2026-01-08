@@ -1058,6 +1058,11 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
     Recibe un ZIP con (al menos) 1 Comparativa y 1 Pliego.
     Retorna {'df': standard_df, 'summary': ...}
     """
+    import sys
+    
+    print(f"--- START NORMALIZE_LA_PAMPA ---")
+    print(f"Input: {input_path}")
+    
     # 1. Unzip
     extract_dir = out_dir / f"extract_{uuid.uuid4().hex[:8]}"
     extract_dir.mkdir(parents=True, exist_ok=True)
@@ -1068,45 +1073,82 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
             
         # 2. Identify files
         all_files = [str(p) for p in extract_dir.glob("**/*") if p.is_file() and p.suffix.lower() == ".pdf"]
+        print(f"Extracted files: {all_files}")
         
         comparativas = [p for p in all_files if _looks_like_comparativa_pdf(p)]
         pliegos = [p for p in all_files if _looks_like_pliego_pdf(p)]
         
-        if not comparativas:
-            # Fallback: si solo hay 2 PDF y uno es pliego, el otro es comparativa
-            leftover = [p for p in all_files if p not in pliegos]
-            if len(all_files) == 2 and len(pliegos) == 1 and len(leftover) == 1:
-                comparativas = leftover
-            else:
-                raise ValueError("No se detectó archivo de Comparativa (PDF) en el ZIP.")
-                
-        if not pliegos:
-            # Fallback: si solo hay 2 PDF y uno es comparativa, el otro es pliego
-            leftover = [p for p in all_files if p not in comparativas]
-            if len(all_files) == 2 and len(comparativas) == 1 and len(leftover) == 1:
-                pliegos = leftover
-            else:
-                raise ValueError("No se detectó archivo de Pliego (PDF) en el ZIP.")
-
-        # 3. Process pairs (assume 1 pair mostly, but support loop logic from run_all_pipelines)
-        #    Simplify: If multiple files, try to pair by tag. If 1 vs 1, just force pair.
+        print(f"Identified Comp: {comparativas}")
+        print(f"Identified Plie: {pliegos}")
         
+        # Fallback Logic
+        if not comparativas and len(all_files) == 2:
+            # Si hay 2 y uno es pliego, el otro es comparativa
+            leftover = [p for p in all_files if p not in pliegos]
+            if len(leftover) == 1:
+                comparativas = leftover
+                print(f"Fallback: using {comparativas[0]} as Comparativa")
+
+        if not pliegos and len(all_files) == 2:
+            # Si hay 2 y uno es comparativa, el otro es pliego
+            leftover = [p for p in all_files if p not in comparativas]
+            if len(leftover) == 1:
+                pliegos = leftover
+                print(f"Fallback: using {pliegos[0]} as Pliego")
+        
+        # Force fallback if still ambiguous but exactly 2 files
+        if (not comparativas or not pliegos) and len(all_files) == 2:
+             # Assume larger/smaller or sort by name? 
+             # Let's try heuristic: "Pliego" usually has "Pliego" or "LP" but if user renamed it...
+             # We just take the one that ISN'T the other if we found one.
+             # If we found NEITHER, we are in trouble.
+             pass
+
+        if not comparativas:
+            raise ValueError("No se detectó archivo de Comparativa (PDF) en el ZIP.")
+        if not pliegos:
+            raise ValueError("No se detectó archivo de Pliego (PDF) en el ZIP.")
+
+        # 3. Process pairs
         master_rows = []
         
-        # Caso simple: 1 vs 1
+        # Caso simple: 1 vs 1 (Most common in Web App)
         if len(comparativas) == 1 and len(pliegos) == 1:
             comp_path = comparativas[0]
             pliego_path = pliegos[0]
             tag_name = "SINGLE_PAIR"
             expediente = _extract_expediente_from_pdf(comp_path)
             
-            print(f"Processing single pair: {Path(comp_path).name} + {Path(pliego_path).name}")
+            print(f"Processing SINGLE PAIR: Comp={Path(comp_path).name}, Pliego={Path(pliego_path).name}")
             
             df_pl = leer_pliego_pdf(pliego_path)
             df_comp = leer_comparativa_pdf(comp_path)
             
-            # Merge logic (copied from run_all_pipelines)
+            print(f"DF Pliego shape: {df_pl.shape}")
+            print(f"DF Comp shape: {df_comp.shape}")
+            if not df_pl.empty:
+                print(f"DF Pliego Head:\n{df_pl.head(2).to_string()}")
+            else:
+                print("WARNING: DF Pliego IS EMPTY!")
+
+            # --- MERGE ROBUSTNESS ---
+            # Ensure ITEM is int
+            if not df_comp.empty and "ITEM" in df_comp.columns:
+                 df_comp["ITEM"] = pd.to_numeric(df_comp["ITEM"], errors='coerce').fillna(0).astype(int)
+            
+            if not df_pl.empty and "ITEM" in df_pl.columns:
+                 df_pl["ITEM"] = pd.to_numeric(df_pl["ITEM"], errors='coerce').fillna(0).astype(int)
+
+            # Merge
             df = df_comp.merge(df_pl[['ITEM','CGO','CANTIDAD','DESCRIPCION','UNIDAD']], on="ITEM", how="left")
+            print(f"Merged DF shape: {df.shape}")
+            
+            # Helper to fill NaNs if merge failed (debug check)
+            if df["DESCRIPCION"].isna().all() and not df_pl.empty:
+                print("WARNING: Merge resulted in all NaNs for Pliego columns. Check ITEM matching.")
+                print(f"Comp Items: {df_comp['ITEM'].unique()[:10]}")
+                print(f"Pliego Items: {df_pl['ITEM'].unique()[:10]}")
+                
             df["EXPEDIENTE"] = expediente
             df["Tag"] = tag_name
             df["ArchivoComparativa"] = os.path.basename(comp_path)
@@ -1116,6 +1158,7 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
                 lambda r: (r["PU"] * r["CANTIDAD"]) if pd.notna(r["PU"]) and pd.notna(r["CANTIDAD"]) else None,
                 axis=1
             )
+            
             if not df.empty:
                 ranked = df.groupby(["ITEM","Alt"])['PU'].rank(method="dense", ascending=True)
                 df["Posicion"] = ranked.mask(df["PU"].isna()).astype("Int64")
@@ -1125,16 +1168,23 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
             master_rows.append(df)
             
         else:
-            # Caso complejo: varios archivos, usar lógica de pairing original
+            # Caso complejo: varios archivos
+            print(f"Processing MULTIPLE PAIRS logic.")
             for comp in sorted(comparativas):
                 exp = _extract_expediente_from_pdf(comp)
                 tag = _find_tag_in_filename(comp) or _tag_expediente(exp)
                 pliego = _pair_pliego_for_tag(tag, pliegos)
                 
                 if pliego:
+                    print(f"Matched Tag {tag}: {Path(comp).name} <-> {Path(pliego).name}")
                     df_pl = leer_pliego_pdf(pliego)
                     df_comp = leer_comparativa_pdf(comp)
                     
+                    if not df_comp.empty and "ITEM" in df_comp.columns:
+                         df_comp["ITEM"] = pd.to_numeric(df_comp["ITEM"], errors='coerce').fillna(0).astype(int)
+                    if not df_pl.empty and "ITEM" in df_pl.columns:
+                         df_pl["ITEM"] = pd.to_numeric(df_pl["ITEM"], errors='coerce').fillna(0).astype(int)
+
                     df = df_comp.merge(df_pl[['ITEM','CGO','CANTIDAD','DESCRIPCION','UNIDAD']], on="ITEM", how="left")
                     df["EXPEDIENTE"] = exp
                     df["Tag"] = tag
@@ -1152,6 +1202,8 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
                         df["Posicion"] = pd.Series(dtype="Int64")
                     
                     master_rows.append(df)
+                else:
+                    print(f"WARNING: No matching Pliego for {Path(comp).name} (Tag: {tag})")
         
         if not master_rows:
              raise ValueError("No se pudieron procesar datos (posiblemente no se encontraron pares válidos).")
@@ -1164,16 +1216,16 @@ def normalize_la_pampa(input_path: Path, metadata: dict, out_dir: Path) -> dict:
         # 5. Summary
         total_rows = len(std_df)
         total_offers = std_df["Total por renglón"].sum() if "Total por renglón" in std_df else 0.0
-        awarded = 0.0 # No logic for awarded yet
         
         summary = {
             "total_rows": total_rows,
             "total_offers": float(total_offers or 0.0),
-            "awarded": float(awarded),
+            "awarded": 0.0,
             "pct_over_awarded": 0.0,
             "renglones": int(std_df["Renglón"].nunique()) if "Renglón" in std_df else 0
         }
         
+        print(f"--- END NORMALIZE_LA_PAMPA ---\n")
         return {"df": std_df, "summary": summary}
         
     finally:
