@@ -495,20 +495,12 @@
 
     <script>
         (function () {
-            // Logic to show only once per session entry
             const splash = document.getElementById('splash-screen');
-            if (!sessionStorage.getItem('siem_splash_played')) {
-                // Not played yet, show it
-                window.addEventListener('load', () => {
-                    setTimeout(() => {
-                        splash.classList.add('splash-hidden');
-                        sessionStorage.setItem('siem_splash_played', 'true');
-                    }, 2200);
-                });
-            } else {
-                // Already played in this session, hide immediately
-                splash.style.display = 'none';
-            }
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    splash.classList.add('splash-hidden');
+                }, 2200);
+            });
         })();
     </script>
 </body>

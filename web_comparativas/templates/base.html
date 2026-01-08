@@ -46,8 +46,8 @@
       background: #ffffff;
       z-index: 99999;
       /* Even higher */
-      display: none;
-      /* Controlled by JS */
+      display: flex;
+      /* Always visible initially */
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -399,18 +399,12 @@
 
   <script>
     (function () {
-      // Logic to show only once per session entry
-      if (!sessionStorage.getItem('siem_splash_played')) {
-        const splash = document.getElementById('splash-screen');
-        splash.style.display = 'flex';
-
-        window.addEventListener('load', () => {
-          setTimeout(() => {
-            splash.classList.add('splash-hidden');
-            sessionStorage.setItem('siem_splash_played', 'true');
-          }, 2200);
-        });
-      }
+      const splash = document.getElementById('splash-screen');
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          splash.classList.add('splash-hidden');
+        }, 2200);
+      });
     })();
   </script>
 
