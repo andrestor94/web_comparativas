@@ -1,0 +1,15 @@
+STARTING DEBUG
+IMPORT ERROR: cannot import name 'UploadModel' from 'web_comparativas.models' (c:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2- ok\web_comparativas_v2- ok\web_comparativas_v2\web_comparativas\models.py)
+Traceback (most recent call last):
+  File "C:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2- ok\web_comparativas_v2- ok\web_comparativas_v2\scripts\reprocess_debug.py", line 20, in <module>
+    from web_comparativas.models import SessionLocal, UploadModel
+ImportError: cannot import name 'UploadModel' from 'web_comparativas.models' (c:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2- ok\web_comparativas_v2- ok\web_comparativas_v2\web_comparativas\models.py)
+STARTING DEBUG
+Models imported
+Services imported
+NO UPLOADS FOUND
+STARTING DEBUG
+DB Path Set: sqlite:///c:\Users\ANDRES.TORRES\Desktop\web_comparativas_v2- ok\web_comparativas_v2- ok\web_comparativas_v2\web_comparativas\app.db
+Models imported
+Services imported
+NO UPLOADS FOUND
