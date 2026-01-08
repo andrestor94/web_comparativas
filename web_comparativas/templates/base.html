@@ -230,6 +230,47 @@
     .nav .submenu a.nav-link {
       padding-left: 1.75rem;
     }
+
+    /* SIEM Sidebar Brand */
+    .sidebar-brand-container {
+      padding: 1rem 1rem;
+      border-bottom: 1px solid var(--sa-gris-borde, #e5e7eb);
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .sidebar-logo {
+      height: 38px;
+      /* Adjust height to fit nicely */
+      width: auto;
+      object-fit: contain;
+      align-self: flex-start;
+      margin-bottom: 0.25rem;
+      /* Subtle entry animation */
+      animation: fade-in-logo 0.8s ease-out forwards;
+    }
+
+    .sidebar-market-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-400);
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    @keyframes fade-in-logo {
+      from {
+        opacity: 0;
+        transform: translateX(-5px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
   </style>
   <!-- ========== /Notificaciones SA (UI) ========== -->
 
@@ -241,12 +282,16 @@
   <div class="app d-flex" style="min-height:100vh">
     <!-- Sidebar -->
     <aside class="sidebar" role="navigation" aria-label="Menú lateral">
-      {% if market_context == 'private' %}
-      <div class="brand px-3 py-3 fw-semibold border-bottom" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado
+      <div class="sidebar-brand-container">
+        <!-- Logo SIEM Azul -->
+        <img src="{{ url_for('static', path='img/logo_siem_azul.png') }}" alt="SIEM" class="sidebar-logo">
+
+        {% if market_context == 'private' %}
+        <div class="sidebar-market-label" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado</div>
+        {% else %}
+        <div class="sidebar-market-label">Mercado Público</div>
+        {% endif %}
       </div>
-      {% else %}
-      <div class="brand px-3 py-3 fw-semibold border-bottom">Mercado Público</div>
-      {% endif %}
 
       {% if user %}
       {% set r = (user.role or user.rol or '')|lower %}
@@ -565,8 +610,8 @@
       const APP_USER = {
         role: {{ ((user and(user.role or user.rol or ''))| lower)| tojson
     }},
-    display: {{ (_display_name or 'Yo')| tojson }},
-    email: {{ (user and user.email or '')| tojson }}
+    display: { { (_display_name or 'Yo')| tojson } },
+    email: { { (user and user.email or '')| tojson } }
       };
     window.APP_USER = APP_USER;
 
