@@ -648,6 +648,11 @@
       <!-- Header -->
       {% if user %}
       <header class="header d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-white">
+        <!-- Mobile Sidebar Toggle -->
+        <button class="btn btn-link text-dark p-0 me-2 d-md-none" id="sidebarToggle" aria-label="Menu">
+          <i class="bi bi-list fs-2"></i>
+        </button>
+
         <div class="title h5 m-0">{% block header_title %}Panel{% endblock %}</div>
 
         <div class="d-none d-md-flex align-items-center gap-2">
@@ -792,6 +797,42 @@
         }
       }
     });
+
+    (function () {
+      const toggle = document.getElementById('sidebarToggle');
+      const sidebar = document.querySelector('.sidebar');
+      const overlay = document.createElement('div');
+      overlay.className = 'sidebar-overlay'; // CSS will handle styling
+      document.body.appendChild(overlay);
+
+      function openSidebar() {
+        sidebar.classList.add('show');
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden'; // Prevent scrolling
+      }
+
+      function closeSidebar() {
+        sidebar.classList.remove('show');
+        overlay.classList.remove('show');
+        document.body.style.overflow = '';
+      }
+
+      if (toggle) {
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (sidebar.classList.contains('show')) closeSidebar();
+          else openSidebar();
+        });
+      }
+
+      overlay.addEventListener('click', closeSidebar);
+
+      // Close on route change (for cleaner SPA-like feel if applicable, though mostly server-side)
+      // Close on ESC
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && sidebar.classList.contains('show')) closeSidebar();
+      });
+    })();
 
     (function () {
       const badge = document.getElementById('cmMenuBadge');
