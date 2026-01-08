@@ -649,7 +649,8 @@
       {% if user %}
       <header class="header d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-white">
         <!-- Mobile Sidebar Toggle -->
-        <button class="btn btn-link text-dark p-0 me-2 d-md-none" id="sidebarToggle" aria-label="Menu">
+        <button class="btn btn-link text-dark p-0 me-2 d-md-none" id="sidebarToggle" aria-label="Menu"
+          onclick="toggleAppSidebar(event)">
           <i class="bi bi-list fs-2"></i>
         </button>
 
@@ -798,40 +799,47 @@
       }
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const toggle = document.getElementById('sidebarToggle');
+    // ====== SIDEBAR MOBILE TOGGLE (Global) ======
+    window.toggleAppSidebar = function (e) {
+      if (e) e.stopPropagation();
+
       const sidebar = document.querySelector('.sidebar');
-
-      if (!toggle || !sidebar) return;
-
-      const overlay = document.createElement('div');
-      overlay.className = 'sidebar-overlay'; // CSS will handle styling
-      document.body.appendChild(overlay);
-
-      function openSidebar() {
-        sidebar.classList.add('show');
-        overlay.classList.add('show');
-        document.body.style.overflow = 'hidden'; // Prevent scrolling
+      // Asegurarse de que existe el overlay
+      let overlay = document.querySelector('.sidebar-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', () => {
+          // Close
+          if (sidebar) sidebar.classList.remove('show');
+          overlay.classList.remove('show');
+          document.body.style.overflow = '';
+        });
       }
 
-      function closeSidebar() {
+      if (sidebar.classList.contains('show')) {
+        // Cerrar
         sidebar.classList.remove('show');
         overlay.classList.remove('show');
         document.body.style.overflow = '';
+      } else {
+        // Abrir
+        sidebar.classList.add('show');
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden';
       }
+    };
 
-      toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (sidebar.classList.contains('show')) closeSidebar();
-        else openSidebar();
-      });
-
-      overlay.addEventListener('click', closeSidebar);
-
-      // Close on ESC
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && sidebar.classList.contains('show')) closeSidebar();
-      });
+    // Close on ESC
+    document.addEventListener('keydown', (e) => {
+      const sidebar = document.querySelector('.sidebar');
+      if (e.key === 'Escape' && sidebar && sidebar.classList.contains('show')) {
+        sidebar.classList.remove('show');
+        const ov = document.querySelector('.sidebar-overlay');
+        if (ov) ov.classList.remove('show');
+        document.body.style.overflow = '';
+      }
     });
 
     (function () {
