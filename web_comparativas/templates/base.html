@@ -798,9 +798,12 @@
       }
     });
 
-    (function () {
+    document.addEventListener('DOMContentLoaded', () => {
       const toggle = document.getElementById('sidebarToggle');
       const sidebar = document.querySelector('.sidebar');
+
+      if (!toggle || !sidebar) return;
+
       const overlay = document.createElement('div');
       overlay.className = 'sidebar-overlay'; // CSS will handle styling
       document.body.appendChild(overlay);
@@ -817,22 +820,19 @@
         document.body.style.overflow = '';
       }
 
-      if (toggle) {
-        toggle.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (sidebar.classList.contains('show')) closeSidebar();
-          else openSidebar();
-        });
-      }
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (sidebar.classList.contains('show')) closeSidebar();
+        else openSidebar();
+      });
 
       overlay.addEventListener('click', closeSidebar);
 
-      // Close on route change (for cleaner SPA-like feel if applicable, though mostly server-side)
       // Close on ESC
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && sidebar.classList.contains('show')) closeSidebar();
       });
-    })();
+    });
 
     (function () {
       const badge = document.getElementById('cmMenuBadge');
