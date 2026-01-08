@@ -106,7 +106,7 @@
         }
 
         .main-container {
-            max-width: 1000px;
+            max-width: 900px;
             text-align: center;
             z-index: 1;
         }
@@ -130,16 +130,16 @@
 
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
             padding: 0 1rem;
         }
 
         .market-card {
             background: var(--card-bg);
             border: 1px solid #fff;
-            border-radius: 20px;
-            padding: 2.5rem;
+            border-radius: 16px;
+            padding: 1.75rem;
             text-align: left;
             position: relative;
             cursor: pointer;
@@ -151,7 +151,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-height: 280px;
+            min-height: 240px;
         }
 
         .market-card:hover {
@@ -178,16 +178,16 @@
         }
 
         .card-icon-wrapper {
-            width: 56px;
-            height: 56px;
-            border-radius: 14px;
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
             background: #f1f5f9;
             color: var(--sa-azul);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.75rem;
-            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            margin-bottom: 1.25rem;
             transition: all 0.3s ease;
         }
 
@@ -198,18 +198,18 @@
         }
 
         .card-heading {
-            font-size: 1.5rem;
+            font-size: 1.35rem;
             font-weight: 700;
             color: var(--sa-azul);
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.6rem;
         }
 
         .card-text {
             color: var(--sa-text-muted);
-            font-size: 0.95rem;
+            font-size: 0.88rem;
             line-height: 1.6;
             flex-grow: 1;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.25rem;
         }
 
         .card-footer {
