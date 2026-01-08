@@ -35,6 +35,110 @@
   <!-- Tema personalizado (global) + cache-busting -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=20251209-pro">
 
+  <style>
+    /* SPLASH SCREEN (PREMIUM) */
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
+      z-index: 99999;
+      /* Even higher */
+      display: none;
+      /* Controlled by JS */
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 1;
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.6s ease;
+    }
+
+    #splash-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    #splash-logo {
+      width: 450px;
+      max-width: 80vw;
+      height: auto;
+      opacity: 0;
+      filter: blur(10px);
+      transform: scale(0.95);
+      animation: logo-premium-entry 1.2s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+      image-rendering: -webkit-optimize-contrast;
+      backface-visibility: hidden;
+      will-change: transform, opacity, filter;
+    }
+
+    .splash-loader {
+      width: 60px;
+      height: 3px;
+      background: rgba(6, 64, 102, 0.1);
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+      opacity: 0;
+      animation: fade-in-simple 0.8s ease-out 0.4s forwards;
+    }
+
+    .splash-loader::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 40%;
+      background: #064066;
+      /* var(--sa-azul) */
+      border-radius: 99px;
+      animation: loader-slide 1.5s infinite ease-in-out;
+    }
+
+    @keyframes logo-premium-entry {
+      0% {
+        opacity: 0;
+        filter: blur(10px);
+        transform: scale(0.95);
+      }
+
+      100% {
+        opacity: 1;
+        filter: blur(0);
+        transform: scale(1);
+      }
+    }
+
+    @keyframes fade-in-simple {
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes loader-slide {
+      0% {
+        left: -40%;
+      }
+
+      50% {
+        left: 100%;
+      }
+
+      100% {
+        left: -40%;
+      }
+    }
+
+    .splash-hidden {
+      opacity: 0 !important;
+      visibility: hidden;
+      pointer-events: none;
+    }
+  </style>
 
   <!-- ========== Notificaciones SA (UI) ========== -->
   <style>
@@ -283,7 +387,33 @@
   {% block page_skin %}{% endblock %}
 </head>
 
-<body>
+<body class="{% block body_class %}{% endblock %}">
+  <!-- SPLASH SCREEN ELEMENT (Universal) -->
+  <div id="splash-screen">
+    <div id="splash-content">
+      <img id="splash-logo" src="{{ url_for('static', path='img/logo_siem_azul.png') }}"
+        alt="SIEM - Sistema Integrado de Estimación de Mercados" />
+      <div class="splash-loader"></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // Logic to show only once per session entry
+      if (!sessionStorage.getItem('siem_splash_played')) {
+        const splash = document.getElementById('splash-screen');
+        splash.style.display = 'flex';
+
+        window.addEventListener('load', () => {
+          setTimeout(() => {
+            splash.classList.add('splash-hidden');
+            sessionStorage.setItem('siem_splash_played', 'true');
+          }, 2200);
+        });
+      }
+    })();
+  </script>
+
   <div class="app d-flex" style="min-height:100vh">
     <!-- Sidebar -->
     <aside class="sidebar" role="navigation" aria-label="Menú lateral">
