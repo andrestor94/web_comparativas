@@ -5,6 +5,7 @@ Loads CSVs, processes metadata, calculates prices, and returns
 JSON-serializable structures for the frontend.
 """
 import os
+import gc
 import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -31,6 +32,17 @@ _CLIENTES_FILE      = FORECAST_DATA_DIR / "clientes.csv"
 # Singleton cache (lazy load)
 # ---------------------------------------------------------------------------
 _cache: Dict[str, Any] = {}
+
+
+def _downcast_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggressively reduce DataFrame memory by converting dtypes."""
+    for c in df.select_dtypes(include="object").columns:
+        df[c] = df[c].astype("category")
+    for c in df.select_dtypes(include="float64").columns:
+        df[c] = df[c].astype("float32")
+    for c in df.select_dtypes(include="int64").columns:
+        df[c] = pd.to_numeric(df[c], downcast="integer")
+    return df
 
 
 def _get_col(df: pd.DataFrame, name: str) -> Optional[str]:
@@ -96,6 +108,7 @@ def _load_master_meta() -> pd.DataFrame:
             meta = meta.sort_values(by=sort_cols, ascending=sort_asc)
             
         meta = meta.drop_duplicates(subset=[col_art], keep="first")
+        meta = _downcast_df(meta)
         _cache["df_meta"] = meta
         return meta
     except Exception as e:
@@ -364,11 +377,14 @@ def _ensure_loaded():
     logger.info("[Forecast] Loading data...")
     meta = _load_master_meta()
     pl = _build_price_lookup()
+    gc.collect()
 
     # Main forecast
     try:
-        df_raw = pd.read_csv(str(_FORECAST_FILE), sep=";", decimal=",", encoding="utf-8-sig")
+        df_raw = pd.read_csv(str(_FORECAST_FILE), sep=";", decimal=",",
+                             encoding="utf-8-sig", low_memory=False)
         df_main = _process_df(df_raw, meta)
+        del df_raw; gc.collect()
         df_main = _apply_prices(df_main, pl)
     except Exception as e:
         logger.warning("Forecast file error: %s", e)
@@ -381,14 +397,26 @@ def _ensure_loaded():
             df_main["precio"] = 1500
 
     df_val = _load_valorizado(pl)
+    gc.collect()
     plm = _build_product_lab_map()
+    gc.collect()
+
+    # --- Downcast all cached DataFrames to save memory ---
+    if not df_main.empty:
+        df_main = _downcast_df(df_main)
+    if not df_val.empty:
+        df_val = _downcast_df(df_val)
 
     _cache["df_main"] = df_main
     _cache["df_valorizado"] = df_val
     _cache["price_lookup"] = pl
     _cache["product_lab_map"] = plm
-    logger.info("[Forecast] Loaded. Main rows=%d, Val rows=%d, LabMap=%d",
-                len(df_main), len(df_val), len(plm))
+    gc.collect()
+    logger.info("[Forecast] Loaded. Main rows=%d (%.1f MB), Val rows=%d (%.1f MB)",
+                len(df_main),
+                df_main.memory_usage(deep=True).sum() / 1024 / 1024 if not df_main.empty else 0,
+                len(df_val),
+                df_val.memory_usage(deep=True).sum() / 1024 / 1024 if not df_val.empty else 0)
 
 
 def is_available() -> bool:
