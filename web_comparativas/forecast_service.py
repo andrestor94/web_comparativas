@@ -240,22 +240,28 @@ def get_chart_data(
             if df.empty:
                 return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
 
+        # Ensure numeric types
+        for col in ["y", "yhat", "li", "ls", "precio"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
         # Value mapping
         if view_money:
-            df["y_val"] = df["y"].fillna(0) * df["precio"]
-            df["yhat_val"] = df["yhat"].fillna(0) * df["precio"]
-            df["li_val"] = df["li"].fillna(0) * df["precio"]
-            df["ls_val"] = df["ls"].fillna(0) * df["precio"]
+            df["y_val"] = df["y"] * df["precio"]
+            df["yhat_val"] = df["yhat"] * df["precio"]
+            df["li_val"] = df["li"] * df["precio"]
+            df["ls_val"] = df["ls"] * df["precio"]
         else:
-            df["y_val"] = df["y"].fillna(0)
-            df["yhat_val"] = df["yhat"].fillna(0)
-            df["li_val"] = df["li"].fillna(0)
-            df["ls_val"] = df["ls"].fillna(0)
+            df["y_val"] = df["y"]
+            df["yhat_val"] = df["yhat"]
+            df["li_val"] = df["li"]
+            df["ls_val"] = df["ls"]
 
         # Aggregate by date, tipo
         grouped = df.groupby(["fecha", "tipo"])[["y_val", "yhat_val", "li_val", "ls_val"]].sum().reset_index()
 
-        df_hist = grouped[grouped["tipo"] == "hist"].sort_values("fecha")
+        # Filters using the strings requested by user (history/forecast)
+        # We also handle 'hist' as a fallback just in case
+        df_hist = grouped[grouped["tipo"].isin(["history", "hist"])].sort_values("fecha")
         df_fore = grouped[grouped["tipo"] == "forecast"].sort_values("fecha")
 
         # Format arrays for Plotly
