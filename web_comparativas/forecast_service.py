@@ -244,32 +244,42 @@ def get_chart_data(
         for col in ["y", "yhat", "li", "ls", "precio"]:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-        # Value mapping
+        # Value mapping: Usar y para hist, yhat para forecast
+        df["valor"] = df.apply(
+            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["yhat"]) or 0,
+            axis=1
+        )
+        df["valor_li"] = df.apply(
+            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["li"]) or 0,
+            axis=1
+        )
+        df["valor_ls"] = df.apply(
+            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["ls"]) or 0,
+            axis=1
+        )
+
         if view_money:
-            df["y_val"] = df["y"] * df["precio"]
-            df["yhat_val"] = df["yhat"] * df["precio"]
-            df["li_val"] = df["li"] * df["precio"]
-            df["ls_val"] = df["ls"] * df["precio"]
+            df["valor_final"] = df["valor"] * df["precio"].fillna(0)
+            df["li_final"] = df["valor_li"] * df["precio"].fillna(0)
+            df["ls_final"] = df["valor_ls"] * df["precio"].fillna(0)
         else:
-            df["y_val"] = df["y"]
-            df["yhat_val"] = df["yhat"]
-            df["li_val"] = df["li"]
-            df["ls_val"] = df["ls"]
+            df["valor_final"] = df["valor"]
+            df["li_final"] = df["valor_li"]
+            df["ls_final"] = df["valor_ls"]
 
         # Aggregate by date, tipo
-        grouped = df.groupby(["fecha", "tipo"])[["y_val", "yhat_val", "li_val", "ls_val"]].sum().reset_index()
+        grouped = df.groupby(["fecha", "tipo"])[["valor_final", "li_final", "ls_final"]].sum().reset_index()
 
         # Filters using the strings requested by user (history/forecast)
-        # We also handle 'hist' as a fallback just in case
         df_hist = grouped[grouped["tipo"].isin(["history", "hist"])].sort_values("fecha")
         df_fore = grouped[grouped["tipo"] == "forecast"].sort_values("fecha")
 
         # Format arrays for Plotly
-        history = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["y_val"]), 2)} for _, row in df_hist.iterrows()]
+        history = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["valor_final"]), 2)} for _, row in df_hist.iterrows()]
         
-        forecast = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["yhat_val"]), 2)} for _, row in df_fore.iterrows()]
-        ci_lower = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["li_val"]), 2)} for _, row in df_fore.iterrows()]
-        ci_upper = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["ls_val"]), 2)} for _, row in df_fore.iterrows()]
+        forecast = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["valor_final"]), 2)} for _, row in df_fore.iterrows()]
+        ci_lower = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["li_final"]), 2)} for _, row in df_fore.iterrows()]
+        ci_upper = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["ls_final"]), 2)} for _, row in df_fore.iterrows()]
 
         forecast_adj = []
         if growth_pct != 0 and forecast:
