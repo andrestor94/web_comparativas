@@ -192,6 +192,8 @@ def get_chart_data(start_date, end_date, profiles, negocios, subnegocios, produc
     try:
         from web_comparativas.models import SessionLocal
         from sqlalchemy import text
+        import math
+        from datetime import datetime
         db = SessionLocal()
         try:
             if db.bind.dialect.name == "postgresql":
@@ -200,75 +202,110 @@ def get_chart_data(start_date, end_date, profiles, negocios, subnegocios, produc
                 except:
                     pass
             
-            # Build WHERE conditions
-            conditions = []
+            # Base Where
+            conditions_base = []
+            conditions_val = []
             params = {}
             if start_date:
-                conditions.append("fecha >= :start")
+                conditions_base.append("fecha >= :start")
+                conditions_val.append("fecha >= :start")
                 params["start"] = start_date
             if end_date:
-                conditions.append("fecha <= :end")
+                conditions_base.append("fecha <= :end")
+                conditions_val.append("fecha <= :end")
                 params["end"] = end_date
             if profiles:
-                conditions.append("perfil = ANY(:profiles)")
+                conditions_base.append("perfil = ANY(:profiles)")
+                conditions_val.append("perfil = ANY(:profiles)")
                 params["profiles"] = profiles
             if negocios:
-                conditions.append("neg = ANY(:negocios)")
+                conditions_base.append("neg = ANY(:negocios)")
+                conditions_val.append("neg = ANY(:negocios)")
                 params["negocios"] = negocios
             if subnegocios:
-                conditions.append("subneg = ANY(:subnegocios)")
+                conditions_base.append("subneg = ANY(:subnegocios)")
+                conditions_val.append("subneg = ANY(:subnegocios)")
                 params["subnegocios"] = subnegocios
             if products:
-                conditions.append("codigo_serie = ANY(:products)")
+                conditions_base.append("codigo_serie = ANY(:products)")
+                conditions_val.append("codigo_serie = ANY(:products)") # Note: forecast_valorizado has codigo_serie
                 params["products"] = products
             
-            where = " AND ".join(conditions) if conditions else "1=1"
+            where_base = " AND ".join(conditions_base) if conditions_base else "1=1"
+            where_val = " AND ".join(conditions_val) if conditions_val else "1=1"
             
-            sql = text(f"""
+            # History Query (from forecast_base)
+            # The original DB forced EVERYTHING to money, ignoring view_money for the chart
+            # We will respect view_money, but default to money if requested.
+            sql_hist = text(f"""
                 SELECT 
                     fecha,
-                    tipo,
-                    SUM(CASE WHEN tipo IN ('hist', 'history') THEN COALESCE(y, 0) * COALESCE(precio, 0) ELSE 0 END) as hist_money,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(yhat, 0) * COALESCE(precio, 0) ELSE 0 END) as fore_money,
-                    SUM(CASE WHEN tipo IN ('hist', 'history') THEN COALESCE(y, 0) ELSE 0 END) as hist_units,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(yhat, 0) ELSE 0 END) as fore_units,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(li, 0) * COALESCE(precio, 0) ELSE 0 END) as li_money,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(ls, 0) * COALESCE(precio, 0) ELSE 0 END) as ls_money,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(li, 0) ELSE 0 END) as li_units,
-                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(ls, 0) ELSE 0 END) as ls_units
+                    SUM(COALESCE(y, 0) * COALESCE(precio, 0)) as hist_money,
+                    SUM(COALESCE(y, 0)) as hist_units
                 FROM forecast_base
-                WHERE {where}
-                GROUP BY fecha, tipo
+                WHERE tipo IN ('hist', 'history') AND ({where_base})
+                GROUP BY fecha
                 ORDER BY fecha
             """)
             
-            rows = db.execute(sql, params).fetchall()
+            # Forecast Query (from forecast_valorizado)
+            sql_fore = text(f"""
+                SELECT 
+                    fecha,
+                    SUM(COALESCE(monto_yhat, 0)) as fore_money,
+                    SUM(COALESCE(monto_li, 0)) as li_money,
+                    SUM(COALESCE(monto_ls, 0)) as ls_money,
+                    SUM(COALESCE(yhat_cliente, 0)) as fore_units,
+                    SUM(COALESCE(li_cliente, 0)) as li_units,
+                    SUM(COALESCE(ls_cliente, 0)) as ls_units
+                FROM forecast_valorizado
+                WHERE {where_val}
+                GROUP BY fecha
+                ORDER BY fecha
+            """)
+            
+            rows_hist = db.execute(sql_hist, params).fetchall()
+            rows_fore = db.execute(sql_fore, params).fetchall()
             
             history, forecast, ci_lower, ci_upper = [], [], [], []
             hist_max_date = ""
             
-            for row in rows:
-                if not row.fecha:
-                    continue
+            for row in rows_hist:
+                if not row.fecha: continue
                 x = row.fecha.strftime("%Y-%m-%d")
-                if row.tipo in ["hist", "history"]:
-                    val = row.hist_money if view_money else row.hist_units
-                    history.append({"x": x, "y": round(float(val or 0), 2)})
-                    hist_max_date = x
-                elif row.tipo == "forecast":
-                    val = row.fore_money if view_money else row.fore_units
-                    forecast.append({"x": x, "y": round(float(val or 0), 2)})
-                    li = row.li_money if view_money else row.li_units
-                    ls = row.ls_money if view_money else row.ls_units
-                    ci_lower.append({"x": x, "y": round(float(li or 0), 2)})
-                    ci_upper.append({"x": x, "y": round(float(ls or 0), 2)})
+                val = row.hist_money if view_money else row.hist_units
+                history.append({"x": x, "y": round(float(val or 0), 2)})
+                hist_max_date = x
+                
+            start_proj_dt = None
+            for row in rows_fore:
+                if not row.fecha: continue
+                
+                # We need to skip forecast dates that overlap with history to prevent double-drawing
+                if hist_max_date and row.fecha <= datetime.strptime(hist_max_date, "%Y-%m-%d"):
+                    continue
+                    
+                x = row.fecha.strftime("%Y-%m-%d")
+                if not start_proj_dt:
+                    start_proj_dt = row.fecha
+                    
+                val = row.fore_money if view_money else row.fore_units
+                forecast.append({"x": x, "y": round(float(val or 0), 2)})
+                
+                li = row.li_money if view_money else row.li_units
+                ls = row.ls_money if view_money else row.ls_units
+                ci_lower.append({"x": x, "y": round(float(li or 0), 2)})
+                ci_upper.append({"x": x, "y": round(float(ls or 0), 2)})
             
+            # Original growth adjustment logic
             forecast_adj = []
-            if growth_pct != 0 and forecast:
-                import math
-                ra = growth_pct / 100.0
-                rm = math.pow(1 + ra, 1/12.0) - 1
-                forecast_adj = [{"x": pt["x"], "y": round(pt["y"] * math.pow(1 + rm, i + 1), 2)} for i, pt in enumerate(forecast)]
+            if growth_pct != 0 and forecast and start_proj_dt:
+                for pt in forecast:
+                    pt_dt = datetime.strptime(pt["x"], "%Y-%m-%d")
+                    months_diff = ((pt_dt.year - start_proj_dt.year) * 12 + (pt_dt.month - start_proj_dt.month))
+                    quarters = (months_diff // 3) + 1
+                    factor = 1.0 + (growth_pct * quarters / 100.0)
+                    forecast_adj.append({"x": pt["x"], "y": round(pt["y"] * factor, 2)})
             
             return {
                 "history": history,
@@ -282,6 +319,8 @@ def get_chart_data(start_date, end_date, profiles, negocios, subnegocios, produc
         finally:
             db.close()
     except Exception as e:
+        import logging
+        logger = logging.getLogger("wc.forecast")
         logger.error(f"Error in get_chart_data: {e}")
         return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
 
