@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#6366F1', width: 2.5, dash: 'dash', shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: '<b>Proyección (Base)</b><br>%{x}<br>Pronóstico: $%{customdata[0]}<br>Lm. Inf: $%{customdata[1]}<br>Lm. Sup: $%{customdata[2]}<extra></extra>'
+                hovertemplate: '<b>Proyección (Base)</b><br>%{x}<br>Pronóstico: $ %{customdata[0]}<br>Lm. Inf: $ %{customdata[1]}<br>Lm. Sup: $ %{customdata[2]}<extra></extra>'
             });
         }
 
@@ -383,7 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#10B981', width: 2.5, dash: 'dot', shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: `<b>Proyección (+${pct}%)</b><br>%{x}<br>Ajustado: $%{customdata[0]}<extra></extra>`
+                hovertemplate: `<b>Proyección (+${pct}%)</b><br>%{x}<br>Ajustado: $ %{customdata[0]}<extra></extra>`
             });
         }
 
@@ -399,7 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#0F172A', width: 3, shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: '<b>Historia</b><br>%{x}<br>$%{customdata[0]}<extra></extra>'
+                hovertemplate: '<b>Historia</b><br>%{x}<br>$ %{customdata[0]}<extra></extra>'
             });
         }
 
