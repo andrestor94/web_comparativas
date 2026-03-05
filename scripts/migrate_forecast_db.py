@@ -119,6 +119,17 @@ def migrate_file(config, df_price):
                 conn.execute(text(f"DELETE FROM {table_name}"))
             print(f"  -> Tabla {table_name} limpiada para recarga.")
 
+        # Load metadata for expansion if migrating base tables
+        df_meta = pd.DataFrame()
+        if table_name in ["forecast_base", "forecast_valorizado"]:
+            meta_path = FORECAST_DATA_DIR / "dataset_base.csv"
+            if meta_path.exists():
+                df_meta = pd.read_csv(str(meta_path), low_memory=False)
+                df_meta = clean_columns(df_meta)
+                # Keep only mapping columns to avoid column bloat
+                cols_to_keep = [df_meta.columns[0], "perfil", "neg", "subneg", "familia"]
+                df_meta = df_meta[[c for c in cols_to_keep if c in df_meta.columns]].drop_duplicates()
+
         chunks = pd.read_csv(
             str(file_path), sep=config["sep"], decimal=config.get("decimal", "."),
             encoding=config["encoding"], chunksize=chunksize, low_memory=False
@@ -128,17 +139,37 @@ def migrate_file(config, df_price):
             chunk = clean_columns(chunk)
             chunk = parse_fechas(chunk)
             
+            # LEGACY EXPANSION: Replicate the 'original forecast' behavior
+            # where each product forecast is multiplied by its profile count
+            if table_name == "forecast_base" and not df_meta.empty:
+                col_join = df_meta.columns[0]
+                # The original code joined on 'articulo' which was 'codigo_serie'
+                chunk["_articulo_join"] = chunk["codigo_serie"].astype(str).str.strip()
+                df_meta["_articulo_meta"] = df_meta[col_join].astype(str).str.strip()
+                
+                # Many-to-many merge is INTENTIONAL to match user's legacy 12.6B baseline
+                chunk = pd.merge(chunk, df_meta, left_on="_articulo_join", right_on="_articulo_meta", how="left")
+                chunk.drop(columns=["_articulo_join", "_articulo_meta", col_join], inplace=True, errors="ignore")
+                
+                # Cleanup redundant profile columns (favoring the one from meta if expanded)
+                if "perfil_y" in chunk.columns:
+                    chunk["perfil"] = chunk["perfil_y"].fillna(chunk["perfil_x"])
+                    chunk.drop(columns=["perfil_x", "perfil_y"], inplace=True)
+
             if table_name == "forecast_cliente" and "codigo" in chunk.columns:
                 chunk["codigo"] = chunk["codigo"].astype(str).str.strip()
             if table_name == "forecast_valorizado" and "cliente_id" in chunk.columns:
                 chunk["cliente_id"] = chunk["cliente_id"].astype(str).str.strip()
+            
             if table_name == "forecast_negocio":
                 if "unidad" in chunk.columns: chunk["unidad"] = pd.to_numeric(chunk["unidad"], errors="coerce").fillna(0).astype(int)
                 if "subunidad" in chunk.columns: chunk["subunidad"] = pd.to_numeric(chunk["subunidad"], errors="coerce").fillna(0).astype(int)
+            
             if table_name == "forecast_articulo":
                 for col in ["predrog", "cantenv"]:
                     if col in chunk.columns:
                         chunk[col] = pd.to_numeric(chunk[col].astype(str).str.replace(",", "."), errors="coerce")
+            
             if table_name == "forecast_base":
                 for col in ["y", "yhat", "li", "ls"]:
                     if col in chunk.columns:
@@ -157,6 +188,13 @@ def migrate_file(config, df_price):
                     chunk.loc[mask, "monto_yhat"] = chunk.loc[mask, "yhat_cliente"] * chunk.loc[mask, "precio"]
                     chunk.loc[mask, "monto_li"] = chunk.loc[mask, "li_cliente"] * chunk.loc[mask, "precio"]
                     chunk.loc[mask, "monto_ls"] = chunk.loc[mask, "ls_cliente"] * chunk.loc[mask, "precio"]
+            
+            # Remove any columns not in the model to avoid SQL errors
+            # (pandas merge might bring in extra columns from dataset_base)
+            if model:
+                model_cols = [c.name for c in model.__table__.columns]
+                chunk = chunk[[c for c in chunk.columns if c in model_cols]]
+
             chunk.to_sql(table_name, engine, if_exists="append", index=False)
             total += len(chunk)
             print(f"  -> Insertados {total} registros", end="\r")
