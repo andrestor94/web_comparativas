@@ -24,6 +24,7 @@ def forecast_page(request: Request):
         "request": request,
         "user": user,
         "market_context": "forecast",
+        "_display_name": getattr(user, "display_name", user.email if hasattr(user, "email") else "Yo"),
     })
 
 
