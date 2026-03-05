@@ -415,7 +415,6 @@ document.addEventListener('DOMContentLoaded', () => {
             hovermode: 'x unified',
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
-            separators: '.,',
             xaxis: {
                 showgrid: false, zeroline: false,
                 showline: true, linecolor: '#E2E8F0',
@@ -426,7 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 showgrid: true, gridcolor: '#F1F5F9', gridwidth: 1,
                 zeroline: false, showline: false,
                 title: '', tickfont: { color: '#94A3B8' },
-                tickformat: ',d'
+                tickformat: '~s'
             }
         };
 
@@ -466,8 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         Plotly.newPlot(chartDiv, traces, layout, {
             responsive: true,
-            displayModeBar: false,
-            locale: 'es'
+            displayModeBar: false
         });
     }
 
