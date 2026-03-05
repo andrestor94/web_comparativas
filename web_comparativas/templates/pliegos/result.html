@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Detalle del Pliego{% endblock %}
+
+{% block content %}
+<style>
+    /* ... (Estilos previos se mantienen si se desean, agregamos/ajustamos solo cambios) ... */
+    :root {
+        --primary-bg: #f8f9fa;
+        --card-bg: #ffffff;
+        --border-color: #e9ecef;
+        --text-dark: #343a40;
+        --text-muted: #6c757d;
+        --brand-blue: var(--sa-azul);
+        --brand-light-blue: #e0f2fe;
+    }
+
+    body {
+        background-color: var(--primary-bg);
+    }
+
+    .process-hero {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+        padding: 2.5rem;
+        margin-bottom: 2rem;
+        border-top: 5px solid var(--brand-blue);
+    }
+
+    .hero-eyebrow {
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+    }
+
+    .hero-title {
+        font-family: 'Outfit', sans-serif;
+        font-weight: 800;
+        font-size: 2rem;
+        color: var(--brand-blue);
+        margin-bottom: 1.5rem;
+        line-height: 1.2;
+    }
+
+    .meta-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .meta-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: #fff;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+        border-radius: 8px;
+        font-size: 0.9rem;
+        color: var(--text-dark);
+        font-weight: 500;
+    }
+
+    .meta-pill i {
+        color: var(--brand-blue);
+    }
+
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 2rem;
+    }
+
+    @media(max-width: 992px) {
+        .detail-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .content-card {
+        background: var(--card-bg);
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+        border: 1px solid var(--border-color);
+        margin-bottom: 2rem;
+        overflow: hidden;
+    }
+
+    .card-header-custom {
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #fdfdfd;
+    }
+
+    .section-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text-dark);
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .info-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .info-list-item {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .info-list-item:last-child {
+        border-bottom: none;
+    }
+
+    .info-item-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+        letter-spacing: 0.05em;
+    }
+
+    .info-item-value {
+        font-size: 0.95rem;
+        font-weight: 500;
+        color: var(--text-dark);
+        word-break: break-word;
+    }
+
+    .req-item {
+        display: flex;
+        gap: 1rem;
+        padding: 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+        align-items: flex-start;
+    }
+
+    .req-badge {
+        background: var(--brand-light-blue);
+        color: var(--brand-blue);
+        font-weight: 700;
+        padding: 0.3rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* Table override */
+    .table-custom {
+        width: 100%;
+        font-size: 0.9rem;
+    }
+
+    .table-custom thead th {
+        background: #f8f9fa;
+        padding: 1rem;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        font-weight: 700;
+        color: var(--text-muted);
+        border-bottom: 2px solid #e9ecef;
+    }
+
+    .table-custom tbody td {
+        padding: 1rem;
+        border-bottom: 1px solid #e9ecef;
+        vertical-align: middle;
+    }
+</style>
+
+<div class="mb-3 d-flex justify-content-between align-items-center">
+    <a href="/mercado-publico/pliegos" class="btn btn-sm btn-ghost text-muted fw-bold">
+        <i class="bi bi-arrow-left me-1"></i> VOLVER A CARGAR
+    </a>
+    <div class="d-flex gap-2">
+        <span class="badge bg-white text-muted border py-2 px-3 fw-normal">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i> {{ filename }}
+        </span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+            <i class="bi bi-printer"></i>
+        </button>
+    </div>
+</div>
+
+<!-- INFO HERO -->
+<div class="process-hero">
+    <div class="hero-eyebrow">
+        {{ info.get('Tipo de contratación', 'Licitación Pública') }}
+    </div>
+    <div class="hero-title">
+        {{ info.get('Nombre del proceso de compra') or info.get('Carátula') or 'Información del Proceso' }}
+    </div>
+
+    <div class="meta-pills">
+        {% set show_in_hero = ['Número del proceso de compra', 'Expediente', 'Etapa', 'Monto total estimado',
+        'Modalidad', 'Unidad Operativa de Adquisiciones'] %}
+
+        {% for k in show_in_hero %}
+        {% if info.get(k) %}
+        <div class="meta-pill">
+            <span class="text-muted small text-uppercase me-1" style="font-size:0.7em;">{{ k }}:</span>
+            <strong>{{ info.get(k) }}</strong>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div class="detail-grid">
+    <div class="main-column">
+
+        <!-- ITEMS -->
+        <div class="content-card">
+            <div class="card-header-custom">
+                <h3 class="section-title"><i class="bi bi-basket text-primary"></i> Renglones / Items</h3>
+                <span class="badge bg-secondary rounded-pill">{{ items|length }}</span>
+            </div>
+            <div class="table-responsive">
+                {% if items %}
+                <table class="table-custom">
+                    <thead>
+                        <tr>
+                            {% for col in columns %}
+                            {# Show key columns, hide super long ones if necessary, or show all #}
+                            <th>{{ col }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr>
+                            {% for col in columns %}
+                            <td>
+                                {% if item[col] == '-' %}
+                                <span class="text-muted opacity-25">—</span>
+                                {% else %}
+                                {{ item[col] }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="p-4 text-center text-muted">No se encontraron items.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- REQUIREMENTS -->
+        {% if requirements %}
+        <div class="content-card">
+            <div class="card-header-custom">
+                <h3 class="section-title"><i class="bi bi-card-checklist text-success"></i> Requisitos</h3>
+            </div>
+            <div>
+                {% for req in requirements %}
+                <div class="req-item">
+                    {% set nro = req.get('N° de requisito') or loop.index %}
+                    <div class="req-badge">Req. {{ nro }}</div>
+                    <div class="flex-grow-1">
+                        {% set desc = req.get('Descripción (literal del pliego, sin resumir)') or req.get('Descripción')
+                        %}
+                        {% if desc %}
+                        <div class="text-dark fw-medium mb-1" style="white-space: pre-wrap;">{{ desc }}</div>
+                        {% else %}
+                        <div class="text-muted fst-italic">Sin descripción</div>
+                        {% endif %}
+
+                        <div class="mt-2 d-flex gap-3 small text-muted">
+                            {% if req.get('Archivo a adjuntar') %}
+                            <span><i class="bi bi-paperclip"></i> Adjunto: <strong>{{ req.get('Archivo a adjuntar')
+                                    }}</strong></span>
+                            {% endif %}
+                            {% if req.get('Origen') %}
+                            <span><i class="bi bi-geo-alt"></i> Origen: {{ req.get('Origen') }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <!-- SIDEBAR -->
+    <div class="sidebar-column">
+
+        <!-- FULL INFO DUMP (Ordered) -->
+        <div class="content-card">
+            <div class="card-header-custom">
+                <h3 class="section-title"><i class="bi bi-info-circle text-info"></i> Detalle Completo</h3>
+            </div>
+            <ul class="info-list">
+                {% for k, v in info.items() %}
+                {# Exclude what is already in Hero to avoid duplication, IF desired. Or just show everything here
+                formatted. #}
+                {% if k not in ['Número del proceso de compra', 'Nombre del proceso de compra', 'Tipo de contratación']
+                %}
+                <li class="info-list-item">
+                    <span class="info-item-label">{{ k }}</span>
+                    <div class="info-item-value">
+                        {% if 'fecha' in k|lower or 'hora' in k|lower %}
+                        <i class="bi bi-calendar-event me-1 text-muted small"></i> {{ v }}
+                        {% else %}
+                        {{ v }}
+                        {% endif %}
+                    </div>
+                </li>
+                {% endif %}
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

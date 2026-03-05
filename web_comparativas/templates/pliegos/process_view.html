@@ -1,0 +1,1570 @@
+{% extends "base.html" %}
+
+{% macro render_field(data, field_path="") %}
+{% if data is none %}
+<span class="text-muted">No informado</span>
+{% elif data is mapping and 'value' in data and data.value is none %}
+<span class="text-muted">No informado</span>
+{% elif data is mapping and 'value' in data and 'provenance' in data and data.provenance %}
+{% set requires_rev = data.get('requires_review', false) %}
+<span class="value-text {% if requires_rev %}text-danger fw-bold{% endif %}" data-original-value="{{ data.value }}"
+    title="{% if requires_rev %}Requiere revisión humana (Confianza < 70%){% endif %}">
+    {{ data.value }}
+    {% if requires_rev %}
+    <i class="bi bi-exclamation-triangle-fill ms-1" style="font-size: 0.8rem;"></i>
+    {% endif %}
+</span>
+<span class="auditor-mode-only ms-2 d-none">
+    {% set is_inferred_val = data.get('is_inferred', false) %}
+    {% if is_inferred_val %}
+    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25"
+        title="Dato inferido o algoritmizado"><i class="bi bi-robot"
+            style="font-size: 0.5rem; vertical-align: middle; margin-right: 2px;"></i> Inferido</span>
+    {% else %}
+    {% set conf = data.provenance.confidence|default(1.0) %}
+    {% if conf >= 0.92 %}
+    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25"
+        title="Alta Confianza"><i class="bi bi-circle-fill"
+            style="font-size: 0.5rem; vertical-align: middle; margin-right: 2px;"></i> Alta</span>
+    {% elif conf >= 0.70 %}
+    <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25"
+        title="Confianza Media"><i class="bi bi-circle-fill"
+            style="font-size: 0.5rem; vertical-align: middle; margin-right: 2px;"></i> Media</span>
+    {% else %}
+    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25"
+        title="Baja Confianza (Requiere Revisión)"><i class="bi bi-circle-fill"
+            style="font-size: 0.5rem; vertical-align: middle; margin-right: 2px;"></i> Baja</span>
+    {% endif %}
+    {% endif %}
+    {% if data.provenance.source %}
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-1 fw-bold text-primary"
+        onclick='openEvidence("{{ data.provenance.source }}", {{ data.provenance.page | tojson | safe }}, {{ data.provenance.evidence_text | default("") | tojson | safe }}, {{ data.provenance.bbox | tojson | safe }})'
+        title="Ver evidencia en documento original">
+        <i class="bi bi-search"></i> Evidencia
+    </button>
+    {% endif %}
+    <!-- Curation Edit Button -->
+    {% if field_path %}
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+        onclick="enableEditMode(this, '{{ field_path }}', {{ data.provenance.confidence | default(none) | tojson | safe }})"
+        title="Corregir este valor">
+        <i class="bi bi-pencil-square"></i>
+    </button>
+    {% endif %}
+</span>
+{% elif data is mapping and 'value' in data %}
+<span class="value-text" data-original-value="{{ data.value if data.value is not none else '' }}">{{ data.value if
+    data.value is not none else 'No informado' }}</span>
+{% if field_path %}
+<span class="auditor-mode-only ms-2 d-none">
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+        onclick="enableEditMode(this, '{{ field_path }}')" title="Corregir este valor">
+        <i class="bi bi-pencil-square"></i>
+    </button>
+</span>
+{% endif %}
+{% else %}
+<span class="value-text" data-original-value="{{ data }}">{{ data }}</span>
+{% if field_path %}
+<span class="auditor-mode-only ms-2 d-none">
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+        onclick="enableEditMode(this, '{{ field_path }}')" title="Corregir este valor">
+        <i class="bi bi-pencil-square"></i>
+    </button>
+</span>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% block content %}
+{# Import Outfit Font for Premium Feel #}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+    /* Rediseño Audaz Premium SaaS */
+    :root {
+        --bg-app: #f4f6f8;
+        --bg-surface: #ffffff;
+        --text-primary: #0f172a;
+        --text-secondary: #64748b;
+        --primary: #0f172a;
+        /* Sleek dark primary */
+        --primary-hover: #334155;
+        --border-soft: #e2e8f0;
+        --radius-xl: 20px;
+        --radius-lg: 12px;
+        --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
+        --shadow-hover: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
+        --accent-blue: #2563eb;
+        --accent-blue-light: #eff6ff;
+    }
+
+    body {
+        background-color: var(--bg-app) !important;
+        background-image: none !important;
+        font-family: 'Outfit', sans-serif !important;
+        color: var(--text-primary);
+    }
+
+    .page-container {
+        padding: 2.5rem;
+        max-width: 1600px;
+        margin: 0 auto;
+    }
+
+    /* Header Area */
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 2rem;
+        gap: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .title-group h1 {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 0.75rem;
+        letter-spacing: -0.04em;
+        line-height: 1.1;
+    }
+
+    .title-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .tag-modern {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-soft);
+        color: var(--text-secondary);
+        padding: 0.35rem 0.85rem;
+        border-radius: 99px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+
+    /* Actions Menu */
+    .action-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.75rem;
+    }
+
+    .btn-modern {
+        background: var(--bg-surface);
+        color: var(--text-primary);
+        border: 1px solid var(--border-soft);
+        padding: 0.6rem 1.25rem;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        cursor: pointer;
+    }
+
+    .btn-modern:hover {
+        background: #f8fafc;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    }
+
+    .btn-modern.primary {
+        background: var(--accent-blue);
+        color: white;
+        border-color: var(--accent-blue);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    }
+
+    .btn-modern.primary:hover {
+        background: #1d4ed8;
+        border-color: #1d4ed8;
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+    }
+
+    /* KPI Banner */
+    .kpi-banner {
+        display: flex;
+        flex-wrap: wrap;
+        margin-bottom: 2.5rem;
+        background: var(--bg-surface);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-soft);
+        box-shadow: var(--shadow-soft);
+        overflow: hidden;
+    }
+
+    .kpi-item {
+        flex: 1;
+        min-width: 200px;
+        padding: 1.5rem 2rem;
+        border-right: 1px solid var(--border-soft);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        position: relative;
+    }
+
+    .kpi-item:last-child {
+        border-right: none;
+    }
+
+    @media (max-width: 992px) {
+        .kpi-item {
+            border-bottom: 1px solid var(--border-soft);
+            border-right: none;
+        }
+
+        .kpi-item:last-child {
+            border-bottom: none;
+        }
+    }
+
+    .kpi-item::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: var(--accent-blue);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .kpi-item:hover::before {
+        opacity: 1;
+    }
+
+    .kpi-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-secondary);
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+
+    .kpi-val {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Dashboard Widgets */
+    .widget-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+        margin-bottom: 3rem;
+    }
+
+    @media (max-width: 1200px) {
+        .widget-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .widget-card {
+        background: var(--bg-surface);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-soft);
+        box-shadow: var(--shadow-soft);
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: box-shadow 0.3s ease;
+    }
+
+    .widget-card:hover {
+        box-shadow: var(--shadow-hover);
+    }
+
+    .widget-header {
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-soft);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .widget-title {
+        font-weight: 700;
+        font-size: 1.1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .widget-body {
+        padding: 1.5rem;
+        flex: 1;
+        overflow-y: auto;
+        max-height: 350px;
+    }
+
+    /* Scrollbar minimalista */
+    .widget-body::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .widget-body::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .widget-body::-webkit-scrollbar-thumb {
+        background: #e2e8f0;
+        border-radius: 10px;
+    }
+
+    .widget-body:hover::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+    }
+
+    /* Estilos Específicos de Widgets */
+    .w-danger .widget-header {
+        background: #fffcfc;
+        border-bottom-color: #fee2e2;
+    }
+
+    .w-danger .widget-title {
+        color: #dc2626;
+    }
+
+    .w-danger .widget-badge {
+        background: #fee2e2;
+        color: #dc2626;
+        border-radius: 99px;
+        padding: 2px 8px;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .w-success .widget-header {
+        background: #fbfffb;
+        border-bottom-color: #dcfce7;
+    }
+
+    .w-success .widget-title {
+        color: #16a34a;
+    }
+
+    .w-success .widget-badge {
+        background: #dcfce7;
+        color: #16a34a;
+        border-radius: 99px;
+        padding: 2px 8px;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .w-warning .widget-header {
+        background: #fffdf5;
+        border-bottom-color: #fef3c7;
+    }
+
+    .w-warning .widget-title {
+        color: #d97706;
+    }
+
+    .w-docs .widget-header {
+        background: #f8fafc;
+        border-bottom-color: var(--border-soft);
+    }
+
+    .w-docs .widget-title {
+        color: var(--text-primary);
+    }
+
+    .list-item-clean {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding-bottom: 1.25rem;
+        margin-bottom: 1.25rem;
+        border-bottom: 1px solid #f1f5f9;
+        transition: transform 0.2s ease;
+    }
+
+    .list-item-clean:hover {
+        transform: translateX(4px);
+    }
+
+    .list-item-clean:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+        margin-bottom: 0;
+    }
+
+    .alert-chip {
+        display: inline-block;
+        padding: 0.35rem 0.85rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin: 0.25rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+
+    /* Modern Tabs - Linear Style */
+    .tabs-modern {
+        display: flex;
+        gap: 2rem;
+        border-bottom: 1px solid var(--border-soft);
+        margin-bottom: 2rem;
+        overflow-x: auto;
+        padding-bottom: 0;
+    }
+
+    .tabs-modern::-webkit-scrollbar {
+        display: none;
+    }
+
+    .tabs-modern .nav-link {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.95rem;
+        padding: 0.75rem 0;
+        position: relative;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .tabs-modern .nav-link::after {
+        content: "";
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: transparent;
+        transition: background 0.2s ease;
+    }
+
+    .tabs-modern .nav-link:hover {
+        color: var(--text-primary);
+    }
+
+    .tabs-modern .nav-link:hover::after {
+        background: #cbd5e1;
+    }
+
+    .tabs-modern .nav-link.active {
+        color: var(--text-primary);
+    }
+
+    .tabs-modern .nav-link.active::after {
+        background: var(--text-primary);
+    }
+
+    .tabs-modern .badge {
+        background: #f1f5f9;
+        color: var(--text-secondary);
+        border: 1px solid var(--border-soft);
+        margin-left: 0.5rem;
+        border-radius: 99px;
+        font-weight: 700;
+        font-size: 0.7rem;
+        padding: 2px 8px;
+    }
+
+    .tabs-modern .nav-link.active .badge {
+        background: var(--text-primary);
+        color: white;
+        border-color: var(--text-primary);
+    }
+
+    /* Detail Sections override */
+    .content-section {
+        background: var(--bg-surface);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-soft);
+        padding: 2.5rem;
+        box-shadow: var(--shadow-soft);
+        margin-bottom: 2rem;
+        transition: none;
+    }
+
+    .content-section:hover {
+        box-shadow: var(--shadow-soft);
+    }
+
+    .section-title {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border-soft);
+    }
+
+    .info-row {
+        border-bottom: 1px dashed var(--border-soft) !important;
+        padding: 1.25rem 0.5rem !important;
+        background: transparent !important;
+    }
+
+    .info-row:hover {
+        background: #f8fafc !important;
+        border-radius: 8px;
+    }
+
+    .info-label {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .info-val {
+        color: var(--text-primary);
+        font-size: 1.05rem;
+    }
+
+    .table-container {
+        border: 1px solid var(--border-soft);
+        box-shadow: none;
+        border-radius: var(--radius-lg);
+    }
+
+    .table-custom th {
+        background: #f8fafc;
+        padding: 1rem 1.5rem;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+    }
+
+    .table-custom td {
+        padding: 1.25rem 1.5rem;
+        font-size: 0.95rem;
+        border-bottom: 1px solid var(--border-soft);
+    }
+
+    /* Bootstrap Tooltip Customization */
+    .tooltip-inner {
+        font-family: 'Outfit', sans-serif !important;
+        font-size: 0.85rem;
+        padding: 0.6rem 0.85rem;
+        background-color: var(--text-primary);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+        text-align: left;
+        max-width: 300px;
+    }
+</style>
+
+<div class="page-container">
+    <!-- 1. HEADER & ACTIONS -->
+    <div class="page-header">
+        <div class="title-group">
+            <h1>Proceso de compra</h1>
+
+            <div class="title-tags">
+                <div class="tag-modern" style="color: var(--text-primary); font-weight: 700; background: #f8fafc;">
+                    <i class="bi bi-hash"></i>
+                    {{ render_field(data.summary.process_number, 'summary.process_number') if
+                    data.summary.process_number else
+                    (data.basic_info.process_number or 'No informado') }}
+                </div>
+
+                {% if data.completeness_audit and data.completeness_audit.reliability_score is defined %}
+                <div class="tag-modern" style="background: #f0fdf4; border-color: #bbf7d0; color: #15803d;">
+                    <i class="bi bi-shield-check"></i> {{ data.completeness_audit.reliability_score }}% Confiabilidad
+                </div>
+                {% endif %}
+
+                {% if data.summary.uoa and data.summary.uoa.value %}
+                <div class="tag-modern"><i class="bi bi-building"></i> {{ data.summary.uoa.value }}</div>
+                {% endif %}
+
+                {% if data.basic_info.selection_procedure and data.basic_info.selection_procedure.value %}
+                <div class="tag-modern"><i class="bi bi-diagram-3"></i> {{ data.basic_info.selection_procedure.value }}
+                </div>
+                {% endif %}
+
+                {% if data.summary.estimated_total_amount and data.summary.estimated_total_amount.value %}
+                <div class="tag-modern"><i class="bi bi-currency-dollar"></i> {{
+                    data.summary.estimated_total_amount.value.currency }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="action-panel">
+            <div class="d-flex align-items-center gap-3">
+                <div class="form-check form-switch rounded px-3 py-1"
+                    style="background: var(--bg-surface); border: 1px solid var(--border-soft); display:flex; align-items:center; height: 42px;">
+                    <input class="form-check-input" type="checkbox" role="switch" id="auditorModeToggle"
+                        onchange="toggleAuditorMode(this.checked)"
+                        style="cursor: pointer; transform: scale(1.1); margin-top: 0; margin-left: -2em;">
+                    <label class="form-check-label ms-2 fw-bold" for="auditorModeToggle"
+                        style="font-size: 0.9rem; cursor: pointer; padding-top: 2px; color: #475569;">
+                        <i class="bi bi-shield-check text-primary"></i> Modo Auditor
+                    </label>
+                </div>
+                <button class="btn-modern shadow-sm"><i class="bi bi-file-earmark-code"></i> Data JSON</button>
+                <button class="btn-modern primary shadow-sm"><i class="bi bi-file-earmark-excel"></i> Exportar
+                    Excel</button>
+            </div>
+            <div class="text-secondary"
+                style="font-size: 0.75rem; font-family: monospace; letter-spacing: 0.05em; opacity: 0.7;">
+                ID_TRANSAC: {{ data.tender_id }}
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. KPI BANNER (Dashboard Style) -->
+    <div class="kpi-banner">
+        <div class="kpi-item">
+            <div class="kpi-label">Expediente</div>
+            <div class="kpi-val" data-bs-toggle="tooltip" data-bs-title="Expediente">{{ data.summary.expediente.value if
+                data.summary.expediente else '-'
+                }}</div>
+        </div>
+        <div class="kpi-item">
+            <div class="kpi-label">Monto Estimado</div>
+            <div class="kpi-val" style="color: var(--accent-blue);">
+                {% if data.summary.estimated_total_amount and data.summary.estimated_total_amount.value %}
+                $ {{ data.summary.estimated_total_amount.value.amount | peso }}
+                {% else %}
+                -
+                {% endif %}
+            </div>
+        </div>
+        <div class="kpi-item">
+            <div class="kpi-label">Etapa</div>
+            <div class="kpi-val">{{ data.summary.stage.value if data.summary.stage else '-' }}</div>
+        </div>
+        <div class="kpi-item">
+            <div class="kpi-label">Renglones</div>
+            <div class="kpi-val">{{ items | length }}</div>
+        </div>
+    </div>
+
+    <!-- 3. INTELLIGENCE WIDGETS GRID -->
+    <!-- Columna 1: Riesgos | Columna 2: Oportunidades | Columna 3: Alertas y Documentos -->
+    <div class="widget-grid">
+
+        <!-- RIESGOS WIDGET -->
+        <div class="widget-card w-danger">
+            <div class="widget-header">
+                <div class="widget-title"><i class="bi bi-shield-x"></i> Riesgos Detectados</div>
+                <div class="widget-badge">{{ data.risk_assessment.risks|length if data.risk_assessment and
+                    data.risk_assessment.risks else 0 }}</div>
+            </div>
+            <div class="widget-body">
+                {% if data.risk_assessment and data.risk_assessment.risks %}
+                {% for risk in data.risk_assessment.risks %}
+                <div class="list-item-clean">
+                    <div class="fs-5 mt-1">{{ risk.icon }}</div>
+                    <div>
+                        <div class="fw-bold" style="color: #0f172a; font-size: 0.95rem;">{{ risk.category }}
+                            <span class="badge bg-danger bg-opacity-10 text-danger ms-2" style="font-size: 0.65em;">{{
+                                risk.level }}</span>
+                        </div>
+                        <p class="mb-2 mt-1 text-secondary" style="font-size: 0.85rem; line-height: 1.4;">{{
+                            risk.description }}</p>
+                        <div class="text-muted"
+                            style="font-size: 0.8rem; font-style: italic; background: #f8fafc; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border-soft);">
+                            <i class="bi bi-lightbulb-fill text-warning me-1"></i>{{ risk.recommendation }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div
+                    class="d-flex flex-column align-items-center justify-content-center h-100 text-center text-secondary py-5">
+                    <i class="bi bi-shield-check text-success d-block mb-3"
+                        style="font-size: 2.5rem; opacity: 0.8;"></i>
+                    <span style="font-size: 0.95rem; font-weight: 500;">No se detectaron riesgos.</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- OPORTUNIDADES WIDGET -->
+        <div class="widget-card w-success">
+            <div class="widget-header">
+                <div class="widget-title"><i class="bi bi-stars"></i> Oportunidades</div>
+                <div class="widget-badge">{{ data.risk_assessment.opportunities|length if data.risk_assessment and
+                    data.risk_assessment.opportunities else 0 }}</div>
+            </div>
+            <div class="widget-body">
+                {% if data.risk_assessment and data.risk_assessment.opportunities %}
+                {% for opp in data.risk_assessment.opportunities %}
+                <div class="list-item-clean">
+                    <div class="fs-5 mt-1">{{ opp.icon }}</div>
+                    <div>
+                        <div class="fw-bold" style="color: #0f172a; font-size: 0.95rem;">{{ opp.category }}</div>
+                        <p class="mb-0 mt-1 text-secondary" style="font-size: 0.85rem; line-height: 1.4;">{{
+                            opp.description }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div
+                    class="d-flex flex-column align-items-center justify-content-center h-100 text-center text-secondary py-5">
+                    <i class="bi bi-moon-stars d-block mb-3" style="font-size: 2.5rem; opacity: 0.3;"></i>
+                    <span style="font-size: 0.95rem; font-weight: 500;">Sin oportunidades destacadas.</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- AUDITORÍA Y DOCUMENTOS WIDGET (Combinado en una columna) -->
+        <div class="d-flex flex-column gap-4" style="height: 100%;">
+
+            {% set has_omissions = data.analysis and data.analysis.completeness_audit and
+            (data.analysis.completeness_audit.missing_critical or data.analysis.completeness_audit.missing_optional or
+            data.analysis.completeness_audit.low_confidence_warnings) %}
+            {% set has_warnings = data.provenance and data.provenance.warnings %}
+
+            <!-- ALERTS WIDGET (No accordion!) -->
+            <div class="widget-card w-warning" style="flex: 1; max-height: 250px;">
+                <div class="widget-header" style="padding: 1rem 1.5rem;">
+                    <div class="widget-title" style="font-size: 1rem;"><i class="bi bi-exclamation-triangle-fill"></i>
+                        Auditoría IA</div>
+                </div>
+                <div class="widget-body" style="padding: 1.5rem;">
+                    {% if has_omissions or has_warnings %}
+                    {% if data.provenance and data.provenance.warnings %}
+                    <div class="mb-3">
+                        <span
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #dc2626; display: block; margin-bottom: 0.5rem;">Alertas
+                            de parsing</span>
+                        {% for warn in data.provenance.warnings %}
+                        <div class="text-danger mb-2" style="font-size: 0.85rem; line-height: 1.3;"><i
+                                class="bi bi-x-circle-fill me-1"></i>{{ warn }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if data.analysis and data.analysis.completeness_audit %}
+                    {% if data.analysis.completeness_audit.missing_critical %}
+                    <div class="mb-3">
+                        <span
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #dc2626; display: block; margin-bottom: 0.5rem;">Falta
+                            Info Crítica</span>
+                        <div class="d-flex flex-wrap">
+                            {% for field in data.analysis.completeness_audit.missing_critical %}
+                            <div class="alert-chip"
+                                style="background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c;">{{ field }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if data.analysis.completeness_audit.missing_optional %}
+                    <div class="mb-3">
+                        <span
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #b45309; display: block; margin-bottom: 0.5rem;">Opcionales
+                            Faltantes</span>
+                        <div class="d-flex flex-wrap">
+                            {% for field in data.analysis.completeness_audit.missing_optional %}
+                            <div class="alert-chip"
+                                style="background: #fffbeb; border: 1px solid #fde68a; color: #b45309;">{{ field }}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if data.analysis.completeness_audit.low_confidence_warnings %}
+                    <div>
+                        <span
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #475569; display: block; margin-bottom: 0.5rem;">Baja
+                            Confianza (Revisar)</span>
+                        {% for warn in data.analysis.completeness_audit.low_confidence_warnings %}
+                        <div class="text-secondary mb-2" style="font-size: 0.85rem; line-height: 1.3;"><i
+                                class="bi bi-eye-fill me-1 opacity-75"></i>{{ warn }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                    {% else %}
+                    <div class="text-center text-success py-3">
+                        <i class="bi bi-shield-check d-block mb-2" style="font-size: 2rem; opacity: 0.5;"></i>
+                        <span style="font-size: 0.9rem; font-weight: 500;">Auditoría perfecta. Sin omisiones.</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- DOCS WIDGET -->
+            <div class="widget-card w-docs" style="flex: 1; min-height: 150px;">
+                <div class="widget-header" style="padding: 1rem 1.5rem;">
+                    <div class="widget-title" style="font-size: 1rem;"><i class="bi bi-folder2-open"></i> Archivos
+                        Origen</div>
+                </div>
+                <div class="widget-body" style="padding: 1rem 1.5rem;">
+                    {% if data.documents and data.documents.source_files %}
+                    {% for doc in data.documents.source_files %}
+                    <div class="d-flex align-items-center gap-3 p-2 mb-2 rounded document-file-item" {% if doc.url %}
+                        onclick="openPdfViewer('{{ doc.url }}', '{{ doc.filename }}')"
+                        style="background: #f8fafc; border: 1px solid var(--border-soft); transition: all 0.2s ease; cursor: pointer;"
+                        {% else %} style="background: #f8fafc; border: 1px solid var(--border-soft);" {% endif %}>
+                        <div
+                            style="background: white; padding: 8px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                            <i class="bi bi-file-earmark-pdf-fill text-danger fs-5"></i>
+                        </div>
+                        <div style="overflow: hidden; flex: 1;">
+                            <div class="fw-bold text-truncate"
+                                style="font-size: 0.85rem; color: var(--text-primary); {% if doc.url %}text-decoration: underline; text-decoration-color: var(--border-soft);{% endif %}"
+                                data-bs-toggle="tooltip" data-bs-title="{{ doc.filename }}">
+                                {{ doc.filename }}
+                            </div>
+                            <div
+                                style="font-size: 0.70rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">
+                                {{ doc.doc_type }}</div>
+                        </div>
+                        {% if doc.url %}
+                        <div>
+                            <i class="bi bi-box-arrow-up-right text-secondary opacity-50 pe-2"></i>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="text-center text-secondary py-3">
+                        <i class="bi bi-file-earmark-x d-block mb-2" style="font-size: 2rem; opacity: 0.3;"></i>
+                        <span style="font-size: 0.9rem; font-weight: 500;">No hay archivos cargados.</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- TABS NAV -->
+
+
+    <!-- SPLIT LAYOUT -->
+    <div class="row" id="mainSplitter">
+        <!-- Main Content Column -->
+        <div class="col-lg-7 mb-4">
+
+            <div class="accordion accordion-flush shadow-sm"
+                style="border-radius: var(--radius-xl); overflow: hidden; border: 1px solid var(--border-soft); background: var(--bg-surface);"
+                id="pliegoAccordion">
+
+                <!-- 1. Información Básica -->
+                <div class="accordion-item border-bottom">
+                    <h2 class="accordion-header" id="headingBasic">
+                        <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapseBasic" aria-expanded="true">
+                            <i class="bi bi-info-circle text-primary me-2"></i> Información Básica
+                        </button>
+                    </h2>
+                    <div id="collapseBasic" class="accordion-collapse collapse show" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light">
+                            <div class="row">
+                                <div class="col-md-6 border-end">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Cabecera del Proceso</h6>
+                                    <div class="mb-3">
+                                        <div class="info-label">Nombre del proceso</div>
+                                        <div class="info-val">{{ render_field(data.summary.process_name,
+                                            'summary.process_name') if
+                                            data.summary.process_name else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Objeto</div>
+                                        <div class="info-val">{{ render_field(data.basic_info.object,
+                                            'basic_info.object') if
+                                            data.basic_info.object else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Procedimiento</div>
+                                        <div class="info-val">{{ render_field(data.basic_info.selection_procedure,
+                                            'basic_info.selection_procedure') if
+                                            data.basic_info.selection_procedure else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Valor del Pliego</div>
+                                        <div class="info-val">
+                                            {% if data.basic_info.pliego_value and data.basic_info.pliego_value.value %}
+                                            {{ data.basic_info.pliego_value.value.currency }} {{
+                                            data.basic_info.pliego_value.value.amount | peso }}
+                                            {% else %}
+                                            Sin costo / No informado
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 px-4">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Contacto y Apertura</h6>
+                                    <div class="mb-3">
+                                        <div class="info-label">Email de Contacto</div>
+                                        <div class="info-val">{{ render_field(data.basic_info.contact_email,
+                                            'basic_info.contact_email') if
+                                            data.basic_info.contact_email else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Lugar de apertura</div>
+                                        <div class="info-val">{{ render_field(data.basic_info.physical_address,
+                                            'basic_info.physical_address') if
+                                            data.basic_info.physical_address else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Fecha de apertura</div>
+                                        <div class="info-val fw-bold text-danger">{{
+                                            render_field(data.basic_info.submission_deadline,
+                                            'basic_info.submission_deadline') if
+                                            data.basic_info.submission_deadline else 'No informado' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Mantenimiento de Oferta</div>
+                                        <div class="info-val">{{
+                                            render_field(data.basic_info.offer_maintenance_term_days_business,
+                                            'basic_info.offer_maintenance_term_days_business') if
+                                            data.basic_info.offer_maintenance_term_days_business else 'No informado' }}
+                                            días hábiles</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Renglones y Productos -->
+                <div class="accordion-item border-bottom">
+                    <h2 class="accordion-header" id="headingItems">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapseItems">
+                            <i class="bi bi-list-check text-primary me-2"></i> Productos y Renglones ({{ items|length
+                            }})
+                        </button>
+                    </h2>
+                    <div id="collapseItems" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light p-0 p-lg-3">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="text-uppercase text-muted small fw-bold mb-0">Detalle Exclusivo</h6>
+                                <input type="text" id="itemsSearch" class="form-control form-control-sm w-50"
+                                    placeholder="Buscar producto..." onkeyup="filterItems()">
+                            </div>
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover table-custom" id="itemsTable"
+                                    style="font-size: 0.85rem;">
+                                    <thead class="bg-white sticky-top">
+                                        <tr>
+                                            <th>Renglón</th>
+                                            <th>Código</th>
+                                            <th>Cat. Prog</th>
+                                            <th>Destino</th>
+                                            <th>Cant.</th>
+                                            <th>UD</th>
+                                            <th>Desc</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white">
+                                        {% for item in items %}
+                                        <tr>
+                                            <td class="fw-bold text-center">{{ item.line_number }}</td>
+                                            <td>{{ item.product_code|default('-') }}</td>
+                                            <td>{{ item.programmatic_category|default('-') }}</td>
+                                            <td>{{ item.delivery_location|default('-') }}</td>
+                                            <td class="fw-bold">{{ item.quantity }}</td>
+                                            <td>{{ item.unit_of_measure }}</td>
+                                            <td>{{ item.name|default('-') }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                <div id="noResults" class="text-center p-3 text-muted d-none">No se encontraron
+                                    productos coincidentes.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Entrega y Logística -->
+                <div class="accordion-item border-bottom">
+                    <h2 class="accordion-header" id="headingDelivery">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapseDelivery">
+                            <i class="bi bi-truck text-primary me-2"></i> Logística y Entrega
+                        </button>
+                    </h2>
+                    <div id="collapseDelivery" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light">
+                            <div class="row">
+                                <div class="col-md-6 border-end">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Plazos y Condiciones
+                                        Técnicas</h6>
+                                    <div class="mb-3">
+                                        <div class="info-label">Términos Generales</div>
+                                        <div class="info-val fs-6 text-muted">{{ render_field(data.delivery.terms,
+                                            'delivery.terms') if
+                                            data.delivery.terms else '-' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Plazo Estimado</div>
+                                        <div class="info-val">{{ render_field(data.delivery.plazo, 'delivery.plazo') if
+                                            data.delivery.plazo else '-' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Vencimiento Mínimo Exigido</div>
+                                        <div class="info-val">{{ render_field(data.delivery.vencimiento_minimo,
+                                            'delivery.vencimiento_minimo') if
+                                            data.delivery.vencimiento_minimo else '-' }}</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 ps-4">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Sedes / Destinos</h6>
+                                    {% if data.delivery.locations %}
+                                    <ul class="list-group list-group-flush border rounded-3 overflow-hidden">
+                                        {% for loc in data.delivery.locations %}
+                                        <li class="list-group-item bg-white">
+                                            <div class="fw-bold text-dark" style="font-size: 0.9rem;">{{
+                                                loc.name|default('-') }}</div>
+                                            <div class="text-muted small"><i class="bi bi-geo-alt"></i> {{
+                                                loc.address|default('Dirección no provista') }}</div>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% else %}
+                                    <div class="text-center p-3 text-muted bg-white border rounded">Sin sedes
+                                        específicas detectadas.</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Pago, Garantías y Económico -->
+                <div class="accordion-item border-bottom">
+                    <h2 class="accordion-header" id="headingEco">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapseEco">
+                            <i class="bi bi-cash-coin text-primary me-2"></i> Económico-Financiero
+                        </button>
+                    </h2>
+                    <div id="collapseEco" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light">
+                            <div class="row">
+                                <div class="col-md-6 border-end">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Pagos y Facturación</h6>
+                                    <div class="mb-3">
+                                        <div class="info-label">Condiciones Generales</div>
+                                        <div class="info-val">{{ render_field(data.basic_info.payment_terms,
+                                            'basic_info.payment_terms') if
+                                            data.basic_info.payment_terms else '-' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Plazo de anticipo</div>
+                                        <div class="info-val">{{ render_field(data.payment.anticipo, 'payment.anticipo')
+                                            if data.payment and
+                                            data.payment.anticipo else '-' }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Formato Factura</div>
+                                        <div class="info-val">{{ render_field(data.payment.tipo_factura,
+                                            'payment.tipo_factura') if data.payment
+                                            and data.payment.tipo_factura else '-' }}</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6 px-4">
+                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Garantías Requeridas</h6>
+                                    <div class="mb-3">
+                                        <div class="info-label">Mantenimiento de Oferta</div>
+                                        <div class="info-val fs-5 fw-bold text-dark">{{
+                                            render_field(data.guarantees.offer_maintenance_pct,
+                                            'guarantees.offer_maintenance_pct') }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Cumplimiento de Contrato</div>
+                                        <div class="info-val fs-5 fw-bold text-dark">{{
+                                            render_field(data.guarantees.contract_compliance_pct,
+                                            'guarantees.contract_compliance_pct') }}</div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="info-label">Impugnación</div>
+                                        <div class="info-val">{{ render_field(data.guarantees.impugnation_pct,
+                                            'guarantees.impugnation_pct') }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 5. Penalidades -->
+                <div class="accordion-item border-bottom">
+                    <h2 class="accordion-header" id="headingPen">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapsePen">
+                            <i class="bi bi-exclamation-triangle text-primary me-2"></i> Penalidades
+                        </button>
+                    </h2>
+                    <div id="collapsePen" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light">
+                            <div class="row">
+                                <div class="col-md-6 border-end mb-3">
+                                    <div class="info-label">Mora</div>
+                                    <div class="info-val text-muted small mt-1">{{ render_field(data.penalties.mora,
+                                        'penalties.mora') if
+                                        data.penalties and data.penalties.mora else '-' }}</div>
+                                </div>
+                                <div class="col-md-6 mb-3 ps-4">
+                                    <div class="info-label">Multas Específicas</div>
+                                    <div class="info-val text-muted small mt-1">{{ render_field(data.penalties.multas,
+                                        'penalties.multas')
+                                        if data.penalties and data.penalties.multas else '-' }}</div>
+                                </div>
+                                <div class="col-12 border-top pt-3">
+                                    <div class="info-label">Términos Generales</div>
+                                    <div class="info-val text-muted small mt-1">{{
+                                        render_field(data.penalties.penalidades_generales,
+                                        'penalties.penalidades_generales') if data.penalties and
+                                        data.penalties.penalidades_generales else '-' }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. Sobres / Documentación a Presentar -->
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="headingSobres">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#collapseSobres">
+                            <i class="bi bi-envelope-paper text-primary me-2"></i> Requisitos / Sobres a Presentar
+                        </button>
+                    </h2>
+                    <div id="collapseSobres" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
+                        <div class="accordion-body bg-light">
+                            {% if data.sobres and data.sobres|length > 0 %}
+                            {% for sobre in data.sobres %}
+                            <div class="card mb-3 shadow-sm"
+                                style="border-radius: 12px; border: 1px solid var(--border-soft);">
+                                <div
+                                    class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                                    <div><i class="bi bi-archive me-2"></i>{{ sobre.name }}</div>
+                                    <span class="badge bg-secondary">{{ sobre.count }} docs</span>
+                                </div>
+                                <div class="card-body p-0">
+                                    <ul class="list-group list-group-flush">
+                                        {% for doc in sobre.documents %}
+                                        <li class="list-group-item" style="font-size: 0.85rem;">
+                                            <div class="d-flex w-100 justify-content-between">
+                                                <div>
+                                                    <input type="checkbox" class="form-check-input me-2 sobre-check">
+                                                    <span class="fw-bold me-2">{{ doc.code }}:</span>
+                                                    {{ doc.description }}
+                                                </div>
+                                                {% if doc.proof_document %}
+                                                <span class="badge bg-light text-primary border"><i
+                                                        class="bi bi-paperclip"></i> Adjs: {{ doc.proof_document
+                                                    }}</span>
+                                                {% endif %}
+                                            </div>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+                            {% endfor %}
+                            {% else %}
+                            <div class="text-muted text-center p-4">No se detectaron distribuciones de sobres
+                                explícitas.</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+            </div> <!-- End Accordion -->
+
+            <div class="mt-4 border rounded bg-dark p-3" id="debugSection">
+                <h6 class="text-white">JSON Source (Auditor)</h6>
+                <pre class="bg-dark text-light border p-2 rounded mb-0"
+                    style="max-height: 200px; overflow: auto; font-size: 0.75rem;">{{ data | tojson(indent=2) }}</pre>
+            </div>
+
+        </div>
+
+        <!-- Evidence Split Viewer Column (PDF) -->
+        <div class="col-lg-5 mb-4" id="evidencePane">
+            <div class="card h-100 shadow-sm"
+                style="border-radius: var(--radius-xl); border: 1px solid var(--border-soft); background: var(--bg-surface); min-height: 600px; display: flex; flex-direction: column; overflow:hidden;">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-2"></i> Visor de Documentos
+                    </h6>
+                    <button class="btn btn-sm btn-outline-secondary"
+                        onclick="document.getElementById('splitPdfViewer').src='about:blank'; document.getElementById('splitPdfViewer').classList.add('d-none'); document.getElementById('viewerEmptyState').classList.remove('d-none');"><i
+                            class="bi bi-x"></i> Cerrar</button>
+                </div>
+                <div class="card-body p-0" style="position: relative; flex: 1; display:flex; flex-direction: column;">
+                    <!-- Empty State -->
+                    <div id="viewerEmptyState"
+                        class="d-flex flex-column align-items-center justify-content-center h-100 text-muted p-5 text-center">
+                        <i class="bi bi-search fs-1 mb-3 opacity-25"></i>
+                        <p class="mb-0 small">Active el <strong>Modo Auditor</strong> arriba y haga clic en "Evidencia"
+                            sobre un dato extraído para validar su trazabilidad en el documento original.</p>
+                    </div>
+                    <!-- Viewer Iframe -->
+                    <iframe id="splitPdfViewer" class="d-none" style="flex:1; width:100%; border:none;"
+                        src="about:blank"></iframe>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+<script>
+    // Set the main PDF URL for the evidence viewer
+    window.MAIN_PDF_URL = "";
+    const DOC_URLS = {};
+    {% if data.documents and data.documents.source_files %}
+    {% for doc in data.documents.source_files %}
+    DOC_URLS["{{ doc.filename }}"] = "{{ doc.url }}";
+    {% endfor %}
+    // Fallback if no pdf extension matched but files exist
+    if (!window.MAIN_PDF_URL && data.documents.source_files.length > 0) {
+        window.MAIN_PDF_URL = "{{ data.documents.source_files[0].url|default('') }}";
+    }
+    {% endif %}
+
+    function toggleAuditorMode(isAuditor) {
+        const els = document.querySelectorAll('.auditor-mode-only');
+        els.forEach(el => {
+            if (isAuditor) {
+                el.classList.remove('d-none');
+            } else {
+                el.classList.add('d-none');
+            }
+        });
+    }
+
+    function openEvidence(sourceText, pageNum, text, bbox) {
+        let finalUrl = DOC_URLS[sourceText] || window.MAIN_PDF_URL;
+
+        if (!finalUrl) {
+            alert("No se encontró un documento en el sistema para " + (sourceText || "la evidencia."));
+            return;
+        }
+
+        // Find split viewer if it exists
+        const viewerIframe = document.getElementById('splitPdfViewer');
+        const emptyState = document.getElementById('viewerEmptyState');
+        const splitContainer = document.getElementById('mainSplitter');
+
+        if (viewerIframe && emptyState && splitContainer) {
+            // Unhide right pane
+            splitContainer.classList.remove('d-none');
+            emptyState.classList.add('d-none');
+            viewerIframe.classList.remove('d-none');
+
+            // Build PDF.js/Native URL hash params
+            let hashParams = [];
+            if (pageNum && pageNum !== '?' && pageNum !== 'None' && pageNum !== 'null') {
+                hashParams.push('page=' + pageNum);
+            }
+            if (bbox && Array.isArray(bbox) && bbox.length === 4) {
+                // PDF Open Parameters: view=rect,left,top,right,bottom or zoom
+                // For Chromium native: zoom=scale,left,top
+                hashParams.push('view=rect,' + bbox.join(','));
+                hashParams.push('zoom=150,' + bbox[0] + ',' + bbox[1]);
+            }
+            if (text) {
+                // Standard search parameter for highlighting in browsers
+                // Make sure to remove newlines for search query
+                let cleanText = text.replace(/[\r\n]+/g, ' ').substring(0, 100);
+                hashParams.push('search=' + encodeURIComponent(cleanText));
+            }
+
+            if (hashParams.length > 0) {
+                finalUrl += '#' + hashParams.join('&');
+            }
+
+            // Always assign to force navigation if hash changed
+            viewerIframe.src = finalUrl;
+
+        } else {
+            // Fallback to modal
+            openPdfViewer(finalUrl, "Evidencia (Pág " + pageNum + ")");
+        }
+    }
+
+    function filterItems() {
+        const input = document.getElementById("itemsSearch");
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById("itemsTable");
+        const tr = table.getElementsByTagName("tr");
+        let visibleCount = 0;
+
+        for (let i = 0; i < tr.length; i++) {
+            if (tr[i].getElementsByTagName("th").length > 0) {
+                continue; // Skip header
+            }
+
+            const tds = tr[i].getElementsByTagName("td");
+            let txtValue = "";
+
+            // Search in code (1), dest (2), desc (5)
+            // Indices: 0=Row, 1=Code, 2=Dest, 3=Cant, 4=Unit, 5=Desc
+            const targetIndices = [1, 2, 4, 5];
+
+            for (let j of targetIndices) {
+                if (tds[j]) {
+                    txtValue += tds[j].textContent || tds[j].innerText;
+                    txtValue += " ";
+                }
+            }
+
+            if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                tr[i].style.display = "";
+                visibleCount++;
+            } else {
+                tr[i].style.display = "none";
+            }
+        }
+
+        // Show/Hide no results
+        const noRes = document.getElementById("noResults");
+        if (visibleCount === 0) {
+            noRes.classList.remove("d-none");
+            table.classList.add("d-none");
+        } else {
+            noRes.classList.add("d-none");
+            table.classList.remove("d-none");
+        }
+
+        document.getElementById("itemsCount").innerText = visibleCount;
+    }
+
+    // Curation Logic
+    function enableEditMode(btn, fieldPath) {
+        // Find the container
+        const container = btn.closest('span.auditor-mode-only').previousElementSibling;
+        if (!container || !container.classList.contains('value-text')) return;
+
+        // Save original text if not already saved
+        if (!container.hasAttribute('data-original-value')) {
+            container.setAttribute('data-original-value', container.innerText.trim());
+        }
+        const originalValue = container.getAttribute('data-original-value');
+        const currentValue = container.innerText.trim();
+
+        // Hide the original text and auditor tools temporarily
+        container.style.display = 'none';
+        btn.closest('span.auditor-mode-only').style.display = 'none';
+
+        // Create edit UI
+        const editSpan = document.createElement('span');
+        editSpan.className = 'curation-edit-ui ms-2 d-inline-flex align-items-center gap-1';
+        editSpan.innerHTML = `
+            <input type="text" class="form-control form-control-sm curation-input" value="${currentValue}" style="min-width: 150px; font-size: 0.85rem;" />
+            <button class="btn btn-sm btn-success p-1" onclick="saveRevision(this, '${fieldPath}')" title="Guardar Corrección"><i class="bi bi-check2"></i></button>
+            <button class="btn btn-sm btn-danger p-1" onclick="cancelEditMode(this)" title="Cancelar"><i class="bi bi-x"></i></button>
+        `;
+
+        // Insert after the hidden value span
+        container.parentNode.insertBefore(editSpan, container.nextSibling);
+    }
+
+    function cancelEditMode(btn) {
+        const editSpan = btn.closest('.curation-edit-ui');
+        const container = editSpan.previousElementSibling; // The value-text span
+        const auditorSpan = editSpan.nextElementSibling;   // The auditor-mode-only span
+
+        // Restore visibility
+        container.style.display = '';
+        if (document.getElementById('auditorModeSwitch').checked) {
+            auditorSpan.style.display = '';
+        } else {
+            // Let the toggle logic handle it next time, or reset classes
+            auditorSpan.style.display = 'none';
+        }
+
+        // Remove edit UI
+        editSpan.remove();
+    }
+
+    async function saveRevision(btn, fieldPath) {
+        const editSpan = btn.closest('.curation-edit-ui');
+        const container = editSpan.previousElementSibling;
+        const auditorSpan = editSpan.nextElementSibling;
+
+        const input = editSpan.querySelector('.curation-input');
+        const newValue = input.value.trim();
+        const originalValue = container.getAttribute('data-original-value');
+
+        const tenderId = "{{ data.tender_id | default('test_tender') }}"; // Replace with actual tender ID passed to template
+
+        try {
+            // Disable buttons during save
+            editSpan.querySelectorAll('button').forEach(b => b.disabled = true);
+
+            const response = await fetch(`/mercado-publico/pliegos/${tenderId}/revisions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    field_path: fieldPath,
+                    original_value: originalValue,
+                    corrected_value: newValue
+                })
+            });
+
+            if (!response.ok) {
+                const textErr = await response.text();
+                throw new Error(textErr.substring(0, 100));
+            }
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                // Update UI
+                container.innerText = newValue;
+
+                // Show success feedback
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-success ms-2';
+                badge.innerText = 'Corregido';
+
+                container.style.display = '';
+                if (document.getElementById('auditorModeSwitch').checked) {
+                    auditorSpan.style.display = '';
+                }
+
+                // Insert badge temporarily
+                container.parentNode.insertBefore(badge, auditorSpan.nextSibling);
+                setTimeout(() => badge.remove(), 3000);
+
+                editSpan.remove();
+            } else {
+                alert("Error al guardar la revisión: " + (result.message || "Error desconocido"));
+                editSpan.querySelectorAll('button').forEach(b => b.disabled = false);
+            }
+
+        } catch (e) {
+            console.error(e);
+            alert("Error de conexión al guardar la revisión.");
+            editSpan.querySelectorAll('button').forEach(b => b.disabled = false);
+        }
+    }
+
+    // Sobres Checklist Progress Tracker
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.sobre-check').forEach(function (checkbox) {
+            checkbox.addEventListener('change', function () {
+                const card = this.closest('.card');
+                if (!card) return;
+                const total = card.querySelectorAll('.sobre-check').length;
+                const checked = card.querySelectorAll('.sobre-check:checked').length;
+                const progressEl = card.querySelector('.sobre-progress');
+                if (progressEl) {
+                    progressEl.textContent = checked + ' / ' + total + ' completados';
+                    if (checked === total) {
+                        progressEl.classList.remove('text-muted');
+                        progressEl.classList.add('text-success');
+                    } else {
+                        progressEl.classList.remove('text-success');
+                        progressEl.classList.add('text-muted');
+                    }
+                }
+            });
+        });
+    });
+
+    // PDF Viewer Modal Logic
+    function openPdfViewer(url, filename) {
+        if (!url) return;
+        const pdfIframe = document.getElementById('pdfViewerIframe');
+        const pdfTitle = document.getElementById('pdfViewerTitle');
+        const pdfLink = document.getElementById('pdfViewerExtLink');
+
+        // Show loading state or set src
+        pdfIframe.src = url;
+        pdfTitle.textContent = filename;
+        pdfLink.href = url;
+
+        // Open Modal
+        const pdfModal = new bootstrap.Modal(document.getElementById('pdfViewerModal'));
+        pdfModal.show();
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // Clear iframe when modal closes to save memory
+        const pdfModalEl = document.getElementById('pdfViewerModal');
+        if (pdfModalEl) {
+            pdfModalEl.addEventListener('hidden.bs.modal', function () {
+                document.getElementById('pdfViewerIframe').src = 'about:blank';
+            });
+        }
+    });
+
+    // Initialize Bootstrap Tooltips with custom options
+    document.addEventListener("DOMContentLoaded", function () {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl, {
+                html: true,
+                animation: true,
+                delay: { "show": 200, "hide": 100 }
+            });
+        });
+    });
+</script>
+
+<!-- PDF Viewer Modal -->
+<div class="modal fade" id="pdfViewerModal" tabindex="-1" aria-labelledby="pdfViewerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 95vw; height: 95vh; margin: 2.5vh auto;">
+        <div class="modal-content"
+            style="height: 100%; border-radius: var(--radius-xl); border: none; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);">
+            <div class="modal-header bg-light border-bottom" style="padding: 1rem 1.5rem;">
+                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="pdfViewerModalLabel"
+                    style="font-size: 1.1rem; color: var(--text-primary);">
+                    <i class="bi bi-file-earmark-pdf-fill text-danger fs-4"></i>
+                    <span id="pdfViewerTitle" class="text-truncate" style="max-width: 600px;">Documento Original</span>
+                </h5>
+                <div class="d-flex align-items-center gap-2">
+                    <a id="pdfViewerExtLink" href="#" target="_blank" class="btn btn-sm btn-outline-secondary"
+                        data-bs-toggle="tooltip" data-bs-title="Abrir en pestaña nueva">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0" style="background: #525659; height: calc(100% - 65px);">
+                <iframe id="pdfViewerIframe" src=""
+                    style="width: 100%; height: 100%; border: none; display: block;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .document-file-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+        border-color: #cbd5e1 !important;
+    }
+</style>
+{% endblock %}

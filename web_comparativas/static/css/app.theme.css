@@ -87,9 +87,10 @@ a:hover {
 
 /* ---------- Layout: App Shell ---------- */
 .app {
-  display: grid;
-  grid-template-columns: 260px 1fr;
+  display: flex;
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 /* --- Sidebar (Tech/Pro) --- */
@@ -102,6 +103,12 @@ a:hover {
   height: 100vh;
   position: sticky;
   top: 0;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-x: hidden;
+  width: 260px;
+  flex-shrink: 0 !important;
+  /* Extremely important to prevent flex crushing */
+  white-space: nowrap;
 }
 
 .sidebar-brand {
@@ -114,6 +121,10 @@ a:hover {
   text-transform: uppercase;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   padding-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s;
+  white-space: nowrap;
 }
 
 .nav-link {
@@ -125,6 +136,17 @@ a:hover {
   margin-bottom: 0.25rem;
   font-weight: 500;
   transition: all 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nav-link>div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: overflow;
+  display: flex;
+  align-items: center;
+  width: 100%;
 }
 
 .nav-link:hover {
@@ -143,11 +165,131 @@ a:hover {
   margin-right: 0.75rem;
   width: 20px;
   text-align: center;
+  font-size: 1.1rem;
+}
+
+/* --- Collapsed Sidebar State --- */
+.app.sidebar-collapsed .sidebar {
+  width: 80px;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.app.sidebar-collapsed .sidebar-brand {
+  opacity: 0;
+  visibility: hidden;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.app.sidebar-collapsed .sidebar-brand-container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app.sidebar-collapsed .sidebar-brand-container>div {
+  display: none !important;
+  /* Completely hide logo and label wrapper */
+}
+
+/* Ensure the hamburger button centers nicely inside the collapsed header */
+.app.sidebar-collapsed #desktopSidebarToggle {
+  display: inline-block !important;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.app.sidebar-collapsed .sidebar-logo {
+  width: 40px !important;
+  height: auto !important;
+  margin-bottom: 0.5rem;
+}
+
+.app.sidebar-collapsed .sidebar-market-label {
+  display: none !important;
+}
+
+.app.sidebar-collapsed .nav-link .caret {
+  display: none !important;
+}
+
+.app.sidebar-collapsed .nav-link {
+  justify-content: center !important;
+  padding: 0.75rem 0;
+}
+
+.app.sidebar-collapsed .nav-link div,
+.app.sidebar-collapsed .nav-link span:not(.badge) {
+  font-size: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.app.sidebar-collapsed .nav-link i {
+  margin-right: 0 !important;
+  font-size: 1.35rem;
+}
+
+.app.sidebar-collapsed .nav-link:hover {
+  transform: translateY(-2px);
+}
+
+.app.sidebar-collapsed .signout {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  text-align: center;
+}
+
+.app.sidebar-collapsed .signout .small {
+  display: none !important;
+}
+
+.app.sidebar-collapsed .signout .btn {
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+  font-size: 0;
+}
+
+.app.sidebar-collapsed .signout .btn::before {
+  font-family: "bootstrap-icons";
+  font-size: 1.2rem;
+}
+
+.app.sidebar-collapsed .signout .btn-outline-secondary::before {
+  content: "\f135";
+  /* bi-arrow-left-right */
+}
+
+.app.sidebar-collapsed .signout .btn-outline-danger::before {
+  content: "\f1bc";
+  /* bi-box-arrow-right */
+}
+
+.app.sidebar-collapsed .submenu .text-uppercase {
+  display: none !important;
+}
+
+.app.sidebar-collapsed .nav-link .badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 0.25em 0.4em;
+  font-size: 0.6rem;
 }
 
 /* --- Main Content --- */
 .main-content {
   padding: var(--gap-4);
+  flex-grow: 1;
+  min-width: 0;
+  /* Prevents flex items from overflowing screen width */
 }
 
 .header {
@@ -1149,9 +1291,11 @@ body {
    ========================================================= */
 
 @media (max-width: 768px) {
+
   /* 1. App Shell: Single Column */
   .app {
-    display: block; /* Disable Grid */
+    display: block;
+    /* Disable Grid */
     position: relative;
     overflow-x: hidden;
   }
@@ -1163,10 +1307,11 @@ body {
     left: 0;
     height: 100vh;
     width: 280px;
-    z-index: 1040; /* Above header */
+    z-index: 1040;
+    /* Above header */
     transform: translateX(-100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 4px 0 12px rgba(0,0,0,0.15);
+    box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15);
   }
 
   .sidebar.show {
@@ -1182,7 +1327,8 @@ body {
     height: 100vh;
     background: rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(2px);
-    z-index: 1030; /* Below sidebar, above content */
+    z-index: 1030;
+    /* Below sidebar, above content */
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.3s ease;
@@ -1200,10 +1346,10 @@ body {
     padding: 0.75rem 1rem;
     z-index: 1020;
   }
-  
+
   .page-title {
-     font-size: 1.25rem;
-     margin-bottom: 1rem;
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
   }
 
   /* 5. Content Padding */
@@ -1213,26 +1359,29 @@ body {
 
   /* 6. Cards Grid (Lobby) - One Column */
   .cards-grid {
-    grid-template-columns: 1fr !important; 
+    grid-template-columns: 1fr !important;
     gap: 1rem;
   }
-  
+
   /* 7. Hide non-essential top bar items if crowded */
   .top-user-pill span {
-     display: none; /* Hide text "Admin", keep badge/icon if needed or simplify */
+    display: none;
+    /* Hide text "Admin", keep badge/icon if needed or simplify */
   }
+
   .top-user-pill {
-     padding: 4px 8px; /* Compact pill */
+    padding: 4px 8px;
+    /* Compact pill */
   }
 
   /* 8. Tables Horizontal Scroll */
   .table-responsive-mobile {
-     display: block;
-     width: 100%;
-     overflow-x: auto;
-     -webkit-overflow-scrolling: touch;
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
-  
+
   /* 9. Upload Zone - Stack vertically */
   .upload-zone-tech {
     flex-direction: column;

@@ -66,6 +66,14 @@ def _str_keyed(o):
     return o
 
 def _pick_handler(meta: dict):
+    # --- DEBUG LOGGING START ---
+    try:
+        debug_log = PROJECT_ROOT / "debug_services.log"
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"[PICK_HANDLER] Meta: {meta}\n")
+    except: pass
+    # --- DEBUG LOGGING END ---
+
     sources = _load_registry()
     fname = meta.get("filename", "") or ""
     platform = (meta.get("platform", "") or "").upper()
@@ -77,9 +85,18 @@ def _pick_handler(meta: dict):
         if w.get("filename_regex"):
             if not re.match(w["filename_regex"], fname, flags=re.I):
                 ok = False
+        
+        # --- DEBUG LOGGING LOOP ---
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"  Checking {s.get('id')}: OK={ok} (regex={w.get('filename_regex')} vs fname={fname}, plat={w.get('platform')} vs {platform})\n")
+        except: pass
+        # --- DEBUG LOGGING LOOP END ---
+
         if ok:
             mod, func = s["handler"].split(":")
             return HandlerRef(mod, func), s.get("id")
+            
     s = [x for x in sources if x.get("id") == "DEFAULT"]
     if s:
         mod, func = s[0]["handler"].split(":")
@@ -446,6 +463,31 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         (out_dir / "dashboard.json").write_text(
             json.dumps(_str_keyed(summary), ensure_ascii=False), encoding="utf-8"
         )
+
+        # --- NUEVO: Persistir metadatos ricos en la DB para el Header del Dashboard ---
+        try:
+            # Apertura
+            ap_val = summary.get("basic_info", {}).get("opening_date", {}).get("value")
+            if ap_val:
+                 up.apertura_fecha = str(ap_val)
+
+            # Comprador / Organismo (UOA)
+            org_val = summary.get("summary", {}).get("uoa", {}).get("value")
+            if org_val:
+                 up.buyer_hint = str(org_val)
+            
+            # Lugar / Provincia
+            place_val = summary.get("basic_info", {}).get("place", {}).get("value")
+            if place_val:
+                 up.province_hint = str(place_val)
+
+            # Cuenta (si viniese en summary)
+            # exp_val = summary.get("summary", {}).get("expediente", {}).get("value")
+            # if exp_val: ...
+                 
+        except Exception as e:
+            logger.warning(f"Error mapeando metadatos extraídos a DB: {e}")
+
 
         up.detected_source = script_id
         up.script_key = f"{href.module}:{href.func}"

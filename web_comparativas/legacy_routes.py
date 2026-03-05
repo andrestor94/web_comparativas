@@ -1614,7 +1614,7 @@ def _home_collect(user: User):
 # ======================================================================
 # HOME: selecci├│n de Mercado (Men├║ principal)
 # ======================================================================
-@router.get("/", response_class=HTMLResponse)
+# @router.get("/", response_class=HTMLResponse)
 def markets_home(
     request: Request,
     user: User = Depends(
@@ -1628,6 +1628,10 @@ def markets_home(
     """
     role = (user.role or "").lower()
     
+    # Gerente solo puede ver Forecast
+    if role == "gerente":
+        return RedirectResponse("/forecast", status_code=303)
+
     # Analistas no deben ver el SIEM, redirigir a su mercado
     if role == "analista":
         scope = (user.access_scope or "").strip().lower()
@@ -5818,7 +5822,8 @@ def tablero_show(
             "table_rows": table_rows,
             "rows_total": rows_total,
             "rank_api_url": rank_api_url,
-            "pdf_url": pdf_url, 
+            "pdf_url": pdf_url,
+            "rich_data": summary, 
             # DEBUG INFO
             "debug_version": f"v2.DEBUG.{int(dt.datetime.now().timestamp())}",
             "debug_base_dir": str(getattr(up, "base_dir", "MISSING")),
@@ -6015,12 +6020,13 @@ def logout(request: Request):
 def my_password_form(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente")
     ),
 ):
     ctx = {
         "request": request,
         "user": user,
+        "market_context": "account",
         "error": request.query_params.get("error") or "",
         "ok": request.query_params.get("ok") or "",
     }
@@ -6034,7 +6040,7 @@ def my_password_submit(
     nueva: str = Form(...),
     confirmar: str = Form(...),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente")
     ),
 ):
     if not verify_password(actual, user.password_hash):

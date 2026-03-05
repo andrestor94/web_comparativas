@@ -1250,6 +1250,27 @@ def _bootstrap_reset_password_from_env():
         s.close()
 
 
+class RevisionSession(Base):
+    """
+    Capa de Curación: Registro de modificaciones manuales sobre las extracciones de IA.
+    """
+    __tablename__ = "revision_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(String, index=True, nullable=False) # The hash ID of the processed tender
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    field_path = Column(String, nullable=False) # e.g. "basic_info.object", "items[0].quantity"
+    original_value = Column(String, nullable=True)
+    corrected_value = Column(String, nullable=True)
+    confidence_at_revision = Column(Float, nullable=True) # Tracks AI confidence when human corrected it
+    
+    created_at = Column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+
+    # Relationship
+    user = relationship("User")
+
+
 def init_db():
     """Crea tablas si no existen y asegura columnas nuevas e índices básicos."""
     Base.metadata.create_all(bind=engine)

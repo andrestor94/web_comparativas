@@ -408,19 +408,37 @@
     })();
   </script>
 
-  <div class="app d-flex" style="min-height:100vh">
+  <div class="app d-flex" id="app-container" style="min-height:100vh">
+    <!-- Check localstorage FIRST to avoid flash -->
+    <script>
+      (function () {
+        if (localStorage.getItem('siem_sidebar_collapsed') === 'true') {
+          document.getElementById('app-container').classList.add('sidebar-collapsed');
+        }
+      })();
+    </script>
     <!-- Sidebar -->
     {% if user %}
     <aside class="sidebar" role="navigation" aria-label="Menú lateral">
-      <div class="sidebar-brand-container">
-        <!-- Logo SIEM Blanco (contraste fondo oscuro) -->
-        <img src="{{ url_for('static', path='img/logo_siem_blanco.png') }}" alt="SIEM" class="sidebar-logo">
+      <div class="sidebar-brand-container d-flex align-items-center justify-content-between">
+        <div>
+          <!-- Logo SIEM Blanco (contraste fondo oscuro) -->
+          <img src="{{ url_for('static', path='img/logo_siem_blanco.png') }}" alt="SIEM" class="sidebar-logo">
 
-        {% if market_context == 'private' %}
-        <div class="sidebar-market-label" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado</div>
-        {% else %}
-        <div class="sidebar-market-label">Mercado Público</div>
-        {% endif %}
+          {% if market_context == 'private' %}
+          <div class="sidebar-market-label" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado</div>
+          {% elif market_context == 'forecast' %}
+          <div class="sidebar-market-label" style="color: #059669;">Forecast</div>
+          {% elif market_context == 'account' %}
+          <div class="sidebar-market-label" style="color: #94a3b8;">Mi Cuenta</div>
+          {% else %}
+          <div class="sidebar-market-label">Mercado Público</div>
+          {% endif %}
+        </div>
+        <button class="btn btn-link text-white p-0 d-none d-md-inline-block" id="desktopSidebarToggle"
+          aria-label="Colapsar Menú" title="Colapsar Menú" onclick="toggleDesktopSidebar(event)">
+          <i class="bi bi-list fs-4"></i>
+        </button>
       </div>
 
       {% if user %}
@@ -436,20 +454,20 @@
 
         <!-- Home -->
         <a href="/mercado-privado" class="nav-link {% if request.url.path == '/mercado-privado' %}active{% endif %}">
-          Home
+          <div><i class="bi bi-house-door"></i> Home</div>
         </a>
 
         <!-- Dimensionamiento de mercado -->
         <a href="/mercado-privado/dimensiones"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/dimensiones') %}active{% endif %}">
-          Dimensionamiento
+          <div><i class="bi bi-pie-chart"></i> Dimensionamiento</div>
         </a>
 
         <!-- Reporte perfiles (Reutilizado) -->
         {% if user and r in ['admin','supervisor','auditor'] %}
         <a href="/mercado-privado/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/reporte-perfiles') %}active{% endif %}">
-          Reporte perfiles
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles</div>
         </a>
         {% endif %}
 
@@ -459,7 +477,7 @@
         <a href="/mercado-privado/helpdesk"
           class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
           id="cmMenuLink" title="Mesa de ayuda">
-          <span>Mesa de ayuda</span>
+          <div><i class="bi bi-headset"></i> Mesa de ayuda</div>
           <span class="ms-2">
             <span id="cmMenuBadge" class="badge rounded-pill bg-primary-subtle text-primary"
               style="display:none">0</span>
@@ -470,7 +488,26 @@
         <!-- Mi contraseña -->
         <a href="/mercado-privado/mi-password"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/mi-password') %}active{% endif %}">
-          Mi contraseña
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
+        </a>
+
+        {% elif market_context == 'account' %}
+        <!-- ================= MI CUENTA (STANDALONE, SIN SIDEBAR DE MERCADO) ================= -->
+        <a href="javascript:history.back()" class="nav-link">
+          <div><i class="bi bi-arrow-left"></i> Volver</div>
+        </a>
+
+        {% elif market_context == 'forecast' %}
+        <!-- ================= MENÚ FORECAST (INDEPENDIENTE) ================= -->
+
+        <!-- Home Alternativo (opcional si hay sub-rutas, hoy apunta a /forecast) -->
+        <a href="/forecast" class="nav-link {% if request.url.path == '/forecast' %}active{% endif %}">
+          <div><i class="bi bi-graph-up-arrow"></i> Forecast</div>
+        </a>
+
+        <!-- Mi contraseña -->
+        <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
         </a>
 
         {% else %}
@@ -493,29 +530,36 @@
 
         <!-- Home Mercado Público -->
         <a href="/mercado-publico" class="nav-link {% if request.url.path == '/mercado-publico' %}active{% endif %}">
-          Home
+          <div><i class="bi bi-house-door"></i> Home</div>
         </a>
 
         <!-- ====== Web Comparativa (submenú colapsable) ====== -->
         <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
           href="#wcMenu" role="button" aria-expanded="false" aria-controls="wcMenu">
-          <span>Comparativa</span>
+          <div><i class="bi bi-intersect"></i> Comparativa</div>
           <span class="caret">▸</span>
         </a>
 
         <div id="wcMenu" class="collapse submenu">
 
 
+          {% if user and r == 'admin' %}
           <!-- Sección: PRINCIPALES -->
           <div class="px-3 mt-3 mb-1 text-uppercase"
             style="font-size: 0.65rem; letter-spacing: 0.5px; font-weight: 700; color: rgba(255,255,255,0.65);">
             Principales
           </div>
 
+          <a href="/mercado-publico/pliegos"
+            class="nav-link {% if request.url.path.startswith('/mercado-publico/pliegos') %}active{% endif %}">
+            <div><i class="bi bi-file-pdf"></i> Lectura de Pliego IA</div>
+          </a>
+          {% endif %}
+
           {% if user and r in ['admin','analista','supervisor'] %}
           <a href="/otras-fuentes/nueva"
             class="nav-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
-            Nueva carga
+            <div><i class="bi bi-cloud-upload"></i> Nueva carga</div>
           </a>
           {% endif %}
 
@@ -525,7 +569,7 @@
           </div>
           <a href="/otras-fuentes-externas"
             class="nav-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
-            Nueva carga
+            <div><i class="bi bi-cloud-arrow-up"></i> Nueva carga</div>
           </a>
 
           <!-- Separador -->
@@ -539,7 +583,7 @@
           or request.url.path.startswith('/tablero/') %}
           <a href="/cargas/historial"
             class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
-            <span>Historial</span>
+            <div><i class="bi bi-clock-history"></i> Historial</div>
             <span class="ms-2">
               {% if _pending is not none and _pending|int > 0 %}
               <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
@@ -554,7 +598,7 @@
           {% if user and r in ['admin','supervisor'] %}
           {% set is_groups = request.url.path.startswith('/grupos') %}
           <a href="/grupos" class="nav-link {% if is_groups %}active{% endif %}">
-            Grupos
+            <div><i class="bi bi-people"></i> Grupos</div>
           </a>
           {% endif %}
         </div>
@@ -564,18 +608,18 @@
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
         <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
           href="#opMenu" role="button" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
-          <span>Oportunidades</span>
+          <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
           <span class="caret">▸</span>
         </a>
 
         <div id="opMenu" class="collapse submenu {% if op_expand %}show{% endif %}">
           <a href="/oportunidades/buscador"
             class="nav-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
-            Buscador
+            <div><i class="bi bi-search"></i> Buscador</div>
           </a>
           <a href="/oportunidades/dimensiones"
             class="nav-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
-            Dimensiones
+            <div><i class="bi bi-rulers"></i> Dimensiones</div>
           </a>
         </div>
         {% endif %}
@@ -585,7 +629,7 @@
         {% if user and r in ['admin','supervisor','auditor'] %}
         <a href="/mercado-publico/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
-          Reporte perfiles
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles</div>
         </a>
         {% endif %}
 
@@ -596,13 +640,13 @@
         <a href="/mercado-publico/helpdesk"
           class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/mercado-publico/helpdesk') %}active{% endif %}"
           title="Mesa de ayuda">
-          <span>Mesa de ayuda</span>
+          <div><i class="bi bi-headset"></i> Mesa de ayuda</div>
         </a>
         {% elif (r == 'admin') %}
         <a href="/sic/helpdesk"
           class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}"
           title="Mesa de ayuda">
-          <span>Mesa de ayuda (SIC)</span>
+          <div><i class="bi bi-headset"></i> Mesa de ayuda (SIC)</div>
           <span class="ms-2">
             <i class="bi bi-box-arrow-up-right" style="font-size: 0.7em;"></i>
           </span>
@@ -610,16 +654,10 @@
         {% endif %}
         {% endif %}
 
-
-
-
-
-
-
         <!-- Mi contraseña -->
         {% if user %}
         <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
-          Mi contraseña
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
         </a>
         {% endif %}
 
@@ -629,13 +667,26 @@
 
       <div class="signout mt-auto px-3 py-3 border-top">
         {% if user %}
+        {% if market_context == 'account' %}
+        {# Account standalone: solo cerrar sesión #}
+        <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
+          href="/logout">
+          <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+        </a>
+        {% else %}
+        {% if r != 'gerente' %}
         <div class="small fw-semibold mb-2 text-muted px-1" style="font-size:0.7rem;">
           Volver a la selección
         </div>
         {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
         <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/switch-market">Cambiar Mercado</a>
         {% endif %}
-        <a class="btn btn-outline-danger w-100 btn-sm" href="/logout">Salir</a>
+        {% endif %}
+        <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
+          href="/logout">
+          <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+        </a>
+        {% endif %} {# end market_context == account else #}
         {% else %}
         <a class="btn btn-primary w-100" href="/login">Ingresar</a>
         {% endif %}
@@ -644,7 +695,7 @@
     {% endif %}
 
     <!-- Main -->
-    <main class="main flex-fill">
+    <main class="main flex-fill" style="min-width: 0;">
       <!-- Header -->
       {% if user %}
       <header class="header d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-white">
@@ -703,7 +754,10 @@
               {{ (r or '')|capitalize }}
             </span>
 
-            {# Se quitó el link "Cambiar contraseña" de la barra superior #}
+            <!-- Cerrar sesión (header) -->
+            <a href="/logout" class="text-secondary opacity-75 ms-1" title="Cerrar sesión" style="font-size: 1.1rem;">
+              <i class="bi bi-box-arrow-right"></i>
+            </a>
 
             <!-- Toggle Dark Mode (Tech/Pill) -->
 
@@ -733,17 +787,71 @@
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
+  <!-- ====== SIDEBAR TOGGLE (isolated script so it never breaks) ====== -->
+  <script>
+    // ====== SIDEBAR MOBILE TOGGLE (Global) ======
+    window.toggleAppSidebar = function (e) {
+      if (e) e.stopPropagation();
+      var sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+      var overlay = document.querySelector('.sidebar-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function () {
+          sidebar.classList.remove('show');
+          overlay.classList.remove('show');
+          document.body.style.overflow = '';
+        });
+      }
+      if (sidebar.classList.contains('show')) {
+        sidebar.classList.remove('show');
+        overlay.classList.remove('show');
+        document.body.style.overflow = '';
+      } else {
+        sidebar.classList.add('show');
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden';
+      }
+    };
+
+    // ====== SIDEBAR DESKTOP TOGGLE (Global) ======
+    window.toggleDesktopSidebar = function (e) {
+      if (e) e.preventDefault();
+      var appContainer = document.getElementById('app-container');
+      if (appContainer) {
+        appContainer.classList.toggle('sidebar-collapsed');
+        var isCollapsed = appContainer.classList.contains('sidebar-collapsed');
+        localStorage.setItem('siem_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+      }
+    };
+
+    // Close sidebar on ESC
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var sidebar = document.querySelector('.sidebar');
+        if (sidebar && sidebar.classList.contains('show')) {
+          sidebar.classList.remove('show');
+          var ov = document.querySelector('.sidebar-overlay');
+          if (ov) ov.classList.remove('show');
+          document.body.style.overflow = '';
+        }
+      }
+    });
+  </script>
+
   <!-- Notify (UI de toasts/banners) -->
   <script src="{{ url_for('static', path='js/notify.js') }}" defer></script>
 
   <script>
     // ====== Usuario (expuesto a JS global + data-attrs en <html>) ======
     (function () {
-      const APP_USER = {
-        role: {{ ((user and(user.role or user.rol or ''))| lower)| tojson
+      var APP_USER = {
+        role: {{ ((user and(user.role or user.rol or '')) | lower) | tojson
     }},
-    display: { { (_display_name or 'Yo')| tojson } },
-    email: { { (user and user.email or '')| tojson } }
+    display: { { (_display_name or 'Yo') | tojson } },
+    email: { { (user and user.email or '') | tojson } }
       };
     window.APP_USER = APP_USER;
 
@@ -799,48 +907,6 @@
       }
     });
 
-    // ====== SIDEBAR MOBILE TOGGLE (Global) ======
-    window.toggleAppSidebar = function (e) {
-      if (e) e.stopPropagation();
-
-      const sidebar = document.querySelector('.sidebar');
-      // Asegurarse de que existe el overlay
-      let overlay = document.querySelector('.sidebar-overlay');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.className = 'sidebar-overlay';
-        document.body.appendChild(overlay);
-        overlay.addEventListener('click', () => {
-          // Close
-          if (sidebar) sidebar.classList.remove('show');
-          overlay.classList.remove('show');
-          document.body.style.overflow = '';
-        });
-      }
-
-      if (sidebar.classList.contains('show')) {
-        // Cerrar
-        sidebar.classList.remove('show');
-        overlay.classList.remove('show');
-        document.body.style.overflow = '';
-      } else {
-        // Abrir
-        sidebar.classList.add('show');
-        overlay.classList.add('show');
-        document.body.style.overflow = 'hidden';
-      }
-    };
-
-    // Close on ESC
-    document.addEventListener('keydown', (e) => {
-      const sidebar = document.querySelector('.sidebar');
-      if (e.key === 'Escape' && sidebar && sidebar.classList.contains('show')) {
-        sidebar.classList.remove('show');
-        const ov = document.querySelector('.sidebar-overlay');
-        if (ov) ov.classList.remove('show');
-        document.body.style.overflow = '';
-      }
-    });
 
     (function () {
       const badge = document.getElementById('cmMenuBadge');
@@ -953,7 +1019,7 @@
   contraseña e intentá nuevamente.' %}
   <script>
     window.addEventListener('DOMContentLoaded', function () {
-      var msg = {{ _reset_err_msg| tojson
+      var msg = {{ _reset_err_msg | tojson
     }};
     if (window.Notify && Notify.toastError) {
       Notify.toastError('No se pudo resetear', msg);

@@ -824,6 +824,82 @@
       </div>
     </div>
 
+    <!-- SECCIÓN REQUISITOS (NUEVA: Inyectada por Antigravity) -->
+    {% if rich_data and rich_data.requirements and rich_data.requirements.value %}
+    <section class="kpi-group mb-4" aria-labelledby="reqTitle">
+      <h2 class="group-title m-0" id="reqTitle">Requisitos y Condiciones</h2>
+
+      <div class="row mt-3">
+        <!-- Columna Izq: Textos Legales -->
+        <div class="col-md-4">
+          <div class="p-3 mb-3" style="background:#f8f9fa; border-radius:8px;">
+            <h6 class="text-uppercase small fw-bold" style="color:var(--ink-500)">Condiciones de Pago</h6>
+            <p class="mb-3 small">{{ rich_data.basic_info.payment_terms.value or "No especificado" }}</p>
+
+            <h6 class="text-uppercase small fw-bold" style="color:var(--ink-500)">Plazo de Entrega</h6>
+            <p class="mb-3 small">{{ rich_data.delivery.terms.value or "No especificado" }}</p>
+
+            <h6 class="text-uppercase small fw-bold" style="color:var(--ink-500)">Lugares de Entrega</h6>
+            {% if rich_data.delivery.locations %}
+            {% for loc in rich_data.delivery.locations %}
+            <p class="mb-1 small"><strong>{{ loc.name }}:</strong> {{ loc.address }}</p>
+            {% endfor %}
+            {% else %}
+            <p class="mb-3 small">Ver pliego</p>
+            {% endif %}
+          </div>
+
+          <div class="p-3" style="background:#f8f9fa; border-radius:8px;">
+            <h6 class="text-uppercase small fw-bold" style="color:var(--ink-500)">Garantías Solicitadas</h6>
+            <ul class="list-unstyled mb-0 small">
+              <li class="mb-2">
+                <strong>Mantenimiento de Oferta:</strong>
+                {{ rich_data.guarantees.offer_maintenance_pct.value or "No especificado" }}
+              </li>
+              <li>
+                <strong>Cumplimiento de Contrato:</strong>
+                {{ rich_data.guarantees.contract_compliance_pct.value or "No especificado" }}
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Columna Der: Lista de Requisitos -->
+        <div class="col-md-8">
+          <h6 class="text-uppercase small fw-bold mb-3" style="color:var(--ink-500)">Documentación a Presentar</h6>
+          <div class="table-responsive" style="max-height: 400px; overflow-y:auto;">
+            <table class="table table-sm table-hover" style="font-size:0.85rem;">
+              <thead style="position:sticky; top:0; background:white; z-index:1;">
+                <tr>
+                  <th style="width:80px">Código</th>
+                  <th>Descripción</th>
+                  <th style="width:120px">Tipo</th>
+                  <th style="width:140px">Adjuntar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for req in rich_data.requirements.value %}
+                <tr>
+                  <td class="fw-bold">{{ req.code }}</td>
+                  <td>{{ req.description }}</td>
+                  <td><span class="badge bg-light text-dark border">{{ req.type }}</span></td>
+                  <td>
+                    {% if req.proof_document %}
+                    <code>{{ req.proof_document }}</code>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
     <!-- RANKING -->
     <section id="rankSection" class="table-wrap mb-4" aria-labelledby="rankTitle">
       <h2 id="rankTitle" class="visually-hidden">Ranking de ofertas</h2>
@@ -1005,16 +1081,14 @@
 <!-- 1) Datos iniciales para el treemap (fallback si no hay chart_prov directo) -->
 <script>
   (() => {
-    const direct = {{ chart_prov|default ([]) | tojson
-  }};
+    const direct = {{ chart_prov|default([]) | tojson }};
   if (Array.isArray(direct) && direct.length) {
     window.CHART_PROV = direct.map(d => ({
       label: String(d.label ?? d.name ?? '—'),
       value: +d.value || 0
     }));
   } else {
-    const L = {{ chart_suppliers_adj_labels|default ([]) | tojson
-  }};
+    const L = {{ chart_suppliers_adj_labels|default([]) | tojson }};
   const V = {{ chart_suppliers_adj_values|default ([]) | tojson }};
   const out = [];
   for (let i = 0; i < Math.min(L.length, V.length); i++) {
