@@ -243,18 +243,18 @@ def get_chart_data(
         df_fore = grouped[grouped["tipo"] == "forecast"].sort_values("fecha")
 
         # Format arrays for Plotly
-        history = [{"x": str(row["fecha"].date()), "y": round(float(row["y_val"]), 2)} for _, row in df_hist.iterrows()]
+        history = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["y_val"]), 2)} for _, row in df_hist.iterrows()]
         
-        forecast = [{"x": str(row["fecha"].date()), "y": round(float(row["yhat_val"]), 2)} for _, row in df_fore.iterrows()]
-        ci_lower = [{"x": str(row["fecha"].date()), "y": round(float(row["li_val"]), 2)} for _, row in df_fore.iterrows()]
-        ci_upper = [{"x": str(row["fecha"].date()), "y": round(float(row["ls_val"]), 2)} for _, row in df_fore.iterrows()]
+        forecast = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["yhat_val"]), 2)} for _, row in df_fore.iterrows()]
+        ci_lower = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["li_val"]), 2)} for _, row in df_fore.iterrows()]
+        ci_upper = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["ls_val"]), 2)} for _, row in df_fore.iterrows()]
 
         forecast_adj = []
         if growth_pct != 0 and forecast:
             factor = 1.0 + (growth_pct / 100.0)
             forecast_adj = [{"x": pt["x"], "y": round(pt["y"] * factor, 2)} for pt in forecast]
 
-        hist_max_date = str(df_hist["fecha"].max().date()) if not df_hist.empty else ""
+        hist_max_date = df_hist["fecha"].max().strftime("%Y-%m-%d") if not df_hist.empty else ""
 
         return {
             "history": history,
