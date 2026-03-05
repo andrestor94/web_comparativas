@@ -10,6 +10,11 @@ import traceback
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(BASE_DIR))
 
+from web_comparativas.forecast_models import (
+    ForecastCliente, ForecastNegocio, ForecastArticulo,
+    ForecastDatasetBase, ForecastBase, ForecastValorizado
+)
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://usuario:contraseña@localhost/web_comparativas_db")
 if "postgres://" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -96,9 +101,23 @@ def migrate_file(config, df_price):
     print(f"[*] Migrando {config['file']} a {table_name}...")
     chunksize = 20000
     try:
-        with engine.begin() as conn:
-            conn.execute(text(f"DELETE FROM {table_name}"))
-        print(f"  -> Tabla {table_name} limpiada para recarga.")
+        model_mapping = {
+            "forecast_cliente": ForecastCliente,
+            "forecast_negocio": ForecastNegocio,
+            "forecast_articulo": ForecastArticulo,
+            "forecast_dataset_base": ForecastDatasetBase,
+            "forecast_base": ForecastBase,
+            "forecast_valorizado": ForecastValorizado,
+        }
+        model = model_mapping.get(table_name)
+        if model:
+            model.__table__.drop(engine, checkfirst=True)
+            model.__table__.create(engine)
+            print(f"  -> Tabla {table_name} recreada con esquema SQLAlchemy estricto.")
+        else:
+            with engine.begin() as conn:
+                conn.execute(text(f"DELETE FROM {table_name}"))
+            print(f"  -> Tabla {table_name} limpiada para recarga.")
 
         chunks = pd.read_csv(
             str(file_path), sep=config["sep"], decimal=config.get("decimal", "."),
@@ -111,6 +130,8 @@ def migrate_file(config, df_price):
             
             if table_name == "forecast_cliente" and "codigo" in chunk.columns:
                 chunk["codigo"] = chunk["codigo"].astype(str).str.strip()
+            if table_name == "forecast_valorizado" and "cliente_id" in chunk.columns:
+                chunk["cliente_id"] = chunk["cliente_id"].astype(str).str.strip()
             if table_name == "forecast_negocio":
                 if "unidad" in chunk.columns: chunk["unidad"] = pd.to_numeric(chunk["unidad"], errors="coerce").fillna(0).astype(int)
                 if "subunidad" in chunk.columns: chunk["subunidad"] = pd.to_numeric(chunk["subunidad"], errors="coerce").fillna(0).astype(int)
