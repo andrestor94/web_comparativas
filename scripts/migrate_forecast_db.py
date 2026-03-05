@@ -87,7 +87,7 @@ def apply_prices(chunk: pd.DataFrame, df_price: pd.DataFrame) -> pd.DataFrame:
     if mask_zero.any():
         chunk.loc[mask_zero, "precio"] = chunk.loc[mask_zero, "_key_fam"].map(prices_fam)
         
-    chunk["precio"] = chunk["precio"].fillna(1500.0)
+    chunk["precio"] = chunk["precio"].fillna(0.0)
     chunk.drop(columns=["_key_desc", "_key_fam"], inplace=True)
     return chunk
 
