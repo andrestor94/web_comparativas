@@ -1,3 +1,4 @@
+// v1.0.1 - Fixed color strings and layout
 /**
  * forecast.js — Phase 4: Hierarchical Table + Grouped Modal + Lab Highlight
  */
