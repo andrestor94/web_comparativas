@@ -20,7 +20,7 @@ FORECAST_DATA_DIR = Path(os.environ.get("FORECAST_DATA_DIR", str(BASE_DIR / "dat
 FILES_CONFIG = [
     {"file": "clientes.csv", "table": "forecast_cliente", "sep": ",", "encoding": "latin-1"},
     {"file": "Negocios.csv", "table": "forecast_negocio", "sep": ",", "encoding": "utf-8"},
-    {"file": "Articulos 1.csv", "table": "forecast_articulo", "sep": ",", "encoding": "latin-1"},
+    {"file": "Articulos 1.csv", "table": "forecast_articulo", "sep": ",", "encoding": "iso-8859-1"},
     {"file": "dataset_base.csv", "table": "forecast_dataset_base", "sep": ",", "encoding": "utf-8"},
     {"file": "forecast_base_consolidado.csv", "table": "forecast_base", "sep": ";", "encoding": "utf-8-sig", "decimal": ","},
     {"file": "forecast_valorizado_v2.csv", "table": "forecast_valorizado", "sep": ";", "encoding": "utf-8-sig", "decimal": ","}
@@ -39,7 +39,7 @@ def build_price_lookup() -> pd.DataFrame:
     file_master = FORECAST_DATA_DIR / "Articulos 1.csv"
     if not file_master.exists():
         return pd.DataFrame()
-    df = pd.read_csv(str(file_master), sep=",", encoding="latin-1", low_memory=False)
+    df = pd.read_csv(str(file_master), sep=",", encoding="iso-8859-1", low_memory=False)
     df.columns = [c.lower().strip() for c in df.columns]
     
     col_art = "codigo"
@@ -115,10 +115,9 @@ def migrate_file(config, df_price):
                 if "unidad" in chunk.columns: chunk["unidad"] = pd.to_numeric(chunk["unidad"], errors="coerce").fillna(0).astype(int)
                 if "subunidad" in chunk.columns: chunk["subunidad"] = pd.to_numeric(chunk["subunidad"], errors="coerce").fillna(0).astype(int)
             if table_name == "forecast_articulo":
-                if "predrog" in chunk.columns:
-                    chunk["predrog"] = pd.to_numeric(chunk["predrog"].astype(str).str.replace(",", "."), errors="coerce")
-                if "cantenv" in chunk.columns:
-                    chunk["cantenv"] = pd.to_numeric(chunk["cantenv"].astype(str).str.replace(",", "."), errors="coerce")
+                for col in ["predrog", "cantenv"]:
+                    if col in chunk.columns:
+                        chunk[col] = pd.to_numeric(chunk[col].astype(str).str.replace(",", "."), errors="coerce")
             if table_name == "forecast_base":
                 chunk = apply_prices(chunk, df_price)
 
