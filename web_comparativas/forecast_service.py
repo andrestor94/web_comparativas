@@ -17,7 +17,7 @@ logger = logging.getLogger("wc.forecast")
 # Configuration: where to find the Forecast data files
 # ---------------------------------------------------------------------------
 _BASE = Path(__file__).resolve().parent.parent  # web_comparativas_v2/
-FORECAST_DATA_DIR = _BASE / "data" / "forecast"
+FORECAST_DATA_DIR = Path(os.environ.get("FORECAST_DATA_DIR", str(_BASE / "data" / "forecast")))
 
 _FORECAST_FILE      = FORECAST_DATA_DIR / "forecast_base_consolidado.csv"
 _MASTER_FILE        = FORECAST_DATA_DIR / "Articulos 1.csv"
