@@ -15,7 +15,7 @@ from web_comparativas.models import db_session
 from web_comparativas.forecast_models import (
     ForecastBase, ForecastValorizado, ForecastArticulo, ForecastNegocio, ForecastCliente
 )
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, desc, text
 
 logger = logging.getLogger("wc.forecast")
 
@@ -200,9 +200,25 @@ def get_chart_data(
 ) -> Dict[str, Any]:
     session = db_session()
     try:
-        # Build query
+        # 1. SQL Optimization: Set timeout for heavy queries (Postgres only)
+        if session.bind.dialect.name == "postgresql":
+            try:
+                session.execute(text("SET statement_timeout = '30s'"))
+            except:
+                pass
+
+        # 2. Query Optimization: Select ONLY needed columns to reduce data transfer
         filters = _build_base_filter(ForecastBase, start_date, end_date, profiles, negocios, subnegocios)
-        query = select(ForecastBase).where(and_(*filters))
+        query = select(
+            ForecastBase.fecha,
+            ForecastBase.tipo,
+            ForecastBase.yhat,
+            ForecastBase.y,
+            ForecastBase.li,
+            ForecastBase.ls,
+            ForecastBase.precio,
+            ForecastBase.codigo_serie
+        ).where(and_(*filters))
         
         # Load to pandas for rapid aggregation
         df = pd.read_sql(query, session.bind)
