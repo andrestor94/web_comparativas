@@ -131,6 +131,19 @@ async def attach_user_to_state(request: Request, call_next):
         
         # Inject Market Context from Session
         request.state.market_context = request.session.get("market_context", "public")
+
+        # === GERENTE ROUTE GUARD ===
+        if u and (u.role or "").lower() == "gerente":
+            path = request.url.path
+            allowed = (
+                path.startswith("/forecast")
+                or path.startswith("/api/forecast/")
+                or path.startswith("/mi/password")
+                or path.startswith("/static/")
+                or path in ("/login", "/logout", "/healthz", "/", "/markets", "/switch-market")
+            )
+            if not allowed:
+                return RedirectResponse("/forecast", 303)
     except Exception as e:
          print(f"[MW] Auth Error: {e}", flush=True)
          request.state.user = None
@@ -188,13 +201,19 @@ def health_check():
 from web_comparativas.routers.sic_router import router as sic_router
 from web_comparativas.routers.dimensiones_router import router as dimensiones_router
 from web_comparativas.routers.notifications_router import router as notifications_router
+from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
 from web_comparativas.api_comments import ui_router as comments_ui_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
 app.include_router(notifications_router)
+app.include_router(pliegos_router)
 app.include_router(comments_router)
+
+# === MODULES ===
+from web_comparativas.routers.forecast_router import router as forecast_router
+app.include_router(forecast_router)
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
@@ -328,14 +347,21 @@ async def http_exception_handler(request, exc):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    print("[HOME] Route / accessed", flush=True)
     if not request.state.user:
         return RedirectResponse("/login", 303)
 
     user = request.state.user
+
+    # === GERENTE → Forecast ===
+    if (user.role or "").lower() == "gerente":
+        return RedirectResponse("/forecast", 303)
+
     db = request.state.db
     
     # Context Check: If Private, redirect to Private Home
     if getattr(request.state, "market_context", "public") == "private":
+        print("[HOME] Redirecting to private market", flush=True)
         return RedirectResponse("/mercado-privado", 303)
 
     # 1. KPIs de Cargas (Uploads)
@@ -362,9 +388,21 @@ def home(request: Request):
         try:
             import pandas as pd
             df = pd.read_excel(OPP_FILE, engine="openpyxl")
+            print(f"[OPP] Loaded {len(df)} rows from Excel", flush=True)
+            
+            # Filter by Apertura date - only show active/future opportunities
+            if 'Apertura' in df.columns:
+                df['Apertura'] = pd.to_datetime(df['Apertura'], errors='coerce')
+                now = dt.datetime.now()
+                df = df[df['Apertura'] >= now]
+            
             opp_total = len(df)
+            # Force reload
             opp_unseen = opp_total # Asumimos todo unseen backend, el JS lo corrige
-        except: pass
+        except Exception as e:
+            print(f"[OPP] ERROR: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     return templates.TemplateResponse("home.html", {
         "request": request, 
@@ -394,6 +432,9 @@ def home(request: Request):
 def markets_home(request: Request):
     if not request.state.user:
         return RedirectResponse("/login", 303)
+    # === GERENTE → Forecast ===
+    if (getattr(request.state.user, 'role', '') or '').lower() == 'gerente':
+        return RedirectResponse("/forecast", 303)
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
         "user": request.state.user

@@ -1,4 +1,9 @@
 sources:
+  - id: TENDER_PDF
+    when:
+      filename_regex: '.*\.pdf$'
+    handler: 'web_comparativas.adapters.pdf_adapter:process_pdf_tender'
+
   - id: BAC
     when:
       platform: ['BAC']

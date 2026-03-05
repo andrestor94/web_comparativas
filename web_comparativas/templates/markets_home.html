@@ -130,7 +130,7 @@
 
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 1.5rem;
             padding: 0 1rem;
         }
@@ -419,6 +419,9 @@
 
 
             <div class="cards-grid">
+                {% set user_role = (user.role or '')|lower %}
+
+                {% if user_role != 'gerente' %}
                 <!-- Mercado Público -->
                 <a href="/mercado-publico/web-comparativas" class="market-card">
                     <div class="card-icon-wrapper">
@@ -462,9 +465,33 @@
                         </div>
                     </div>
                 </a>
+                {% endif %}
 
-                <!-- S.I.C (Soporte) - Admin y Auditor -->
+                <!-- Forecast -->
+                <a href="/forecast" class="market-card"
+                    style="border: 1px solid rgba(16, 185, 129, 0.3); background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(240,253,244,0.95));">
+                    <div class="card-icon-wrapper" style="background: rgba(16, 185, 129, 0.1); color: #059669;">
+                        <i class="bi bi-graph-up-arrow"></i>
+                    </div>
+                    <div>
+                        <h2 class="card-heading" style="color: #047857;">Forecast</h2>
+                        <p class="card-text">
+                            Proyección de demanda y análisis de expectativas de crecimiento.
+                            <br><br>
+                            Evolución histórica y pronósticos detallados por cliente y producto.
+                        </p>
+                    </div>
+                    <div class="card-footer" style="border-top-color: #dcfce7;">
+                        <span class="status-badge status-available"
+                            style="background: #065f46; color: #fff;">Disponible</span>
+                        <div class="arrow-link" style="color: #059669;">
+                            Ingresar <i class="bi bi-arrow-right"></i>
+                        </div>
+                    </div>
+                </a>
+
                 {% if user and (user.role or '')|lower in ['admin', 'auditor'] %}
+                <!-- S.I.C (Soporte) - Admin y Auditor -->
                 <a href="/sic" class="market-card"
                     style="border: 1px solid rgba(99, 102, 241, 0.3); background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(248,250,252,0.95));">
                     <div class="card-icon-wrapper" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">

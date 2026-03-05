@@ -63,12 +63,14 @@
                     <option value="supervisor" {% if r=='supervisor' %}selected{% endif %}>Supervisor</option>
                     <option value="analista" {% if r=='analista' %}selected{% endif %}>Analista</option>
                     <option value="auditor" {% if r=='auditor' %}selected{% endif %}>Auditor</option>
+                    <option value="gerente" {% if r=='gerente' %}selected{% endif %}>Gerente</option>
                 </select>
                 <div class="text-white-50 small mt-1">
                     • <strong>Administrador:</strong> acceso total.<br>
                     • <strong>Supervisor:</strong> puede cargar y ver todo, sin crear usuarios.<br>
                     • <strong>Analista:</strong> puede cargar y ver solo sus procesos.<br>
-                    • <strong>Auditor:</strong> solo lectura de todos los procesos.
+                    • <strong>Auditor:</strong> solo lectura de todos los procesos.<br>
+                    • <strong>Gerente:</strong> acceso exclusivo al módulo Forecast.
                 </div>
             </div>
 
