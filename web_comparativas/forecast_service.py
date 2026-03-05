@@ -45,6 +45,13 @@ def _downcast_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _decat(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert category columns back to object for safe fillna / str ops."""
+    for c in df.select_dtypes(include="category").columns:
+        df[c] = df[c].astype(object)
+    return df
+
+
 def _get_col(df: pd.DataFrame, name: str) -> Optional[str]:
     for c in df.columns:
         if c.lower().strip() == name.lower().strip():
@@ -522,8 +529,8 @@ def get_chart_data(
 ) -> Dict[str, Any]:
     """Return chart series for the demand evolution chart."""
     _ensure_loaded()
-    df = _cache.get("df_main", pd.DataFrame()).copy()
-    df_val = _cache.get("df_valorizado", pd.DataFrame()).copy()
+    df = _decat(_cache.get("df_main", pd.DataFrame()).copy())
+    df_val = _decat(_cache.get("df_valorizado", pd.DataFrame()).copy())
     if df.empty:
         return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
 
@@ -622,7 +629,7 @@ def get_client_table(
     _ensure_loaded()
     df_main = _cache.get("df_main", pd.DataFrame())
     df_val = _cache.get("df_valorizado", pd.DataFrame())
-    src = df_val if not df_val.empty else pd.DataFrame()
+    src = _decat(df_val.copy()) if not df_val.empty else pd.DataFrame()
     use_val = not df_val.empty
 
     if src.empty:
@@ -795,7 +802,7 @@ def get_client_detail(
     df_val = _cache.get("df_valorizado", pd.DataFrame())
     pl = _cache.get("price_lookup", {})
 
-    src = df_val if not df_val.empty else pd.DataFrame()
+    src = _decat(df_val.copy()) if not df_val.empty else pd.DataFrame()
     if src.empty:
         return {"client": cliente_display, "negocios": []}
 
