@@ -207,24 +207,9 @@ def get_chart_data(
             except:
                 pass
 
-        # 2. Query Optimization: Select ONLY needed columns to reduce data transfer
+        # 2. Query Optimization & SQL Aggregation (Replaces Pandas)
         filters = _build_base_filter(ForecastBase, start_date, end_date, profiles, negocios, subnegocios)
-        query = select(
-            ForecastBase.fecha,
-            ForecastBase.tipo,
-            ForecastBase.yhat,
-            ForecastBase.y,
-            ForecastBase.li,
-            ForecastBase.ls,
-            ForecastBase.precio,
-            ForecastBase.codigo_serie
-        ).where(and_(*filters))
         
-        # Load to pandas for rapid aggregation
-        df = pd.read_sql(query, session.bind)
-        if df.empty:
-            return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
-
         # Filter products via description from Articulos if needed
         if products:
             art_query = select(ForecastArticulo.codigo, ForecastArticulo.descrip)
@@ -236,50 +221,56 @@ def get_chart_data(
             # If a product is not found in article table, its code is exactly the description
             valid_codes.extend(products)
             
-            df = df[df["codigo_serie"].isin(valid_codes)]
-            if df.empty:
-                return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
+            filters.append(ForecastBase.codigo_serie.in_(valid_codes))
 
-        # Ensure numeric types
-        for col in ["y", "yhat", "li", "ls", "precio"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-
-        # Value mapping: Usar y para hist, yhat para forecast
-        df["valor"] = df.apply(
-            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["yhat"]) or 0,
-            axis=1
-        )
-        df["valor_li"] = df.apply(
-            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["li"]) or 0,
-            axis=1
-        )
-        df["valor_ls"] = df.apply(
-            lambda r: (r["y"] if r["tipo"] in ["history", "hist"] else r["ls"]) or 0,
-            axis=1
-        )
-
-        if view_money:
-            df["valor_final"] = df["valor"] * df["precio"].fillna(0)
-            df["li_final"] = df["valor_li"] * df["precio"].fillna(0)
-            df["ls_final"] = df["valor_ls"] * df["precio"].fillna(0)
-        else:
-            df["valor_final"] = df["valor"]
-            df["li_final"] = df["valor_li"]
-            df["ls_final"] = df["valor_ls"]
-
-        # Aggregate by date, tipo
-        grouped = df.groupby(["fecha", "tipo"])[["valor_final", "li_final", "ls_final"]].sum().reset_index()
-
-        # Filters using the strings requested by user (history/forecast)
-        df_hist = grouped[grouped["tipo"].isin(["history", "hist"])].sort_values("fecha")
-        df_fore = grouped[grouped["tipo"] == "forecast"].sort_values("fecha")
-
-        # Format arrays for Plotly
-        history = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["valor_final"]), 2)} for _, row in df_hist.iterrows()]
+        from sqlalchemy import case
         
-        forecast = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["valor_final"]), 2)} for _, row in df_fore.iterrows()]
-        ci_lower = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["li_final"]), 2)} for _, row in df_fore.iterrows()]
-        ci_upper = [{"x": row["fecha"].strftime("%Y-%m-%d"), "y": round(float(row["ls_final"]), 2)} for _, row in df_fore.iterrows()]
+        hist_money = func.sum(case((ForecastBase.tipo.in_(["hist", "history"]), ForecastBase.y * ForecastBase.precio), else_=0)).label("hist_money")
+        fore_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.yhat * ForecastBase.precio), else_=0)).label("fore_money")
+        hist_units = func.sum(case((ForecastBase.tipo.in_(["hist", "history"]), ForecastBase.y), else_=0)).label("hist_units")
+        fore_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.yhat), else_=0)).label("fore_units")
+        li_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.li * ForecastBase.precio), else_=0)).label("li_money")
+        ls_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.ls * ForecastBase.precio), else_=0)).label("ls_money")
+        li_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.li), else_=0)).label("li_units")
+        ls_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.ls), else_=0)).label("ls_units")
+
+        query = select(
+            ForecastBase.fecha,
+            ForecastBase.tipo,
+            hist_money,
+            fore_money,
+            hist_units,
+            fore_units,
+            li_money,
+            ls_money,
+            li_units,
+            ls_units
+        ).where(and_(*filters)).group_by(ForecastBase.fecha, ForecastBase.tipo).order_by(ForecastBase.fecha)
+
+        rows = session.execute(query).fetchall()
+
+        history = []
+        forecast = []
+        ci_lower = []
+        ci_upper = []
+        
+        hist_max_date = ""
+
+        for row in rows:
+            if not row.fecha:
+                continue
+            x = row.fecha.strftime("%Y-%m-%d")
+            if row.tipo in ["hist", "history"]:
+                val = row.hist_money if view_money else row.hist_units
+                history.append({"x": x, "y": round(float(val or 0), 2)})
+                hist_max_date = x
+            elif row.tipo == "forecast":
+                val = row.fore_money if view_money else row.fore_units
+                forecast.append({"x": x, "y": round(float(val or 0), 2)})
+                li = row.li_money if view_money else row.li_units
+                ls = row.ls_money if view_money else row.ls_units
+                ci_lower.append({"x": x, "y": round(float(li or 0), 2)})
+                ci_upper.append({"x": x, "y": round(float(ls or 0), 2)})
 
         forecast_adj = []
         if growth_pct != 0 and forecast:
