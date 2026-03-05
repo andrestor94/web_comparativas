@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import traceback
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -96,6 +96,10 @@ def migrate_file(config, df_price):
     print(f"[*] Migrando {config['file']} a {table_name}...")
     chunksize = 20000
     try:
+        with engine.begin() as conn:
+            conn.execute(text(f"DELETE FROM {table_name}"))
+        print(f"  -> Tabla {table_name} limpiada para recarga.")
+
         chunks = pd.read_csv(
             str(file_path), sep=config["sep"], decimal=config.get("decimal", "."),
             encoding=config["encoding"], chunksize=chunksize, low_memory=False
@@ -110,6 +114,11 @@ def migrate_file(config, df_price):
             if table_name == "forecast_negocio":
                 if "unidad" in chunk.columns: chunk["unidad"] = pd.to_numeric(chunk["unidad"], errors="coerce").fillna(0).astype(int)
                 if "subunidad" in chunk.columns: chunk["subunidad"] = pd.to_numeric(chunk["subunidad"], errors="coerce").fillna(0).astype(int)
+            if table_name == "forecast_articulo":
+                if "predrog" in chunk.columns:
+                    chunk["predrog"] = pd.to_numeric(chunk["predrog"].astype(str).str.replace(",", "."), errors="coerce")
+                if "cantenv" in chunk.columns:
+                    chunk["cantenv"] = pd.to_numeric(chunk["cantenv"].astype(str).str.replace(",", "."), errors="coerce")
             if table_name == "forecast_base":
                 chunk = apply_prices(chunk, df_price)
 
