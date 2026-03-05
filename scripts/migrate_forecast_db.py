@@ -57,10 +57,21 @@ def build_price_lookup() -> pd.DataFrame:
     if col_desc in df.columns: df[col_desc] = df[col_desc].astype(str).str.upper()
     if col_fam in df.columns: df[col_fam] = df[col_fam].astype(str).str.strip().str.upper()
 
-    df_price = df[[col_art, col_desc, col_fam, col_predrog, col_env]].dropna(subset=[col_predrog, col_env]).copy()
+    df_price = df[[col_art, col_desc, col_fam, col_predrog, col_env]].dropna(subset=[col_predrog]).copy()
     df_price["predrog"] = pd.to_numeric(df_price[col_predrog].astype(str).str.replace(",", "."), errors="coerce")
-    df_price["cantenv"] = pd.to_numeric(df_price[col_env].astype(str).str.replace(",", "."), errors="coerce")
-    df_price = df_price[(df_price["predrog"] > 0) & (df_price["cantenv"] > 0)].copy()
+    df_price["cantenv"] = pd.to_numeric(df_price[col_env].astype(str).str.replace(",", "."), errors="coerce").fillna(1.0)
+    df_price.loc[df_price["cantenv"] <= 0, "cantenv"] = 1.0
+    df_price = df_price[df_price["predrog"] > 0].copy()
+    
+    # Extract clean code if it has (100) ASA ... pattern
+    import re
+    def clean_art_code(c):
+        c = str(c).strip()
+        match = re.search(r"\((.*?)\)", c)
+        if match: return match.group(1).strip()
+        return c
+        
+    df_price["codigo_clean"] = df_price[col_art].apply(clean_art_code)
     df_price["precio_unitario"] = df_price["predrog"] / df_price["cantenv"]
     return df_price
 
@@ -70,25 +81,42 @@ def apply_prices(chunk: pd.DataFrame, df_price: pd.DataFrame) -> pd.DataFrame:
         return chunk
         
     prices_art = df_price.groupby("codigo")["precio_unitario"].mean().to_dict()
+    prices_art_clean = df_price.groupby("codigo_clean")["precio_unitario"].mean().to_dict()
     prices_desc = df_price.groupby("descrip")["precio_unitario"].mean().to_dict()
     prices_fam = df_price.groupby("familia")["precio_unitario"].mean().to_dict()
-    
+
+    import re
+    def clean_art_code(c):
+        c = str(c).strip()
+        match = re.search(r"\((.*?)\)", c)
+        if match: return match.group(1).strip()
+        return c
+
     chunk["codigo_serie"] = chunk["codigo_serie"].astype(str).str.strip()
+    chunk["_key_art_clean"] = chunk["codigo_serie"].apply(clean_art_code)
     chunk["_key_desc"] = chunk["codigo_serie"].str.upper()
     chunk["_key_fam"] = chunk["codigo_serie"].str.upper()
     
+    # Priority 1: Exact code
     chunk["precio"] = chunk["codigo_serie"].map(prices_art)
     
+    # Priority 2: Clean code (extract from parens)
+    mask_zero = chunk["precio"].isna() | (chunk["precio"] == 0)
+    if mask_zero.any():
+        chunk.loc[mask_zero, "precio"] = chunk.loc[mask_zero, "_key_art_clean"].map(prices_art_clean)
+
+    # Priority 3: Description
     mask_zero = chunk["precio"].isna() | (chunk["precio"] == 0)
     if mask_zero.any():
         chunk.loc[mask_zero, "precio"] = chunk.loc[mask_zero, "_key_desc"].map(prices_desc)
         
+    # Priority 4: Family
     mask_zero = chunk["precio"].isna() | (chunk["precio"] == 0)
     if mask_zero.any():
         chunk.loc[mask_zero, "precio"] = chunk.loc[mask_zero, "_key_fam"].map(prices_fam)
         
     chunk["precio"] = chunk["precio"].fillna(1500.0)
-    chunk.drop(columns=["_key_desc", "_key_fam"], inplace=True)
+    chunk.drop(columns=["_key_art_clean", "_key_desc", "_key_fam"], inplace=True)
     return chunk
 
 def migrate_file(config, df_price):
@@ -140,8 +168,23 @@ def migrate_file(config, df_price):
                     if col in chunk.columns:
                         chunk[col] = pd.to_numeric(chunk[col].astype(str).str.replace(",", "."), errors="coerce")
             if table_name == "forecast_base":
+                for col in ["y", "yhat", "li", "ls"]:
+                    if col in chunk.columns:
+                        chunk[col] = pd.to_numeric(chunk[col].astype(str).str.replace(",", "."), errors="coerce").fillna(0.0)
                 chunk = apply_prices(chunk, df_price)
 
+            if table_name == "forecast_valorizado":
+                num_cols = ["yhat_cliente", "li_cliente", "ls_cliente", "ponderador_mes", "monto_yhat", "monto_li", "monto_ls", "precio"]
+                for col in num_cols:
+                    if col in chunk.columns:
+                        chunk[col] = pd.to_numeric(chunk[col].astype(str).str.replace(",", "."), errors="coerce").fillna(0.0)
+                
+                # If monto_yhat is missing or zero, calculate it
+                if "precio" in chunk.columns and "yhat_cliente" in chunk.columns:
+                    mask = (chunk["monto_yhat"] == 0) | chunk["monto_yhat"].isna()
+                    chunk.loc[mask, "monto_yhat"] = chunk.loc[mask, "yhat_cliente"] * chunk.loc[mask, "precio"]
+                    chunk.loc[mask, "monto_li"] = chunk.loc[mask, "li_cliente"] * chunk.loc[mask, "precio"]
+                    chunk.loc[mask, "monto_ls"] = chunk.loc[mask, "ls_cliente"] * chunk.loc[mask, "precio"]
             chunk.to_sql(table_name, engine, if_exists="append", index=False)
             total += len(chunk)
             print(f"  -> Insertados {total} registros", end="\r")
