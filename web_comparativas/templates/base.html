@@ -850,8 +850,8 @@
       var APP_USER = {
         role: {{ ((user and(user.role or user.rol or '')) | lower) | tojson
     }},
-    display: { { (_display_name or 'Yo') | tojson } },
-    email: { { (user and user.email or '') | tojson } }
+    display: {{ (_display_name or 'Yo') | tojson }},
+    email: {{ (user and user.email or '') | tojson }}
       };
     window.APP_USER = APP_USER;
 
@@ -879,7 +879,7 @@
       }
 
       form.addEventListener('submit', function (e) { e.preventDefault(); go(); });
-      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); }});
     })();
 
     // ====== Badge "Mesa de ayuda" (abiertos) ======
