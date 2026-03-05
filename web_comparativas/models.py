@@ -1347,3 +1347,8 @@ class TicketMessage(Base):
     ticket = relationship("Ticket", back_populates="messages")
     user = relationship("User")
 
+
+# ----------------------------------------------------------------------
+# Import Forecast Models to register them with Base
+# ----------------------------------------------------------------------
+from .forecast_models import *
