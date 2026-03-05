@@ -361,8 +361,7 @@ def get_client_table(
 
             if group_key not in result_groups:
                 result_groups[group_key] = {
-                    "group_name": group_key,
-                    "is_group": bool(grp_name),
+                    "grupo": group_key,
                     "clients": [],
                     "totals": {c: 0.0 for c in col_names},
                     "group_total": 0.0,
@@ -378,8 +377,7 @@ def get_client_table(
                 if val < min_val: min_val = val
 
             cli_dict["Total"] = float(row["Total"])
-            if result_groups[group_key]["is_group"]:
-                result_groups[group_key]["clients"].append(cli_dict)
+            result_groups[group_key]["clients"].append(cli_dict)
 
         merged_groups = []
         grand_totals = {c: 0.0 for c in col_names}
@@ -390,8 +388,7 @@ def get_client_table(
                 grand_totals[c] += g["totals"][c]
             grand_totals["Total"] += g["group_total"]
 
-            if g["is_group"]:
-                g["clients"] = sorted(g["clients"], key=lambda x: x["Total"], reverse=True)
+            g["clients"] = sorted(g["clients"], key=lambda x: x["Total"], reverse=True)
             merged_groups.append(g)
 
         merged_groups = sorted(merged_groups, key=lambda x: x["group_total"], reverse=True)
@@ -426,27 +423,32 @@ def get_client_detail(
 ) -> Dict[str, Any]:
     session = db_session()
     try:
-        # Same exact filter logic as the table
+        # Get client info
+        cli_query = select(ForecastCliente.nombre, ForecastCliente.perfil).where(ForecastCliente.codigo == str(cliente_display).strip())
+        cli_info = session.execute(cli_query).first()
+        client_name = cli_info.nombre if cli_info else cliente_display
+        client_perfil = cli_info.perfil if cli_info else ""
+
+        # Base filters
         filters = _build_valorizado_filter(ForecastValorizado, start_date, end_date, profiles)
         query = select(ForecastValorizado).where(and_(*filters))
         df_val = pd.read_sql(query, session.bind)
         
         if df_val.empty:
-            return {"client": cliente_display, "negocios": []}
+            return {"client": client_name, "perfil": client_perfil, "negocio": "", "n_products": 0, "growth_pct": growth_pct, "columns": [], "negocios": []}
 
         df_val["cliente_id"] = df_val["cliente_id"].astype(str).str.strip()
         df_val = df_val[df_val["cliente_id"] == str(cliente_display).strip()]
         
         if df_val.empty:
-            return {"client": cliente_display, "negocios": []}
+            return {"client": client_name, "perfil": client_perfil, "negocio": "", "n_products": 0, "growth_pct": growth_pct, "columns": [], "negocios": []}
 
-        # Need Neg/Subneg mappings to detail by product
+        # Value to use: yhat_cliente in UNITS. NOT money.
+        df_val["yhat_orig"] = df_val["yhat_cliente"] 
+        
+        # Need Neg/Subneg base info natively
         base_query = select(ForecastBase.codigo_serie, ForecastBase.neg, ForecastBase.subneg).distinct()
         df_base_dim = pd.read_sql(base_query, session.bind)
-        
-        # Need Neg/Subneg descriptors
-        neg_query = select(ForecastNegocio.unidad, ForecastNegocio.subunidad, ForecastNegocio.descrip)
-        df_neg = pd.read_sql(neg_query, session.bind)
         
         # Merge dimensions to Val
         df_c = pd.merge(df_val, df_base_dim, on="codigo_serie", how="left")
@@ -459,71 +461,109 @@ def get_client_detail(
             subnegs_int = [int(x) for x in subnegocios if str(x).isdigit()]
             df_c = df_c[df_c["subneg"].isin(subnegs_int)]
 
+        # Get all articles to retrieve their product descriptions and unit prices (predrog)
+        art_query = select(ForecastArticulo.codigo, ForecastArticulo.descrip, ForecastArticulo.predrog)
+        art_df = pd.read_sql(art_query, session.bind)
+        art_df["predrog"] = pd.to_numeric(art_df["predrog"], errors="coerce").fillna(0.0)
+        
         if products:
-            art_query = select(ForecastArticulo.codigo, ForecastArticulo.descrip)
-            art_df = pd.read_sql(art_query, session.bind)
-            art_df["descrip"] = art_df["descrip"].fillna(art_df["codigo"])
-            prod_codes = art_df[art_df["descrip"].isin(products)]["codigo"].tolist()
+            art_df_search = art_df.copy()
+            art_df_search["descrip"] = art_df_search["descrip"].fillna(art_df_search["codigo"])
+            prod_codes = art_df_search[art_df_search["descrip"].isin(products)]["codigo"].tolist()
             prod_codes.extend(products)
             df_c = df_c[df_c["codigo_serie"].isin(prod_codes)]
 
         if df_c.empty:
-            return {"client": cliente_display, "negocios": []}
+            return {"client": client_name, "perfil": client_perfil, "negocio": "", "n_products": 0, "growth_pct": growth_pct, "columns": [], "negocios": []}
 
-        # Join product descriptions
-        art_query = select(ForecastArticulo.codigo, ForecastArticulo.descrip)
-        art_df = pd.read_sql(art_query, session.bind)
+        # Join descriptions and prices
         df_c = pd.merge(df_c, art_df, left_on="codigo_serie", right_on="codigo", how="left")
         df_c["producto"] = df_c["descrip"].fillna(df_c["codigo_serie"])
+        df_c["unit_price"] = df_c["predrog"].fillna(0.0)
 
-        # Join Neg descriptor
+        # Get Negocio descriptors
+        neg_query = select(ForecastNegocio.unidad, ForecastNegocio.subunidad, ForecastNegocio.descrip)
+        df_neg = pd.read_sql(neg_query, session.bind)
+        
+        # Map main negocios (subunidad == 0)
         df_neg_main = df_neg[df_neg["subunidad"] == 0].copy()
         df_c = pd.merge(df_c, df_neg_main, left_on="neg", right_on="unidad", how="left")
         df_c.rename(columns={"descrip_y": "negocio_desc", "descrip_x": "descrip"}, inplace=True)
         df_c["negocio_desc"] = df_c["negocio_desc"].fillna("Sin Negocio")
+        
+        # Map subnegocios
+        df_subneg = df_neg[df_neg["subunidad"] != 0].copy()
+        # Since neg, subneg combo defines the exact subnegocio, we can merge on both
+        df_c = pd.merge(df_c, df_subneg, left_on=["neg", "subneg"], right_on=["unidad", "subunidad"], how="left")
+        df_c.rename(columns={"descrip_y": "subnegocio_desc", "descrip_x": "descrip"}, inplace=True)
+        # Fallback if no specific subneg match
+        mask_no_sub = df_c["subnegocio_desc"].isna()
+        df_c.loc[mask_no_sub, "subnegocio_desc"] = "Subnegocio " + df_c.loc[mask_no_sub, "subneg"].astype(str)
+        df_c["subnegocio_desc"] = df_c["subnegocio_desc"].fillna("Sin Subnegocio")
+        
+        # Get unique columns (months)
+        df_c["fecha_str"] = df_c["fecha"].dt.strftime("%Y-%m")
+        col_names = sorted(df_c["fecha_str"].unique().tolist())
+        
+        # Total unique products
+        n_products = df_c["producto"].nunique()
+        
+        # Main negocio for the client (pick the one with most rows or just the first)
+        main_negocio = df_c["negocio_desc"].value_counts().index[0] if not df_c.empty else "Sin Negocio"
 
-        # Pivot Negocio -> Producto
-        factor = 1.0 + (growth_pct / 100.0)
-        df_c["yhat"] = df_c["monto_yhat"] * factor
-
-        idx_cols = ["negocio_desc", "producto"]
-        piv = df_c.groupby(idx_cols + ["fecha"])["yhat"].sum().reset_index()
-        piv["fecha"] = piv["fecha"].dt.strftime("%Y-%m")
-
-        pivot = piv.set_index(idx_cols + ["fecha"])["yhat"].unstack("fecha").fillna(0)
-        col_names = sorted(pivot.columns.tolist())
-        pivot["Total"] = pivot.sum(axis=1)
-        pivot = pivot.reset_index()
-
+        # Pivot the data to get sum of yhat_orig per product per month
+        # Group by negocio, subnegocio, producto, unit_price
+        grouped = df_c.groupby(["negocio_desc", "subnegocio_desc", "producto", "unit_price", "fecha_str"])["yhat_orig"].sum().reset_index()
+        
         result_negs = []
-        for neg, group in pivot.groupby("negocio_desc"):
-            products_arr = []
-            neg_totals = {c: 0.0 for c in col_names}
-            neg_totals["Total"] = 0.0
-
-            for _, row in group.iterrows():
-                p_dict = {"producto": row["producto"]}
-                for c in col_names:
-                    val = float(row[c])
-                    p_dict[c] = val
-                    neg_totals[c] += val
-                p_total = float(row["Total"])
-                p_dict["Total"] = p_total
-                neg_totals["Total"] += p_total
-                products_arr.append(p_dict)
-
-            products_arr = sorted(products_arr, key=lambda x: x["Total"], reverse=True)
+        for neg, group_neg in grouped.groupby("negocio_desc"):
+            subnegs_arr = []
+            
+            for subneg, group_subneg in group_neg.groupby("subnegocio_desc"):
+                products_arr = []
+                
+                # Each product has multiple months
+                for (prod, price), group_prod in group_subneg.groupby(["producto", "unit_price"]):
+                    month_data = {row["fecha_str"]: row["yhat_orig"] for _, row in group_prod.iterrows()}
+                    months = []
+                    for c in col_names:
+                        months.append({
+                            "label": c,
+                            "orig": float(month_data.get(c, 0.0))
+                        })
+                        
+                    products_arr.append({
+                        "producto": prod,
+                        "um": "Unid.",
+                        "unit_price": float(price),
+                        "months": months
+                    })
+                    
+                subnegs_arr.append({
+                    "subnegocio": subneg,
+                    "products": sorted(products_arr, key=lambda x: x["producto"])
+                })
+                
             result_negs.append({
                 "negocio": neg,
-                "productos": products_arr,
-                "totals": neg_totals
+                "count": sum(len(sn["products"]) for sn in subnegs_arr),
+                "subnegocios": sorted(subnegs_arr, key=lambda x: x["subnegocio"])
             })
 
-        result_negs = sorted(result_negs, key=lambda x: x["totals"]["Total"], reverse=True)
-        return {"client": cliente_display, "negocios": result_negs, "columns": col_names}
+        result_negs = sorted(result_negs, key=lambda x: x["count"], reverse=True)
+
+        return {
+            "client": client_name,
+            "perfil": client_perfil,
+            "negocio": main_negocio,
+            "n_products": int(n_products),
+            "growth_pct": float(growth_pct),
+            "columns": col_names,
+            "negocios": result_negs
+        }
     except Exception as e:
         logger.error(f"Error in get_client_detail: {e}")
-        return {"client": cliente_display, "negocios": [], "columns": []}
+        return {"client": cliente_display, "perfil": "", "negocios": [], "n_products": 0, "growth_pct": growth_pct, "columns": []}
     finally:
         session.close()
 
