@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#6366F1', width: 2.5, dash: 'dash', shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: '<b>Proyección (Base)</b><br>%{x|%b %Y}<br>Pronóstico: $%{customdata[0]}<br>Lm. Inf: $%{customdata[1]}<br>Lm. Sup: $%{customdata[2]}<extra></extra>'
+                hovertemplate: '<b>Proyección (Base)</b><br>%{x}<br>Pronóstico: $%{customdata[0]}<br>Lm. Inf: $%{customdata[1]}<br>Lm. Sup: $%{customdata[2]}<extra></extra>'
             });
         }
 
@@ -383,7 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#10B981', width: 2.5, dash: 'dot', shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: `<b>Proyección (+${pct}%)</b><br>%{x|%b %Y}<br>Ajustado: $%{customdata[0]}<extra></extra>`
+                hovertemplate: `<b>Proyección (+${pct}%)</b><br>%{x}<br>Ajustado: $%{customdata[0]}<extra></extra>`
             });
         }
 
@@ -399,7 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 mode: 'lines',
                 line: { color: '#0F172A', width: 3, shape: 'spline', smoothing: 1.3 },
                 customdata: customdata,
-                hovertemplate: '<b>Historia</b><br>%{x|%b %Y}<br>$%{customdata[0]}<extra></extra>'
+                hovertemplate: '<b>Historia</b><br>%{x}<br>$%{customdata[0]}<extra></extra>'
             });
         }
 
@@ -417,9 +417,10 @@ document.addEventListener('DOMContentLoaded', () => {
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
             xaxis: {
+                type: 'date',
                 showgrid: false, zeroline: false,
                 showline: true, linecolor: '#E2E8F0',
-                title: '', tickformat: '%b %Y',
+                title: '', tickformat: '%b<br>%Y',
                 tickfont: { color: '#94A3B8' }
             },
             yaxis: {
