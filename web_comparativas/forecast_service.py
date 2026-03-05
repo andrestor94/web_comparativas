@@ -188,111 +188,102 @@ def _build_valorizado_filter(model, start_date: str, end_date: str, profiles: Li
         filters.append(model.perfil.in_(profiles))
     return filters
 
-def get_chart_data(
-    start_date: str,
-    end_date: str,
-    profiles: List[str],
-    negocios: List[str],
-    subnegocios: List[str],
-    products: List[str],
-    growth_pct: float = 0.0,
-    view_money: bool = True,
-) -> Dict[str, Any]:
-    session = db_session()
+def get_chart_data(start_date, end_date, profiles, negocios, subnegocios, products, growth_pct, view_money):
     try:
-        # 1. SQL Optimization: Set timeout for heavy queries (Postgres only)
-        if session.bind.dialect.name == "postgresql":
-            try:
-                session.execute(text("SET statement_timeout = '30s'"))
-            except:
-                pass
-
-        # 2. Query Optimization & SQL Aggregation (Replaces Pandas)
-        filters = _build_base_filter(ForecastBase, start_date, end_date, profiles, negocios, subnegocios)
-        
-        # Filter products via description from Articulos if needed
-        if products:
-            art_query = select(ForecastArticulo.codigo, ForecastArticulo.descrip)
-            art_df = pd.read_sql(art_query, session.bind)
-            art_df["descrip"] = art_df["descrip"].fillna(art_df["codigo"])
+        from web_comparativas.models import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        try:
+            if db.bind.dialect.name == "postgresql":
+                try:
+                    db.execute(text("SET statement_timeout = '30s'"))
+                except:
+                    pass
             
-            # Sub-filter the codes that match the descriptions
-            valid_codes = art_df[art_df["descrip"].isin(products)]["codigo"].tolist()
-            # If a product is not found in article table, its code is exactly the description
-            valid_codes.extend(products)
+            # Build WHERE conditions
+            conditions = []
+            params = {}
+            if start_date:
+                conditions.append("fecha >= :start")
+                params["start"] = start_date
+            if end_date:
+                conditions.append("fecha <= :end")
+                params["end"] = end_date
+            if profiles:
+                conditions.append("perfil = ANY(:profiles)")
+                params["profiles"] = profiles
+            if negocios:
+                conditions.append("neg = ANY(:negocios)")
+                params["negocios"] = negocios
+            if subnegocios:
+                conditions.append("subneg = ANY(:subnegocios)")
+                params["subnegocios"] = subnegocios
+            if products:
+                conditions.append("codigo_serie = ANY(:products)")
+                params["products"] = products
             
-            filters.append(ForecastBase.codigo_serie.in_(valid_codes))
-
-        from sqlalchemy import case
-        
-        hist_money = func.sum(case((ForecastBase.tipo.in_(["hist", "history"]), ForecastBase.y * ForecastBase.precio), else_=0)).label("hist_money")
-        fore_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.yhat * ForecastBase.precio), else_=0)).label("fore_money")
-        hist_units = func.sum(case((ForecastBase.tipo.in_(["hist", "history"]), ForecastBase.y), else_=0)).label("hist_units")
-        fore_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.yhat), else_=0)).label("fore_units")
-        li_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.li * ForecastBase.precio), else_=0)).label("li_money")
-        ls_money = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.ls * ForecastBase.precio), else_=0)).label("ls_money")
-        li_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.li), else_=0)).label("li_units")
-        ls_units = func.sum(case((ForecastBase.tipo == "forecast", ForecastBase.ls), else_=0)).label("ls_units")
-
-        query = select(
-            ForecastBase.fecha,
-            ForecastBase.tipo,
-            hist_money,
-            fore_money,
-            hist_units,
-            fore_units,
-            li_money,
-            ls_money,
-            li_units,
-            ls_units
-        ).where(and_(*filters)).group_by(ForecastBase.fecha, ForecastBase.tipo).order_by(ForecastBase.fecha)
-
-        rows = session.execute(query).fetchall()
-
-        history = []
-        forecast = []
-        ci_lower = []
-        ci_upper = []
-        
-        hist_max_date = ""
-
-        for row in rows:
-            if not row.fecha:
-                continue
-            x = row.fecha.strftime("%Y-%m-%d")
-            if row.tipo in ["hist", "history"]:
-                val = row.hist_money if view_money else row.hist_units
-                history.append({"x": x, "y": round(float(val or 0), 2)})
-                hist_max_date = x
-            elif row.tipo == "forecast":
-                val = row.fore_money if view_money else row.fore_units
-                forecast.append({"x": x, "y": round(float(val or 0), 2)})
-                li = row.li_money if view_money else row.li_units
-                ls = row.ls_money if view_money else row.ls_units
-                ci_lower.append({"x": x, "y": round(float(li or 0), 2)})
-                ci_upper.append({"x": x, "y": round(float(ls or 0), 2)})
-
-        forecast_adj = []
-        if growth_pct != 0 and forecast:
-            factor = 1.0 + (growth_pct / 100.0)
-            forecast_adj = [{"x": pt["x"], "y": round(pt["y"] * factor, 2)} for pt in forecast]
-
-        hist_max_date = df_hist["fecha"].max().strftime("%Y-%m-%d") if not df_hist.empty else ""
-
-        return {
-            "history": history,
-            "forecast": forecast,
-            "forecast_adj": forecast_adj,
-            "ci_upper": ci_upper,
-            "ci_lower": ci_lower,
-            "hist_max_date": hist_max_date,
-            "growth_pct": growth_pct,
-        }
+            where = " AND ".join(conditions) if conditions else "1=1"
+            
+            sql = text(f"""
+                SELECT 
+                    fecha,
+                    tipo,
+                    SUM(CASE WHEN tipo IN ('hist', 'history') THEN COALESCE(y, 0) * COALESCE(precio, 0) ELSE 0 END) as hist_money,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(yhat, 0) * COALESCE(precio, 0) ELSE 0 END) as fore_money,
+                    SUM(CASE WHEN tipo IN ('hist', 'history') THEN COALESCE(y, 0) ELSE 0 END) as hist_units,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(yhat, 0) ELSE 0 END) as fore_units,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(li, 0) * COALESCE(precio, 0) ELSE 0 END) as li_money,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(ls, 0) * COALESCE(precio, 0) ELSE 0 END) as ls_money,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(li, 0) ELSE 0 END) as li_units,
+                    SUM(CASE WHEN tipo = 'forecast' THEN COALESCE(ls, 0) ELSE 0 END) as ls_units
+                FROM forecast_base
+                WHERE {where}
+                GROUP BY fecha, tipo
+                ORDER BY fecha
+            """)
+            
+            rows = db.execute(sql, params).fetchall()
+            
+            history, forecast, ci_lower, ci_upper = [], [], [], []
+            hist_max_date = ""
+            
+            for row in rows:
+                if not row.fecha:
+                    continue
+                x = row.fecha.strftime("%Y-%m-%d")
+                if row.tipo in ["hist", "history"]:
+                    val = row.hist_money if view_money else row.hist_units
+                    history.append({"x": x, "y": round(float(val or 0), 2)})
+                    hist_max_date = x
+                elif row.tipo == "forecast":
+                    val = row.fore_money if view_money else row.fore_units
+                    forecast.append({"x": x, "y": round(float(val or 0), 2)})
+                    li = row.li_money if view_money else row.li_units
+                    ls = row.ls_money if view_money else row.ls_units
+                    ci_lower.append({"x": x, "y": round(float(li or 0), 2)})
+                    ci_upper.append({"x": x, "y": round(float(ls or 0), 2)})
+            
+            forecast_adj = []
+            if growth_pct != 0 and forecast:
+                import math
+                ra = growth_pct / 100.0
+                rm = math.pow(1 + ra, 1/12.0) - 1
+                forecast_adj = [{"x": pt["x"], "y": round(pt["y"] * math.pow(1 + rm, i + 1), 2)} for i, pt in enumerate(forecast)]
+            
+            return {
+                "history": history,
+                "forecast": forecast,
+                "forecast_adj": forecast_adj,
+                "ci_upper": ci_upper,
+                "ci_lower": ci_lower,
+                "hist_max_date": hist_max_date,
+                "growth_pct": growth_pct,
+            }
+        finally:
+            db.close()
     except Exception as e:
         logger.error(f"Error in get_chart_data: {e}")
         return {"history": [], "forecast": [], "forecast_adj": [], "ci_upper": [], "ci_lower": []}
-    finally:
-        session.close()
 
 def get_client_table(
     start_date: str,
