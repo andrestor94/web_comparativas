@@ -95,5 +95,11 @@ class ForecastDatasetBase(Base):
     __tablename__ = "forecast_dataset_base"
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     codigo_serie = Column(String(100), index=True)
+    perfil = Column(String(50), index=True)
+    qty_mes = Column(Float)
+    periodo = Column(String(20), index=True)
     nivel_agregacion = Column(String(50))
-    descrip = Column(String(300))
+    neg = Column(Integer, index=True)
+    subneg = Column(Integer, index=True)
+    familia = Column(String(200))
+    fecha = Column(DateTime, index=True)
