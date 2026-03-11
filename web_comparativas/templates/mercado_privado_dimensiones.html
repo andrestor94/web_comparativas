@@ -48,12 +48,38 @@
         <h6 class="mt-2 text-primary fw-bold" id="loadingText">Consultando base de datos...</h6>
     </div>
 
+    {% if user.role == 'admin' %}
+    <div class="tech-card" id="adminUploadPanel" style="border: 1px solid #d0e4ff; background: #f5f9ff;">
+        <div class="dim-section-kicker">Administración — Carga de datos</div>
+        <p class="text-muted small mb-3">
+            Sube el <strong>dataset_unificado.csv</strong> para ingestar los datos en la base de datos.
+            La ingesta corre en background; revisá el estado en la tarjeta <em>Contexto de datos</em>.
+        </p>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <input type="file" id="csvFileInput" accept=".csv" class="form-control form-control-sm" style="max-width:320px;">
+            <button id="uploadCsvBtn" class="btn btn-primary btn-sm rounded-pill px-4" onclick="uploadDimensionamientoCSV()">
+                <i class="bi bi-cloud-upload me-1"></i> Ingestar CSV
+            </button>
+            <span id="uploadCsvStatus" class="small text-muted"></span>
+        </div>
+        <div id="uploadCsvProgress" class="mt-2" style="display:none;">
+            <div class="progress" style="height:6px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated w-100"></div>
+            </div>
+            <small class="text-primary mt-1 d-block">Subiendo archivo... esto puede tardar varios minutos para archivos grandes.</small>
+        </div>
+    </div>
+    {% endif %}
+
     <div id="emptyState" class="tech-card dim-empty-state" style="display:none;">
         <h3 class="h5 fw-bold mb-2" style="color: var(--tech-blue-dark);">No hay datos cargados</h3>
+        {% if user.role == 'admin' %}
+        <p class="text-muted mb-0">Usá el panel de administración de arriba para subir el CSV e iniciar la ingesta.</p>
+        {% else %}
         <p class="text-muted mb-0">
-            El módulo ya no procesa archivos desde la interfaz. Coloque el CSV unificado en el proyecto y ejecute la
-            ingesta backend para poblar la base de datos.
+            Contactá a un administrador para cargar el dataset de Dimensionamiento.
         </p>
+        {% endif %}
     </div>
 
     <div id="dashboardContent" style="display:none;">
@@ -264,4 +290,48 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v12"></script>
+<script>
+async function uploadDimensionamientoCSV() {
+    const input = document.getElementById('csvFileInput');
+    const btn = document.getElementById('uploadCsvBtn');
+    const statusEl = document.getElementById('uploadCsvStatus');
+    const progressEl = document.getElementById('uploadCsvProgress');
+
+    if (!input.files || !input.files[0]) {
+        statusEl.textContent = 'Seleccioná un archivo CSV primero.';
+        statusEl.className = 'small text-warning';
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+
+    btn.disabled = true;
+    statusEl.textContent = 'Subiendo...';
+    statusEl.className = 'small text-primary';
+    progressEl.style.display = 'block';
+
+    try {
+        const resp = await fetch('/api/mercado-privado/dimensiones/upload-csv', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            statusEl.textContent = '✓ ' + data.message;
+            statusEl.className = 'small text-success';
+            input.value = '';
+        } else {
+            statusEl.textContent = '✗ ' + (data.detail || 'Error desconocido');
+            statusEl.className = 'small text-danger';
+        }
+    } catch (err) {
+        statusEl.textContent = '✗ Error de red: ' + err.message;
+        statusEl.className = 'small text-danger';
+    } finally {
+        btn.disabled = false;
+        progressEl.style.display = 'none';
+    }
+}
+</script>
 {% endblock %}
