@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Solicitud #{{ caso.id }} – SIEM{% endblock %}
+{% block header_title %}Solicitud #{{ caso.id }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .estado-badge { font-size: .75rem; font-weight: 600; padding: .3em .8em; border-radius: 20px; }
+  .estado-borrador              { background: #f0f0f0; color: #666; }
+  .estado-pendiente_revision    { background: #fff3cd; color: #856404; }
+  .estado-en_revision           { background: #cfe2ff; color: #084298; }
+  .estado-pendiente_procesamiento { background: #e2d9f3; color: #432874; }
+  .estado-procesado_externamente { background: #d1ecf1; color: #0c5460; }
+  .estado-excel_cargado         { background: #d4edda; color: #155724; }
+  .estado-en_validacion         { background: #fde8c8; color: #7d4000; }
+  .estado-listo                 { background: #198754; color: #fff; }
+  .estado-observado             { background: #fff0b3; color: #664d03; }
+  .estado-rechazado             { background: #f8d7da; color: #842029; }
+  .estado-reprocesar            { background: #ffd6a5; color: #7c4700; }
+  .estado-archivado             { background: #e9ecef; color: #495057; }
+
+  .timeline { position: relative; padding-left: 1.5rem; }
+  .timeline::before { content: ''; position: absolute; left: .5rem; top: 0; bottom: 0;
+    width: 2px; background: var(--bs-border-color); }
+  .timeline-item { position: relative; margin-bottom: 1rem; }
+  .timeline-item::before { content: ''; position: absolute; left: -1.1rem; top: .3rem;
+    width: .6rem; height: .6rem; border-radius: 50%; background: var(--bs-primary); border: 2px solid white;
+    box-shadow: 0 0 0 2px var(--bs-primary); }
+  .timeline-item.estado-listo::before { background: #198754; box-shadow: 0 0 0 2px #198754; }
+  .timeline-item.estado-rechazado::before { background: #dc3545; box-shadow: 0 0 0 2px #dc3545; }
+
+  .info-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: #888; font-weight: 600; }
+  .info-value { font-size: .9rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="py-3 px-1" style="max-width:760px">
+
+  <nav style="font-size:.82rem" class="mb-3">
+    <a href="/mercado-publico/lectura-pliegos" class="text-muted text-decoration-none">
+      <i class="bi bi-arrow-left me-1"></i>Lectura de Pliegos
+    </a>
+    <span class="mx-1 text-muted">/</span>
+    <span>Solicitud #{{ caso.id }}</span>
+  </nav>
+
+  {# ── Header del caso ── #}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h5 class="mb-1 fw-bold">{{ caso.titulo }}</h5>
+          {% if caso.organismo %}
+          <div class="text-muted" style="font-size:.88rem">{{ caso.organismo }}</div>
+          {% endif %}
+        </div>
+        <span class="estado-badge estado-{{ caso.estado }} flex-shrink-0" style="font-size:.82rem; padding:.35em 1em">
+          {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
+        </span>
+      </div>
+
+      <div class="row g-3">
+        {% if caso.nombre_licitacion %}
+        <div class="col-6 col-md-4">
+          <div class="info-label">Licitación</div>
+          <div class="info-value">{{ caso.nombre_licitacion }}</div>
+        </div>
+        {% endif %}
+        {% if caso.numero_proceso %}
+        <div class="col-6 col-md-4">
+          <div class="info-label">N° de proceso</div>
+          <div class="info-value">{{ caso.numero_proceso }}</div>
+        </div>
+        {% endif %}
+        {% if caso.expediente %}
+        <div class="col-6 col-md-4">
+          <div class="info-label">Expediente</div>
+          <div class="info-value">{{ caso.expediente }}</div>
+        </div>
+        {% endif %}
+        <div class="col-6 col-md-4">
+          <div class="info-label">Creado</div>
+          <div class="info-value">{{ caso.creado_en.strftime('%d/%m/%Y %H:%M') if caso.creado_en else '—' }}</div>
+        </div>
+        {% if caso.publicado_en %}
+        <div class="col-6 col-md-4">
+          <div class="info-label">Publicado</div>
+          <div class="info-value">{{ caso.publicado_en.strftime('%d/%m/%Y %H:%M') }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── Archivos adjuntos ── #}
+  {% if caso.archivos %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <h6 class="card-title fw-bold mb-3">
+        <i class="bi bi-paperclip me-2 text-primary"></i>Archivos adjuntos
+      </h6>
+      <div class="d-flex flex-column gap-2">
+        {% for arch in caso.archivos %}
+        <div class="d-flex align-items-center gap-2 p-2 rounded" style="border: 1px solid var(--bs-border-color); font-size:.85rem">
+          <i class="bi bi-file-earmark-text text-muted"></i>
+          <span class="flex-grow-1">{{ arch.nombre_original }}</span>
+          {% if arch.tamano_bytes %}
+          <span class="text-muted" style="font-size:.75rem">
+            {% if arch.tamano_bytes < 1024 %}{{ arch.tamano_bytes }} B
+            {% elif arch.tamano_bytes < 1048576 %}{{ (arch.tamano_bytes / 1024)|round(1) }} KB
+            {% else %}{{ (arch.tamano_bytes / 1048576)|round(1) }} MB
+            {% endif %}
+          </span>
+          {% endif %}
+          <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/archivo/{{ arch.id }}"
+             class="btn btn-xs btn-outline-secondary"
+             style="font-size:.75rem; padding:.15rem .5rem" title="Descargar">
+            <i class="bi bi-download"></i>
+          </a>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Observaciones propias ── #}
+  {% if caso.observaciones_usuario %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <h6 class="card-title fw-bold mb-2">
+        <i class="bi bi-chat-text me-2 text-primary"></i>Tus observaciones
+      </h6>
+      <div class="p-3 rounded" style="background: rgba(0,0,0,.03); font-size:.88rem; white-space: pre-wrap">{{ caso.observaciones_usuario }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Observaciones del admin ── #}
+  {% if caso.observaciones_admin %}
+  <div class="card mb-3" style="border-left: 3px solid #0d6efd">
+    <div class="card-body">
+      <h6 class="card-title fw-bold mb-2">
+        <i class="bi bi-person-badge me-2 text-primary"></i>Observaciones del equipo
+      </h6>
+      <div class="p-3 rounded" style="background: rgba(13,110,253,.04); font-size:.88rem; white-space: pre-wrap">{{ caso.observaciones_admin }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Historial ── #}
+  {% if caso.historial %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <h6 class="card-title fw-bold mb-3">
+        <i class="bi bi-clock-history me-2 text-primary"></i>Historial del caso
+      </h6>
+      <div class="timeline">
+        {% for h in caso.historial|reverse %}
+        <div class="timeline-item estado-{{ h.estado_nuevo }}">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <span class="estado-badge estado-{{ h.estado_nuevo }}" style="font-size:.75rem">
+                {{ PLIEGO_ESTADO_LABELS.get(h.estado_nuevo, h.estado_nuevo) }}
+              </span>
+              {% if h.comentario %}
+              <div class="mt-1 text-muted" style="font-size:.82rem">{{ h.comentario }}</div>
+              {% endif %}
+            </div>
+            <div class="text-muted" style="font-size:.75rem; white-space:nowrap; margin-left:1rem">
+              {{ h.creado_en.strftime('%d/%m/%Y %H:%M') if h.creado_en else '' }}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── CTA si el caso está listo ── #}
+  {% if caso.estado == 'listo' %}
+  <div class="alert alert-success d-flex align-items-center justify-content-between gap-3 py-3">
+    <div>
+      <strong><i class="bi bi-check-circle-fill me-2"></i>¡El pliego ya está procesado!</strong>
+      <div style="font-size:.85rem">Podés ver la información estructurada completa.</div>
+    </div>
+    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
+       class="btn btn-success flex-shrink-0">
+      <i class="bi bi-eye me-1"></i>Ver resultado
+    </a>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

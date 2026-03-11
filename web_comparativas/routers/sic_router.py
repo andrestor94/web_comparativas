@@ -7,7 +7,7 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage
+from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
 
@@ -43,8 +43,6 @@ def sic_access_required(request: Request):
     if role not in ["admin", "auditor", "supervisor", "analista"]:
          pass # O hacemos raise si queremos bloquear roles desconocidos
          
-    return user
-    
     return user
 
 # --- HOME ---
@@ -636,3 +634,183 @@ def sic_users_delete(
     except Exception:
         db_session.rollback()
         return RedirectResponse("/sic/users?err=delete_failed", status_code=303)
+
+
+# ===== PASSWORD RESET REQUESTS (dentro de S.I.C) =====
+
+RESET_STATUSES = ["Pendiente", "En proceso", "Resuelto", "Rechazado"]
+
+
+@router.get("/api/password-resets/pending-count", response_class=JSONResponse)
+def sic_password_resets_count(request: Request, user: User = Depends(sic_access_required)):
+    if "admin" not in (user.role or "").lower():
+        return JSONResponse({"count": 0})
+    try:
+        count = db_session.query(PasswordResetRequest).filter(
+            PasswordResetRequest.status == "Pendiente"
+        ).count()
+        return JSONResponse({"count": count})
+    except Exception:
+        db_session.rollback()
+        return JSONResponse({"count": 0})
+
+
+@router.get("/password-resets", response_class=HTMLResponse)
+def sic_password_resets_list(request: Request, user: User = Depends(sic_access_required)):
+    if "admin" not in (user.role or "").lower():
+        return RedirectResponse("/sic/", status_code=303)
+
+    status_filter = request.query_params.get("status_filter", "")
+    solicitudes = []
+    pending_count = 0
+    try:
+        q = db_session.query(PasswordResetRequest)
+        if status_filter:
+            q = q.filter(PasswordResetRequest.status == status_filter)
+        solicitudes = q.order_by(PasswordResetRequest.request_date.desc()).all()
+        pending_count = db_session.query(PasswordResetRequest).filter(
+            PasswordResetRequest.status == "Pendiente"
+        ).count()
+    except Exception:
+        db_session.rollback()
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "user_display": user_display,
+        "section": "users",
+        "solicitudes": solicitudes,
+        "statuses": RESET_STATUSES,
+        "status_filter": status_filter,
+        "pending_count": pending_count,
+        "ok": request.query_params.get("ok"),
+        "err": request.query_params.get("err"),
+    }
+    return templates.TemplateResponse("sic/password_resets.html", ctx)
+
+
+@router.get("/password-resets/{req_id}", response_class=HTMLResponse)
+def sic_password_reset_detail(request: Request, req_id: int, user: User = Depends(sic_access_required)):
+    if "admin" not in (user.role or "").lower():
+        return RedirectResponse("/sic/", status_code=303)
+
+    sol = None
+    try:
+        sol = db_session.get(PasswordResetRequest, req_id)
+    except Exception:
+        db_session.rollback()
+
+    if not sol:
+        return RedirectResponse("/sic/password-resets?err=not_found", status_code=303)
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "user_display": user_display,
+        "section": "users",
+        "sol": sol,
+        "statuses": RESET_STATUSES,
+        "ok": request.query_params.get("ok"),
+        "err": request.query_params.get("err"),
+    }
+    return templates.TemplateResponse("sic/password_reset_detail.html", ctx)
+
+
+@router.post("/password-resets/{req_id}/estado")
+def sic_password_reset_estado(
+    request: Request,
+    req_id: int,
+    status: str = Form(...),
+    admin_observation: str = Form(""),
+    user: User = Depends(sic_access_required),
+):
+    if "admin" not in (user.role or "").lower():
+        return RedirectResponse("/sic/", status_code=303)
+
+    try:
+        sol = db_session.get(PasswordResetRequest, req_id)
+        if not sol:
+            return RedirectResponse("/sic/password-resets?err=not_found", status_code=303)
+
+        if status not in RESET_STATUSES:
+            return RedirectResponse(f"/sic/password-resets/{req_id}?err=invalid_status", status_code=303)
+
+        sol.status = status
+        if admin_observation.strip():
+            sol.admin_observation = admin_observation.strip()
+        sol.handled_by = user.email
+        sol.handled_date = dt.datetime.utcnow()
+        db_session.commit()
+        return RedirectResponse(f"/sic/password-resets/{req_id}?ok=estado_actualizado", status_code=303)
+    except Exception:
+        db_session.rollback()
+        return RedirectResponse(f"/sic/password-resets/{req_id}?err=save_error", status_code=303)
+
+
+@router.post("/password-resets/{req_id}/resolver")
+def sic_password_reset_resolver(
+    request: Request,
+    req_id: int,
+    generate_password: str = Form("1"),
+    new_password: str = Form(""),
+    must_change_on_login: str = Form(""),
+    admin_observation: str = Form(""),
+    user: User = Depends(sic_access_required),
+):
+    if "admin" not in (user.role or "").lower():
+        return RedirectResponse("/sic/", status_code=303)
+
+    try:
+        import secrets
+        import string
+        from urllib.parse import quote
+        from web_comparativas.auth import hash_password as hp
+
+        sol = db_session.get(PasswordResetRequest, req_id)
+        if not sol:
+            return RedirectResponse("/sic/password-resets?err=not_found", status_code=303)
+
+        target_user = db_session.query(User).filter(
+            func.lower(User.email) == sol.user_email.lower()
+        ).first()
+        if not target_user:
+            return RedirectResponse(f"/sic/password-resets/{req_id}?err=user_not_found", status_code=303)
+
+        tmp_pwd_plain = None
+        if generate_password == "1":
+            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+            tmp_pwd_plain = "".join(secrets.choice(alphabet) for _ in range(12))
+            target_user.password_hash = hp(tmp_pwd_plain)
+            sol.temporary_password_generated = True
+        else:
+            pwd = (new_password or "").strip()
+            if len(pwd) < 8:
+                return RedirectResponse(f"/sic/password-resets/{req_id}?err=password_too_short", status_code=303)
+            target_user.password_hash = hp(pwd)
+            sol.temporary_password_generated = False
+
+        force_change = must_change_on_login == "1"
+        target_user.must_change_password = force_change
+        sol.must_change_password_on_next_login = force_change
+        sol.status = "Resuelto"
+        sol.handled_by = user.email
+        sol.handled_date = dt.datetime.utcnow()
+        if admin_observation.strip():
+            sol.admin_observation = admin_observation.strip()
+
+        db_session.commit()
+
+        log_usage_event(
+            user=user,
+            action_type="admin_password_reset",
+            section="sic_password_resets",
+            request=request,
+        )
+
+        redirect_url = f"/sic/password-resets/{req_id}?ok=resuelto"
+        if tmp_pwd_plain:
+            redirect_url += f"&tmp_pwd={quote(tmp_pwd_plain)}"
+        return RedirectResponse(redirect_url, status_code=303)
+    except Exception:
+        db_session.rollback()
+        return RedirectResponse(f"/sic/password-resets/{req_id}?err=save_error", status_code=303)

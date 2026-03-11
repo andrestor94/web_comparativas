@@ -12,9 +12,9 @@
     }
 
     .status-abierto {
-        background: rgba(59, 130, 246, 0.1);
-        color: #2563eb;
-        border: 1px solid rgba(59, 130, 246, 0.2);
+        background: rgba(87, 112, 176, 0.1);
+        color: #5770b0;
+        border: 1px solid rgba(87, 112, 176, 0.2);
     }
 
     .status-pendiente {
@@ -53,7 +53,7 @@
     }
 
     .priority-baja {
-        background-color: #3b82f6;
+        background-color: #5770b0;
     }
 
     .consulta-row {
@@ -68,16 +68,17 @@
 {% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-between mb-4">
-    <div>
-        <h1 class="h3 fw-bold text-dark mb-1">Mesa de Ayuda</h1>
-        <p class="text-muted small mb-0">Gestión de consultas y soporte.</p>
-    </div>
-    <div>
-        <a href="/sic/helpdesk/new" class="btn btn-primary d-flex align-items-center gap-2">
-            <i class="bi bi-plus-lg"></i> Nueva Consulta
-        </a>
-    </div>
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Soporte</span>
+    <h1 class="h-page-header__title">Mesa de Ayuda</h1>
+    <p class="h-page-header__subtitle">Gestión de consultas y soporte de Mercado Público</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a href="/sic/helpdesk/new" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-2">
+      <i class="bi bi-plus-lg"></i> Nueva Consulta
+    </a>
+  </div>
 </div>
 
 {% if request.query_params.get('ok') == 'deleted' %}
@@ -93,80 +94,71 @@
 </div>
 {% endif %}
 
-<div class="card border-0 shadow-sm">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            {% if not tickets or tickets|length == 0 %}
-            <div class="text-center text-muted py-5">
-                <i class="bi bi-chat-square-text mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
-                Aún no hay consultas creadas.
-                <div class="mt-2">
-                    <a href="/sic/helpdesk/new" class="text-primary text-decoration-underline">Iniciar una consulta</a>
-                </div>
-            </div>
-            {% else %}
-            <table class="table table-hover align-middle mb-0">
-                <thead class="bg-light">
-                    <tr>
-                        <th class="ps-3" style="width: 60px;">ID</th>
-                        <th>Asunto</th>
-                        {% if is_admin %}
-                        <th>Usuario</th>
-                        {% endif %}
-                        <th>Categoría</th>
-                        <th>Prioridad</th>
-                        <th>Estado</th>
-                        <th>Última act.</th>
-                        <th class="text-end pe-3"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for t in tickets %}
-                    <tr class="consulta-row" onclick="window.location='/sic/helpdesk/{{ t.id }}'">
-                        <td class="ps-3 text-muted small">#{{ t.id }}</td>
-                        <td class="fw-medium text-dark">
-                            {{ t.title }}
-                        </td>
-                        {% if is_admin %}
-                        <td class="small text-muted">
-                            {{ t.user.email }}
-                        </td>
-                        {% endif %}
-                        <td>
-                            <span
-                                class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal px-2 py-1"
-                                style="font-size: 0.7rem;">
-                                {{ t.category|capitalize }}
-                            </span>
-                        </td>
-                        <td>
-                            {% set p_cls = 'priority-media' %}
-                            {% if t.priority == 'alta' %}{% set p_cls = 'priority-alta' %}{% endif %}
-                            {% if t.priority == 'baja' %}{% set p_cls = 'priority-baja' %}{% endif %}
-                            <div class="d-flex align-items-center small text-muted">
-                                <span class="priority-dot {{ p_cls }}"></span>
-                                {{ t.priority|capitalize }}
-                            </div>
-                        </td>
-                        <td>
-                            {% set s_cls = 'status-abierto' %}
-                            {% if t.status == 'pendiente' %}{% set s_cls = 'status-pendiente' %}{% endif %}
-                            {% if t.status == 'resuelto' %}{% set s_cls = 'status-resuelto' %}{% endif %}
-                            {% if t.status == 'cerrado' %}{% set s_cls = 'status-cerrado' %}{% endif %}
-                            <span class="consulta-status {{ s_cls }}">{{ t.status }}</span>
-                        </td>
-                        <td class="text-muted small">
-                            {{ t.updated_at.strftime('%d/%m %H:%M') }}
-                        </td>
-                        <td class="text-end pe-3 text-muted">
-                            <i class="bi bi-chevron-right"></i>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
+<div class="h-panel" style="padding:0;overflow:hidden;">
+    <div class="table-responsive">
+        {% if not tickets or tickets|length == 0 %}
+        <div class="h-empty">
+            <div class="h-empty__icon"><i class="bi bi-chat-square-text"></i></div>
+            <p class="h-empty__title">Sin consultas aún</p>
+            <p class="h-empty__desc">Aún no hay consultas creadas.</p>
+            <a href="/sic/helpdesk/new" class="btn btn-primary btn-sm mt-2">
+                <i class="bi bi-plus-lg me-1"></i> Iniciar una consulta
+            </a>
         </div>
+        {% else %}
+        <table class="h-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">ID</th>
+                    <th>Asunto</th>
+                    {% if is_admin %}
+                    <th>Usuario</th>
+                    {% endif %}
+                    <th>Categoría</th>
+                    <th>Prioridad</th>
+                    <th>Estado</th>
+                    <th>Última act.</th>
+                    <th class="text-end" style="width:40px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in tickets %}
+                <tr class="consulta-row" onclick="window.location='/sic/helpdesk/{{ t.id }}'">
+                    <td style="font-size:0.8rem;color:#94a3b8;">#{{ t.id }}</td>
+                    <td style="font-weight:600;color:#06486f;">{{ t.title }}</td>
+                    {% if is_admin %}
+                    <td style="font-size:0.82rem;color:#64748b;">{{ t.user.email }}</td>
+                    {% endif %}
+                    <td>
+                        <span class="h-badge h-badge--info">{{ t.category|capitalize }}</span>
+                    </td>
+                    <td>
+                        {% set p_cls = 'priority-media' %}
+                        {% if t.priority == 'alta' %}{% set p_cls = 'priority-alta' %}{% endif %}
+                        {% if t.priority == 'baja' %}{% set p_cls = 'priority-baja' %}{% endif %}
+                        <div class="d-flex align-items-center" style="font-size:0.85rem;color:#64748b;">
+                            <span class="priority-dot {{ p_cls }}"></span>
+                            {{ t.priority|capitalize }}
+                        </div>
+                    </td>
+                    <td>
+                        {% set s_cls = 'status-abierto' %}
+                        {% if t.status == 'pendiente' %}{% set s_cls = 'status-pendiente' %}{% endif %}
+                        {% if t.status == 'resuelto' %}{% set s_cls = 'status-resuelto' %}{% endif %}
+                        {% if t.status == 'cerrado' %}{% set s_cls = 'status-cerrado' %}{% endif %}
+                        <span class="consulta-status {{ s_cls }}">{{ t.status }}</span>
+                    </td>
+                    <td style="font-size:0.82rem;color:#64748b;">
+                        {{ t.updated_at.strftime('%d/%m %H:%M') }}
+                    </td>
+                    <td class="text-end" style="color:#94a3b8;">
+                        <i class="bi bi-chevron-right"></i>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

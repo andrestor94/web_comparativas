@@ -3,60 +3,99 @@
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="m-0">Usuarios</h2>
-  <a class="btn btn-primary" href="/usuarios/nuevo">+ Nuevo usuario</a>
+<!-- ======= PAGE HEADER ======= -->
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Administración</span>
+    <h1 class="h-page-header__title">Usuarios</h1>
+    <p class="h-page-header__subtitle">Gestión de roles y permisos de la plataforma</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a class="btn btn-primary btn-sm" href="/usuarios/nuevo">
+      <i class="bi bi-plus-lg me-1"></i> Nuevo usuario
+    </a>
+  </div>
 </div>
 
 {# ====== Alertas de feedback ====== #}
 {% if ok == 'created' %}
-  <div class="alert alert-success">Usuario creado correctamente.</div>
+  <div class="h-alert-success" role="alert">
+    <span><i class="bi bi-check-circle me-1"></i> Usuario creado correctamente.</span>
+  </div>
 {% elif ok == 'updated' %}
-  <div class="alert alert-success">Usuario actualizado correctamente.</div>
+  <div class="h-alert-success" role="alert">
+    <span><i class="bi bi-check-circle me-1"></i> Usuario actualizado correctamente.</span>
+  </div>
 {% elif ok == 'deleted' %}
-  <div class="alert alert-success">Usuario eliminado.</div>
+  <div class="h-alert-success" role="alert">
+    <span><i class="bi bi-check-circle me-1"></i> Usuario eliminado.</span>
+  </div>
 {% endif %}
 
 {% if err == 'not_found' %}
-  <div class="alert alert-warning">Usuario no encontrado.</div>
+  <div class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
+    <i class="bi bi-exclamation-triangle me-1"></i> Usuario no encontrado.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% elif err == 'cannot_self' %}
-  <div class="alert alert-warning">No puedes eliminarte a ti mismo.</div>
+  <div class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
+    <i class="bi bi-exclamation-triangle me-1"></i> No puedes eliminarte a ti mismo.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% elif err == 'last_admin' %}
-  <div class="alert alert-warning">No puedes eliminar el último administrador.</div>
+  <div class="alert alert-warning alert-dismissible fade show mb-3" role="alert">
+    <i class="bi bi-exclamation-triangle me-1"></i> No puedes eliminar el último administrador.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% elif err == 'delete_failed' %}
-  <div class="alert alert-danger">Ocurrió un error al eliminar el usuario.</div>
+  <div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+    <i class="bi bi-x-circle me-1"></i> Ocurrió un error al eliminar el usuario.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% elif err %}
-  <div class="alert alert-danger">Ocurrió un error: {{ err }}</div>
+  <div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+    <i class="bi bi-x-circle me-1"></i> Ocurrió un error: {{ err }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% endif %}
 
 {% if error %}
-  <div class="alert alert-danger">{{ error }}</div>
+  <div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+    {{ error }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
 {% endif %}
 
-<div class="card">
-  <div class="card-body">
-
-    {% if not users or users|length == 0 %}
-      <div class="text-center text-subtle py-4">
-        No hay usuarios cargados todavía.
-        <a href="/usuarios/nuevo" class="ms-1">Crear el primero</a>.
-      </div>
-    {% else %}
-
-    <table class="table align-middle">
+<div class="h-panel" style="padding:0;overflow:hidden;">
+  <div class="table-responsive">
+    <table class="h-table">
       <thead>
         <tr>
-          <th style="width:80px">ID</th>
+          <th style="width:64px">ID</th>
           <th>Nombre</th>
           <th>Email</th>
           <th style="width:140px">Rol</th>
-          <th style="width:180px">Creado</th>
-          <th class="text-end" style="width:240px">Acciones</th>
+          <th style="width:160px">Creado</th>
+          <th class="text-end" style="width:200px">Acciones</th>
         </tr>
       </thead>
       <tbody>
+        {% if not users or users|length == 0 %}
+        <tr>
+          <td colspan="6">
+            <div class="h-empty">
+              <div class="h-empty__icon"><i class="bi bi-people"></i></div>
+              <p class="h-empty__title">No hay usuarios cargados</p>
+              <p class="h-empty__desc">Creá el primer usuario para comenzar a gestionar accesos.</p>
+              <a class="btn btn-primary btn-sm mt-2" href="/usuarios/nuevo">
+                <i class="bi bi-plus-lg me-1"></i> Nuevo usuario
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% else %}
         {% for u in users %}
-        {# --- Normalización de nombre (name/nombre) con fallback a alias del email --- #}
+        {# --- Normalización de nombre --- #}
         {% set _n = (u.name if u.name else (u.full_name if u.full_name else (u.nombre if u.nombre else ''))) %}
         {% set _n = _n.strip() if _n else '' %}
         {% if not _n %}
@@ -70,55 +109,52 @@
         {% if _rol == 'visor' %}{% set _rol = 'auditor' %}{% endif %}
 
         {# --- Badge según rol --- #}
-        {% if _rol == 'admin' %}
-          {% set rol_badge_class = 'badge bg-danger-subtle text-danger' %}
-        {% elif _rol == 'supervisor' %}
-          {% set rol_badge_class = 'badge bg-purple-subtle text-purple' %}
-        {% elif _rol == 'analista' %}
-          {% set rol_badge_class = 'badge bg-primary-subtle text-primary' %}
-        {% elif _rol == 'auditor' %}
-          {% set rol_badge_class = 'badge bg-secondary-subtle text-secondary' %}
-        {% else %}
-          {% set rol_badge_class = 'badge bg-light text-dark' %}
-        {% endif %}
+        {% if _rol == 'admin' %}{% set rol_badge = 'h-badge h-badge--admin' %}
+        {% elif _rol == 'supervisor' %}{% set rol_badge = 'h-badge h-badge--supervisor' %}
+        {% elif _rol == 'analista' %}{% set rol_badge = 'h-badge h-badge--analista' %}
+        {% elif _rol == 'auditor' %}{% set rol_badge = 'h-badge h-badge--auditor' %}
+        {% else %}{% set rol_badge = 'h-badge h-badge--pending' %}{% endif %}
 
         <tr>
-          <td>{{ u.id }}</td>
-          <td>{{ _n or '—' }}</td>
-          <td>{{ u.email or '—' }}</td>
-          <td><span class="{{ rol_badge_class }}">{{ _rol|capitalize }}</span></td>
-          <td>
+          <td style="font-size:0.8rem;color:#94a3b8;font-variant-numeric:tabular-nums;">#{{ u.id }}</td>
+          <td style="font-weight:600;color:#06486f;">{{ _n or '—' }}</td>
+          <td style="font-size:0.85rem;color:#64748b;">{{ u.email or '—' }}</td>
+          <td><span class="{{ rol_badge }}">{{ _rol|capitalize }}</span></td>
+          <td style="font-size:0.82rem;color:#64748b;">
             {% if u.created_at %}
-              {% if u.created_at is string %}
-                {{ u.created_at }}
-              {% else %}
-                {{ u.created_at.strftime('%Y-%m-%d %H:%M') }}
-              {% endif %}
-            {% else %}
-              —
-            {% endif %}
+              {% if u.created_at is string %}{{ u.created_at }}
+              {% else %}{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+            {% else %}—{% endif %}
           </td>
           <td class="text-end">
-            <a class="btn btn-sm btn-secondary" href="/usuarios/{{ u.id }}/editar">Editar</a>
-            {% if u.id == user.id %}
-              <span class="text-subtle ms-2 small">No puedes eliminarte a ti mismo</span>
-            {% else %}
-              <a class="btn btn-sm btn-danger ms-1"
-                 href="/usuarios/{{ u.id }}/borrar"
-                 onclick="return confirm('¿Eliminar usuario {{ u.email }}?');">
-                 Eliminar
+            <div class="d-flex justify-content-end gap-1">
+              <a class="btn btn-outline-secondary btn-sm" href="/usuarios/{{ u.id }}/editar">
+                <i class="bi bi-pencil me-1"></i>Editar
               </a>
-            {% endif %}
+              {% if u.id == user.id %}
+                <button class="btn btn-outline-secondary btn-sm disabled" disabled title="No puedes eliminarte a ti mismo">
+                  <i class="bi bi-trash"></i>
+                </button>
+              {% else %}
+                <a class="btn btn-outline-danger btn-sm"
+                   href="/usuarios/{{ u.id }}/borrar"
+                   onclick="return confirm('¿Eliminar usuario {{ u.email }}?');">
+                  <i class="bi bi-trash me-1"></i>Eliminar
+                </a>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% endfor %}
+        {% endif %}
       </tbody>
     </table>
-
-    <div class="text-subtle mt-2">Total: {{ users|length }} usuario(s).</div>
-
-    {% endif %}
   </div>
+  {% if users and users|length > 0 %}
+  <div class="px-4 py-3 border-top" style="font-size:0.82rem;color:#64748b;background:#fafbfc;">
+    Total: {{ users|length }} usuario(s).
+  </div>
+  {% endif %}
 </div>
 
 {% endblock %}

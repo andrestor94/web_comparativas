@@ -2,113 +2,50 @@
 {% block title %}Mercado Privado – Inicio{% endblock %}
 
 {% block content %}
-<!-- Custom CSS for Cards (Copied from Home) -->
-<style>
-    :root {
-        --sa-azul: #064066;
-        --sa-azul-alt: #5274ce;
-        --sa-panel-bg: #ffffff;
-        --sa-borde-soft: #e2e8f0;
-        --tech-blue-mid: #5274ce;
-    }
 
-    .panel-section {
-        background: var(--sa-panel-bg);
-        border-radius: 1rem;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
-        border: 1px solid var(--sa-borde-soft);
-    }
-
-    .panel-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
-    }
-
-    .panel-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: var(--sa-azul);
-        letter-spacing: .02em;
-    }
-
-    .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 1rem;
-    }
-
-    .kpi-card {
-        background: #f8fafc;
-        border-radius: 0.75rem;
-        padding: 1.25rem;
-        border: 1px solid var(--sa-borde-soft);
-        transition: all 0.2s ease;
-        text-align: center;
-    }
-
-    .kpi-card:hover {
-        background: #fff;
-        border-color: var(--sa-azul-alt);
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-    }
-
-    .kpi-title {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        font-weight: 700;
-        color: #64748b;
-        margin-bottom: 0.5rem;
-    }
-
-    .kpi-value {
-        font-size: 2rem;
-        font-weight: 800;
-        color: var(--sa-azul);
-        line-height: 1.1;
-        font-family: 'Outfit', sans-serif;
-        margin-bottom: 0.25rem;
-    }
-
-    .kpi-sub {
-        font-size: 0.85rem;
-        color: #94a3b8;
-    }
-</style>
-
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="m-0 fw-bold" style="color: var(--sa-azul);">Mercado Privado</h2>
+<!-- ======= PAGE HEADER ======= -->
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Módulo</span>
+    <h1 class="h-page-header__title">Mercado Privado</h1>
+    <p class="h-page-header__subtitle">Análisis de cotizaciones y dimensionamiento de mercado privado</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a class="btn btn-outline-secondary btn-sm" href="/mercado-privado/dimensiones">
+      Ver dimensionamiento <i class="bi bi-arrow-right ms-1"></i>
+    </a>
+  </div>
 </div>
 
 <!-- Alcance de Dimensionamiento Section -->
-<div class="panel-section" style="border-top: 4px solid var(--sa-azul-alt);">
-    <div class="panel-header">
-        <div class="panel-title">Alcance de dimensionamiento</div>
+<div class="h-panel h-panel--priv">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Módulo</p>
+      <h2 class="h-panel__title">Alcance de dimensionamiento</h2>
+      <p class="h-panel__desc">Resumen de cobertura del mercado privado cargado</p>
     </div>
-    <div class="kpi-grid">
-        <!-- Card 1: Clientes -->
-        <div class="kpi-card">
-            <div class="kpi-title">Cantidad de clientes</div>
-            <div class="kpi-value" id="kpiClientsHome">-</div>
-            <div class="kpi-sub">Clientes identificados</div>
-        </div>
-        <!-- Card 2: Familias -->
-        <div class="kpi-card">
-            <div class="kpi-title">Cantidad de familias Suizo</div>
-            <div class="kpi-value" id="kpiFamiliesHome">-</div>
-            <div class="kpi-sub">Familias analizadas</div>
-        </div>
-        <!-- Card 3: Procesos -->
-        <div class="kpi-card">
-            <div class="kpi-title">Cantidad de procesos</div>
-            <div class="kpi-value" id="kpiProcessesHome">-</div>
-            <div class="kpi-sub">Procesos únicos</div>
-        </div>
+    <a class="btn btn-outline-secondary btn-sm" href="/mercado-privado/dimensiones">
+      Ver análisis <i class="bi bi-arrow-right ms-1"></i>
+    </a>
+  </div>
+  <div class="kpi-grid">
+    <div class="kpi-card kpi-card--azul2">
+      <span class="kl">Clientes</span>
+      <span class="kv" id="kpiClientsHome">—</span>
+      <span class="ks">Clientes identificados</span>
     </div>
+    <div class="kpi-card kpi-card--azul">
+      <span class="kl">Familias Suizo</span>
+      <span class="kv" id="kpiFamiliesHome">—</span>
+      <span class="ks">Familias analizadas</span>
+    </div>
+    <div class="kpi-card kpi-card--verde">
+      <span class="kl">Procesos</span>
+      <span class="kv" id="kpiProcessesHome">—</span>
+      <span class="ks">Procesos únicos</span>
+    </div>
+  </div>
 </div>
 
 

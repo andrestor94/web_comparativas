@@ -1,11 +1,11 @@
 /* ===== Dashboard Tech Theme (Suizo Argentina Modern v3 - Compact) ===== */
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap');
 
 :root {
     /* --- Brand Palette --- */
-    --tech-blue-dark: #064066;
+    --tech-blue-dark: #06486f;
     --tech-blue-mid: #1e5c8a;
-    --tech-blue-bright: #5274ce;
+    --tech-blue-bright: #5770b0;
     --tech-cyan: #38bdf8;
     --tech-success: #10b981;
     --tech-warning: #f59e0b;
@@ -23,9 +23,9 @@
     --radius-md: 8px;
     --radius-sm: 6px;
 
-    --shadow-soft: 0 2px 10px -1px rgba(6, 64, 102, 0.05);
-    --shadow-card: 0 4px 6px -1px rgba(6, 64, 102, 0.05), 0 2px 4px -1px rgba(6, 64, 102, 0.03);
-    --shadow-hover: 0 10px 15px -3px rgba(6, 64, 102, 0.1), 0 4px 6px -2px rgba(6, 64, 102, 0.05);
+    --shadow-soft: 0 2px 10px -1px rgba(6, 72, 111, 0.05);
+    --shadow-card: 0 4px 6px -1px rgba(6, 72, 111, 0.05), 0 2px 4px -1px rgba(6, 72, 111, 0.03);
+    --shadow-hover: 0 10px 15px -3px rgba(6, 72, 111, 0.1), 0 4px 6px -2px rgba(6, 72, 111, 0.05);
 
     --font-main: 'Outfit', sans-serif;
 }
@@ -33,7 +33,7 @@
 body {
     background-color: var(--bg-main);
     background-image:
-        radial-gradient(at 100% 0%, rgba(82, 116, 206, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(87, 112, 176, 0.05) 0px, transparent 50%),
         radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.05) 0px, transparent 50%);
     background-attachment: fixed;
     color: var(--tech-blue-dark);
@@ -125,7 +125,7 @@ body {
 
 .tech-select {
     background: rgba(255, 255, 255, 0.6);
-    border: 1px solid rgba(82, 116, 206, 0.15);
+    border: 1px solid rgba(87, 112, 176, 0.15);
     padding: 0.25rem 1.75rem 0.25rem 0.5rem;
     /* Compact padding */
     border-radius: var(--radius-sm);
@@ -136,7 +136,7 @@ body {
     cursor: pointer;
     transition: all 0.2s;
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%235274ce'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%235770b0'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.4rem center;
     background-size: 0.7em;
@@ -218,7 +218,7 @@ body {
     width: 42px;
     height: 42px;
     border-radius: 10px;
-    background: linear-gradient(135deg, rgba(82, 116, 206, 0.1) 0%, rgba(82, 116, 206, 0.05) 100%);
+    background: linear-gradient(135deg, rgba(87, 112, 176, 0.1) 0%, rgba(87, 112, 176, 0.05) 100%);
     color: var(--tech-blue-bright);
     display: flex;
     align-items: center;
@@ -287,7 +287,7 @@ body {
 /* 6. Upload Zone (Refined) */
 .tech-upload-zone {
     grid-column: span 12;
-    border: 2px dashed rgba(82, 116, 206, 0.2);
+    border: 2px dashed rgba(87, 112, 176, 0.2);
     border-radius: var(--radius-lg);
     background: rgba(255, 255, 255, 0.5);
     padding: 2rem 1rem;
@@ -358,6 +358,549 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(82, 116, 206, 0.2);
+    background: rgba(87, 112, 176, 0.2);
     border-radius: 3px;
+}
+
+/* ===== Dimensionamiento Dashboard ===== */
+#dimensionamientoApp {
+    gap: 0.9rem;
+    padding: 0.85rem 0.85rem 1.2rem;
+}
+
+#dimensionamientoApp .tech-header {
+    margin-bottom: 0;
+    padding: 0 0.1rem;
+}
+
+#dimensionamientoApp .tech-title h2 {
+    font-size: clamp(1.8rem, 2.5vw, 2.25rem);
+    line-height: 1;
+    margin-bottom: 0.2rem;
+}
+
+#dimensionamientoApp .tech-title p {
+    font-size: 0.92rem;
+    max-width: 760px;
+}
+
+#dimensionamientoApp .animate-enter > * {
+    animation-duration: 0.45s;
+}
+
+#dimensionamientoApp .dim-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+#dimensionamientoApp #datasetStatusPill {
+    border-radius: 999px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+#dimensionamientoApp .dim-refresh-btn {
+    height: 36px;
+    padding: 0 0.85rem;
+    border-color: rgba(30, 92, 138, 0.18);
+    background: rgba(255, 255, 255, 0.8);
+    color: var(--tech-blue-dark);
+    font-weight: 600;
+}
+
+#dimensionamientoApp .dim-section-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: var(--tech-blue-mid);
+}
+
+#dimensionamientoApp .dim-status-card,
+#dimensionamientoApp .dim-empty-state,
+#dimensionamientoApp .dim-card-table-wide {
+    grid-column: span 12;
+}
+
+#dimensionamientoApp .dim-status-card {
+    padding: 0.85rem 1rem 0.95rem;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.92)),
+        radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 35%);
+}
+
+#dimensionamientoApp .dim-status-grid {
+    display: grid;
+    grid-template-columns: 1.8fr 0.9fr 0.9fr;
+    gap: 0.55rem;
+    margin-top: 0.5rem;
+}
+
+#dimensionamientoApp .dim-status-block {
+    min-height: 62px;
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 249, 253, 0.88));
+    border: 1px solid rgba(87, 112, 176, 0.12);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+#dimensionamientoApp .dim-status-block-wide {
+    min-width: 0;
+}
+
+#dimensionamientoApp .dim-status-label {
+    font-size: 0.63rem;
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--tech-blue-mid);
+}
+
+#dimensionamientoApp .dim-status-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--tech-blue-dark);
+}
+
+#dimensionamientoApp .dim-status-path {
+    font-size: 0.86rem;
+    line-height: 1.2;
+    color: #5f6f84;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#dimensionamientoApp .dim-filter-panel {
+    padding: 0.7rem 0.95rem 0.78rem;
+    gap: 0.35rem;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 251, 255, 0.94)),
+        radial-gradient(circle at top right, rgba(87, 112, 176, 0.1), transparent 28%);
+    align-items: stretch;
+    /* Z-index fix: que el dropdown de plataformas no quede tras las cards */
+    position: relative;
+    z-index: 100;
+    overflow: visible;
+}
+
+#dimensionamientoApp .dim-filter-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.45rem 0.75rem;
+    align-items: end;
+    /* Necesario para que el dropdown flote fuera del grid sin ser cortado */
+    overflow: visible;
+}
+
+/* Dropdown de Plataformas: asegura que quede sobre todas las cards */
+#dimensionamientoApp .dim-filter-platforms .dropdown {
+    position: relative;
+}
+
+#dimensionamientoApp .dim-filter-platforms .dropdown-menu {
+    z-index: 1100;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 190px;
+    margin-top: 2px;
+}
+
+#dimensionamientoApp .filter-group {
+    gap: 0.18rem;
+    min-width: 0;
+}
+
+#dimensionamientoApp .tech-toolbar label,
+#dimensionamientoApp .filter-group label {
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--tech-blue-mid);
+    margin-bottom: 0;
+}
+
+#dimensionamientoApp .tech-select,
+#dimensionamientoApp .form-control-sm,
+#dimensionamientoApp .dim-search-shell {
+    width: 100%;
+    min-width: 0;
+}
+
+#dimensionamientoApp .tech-select,
+#dimensionamientoApp .form-control-sm,
+#dimensionamientoApp .dim-search-shell .input-group-text,
+#dimensionamientoApp .dim-search-shell .form-control {
+    height: 32px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(87, 112, 176, 0.14);
+    box-shadow: 0 1px 2px rgba(6, 72, 111, 0.03);
+}
+
+#dimensionamientoApp .tech-select,
+#dimensionamientoApp .form-control-sm,
+#dimensionamientoApp .dim-search-shell .form-control {
+    padding: 0.28rem 0.72rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--tech-blue-dark);
+}
+
+#dimensionamientoApp .tech-select {
+    padding-right: 1.8rem;
+    background-position: right 0.55rem center;
+    background-size: 0.72em;
+}
+
+#dimensionamientoApp .dim-search-shell {
+    overflow: hidden;
+    border-radius: 12px;
+}
+
+#dimensionamientoApp .dim-search-shell .input-group-text {
+    border-right: 0;
+    width: 42px;
+    justify-content: center;
+}
+
+#dimensionamientoApp .dim-search-shell .form-control {
+    border-left: 0;
+    box-shadow: none;
+}
+
+#dimensionamientoApp .dim-platform-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    min-height: 32px;
+    align-items: center;
+}
+
+#dimensionamientoApp .dim-platform-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.28rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(245, 249, 255, 0.95);
+    border: 1px solid rgba(87, 112, 176, 0.16);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--tech-blue-dark);
+}
+
+#dimensionamientoApp .dim-filter-platforms {
+    grid-column: span 1;
+}
+
+#dimensionamientoApp .dim-filter-family {
+    grid-column: span 1;
+}
+
+#dimensionamientoApp .dim-platform-pill .form-check-input {
+    margin-top: 0;
+    width: 0.85rem;
+    height: 0.85rem;
+}
+
+#dimensionamientoApp .dim-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.7rem;
+    margin-bottom: 0;
+}
+
+#dimensionamientoApp .dim-kpi-card {
+    min-height: 92px;
+    padding: 0.72rem 0.85rem;
+    align-items: flex-start;
+    gap: 0.7rem;
+    border-radius: 18px;
+    justify-content: space-between;
+}
+
+#dimensionamientoApp .dim-kpi-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    font-size: 1rem;
+}
+
+#dimensionamientoApp .dim-kpi-card .kpi-content {
+    width: 100%;
+}
+
+#dimensionamientoApp .dim-kpi-card .kpi-value {
+    font-size: clamp(1.35rem, 1.7vw, 1.9rem);
+    margin-bottom: 0.15rem;
+}
+
+#dimensionamientoApp .dim-kpi-card .kpi-label {
+    font-size: 0.64rem;
+    letter-spacing: 0.08em;
+}
+
+#dimensionamientoApp .dim-card-chart,
+#dimensionamientoApp .dim-card-table-list,
+#dimensionamientoApp .dim-card-table-wide {
+    padding: 0.9rem 0.95rem 0.85rem;
+}
+
+#dimensionamientoApp .dim-card-chart-primary {
+    min-height: 360px;
+}
+
+#dimensionamientoApp .dim-card-chart-compact,
+#dimensionamientoApp .dim-card-table-list {
+    min-height: 330px;
+}
+
+#dimensionamientoApp .dim-card-table-wide {
+    min-height: 420px;
+    overflow: hidden;
+}
+
+#dimensionamientoApp .chart-container {
+    min-height: 0;
+    padding-top: 0.15rem;
+}
+
+#dimensionamientoApp .dim-card-chart .chart-container,
+#dimensionamientoApp .dim-card-table-list .dim-scroll-body {
+    flex: 1 1 auto;
+}
+
+#dimensionamientoApp .dim-map-shell {
+    padding: 0.15rem 0 0;
+}
+
+#dimensionamientoApp #mapContainer {
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+#dimensionamientoApp .dim-scroll-body {
+    min-height: 0;
+    overflow: hidden;
+    padding-right: 0;
+}
+
+#dimensionamientoApp .dim-card-table-list .dim-scroll-body {
+    overflow-x: hidden;
+}
+
+#dimensionamientoApp .dim-table-wrap {
+    height: 100%;
+    max-height: 345px;
+    padding-bottom: 0.5rem;
+}
+
+#dimensionamientoApp .tech-card-title {
+    height: auto;
+    min-height: 1.4rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.88rem;
+}
+
+#dimensionamientoApp .tech-card-title span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+#dimensionamientoApp .tech-table {
+    font-size: 0.82rem;
+    table-layout: auto;
+}
+
+#dimensionamientoApp .tech-table thead tr {
+    background: rgba(248, 250, 252, 0.96);
+}
+
+#dimensionamientoApp .tech-table th {
+    padding: 0.85rem 0.95rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    color: var(--tech-blue-mid);
+    white-space: nowrap;
+}
+
+#dimensionamientoApp .tech-table td {
+    padding: 0.8rem 0.95rem;
+    vertical-align: top;
+    color: #5f6f84;
+}
+
+#dimensionamientoApp .tech-table tbody tr:hover {
+    background: rgba(87, 112, 176, 0.04);
+}
+
+#dimensionamientoApp .tech-table td:first-child,
+#dimensionamientoApp .tech-table th:first-child {
+    position: sticky;
+    left: 0;
+    background: inherit;
+    z-index: 1;
+}
+
+#dimensionamientoApp .tech-table td:first-child {
+    background: rgba(255, 255, 255, 0.98);
+    min-width: 190px;
+    color: var(--tech-blue-dark);
+}
+
+#dimensionamientoApp .tech-table th:first-child {
+    z-index: 11;
+}
+
+#dimensionamientoApp .tech-table td:not(:first-child),
+#dimensionamientoApp .tech-table th:not(:first-child) {
+    text-align: right;
+    white-space: nowrap;
+}
+
+#dimensionamientoApp .dim-family-table {
+    table-layout: fixed;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#dimensionamientoApp .dim-family-col-name {
+    width: 42%;
+}
+
+#dimensionamientoApp .dim-family-col-count {
+    width: 23%;
+}
+
+#dimensionamientoApp .dim-family-col-qty {
+    width: 35%;
+}
+
+#dimensionamientoApp .dim-family-head {
+    padding-top: 0.55rem;
+    padding-bottom: 0.7rem;
+    vertical-align: middle;
+    font-size: 0.62rem;
+    line-height: 1.2;
+}
+
+#dimensionamientoApp .dim-family-head-name {
+    padding-left: 0;
+    padding-right: 0.85rem;
+    text-align: left;
+}
+
+#dimensionamientoApp .dim-family-head-count {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+    text-align: right;
+}
+
+#dimensionamientoApp .dim-family-head-qty {
+    padding-left: 1.15rem;
+    padding-right: 0.35rem;
+    text-align: right;
+    border-left: 1px solid rgba(87, 112, 176, 0.12);
+}
+
+#dimensionamientoApp .dim-family-name-cell {
+    min-width: 0;
+    max-width: 0;
+    font-weight: 500;
+    font-size: 0.75rem;
+    padding: 0.56rem 0.85rem 0.56rem 0;
+}
+
+#dimensionamientoApp .dim-family-name-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#dimensionamientoApp .dim-family-number {
+    text-align: right;
+    white-space: nowrap;
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+}
+
+#dimensionamientoApp .dim-family-number-count {
+    padding: 0.56rem 0.85rem 0.56rem 0.85rem;
+}
+
+#dimensionamientoApp .dim-family-number-qty {
+    padding: 0.56rem 0.35rem 0.56rem 1.15rem;
+    border-left: 1px solid rgba(87, 112, 176, 0.08);
+}
+
+@media (max-width: 1280px) {
+    #dimensionamientoApp .dim-status-grid,
+    #dimensionamientoApp .dim-filter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 1100px) {
+    #dimensionamientoApp .area-full,
+    #dimensionamientoApp .area-third {
+        grid-column: span 12;
+    }
+
+    #dimensionamientoApp .dim-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    #dimensionamientoApp {
+        gap: 1rem;
+        padding: 1rem 0.35rem 1.5rem;
+    }
+
+    #dimensionamientoApp .tech-header,
+    #dimensionamientoApp .dim-header-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    #dimensionamientoApp .dim-status-grid,
+    #dimensionamientoApp .dim-filter-grid,
+    #dimensionamientoApp .dim-kpi-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #dimensionamientoApp .dim-platform-pills {
+        gap: 0.5rem;
+    }
+
+    #dimensionamientoApp .dim-platform-pill {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    #dimensionamientoApp .dim-card-chart-primary,
+    #dimensionamientoApp .dim-card-chart-compact,
+    #dimensionamientoApp .dim-card-table-list,
+    #dimensionamientoApp .dim-card-table-wide {
+        min-height: auto;
+    }
+
+    #dimensionamientoApp .dim-table-wrap {
+        max-height: 360px;
+    }
 }

@@ -3,13 +3,28 @@
 {% block header_title %}Editar grupo{% endblock %}
 
 {% block content %}
-{% if ok %}<div class="alert alert-success py-2">OK: {{ ok }}</div>{% endif %}
+
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Administración</span>
+    <h1 class="h-page-header__title">Editar grupo</h1>
+    <p class="h-page-header__subtitle">{{ group.name }}</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a class="btn btn-outline-secondary btn-sm" href="/grupos">
+      <i class="bi bi-arrow-left me-1"></i> Volver
+    </a>
+  </div>
+</div>
+
+{% if ok %}<div class="h-alert-success"><i class="bi bi-check-circle me-2"></i>{{ ok }}</div>{% endif %}
 {% if err %}<div class="alert alert-danger py-2">Error: {{ err }}</div>{% endif %}
 
 <div class="row g-3">
   <!-- Datos del grupo -->
   <div class="col-12 col-lg-5">
-    <form method="post" action="/grupos/{{ group.id }}/actualizar" class="card p-3">
+    <div class="h-panel">
+    <form method="post" action="/grupos/{{ group.id }}/actualizar">
       <h6 class="mb-3">Datos del grupo</h6>
       <div class="mb-3">
         <label class="form-label">Nombre</label>
@@ -38,15 +53,17 @@
       {% endif %}
 
       <div class="d-flex gap-2">
-        <button class="btn btn-primary" type="submit">Guardar</button>
-        <a class="btn btn-outline-secondary" href="/grupos">Volver</a>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-floppy me-1"></i> Guardar</button>
+        <a class="btn btn-outline-secondary" href="/grupos">Cancelar</a>
         <a class="btn btn-outline-danger ms-auto btn-delete-group" href="/grupos/{{ group.id }}/eliminar"
           data-name="{{ group.name }}">Eliminar grupo</a>
       </div>
     </form>
+    </div>
 
     <!-- Agregar miembros -->
-    <form method="post" action="/grupos/{{ group.id }}/miembros/agregar" class="card p-3 mt-3">
+    <div class="h-panel mt-3">
+    <form method="post" action="/grupos/{{ group.id }}/miembros/agregar">
       <h6 class="mb-3">Agregar miembros</h6>
       <div class="mb-3">
         <label class="form-label">Usuarios</label>
@@ -70,16 +87,17 @@
         </select>
       </div>
 
-      <button class="btn btn-primary" type="submit">Agregar</button>
+      <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i> Agregar</button>
     </form>
+    </div>
   </div>
 
   <!-- Miembros actuales -->
   <div class="col-12 col-lg-7">
-    <div class="card p-3">
-      <h6 class="mb-3">Miembros ({{ memberships|length }})</h6>
+    <div class="h-panel" style="padding:0;overflow:hidden;">
+      <div style="padding:1rem 1.25rem 0.5rem;font-weight:600;color:#06486f;">Miembros ({{ memberships|length }})</div>
       <div class="table-responsive">
-        <table class="table table-sm align-middle">
+        <table class="h-table">
           <thead>
             <tr>
               <th>Usuario</th>
@@ -101,7 +119,7 @@
                     {% endif %}
                     {% endfor %}
                   </select>
-                  <button class="btn btn-sm btn-outline-primary" type="submit">Actualizar</button>
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">Actualizar</button>
                 </form>
               </td>
               <td class="text-end">

@@ -76,7 +76,6 @@ from .models import (
     BUSINESS_UNITS,
     Group,
     GroupMember,
-    GroupMember,
     normalize_proceso_nro,
     normalize_unit_business,
     Ticket,
@@ -92,6 +91,7 @@ from .models import (
     ChatChannel,
     ChatMember,
     ChatMessage,
+    PasswordResetRequest,
 )
 from .auth import hash_password, verify_password
 
@@ -1628,10 +1628,6 @@ def markets_home(
     """
     role = (user.role or "").lower()
     
-    # Gerente solo puede ver Forecast
-    if role == "gerente":
-        return RedirectResponse("/forecast", status_code=303)
-
     # Analistas no deben ver el SIEM, redirigir a su mercado
     if role == "analista":
         scope = (user.access_scope or "").strip().lower()
@@ -2030,14 +2026,11 @@ def mercado_privado_mi_password(
     """
     Mi contrase├▒a (Privado).
     """
-    ctx = {
-        "request": request,
-        "user": user,
-        "market_context": "private",
-        "error": request.query_params.get("error") or "",
-        "ok": request.query_params.get("ok") or "",
-    }
-    return templates.TemplateResponse("account_password.html", ctx)
+    qs = request.url.query
+    target = "/mi/password"
+    if qs:
+        target = f"{target}?{qs}"
+    return RedirectResponse(target, status_code=303)
 
 # ======================================================================
 # MERCADO P├ÜBLICO: helpers comunes
@@ -4567,13 +4560,14 @@ def api_carga_avance(
 def _load_processed_df(upload: UploadModel) -> Optional[pd.DataFrame]:
     """
     Carga el normalized.xlsx asociado al upload.
-    Devuelve un DataFrame o None si no existe.
+    Prioridad: archivo en disco → contenido guardado en DB.
+    El fallback a DB garantiza que funcione después de un redespliegue en Render.
     """
     try:
-        norm_path = services.get_normalized_path(upload)
-        if not norm_path or not norm_path.exists():
+        content = services.get_normalized_bytes(upload)
+        if not content:
             return None
-        df = pd.read_excel(norm_path)
+        df = pd.read_excel(io.BytesIO(content))
         df.columns = [str(c).strip() for c in df.columns]
         return df
     except Exception as e:
@@ -4642,9 +4636,11 @@ def api_descargar_final(
     if not up:
         raise HTTPException(status_code=404, detail="Proceso no encontrado")
 
-    norm_path = services.get_normalized_path(up)
-    if not norm_path or not norm_path.exists():
+    norm_bytes = services.get_normalized_bytes(up)
+    if not norm_bytes:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    safe_filename = f"normalized_{upload_id}.xlsx"
 
     # Log usage
     log_usage_event(
@@ -4653,40 +4649,17 @@ def api_descargar_final(
         section="normalized_download",
         request=request,
         resource_id=str(up.id),
-        extra_data={"filename": norm_path.name},
+        extra_data={"filename": safe_filename},
     )
 
-    # --- FILE RESPONSE STRATEGY (ON STATIC COPY) ---
-    logger.info(f"Descargando archivo para upload_id={upload_id}")
-    
-    # 1. Prepare destination
-    static_dl_dir = BASE_DIR / "static" / "temp_dl"
-    static_dl_dir.mkdir(parents=True, exist_ok=True)
-    
-    # 2. Copy file
-    safe_filename = f"normalized_{upload_id}.xlsx"
-    dest_path = static_dl_dir / safe_filename
-    
-    # Log original path
-    logger.info(f"Origen: {norm_path} -> Destino: {dest_path}")
-    
-    # Always overwrite to ensure fresh content
-    if dest_path.exists():
-        try:
-            dest_path.unlink()
-        except Exception as e:
-            logger.warning(f"No se pudo borrar temporal: {e}")
+    logger.info(f"Descargando archivo para upload_id={upload_id} ({len(norm_bytes)} bytes)")
 
-    shutil.copy2(norm_path, dest_path)
-    
-    # 3. Return FileResponse with EXPLICIT forced headers
-    # We set Content-Type and Content-Disposition manually to override anything else.
-    return FileResponse(
-        path=dest_path,
-        filename=safe_filename,
+    return Response(
+        content=norm_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(len(norm_bytes)),
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
             "Expires": "0",
@@ -5630,7 +5603,9 @@ def tablero_show(
     is_finalized = st in ("done", "finalizado")
 
     norm_path = services.get_normalized_path(up)
-    if not norm_path or not norm_path.exists():
+    # Verificar disponibilidad: disco O contenido en DB (sobrevive redespliegues)
+    has_normalized = (norm_path and norm_path.exists()) or bool(getattr(up, "normalized_content", None))
+    if not has_normalized:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
     # ­ƒöÆ Regla: solo ADMIN puede ver antes de finalizado
@@ -5640,20 +5615,8 @@ def tablero_show(
             detail="Disponible cuando el admin finalice el proceso.",
         )
 
-    processed_dir = (
-        norm_path.parent
-        if norm_path and norm_path.exists()
-        else Path(getattr(up, "base_dir", "")) / "processed"
-    )
-
-    # intentar leer dashboard.json generado por pipeline
-    summary = {}
-    dash_json = processed_dir / "dashboard.json"
-    if dash_json.exists():
-        try:
-            summary = json.loads(dash_json.read_text(encoding="utf-8"))
-        except Exception:
-            summary = {}
+    # Leer dashboard.json: disco primero, DB como fallback
+    summary = services.get_dashboard_data(up)
 
     df = _load_processed_df(up)
 
@@ -5947,6 +5910,7 @@ def login_form(request: Request):
     ctx = {
         "request": request,
         "error": request.query_params.get("error"),
+        "reset_request_ok": request.query_params.get("reset_ok") == "1",
     }
     return templates.TemplateResponse("login.html", ctx)
 
@@ -5983,6 +5947,10 @@ def login_submit(
         extra_data={"email": u.email},
     )
 
+    # Si el admin marcó cambio obligatorio de contraseña, redirigir a cambio
+    if getattr(u, "must_change_password", False):
+        return RedirectResponse("/mi/password?force=1", status_code=303)
+
     # Redirect logic based on Role and Business Unit
     target_url = "/"
     role = (u.role or "").lower()
@@ -5993,7 +5961,7 @@ def login_submit(
             target_url = "/mercado-publico"
         elif bu == "Mercado Privado":
             target_url = "/mercado-privado"
-    
+
     return RedirectResponse(target_url, status_code=303)
 
 
@@ -6029,6 +5997,7 @@ def my_password_form(
         "market_context": "account",
         "error": request.query_params.get("error") or "",
         "ok": request.query_params.get("ok") or "",
+        "force": request.query_params.get("force") == "1",
     }
     return templates.TemplateResponse("account_password.html", ctx)
 
@@ -6060,6 +6029,9 @@ def my_password_submit(
         )
     try:
         user.password_hash = hash_password(nueva)
+        # Si tenía cambio obligatorio pendiente, lo limpiamos
+        if getattr(user, "must_change_password", False):
+            user.must_change_password = False
         db_session.add(user)
         db_session.commit()
         return RedirectResponse("/mi/password?ok=1", status_code=303)
@@ -6183,6 +6155,247 @@ def password_reset_submit(
         )
 
 # ======================================================================
+# SOLICITUD INTERNA DE RESTABLECIMIENTO DE CONTRASEÑA (flujo corporativo)
+# ======================================================================
+
+
+@router.post("/password/solicitar", response_class=JSONResponse)
+def password_solicitar(
+    request: Request,
+    user_email: str = Form(...),
+):
+    """
+    Crea una solicitud interna de restablecimiento de contraseña.
+    No envía emails externos. Queda registrada para revisión del admin.
+    """
+    user_email = (user_email or "").strip().lower()
+
+    # Validación mínima de backend
+    import re as _re
+    email_re = _re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+    if not user_email or not email_re.match(user_email):
+        return JSONResponse({"ok": False, "error": "Email inválido."}, status_code=400)
+
+    # Derivar full_name del registro de usuario existente (o usar prefijo del email)
+    try:
+        existing_user = db_session.query(User).filter(
+            func.lower(User.email) == user_email
+        ).first()
+    except Exception:
+        db_session.rollback()
+        existing_user = None
+
+    if existing_user:
+        full_name = (
+            getattr(existing_user, "full_name", None)
+            or getattr(existing_user, "name", None)
+            or getattr(existing_user, "nombre", None)
+            or user_email
+        )
+    else:
+        prefix = user_email.split("@")[0]
+        full_name = prefix.replace(".", " ").replace("_", " ").replace("-", " ").title()
+
+    try:
+        req = PasswordResetRequest(
+            user_email=user_email,
+            full_name=full_name,
+            request_date=dt.datetime.utcnow(),
+            status="Pendiente",
+            must_change_password_on_next_login=True,
+        )
+        db_session.add(req)
+        db_session.commit()
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        db_session.rollback()
+        import logging as _log
+        _log.getLogger("wc.reset").error("Error al guardar solicitud de reset: %s", exc)
+        return JSONResponse({"ok": False, "error": "Error interno."}, status_code=500)
+
+
+# ── Admin: listado de solicitudes ─────────────────────────────────────
+
+@router.get("/admin/reset-solicitudes", response_class=HTMLResponse)
+def admin_reset_list(
+    request: Request,
+    status_filter: str = Query(""),
+    user: User = Depends(require_roles("admin")),
+):
+    q = db_session.query(PasswordResetRequest).order_by(
+        PasswordResetRequest.request_date.desc()
+    )
+    if status_filter:
+        q = q.filter(PasswordResetRequest.status == status_filter)
+    solicitudes = q.all()
+
+    return templates.TemplateResponse("password_reset_requests.html", {
+        "request": request,
+        "user": user,
+        "solicitudes": solicitudes,
+        "status_filter": status_filter,
+        "statuses": ["Pendiente", "En proceso", "Resuelto", "Rechazado"],
+        "ok": request.query_params.get("ok", ""),
+        "err": request.query_params.get("err", ""),
+    })
+
+
+# ── Admin: detalle de una solicitud ──────────────────────────────────
+
+@router.get("/admin/reset-solicitudes/{req_id}", response_class=HTMLResponse)
+def admin_reset_detail(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_roles("admin")),
+):
+    sol = db_session.get(PasswordResetRequest, req_id)
+    if not sol:
+        return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
+
+    return templates.TemplateResponse("password_reset_request_detail.html", {
+        "request": request,
+        "user": user,
+        "sol": sol,
+        "statuses": ["Pendiente", "En proceso", "Resuelto", "Rechazado"],
+        "ok": request.query_params.get("ok", ""),
+        "err": request.query_params.get("err", ""),
+    })
+
+
+# ── Admin: actualizar estado / observación ────────────────────────────
+
+@router.post("/admin/reset-solicitudes/{req_id}/estado")
+def admin_reset_update_status(
+    request: Request,
+    req_id: int,
+    status: str = Form(...),
+    admin_observation: str = Form(""),
+    user: User = Depends(require_roles("admin")),
+):
+    sol = db_session.get(PasswordResetRequest, req_id)
+    if not sol:
+        return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
+
+    valid_statuses = {"Pendiente", "En proceso", "Resuelto", "Rechazado"}
+    if status not in valid_statuses:
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?err=invalid_status", status_code=303
+        )
+
+    try:
+        sol.status = status
+        sol.admin_observation = (admin_observation or "").strip() or sol.admin_observation
+        sol.handled_by = user.email
+        sol.handled_date = dt.datetime.utcnow()
+        db_session.add(sol)
+        db_session.commit()
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?ok=estado_actualizado", status_code=303
+        )
+    except Exception:
+        db_session.rollback()
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?err=save_error", status_code=303
+        )
+
+
+# ── Admin: resolver — cambiar contraseña manualmente ─────────────────
+
+import secrets as _secrets
+import string  as _string
+
+
+@router.post("/admin/reset-solicitudes/{req_id}/resolver")
+def admin_reset_resolver(
+    request: Request,
+    req_id: int,
+    new_password: str = Form(""),
+    generate_password: str = Form(""),          # "1" = generar automáticamente
+    must_change_on_login: str = Form("1"),      # "1" = forzar cambio en próximo login
+    admin_observation: str = Form(""),
+    user: User = Depends(require_roles("admin")),
+):
+    sol = db_session.get(PasswordResetRequest, req_id)
+    if not sol:
+        return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
+
+    # Determinar contraseña a usar
+    generated = False
+    if generate_password == "1":
+        alphabet = _string.ascii_letters + _string.digits + "!@#$%"
+        new_password = "".join(_secrets.choice(alphabet) for _ in range(12))
+        generated = True
+    else:
+        new_password = (new_password or "").strip()
+
+    if len(new_password) < 8:
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?err=password_too_short", status_code=303
+        )
+
+    # Buscar al usuario por email
+    target_user = (
+        db_session.query(User)
+        .filter(func.lower(func.trim(User.email)) == sol.user_email.lower())
+        .first()
+    )
+    if not target_user:
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?err=user_not_found", status_code=303
+        )
+
+    try:
+        force_change = must_change_on_login == "1"
+
+        target_user.password_hash = hash_password(new_password)
+        target_user.must_change_password = force_change
+        db_session.add(target_user)
+
+        sol.status = "Resuelto"
+        sol.handled_by = user.email
+        sol.handled_date = dt.datetime.utcnow()
+        sol.temporary_password_generated = generated
+        sol.must_change_password_on_next_login = force_change
+        obs = (admin_observation or "").strip()
+        if obs:
+            sol.admin_observation = obs
+        db_session.add(sol)
+
+        # Auditoría
+        log_usage_event(
+            user=user,
+            action_type="admin_password_reset",
+            section="auth",
+            request=request,
+            extra_data={
+                "target_email": target_user.email,
+                "reset_request_id": req_id,
+                "generated": generated,
+                "force_change": force_change,
+            },
+        )
+
+        db_session.commit()
+
+        # Devolver contraseña temporal solo si fue generada (mostrar al admin UNA VEZ)
+        if generated:
+            return RedirectResponse(
+                f"/admin/reset-solicitudes/{req_id}"
+                f"?ok=resuelto&tmp_pwd={new_password}",
+                status_code=303,
+            )
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?ok=resuelto", status_code=303
+        )
+
+    except Exception:
+        db_session.rollback()
+        return RedirectResponse(
+            f"/admin/reset-solicitudes/{req_id}?err=save_error", status_code=303
+        )
+
+
+# ======================================================================
 # DESCARGA DEL ARCHIVO ORIGINAL SUBIDO
 # ======================================================================
 @router.get("/cargas/{upload_id}/original")
@@ -6279,29 +6492,25 @@ def descargar_normalizado(
             detail="Disponible cuando el admin finalice el proceso.",
         )
 
-    norm_path = services.get_normalized_path(up)
-    if not norm_path or not norm_path.exists():
+    norm_bytes = services.get_normalized_bytes(up)
+    if not norm_bytes:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
-    # ­ƒæç NUEVO: log de descarga de normalized
     log_usage_event(
         user=user,
         action_type="download_normalized",
         section="normalized_download",
         request=request,
         resource_id=str(up.id),
-        extra_data={"filename": norm_path.name},
+        extra_data={"filename": f"normalized_{upload_id}.xlsx"},
     )
 
-    # Force filename by reading bytes and sending raw Response
-    # This bypasses any FileResponse magic that might be overriding headers or filename
-    content = norm_path.read_bytes()
     return Response(
-        content=content,
+        content=norm_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="normalized_{upload_id}.xlsx"',
-            "Content-Length": str(len(content)),
+            "Content-Length": str(len(norm_bytes)),
         },
     )
 

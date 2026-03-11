@@ -1,8 +1,8 @@
 /* ========= SKIN MODERNO – Suizo =========
    Colores y tipografía pedidos:
-   - Azul principal: #064066
-   - Azul alternativo: #5274ce
-   - Azul alternativo claro: #6886c4
+   - Azul principal: #06486f  (Brandbook oficial)
+   - Azul alternativo: #5770b0 (Brandbook oficial)
+   - Azul alternativo claro: #7b8fc4
    - Amarillo (neutro claro): #eeede8
    - Tipografía: Outfit
    Este skin SOLO cambia estética (cards, bordes, sombras, header de tabla, controles).
@@ -10,9 +10,9 @@
 ========================================= */
 
 :root{
-  --brand-azul: #064066;
-  --brand-azul-alt: #5274ce;
-  --brand-azul-claro: #6886c4;
+  --brand-azul: #06486f;
+  --brand-azul-alt: #5770b0;
+  --brand-azul-claro: #7b8fc4;
   --brand-amarillo: #eeede8;
 
   --bg-soft: #f6f8fb;
@@ -22,8 +22,8 @@
 
   --radius-lg: 14px;
   --radius-md: 12px;
-  --shadow-sm: 0 4px 10px rgba(6,64,102,.05);
-  --shadow-md: 0 10px 20px rgba(6,64,102,.08);
+  --shadow-sm: 0 4px 10px rgba(6,72,111,.05);
+  --shadow-md: 0 10px 20px rgba(6,72,111,.08);
 
   /* ajustar sutilmente la grilla */
   --gap: 1rem;
@@ -157,7 +157,7 @@
 .dash-v2 #rankTable td.col-desc,
 .dash-v2 #rankTable th.col-cant,
 .dash-v2 #rankTable td.col-cant{
-  box-shadow: 4px 0 0 rgba(255,255,255,1), 6px 0 10px rgba(6,64,102,.05);
+  box-shadow: 4px 0 0 rgba(255,255,255,1), 6px 0 10px rgba(6,72,111,.05);
 }
 
 /* Chips de relación/asignación (ya venían) – solo afinamos colores */

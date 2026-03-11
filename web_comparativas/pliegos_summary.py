@@ -1,0 +1,948 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from pathlib import Path
+
+from web_comparativas.models import PliegoSolicitud
+
+MISSING_VALUE_MARKERS = {
+    "",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "nan",
+    "none",
+    "no encontrado",
+    "no encontrada",
+    "no identificado",
+    "no identificada",
+    "sin dato",
+    "sin datos",
+    "sin informacion",
+    "sin información",
+    "aaaa-mm-dd",
+    "hh:mm",
+    "id proceso",
+    "id único",
+    "id unico",
+    "archivo origen",
+    "pagina/seccion",
+    "página/sección",
+    "encontrado/ambiguo",
+    "abierto/cerrado",
+    "literal/inferido/calculado",
+    "texto/tabla/imagen",
+}
+HIGH_CRIT_VALUES = {"alta", "critica", "crítica", "alto", "high"}
+SUMMARY_FIELD_ALIASES = {
+    "tipo_proceso": ["tipo_proceso", "clase_proceso", "tipo_licitacion", "tipo_compra"],
+    "numero_proceso": ["numero_proceso", "nro_proceso", "numero_de_proceso", "codigo_oficial"],
+    "expediente": ["expediente", "nro_expediente", "numero_expediente"],
+    "nombre_proceso": ["nombre_proceso", "titulo_proceso", "denominacion_proceso", "denominacion"],
+    "objeto_contratacion": ["objeto_contratacion", "objeto", "descripcion_objeto", "objeto_de_contratacion"],
+    "organismo_contratante": ["organismo_contratante", "organismo", "entidad_contratante", "reparticion"],
+    "unidad_operativa": ["unidad_operativa", "unidad_operativa_adquisiciones", "unidad_contratante", "uoa"],
+    "rubro": ["rubro", "categoria", "clase"],
+    "moneda": ["moneda", "divisa", "currency"],
+    "modalidad": ["modalidad", "modalidad_contratacion"],
+    "etapa": ["etapa", "fase"],
+    "alcance": ["alcance", "alcance_territorial"],
+    "presupuesto_oficial": ["presupuesto_oficial", "monto_estimado", "monto_oficial", "presupuesto", "valor_total_estimado"],
+    "requiere_pago_pliego": ["requiere_pago_pliego", "pago_pliego", "compra_pliego"],
+    "valor_pliego": ["valor_pliego", "precio_pliego", "monto_pliego", "costo_pliego"],
+    "plazo_mantenimiento_oferta": ["plazo_mantenimiento_oferta", "mantenimiento_oferta"],
+    "condiciones_pago": ["condiciones_pago", "forma_pago", "pago", "condicion_pago"],
+    "anticipo_financiero": ["anticipo_financiero", "anticipo"],
+    "contragarantia": ["contragarantia", "contragarantía", "contra_garantia"],
+    "duracion_contrato": ["duracion_contrato", "plazo_contrato", "duracion_del_contrato"],
+    "fecha_estimada_inicio": ["fecha_estimada_inicio", "fecha_inicio", "fecha_probable_inicio", "inicio_contrato"],
+    "tipo_adjudicacion": ["tipo_adjudicacion", "forma_adjudicacion"],
+    "tipo_cotizacion": ["tipo_cotizacion", "forma_cotizacion"],
+    "lugar_entrega": ["lugar_entrega", "lugares_entrega", "domicilio_entrega"],
+    "plazo_entrega": ["plazo_entrega", "tiempo_entrega"],
+    "periodicidad": ["periodicidad", "periodicidad_recepcion"],
+    "supervisor": ["supervisor", "responsable", "responsable_tecnico"],
+    "contactos": ["contactos", "contacto", "email_contacto", "correo_contacto", "telefono_contacto", "correo", "email"],
+    "observaciones": ["observaciones", "observaciones_generales", "notas"],
+    "id_documental": ["proceso_id", "id_documental", "codigo_pliego", "codigo_documental", "documento_particular"],
+    "jurisdiccion": ["jurisdiccion", "ministerio", "area"],
+    "documento_generado": ["documento_generado", "documento_contrato", "instrumento_generado"],
+    "recepcion_digital": ["recepcion_digital", "presentacion_digital"],
+    "acepta_redeterminacion": ["acepta_redeterminacion", "redeterminacion_precios"],
+    "acepta_actualizacion_precios": ["acepta_actualizacion_precios", "actualizacion_precios"],
+    "acepta_prorroga": ["acepta_prorroga", "prorroga"],
+    "fecha_apertura": ["fecha_apertura", "apertura"],
+}
+SUMMARY_FIELD_META = {
+    "tipo_proceso": {"label": "Tipo de proceso", "icon": "bi-tag"},
+    "numero_proceso": {"label": "Numero de proceso", "icon": "bi-hash"},
+    "expediente": {"label": "Expediente", "icon": "bi-folder2"},
+    "nombre_proceso": {"label": "Nombre del proceso", "icon": "bi-file-text"},
+    "objeto_contratacion": {"label": "Objeto de contratacion", "icon": "bi-bullseye"},
+    "organismo_contratante": {"label": "Organismo contratante", "icon": "bi-building"},
+    "unidad_operativa": {"label": "Unidad operativa", "icon": "bi-diagram-3"},
+    "rubro": {"label": "Rubro", "icon": "bi-collection"},
+    "moneda": {"label": "Moneda", "icon": "bi-currency-exchange"},
+    "modalidad": {"label": "Modalidad", "icon": "bi-sliders"},
+    "etapa": {"label": "Etapa", "icon": "bi-signpost-2"},
+    "alcance": {"label": "Alcance", "icon": "bi-globe"},
+    "presupuesto_oficial": {"label": "Presupuesto oficial", "icon": "bi-cash-stack"},
+    "requiere_pago_pliego": {"label": "Requiere pago de pliego", "icon": "bi-wallet2"},
+    "valor_pliego": {"label": "Valor del pliego", "icon": "bi-receipt"},
+    "plazo_mantenimiento_oferta": {"label": "Plazo mant. oferta", "icon": "bi-hourglass"},
+    "condiciones_pago": {"label": "Condiciones de pago", "icon": "bi-credit-card"},
+    "anticipo_financiero": {"label": "Anticipo financiero", "icon": "bi-bank"},
+    "contragarantia": {"label": "Contragarantia", "icon": "bi-shield-check"},
+    "duracion_contrato": {"label": "Duracion del contrato", "icon": "bi-calendar-range"},
+    "fecha_estimada_inicio": {"label": "Fecha estimada de inicio", "icon": "bi-calendar-event"},
+    "tipo_adjudicacion": {"label": "Tipo de adjudicacion", "icon": "bi-award"},
+    "tipo_cotizacion": {"label": "Tipo de cotizacion", "icon": "bi-percent"},
+    "lugar_entrega": {"label": "Lugar de entrega", "icon": "bi-geo-alt"},
+    "plazo_entrega": {"label": "Plazo de entrega", "icon": "bi-clock"},
+    "periodicidad": {"label": "Periodicidad", "icon": "bi-arrow-repeat"},
+    "supervisor": {"label": "Supervisor / Responsable", "icon": "bi-person-badge"},
+    "contactos": {"label": "Contacto", "icon": "bi-telephone"},
+    "observaciones": {"label": "Observaciones", "icon": "bi-chat-text"},
+    "id_documental": {"label": "ID documental", "icon": "bi-upc-scan"},
+    "jurisdiccion": {"label": "Jurisdiccion", "icon": "bi-building-gear"},
+    "documento_generado": {"label": "Documento generado", "icon": "bi-file-earmark-check"},
+    "recepcion_digital": {"label": "Recepcion digital", "icon": "bi-cloud-arrow-up"},
+    "acepta_redeterminacion": {"label": "Acepta redeterminacion", "icon": "bi-graph-up-arrow"},
+    "acepta_actualizacion_precios": {"label": "Acepta actualizacion de precios", "icon": "bi-arrow-repeat"},
+    "acepta_prorroga": {"label": "Acepta prorroga", "icon": "bi-arrow-clockwise"},
+    "fecha_apertura": {"label": "Fecha de apertura", "icon": "bi-calendar2-check"},
+}
+SUMMARY_GROUPS = {
+    "informacion_basica": [
+        "tipo_proceso", "numero_proceso", "expediente", "nombre_proceso",
+        "objeto_contratacion", "organismo_contratante", "unidad_operativa",
+        "rubro", "moneda", "modalidad", "etapa", "alcance",
+    ],
+    "condiciones_comerciales": [
+        "presupuesto_oficial", "requiere_pago_pliego", "valor_pliego",
+        "plazo_mantenimiento_oferta", "condiciones_pago", "anticipo_financiero",
+        "contragarantia", "duracion_contrato", "fecha_estimada_inicio",
+        "tipo_adjudicacion", "tipo_cotizacion",
+    ],
+    "entrega_responsables": [
+        "lugar_entrega", "plazo_entrega", "periodicidad", "supervisor", "contactos", "observaciones",
+    ],
+    "informacion_adicional": [
+        "id_documental", "jurisdiccion", "documento_generado", "recepcion_digital",
+        "acepta_redeterminacion", "acepta_actualizacion_precios", "acepta_prorroga", "fecha_apertura",
+    ],
+}
+SUMMARY_KPI_KEYS = ["presupuesto_oficial", "valor_pliego", "plazo_mantenimiento_oferta", "duracion_contrato"]
+SUMMARY_TOP_LEVEL_ALIASES = {
+    "organismo": "organismo_contratante",
+    "objeto": "objeto_contratacion",
+    "pago": "condiciones_pago",
+    "anticipo": "anticipo_financiero",
+    "fecha_inicio": "fecha_estimada_inicio",
+    "contacto": "contactos",
+}
+
+
+def _safe_str(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in {"nan", "none"} else text
+
+
+def _strip_accents(value: str) -> str:
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", value or "")
+        if not unicodedata.combining(ch)
+    )
+
+
+def _normalize_key(value) -> str:
+    text = _strip_accents(_safe_str(value).lower())
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _normalize_text(value) -> str:
+    return re.sub(r"\s+", " ", _strip_accents(_safe_str(value).lower())).strip()
+
+
+def _alias_matches(candidate_key: str, alias_key: str) -> bool:
+    return candidate_key == alias_key or candidate_key.startswith(f"{alias_key}_") or alias_key.startswith(f"{candidate_key}_")
+
+
+def _is_explicit_missing(value: str) -> bool:
+    text = _normalize_text(value)
+    return (
+        not text
+        or text in MISSING_VALUE_MARKERS
+        or text.startswith("no encontrado")
+        or text.startswith("no encontrada")
+        or text.startswith("no identificado")
+        or text.startswith("no identificada")
+    )
+
+
+def _field_state_from_value(value: str, fallback: str = "Encontrado") -> str:
+    text = _normalize_text(value)
+    if _is_explicit_missing(text):
+        return "Pendiente validacion"
+    if "contradict" in text:
+        return "Contradictorio"
+    if "ambigu" in text:
+        return "Ambiguo"
+    if "inferid" in text:
+        return "Inferido"
+    return fallback
+
+
+def _state_key(state: str) -> str:
+    return {
+        "Encontrado": "encontrado",
+        "Inferido": "inferido",
+        "Ambiguo": "ambiguo",
+        "Contradictorio": "contradictorio",
+        "No encontrado": "no_encontrado",
+        "Pendiente validacion": "pendiente",
+    }.get(state, "pendiente")
+
+
+def is_presentable_value(value) -> bool:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return True
+    text = _safe_str(value)
+    return bool(text and not _is_explicit_missing(text))
+
+
+def _has_usable_field_value(*values) -> bool:
+    return any(is_presentable_value(value) for value in values)
+
+
+def _normalize_yes_no(value: str) -> str:
+    text = _normalize_text(value)
+    token = re.split(r"[\s,;:/()]+", text)[0] if text else ""
+    if token in {"si", "s", "yes", "true", "1"}:
+        return "Si"
+    if token in {"no", "false", "0"}:
+        return "No"
+    return ""
+
+
+def _parse_decimal_text(value: str):
+    text = _safe_str(value)
+    if not text:
+        return None
+    cleaned = re.sub(r"[^0-9,.\-]", "", text)
+    if not cleaned or cleaned in {"-", ".", ","}:
+        return None
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "." in cleaned:
+        whole, frac = cleaned.rsplit(".", 1)
+        if frac.isdigit() and len(frac) == 3 and whole.replace("-", "").isdigit():
+            cleaned = cleaned.replace(".", "")
+    elif cleaned.count(".") > 1:
+        cleaned = cleaned.replace(".", "")
+    elif "," in cleaned:
+        whole, frac = cleaned.rsplit(",", 1)
+        if frac.isdigit() and len(frac) == 3 and whole.replace("-", "").isdigit():
+            cleaned = cleaned.replace(",", "")
+        else:
+            parts = cleaned.split(",")
+            cleaned = "".join(parts[:-1]) + "." + parts[-1] if len(parts[-1]) in {1, 2} else "".join(parts)
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _extract_money_amount(value: str):
+    matches = re.findall(r"(?:\$|ars|usd)?\s*([0-9][0-9.,]*)", _normalize_text(value))
+    if not matches:
+        return _parse_decimal_text(value)
+    for raw in reversed(matches):
+        parsed = _parse_decimal_text(raw)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_percentage(value: str) -> str:
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*%", _safe_str(value))
+    return f"{match.group(1).replace('.', ',')}%" if match else ""
+
+
+def _format_number(value: float) -> str:
+    decimals = 0 if abs(value - int(value)) < 0.000001 else 2
+    fmt = f"{value:,.{decimals}f}"
+    return fmt.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _format_currency_value(value: str, currency: str = "ARS") -> str:
+    parsed = _parse_decimal_text(value)
+    if parsed is None:
+        return _safe_str(value)
+    prefix = "$ " if (currency or "ARS").upper() == "ARS" else f"{currency.upper()} "
+    return f"{prefix}{_format_number(parsed)}"
+
+
+def _format_field_value(field_key: str, value: str, currency: str = "ARS") -> str:
+    text = _safe_str(value)
+    if not text:
+        return ""
+    if field_key in {"presupuesto_oficial", "valor_pliego"}:
+        return _format_currency_value(text, currency)
+    if field_key in {"requiere_pago_pliego", "recepcion_digital", "acepta_redeterminacion", "acepta_actualizacion_precios", "acepta_prorroga"}:
+        yes_no = _normalize_yes_no(text)
+        if yes_no:
+            return yes_no
+    return text
+
+
+def _trace_hint(source_name: str, trace: dict, note: str = "") -> str:
+    parts = [f"Fuente: {source_name}"]
+    if trace.get("fuente_documento"):
+        parts.append(f"Documento: {trace['fuente_documento']}")
+    if trace.get("pagina_seccion"):
+        parts.append(f"Pagina/seccion: {trace['pagina_seccion']}")
+    if trace.get("metodo_extraccion"):
+        parts.append(f"Metodo: {trace['metodo_extraccion']}")
+    if trace.get("texto_evidencia"):
+        parts.append(f"Evidencia: {trace['texto_evidencia']}")
+    if note:
+        parts.append(note)
+    return " | ".join(p for p in parts if p)
+
+
+def _make_candidate(value: str, *, source_name: str, priority: int, source_type: str, state: str | None = None, trace: dict | None = None, note: str = ""):
+    raw_value = _safe_str(value)
+    if not raw_value or _is_explicit_missing(raw_value):
+        return None
+    return {
+        "value": raw_value,
+        "source_name": source_name,
+        "priority": priority,
+        "source_type": source_type,
+        "state": state or _field_state_from_value(raw_value, "Encontrado"),
+        "trace": trace or {},
+        "note": note,
+    }
+
+
+def _parse_trace_observation(observacion: str) -> dict:
+    data = {}
+    for raw_line in _safe_str(observacion).splitlines():
+        line = raw_line.strip()
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        norm_key = _normalize_key(key)
+        if norm_key in {"metodo", "metodo_extraccion"}:
+            data["metodo_extraccion"] = value.strip()
+        elif norm_key in {"texto_evidencia", "evidencia"}:
+            data["texto_evidencia"] = value.strip()
+        elif norm_key in {"normalizacion", "normalizacion_aplicada"}:
+            data["normalizacion_aplicada"] = value.strip()
+        elif norm_key == "observacion":
+            data["observacion"] = value.strip()
+    return data
+
+
+def _collect_process_candidates(datos: dict, field_key: str) -> list[dict]:
+    aliases = {_normalize_key(field_key), *(_normalize_key(alias) for alias in SUMMARY_FIELD_ALIASES.get(field_key, []))}
+    candidates = []
+    for raw_key, raw_value in (datos or {}).items():
+        norm_key = _normalize_key(raw_key)
+        if norm_key and any(_alias_matches(norm_key, alias) for alias in aliases):
+            candidate = _make_candidate(raw_value, source_name="01_Proceso", priority=1, source_type="proceso")
+            if candidate:
+                candidates.append(candidate)
+    return candidates
+
+
+def _resolve_active_excel_path(caso: PliegoSolicitud) -> Path | None:
+    cargas = [carga for carga in (caso.cargas_excel or []) if getattr(carga, "es_activa", False) and _safe_str(getattr(carga, "url_path", ""))]
+    if not cargas:
+        return None
+    cargas.sort(key=lambda item: getattr(item, "version", 0), reverse=True)
+    url_path = _safe_str(cargas[0].url_path)
+    if not url_path:
+        return None
+    base_dir = Path(__file__).resolve().parent
+    return base_dir / url_path.lstrip("/\\")
+
+
+def _looks_like_process_template_row(row: dict) -> bool:
+    process_id = _normalize_text(row.get("proceso_id", ""))
+    if process_id.startswith("id "):
+        return True
+    joined = " ".join(_normalize_text(value) for value in row.values() if _safe_str(value))
+    template_tokens = {
+        "codigo oficial",
+        "n expediente",
+        "denominacion",
+        "objeto",
+        "rubro",
+        "ars/usd",
+        "oc abierta/cerrada",
+        "nacional/internacional",
+        "por oferta/por renglon",
+        "total/parcial",
+        "texto del pliego",
+        "texto o fecha",
+        "tel./mail/area",
+        "nombre/cargo",
+    }
+    return sum(1 for token in template_tokens if token in joined) >= 3
+
+
+def _load_process_data_from_excel(caso: PliegoSolicitud) -> dict:
+    excel_path = _resolve_active_excel_path(caso)
+    if not excel_path or not excel_path.exists():
+        return {}
+    try:
+        import pandas as pd
+    except Exception:
+        return {}
+    try:
+        xl = pd.ExcelFile(excel_path)
+    except Exception:
+        return {}
+    sheet_name = next((name for name in xl.sheet_names if _normalize_key(name) in {"01_proceso", "proceso"}), None)
+    if not sheet_name:
+        sheet_name = next((name for name in xl.sheet_names if "proceso" in _normalize_key(name)), None)
+    if not sheet_name:
+        return {}
+    try:
+        df = xl.parse(sheet_name, dtype=str).fillna("")
+    except Exception:
+        return {}
+    for row in df.to_dict("records"):
+        clean_row = {str(key): _safe_str(value) for key, value in row.items() if _safe_str(key)}
+        if not clean_row or _looks_like_process_template_row(clean_row):
+            continue
+        if sum(1 for value in clean_row.values() if is_presentable_value(value)) >= 4:
+            return clean_row
+    return {}
+
+
+def _collect_trace_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
+    aliases = {_normalize_key(field_key), *(_normalize_key(alias) for alias in SUMMARY_FIELD_ALIASES.get(field_key, []))}
+    candidates = []
+    for traza in caso.trazabilidad or []:
+        campo_norm = _normalize_key(traza.campo)
+        if not campo_norm or not any(_alias_matches(campo_norm, alias) for alias in aliases):
+            continue
+        extra_trace = _parse_trace_observation(traza.observacion or "")
+        trace = {
+            "campo_objetivo": traza.campo or "",
+            "fuente_documento": traza.documento_fuente or "",
+            "pagina_seccion": traza.pagina_seccion or "",
+            "tipo_evidencia": traza.tipo_evidencia or "",
+            "metodo_extraccion": extra_trace.get("metodo_extraccion", ""),
+            "texto_evidencia": extra_trace.get("texto_evidencia", ""),
+            "normalizacion_aplicada": extra_trace.get("normalizacion_aplicada", ""),
+            "observacion": extra_trace.get("observacion", "") or (traza.observacion or ""),
+        }
+        state_source = " ".join(filter(None, [traza.valor_extraido or "", trace.get("metodo_extraccion", ""), trace.get("observacion", "")]))
+        candidate = _make_candidate(
+            traza.valor_extraido,
+            source_name="10_Trazabilidad",
+            priority=2,
+            source_type="trazabilidad",
+            state=_field_state_from_value(state_source, "Encontrado"),
+            trace=trace,
+        )
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def _collect_case_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
+    return []
+
+
+def _collect_renglon_values(caso: PliegoSolicitud, extra_keys: list[str], fallback_attrs: list[str]) -> list[str]:
+    values = []
+    for renglon in caso.renglones or []:
+        extra = renglon.datos_extra or {}
+        for key in extra_keys:
+            value = _safe_str(extra.get(key, ""))
+            if value and not _is_explicit_missing(value):
+                values.append(value)
+        for attr in fallback_attrs:
+            value = _safe_str(getattr(renglon, attr, ""))
+            if value and not _is_explicit_missing(value):
+                values.append(value)
+    return values
+
+
+def _collapse_unique(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        norm = _normalize_text(value)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        result.append(_safe_str(value))
+    return result
+
+
+def _candidate_from_renglones(field_key: str, values: list[str]) -> list[dict]:
+    unique = _collapse_unique(values)
+    if not unique:
+        return []
+    if field_key in {"lugar_entrega", "contactos"}:
+        display = " / ".join(unique[:4])
+        state = "Inferido"
+    elif len(unique) == 1:
+        display = unique[0]
+        state = "Inferido"
+    else:
+        display = " | ".join(unique[:4])
+        state = "Ambiguo"
+    candidate = _make_candidate(
+        display,
+        source_name="05_Renglones",
+        priority=3,
+        source_type="tematica",
+        state=state,
+        note="Consolidado desde renglones",
+    )
+    return [candidate] if candidate else []
+
+
+def _thematic_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
+    if field_key == "lugar_entrega":
+        return _candidate_from_renglones(field_key, _collect_renglon_values(caso, ["lugar_entrega"], ["destino_efector"]))
+    if field_key == "plazo_entrega":
+        return _candidate_from_renglones(field_key, _collect_renglon_values(caso, ["plazo_entrega"], []))
+    if field_key == "periodicidad":
+        return _candidate_from_renglones(field_key, _collect_renglon_values(caso, ["periodicidad"], []))
+    if field_key == "fecha_apertura":
+        values = []
+        for hito in caso.cronograma or []:
+            if "apertura" not in _normalize_text(hito.hito):
+                continue
+            if is_presentable_value(hito.fecha):
+                parts = [_safe_str(hito.fecha)]
+                if is_presentable_value(hito.hora):
+                    parts.append(_safe_str(hito.hora))
+                values.append(" ".join(parts))
+        return _candidate_from_renglones(field_key, values)
+    if field_key == "contragarantia":
+        for garantia in caso.garantias or []:
+            tipo = _normalize_text(garantia.tipo)
+            if "contragar" not in tipo and "anticipo" not in tipo:
+                continue
+            pieces = []
+            if _safe_str(garantia.requerida):
+                pieces.append(_safe_str(garantia.requerida))
+            if _safe_str(garantia.porcentaje):
+                pieces.append(f"{_safe_str(garantia.porcentaje)}%")
+            if _safe_str(garantia.base_calculo):
+                pieces.append(f"sobre {_safe_str(garantia.base_calculo)}")
+            candidate = _make_candidate(
+                "; ".join(pieces) or _safe_str(garantia.tipo),
+                source_name="04_Garantias",
+                priority=3,
+                source_type="tematica",
+                state=_field_state_from_value(garantia.estado_dato or "", "Encontrado"),
+                note=_safe_str(garantia.tipo),
+            )
+            return [candidate] if candidate else []
+    if field_key == "anticipo_financiero":
+        for hallazgo in caso.hallazgos or []:
+            raw_text = " ".join(filter(None, [hallazgo.categoria, hallazgo.hallazgo, hallazgo.accion_sugerida]))
+            if "anticipo" not in _normalize_text(raw_text):
+                continue
+            percentage = _extract_percentage(raw_text)
+            candidate = _make_candidate(
+                percentage or _safe_str(hallazgo.hallazgo),
+                source_name="08_Hallazgos_extra",
+                priority=3,
+                source_type="tematica",
+                state="Encontrado" if percentage else "Inferido",
+            )
+            return [candidate] if candidate else []
+    if field_key == "tipo_adjudicacion":
+        for hallazgo in caso.hallazgos or []:
+            normalized = _normalize_text(" ".join(filter(None, [hallazgo.categoria, hallazgo.hallazgo])))
+            if "adjudicacion parcial" in normalized:
+                candidate = _make_candidate("Parcial", source_name="08_Hallazgos_extra", priority=3, source_type="tematica", state="Inferido")
+                return [candidate] if candidate else []
+            if "adjudicacion total" in normalized:
+                candidate = _make_candidate("Total", source_name="08_Hallazgos_extra", priority=3, source_type="tematica", state="Inferido")
+                return [candidate] if candidate else []
+    if field_key == "id_documental":
+        values = [_safe_str(acto.numero) for acto in caso.actos_admin or [] if _safe_str(acto.numero)]
+        return _candidate_from_renglones(field_key, values)
+    return []
+
+
+def _find_matching_faltante(caso: PliegoSolicitud, field_key: str):
+    aliases = {_normalize_key(field_key), *(_normalize_key(alias) for alias in SUMMARY_FIELD_ALIASES.get(field_key, []))}
+    matches = []
+    for faltante in caso.faltantes or []:
+        campo_norm = _normalize_key(faltante.campo_objetivo)
+        if campo_norm and any(_alias_matches(campo_norm, alias) for alias in aliases):
+            matches.append(faltante)
+    if not matches:
+        return None
+    matches.sort(key=lambda item: 0 if _normalize_text(item.criticidad) in HIGH_CRIT_VALUES else 1)
+    return matches[0]
+
+
+def _comparable_field_value(field_key: str, value: str):
+    if field_key in {"presupuesto_oficial", "valor_pliego"}:
+        parsed = _extract_money_amount(value)
+        return round(parsed, 2) if parsed is not None else _normalize_text(value)
+    if field_key in {"requiere_pago_pliego", "recepcion_digital", "acepta_redeterminacion", "acepta_actualizacion_precios", "acepta_prorroga"}:
+        yes_no = _normalize_yes_no(value)
+        return yes_no or _normalize_text(value)
+    return _normalize_text(value)
+
+
+def _pick_best_candidate(field_key: str, candidates: list[dict]):
+    usable = [candidate for candidate in candidates if candidate and not _is_explicit_missing(candidate["value"])]
+    if not usable:
+        return None
+    usable.sort(key=lambda item: (item["priority"], 0 if item["state"] == "Encontrado" else 1))
+    selected = dict(usable[0])
+    unique_values = []
+    seen = set()
+    for candidate in usable:
+        comparable = _comparable_field_value(field_key, candidate["value"])
+        if comparable in seen:
+            continue
+        seen.add(comparable)
+        unique_values.append(candidate["value"])
+    normalized_values = [_normalize_text(value) for value in unique_values]
+    if len(normalized_values) > 1:
+        compact = []
+        for value in normalized_values:
+            if any(value != other and value and value in other for other in normalized_values):
+                continue
+            compact.append(value)
+        normalized_values = compact or normalized_values
+    if len(normalized_values) > 1 and selected["state"] not in {"Ambiguo", "Contradictorio"}:
+        bool_like = {"requiere_pago_pliego", "recepcion_digital", "acepta_redeterminacion", "acepta_actualizacion_precios", "acepta_prorroga"}
+        selected["state"] = "Contradictorio" if field_key in bool_like else "Ambiguo"
+        selected["note"] = (selected.get("note", "") + " | " if selected.get("note") else "") + "Multiples valores detectados"
+    return selected
+
+
+def _build_missing_field(field_key: str, missing_hint) -> dict:
+    reason = _normalize_text(getattr(missing_hint, "motivo", "") if missing_hint else "")
+    state = "Pendiente validacion"
+    if "contradict" in reason:
+        state = "Contradictorio"
+    elif "ambigu" in reason:
+        state = "Ambiguo"
+    elif "no encontrado" in reason or "ausente" in reason:
+        state = "No encontrado"
+    note = _safe_str(getattr(missing_hint, "detalle", "") if missing_hint else "")
+    trace = {
+        "fuente_documento": "",
+        "pagina_seccion": "",
+        "tipo_evidencia": "",
+        "metodo_extraccion": "",
+        "texto_evidencia": "",
+        "observacion": note,
+    } if missing_hint else {}
+    meta = SUMMARY_FIELD_META[field_key]
+    return {
+        "key": field_key,
+        "label": meta["label"],
+        "icon": meta["icon"],
+        "value": "",
+        "has_value": False,
+        "display_value": "No identificado",
+        "state": state,
+        "state_key": _state_key(state),
+        "source_name": "09_Faltantes_y_dudas" if missing_hint else "",
+        "trace": trace,
+        "note": note,
+        "trace_hint": _trace_hint("09_Faltantes_y_dudas", trace, note) if missing_hint else "",
+    }
+
+
+def _build_field(field_key: str, candidate, missing_hint, currency: str = "ARS") -> dict:
+    if not candidate:
+        return _build_missing_field(field_key, missing_hint)
+    meta = SUMMARY_FIELD_META[field_key]
+    display_value = _format_field_value(field_key, candidate["value"], currency)
+    has_value = _has_usable_field_value(
+        candidate.get("raw_value"),
+        candidate.get("value"),
+        display_value,
+    )
+    if not has_value:
+        return _build_missing_field(field_key, missing_hint)
+    note = candidate.get("note", "")
+    return {
+        "key": field_key,
+        "label": meta["label"],
+        "icon": meta["icon"],
+        "value": candidate["value"],
+        "has_value": True,
+        "display_value": display_value,
+        "state": candidate["state"],
+        "state_key": _state_key(candidate["state"]),
+        "source_name": candidate["source_name"],
+        "trace": candidate.get("trace", {}),
+        "note": note,
+        "trace_hint": _trace_hint(candidate["source_name"], candidate.get("trace", {}), note),
+    }
+
+
+def _parse_compound_pliego_value(raw_value: str) -> dict:
+    text = _safe_str(raw_value)
+    if not text or _is_explicit_missing(text):
+        return {}
+    return {
+        "raw_value": text,
+        "requiere_pago_pliego": _normalize_yes_no(text),
+        "valor_pliego_amount": _extract_money_amount(text),
+    }
+
+
+def _resolve_compound_pliego_fields(caso: PliegoSolicitud, datos: dict, currency: str):
+    raw_candidates = _collect_process_candidates(datos, "requiere_pago_pliego")
+    raw_candidates.extend(_collect_trace_candidates(caso, "requiere_pago_pliego"))
+    raw_source = _pick_best_candidate("requiere_pago_pliego", raw_candidates)
+    parsed = _parse_compound_pliego_value(raw_source["value"]) if raw_source else {}
+    direct_value = _pick_best_candidate(
+        "valor_pliego",
+        _collect_process_candidates(datos, "valor_pliego") + _collect_trace_candidates(caso, "valor_pliego"),
+    )
+    result = {}
+    if raw_source and parsed.get("requiere_pago_pliego"):
+        result["requiere_pago_pliego"] = _build_field(
+            "requiere_pago_pliego",
+            dict(raw_source, raw_value=parsed.get("raw_value", raw_source["value"]), value=parsed["requiere_pago_pliego"]),
+            _find_matching_faltante(caso, "requiere_pago_pliego"),
+            currency,
+        )
+    elif raw_source:
+        result["requiere_pago_pliego"] = _build_field(
+            "requiere_pago_pliego",
+            dict(raw_source, state="Pendiente validacion"),
+            _find_matching_faltante(caso, "requiere_pago_pliego"),
+            currency,
+        )
+    if parsed.get("valor_pliego_amount") is not None:
+        result["valor_pliego"] = _build_field(
+            "valor_pliego",
+            dict(raw_source, raw_value=parsed.get("raw_value", raw_source["value"]), value=str(parsed["valor_pliego_amount"])),
+            _find_matching_faltante(caso, "valor_pliego"),
+            currency,
+        )
+    elif direct_value:
+        result["valor_pliego"] = _build_field(
+            "valor_pliego",
+            direct_value,
+            _find_matching_faltante(caso, "valor_pliego"),
+            currency,
+        )
+    elif raw_source:
+        result["valor_pliego"] = _build_field(
+            "valor_pliego",
+            dict(raw_source, state="Pendiente validacion"),
+            _find_matching_faltante(caso, "valor_pliego"),
+            currency,
+        )
+    return result
+
+
+def _resolve_summary_field(caso: PliegoSolicitud, datos: dict, field_key: str, currency: str = "ARS") -> dict:
+    candidates = []
+    candidates.extend(_collect_process_candidates(datos, field_key))
+    candidates.extend(_collect_trace_candidates(caso, field_key))
+    candidates.extend(_thematic_candidates(caso, field_key))
+    candidates.extend(_collect_case_candidates(caso, field_key))
+    return _build_field(field_key, _pick_best_candidate(field_key, candidates), _find_matching_faltante(caso, field_key), currency)
+
+
+def _score_from_state(state: str, *, has_value: bool) -> float:
+    if not has_value:
+        return 0.0
+    return {
+        "Encontrado": 1.0,
+        "Inferido": 0.7,
+        "Ambiguo": 0.4,
+        "Contradictorio": 0.2,
+        "No encontrado": 0.0,
+        "Pendiente validacion": 0.0,
+    }.get(state, 0.0)
+
+
+def _metric_from_field(campos: dict, key: str) -> dict:
+    campo = campos[key]
+    has_value = bool(campo.get("has_value"))
+    return {
+        "label": key,
+        "score": _score_from_state(campo["state"], has_value=has_value),
+        "state": campo["state"],
+        "has_value": has_value,
+    }
+
+
+def _metric_from_collection(items, *, label: str) -> dict:
+    count = len(items or [])
+    return {
+        "label": label,
+        "score": 1.0 if count else 0.0,
+        "state": "Encontrado" if count else "Pendiente validacion",
+        "has_value": bool(count),
+    }
+
+
+def _metric_from_cronograma_critico(caso: PliegoSolicitud) -> dict:
+    critical_hits = 0
+    for hito in caso.cronograma or []:
+        if "apertura" in _normalize_text(hito.hito) and is_presentable_value(hito.fecha):
+            critical_hits += 1
+            break
+    return {
+        "label": "cronograma_critico_minimo",
+        "score": 1.0 if critical_hits else 0.0,
+        "state": "Encontrado" if critical_hits else "Pendiente validacion",
+        "has_value": bool(critical_hits),
+    }
+
+
+def _build_completeness_metrics(campos: dict, caso: PliegoSolicitud) -> dict:
+    executive_items = [
+        _metric_from_field(campos, "tipo_proceso"),
+        _metric_from_field(campos, "nombre_proceso"),
+        _metric_from_field(campos, "objeto_contratacion"),
+        _metric_from_field(campos, "organismo_contratante"),
+        _metric_from_field(campos, "unidad_operativa"),
+        _metric_from_field(campos, "modalidad"),
+        _metric_from_field(campos, "moneda"),
+        _metric_from_field(campos, "presupuesto_oficial"),
+        _metric_from_field(campos, "valor_pliego"),
+        _metric_from_field(campos, "plazo_mantenimiento_oferta"),
+        _metric_from_field(campos, "duracion_contrato"),
+        _metric_from_field(campos, "lugar_entrega"),
+        _metric_from_field(campos, "plazo_entrega"),
+        _metric_from_field(campos, "contactos"),
+        _metric_from_collection(caso.renglones, label="renglones"),
+        _metric_from_collection(caso.requisitos, label="requisitos"),
+        _metric_from_collection(caso.garantias, label="garantias"),
+        _metric_from_cronograma_critico(caso),
+    ]
+    technical_keys = [
+        "tipo_proceso", "numero_proceso", "expediente", "nombre_proceso", "objeto_contratacion",
+        "organismo_contratante", "unidad_operativa", "rubro", "moneda", "modalidad", "alcance",
+        "presupuesto_oficial", "valor_pliego", "plazo_mantenimiento_oferta", "duracion_contrato",
+        "tipo_adjudicacion", "tipo_cotizacion", "lugar_entrega", "plazo_entrega", "periodicidad",
+        "supervisor", "contactos", "fecha_estimada_inicio", "recepcion_digital", "acepta_redeterminacion",
+        "acepta_actualizacion_precios", "acepta_prorroga", "fecha_apertura", "jurisdiccion",
+        "documento_generado", "condiciones_pago", "anticipo_financiero", "contragarantia",
+    ]
+    technical_items = [_metric_from_field(campos, key) for key in technical_keys]
+    critical = [row for row in caso.faltantes if _normalize_text(row.criticidad) in HIGH_CRIT_VALUES]
+
+    def build_metric(items: list[dict]) -> dict:
+        total = len(items)
+        found = sum(1 for item in items if item["state"] == "Encontrado" and item["has_value"])
+        inferred = sum(1 for item in items if item["state"] == "Inferido" and item["has_value"])
+        ambiguous = sum(1 for item in items if item["state"] == "Ambiguo")
+        contradictory = sum(1 for item in items if item["state"] == "Contradictorio")
+        missing = sum(1 for item in items if not item["has_value"])
+        score_sum = sum(item["score"] for item in items)
+        percentage = int(round((score_sum / total) * 100)) if total else 0
+
+        if critical:
+            percentage = min(percentage, 89)
+        if critical:
+            status = "Pendiente validacion"
+        elif contradictory or missing:
+            status = "Con observaciones"
+        elif ambiguous:
+            status = "Con observaciones"
+        else:
+            status = "Completo"
+
+        max_percentage = 99 if (critical or contradictory or missing or ambiguous) else 100
+        percentage = max(0, min(percentage, max_percentage))
+        return {
+            "porcentaje": percentage,
+            "estado": status,
+            "campos_esperados": total,
+            "campos_encontrados": found,
+            "campos_inferidos": inferred,
+            "campos_ambiguos": ambiguous,
+            "campos_contradictorios": contradictory,
+            "campos_pendientes": missing,
+            "faltantes_criticos": len(critical),
+        }
+
+    return {
+        "ejecutiva": build_metric(executive_items),
+        "tecnica": build_metric(technical_items),
+    }
+
+
+def build_resumen_licitacion(caso: PliegoSolicitud) -> dict:
+    datos = dict(caso.datos_proceso.datos) if (caso.datos_proceso and caso.datos_proceso.datos) else {}
+    excel_process_data = _load_process_data_from_excel(caso)
+    if excel_process_data:
+        for key, value in excel_process_data.items():
+            if not is_presentable_value(datos.get(key)):
+                datos[key] = value
+    campos = {"moneda": _resolve_summary_field(caso, datos, "moneda", "ARS")}
+    moneda_base = campos["moneda"]["display_value"] or "ARS"
+    compound = _resolve_compound_pliego_fields(caso, datos, moneda_base)
+
+    for field_key in SUMMARY_FIELD_META:
+        if field_key in campos:
+            continue
+        if field_key in compound:
+            campos[field_key] = compound[field_key]
+            continue
+        campos[field_key] = _resolve_summary_field(caso, datos, field_key, moneda_base)
+
+    completitudes = _build_completeness_metrics(campos, caso)
+    completitud_ejecutiva = completitudes["ejecutiva"]
+    completitud_tecnica = completitudes["tecnica"]
+    criticos = [row for row in caso.faltantes if _normalize_text(row.criticidad) in HIGH_CRIT_VALUES]
+    known_fields = set()
+    for field_key, aliases in SUMMARY_FIELD_ALIASES.items():
+        known_fields.add(field_key)
+        known_fields.update(aliases)
+
+    resumen = {
+        "titulo": caso.titulo or "",
+        "campos": campos,
+        "grupos": {group: [campos[key] for key in keys] for group, keys in SUMMARY_GROUPS.items()},
+        "kpis": [campos[key] for key in SUMMARY_KPI_KEYS],
+        "cantidad_renglones": len(caso.renglones),
+        "cantidad_requisitos": len(caso.requisitos),
+        "cantidad_hallazgos": len(caso.hallazgos),
+        "cantidad_criticos": len(criticos),
+        "fecha_carga": caso.publicado_en or caso.actualizado_en,
+        "estado": caso.estado,
+        "completitud": completitud_ejecutiva,
+        "completitud_ejecutiva": completitud_ejecutiva,
+        "completitud_tecnica": completitud_tecnica,
+        "_campos_conocidos": known_fields,
+        "_datos_raw": datos,
+    }
+
+    for field_key in SUMMARY_FIELD_META:
+        resumen[field_key] = campos[field_key]["value"]
+    for alias_key, field_key in SUMMARY_TOP_LEVEL_ALIASES.items():
+        resumen[alias_key] = campos[field_key]["value"]
+    return resumen
+
+
+def calcular_completitud(caso: PliegoSolicitud) -> int:
+    return build_resumen_licitacion(caso)["completitud_ejecutiva"]["porcentaje"]

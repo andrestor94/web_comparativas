@@ -7,6 +7,10 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: DIMENSIONAMIENTO_AUTO_INGEST
+        sync: false
+      - key: DIMENSIONAMIENTO_CSV_PATH
+        sync: false
       - key: RENDER
         value: "true"
       - key: PYTHON_VERSION

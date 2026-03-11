@@ -4,29 +4,26 @@
 {% block header_title %}Cargas externas{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-0">
-  <div class="card shadow-sm border-0" style="border-radius: 16px;">
-    <div class="card-body">
-      <h5 class="card-title mb-3">Cargas externas</h5>
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Mercado Público</span>
+    <h1 class="h-page-header__title">Cargas externas</h1>
+  </div>
+</div>
 
-      <div class="alert alert-info mb-3" style="font-size: 0.85rem;">
-        <strong>Nota:</strong> asegurate de estar logueado en tu cuenta de Microsoft 365 para que el formulario
-        funcione correctamente.
-      </div>
+<div class="h-panel">
+  <div class="alert alert-info mb-4"
+    style="font-size: 0.9rem; border-radius: var(--radius-sm); border-left: 4px solid var(--primary-500);">
+    <strong>Nota:</strong> asegúrate de estar logueado en tu cuenta de Microsoft 365 para que el formulario
+    funcione correctamente.
+  </div>
 
-      <div class="ratio ratio-16x9" style="min-height: 720px;">
-        <iframe
-          src="https://forms.office.com/Pages/ResponsePage.aspx?id=jMA0KXHv90GslWW1Rm-xmtH7qCGWM8hOqo_AIdjfWxdUNFJFTlRUWFoyWU1HWUJQSlYxSksyWE1DRC4u&embed=true"
-          frameborder="0"
-          marginwidth="0"
-          marginheight="0"
-          allowfullscreen
-          webkitallowfullscreen
-          mozallowfullscreen
-          msallowfullscreen>
-        </iframe>
-      </div>
-    </div>
+  <div class="ratio ratio-16x9" style="min-height: 720px;">
+    <iframe
+      src="https://forms.office.com/Pages/ResponsePage.aspx?id=jMA0KXHv90GslWW1Rm-xmtH7qCGWM8hOqo_AIdjfWxdUNFJFTlRUWFoyWU1HWUJQSlYxSksyWE1DRC4u&embed=true"
+      frameborder="0" marginwidth="0" marginheight="0" allowfullscreen webkitallowfullscreen mozallowfullscreen
+      msallowfullscreen>
+    </iframe>
   </div>
 </div>
 {% endblock %}

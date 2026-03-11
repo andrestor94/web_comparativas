@@ -31,7 +31,7 @@
 
         body {
             font-family: 'Outfit', system-ui, -apple-system, sans-serif;
-            background: linear-gradient(135deg, #f0f4f8 0%, #e2e8f0 100%);
+            background: #f4f6f9;
             color: var(--sa-text);
             min-height: 100vh;
             display: flex;
@@ -76,148 +76,159 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 3rem 1.5rem;
+            padding: calc(80px + 1.75rem) 2rem 3.5rem;
             position: relative;
         }
 
-        /* Elementos decorativos de fondo */
-        .bg-blob {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(60px);
-            opacity: 0.4;
-            z-index: -1;
-        }
-
-        .blob-1 {
-            top: 20%;
-            left: 10%;
-            width: 300px;
-            height: 300px;
-            background: #cbd5e1;
-        }
-
-        .blob-2 {
-            bottom: 20%;
-            right: 10%;
-            width: 350px;
-            height: 350px;
-            background: #e2e8f0;
-        }
-
         .main-container {
-            max-width: 1200px;
+            max-width: 1320px;
+            width: 100%;
             text-align: center;
             z-index: 1;
         }
 
+        .main-container > p:first-child,
+        .main-container > .page-title,
+        .main-container > .page-subtitle {
+            display: none !important;
+        }
+
         .page-title {
-            font-size: 2.75rem;
-            font-weight: 800;
+            font-size: 2.25rem;
+            font-weight: 700;
             color: var(--sa-azul);
-            margin-bottom: 0.5rem;
-            letter-spacing: -0.02em;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.025em;
         }
 
         .page-subtitle {
-            font-size: 1.1rem;
+            font-size: 1rem;
             color: var(--sa-text-muted);
-            margin-bottom: 3.5rem;
-            max-width: 600px;
+            margin-bottom: 3rem;
+            max-width: 520px;
             margin-left: auto;
             margin-right: auto;
         }
 
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1.5rem;
-            padding: 0 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 380px));
+            justify-content: center;
+            align-items: stretch;
+            gap: 2rem;
+            width: 100%;
+            max-width: 1220px;
+            margin: 0 auto;
+            padding: 0;
         }
 
-        @media (max-width: 992px) {
+        @media (max-width: 1200px) {
             .cards-grid {
-                grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(320px, 360px));
+                max-width: 1100px;
             }
         }
 
+        @media (max-width: 992px) {
+            .hero-section {
+                align-items: flex-start;
+                padding: calc(80px + 2.25rem) 1.5rem 2.75rem;
+            }
+
+            .cards-grid {
+                grid-template-columns: repeat(auto-fit, minmax(300px, 360px));
+                gap: 1.5rem;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .hero-section {
+                padding: calc(80px + 1.5rem) 1rem 2rem;
+            }
+
+            .cards-grid {
+                grid-template-columns: minmax(0, 1fr);
+                max-width: 460px;
+            }
+
+            .market-card {
+                min-height: auto;
+                padding: 1.75rem;
+            }
+        }
+
+        /* Market cards: reutilizamos .market-card-v2 del design system,
+           aquí sólo ajustes contextuales de esta página */
         .market-card {
-            background: var(--card-bg);
-            border: 1px solid #fff;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
             border-radius: 16px;
-            padding: 1.75rem;
+            padding: 2rem;
             text-align: left;
             position: relative;
             cursor: pointer;
             text-decoration: none;
             color: inherit;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px -2px rgba(6,72,111,0.07);
+            transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
             overflow: hidden;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            min-height: 240px;
+            min-height: 415px;
         }
-
-        .market-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02);
-            border-color: rgba(82, 116, 206, 0.3);
-        }
-
-        /* Gradiente sutil en hover */
+        /* Barra de acento superior — reemplaza blur/gradiente anterior */
         .market-card::before {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 6px;
-            background: linear-gradient(90deg, var(--sa-azul) 0%, var(--sa-azul-btn) 100%);
-            opacity: 0;
-            transition: opacity 0.3s ease;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--mc-accent, var(--sa-azul));
+            border-radius: 16px 16px 0 0;
+            transition: height 0.25s ease;
         }
+        .market-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 28px -4px rgba(6,72,111,0.12);
+            border-color: rgba(6, 72, 111, 0.15);
+        }
+        .market-card:hover::before { height: 4px; }
 
-        .market-card:hover::before {
-            opacity: 1;
-        }
+        /* Variantes de acento */
+        .market-card--publico { --mc-accent: #06486f; }
+        .market-card--privado { --mc-accent: #5770b0; }
+        .market-card--sic     { --mc-accent: #00A487; }
 
         .card-icon-wrapper {
-            width: 48px;
-            height: 48px;
+            width: 54px;
+            height: 54px;
             border-radius: 12px;
             background: #f1f5f9;
             color: var(--sa-azul);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.5rem;
-            margin-bottom: 1.25rem;
-            transition: all 0.3s ease;
+            font-size: 1.45rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.25s ease;
         }
-
         .market-card:hover .card-icon-wrapper {
-            background: var(--sa-azul);
+            background: var(--mc-accent, var(--sa-azul));
             color: #fff;
-            transform: scale(1.1);
         }
-
         .card-heading {
             font-size: 1.35rem;
             font-weight: 700;
             color: var(--sa-azul);
-            margin-bottom: 0.6rem;
+            margin-bottom: 0.75rem;
         }
-
         .card-text {
             color: var(--sa-text-muted);
-            font-size: 0.88rem;
-            line-height: 1.6;
+            font-size: 0.95rem;
+            line-height: 1.75;
             flex-grow: 1;
-            margin-bottom: 1.25rem;
+            margin-bottom: 1.5rem;
         }
-
         .card-footer {
             display: flex;
             align-items: center;
@@ -226,61 +237,34 @@
             border-top: 1px solid #f1f5f9;
             padding-top: 1.25rem;
         }
-
         .status-badge {
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            padding: 0.35rem 0.75rem;
+            padding: 0.3rem 0.7rem;
             border-radius: 99px;
         }
-
-        .status-available {
-            background: #dcfce7;
-            color: #166534;
-        }
-
-        .status-soon {
-            background: #f1f5f9;
-            color: #64748b;
-        }
+        .status-available { background: #dcfce7; color: #166534; }
+        .status-soon      { background: #f1f5f9; color: #64748b; }
+        .status-sic       { background: rgba(0,164,135,0.12); color: #00A487; }
 
         .arrow-link {
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.875rem;
             color: var(--sa-azul-btn);
             display: flex;
             align-items: center;
-            gap: 0.25rem;
+            gap: 0.3rem;
             transition: gap 0.2s ease;
         }
-
-        .market-card:hover .arrow-link {
-            gap: 0.5rem;
-        }
+        .market-card:hover .arrow-link { gap: 0.55rem; }
 
         /* Deshabilitado */
         .market-card.disabled {
-            opacity: 0.8;
+            opacity: 0.75;
             cursor: default;
-        }
-
-        .market-card.disabled:hover {
-            transform: none;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-            border-color: #fff;
-            background: var(--card-bg);
-        }
-
-        .market-card.disabled:hover::before {
-            opacity: 0;
-        }
-
-        .market-card.disabled:hover .card-icon-wrapper {
-            background: #f1f5f9;
-            color: var(--sa-text-muted);
-            transform: none;
+            pointer-events: none;
         }
 
         /* SPLASH SCREEN (PREMIUM) */
@@ -412,27 +396,24 @@
     </nav>
 
     <div class="hero-section">
-        <div class="bg-blob blob-1"></div>
-        <div class="bg-blob blob-2"></div>
-
         <div class="main-container">
-
+            <p style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#5770b0;margin-bottom:0.5rem;">Sistema Integrado de Estimación de Mercados</p>
+            <h1 class="page-title">Seleccioná un módulo</h1>
+            <p class="page-subtitle">Accedé a los módulos de análisis disponibles para tu perfil.</p>
 
             <div class="cards-grid">
                 {% set user_role = (user.role or '')|lower %}
 
-                {% if user_role != 'gerente' %}
                 <!-- Mercado Público -->
-                <a href="/mercado-publico/web-comparativas" class="market-card">
+                <a href="/mercado-publico/web-comparativas" class="market-card market-card--publico">
                     <div class="card-icon-wrapper">
                         <i class="bi bi-building"></i>
                     </div>
                     <div>
                         <h2 class="card-heading">Mercado Público</h2>
                         <p class="card-text">
-                            Segmento de análisis de licitaciones públicas y otros procesos de organizaciones del estado.
-                            <br><br>
-                            Buscador de oportunidades, análisis de participación y análisis de pliegos con IA.
+                            Análisis de licitaciones públicas y procesos de organismos del Estado.
+                            Buscador de oportunidades, análisis de participación y lectura de pliegos con IA.
                         </p>
                     </div>
                     <div class="card-footer">
@@ -444,71 +425,41 @@
                 </a>
 
                 <!-- Mercado Privado -->
-                <a href="/mercado-privado" class="market-card">
+                <a href="/mercado-privado" class="market-card market-card--privado">
                     <div class="card-icon-wrapper">
                         <i class="bi bi-briefcase"></i>
                     </div>
                     <div>
                         <h2 class="card-heading">Mercado Privado</h2>
                         <p class="card-text">
-                            Segmento de análisis de cotizaciones a organizaciones privadas dentro y fuera de plataformas
-                            especializadas.
-                            <br><br>
-                            Dimensión de mercado y reportes especializado.
+                            Análisis de cotizaciones a organizaciones privadas dentro y fuera de plataformas especializadas.
+                            Dimensión de mercado y reportes especializados.
                         </p>
                     </div>
                     <div class="card-footer">
-                        <!-- Ahora disponible -->
                         <span class="status-badge status-available">Disponible</span>
                         <div class="arrow-link">
                             Ingresar <i class="bi bi-arrow-right"></i>
                         </div>
                     </div>
                 </a>
-                {% endif %}
-
-                <!-- Forecast -->
-                <a href="/forecast" class="market-card"
-                    style="border: 1px solid rgba(16, 185, 129, 0.3); background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(240,253,244,0.95));">
-                    <div class="card-icon-wrapper" style="background: rgba(16, 185, 129, 0.1); color: #059669;">
-                        <i class="bi bi-graph-up-arrow"></i>
-                    </div>
-                    <div>
-                        <h2 class="card-heading" style="color: #047857;">Forecast</h2>
-                        <p class="card-text">
-                            Proyección de demanda y análisis de expectativas de crecimiento.
-                            <br><br>
-                            Evolución histórica y pronósticos detallados por cliente y producto.
-                        </p>
-                    </div>
-                    <div class="card-footer" style="border-top-color: #dcfce7;">
-                        <span class="status-badge status-available"
-                            style="background: #065f46; color: #fff;">Disponible</span>
-                        <div class="arrow-link" style="color: #059669;">
-                            Ingresar <i class="bi bi-arrow-right"></i>
-                        </div>
-                    </div>
-                </a>
 
                 {% if user and (user.role or '')|lower in ['admin', 'auditor'] %}
-                <!-- S.I.C (Soporte) - Admin y Auditor -->
-                <a href="/sic" class="market-card"
-                    style="border: 1px solid rgba(99, 102, 241, 0.3); background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(248,250,252,0.95));">
-                    <div class="card-icon-wrapper" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
-                        <i class="bi bi-gear"></i>
+                <!-- S.I.C — Admin y Auditor — paleta alineada a marca -->
+                <a href="/sic" class="market-card market-card--sic">
+                    <div class="card-icon-wrapper">
+                        <i class="bi bi-shield-check"></i>
                     </div>
                     <div>
-                        <h2 class="card-heading" style="color: #4f46e5;">S.I.C</h2>
+                        <h2 class="card-heading">S.I.C</h2>
                         <p class="card-text">
-                            Soporte de SIEM
-                            <br><br>
-                            Herramientas de soporte y seguimiento de uso de SIEM
+                            Soporte de Inteligencia Comercial.
+                            Herramientas de soporte y seguimiento de uso del sistema SIEM.
                         </p>
                     </div>
                     <div class="card-footer">
-                        <span class="status-badge status-available"
-                            style="background: #312e81; color: #fff;">Admin/Auditor</span>
-                        <div class="arrow-link" style="color: #6366f1;">
+                        <span class="status-badge status-sic">Admin / Auditor</span>
+                        <div class="arrow-link" style="color:#00A487;">
                             Acceder <i class="bi bi-arrow-right"></i>
                         </div>
                     </div>

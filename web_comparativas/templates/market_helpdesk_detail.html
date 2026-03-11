@@ -46,11 +46,11 @@
         line-height: 1.6;
         font-size: 0.95rem;
         position: relative;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 12px rgba(6, 64, 102, 0.08), 0 2px 8px rgba(6, 64, 102, 0.04);
     }
 
     .chat-bubble-row.me .chat-bubble {
-        background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+        background: linear-gradient(135deg, #5770b0 0%, #06486f 100%);
         color: #fff;
         border-bottom-right-radius: 4px;
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -79,8 +79,13 @@
         border: 1px solid #e2e8f0;
         margin-top: auto;
         border-radius: 16px;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        box-shadow: 0 14px 30px rgba(6, 64, 102, 0.12), 0 6px 14px rgba(6, 64, 102, 0.06);
         z-index: 100;
+        transition: box-shadow 0.2s;
+    }
+
+    .chat-input-area:focus-within {
+        box-shadow: 0 20px 40px rgba(6, 64, 102, 0.15);
     }
 
     .consulta-sidebar {
@@ -90,11 +95,11 @@
 
     .consulta-header-card {
         background: #fff;
-        border-left: 4px solid #2563eb;
+        border-left: 4px solid #5770b0;
         padding: 1.5rem;
         border-radius: 0 16px 16px 0;
         margin-bottom: 2rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 4px 12px rgba(6, 72, 111, 0.06);
     }
 </style>
 {% endblock %}
@@ -146,7 +151,7 @@
                         <span class="small text-muted fw-medium">{{ msg.user.email.split('@')[0]|capitalize }}</span>
                         {% if "admin" in (msg.user.role or "").lower() %}
                         <span
-                            class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25 py-0 px-1"
+                            class="h-badge h-badge--admin py-0 px-1"
                             style="font-size: 0.6rem;">SUPPORT</span>
                         {% endif %}
                         {% endif %}
@@ -199,9 +204,8 @@
     <!-- Sidebar Info -->
     <div class="col-12 col-lg-4">
         <div class="consulta-sidebar">
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-body">
-                    <h5 class="fw-bold fs-6 mb-4 text-dark border-bottom pb-3">Detalles de la Consulta</h5>
+            <div class="h-panel mb-4">
+                    <h5 class="fw-bold fs-6 mb-4" style="color:#06486f;border-bottom:1px solid #e2e8f0;padding-bottom:0.75rem;">Detalles de la Consulta</h5>
 
                     <div class="d-flex align-items-center justify-content-between mb-4 p-3 rounded-3 bg-light">
                         <!-- Status -->
@@ -210,8 +214,8 @@
                                 style="font-size: 0.65rem; letter-spacing: 1px;">Estado</span>
                             <div class="d-flex align-items-center gap-2">
                                 {% if ticket.status == 'abierto' %}
-                                <div class="rounded-circle bg-primary" style="width: 8px; height: 8px;"></div>
-                                <span class="text-primary fw-medium small tracking-wide">Abierto</span>
+                                <div class="rounded-circle" style="width:8px;height:8px;background:#5770b0;"></div>
+                                <span class="fw-medium small" style="color:#5770b0;">Abierto</span>
                                 {% elif ticket.status == 'pendiente' %}
                                 <div class="rounded-circle bg-warning" style="width: 8px; height: 8px;"></div>
                                 <span class="text-warning fw-medium small tracking-wide">Pendiente</span>
@@ -237,8 +241,8 @@
                                 <span class="text-danger fw-medium small tracking-wide">Alta</span>
                                 <i class="bi bi-exclamation-triangle-fill text-danger small"></i>
                                 {% elif ticket.priority == 'baja' %}
-                                <span class="text-info fw-medium small tracking-wide">Baja</span>
-                                <i class="bi bi-arrow-down-circle-fill text-info small"></i>
+                                <span class="fw-medium small" style="color:#5770b0;">Baja</span>
+                                <i class="bi bi-arrow-down-circle-fill small" style="color:#5770b0;"></i>
                                 {% else %}
                                 <span class="text-warning fw-medium small tracking-wide">Media</span>
                                 <i class="bi bi-dash-circle-fill text-warning small"></i>
@@ -250,7 +254,6 @@
                     <div class="text-center mt-3">
                         <!-- User info concealed -->
                     </div>
-                </div>
             </div>
         </div>
     </div>

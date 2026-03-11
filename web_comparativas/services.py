@@ -234,9 +234,50 @@ def get_normalized_path(upload: UploadModel) -> Path | None:
 def normalized_exists(upload: UploadModel) -> bool:
     p = get_normalized_path(upload)
     try:
-        return bool(p and p.exists())
+        if p and p.exists():
+            return True
     except Exception:
-        return False
+        pass
+    # Fallback: verificar contenido guardado en DB (sobrevive redespliegues)
+    return bool(getattr(upload, "normalized_content", None))
+
+
+def get_normalized_bytes(upload: UploadModel) -> bytes | None:
+    """
+    Devuelve los bytes del normalized.xlsx.
+    Prioridad: disco local → contenido en DB.
+    Así funciona aunque el filesystem de Render se haya reiniciado.
+    """
+    try:
+        p = get_normalized_path(upload)
+        if p and p.exists():
+            return p.read_bytes()
+    except Exception:
+        pass
+    content = getattr(upload, "normalized_content", None)
+    return bytes(content) if content else None
+
+
+def get_dashboard_data(upload: UploadModel) -> dict:
+    """
+    Devuelve el dict del dashboard.json.
+    Prioridad: archivo en disco → campo dashboard_json en DB.
+    """
+    try:
+        p = get_normalized_path(upload)
+        if p and p.exists():
+            dash_path = p.parent / "dashboard.json"
+            if dash_path.exists():
+                return json.loads(dash_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    stored = getattr(upload, "dashboard_json", None)
+    if stored:
+        try:
+            return json.loads(stored)
+        except Exception:
+            pass
+    return {}
 
 def refresh_flags(upload: UploadModel) -> dict:
     return {
@@ -459,10 +500,18 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
             renglones_unicos = 0
         summary["renglones"] = int(renglones_unicos)
 
-        # Guardar dashboard.json
-        (out_dir / "dashboard.json").write_text(
-            json.dumps(_str_keyed(summary), ensure_ascii=False), encoding="utf-8"
-        )
+        # Guardar dashboard.json en disco
+        dashboard_json_str = json.dumps(_str_keyed(summary), ensure_ascii=False)
+        (out_dir / "dashboard.json").write_text(dashboard_json_str, encoding="utf-8")
+
+        # --- PERSISTENCIA EN DB: guarda contenido en PostgreSQL para sobrevivir redespliegues ---
+        # Esto asegura que la comparativa siga siendo accesible aunque Render reinicie el filesystem.
+        try:
+            up.normalized_content = normalized_path.read_bytes()
+            up.dashboard_json = dashboard_json_str
+            logger.info(f"Upload {upload_id}: contenido guardado en DB ({len(up.normalized_content)} bytes).")
+        except Exception as persist_err:
+            logger.warning(f"Upload {upload_id}: no se pudo guardar en DB – {persist_err}")
 
         # --- NUEVO: Persistir metadatos ricos en la DB para el Header del Dashboard ---
         try:
