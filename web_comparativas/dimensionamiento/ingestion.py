@@ -530,13 +530,106 @@ def ingest_dimensionamiento_csv(
         session.close()
 
 
+def _tables_are_empty() -> bool:
+    """Devuelve True si la tabla dimensionamiento_records no tiene ningún registro."""
+    session = SessionLocal()
+    try:
+        count = session.execute(
+            select(func.count()).select_from(DimensionamientoRecord)
+        ).scalar_one()
+        return count == 0
+    except Exception:
+        return True
+    finally:
+        session.close()
+
+
+def _download_csv_from_url(url: str, dest: Path) -> None:
+    """Descarga el CSV desde una URL al destino indicado."""
+    import urllib.request
+    logger.info("[DIMENSIONAMIENTO] Descargando CSV desde URL: %s → %s", url, dest)
+    # Soporte para links de Google Drive (convierte /file/d/ID/view → /uc?export=download&id=ID)
+    if "drive.google.com/file/d/" in url:
+        file_id = url.split("/file/d/")[1].split("/")[0]
+        url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    urllib.request.urlretrieve(url, str(dest))
+    logger.info("[DIMENSIONAMIENTO] Descarga completada: %s bytes", dest.stat().st_size)
+
+
 def maybe_run_startup_ingestion() -> None:
-    flag = (os.getenv("DIMENSIONAMIENTO_AUTO_INGEST") or "").strip().lower()
-    if flag not in {"1", "true", "yes", "si", "sí"}:
+    """
+    Ingesta de arranque para Dimensionamiento.
+
+    Lógica:
+    1. Si la tabla ya tiene datos → no hace nada (PostgreSQL es la fuente de verdad).
+    2. Si la tabla está vacía, busca la fuente en este orden:
+       a. DIMENSIONAMIENTO_CSV_PATH  → ruta local al CSV
+       b. DIMENSIONAMIENTO_CSV_URL   → URL para descargar el CSV (ej. Google Drive, S3)
+       c. DEFAULT_CSV_PATH           → ruta local por defecto (solo en entornos con el archivo)
+    3. Si se encontró fuente → ingesta con mode="replace", force=True.
+    4. Si no hay fuente disponible → avisa en logs y sale sin errores.
+
+    Se activa automáticamente si la tabla está vacía, independientemente de DIMENSIONAMIENTO_AUTO_INGEST.
+    La variable DIMENSIONAMIENTO_AUTO_INGEST=true también puede forzar la ingesta incluso con datos.
+    """
+    force_flag = (os.getenv("DIMENSIONAMIENTO_AUTO_INGEST") or "").strip().lower()
+    force_even_with_data = force_flag in {"1", "true", "yes", "si", "sí"}
+
+    tables_empty = _tables_are_empty()
+
+    if not tables_empty and not force_even_with_data:
+        logger.info(
+            "[DIMENSIONAMIENTO] Tabla con datos existentes. Startup ingestion omitida. "
+            "(Usar DIMENSIONAMIENTO_AUTO_INGEST=true para forzar re-ingesta.)"
+        )
         return
-    logger.info("DIMENSIONAMIENTO_AUTO_INGEST enabled; starting startup import.")
-    result = ingest_dimensionamiento_csv(force=False)
-    logger.info("Startup dimensionamiento import result: %s", json.dumps(result, ensure_ascii=False))
+
+    if not tables_empty and force_even_with_data:
+        logger.info("[DIMENSIONAMIENTO] DIMENSIONAMIENTO_AUTO_INGEST=true: forzando re-ingesta.")
+
+    if tables_empty:
+        logger.info("[DIMENSIONAMIENTO] Tabla vacía detectada. Intentando ingesta automática de startup.")
+
+    # Determinar fuente del CSV
+    csv_path_env = os.getenv("DIMENSIONAMIENTO_CSV_PATH") or ""
+    csv_url_env = os.getenv("DIMENSIONAMIENTO_CSV_URL") or ""
+    tmp_path: Path | None = None
+
+    try:
+        if csv_path_env and Path(csv_path_env).exists():
+            # Opción A: ruta local configurada
+            logger.info("[DIMENSIONAMIENTO] Usando CSV desde DIMENSIONAMIENTO_CSV_PATH: %s", csv_path_env)
+            result = ingest_dimensionamiento_csv(csv_path=csv_path_env, mode="replace", force=True)
+
+        elif csv_url_env:
+            # Opción B: descarga desde URL (Google Drive, S3, Dropbox direct link, etc.)
+            import tempfile
+            tmp_dir = Path(tempfile.mkdtemp())
+            tmp_path = tmp_dir / "dataset_unificado.csv"
+            try:
+                _download_csv_from_url(csv_url_env, tmp_path)
+                result = ingest_dimensionamiento_csv(csv_path=tmp_path, mode="replace", force=True)
+            finally:
+                if tmp_path and tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+
+        elif DEFAULT_CSV_PATH.exists():
+            # Opción C: archivo local por defecto (útil en desarrollo)
+            logger.info("[DIMENSIONAMIENTO] Usando CSV por defecto: %s", DEFAULT_CSV_PATH)
+            result = ingest_dimensionamiento_csv(mode="replace", force=force_even_with_data)
+
+        else:
+            logger.warning(
+                "[DIMENSIONAMIENTO] No se encontró fuente de datos (DIMENSIONAMIENTO_CSV_PATH, "
+                "DIMENSIONAMIENTO_CSV_URL ni archivo local). "
+                "Configurá una de estas variables en Render para poblar la base de datos."
+            )
+            return
+
+        logger.info("[DIMENSIONAMIENTO] Startup ingestion result: %s", json.dumps(result, ensure_ascii=False))
+
+    except Exception as exc:
+        logger.error("[DIMENSIONAMIENTO] Error en startup ingestion: %s", exc, exc_info=True)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
