@@ -48,33 +48,55 @@ def ensure_password_reset_columns():
     """
     Migración para el flujo de restablecimiento de contraseña corporativo.
     Agrega 'must_change_password' a users y crea la tabla password_reset_requests.
+
+    IMPORTANTE: cada operación usa su PROPIA transacción para que un fallo en una
+    no revierta las demás (en PostgreSQL, un error dentro de una transacción marca
+    toda la conexión como abortada, deshaciendo cambios previos del mismo bloque).
     """
+    # 1. Columna must_change_password en users — transacción separada
     with engine.begin() as conn:
-        # 1. Columna must_change_password en users
         _add_column_safe(
             conn,
             "ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT FALSE NOT NULL",
             "users.must_change_password",
         )
 
-        # 2. Tabla password_reset_requests (SQLite / PostgreSQL compatible)
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS password_reset_requests (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_email      VARCHAR(255) NOT NULL,
-                full_name       VARCHAR(255) NOT NULL,
-                department      VARCHAR(120),
-                comment         TEXT,
-                request_date    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                status          VARCHAR(30)  NOT NULL DEFAULT 'Pendiente',
-                handled_by      VARCHAR(255),
-                handled_date    DATETIME,
-                admin_observation TEXT,
-                temporary_password_generated BOOLEAN NOT NULL DEFAULT FALSE,
-                must_change_password_on_next_login BOOLEAN NOT NULL DEFAULT TRUE
-            )
-        """))
+    # 2. Tabla password_reset_requests — transacción separada con sintaxis compatible
+    # SQLite usa AUTOINCREMENT; PostgreSQL usa SERIAL. Ramificamos para evitar
+    # errores de sintaxis que abortan la transacción y revierten columnas ya agregadas.
+    if IS_SQLITE:
+        pk_col = "id INTEGER PRIMARY KEY AUTOINCREMENT"
+        ts_type = "DATETIME"
+    else:
+        pk_col = "id SERIAL PRIMARY KEY"
+        ts_type = "TIMESTAMP"
+
+    ddl = f"""
+        CREATE TABLE IF NOT EXISTS password_reset_requests (
+            {pk_col},
+            user_email      VARCHAR(255) NOT NULL,
+            full_name       VARCHAR(255) NOT NULL,
+            department      VARCHAR(120),
+            comment         TEXT,
+            request_date    {ts_type} NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            status          VARCHAR(30)  NOT NULL DEFAULT 'Pendiente',
+            handled_by      VARCHAR(255),
+            handled_date    {ts_type},
+            admin_observation TEXT,
+            temporary_password_generated BOOLEAN NOT NULL DEFAULT FALSE,
+            must_change_password_on_next_login BOOLEAN NOT NULL DEFAULT TRUE
+        )
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(ddl))
         print("[MIGRATION] Tabla 'password_reset_requests' verificada/creada.", flush=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg:
+            print("[MIGRATION] Tabla 'password_reset_requests': ya existe. (OK)", flush=True)
+        else:
+            print(f"[MIGRATION] Tabla 'password_reset_requests': advertencia – {e}", flush=True)
 
 
 def ensure_normalized_storage_columns():
@@ -91,12 +113,14 @@ def ensure_normalized_storage_columns():
     # En PostgreSQL BYTEA; en SQLite BLOB (ambos mapean a LargeBinary en SQLAlchemy)
     blob_type = "BYTEA" if not IS_SQLITE else "BLOB"
 
+    # Transacciones separadas: si una columna ya existe y falla, no revierte la otra
     with engine.begin() as conn:
         _add_column_safe(
             conn,
             f"ALTER TABLE uploads ADD COLUMN normalized_content {blob_type}",
             "uploads.normalized_content",
         )
+    with engine.begin() as conn:
         _add_column_safe(
             conn,
             "ALTER TABLE uploads ADD COLUMN dashboard_json TEXT",
