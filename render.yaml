@@ -11,6 +11,8 @@ services:
         sync: false
       - key: DIMENSIONAMIENTO_CSV_PATH
         sync: false
+      - key: DIMENSIONAMIENTO_CSV_URL
+        sync: false
       - key: RENDER
         value: "true"
       - key: PYTHON_VERSION
