@@ -12,9 +12,9 @@
     }
 
     .status-abierto {
-        background: rgba(59, 130, 246, 0.15);
-        color: #60a5fa;
-        border: 1px solid rgba(59, 130, 246, 0.2);
+        background: rgba(87, 112, 176, 0.2);
+        color: #8ba4d8;
+        border: 1px solid rgba(87, 112, 176, 0.3);
     }
 
     .status-pendiente {
@@ -53,7 +53,7 @@
     }
 
     .priority-baja {
-        background-color: #3b82f6;
+        background-color: #5770b0;
     }
 
     .consulta-row {
@@ -73,7 +73,7 @@
 {% if (user.role or '')|lower != 'auditor' %}
 <div class="col-auto">
     <a href="/sic/helpdesk/new" class="btn btn-sic-primary d-flex align-items-center gap-2">
-        <i class="ph-bold ph-plus"></i> Nueva Consulta
+        <i class="bi bi-plus-lg"></i> Nueva Consulta
     </a>
 </div>
 {% endif %}
@@ -82,14 +82,14 @@
 {% if request.query_params.get('ok') == 'deleted' %}
 <div class="alert alert-success alert-dismissible fade show bg-success bg-opacity-10 border-success border-opacity-25 text-white mb-4"
     role="alert">
-    <i class="ph-bold ph-check-circle me-2"></i> Consulta eliminada correctamente.
+    <i class="bi bi-check-circle me-2"></i> Consulta eliminada correctamente.
     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 {% endif %}
 {% if request.query_params.get('err') %}
 <div class="alert alert-danger alert-dismissible fade show bg-danger bg-opacity-10 border-danger border-opacity-25 text-white mb-4"
     role="alert">
-    <i class="ph-bold ph-warning-circle me-2"></i> Error: {{ request.query_params.get('err') }}
+    <i class="bi bi-exclamation-circle me-2"></i> Error: {{ request.query_params.get('err') }}
     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 {% endif %}
@@ -98,7 +98,7 @@
     <div class="table-responsive">
         {% if not tickets or tickets|length == 0 %}
         <div class="text-center text-white-50 py-5">
-            <i class="ph-bold ph-chats-teardrop mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
+            <i class="bi bi-chat-dots mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
             Aún no hay consultas creadas.
             <div class="mt-2">
                 <a href="/sic/helpdesk/new" class="text-white text-decoration-underline">Iniciar una consulta</a>
@@ -166,14 +166,14 @@
                     {% if is_admin %}
                     <td class="text-end" onclick="event.stopPropagation();">
                         <button type="button" onclick="confirmDelete({{ t.id }}); event.stopPropagation();"
-                            class="btn btn-sm text-danger p-0 border-0 bg-transparent hover:text-white"
+                            class="btn btn-sm text-danger p-0 border-0 bg-transparent"
                             title="Eliminar">
-                            <i class="ph-bold ph-trash"></i>
+                            <i class="bi bi-trash"></i>
                         </button>
                     </td>
                     {% endif %}
                     <td class="text-end text-white-50">
-                        <i class="ph-bold ph-caret-right"></i>
+                        <i class="bi bi-chevron-right"></i>
                     </td>
                 </tr>
                 {% endfor %}
@@ -193,7 +193,7 @@
                 <div class="mb-3">
                     <div class="rounded-circle bg-danger bg-opacity-10 d-inline-flex align-items-center justify-content-center"
                         style="width: 64px; height: 64px;">
-                        <i class="ph-bold ph-trash text-danger" style="font-size: 32px;"></i>
+                        <i class="bi bi-trash text-danger" style="font-size: 32px;"></i>
                     </div>
                 </div>
                 <h5 class="fw-bold mb-2">¿Estás seguro?</h5>

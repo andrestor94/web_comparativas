@@ -9,30 +9,204 @@
       style="height: 80px; width: auto; object-fit: contain;">
   </div>
 
-  <div class="card" style="max-width:420px; width:100%;">
-    <div class="card-body">
-      <h2 class="mb-4">Ingresar</h2>
+  <div class="h-panel" style="max-width:420px; width:100%;">
+      <h2 class="mb-4" style="color:#06486f;font-size:1.5rem;font-weight:700;">Ingresar</h2>
 
       {% if error %}
       <div class="alert alert-danger mb-3">{{ error }}</div>
       {% endif %}
 
+      {% if reset_request_ok %}
+      <div class="alert alert-success mb-3">
+        <i class="bi bi-check-circle me-1"></i>
+        Tu solicitud fue enviada correctamente. Un administrador la revisará y gestionará el restablecimiento de tu contraseña.
+      </div>
+      {% endif %}
+
       <form method="post" action="/login">
         <div class="mb-3">
           <label class="form-label">Email</label>
-          <input name="email" type="email" class="input form-control" required>
+          <input name="email" type="email" class="form-control" required>
         </div>
         <div class="mb-2">
           <label class="form-label">Contraseña</label>
-          <input name="password" type="password" class="input form-control" required>
+          <input name="password" type="password" class="form-control" required>
         </div>
         <div class="mb-3">
-          <a href="/password/olvido" class="small">¿Olvidaste tu contraseña?</a>
+          <button type="button" class="btn btn-link p-0 small text-decoration-none"
+            style="color:#06486f;" data-bs-toggle="modal" data-bs-target="#modalSolicitarReset">
+            ¿Olvidaste tu contraseña?
+          </button>
         </div>
         <button class="btn btn-primary w-100">Entrar</button>
       </form>
+  </div>
+</div>
+
+<!-- ============================================================
+     MODAL: Solicitar restablecimiento de contraseña
+     ============================================================ -->
+<div class="modal fade" id="modalSolicitarReset" tabindex="-1"
+     aria-labelledby="modalSolicitarResetLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:480px;">
+    <div class="modal-content" style="border-radius:12px; border:none; box-shadow:0 8px 40px rgba(6,72,111,.15);">
+
+      <!-- Header -->
+      <div class="modal-header border-0 pb-0" style="padding:1.5rem 1.5rem 0.5rem;">
+        <div>
+          <h5 class="modal-title fw-700 mb-1" id="modalSolicitarResetLabel"
+              style="color:#06486f; font-size:1.1rem; font-weight:700;">
+            <i class="bi bi-shield-lock me-2"></i>Solicitar restablecimiento de contraseña
+          </h5>
+          <p class="text-muted mb-0" style="font-size:.83rem; line-height:1.5;">
+            Por restricciones del entorno corporativo, la recuperación de contraseña se gestiona
+            mediante solicitud al administrador.
+          </p>
+        </div>
+        <button type="button" class="btn-close ms-3" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+
+      <!-- Body con formulario -->
+      <div class="modal-body" style="padding:1.25rem 1.5rem 0.5rem;">
+        <form id="frmSolicitarReset" novalidate>
+
+          <!-- Email corporativo -->
+          <div class="mb-3">
+            <label for="sr_email" class="form-label" style="font-size:.85rem;font-weight:600;">
+              Email corporativo <span class="text-danger">*</span>
+            </label>
+            <input type="email" id="sr_email" name="sr_email"
+                   class="form-control form-control-sm"
+                   placeholder="usuario@empresa.com" autocomplete="off" required>
+            <div class="invalid-feedback" id="sr_email_err"></div>
+          </div>
+
+          <!-- Mensaje de error general -->
+          <div id="sr_global_err" class="alert alert-danger py-2 px-3 d-none"
+               style="font-size:.83rem;"></div>
+
+        </form>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer border-0" style="padding:.75rem 1.5rem 1.5rem; gap:.5rem;">
+        <button type="button" class="btn btn-outline-secondary btn-sm px-4"
+                data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" id="btnEnviarSolicitud"
+                class="btn btn-primary btn-sm px-4">
+          <span id="btnEnviarTxt">Enviar solicitud</span>
+          <span id="btnEnviarSpinner" class="spinner-border spinner-border-sm ms-1 d-none"
+                role="status" aria-hidden="true"></span>
+        </button>
+      </div>
+
     </div>
   </div>
 </div>
+
+<script>
+(function () {
+  /* ── helpers ── */
+  function setInvalid(inputEl, msgEl, msg) {
+    inputEl.classList.add('is-invalid');
+    if (msgEl) { msgEl.textContent = msg; }
+  }
+  function clearInvalid(inputEl) {
+    inputEl.classList.remove('is-invalid');
+    inputEl.classList.remove('is-valid');
+  }
+  function setValid(inputEl) {
+    inputEl.classList.remove('is-invalid');
+    inputEl.classList.add('is-valid');
+  }
+
+  /* ── validación ── */
+  function validateForm() {
+    let ok = true;
+
+    const emailEl  = document.getElementById('sr_email');
+    const emailErr = document.getElementById('sr_email_err');
+
+    clearInvalid(emailEl);
+
+    const emailVal = (emailEl.value || '').trim();
+    const emailRe  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailVal) {
+      setInvalid(emailEl, emailErr, 'El email es obligatorio.');
+      ok = false;
+    } else if (!emailRe.test(emailVal)) {
+      setInvalid(emailEl, emailErr, 'Ingresá un email con formato válido.');
+      ok = false;
+    } else {
+      setValid(emailEl);
+    }
+
+    return ok;
+  }
+
+  /* ── envío ── */
+  document.getElementById('btnEnviarSolicitud').addEventListener('click', function () {
+    const globalErr = document.getElementById('sr_global_err');
+    globalErr.classList.add('d-none');
+    globalErr.textContent = '';
+
+    if (!validateForm()) return;
+
+    const btn     = this;
+    const txtEl   = document.getElementById('btnEnviarTxt');
+    const spinEl  = document.getElementById('btnEnviarSpinner');
+
+    btn.disabled  = true;
+    spinEl.classList.remove('d-none');
+    txtEl.textContent = 'Enviando…';
+
+    const body = new URLSearchParams({
+      user_email: document.getElementById('sr_email').value.trim(),
+    });
+
+    fetch('/password/solicitar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    })
+    .then(function(r) {
+      if (r.ok || r.redirected) {
+        /* cerrar modal y mostrar confirmación en la página */
+        const modal = bootstrap.Modal.getInstance(
+          document.getElementById('modalSolicitarReset')
+        );
+        modal.hide();
+        /* redirigir con flag de éxito */
+        window.location.href = '/login?reset_ok=1';
+      } else {
+        return r.text().then(function(t) { throw new Error(t || 'Error al enviar.'); });
+      }
+    })
+    .catch(function(err) {
+      globalErr.textContent = 'Ocurrió un error al enviar la solicitud. Intentá nuevamente.';
+      globalErr.classList.remove('d-none');
+      btn.disabled = false;
+      spinEl.classList.add('d-none');
+      txtEl.textContent = 'Enviar solicitud';
+    });
+  });
+
+  /* ── limpiar form al cerrar modal ── */
+  document.getElementById('modalSolicitarReset').addEventListener('hidden.bs.modal', function () {
+    const form = document.getElementById('frmSolicitarReset');
+    form.reset();
+    ['sr_email'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) { el.classList.remove('is-invalid','is-valid'); }
+    });
+    document.getElementById('sr_global_err').classList.add('d-none');
+    const btn = document.getElementById('btnEnviarSolicitud');
+    btn.disabled = false;
+    document.getElementById('btnEnviarTxt').textContent = 'Enviar solicitud';
+    document.getElementById('btnEnviarSpinner').classList.add('d-none');
+  });
+})();
+</script>
 
 {% endblock %}

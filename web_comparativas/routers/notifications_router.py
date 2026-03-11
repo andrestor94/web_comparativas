@@ -41,7 +41,8 @@ def page_notifications(request: Request, user: User = Depends(login_required)):
         "user": user,
         "user_display": user_display,
         "notifications": notifs,
-        "section": "notifications"
+        "section": "notifications",
+        "market_context": "notifications"
     }
     return templates.TemplateResponse("notifications.html", ctx)
 

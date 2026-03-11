@@ -3,57 +3,88 @@
 {% block header_title %}Grupos{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-  <h2 class="m-0">Grupos</h2>
-  {% set role = (user.role or '')|lower %}
+
+{% set role = (user.role or '')|lower %}
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Administración</span>
+    <h1 class="h-page-header__title">Grupos</h1>
+    <p class="h-page-header__subtitle">Agrupación de usuarios por unidad de negocio</p>
+  </div>
   {% if role in ['admin','supervisor'] %}
-  <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
+  <div class="h-page-header__actions">
+    <a class="btn btn-primary btn-sm" href="/grupos/nuevo">
+      <i class="bi bi-plus-lg me-1"></i> Nuevo grupo
+    </a>
+  </div>
   {% endif %}
 </div>
 
 {% if ok %}
-<div class="alert alert-success py-2">Acción realizada: {{ ok }}</div>
+<div class="h-alert-success" role="alert">
+  <span><i class="bi bi-check-circle me-1"></i> Acción realizada: {{ ok }}</span>
+</div>
 {% endif %}
 {% if err %}
-<div class="alert alert-danger py-2">Error: {{ err }}</div>
+<div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+  <i class="bi bi-x-circle me-1"></i> Error: {{ err }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
 {% endif %}
 
-<div class="table-responsive">
-  <table class="table table-sm align-middle">
-    <thead>
-      <tr>
-        <th>Nombre</th>
-        <th>Unidad de negocio</th>
-        <th>Miembros</th>
-        <th>Creado por</th>
-        <th>Creado</th>
-        <th class="text-end">Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% if groups and groups|length > 0 %}
-      {% for g in groups %}
-      <tr>
-        <td>{{ g.name }}</td>
-        <td>{{ g.business_unit or '—' }}</td>
-        <td>{{ g.memberships|length }}</td>
-        <td>{{ g.created_by.full_name or g.created_by.name or g.created_by.email }}</td>
-        <td>{{ (g.created_at or '') }}</td>
-        <td class="text-end">
-          <a class="btn btn-sm btn-outline-primary" href="/grupos/{{ g.id }}/editar">Editar</a>
-          <a class="btn btn-sm btn-outline-danger btn-delete-group" href="/grupos/{{ g.id }}/eliminar"
-            data-name="{{ g.name }}">
-            Eliminar
-          </a>
-        </td>
-      </tr>
-      {% endfor %}
-      {% else %}
-      <tr>
-        <td colspan="6" class="text-muted">No hay grupos aún.</td>
-      </tr>
-      {% endif %}
-    </tbody>
-  </table>
+<div class="h-panel" style="padding:0;overflow:hidden;">
+  <div class="table-responsive">
+    <table class="h-table">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Unidad de negocio</th>
+          <th>Miembros</th>
+          <th>Creado por</th>
+          <th>Creado</th>
+          <th class="text-end" style="width:180px">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if groups and groups|length > 0 %}
+        {% for g in groups %}
+        <tr>
+          <td style="font-weight:600;color:#06486f;">{{ g.name }}</td>
+          <td style="font-size:0.85rem;">{{ g.business_unit or '—' }}</td>
+          <td style="font-size:0.85rem;">{{ g.memberships|length }}</td>
+          <td style="font-size:0.82rem;color:#64748b;">{{ g.created_by.full_name or g.created_by.name or g.created_by.email }}</td>
+          <td style="font-size:0.82rem;color:#64748b;">{{ (g.created_at or '') }}</td>
+          <td class="text-end">
+            <div class="d-flex justify-content-end gap-1">
+              <a class="btn btn-outline-secondary btn-sm" href="/grupos/{{ g.id }}/editar">
+                <i class="bi bi-pencil me-1"></i>Editar
+              </a>
+              <a class="btn btn-outline-danger btn-sm btn-delete-group" href="/grupos/{{ g.id }}/eliminar"
+                data-name="{{ g.name }}">
+                <i class="bi bi-trash me-1"></i>Eliminar
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="6">
+            <div class="h-empty">
+              <div class="h-empty__icon"><i class="bi bi-people"></i></div>
+              <p class="h-empty__title">No hay grupos aún</p>
+              <p class="h-empty__desc">Creá el primer grupo para organizar a los usuarios.</p>
+              {% if role in ['admin','supervisor'] %}
+              <a class="btn btn-primary btn-sm mt-2" href="/grupos/nuevo">
+                <i class="bi bi-plus-lg me-1"></i> Nuevo grupo
+              </a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

@@ -9,7 +9,7 @@ import logging
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey, Float, event, text,
-    UniqueConstraint, select, Boolean, JSON, Text, func, or_
+    UniqueConstraint, select, Boolean, JSON, Text, func, or_, LargeBinary
 )
 from sqlalchemy.orm import (
     declarative_base, relationship, sessionmaker, scoped_session, aliased
@@ -138,6 +138,9 @@ class User(Base):
     # Campo para Segmentación de Acceso: "Mercado Publico", "Mercado Privado", "Todos"
     access_scope = Column(String, default="todos")
 
+    # Forzar cambio de contraseña en próximo login (usado por flujo admin)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+
     # Relaciones con métricas de uso (EVITAR eager load masivo)
     # Antes: lazy="selectin" -> traía TODO el historial al cargar el usuario.
     # Ahora: lazy="dynamic" -> devuelve un Query object, o lazy=True para carga bajo demanda si se accede.
@@ -209,6 +212,40 @@ class User(Base):
 User.BUSINESS_UNITS = BUSINESS_UNITS
 
 
+# ---------- Solicitudes de restablecimiento de contraseña ----------
+class PasswordResetRequest(Base):
+    """
+    Solicitud interna de restablecimiento de contraseña.
+    No usa email externo: el admin la resuelve manualmente.
+    """
+    __tablename__ = "password_reset_requests"
+
+    id = Column(Integer, primary_key=True)
+    user_email = Column(String(255), nullable=False, index=True)
+    full_name = Column(String(255), nullable=False)
+    department = Column(String(120), nullable=True)
+    comment = Column(Text, nullable=True)
+    request_date = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+
+    # Pendiente / En proceso / Resuelto / Rechazado
+    status = Column(String(30), default="Pendiente", nullable=False, index=True)
+
+    # Quién gestionó la solicitud (email del admin)
+    handled_by = Column(String(255), nullable=True)
+    handled_date = Column(DateTime, nullable=True)
+    admin_observation = Column(Text, nullable=True)
+
+    # Si se generó contraseña temporal
+    temporary_password_generated = Column(Boolean, default=False, nullable=False)
+    must_change_password_on_next_login = Column(Boolean, default=True, nullable=False)
+
+    def __repr__(self):
+        return (
+            f"<PasswordResetRequest id={self.id} email={self.user_email!r} "
+            f"status={self.status!r}>"
+        )
+
+
 # ---------- Cargas ----------
 class Upload(Base):
     __tablename__ = "uploads"
@@ -242,6 +279,11 @@ class Upload(Base):
     # Datos de detección/procesamiento
     detected_source = Column(String)
     script_key = Column(String)
+
+    # Persistencia robusta: contenido del normalized.xlsx y dashboard en DB
+    # Evita pérdida de datos al redesplegar en Render (filesystem efímero)
+    normalized_content = Column(LargeBinary, nullable=True)   # bytes del Excel procesado
+    dashboard_json = Column(Text, nullable=True)              # JSON del dashboard procesado
 
     # Estado
     status = Column(String, default="pending", index=True)
@@ -1348,7 +1390,327 @@ class TicketMessage(Base):
     user = relationship("User")
 
 
-# ----------------------------------------------------------------------
-# Import Forecast Models to register them with Base
-# ----------------------------------------------------------------------
-from .forecast_models import *
+# ==============================================================================
+# MÓDULO: LECTURA DE PLIEGOS (nuevo, reemplaza "Lectura de Pliego IA")
+# ==============================================================================
+
+PLIEGO_ESTADOS = [
+    "borrador",
+    "pendiente_revision",
+    "en_revision",
+    "pendiente_procesamiento",
+    "procesado_externamente",
+    "excel_cargado",
+    "en_validacion",
+    "listo",
+    "observado",
+    "rechazado",
+    "reprocesar",
+    "archivado",
+]
+
+PLIEGO_ESTADO_LABELS = {
+    "borrador":                  "Borrador",
+    "pendiente_revision":        "Pendiente de revisión",
+    "en_revision":               "En revisión administrativa",
+    "pendiente_procesamiento":   "Pendiente de procesamiento externo",
+    "procesado_externamente":    "Procesado externamente",
+    "excel_cargado":             "Excel cargado",
+    "en_validacion":             "En validación",
+    "listo":                     "Listo para visualización",
+    "observado":                 "Observado",
+    "rechazado":                 "Rechazado",
+    "reprocesar":                "Reprocesar",
+    "archivado":                 "Archivado",
+}
+
+
+class PliegoSolicitud(Base):
+    """Caso principal de lectura de pliego."""
+    __tablename__ = "pliego_solicitudes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    titulo = Column(String, nullable=False)
+    organismo = Column(String, nullable=True)
+    nombre_licitacion = Column(String, nullable=True)
+    numero_proceso = Column(String, nullable=True)
+    expediente = Column(String, nullable=True)
+    observaciones_usuario = Column(Text, nullable=True)
+    estado = Column(String, default="borrador", index=True)
+
+    # Ownership
+    creado_por_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    admin_responsable_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Timestamps
+    creado_en = Column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+    actualizado_en = Column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+    publicado_en = Column(DateTime(timezone=True), nullable=True)
+
+    # Procesamiento externo
+    enviado_a_gpt_en = Column(DateTime(timezone=True), nullable=True)
+    enviado_a_gpt_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    procesado_externamente_en = Column(DateTime(timezone=True), nullable=True)
+    observaciones_procesamiento = Column(Text, nullable=True)
+    observaciones_admin = Column(Text, nullable=True)
+
+    # Relationships
+    creado_por = relationship("User", foreign_keys=[creado_por_id])
+    admin_responsable = relationship("User", foreign_keys=[admin_responsable_id])
+    archivos = relationship("PliegoArchivo", back_populates="solicitud",
+                            cascade="all, delete-orphan")
+    historial = relationship("PliegoHistorial", back_populates="solicitud",
+                             cascade="all, delete-orphan",
+                             order_by="PliegoHistorial.creado_en")
+    cargas_excel = relationship("PliegoExcelCarga", back_populates="solicitud",
+                                cascade="all, delete-orphan")
+    datos_proceso = relationship("PliegoProceso", back_populates="solicitud",
+                                 uselist=False, cascade="all, delete-orphan")
+    cronograma = relationship("PliegoCronograma", back_populates="solicitud",
+                              cascade="all, delete-orphan")
+    requisitos = relationship("PliegoRequisito", back_populates="solicitud",
+                              cascade="all, delete-orphan")
+    garantias = relationship("PliegoGarantia", back_populates="solicitud",
+                             cascade="all, delete-orphan")
+    renglones = relationship("PliegoRenglon", back_populates="solicitud",
+                             cascade="all, delete-orphan")
+    documentos_pliego = relationship("PliegoDocumento", back_populates="solicitud",
+                                     cascade="all, delete-orphan")
+    actos_admin = relationship("PliegoActoAdmin", back_populates="solicitud",
+                               cascade="all, delete-orphan")
+    hallazgos = relationship("PliegoHallazgo", back_populates="solicitud",
+                             cascade="all, delete-orphan")
+    faltantes = relationship("PliegoFaltante", back_populates="solicitud",
+                             cascade="all, delete-orphan")
+    trazabilidad = relationship("PliegoTrazabilidad", back_populates="solicitud",
+                                cascade="all, delete-orphan")
+
+
+class PliegoArchivo(Base):
+    """Archivos adjuntos cargados por el usuario."""
+    __tablename__ = "pliego_archivos"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    nombre_original = Column(String, nullable=False)
+    nombre_guardado = Column(String, nullable=False)
+    tipo_mime = Column(String, nullable=True)
+    tamano_bytes = Column(Integer, nullable=True)
+    url_path = Column(String, nullable=True)
+    creado_en = Column(DateTime(timezone=True),
+                       default=lambda: dt.datetime.now(dt.timezone.utc))
+
+    solicitud = relationship("PliegoSolicitud", back_populates="archivos")
+
+
+class PliegoHistorial(Base):
+    """Historial de cambios de estado de un caso."""
+    __tablename__ = "pliego_historial"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    estado_anterior = Column(String, nullable=True)
+    estado_nuevo = Column(String, nullable=False)
+    comentario = Column(Text, nullable=True)
+    usuario_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    creado_en = Column(DateTime(timezone=True),
+                       default=lambda: dt.datetime.now(dt.timezone.utc))
+
+    solicitud = relationship("PliegoSolicitud", back_populates="historial")
+    usuario = relationship("User")
+
+
+class PliegoExcelCarga(Base):
+    """Registro de cada vez que se sube el Excel resultante del GPT."""
+    __tablename__ = "pliego_excel_cargas"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    nombre_archivo = Column(String, nullable=False)
+    version = Column(Integer, default=1)
+    url_path = Column(String, nullable=True)
+    cargado_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    creado_en = Column(DateTime(timezone=True),
+                       default=lambda: dt.datetime.now(dt.timezone.utc))
+    es_activa = Column(Boolean, default=True)
+    observaciones = Column(Text, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="cargas_excel")
+    cargado_por = relationship("User")
+
+
+class PliegoProceso(Base):
+    """Datos de la hoja 'Proceso' del Excel del GPT."""
+    __tablename__ = "pliego_proceso"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, unique=True, index=True)
+    datos = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="datos_proceso")
+
+
+class PliegoCronograma(Base):
+    """Filas de la hoja 'Cronograma'."""
+    __tablename__ = "pliego_cronograma"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    hito = Column(String, nullable=True)
+    fecha = Column(String, nullable=True)
+    hora = Column(String, nullable=True)
+    lugar_medio = Column(String, nullable=True)
+    estado_dato = Column(String, nullable=True)
+    fuente = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="cronograma")
+
+
+class PliegoRequisito(Base):
+    """Filas de la hoja 'Requisitos'."""
+    __tablename__ = "pliego_requisitos"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    categoria = Column(String, nullable=True)
+    descripcion = Column(Text, nullable=True)
+    obligatorio = Column(String, nullable=True)
+    momento_presentacion = Column(String, nullable=True)
+    medio_presentacion = Column(String, nullable=True)
+    vigencia = Column(String, nullable=True)
+    estado_dato = Column(String, nullable=True)
+    fuente = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="requisitos")
+
+
+class PliegoGarantia(Base):
+    """Filas de la hoja 'Garantias'."""
+    __tablename__ = "pliego_garantias"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    tipo = Column(String, nullable=True)
+    requerida = Column(String, nullable=True)
+    porcentaje = Column(String, nullable=True)
+    base_calculo = Column(String, nullable=True)
+    plazo = Column(String, nullable=True)
+    formas_admitidas = Column(Text, nullable=True)
+    estado_dato = Column(String, nullable=True)
+    fuente = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="garantias")
+
+
+class PliegoRenglon(Base):
+    """Filas de la hoja 'Renglones'."""
+    __tablename__ = "pliego_renglones"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    orden = Column(Integer, nullable=True)
+    numero_renglon = Column(String, nullable=True)
+    codigo_item = Column(String, nullable=True)
+    descripcion = Column(Text, nullable=True)
+    cantidad = Column(String, nullable=True)
+    unidad = Column(String, nullable=True)
+    destino_efector = Column(String, nullable=True)
+    entrega_parcial = Column(String, nullable=True)
+    obs_tecnicas = Column(Text, nullable=True)
+    estado = Column(String, nullable=True)
+    datos_extra = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="renglones")
+
+
+class PliegoDocumento(Base):
+    """Filas de la hoja 'Documentos'."""
+    __tablename__ = "pliego_documentos"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    nombre = Column(String, nullable=True)
+    tipo = Column(String, nullable=True)
+    rol = Column(String, nullable=True)
+    obligatorio = Column(String, nullable=True)
+    estado_lectura = Column(String, nullable=True)
+    fecha = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="documentos_pliego")
+
+
+class PliegoActoAdmin(Base):
+    """Filas de la hoja 'Actos_Administrativos'."""
+    __tablename__ = "pliego_actos_admin"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    tipo_acto = Column(String, nullable=True)
+    numero = Column(String, nullable=True)
+    numero_especial = Column(String, nullable=True)
+    fecha = Column(String, nullable=True)
+    organismo_emisor = Column(String, nullable=True)
+    descripcion = Column(Text, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="actos_admin")
+
+
+class PliegoHallazgo(Base):
+    """Filas de la hoja 'Hallazgos_Extra'."""
+    __tablename__ = "pliego_hallazgos"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    categoria = Column(String, nullable=True)
+    hallazgo = Column(Text, nullable=True)
+    impacto = Column(String, nullable=True)
+    accion_sugerida = Column(Text, nullable=True)
+    fuente = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="hallazgos")
+
+
+class PliegoFaltante(Base):
+    """Filas de la hoja 'Faltantes_y_Dudas'."""
+    __tablename__ = "pliego_faltantes"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    campo_objetivo = Column(String, nullable=True)
+    motivo = Column(String, nullable=True)
+    detalle = Column(Text, nullable=True)
+    criticidad = Column(String, nullable=True)
+    accion_recomendada = Column(Text, nullable=True)
+    estado = Column(String, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="faltantes")
+
+
+class PliegoTrazabilidad(Base):
+    """Filas de la hoja 'Trazabilidad'."""
+    __tablename__ = "pliego_trazabilidad"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    campo = Column(String, nullable=True)
+    valor_extraido = Column(Text, nullable=True)
+    documento_fuente = Column(String, nullable=True)
+    pagina_seccion = Column(String, nullable=True)
+    tipo_evidencia = Column(String, nullable=True)
+    observacion = Column(Text, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="trazabilidad")
+

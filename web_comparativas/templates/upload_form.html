@@ -1,13 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Nueva carga – Web Comparativas{% endblock %}
 {% block header_title %}Nueva carga{% endblock %}
+{% block extra_head %}
+<style>
+  .upload-form-shell {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-center align-items-start py-4">
-  <div class="card shadow-sm" style="max-width:900px; width:100%;">
-    <div class="card-body">
-      <h2 class="mb-4 fw-semibold text-primary">Cargar archivo para normalizar</h2>
 
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Mercado Público</span>
+    <h1 class="h-page-header__title">Nueva carga</h1>
+    <p class="h-page-header__subtitle">Cargar archivo para normalizar</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a href="/historial" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-clock-history me-1"></i> Historial
+    </a>
+  </div>
+</div>
+
+<div class="upload-form-shell">
+<div class="h-panel">
       <form action="/cargas" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm">
         <div class="col-md-4">
           <label class="form-label fw-semibold">N° de proceso</label>
@@ -95,14 +115,13 @@
         <input type="hidden" name="buyer_hint" id="buyer_hint" />
         <input type="hidden" name="province_hint" id="province_hint" />
 
-        <div class="col-12 d-grid mt-3">
-          <button class="btn btn-primary btn-lg">
+        <div class="col-12 mt-4">
+          <button class="btn btn-primary d-inline-flex align-items-center gap-2">
             <i class="bi bi-upload"></i> Procesar y normalizar
           </button>
         </div>
       </form>
-    </div>
-  </div>
+</div>
 </div>
 
 <!-- Script principal -->

@@ -54,260 +54,173 @@
 
 {% block content %}
 
-<!-- ======= PANEL INICIAL ======= -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="m-0">Inicio</h2>
+<!-- ======= PAGE HEADER ======= -->
+<div class="h-page-header">
+  <div>
+    <p class="h-page-header__eyebrow">Panel principal</p>
+    <h1 class="h-page-header__title">Inicio</h1>
+    <p class="h-page-header__subtitle">Resumen de actividad de Mercado Público</p>
+  </div>
+  {% if r in ['admin','analista','supervisor'] %}
+  <div class="h-page-header__actions">
+    <a class="btn btn-primary btn-sm" href="/otras-fuentes/nueva">
+      <i class="bi bi-plus-lg me-1"></i> Nueva carga
+    </a>
+    <a class="btn btn-outline-secondary btn-sm" href="/cargas/historial">Historial</a>
+  </div>
+  {% endif %}
 </div>
 
 {# Mensajes de feedback del reset #}
 {% if reset_ok %}
-<div class="alert alert-success alert-dismissible fade show" role="alert">
-  Procesos reseteados correctamente.
-  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+<div class="h-alert-success" role="alert">
+  <span><i class="bi bi-check-circle me-1"></i> Procesos reseteados correctamente.</span>
+  <button type="button" class="btn-close btn-sm" data-bs-dismiss="alert" aria-label="Cerrar"></button>
 </div>
 {% elif reset_err %}
-<div class="alert alert-danger alert-dismissible fade show" role="alert">
+<div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
   {{ reset_err }}
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
 </div>
 {% endif %}
 
-<!-- ======= TARJETAS HORIZONTALES ======= -->
-<style>
-  :root {
-    /* fallback por si no está definido en base.html */
-    --sa-azul: var(--brand-azul, #064066);
-    --sa-azul-alt: var(--brand-azul-alt, #5274ce);
-    --sa-azul-claro: var(--brand-azul-claro, #6886c4);
-    --sa-panel-bg: #ffffff;
-    --sa-borde-soft: var(--ink-200);
-  }
-
-  .panel-section {
-    background: var(--sa-panel-bg);
-    border-radius: var(--radius-md);
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: none;
-    border: 1px solid var(--sa-borde-soft);
-  }
-
-  .panel-section+.panel-section {
-    margin-top: 0.75rem;
-  }
-
-  .panel-opp {
-    border-top: 4px solid var(--sa-azul-alt);
-  }
-
-  .panel-proc {
-    border-top: 4px solid var(--sa-azul);
-  }
-
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-  }
-
-  .panel-title {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--sa-azul);
-    letter-spacing: .02em;
-  }
-
-  .panel-subtitle {
-    font-size: 0.8rem;
-    color: var(--ink-500);
-  }
-
-  .kpi-card {
-    flex: 1;
-    min-width: 220px;
-    background: #f8fafc;
-    border-radius: var(--radius-sm);
-    box-shadow: none;
-    padding: 0.9rem 1.1rem;
-    transition: 0.2s ease;
-    border: 1px solid var(--ink-200);
-  }
-
-  .kpi-card:hover {
-    background: #fff;
-    border-color: var(--secondary-500);
-  }
-
-  .kpi-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-
-  .kpi-title {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    font-weight: 700;
-    color: var(--ink-500);
-    margin-bottom: 0.25rem;
-  }
-
-  .kpi-value {
-    font-size: 1.9rem;
-    font-weight: 800;
-    line-height: 1.1;
-    font-family: 'Outfit', sans-serif;
-  }
-
-  .kpi-sub {
-    font-size: 0.8rem;
-    color: var(--ink-400);
-    margin-top: 0.15rem;
-  }
-
-  /* acentos de color */
-  .panel-opp .kpi-value {
-    color: var(--sa-azul-alt);
-  }
-
-  .panel-opp .kpi-card:nth-child(3) .kpi-value {
-    color: #d97706;
-    /* No vistas en ámbar suave */
-  }
-
-  .panel-proc .kpi-card:nth-child(1) .kpi-value {
-    color: var(--sa-azul);
-  }
-
-  .panel-proc .kpi-card:nth-child(2) .kpi-value {
-    color: #16a34a;
-    /* completados en verde */
-  }
-
-  .panel-proc .kpi-card:nth-child(3) .kpi-value {
-    color: var(--sa-azul-claro);
-  }
-
-  .action-buttons {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-  }
-</style>
-
-{# ===== KPIs OPORTUNIDADES ===== #}
-<div class="panel-section panel-opp">
-  <div class="panel-header">
+<!-- ======= BLOQUE OPORTUNIDADES ======= -->
+<div class="h-panel h-panel--opp">
+  <div class="h-panel__header">
     <div>
-      <div class="panel-title">Oportunidades</div>
-      <div class="panel-subtitle">Resumen rápido del archivo de oportunidades cargado</div>
+      <p class="h-panel__eyebrow">Módulo</p>
+      <h2 class="h-panel__title">Oportunidades</h2>
+      <p class="h-panel__desc">Resumen rápido del archivo de oportunidades cargado</p>
     </div>
-    <a class="btn btn-sm btn-ghost" href="/oportunidades/buscador">Ir al buscador</a>
+    <a class="btn btn-outline-secondary btn-sm" href="/oportunidades/buscador">
+      Ir al buscador <i class="bi bi-arrow-right ms-1"></i>
+    </a>
   </div>
   <div class="kpi-grid">
-    <div class="kpi-card text-center">
-      <div class="kpi-title">Total</div>
-      <div class="kpi-value" id="kOppTotal">{{ opp_total }}</div>
-      <div class="kpi-sub">Oportunidades cargadas</div>
+    <div class="kpi-card kpi-card--azul2">
+      <span class="kl">Total</span>
+      <span class="kv" id="kOppTotal">{{ opp_total }}</span>
+      <span class="ks">Oportunidades cargadas</span>
     </div>
-    <div class="kpi-card text-center">
-      <div class="kpi-title">Aceptadas</div>
-      <div class="kpi-value" id="kOppAccepted">{{ opp_accepted }}</div>
-      <div class="kpi-sub">Marcadas como aceptadas</div>
+    <div class="kpi-card kpi-card--azul2">
+      <span class="kl">Aceptadas</span>
+      <span class="kv" id="kOppAccepted">{{ opp_accepted }}</span>
+      <span class="ks">Marcadas como aceptadas</span>
     </div>
-    <div class="kpi-card text-center">
-      <div class="kpi-title">No vistas</div>
-      <div class="kpi-value" id="kOppUnseen">{{ opp_unseen }}</div>
-      <div class="kpi-sub">Sin evaluar todavía</div>
+    <div class="kpi-card kpi-card--ambar">
+      <span class="kl">Sin evaluar</span>
+      <span class="kv" id="kOppUnseen">{{ opp_unseen }}</span>
+      <span class="ks">Pendientes de revisión</span>
     </div>
   </div>
 </div>
 
-{# ===== KPIs PROCESOS ===== #}
-<div class="panel-section panel-proc">
-  <div class="panel-header">
+<!-- ======= BLOQUE PROCESOS ======= -->
+<div class="h-panel h-panel--proc">
+  <div class="h-panel__header">
     <div>
-      <div class="panel-title">Procesos</div>
-      <div class="panel-subtitle">Estado general de las cargas de Mercado Público</div>
+      <p class="h-panel__eyebrow">Módulo</p>
+      <h2 class="h-panel__title">Procesos</h2>
+      <p class="h-panel__desc">Estado general de las cargas de Mercado Público</p>
     </div>
   </div>
   <div class="kpi-grid">
-    <div class="kpi-card text-center">
-      <div class="kpi-title">Pendientes</div>
-      <div class="kpi-value">{{ total_pending }}</div>
-      <div class="kpi-sub">Procesos por terminar o revisar</div>
+    <div class="kpi-card kpi-card--ambar">
+      <span class="kl">Pendientes</span>
+      <span class="kv">{{ total_pending }}</span>
+      <span class="ks">Por terminar o revisar</span>
     </div>
-    <div class="kpi-card text-center">
-      <div class="kpi-title">Completados</div>
-      <div class="kpi-value">{{ total_done }}</div>
-      <div class="kpi-sub">Procesos listos</div>
+    <div class="kpi-card kpi-card--verde">
+      <span class="kl">Completados</span>
+      <span class="kv">{{ total_done }}</span>
+      <span class="ks">Procesos listos</span>
     </div>
-    <div class="kpi-card text-center">
-      <div class="kpi-title">Total cargas</div>
-      <div class="kpi-value">{{ total_all }}</div>
-      <div class="kpi-sub">Historial completo</div>
+    <div class="kpi-card kpi-card--azul">
+      <span class="kl">Total</span>
+      <span class="kv">{{ total_all }}</span>
+      <span class="ks">Historial completo</span>
     </div>
   </div>
 </div>
-<!-- ======= FIN TARJETAS ======= -->
 
-<div class="grid" style="gap: 16px; grid-template-columns: repeat(12,1fr);">
-  <div class="span-12">
-    <div class="card">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="m-0">Últimos procesados</h5>
-          <a class="btn btn-sm btn-ghost" href="/cargas/historial">Ver todos</a>
-        </div>
-
-        {% if not last_done or last_done|length == 0 %}
-        <div class="text-subtle py-3">Aún no hay cargas completadas.</div>
-        {% else %}
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead>
-              <tr>
-                <th style="width:90px">ID</th>
-                <th>Proceso</th>
-                <th>Archivo</th>
-                <th style="width:130px">Estado</th>
-                <th class="text-end" style="width:180px">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for up in last_done %}
-              {% set st = (up.status or '')|lower %}
-              <tr>
-                <td>{{ up.id }}</td>
-                <td>
-                  <div class="fw-semibold">{{ up.proceso_nro or '—' }}</div>
-                  <div class="text-subtle small">
-                    {{ up.platform_hint or '' }} {% if up.buyer_hint %}· {{ up.buyer_hint }}{% endif %}
-                  </div>
-                </td>
-                <td class="text-truncate" title="{{ up.original_filename }}">{{ up.original_filename or '—' }}</td>
-                <td>
-                  <span class="badge bg-success-subtle text-success">
-                    {{ step_labels.get(st, 'Listo')|capitalize }}
-                  </span>
-                </td>
-                <td class="text-end">
-                  <div class="action-buttons">
-                    <a class="btn btn-sm btn-primary" href="/tablero/{{ up.id }}">Abrir tablero</a>
-                    <a class="btn btn-sm btn-outline-secondary" href="/cargas/{{ up.id }}">Ver estado</a>
-                  </div>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-      </div>
+<!-- ======= ÚLTIMOS PROCESADOS ======= -->
+<div class="h-panel">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Actividad reciente</p>
+      <h2 class="h-panel__title">Últimos procesados</h2>
     </div>
+    <a class="btn btn-outline-secondary btn-sm" href="/cargas/historial">
+      Ver todos <i class="bi bi-arrow-right ms-1"></i>
+    </a>
   </div>
+
+  {% if not last_done or last_done|length == 0 %}
+  <div class="h-empty">
+    <div class="h-empty__icon"><i class="bi bi-inbox"></i></div>
+    <p class="h-empty__title">Sin cargas completadas aún</p>
+    <p class="h-empty__desc">Cuando se procesen cargas aparecerán aquí las más recientes.</p>
+    {% if r in ['admin','analista','supervisor'] %}
+    <a class="btn btn-primary btn-sm mt-2" href="/otras-fuentes/nueva">
+      <i class="bi bi-plus-lg me-1"></i> Nueva carga
+    </a>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="table-responsive">
+    <table class="h-table">
+      <thead>
+        <tr>
+          <th style="width:64px">ID</th>
+          <th>Proceso</th>
+          <th>Archivo</th>
+          <th style="width:130px">Estado</th>
+          <th class="text-end" style="width:210px">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for up in last_done %}
+        {% set st = (up.status or '')|lower %}
+        {% if st == 'done' %}{% set badge_cls = 'h-badge--done' %}
+        {% elif st in ['pending','queued'] %}{% set badge_cls = 'h-badge--pending' %}
+        {% elif st == 'error' %}{% set badge_cls = 'h-badge--error' %}
+        {% elif st in ['processing','classifying'] %}{% set badge_cls = 'h-badge--processing' %}
+        {% elif st == 'reviewing' %}{% set badge_cls = 'h-badge--reviewing' %}
+        {% else %}{% set badge_cls = 'h-badge--done' %}{% endif %}
+        <tr>
+          <td style="font-size:0.8rem;color:#94a3b8;font-variant-numeric:tabular-nums;">
+            #{{ up.id }}
+          </td>
+          <td>
+            <div style="font-weight:600;color:#06486f;font-size:0.9rem;">
+              {{ up.proceso_nro or '—' }}
+            </div>
+            {% if up.platform_hint or up.buyer_hint %}
+            <div style="font-size:0.78rem;color:#94a3b8;margin-top:2px;">
+              {{ up.platform_hint or '' }}{% if up.buyer_hint %} · {{ up.buyer_hint }}{% endif %}
+            </div>
+            {% endif %}
+          </td>
+          <td style="max-width:220px;" class="text-truncate" title="{{ up.original_filename }}">
+            {{ up.original_filename or '—' }}
+          </td>
+          <td>
+            <span class="h-badge {{ badge_cls }}">
+              {{ step_labels.get(st, 'Listo')|capitalize }}
+            </span>
+          </td>
+          <td class="text-end">
+            <div class="d-flex justify-content-end gap-2">
+              <a class="btn btn-primary btn-sm" href="/tablero/{{ up.id }}">Tablero</a>
+              <a class="btn btn-outline-secondary btn-sm" href="/cargas/{{ up.id }}">Ver estado</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 </div>
 
 <script>

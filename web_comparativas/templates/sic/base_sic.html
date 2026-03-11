@@ -19,15 +19,14 @@
 
     <style>
         :root {
-            /* Palette specific to S.I.C - darker, more tech */
-            --sic-bg: #0f172a;
-            --sic-card-bg: rgba(30, 41, 59, 0.7);
-            --sic-border: rgba(148, 163, 184, 0.1);
-            --sic-highlight: #3b82f6;
-            /* Modern Blue */
-            --sic-accent: #6366f1;
-            /* Indigo */
-            --sic-text: #f8fafc;
+            /* Palette S.I.C — alineada a Brandbook Suizo Argentina */
+            --sic-bg: #071726;                        /* azul institucional muy oscuro  */
+            --sic-card-bg: rgba(6, 72, 111, 0.18);   /* superficie con tinte de marca   */
+            --sic-border: rgba(87, 112, 176, 0.18);  /* borde azul secundario suave     */
+            --sic-highlight: #5770b0;                 /* brand-azul-2 (antes indigo)     */
+            --sic-accent: #06486f;                    /* brand-azul principal            */
+            --sic-done: #00A487;                      /* verde turquesa de marca         */
+            --sic-text: #f1f5f9;
             --sic-text-muted: #94a3b8;
             --glass-blur: 16px;
         }
@@ -35,9 +34,10 @@
         body {
             font-family: 'Outfit', sans-serif;
             background-color: var(--sic-bg);
+            /* Gradientes sutiles alineados a marca: azul institucional */
             background-image:
-                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.15) 0px, transparent 50%);
+                radial-gradient(at 0% 0%,   rgba(6, 72, 111, 0.25) 0px, transparent 55%),
+                radial-gradient(at 100% 100%, rgba(87, 112, 176, 0.18) 0px, transparent 55%);
             color: var(--sic-text);
             min-height: 100vh;
             display: flex;
@@ -46,31 +46,31 @@
         }
 
         .navbar-sic {
-            background: rgba(15, 23, 42, 0.8);
+            background: rgba(4, 14, 28, 0.88);
             backdrop-filter: blur(var(--glass-blur));
             border-bottom: 1px solid var(--sic-border);
-            height: 70px;
+            height: 68px;
         }
 
         .brand-logo {
-            font-weight: 800;
-            font-size: 1.5rem;
+            font-weight: 700;
+            font-size: 1.35rem;
             letter-spacing: -0.02em;
-            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #fff;
+            /* sin gradiente de texto: más sobrio */
         }
 
         .sic-badge {
-            background: rgba(59, 130, 246, 0.15);
-            color: #60a5fa;
-            font-size: 0.75rem;
-            padding: 0.25rem 0.75rem;
+            /* Acento brand-azul-2 en lugar de indigo/blue-500 */
+            background: rgba(87, 112, 176, 0.18);
+            color: #a5b8e8;
+            font-size: 0.7rem;
+            padding: 0.2rem 0.65rem;
             border-radius: 99px;
             font-weight: 600;
-            border: 1px solid rgba(59, 130, 246, 0.2);
-            margin-left: 1rem;
+            border: 1px solid rgba(87, 112, 176, 0.25);
+            margin-left: 0.75rem;
+            letter-spacing: 0.04em;
         }
 
         .nav-link {
@@ -164,9 +164,9 @@
         }
 
         .form-control-sic:focus {
-            background: rgba(15, 23, 42, 0.8);
+            background: rgba(4, 14, 28, 0.85);
             border-color: var(--sic-highlight);
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            box-shadow: 0 0 0 3px rgba(87, 112, 176, 0.22);
             color: #fff;
         }
 
@@ -179,9 +179,9 @@
         }
 
         .form-select-sic:focus {
-            background-color: rgba(15, 23, 42, 0.8);
+            background-color: rgba(4, 14, 28, 0.85);
             border-color: var(--sic-highlight);
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+            box-shadow: 0 0 0 3px rgba(87, 112, 176, 0.22);
             color: #fff;
         }
     </style>
@@ -194,9 +194,8 @@
     <nav class="navbar navbar-sic fixed-top">
         <div class="container-fluid px-4">
             <a class="navbar-brand d-flex align-items-center gap-2" href="/sic">
-                <i class="ph-bold ph-chart-polar" style="color: #60a5fa; font-size: 1.5rem;"></i>
+                <i class="bi bi-shield-check" style="color: #00A487; font-size: 1.3rem;"></i>
                 <span class="brand-logo">S.I.C</span>
-                <span class="sic-badge">BETA</span>
             </a>
 
             <div class="d-flex align-items-center gap-4">
@@ -208,6 +207,16 @@
                         class="nav-link small {% if request.url.path.startswith('/sic/tracking') %}active{% endif %}">Seguimiento</a>
                     <a href="/sic/users"
                         class="nav-link small {% if request.url.path.startswith('/sic/users') %}active{% endif %}">Usuarios</a>
+                    {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+                    <a href="/sic/password-resets"
+                        class="nav-link small position-relative {% if request.url.path.startswith('/sic/password-resets') %}active{% endif %}">
+                        Contraseñas
+                        <span id="pwd-reset-nav-badge"
+                            class="position-absolute top-0 start-100 translate-middle badge rounded-pill border border-dark"
+                            style="display:none;font-size:0.58rem;background:#ffc107;color:#000;padding:0.25em 0.45em;">
+                        </span>
+                    </a>
+                    {% endif %}
                 </div>
 
                 {% if user and (user.role == 'admin' or user.role == 'administrator') %}
@@ -232,11 +241,22 @@
                 </div>
                 {% endif %}
 
-                <a href="/" class="nav-link text-decoration-none small">Volver a SIEM</a>
+                {% set _role = (user.role or '') | lower %}
+                {% set _scope = (user.access_scope or 'todos') | lower %}
+                {% if _role in ['analista', 'analyst'] %}
+                    {% if 'privado' in _scope %}
+                        {% set _back_url = '/mercado-privado' %}
+                    {% else %}
+                        {% set _back_url = '/mercado-publico' %}
+                    {% endif %}
+                {% else %}
+                    {% set _back_url = '/markets' %}
+                {% endif %}
+                <a href="{{ _back_url }}" class="nav-link text-decoration-none small">Volver a SIEM</a>
                 <div class="d-flex align-items-center gap-2 text-white small">
                     <div
                         style="width: 32px; height: 32px; background: rgba(255,255,255,0.1); border-radius: 50%; display:flex; align-items:center; justify-content:center;">
-                        <i class="ph-bold ph-user"></i>
+                        <i class="bi bi-person"></i>
                     </div>
                     <span>{{ user_display(user) if user else 'Admin' }}</span>
                 </div>
@@ -380,6 +400,34 @@
             setInterval(checkNotifs, 30000);
         })();
     </script>
+    <!-- Badge "Solicitudes de contraseña" pendientes -->
+    {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+    <script>
+        (function () {
+            const badge = document.getElementById('pwd-reset-nav-badge');
+            if (!badge) return;
+
+            async function checkResets() {
+                try {
+                    const r = await fetch('/sic/api/password-resets/pending-count');
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    const count = data.count || 0;
+                    if (count > 0) {
+                        badge.textContent = count > 99 ? '99+' : count;
+                        badge.style.display = '';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                } catch (e) {}
+            }
+
+            checkResets();
+            setInterval(checkResets, 60000);
+        })();
+    </script>
+    {% endif %}
+
     {% block extra_js %}{% endblock %}
 </body>
 

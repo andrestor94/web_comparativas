@@ -589,7 +589,7 @@
 {% endblock %}
 
 {% block page_skin %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=brandbook-colors-v1">
 {% endblock %}
 
 {% block toolbar_actions %}
@@ -2057,7 +2057,7 @@
           `<tr><td colspan="${3 + maxPos * 4}" class="text-center text-muted py-5">
             <div class="d-flex flex-column align-items-center gap-2">
               <div>No hay filas para mostrar con los filtros actuales.</div>
-              <button class="btn btn-sm btn-outline-primary" onclick="window.resetFilters()">
+              <button class="btn btn-sm btn-outline-secondary" onclick="window.resetFilters()">
                  Mostrar todo / Resetear filtros
               </button>
             </div>

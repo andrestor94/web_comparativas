@@ -5,8 +5,7 @@
 <style>
   /* === Variables & Base === */
   :root {
-    --suizo-blue: #003366;
-    --suizo-red: #E30613;
+    --suizo-blue: #06486f;
     --text-dark: #212529;
     --text-muted: #6c757d;
   }
@@ -15,18 +14,21 @@
     color: var(--suizo-blue);
   }
 
-  .text-suizo-red {
-    color: var(--suizo-red);
-  }
-
   /* === Header Card === */
   .header-card {
     background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
     padding: 2rem;
     margin-bottom: 2rem;
+    border: 1px solid var(--ink-200);
     border-left: 5px solid var(--suizo-blue);
+    transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .header-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
   }
 
   .header-title {
@@ -67,13 +69,20 @@
 
   /* === Stepper === */
   .stepper-card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-    padding: 3rem 1rem;
+    background: #ffffff;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    padding: 3rem 1.5rem;
     margin-bottom: 2rem;
+    border: 1px solid var(--ink-200);
     overflow: hidden;
     /* Evitar scrollbar */
+    transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .stepper-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
   }
 
   .stepper-container {
@@ -103,7 +112,7 @@
     width: 0%;
     transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 4px;
-    box-shadow: 0 2px 4px rgba(0, 51, 102, 0.2);
+    box-shadow: 0 2px 4px rgba(6, 72, 111, 0.2);
   }
 
   .stepper-items {
@@ -153,7 +162,7 @@
     border-color: var(--suizo-blue);
     color: var(--suizo-blue);
     background: #fff;
-    box-shadow: 0 0 0 4px rgba(0, 51, 102, 0.1);
+    box-shadow: 0 0 0 4px rgba(6, 72, 111, 0.1);
     transform: scale(1.1);
   }
 
@@ -174,85 +183,30 @@
   }
 
   .step-item.error .step-circle {
-    border-color: var(--suizo-red);
-    color: var(--suizo-red);
+    border-color: #dc2626;
+    color: #dc2626;
   }
 
   .step-item.error .step-label {
-    color: var(--suizo-red);
+    color: #dc2626;
   }
 
   @keyframes pulse-blue {
     0% {
-      box-shadow: 0 0 0 0 rgba(0, 51, 102, 0.4);
+      box-shadow: 0 0 0 0 rgba(6, 72, 111, 0.4);
     }
 
     70% {
-      box-shadow: 0 0 0 10px rgba(0, 51, 102, 0);
+      box-shadow: 0 0 0 10px rgba(6, 72, 111, 0);
     }
 
     100% {
-      box-shadow: 0 0 0 0 rgba(0, 51, 102, 0);
+      box-shadow: 0 0 0 0 rgba(6, 72, 111, 0);
     }
   }
 
   .step-item.current .step-circle {
     animation: pulse-blue 2s infinite;
-  }
-
-  /* === Modern Buttons === */
-  .btn-suizo-primary {
-    background-color: var(--suizo-blue);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
-    font-weight: 600;
-    box-shadow: 0 4px 6px rgba(0, 51, 102, 0.2);
-    transition: all 0.2s ease;
-  }
-
-  .btn-suizo-primary:hover:not(.disabled) {
-    background-color: #002244;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(0, 51, 102, 0.25);
-    color: #fff;
-  }
-
-  .btn-suizo-primary.disabled {
-    background-color: #aeb9cc;
-    box-shadow: none;
-    cursor: not-allowed;
-  }
-
-  .btn-suizo-secondary {
-    background-color: transparent;
-    border: 2px solid #dee2e6;
-    color: var(--text-muted);
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
-    font-weight: 600;
-    transition: all 0.2s ease;
-  }
-
-  .btn-suizo-secondary:hover {
-    border-color: var(--suizo-blue);
-    color: var(--suizo-blue);
-    background: #f8f9fa;
-  }
-
-  .btn-suizo-outline-red {
-    background-color: transparent;
-    border: 2px solid #f8d7da;
-    color: var(--suizo-red);
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
-    font-weight: 600;
-  }
-
-  .btn-suizo-outline-red:hover {
-    background-color: #fff5f5;
-    border-color: var(--suizo-red);
   }
 
   .btn-icon-gap {
@@ -374,18 +328,18 @@
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-5">
 
     <div class="d-flex flex-wrap gap-3">
-      <a id="btnDashboard" class="btn btn-suizo-primary btn-icon-gap disabled" href="/tablero/{{ U.id }}"
+      <a id="btnDashboard" class="btn btn-primary btn-icon-gap disabled" href="/tablero/{{ U.id }}"
         aria-disabled="true">
         <i class="bi bi-bar-chart-fill"></i> Ver Tablero
       </a>
 
-      <a id="btnDownload" class="btn btn-suizo-secondary btn-icon-gap disabled" href="/descargas/{{ U.id }}"
+      <a id="btnDownload" class="btn btn-outline-secondary btn-icon-gap disabled" href="/descargas/{{ U.id }}"
         aria-disabled="true">
         <i class="bi bi-file-earmark-excel"></i> Descargar Excel
       </a>
 
       {% if user and (user.role or '').lower() == 'admin' %}
-      <a id="btnOriginal" class="btn btn-suizo-secondary btn-icon-gap" href="/cargas/{{ U.id }}/original"
+      <a id="btnOriginal" class="btn btn-outline-secondary btn-icon-gap" href="/cargas/{{ U.id }}/original"
         target="_blank">
         <i class="bi bi-file-earmark-zip"></i> Archivo Original
       </a>
@@ -393,14 +347,14 @@
 
       {% if user and (user.role or '').lower() == 'admin' %}
       <!-- RESTORE BUTTON (Fix missing files) -->
-      <button id="btnRestore" type="button" class="btn btn-suizo-outline-red btn-icon-gap">
+      <button id="btnRestore" type="button" class="btn btn-outline-danger btn-icon-gap">
         <i class="bi bi-cloud-upload-fill"></i> Restaurar Archivo
       </button>
       <!-- Hidden Input for Restore -->
       <input type="file" id="restoreFile" accept=".xlsx,.xls,.csv" hidden>
       {% endif %}
 
-      <button id="btnRefresh" type="button" class="btn btn-suizo-secondary btn-icon-gap">
+      <button id="btnRefresh" type="button" class="btn btn-outline-secondary btn-icon-gap">
         <i class="bi bi-arrow-clockwise"></i> Refrescar
       </button>
     </div>
@@ -436,8 +390,8 @@
 
 <script>
   /* ===================== Setup y utilidades ===================== */
-  const uploadId = Number({{ U.id or 0 }});
-  const PROC_LABEL = {{ (U.proceso_nro or("N° " ~U.id))| tojson }};
+  const uploadId = Number("{{ U.id or 0 }}");
+  const PROC_LABEL = "{{ (U.proceso_nro or('N° ' ~U.id)) }}";
 
   // Elements
   const stepper = document.getElementById("stepper");

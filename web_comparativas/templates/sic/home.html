@@ -3,13 +3,10 @@
 {% block extra_css %}
 <style>
     .hero-title {
-        font-size: 3rem;
+        font-size: 2.5rem;
         font-weight: 700;
         margin-bottom: 0.5rem;
-        background: linear-gradient(to right, #fff, #94a3b8);
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #fff;
     }
 
     .hero-subtitle {
@@ -38,26 +35,9 @@
 
     .sic-card:hover {
         transform: translateY(-4px);
-        border-color: rgba(59, 130, 246, 0.4);
+        border-color: rgba(0, 164, 135, 0.4);
         background: rgba(30, 41, 59, 0.9);
         box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
-    }
-
-    .sic-card:hover::after {
-        opacity: 1;
-    }
-
-    .sic-card::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: radial-gradient(600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(59, 130, 246, 0.1), transparent 40%);
-        opacity: 0;
-        transition: opacity 0.3s;
-        pointer-events: none;
     }
 
     .icon-box {
@@ -166,23 +146,54 @@
             </div>
         </a>
 
+        {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+        <!-- Solicitudes de contraseña -->
+        <a href="/sic/password-resets" class="sic-card">
+            <div class="icon-box">
+                <i class="bi bi-key-fill"></i>
+            </div>
+            <h3 class="card-title">Solicitudes de contraseña</h3>
+            <p class="card-desc">
+                Recupero de contraseñas solicitadas por usuarios. Gestioná restablecimientos de acceso de forma segura.
+            </p>
+            <div id="pwd-resets-home-badge" class="mb-2" style="display:none;">
+                <span style="display:inline-flex;align-items:center;gap:.4rem;font-size:.78rem;font-weight:600;
+                             padding:.3em .75em;border-radius:6px;
+                             background:rgba(255,193,7,.15);color:#ffc107;border:1px solid rgba(255,193,7,.25);">
+                    <i class="bi bi-exclamation-circle"></i>
+                    <span id="pwd-resets-home-count">0</span> pendiente(s)
+                </span>
+            </div>
+            <div class="card-arrow">
+                Gestionar <i class="bi bi-arrow-right"></i>
+            </div>
+        </a>
+        {% endif %}
 
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+{% if user and (user.role == 'admin' or user.role == 'administrator') %}
 <script>
-    // Mouse movement effect for cards
-    document.querySelectorAll('.sic-card').forEach(card => {
-        card.onmousemove = e => {
-            const rect = card.getBoundingClientRect(),
-                x = e.clientX - rect.left,
-                y = e.clientY - rect.top;
-
-            card.style.setProperty('--mouse-x', `${x}px`);
-            card.style.setProperty('--mouse-y', `${y}px`);
-        };
-    });
+(function () {
+    async function updateHomeResetBadge() {
+        try {
+            const r = await fetch('/sic/api/password-resets/pending-count');
+            if (!r.ok) return;
+            const data = await r.json();
+            const count = data.count || 0;
+            const badge = document.getElementById('pwd-resets-home-badge');
+            const countEl = document.getElementById('pwd-resets-home-count');
+            if (badge && countEl) {
+                countEl.textContent = count;
+                badge.style.display = count > 0 ? '' : 'none';
+            }
+        } catch (e) {}
+    }
+    updateHomeResetBadge();
+})();
 </script>
+{% endif %}
 {% endblock %}

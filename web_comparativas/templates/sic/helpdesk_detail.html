@@ -109,7 +109,7 @@
     <div class="col-12 col-lg-8 mb-4 mb-lg-0 d-flex flex-column">
         <div class="d-flex align-items-center mb-4">
             <a href="/sic/helpdesk" class="btn btn-sm btn-sic-ghost me-3" title="Volver">
-                <i class="ph-bold ph-arrow-left"></i>
+                <i class="bi bi-arrow-left"></i>
             </a>
             <div class="consulta-header-card w-100 mb-0 d-flex justify-content-between align-items-center">
                 <div>
@@ -122,14 +122,14 @@
                             class="badge bg-white bg-opacity-10 text-white border border-white border-opacity-10 fw-normal">
                             {{ ticket.category|capitalize }}
                         </span>
-                        <span><i class="ph-bold ph-clock me-1"></i> {{ ticket.created_at.strftime('%d/%m/%Y %H:%M')
+                        <span><i class="bi bi-clock me-1"></i> {{ ticket.created_at.strftime('%d/%m/%Y %H:%M')
                             }}</span>
                     </div>
                 </div>
 
                 {% if ticket.status == 'abierto' %}
                 <div class="text-end d-none d-md-block">
-                    <span class="d-block text-success fw-bold small"><i class="ph-bold ph-check-circle me-1"></i> En
+                    <span class="d-block text-success fw-bold small"><i class="bi bi-check-circle me-1"></i> En
                         curso</span>
                 </div>
                 {% endif %}
@@ -176,17 +176,17 @@
                         placeholder="Escribe una respuesta... (Enter para enviar)"
                         style="resize: none; background: rgba(0,0,0,0.2);" required></textarea>
                     <button type="submit" class="btn btn-sic-primary px-4 d-flex align-items-center">
-                        <i class="ph-bold ph-paper-plane-right fs-5"></i>
+                        <i class="bi bi-send fs-5"></i>
                     </button>
                 </div>
                 <div class="text-white-50 small mt-2 ps-1">
-                    <i class="ph-bold ph-info me-1"></i> Shift + Enter para nueva línea
+                    <i class="bi bi-info-circle me-1"></i> Shift + Enter para nueva línea
                 </div>
             </form>
         </div>
         {% else %}
         <div class="alert alert-secondary mt-5 bg-opacity-10 border-opacity-25 text-center text-white-50 p-4 rounded-4">
-            <i class="ph-bold ph-lock-key mb-2 d-block fs-3"></i>
+            <i class="bi bi-lock mb-2 d-block fs-3"></i>
             Esta consulta está cerrada.
         </div>
         {% endif %}
@@ -208,8 +208,8 @@
                             style="font-size: 0.65rem; letter-spacing: 1px;">Estado</span>
                         <div class="d-flex align-items-center gap-2">
                             {% if ticket.status == 'abierto' %}
-                            <div class="rounded-circle bg-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]"
-                                style="width: 8px; height: 8px; box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);"></div>
+                            <div class="rounded-circle"
+                                style="width: 8px; height: 8px; background:#5770b0; box-shadow: 0 0 8px rgba(87, 112, 176, 0.6);"></div>
                             <span class="text-white fw-medium small tracking-wide">Abierto</span>
                             {% elif ticket.status == 'pendiente' %}
                             <div class="rounded-circle bg-warning shadow-[0_0_10px_rgba(245,158,11,0.5)]"
@@ -236,15 +236,15 @@
                         <div class="d-flex align-items-center justify-content-end gap-2">
                             {% if ticket.priority == 'alta' %}
                             <span class="text-white fw-medium small tracking-wide">Alta</span>
-                            <i class="ph-fill ph-warning text-danger"
+                            <i class="bi bi-exclamation-triangle-fill text-danger"
                                 style="filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));"></i>
                             {% elif ticket.priority == 'baja' %}
                             <span class="text-white fw-medium small tracking-wide">Baja</span>
-                            <i class="ph-fill ph-arrow-down text-info"
-                                style="filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));"></i>
+                            <i class="bi bi-arrow-down"
+                                style="color:#5770b0; filter: drop-shadow(0 0 8px rgba(87, 112, 176, 0.5));"></i>
                             {% else %}
                             <span class="text-white fw-medium small tracking-wide">Media</span>
-                            <i class="ph-fill ph-minus text-warning"
+                            <i class="bi bi-dash text-warning"
                                 style="filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.5));"></i>
                             {% endif %}
                         </div>
@@ -257,7 +257,7 @@
                     <div id="deleteContainer">
                         <button type="button" onclick="showDeleteModal()"
                             class="btn btn-sm btn-outline-danger w-100 d-flex align-items-center justify-content-center gap-2 border-opacity-25 text-opacity-75 hover:bg-danger">
-                            <i class="ph-bold ph-trash"></i> Eliminar Consulta
+                            <i class="bi bi-trash"></i> Eliminar Consulta
                         </button>
                         <div id="deleteError" class="text-danger small mt-2 text-center" style="display:none;"></div>
                     </div>
@@ -287,7 +287,7 @@
                     <input type="hidden" name="status" value="resuelto">
                     <button type="submit"
                         class="btn btn-sm btn-sic-ghost w-100 text-success border-success border-opacity-25 hover:bg-success hover:text-white">
-                        <i class="ph-bold ph-check-circle me-2"></i> Marcar Resuelto
+                        <i class="bi bi-check-circle me-2"></i> Marcar Resuelto
                     </button>
                 </form>
                 {% endif %}
@@ -313,7 +313,7 @@
                 <div class="mb-3">
                     <div class="rounded-circle bg-danger bg-opacity-10 d-inline-flex align-items-center justify-content-center"
                         style="width: 64px; height: 64px;">
-                        <i class="ph-bold ph-trash text-danger" style="font-size: 32px;"></i>
+                        <i class="bi bi-trash text-danger" style="font-size: 32px;"></i>
                     </div>
                 </div>
                 <h5 class="fw-bold mb-2">¿Estás seguro?</h5>

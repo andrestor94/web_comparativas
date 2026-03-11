@@ -1,11 +1,11 @@
 /* ===== Dashboard v2 (moderno, compacto, brand) ===== */
 :root {
   /* Brand */
-  --sa-azul: #064066;
-  --sa-azul-alt: #5274ce;
-  --sa-azul-alt-claro: #6886c4;
+  --sa-azul: #06486f;
+  --sa-azul-alt: #5770b0;
+  --sa-azul-alt-claro: #7b8fc4;
   --sa-amarillo: #eeede8;
-  --sa-text: #064066;
+  --sa-text: #06486f;
   --sa-blanco: #ffffff;
 
   /* Neutros */
@@ -16,10 +16,11 @@
   --sa-gris-300: #d7dcea;
 
   /* Tokens de UI */
-  --radius: 14px;
-  --radius-sm: 10px;
-  --shadow-1: 0 3px 14px rgba(6, 64, 102, .06);
-  --shadow-2: 0 10px 32px rgba(6, 64, 102, .10);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-1: 0 4px 12px rgba(6, 64, 102, .05), 0 1px 2px rgba(6, 64, 102, .03);
+  --shadow-2: 0 10px 25px rgba(6, 64, 102, .08), 0 4px 10px rgba(6, 64, 102, .04);
+  --shadow-lift: 0 14px 30px rgba(6, 64, 102, .12), 0 6px 14px rgba(6, 64, 102, .06);
   --font-ui: "Outfit", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 
   /* Alturas de charts */
@@ -104,13 +105,22 @@ h4 {
   background: var(--sa-azul-alt) !important;
   border-color: var(--sa-azul-alt) !important;
   color: #fff !important;
-  transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
-  box-shadow: 0 2px 8px rgba(82, 116, 206, .2);
+  transition: transform .15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .2s ease, background .2s ease;
+  box-shadow: 0 2px 8px rgba(82, 116, 206, .15);
+  font-weight: 600;
+  padding: 0.55rem 1.2rem;
+  border-radius: var(--radius-sm);
 }
 
 .btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(82, 116, 206, .28)
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(82, 116, 206, .25);
+  background: #4868cb !important;
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(82, 116, 206, .15);
 }
 
 .btn-outline-secondary {
@@ -159,19 +169,23 @@ h4 {
 .process-header {
   position: relative;
   background: var(--sa-blanco);
-  border: 0;
+  border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-  /* Soft, modern shadow */
-  padding: .55rem .8rem .65rem;
+  box-shadow: var(--shadow-1);
+  padding: .75rem 1rem;
   display: grid;
   grid-template-columns: 1fr;
-  gap: .5rem .75rem;
+  gap: .75rem;
   align-items: start;
-  margin-top: .25rem;
+  margin-top: .5rem;
+  transition: box-shadow .2s;
 
   /* Reservo espacio a la derecha para Vistas/Descargar */
   padding-right: 230px;
+}
+
+.process-header:hover {
+  box-shadow: var(--shadow-2);
 }
 
 .ph-left {
@@ -262,17 +276,19 @@ h4 {
 /* ===== KPI cards (Modern Clean & Compact) ===== */
 .kpi-group {
   background: var(--sa-blanco);
-  border: 0;
+  border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
-  /* Floating */
-  padding: .75rem .9rem;
-  /* Reduced from 1rem */
+  box-shadow: var(--shadow-1);
+  padding: 1.25rem;
   height: auto;
-  /* Allow shrink */
   display: flex;
   flex-direction: column;
   justify-content: center;
+  transition: box-shadow 0.2s;
+}
+
+.kpi-group:hover {
+  box-shadow: var(--shadow-2);
 }
 
 .kpi-group .group-title {
@@ -294,14 +310,12 @@ h4 {
 
 .kpi-card {
   background: var(--sa-blanco) !important;
-  border: 1px solid rgba(226, 232, 240, 0.6);
-  border-left: 3px solid var(--sa-azul-alt);
-  /* Tech Accent */
-  border-radius: 8px;
-  /* Slightly sharper for tech feel */
-  padding: .65rem .9rem;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--sa-gris-200);
+  border-left: 4px solid var(--sa-azul-alt);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(6, 64, 102, 0.02);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   overflow: hidden;
 }
@@ -321,8 +335,7 @@ h4 {
 
 .kpi-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 25px rgba(6, 64, 102, 0.08);
-  /* Suizo Blue Shadow */
+  box-shadow: var(--shadow-lift);
   border-color: var(--sa-azul-alt-claro);
 }
 
@@ -352,14 +365,18 @@ h4 {
 /* ===== Gráficos (Clean) ===== */
 .chart-box {
   background: var(--sa-blanco);
-  border: 0;
+  border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
-  padding: .75rem .9rem;
-  /* Reduced padding */
+  box-shadow: var(--shadow-1);
+  padding: 1.25rem;
   height: 100%;
   display: flex;
   flex-direction: column;
+  transition: box-shadow 0.2s;
+}
+
+.chart-box:hover {
+  box-shadow: var(--shadow-2);
 }
 
 .chart-box .title {
@@ -396,10 +413,10 @@ h4 {
 /* ===== Competidores Fuertes (Modern) ===== */
 .strong-competitors {
   background: var(--sa-blanco);
-  border: 0;
+  border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
-  padding: .75rem .9rem;
+  box-shadow: var(--shadow-1);
+  padding: 1.25rem;
   margin-top: 1rem;
 }
 
@@ -435,9 +452,14 @@ h4 {
   border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow-1);
-  padding: .35rem .5rem;
+  padding: .5rem;
   display: block;
   overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+
+.table-wrap:hover {
+  box-shadow: var(--shadow-2);
 }
 
 /* 👇 Scroll horizontal SOLO dentro de la tabla */

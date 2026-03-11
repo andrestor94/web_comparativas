@@ -1,0 +1,757 @@
+{% extends "base.html" %}
+
+{% block title %}Vista Ampliada · {{ caso.titulo }}{% endblock %}
+
+{% block header_title %}
+  <span>Lectura de Pliego</span>
+  {% if caso.titulo %}
+  <span class="text-muted fw-normal ms-2" style="font-size:.85rem">{{ caso.titulo }}</span>
+  {% endif %}
+{% endblock %}
+
+{% block toolbar_actions %}
+<div class="d-flex gap-2 align-items-center">
+  <div class="view-mode-toggle">
+    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="view-mode-btn">
+      <i class="bi bi-layout-sidebar-inset"></i> Vista Resumida
+    </a>
+    <span class="view-mode-btn active">
+      <i class="bi bi-layout-text-window-reverse"></i> Vista Ampliada
+    </span>
+  </div>
+  {% if es_admin %}
+  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-gear me-1"></i>Gestionar
+  </a>
+  {% endif %}
+  <a href="/mercado-publico/lectura-pliegos" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-list-ul"></i>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-app: #f8fafc;
+    --bg-surface: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --border-soft: #e2e8f0;
+    --accent-blue: #2563eb;
+    --sidebar-w: 240px;
+    --radius-lg: 16px;
+    --radius-md: 10px;
+    --shadow-sm: 0 4px 6px -1px rgba(0,0,0,0.05);
+  }
+
+  body { background-color: var(--bg-app) !important; font-family: 'Outfit', sans-serif !important; color: var(--text-primary); }
+
+  .amp-layout {
+    display: flex;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    gap: 1.5rem;
+    min-height: calc(100vh - 80px);
+  }
+
+  /* Sidebar */
+  .amp-nav {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    position: sticky;
+    top: 2rem;
+    height: max-content;
+    background: transparent !important;
+  }
+  .amp-nav-title {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--text-secondary); font-weight: 700; margin: 1.25rem 0 0.4rem 0.5rem;
+  }
+  .amp-nav-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 1rem; background: transparent; border: none;
+    border-radius: var(--radius-md); color: var(--text-secondary);
+    font-weight: 500; font-size: 0.92rem; text-align: left;
+    cursor: pointer; transition: all 0.2s; width: 100%; text-decoration: none;
+  }
+  .amp-nav-btn i { font-size: 1rem; margin-right: 0.5rem; }
+  .amp-nav-btn:hover { background: #f1f5f9; color: var(--text-primary); }
+  .amp-nav-btn.active {
+    background: var(--bg-surface); color: var(--accent-blue); font-weight: 600;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.04); border: 1px solid var(--border-soft);
+  }
+  .amp-nav-badge {
+    background: #f1f5f9; color: var(--text-secondary);
+    padding: 0.1rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+  }
+  .amp-nav-btn.active .amp-nav-badge { background: #dce7f5; color: var(--accent-blue); }
+
+  /* CTA volver a resumida */
+  .nav-cta-resumida {
+    margin-top: 1.5rem; padding: 0.85rem 1rem;
+    background: #f8fafc; border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md); text-decoration: none;
+    display: block; transition: all 0.2s;
+  }
+  .nav-cta-resumida:hover { background: #f1f5f9; }
+  .nav-cta-resumida .cta-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--text-secondary); margin-bottom: 0.2rem; }
+  .nav-cta-resumida .cta-title { font-size: 0.88rem; font-weight: 700; color: var(--text-primary); }
+
+  /* Main */
+  .amp-main { flex-grow: 1; min-width: 0; }
+  .amp-panel { display: none; margin-top: 1.5rem; animation: fadeIn 0.25s ease; }
+  .amp-panel.active { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
+  /* Hero */
+  .amp-hero {
+    background: var(--bg-surface); border-radius: var(--radius-lg);
+    padding: 1.75rem 2rem; border: 1px solid var(--border-soft);
+    box-shadow: var(--shadow-sm); margin-bottom: 1.5rem;
+  }
+  .amp-hero h1 { font-size: 1.5rem; font-weight: 800; color: var(--text-primary); margin: 0 0 0.3rem; }
+  .amp-hero p { font-size: 0.9rem; color: var(--text-secondary); margin: 0; }
+
+  /* Cards */
+  .amp-card {
+    background: var(--bg-surface); border-radius: var(--radius-lg);
+    border: 1px solid var(--border-soft); box-shadow: var(--shadow-sm);
+    margin-bottom: 1.25rem; overflow: hidden;
+  }
+  .amp-card-header {
+    padding: 1.1rem 1.4rem; border-bottom: 1px solid var(--border-soft);
+    background: #fbfcfd; display: flex; align-items: center;
+    justify-content: space-between; gap: 1rem;
+  }
+  .amp-card-header h2 { font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; }
+  .amp-card-body { padding: 1.25rem 1.4rem; }
+  .amp-badge {
+    background: #f1f5f9; color: var(--text-secondary);
+    padding: 0.15rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+  }
+
+  /* Grid de items */
+  .amp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; }
+  .amp-item { border: 1px solid var(--border-soft); border-radius: 10px; padding: 0.85rem 0.95rem; background: #f8fafc; }
+  .amp-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--text-secondary); }
+  .amp-value { margin-top: 0.3rem; color: var(--text-primary); font-weight: 600; line-height: 1.4; word-break: break-word; font-size: 0.92rem; }
+
+  /* Tablas */
+  .amp-table { width: 100%; font-size: 0.88rem; border-collapse: collapse; }
+  .amp-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 800; background: #f8fafc; padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-soft); }
+  .amp-table td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  .amp-table tr:last-child td { border-bottom: none; }
+  .amp-table tr:hover td { background: #f8fafc; }
+
+  /* Badges estado */
+  .status-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
+  .status-found { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+  .status-infer { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+  .status-miss { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .status-neutral { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+  /* Accordion renglones */
+  .renglon-master { cursor: pointer; transition: background 0.15s; }
+  .renglon-master:hover td { background: #f1f5f9; }
+  .renglon-detail-row { display: none; background: #fbfcfd; }
+  .renglon-detail-row.open { display: table-row; }
+  .renglon-detail-box { padding: 1.25rem 1.4rem; border-left: 3px solid var(--accent-blue); }
+
+  /* Timeline cronograma */
+  .timeline { padding: 1.4rem; display: flex; flex-direction: column; gap: 0.85rem; }
+  .tl-item { display: flex; gap: 1.1rem; }
+  .tl-date { width: 110px; flex-shrink: 0; text-align: right; padding-top: 0.2rem; }
+  .tl-date-val { font-weight: 700; color: var(--text-primary); font-size: 0.9rem; }
+  .tl-date-time { font-size: 0.77rem; color: var(--text-secondary); }
+  .tl-divider { width: 2px; background: #e2e8f0; position: relative; display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 12px; height: 12px; background: var(--accent-blue); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--accent-blue); position: absolute; top: 0.3rem; }
+  .tl-content { padding-bottom: 1.25rem; flex-grow: 1; }
+  .tl-title { font-weight: 700; color: var(--text-primary); font-size: 1rem; }
+  .tl-desc { color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.2rem; }
+
+  /* Toggle view mode */
+  .view-mode-toggle {
+    display: inline-flex; align-items: center;
+    background: #f1f5f9; border: 1px solid var(--border-soft);
+    border-radius: 8px; padding: 3px; gap: 2px;
+  }
+  .view-mode-btn {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.85rem; border-radius: 6px;
+    font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);
+    text-decoration: none; transition: all 0.15s; white-space: nowrap;
+  }
+  .view-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.7); }
+  .view-mode-btn.active { background: var(--bg-surface); color: var(--accent-blue); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+  .nd-text { color: #94a3b8; font-style: italic; }
+  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  @media (max-width: 992px) {
+    .amp-layout { flex-direction: column; }
+    .amp-nav { width: 100%; position: static; flex-direction: row; flex-wrap: wrap; }
+    .amp-nav-btn { flex-basis: calc(50% - 0.5rem); }
+    .amp-nav-title, .nav-cta-resumida { width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="amp-layout">
+
+  {%- macro status_badge(estado) -%}
+    {% set est_low = (estado|default(''))|lower %}
+    {% if est_low in ["encontrado","alta","completo"] %}
+      <span class="status-badge status-found"><i class="bi bi-check-circle-fill"></i> {{ estado }}</span>
+    {% elif est_low in ["inferido","ambiguo","media"] %}
+      <span class="status-badge status-infer"><i class="bi bi-exclamation-triangle-fill"></i> {{ estado }}</span>
+    {% elif est_low in ["no encontrado","pendiente","crítico","critico"] %}
+      <span class="status-badge status-miss"><i class="bi bi-x-circle-fill"></i> {{ estado }}</span>
+    {% else %}
+      <span class="status-badge status-neutral">{{ estado if estado else '—' }}</span>
+    {% endif %}
+  {%- endmacro -%}
+
+  {%- macro txt(v) -%}
+    {% if v and v|string|trim|lower not in ['-','--','n/a','na','none','no encontrado','no identificada','sin dato'] %}
+      {{ v }}
+    {% else %}
+      <span class="nd-text">—</span>
+    {% endif %}
+  {%- endmacro -%}
+
+  <!-- SIDEBAR NAVEGACIÓN -->
+  <aside class="amp-nav">
+    <div class="amp-nav-title">Componentes</div>
+    <button class="amp-nav-btn active" data-target="renglones">
+      <span><i class="bi bi-box-seam"></i> Renglones</span>
+      {% if caso.renglones %}<span class="amp-nav-badge">{{ caso.renglones|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="cronograma">
+      <span><i class="bi bi-calendar-event"></i> Cronograma</span>
+      {% if caso.cronograma %}<span class="amp-nav-badge">{{ caso.cronograma|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="complementarios">
+      <span><i class="bi bi-grid-3x3-gap"></i> Complementarios</span>
+      {% if rp_output.matrix_fields %}<span class="amp-nav-badge">{{ rp_output.matrix_fields|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="requisitos">
+      <span><i class="bi bi-check2-square"></i> Requisitos</span>
+      {% if caso.requisitos %}<span class="amp-nav-badge">{{ caso.requisitos|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="garantias">
+      <span><i class="bi bi-shield-check"></i> Garantías</span>
+      {% if caso.garantias %}<span class="amp-nav-badge">{{ caso.garantias|length }}</span>{% endif %}
+    </button>
+
+    <div class="amp-nav-title mt-2">Documentación</div>
+    <button class="amp-nav-btn" data-target="documentos">
+      <span><i class="bi bi-folder2-open"></i> Documentos</span>
+      {% if caso.documentos_pliego %}<span class="amp-nav-badge">{{ caso.documentos_pliego|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="actos">
+      <span><i class="bi bi-file-earmark-ruled"></i> Actos Adm.</span>
+      {% if caso.actos_admin %}<span class="amp-nav-badge">{{ caso.actos_admin|length }}</span>{% endif %}
+    </button>
+
+    <div class="amp-nav-title mt-2">Auditoría</div>
+    <button class="amp-nav-btn" data-target="faltantes">
+      <span><i class="bi bi-exclamation-octagon"></i> Faltantes</span>
+      {% if caso.faltantes %}<span class="amp-nav-badge">{{ caso.faltantes|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="hallazgos">
+      <span><i class="bi bi-lightbulb"></i> Hallazgos</span>
+      {% if hallazgos_ordenados %}<span class="amp-nav-badge">{{ hallazgos_ordenados|length }}</span>{% endif %}
+    </button>
+    <button class="amp-nav-btn" data-target="trazabilidad">
+      <span><i class="bi bi-diagram-3"></i> Trazabilidad</span>
+      {% if caso.trazabilidad %}<span class="amp-nav-badge">{{ caso.trazabilidad|length }}</span>{% endif %}
+    </button>
+    {% if proceso %}
+    <button class="amp-nav-btn" data-target="extras">
+      <span><i class="bi bi-database"></i> Datos del Proceso</span>
+      <span class="amp-nav-badge">{{ proceso|length }}</span>
+    </button>
+    {% endif %}
+
+    <!-- CTA volver -->
+    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="nav-cta-resumida">
+      <div class="cta-label"><i class="bi bi-arrow-left me-1"></i>Volver</div>
+      <div class="cta-title">Vista Resumida</div>
+    </a>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="amp-main">
+
+    <!-- Hero -->
+    <div class="amp-hero">
+      <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+        <div>
+          <h1>{{ caso.titulo }}</h1>
+          <p>Información completa extraída del pliego: renglones, cronograma, requisitos, garantías, documentos, trazabilidad y hallazgos.</p>
+        </div>
+        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" style="display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;background:#f8fafc;border:1px solid var(--border-soft);border-radius:8px;font-size:.85rem;font-weight:600;color:var(--text-secondary);text-decoration:none;white-space:nowrap;">
+          <i class="bi bi-arrow-left"></i> Vista Resumida
+        </a>
+      </div>
+    </div>
+
+    <!-- PANEL: RENGLONES -->
+    <div class="amp-panel active" id="amp-panel-renglones">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-box-seam"></i> Renglones (Ítems Licitados)</h2>
+          <div class="d-flex align-items-center gap-2">
+            <input type="text" id="filtroRenglones" class="form-control form-control-sm" placeholder="Buscar..." style="max-width:200px;">
+            <span class="amp-badge">{{ caso.renglones|length }} ítems</span>
+          </div>
+        </div>
+        {% if caso.renglones %}
+        <div class="table-responsive">
+          <table class="amp-table" id="tablaRenglones">
+            <thead>
+              <tr>
+                <th style="width:32px;"></th>
+                <th>Código</th>
+                <th>Descripción</th>
+                <th>Cantidad</th>
+                <th>Unidad</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in caso.renglones|sort(attribute='orden') %}
+              <tr class="renglon-master" onclick="toggleRenglon('det-{{ r.id }}', this)">
+                <td class="text-center text-secondary ps-3"><i class="bi bi-chevron-right chevron-icon" style="transition:transform .2s;"></i></td>
+                <td style="font-family:monospace;font-size:.82rem;">{{ r.codigo_item or '—' }}</td>
+                <td class="fw-bold">{{ txt(r.descripcion) }}</td>
+                <td class="fw-bold">{{ r.cantidad or '—' }}</td>
+                <td>{{ r.unidad or '—' }}</td>
+                <td>{{ status_badge(r.estado) }}</td>
+              </tr>
+              <tr class="renglon-detail-row" id="det-{{ r.id }}">
+                <td colspan="6" class="p-0">
+                  <div class="renglon-detail-box">
+                    <div class="row g-3">
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Destino / Efector</div>
+                        <div class="amp-value">{{ r.destino_efector or '—' }}</div>
+                      </div>
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Entrega Parcial</div>
+                        <div class="amp-value">{{ r.entrega_parcial or '—' }}</div>
+                      </div>
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Observaciones Técnicas</div>
+                        <div class="amp-value">{{ r.obs_tecnicas or '—' }}</div>
+                      </div>
+                      {% if r.datos_extra %}
+                        {% for k, v in r.datos_extra.items() %}
+                        <div class="col-12 col-md-3">
+                          <div class="amp-label">{{ k }}</div>
+                          <div class="amp-value">{{ v or '—' }}</div>
+                        </div>
+                        {% endfor %}
+                      {% endif %}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-box-x fs-1 opacity-25 d-block mb-3"></i> Sin renglones registrados.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: COMPLEMENTARIOS -->
+    <div class="amp-panel" id="amp-panel-complementarios">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-grid-3x3-gap"></i> Campos Complementarios</h2>
+          <span class="amp-badge">{{ rp_output.matrix_fields|length }}</span>
+        </div>
+        {% if rp_output.matrix_fields %}
+        <div class="amp-card-body">
+          <div class="amp-grid">
+            {% for field in rp_output.matrix_fields %}
+            <div class="amp-item">
+              <div class="amp-label">{{ field.label }}</div>
+              <div class="amp-value">
+                {% if field.display_value %}
+                  {{ field.display_value }}
+                {% else %}
+                  <span class="nd-text">-</span>
+                {% endif %}
+              </div>
+              <div class="mt-2">{{ status_badge(field.coverage_status) }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-grid-3x3-gap fs-1 opacity-25 d-block mb-3"></i> Sin campos complementarios registrados.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: CRONOGRAMA -->
+    <div class="amp-panel" id="amp-panel-cronograma">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-calendar-event"></i> Cronograma del Proceso</h2>
+          <span class="amp-badge">{{ caso.cronograma|length }} hitos</span>
+        </div>
+        {% if caso.cronograma %}
+        <div class="timeline">
+          {% for h in caso.cronograma %}
+          <div class="tl-item">
+            <div class="tl-date">
+              <div class="tl-date-val">{{ h.fecha or '—' }}</div>
+              <div class="tl-date-time">{{ h.hora or '' }}</div>
+            </div>
+            <div class="tl-divider"><div class="tl-dot"></div></div>
+            <div class="tl-content">
+              <div class="tl-title">{{ h.hito or '—' }}</div>
+              {% if h.lugar_medio %}<div class="tl-desc"><i class="bi bi-geo-alt"></i> {{ h.lugar_medio }}</div>{% endif %}
+              <div class="mt-1">{{ status_badge(h.estado_dato) }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-calendar-x fs-1 opacity-25 d-block mb-3"></i> Sin cronograma registrado.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: REQUISITOS -->
+    <div class="amp-panel" id="amp-panel-requisitos">
+      {% if req_por_cat %}
+        {% for categoria, items in req_por_cat.items() %}
+        <div class="amp-card">
+          <div class="amp-card-header">
+            <h2><i class="bi bi-card-checklist"></i> {{ categoria }}</h2>
+            <span class="amp-badge">{{ items|length }}</span>
+          </div>
+          <div class="table-responsive">
+            <table class="amp-table">
+              <thead><tr><th>Descripción</th><th>Obligatorio</th><th>Momento</th><th>Medio</th><th>Estado</th></tr></thead>
+              <tbody>
+                {% for r in items %}
+                <tr>
+                  <td class="fw-semibold">{{ r.descripcion or '—' }}</td>
+                  <td>
+                    {% if r.obligatorio and r.obligatorio|lower in ['sí','si','true','yes','1'] %}
+                    <span class="badge bg-danger">Sí</span>
+                    {% else %}
+                    {{ r.obligatorio or '—' }}
+                    {% endif %}
+                  </td>
+                  <td>{{ r.momento_presentacion or '—' }}</td>
+                  <td>{{ r.medio_presentacion or '—' }}</td>
+                  <td>{{ status_badge(r.estado_dato) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="amp-card p-5 text-center text-muted"><i class="bi bi-card-checklist fs-1 opacity-25 d-block mb-3"></i> Sin requisitos registrados.</div>
+      {% endif %}
+    </div>
+
+    <!-- PANEL: GARANTÍAS -->
+    <div class="amp-panel" id="amp-panel-garantias">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-shield-check"></i> Garantías Requeridas</h2>
+          <span class="amp-badge">{{ caso.garantias|length }}</span>
+        </div>
+        {% if caso.garantias %}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead><tr><th>Tipo</th><th>Req.</th><th>%</th><th>Base</th><th>Plazo</th><th>Formas</th><th>Estado</th></tr></thead>
+            <tbody>
+              {% for g in caso.garantias %}
+              <tr>
+                <td class="fw-bold">{{ g.tipo or '—' }}</td>
+                <td>{{ g.requerida or '—' }}</td>
+                <td class="fw-bold text-primary" style="font-size:1.05rem;">{{ g.porcentaje or '—' }}</td>
+                <td>{{ g.base_calculo or '—' }}</td>
+                <td>{{ g.plazo or '—' }}</td>
+                <td style="font-size:.82rem;">{{ g.formas_admitidas or '—' }}</td>
+                <td>{{ status_badge(g.estado_dato) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-shield-x fs-1 opacity-25 d-block mb-3"></i> Sin garantías registradas.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: DOCUMENTOS -->
+    <div class="amp-panel" id="amp-panel-documentos">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-folder2-open"></i> Archivos del Pliego</h2>
+          <span class="amp-badge">{{ caso.documentos_pliego|length }}</span>
+        </div>
+        {% if caso.documentos_pliego %}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead><tr><th>Nombre</th><th>Tipo</th><th>Obligatorio</th><th>Fecha</th><th>Lectura IA</th></tr></thead>
+            <tbody>
+              {% for d in caso.documentos_pliego %}
+              <tr>
+                <td class="fw-bold"><i class="bi bi-file-pdf text-danger me-2"></i>{{ d.nombre or '—' }}</td>
+                <td>{{ d.tipo or '—' }}</td>
+                <td>{{ d.obligatorio or '—' }}</td>
+                <td>{{ d.fecha or '—' }}</td>
+                <td>{{ status_badge(d.estado_lectura) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-file-earmark-x fs-1 opacity-25 d-block mb-3"></i> Sin documentos.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: ACTOS ADMINISTRATIVOS -->
+    <div class="amp-panel" id="amp-panel-actos">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-file-earmark-ruled"></i> Actos Administrativos</h2>
+          <span class="amp-badge">{{ caso.actos_admin|length }}</span>
+        </div>
+        {% if caso.actos_admin %}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead><tr><th>Tipo Acto</th><th>N°</th><th>Fecha</th><th>Organismo</th><th>Descripción</th></tr></thead>
+            <tbody>
+              {% for a in caso.actos_admin %}
+              <tr>
+                <td class="fw-bold">{{ a.tipo_acto or '—' }}</td>
+                <td>{{ a.numero or '—' }}</td>
+                <td>{{ a.fecha or '—' }}</td>
+                <td>{{ a.organismo_emisor or '—' }}</td>
+                <td>{{ a.descripcion or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-file-earmark-x fs-1 opacity-25 d-block mb-3"></i> Sin actos administrativos.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: FALTANTES -->
+    <div class="amp-panel" id="amp-panel-faltantes">
+      <div class="amp-card {% if caso.faltantes %}border-danger{% endif %}" style="{% if caso.faltantes %}border-color:#fca5a5{% endif %}">
+        <div class="amp-card-header" style="{% if caso.faltantes %}background:#fef2f2;border-bottom-color:#fca5a5;{% endif %}">
+          <h2 class="{% if caso.faltantes %}text-danger{% endif %}"><i class="bi bi-exclamation-octagon"></i> Faltantes Documentales</h2>
+          {% if caso.faltantes %}<span class="amp-badge" style="background:#fee2e2;color:#dc2626;">{{ caso.faltantes|length }}</span>{% endif %}
+        </div>
+        {% if caso.faltantes %}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead><tr><th>Campo Objetivo</th><th>Motivo / Detalle</th><th>Criticidad</th><th>Recomendación</th></tr></thead>
+            <tbody>
+              {% for f in caso.faltantes|sort(attribute='criticidad', reverse=True) %}
+              {% set crit = (f.criticidad or '')|lower %}
+              <tr class="{% if crit in ['alta','crítica','critica','alto'] %}table-danger{% endif %}">
+                <td class="fw-bold">{{ f.campo_objetivo or '—' }}</td>
+                <td>
+                  <span class="d-block fw-semibold mb-1">{{ f.motivo or '—' }}</span>
+                  <span class="text-secondary" style="font-size:.82rem;">{{ f.detalle or '' }}</span>
+                </td>
+                <td>{{ status_badge(f.criticidad) }}</td>
+                <td class="fst-italic" style="font-size:.85rem;">{{ f.accion_recomendada or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-success"><i class="bi bi-check-circle-fill fs-2 d-block mb-2"></i> No se registraron faltantes.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: HALLAZGOS -->
+    <div class="amp-panel" id="amp-panel-hallazgos">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-lightbulb text-warning"></i> Hallazgos de Interés</h2>
+          <span class="amp-badge">{{ hallazgos_ordenados|length }}</span>
+        </div>
+        {% if hallazgos_ordenados %}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead><tr><th>Categoría</th><th>Hallazgo</th><th>Impacto</th><th>Sugerencia</th></tr></thead>
+            <tbody>
+              {% for h in hallazgos_ordenados %}
+              <tr>
+                <td class="fw-bold">{{ h.categoria or '—' }}</td>
+                <td>{{ h.hallazgo or '—' }}</td>
+                <td>{{ status_badge(h.impacto) }}</td>
+                <td class="fst-italic" style="font-size:.85rem;">{{ h.accion_sugerida or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-secondary">No se registraron hallazgos especiales.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: TRAZABILIDAD -->
+    <div class="amp-panel" id="amp-panel-trazabilidad">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-diagram-3"></i> Trazabilidad del Dato</h2>
+          <div class="d-flex align-items-center gap-2">
+            <input type="text" id="filtroTrazabilidad" class="form-control form-control-sm" placeholder="Buscar..." style="max-width:200px;">
+            <span class="amp-badge">{{ caso.trazabilidad|length }}</span>
+          </div>
+        </div>
+        {% if caso.trazabilidad %}
+        <div class="table-responsive">
+          <table class="amp-table" id="tablaTrazabilidad">
+            <thead><tr><th>Campo</th><th>Valor</th><th>Fuente</th><th>Sección</th><th>Tipo</th></tr></thead>
+            <tbody>
+              {% for t in caso.trazabilidad %}
+              <tr data-search="{{ ((t.campo or '') + ' ' + (t.documento_fuente or '') + ' ' + (t.valor_extraido or ''))|lower }}">
+                <td class="fw-bold" style="font-size:.82rem;">{{ t.campo or '—' }}</td>
+                <td><div class="clamp-2" title="{{ t.valor_extraido }}">{{ t.valor_extraido or '—' }}</div></td>
+                <td>{{ t.documento_fuente or '—' }}</td>
+                <td class="text-center">{{ t.pagina_seccion or '—' }}</td>
+                <td>{{ status_badge(t.tipo_evidencia) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="p-5 text-center text-muted"><i class="bi bi-node-minus fs-1 opacity-25 d-block mb-3"></i> Sin trazabilidad registrada.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- PANEL: DATOS COMPLETOS DEL PROCESO -->
+    {% if proceso %}
+    <div class="amp-panel" id="amp-panel-extras">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-database"></i> Datos Completos del Proceso</h2>
+          <span class="amp-badge">{{ proceso|length }} campos</span>
+        </div>
+        <div class="amp-card-body">
+          <p class="text-muted mb-3" style="font-size:.85rem;">Todos los campos extraídos de la hoja Proceso del Excel, tal como fueron cargados.</p>
+          <div class="amp-grid">
+            {% for key, value in proceso.items() %}
+              {% set vstr = value|string|trim %}
+              {% if vstr and vstr|lower not in ['nan', 'none', '-', '--', 'n/a', 'na', ''] %}
+              <div class="amp-item">
+                <div class="amp-label">{{ key }}</div>
+                <div class="amp-value">{{ vstr }}</div>
+              </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+  </main>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Navegación sidebar
+  const navBtns = document.querySelectorAll('.amp-nav-btn');
+  const panels  = document.querySelectorAll('.amp-panel');
+
+  function activateTab(targetId) {
+    navBtns.forEach(b => b.classList.remove('active'));
+    panels.forEach(p => p.classList.remove('active'));
+    const btn = Array.from(navBtns).find(b => b.dataset.target === targetId);
+    if (btn) btn.classList.add('active');
+    const panel = document.getElementById('amp-panel-' + targetId);
+    if (panel) panel.classList.add('active');
+  }
+
+  navBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      activateTab(this.dataset.target);
+      history.replaceState(null, '', '#' + this.dataset.target);
+    });
+  });
+
+  const hash = location.hash.replace('#', '');
+  if (hash) activateTab(hash);
+
+  // Accordion renglones
+  window.toggleRenglon = function(targetId, rowEl) {
+    const det = document.getElementById(targetId);
+    if (!det) return;
+    det.classList.toggle('open');
+    const icon = rowEl.querySelector('.chevron-icon');
+    if (icon) icon.style.transform = det.classList.contains('open') ? 'rotate(90deg)' : 'rotate(0)';
+  }
+
+  // Filtro renglones
+  const filtroR = document.getElementById('filtroRenglones');
+  if (filtroR) {
+    filtroR.addEventListener('input', function() {
+      const q = this.value.toLowerCase();
+      document.querySelectorAll('#tablaRenglones tbody tr.renglon-master').forEach(r => {
+        const next = r.nextElementSibling;
+        if (r.textContent.toLowerCase().includes(q)) {
+          r.style.display = '';
+        } else {
+          r.style.display = 'none';
+          if (next && next.classList.contains('renglon-detail-row')) next.classList.remove('open');
+        }
+      });
+    });
+  }
+
+  // Filtro trazabilidad
+  const filtroT = document.getElementById('filtroTrazabilidad');
+  if (filtroT) {
+    filtroT.addEventListener('input', function() {
+      const q = this.value.toLowerCase();
+      document.querySelectorAll('#tablaTrazabilidad tbody tr[data-search]').forEach(r => {
+        r.style.display = (r.dataset.search || r.textContent.toLowerCase()).includes(q) ? '' : 'none';
+      });
+    });
+  }
+</script>
+{% endblock %}

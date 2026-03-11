@@ -1,0 +1,66 @@
+# =============================================================
+# .gitignore — SIEM / web_comparativas_v2
+# =============================================================
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# --- Virtual environments ---
+venv_webcomparativas/
+venv/
+.venv/
+env/
+
+# --- Bases de datos locales ---
+*.db
+*.sqlite3
+*.sqlite
+
+# --- Variables de entorno y secretos ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Archivos de deployment generados ---
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# --- Logs y outputs temporales ---
+*.log
+*.out
+debug_*.txt
+debug_*.json
+
+# --- Archivos temporales de descarga ---
+web_comparativas/static/temp_dl/
+
+# --- Uploads de usuarios (datos de runtime) ---
+data/uploads/
+web_comparativas/static/uploads/
+web_comparativas/data/uploads/
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Archivos de construcción de análisis / pruebas ---
+*.csv
+*.json
+sim_result*
+test_out*
+golden_master*
+commit_diff*

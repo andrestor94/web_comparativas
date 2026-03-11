@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Nueva solicitud de lectura – SIEM{% endblock %}
+{% block header_title %}Nueva solicitud de lectura de pliego{% endblock %}
+
+{% block extra_head %}
+<style>
+  .upload-zone {
+    border: 2px dashed var(--bs-border-color);
+    border-radius: .6rem;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--bs-primary);
+    background: rgba(13,110,253,.04);
+  }
+  .file-item {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .5rem .75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .5rem;
+    font-size: .85rem;
+  }
+  .file-item .file-icon { font-size: 1.1rem; flex-shrink: 0; }
+  .file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-item .file-size { color: #999; font-size: .75rem; flex-shrink: 0; }
+  .file-item .remove-btn { border: none; background: none; color: #dc3545; cursor: pointer; padding: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="py-3 px-1" style="max-width:780px">
+
+  {# Breadcrumb #}
+  <nav style="font-size:.82rem" class="mb-3">
+    <a href="/mercado-publico/lectura-pliegos" class="text-muted text-decoration-none">
+      <i class="bi bi-arrow-left me-1"></i>Lectura de Pliegos
+    </a>
+    <span class="mx-1 text-muted">/</span>
+    <span>Nueva solicitud</span>
+  </nav>
+
+  {% if error %}
+  <div class="alert alert-danger d-flex align-items-center gap-2 py-2">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <div>{{ error }}</div>
+  </div>
+  {% endif %}
+
+  <form id="frmSolicitud" method="post" enctype="multipart/form-data"
+        action="/mercado-publico/lectura-pliegos/nueva">
+
+    {# ── Bloque: identificación ── #}
+    <div class="card mb-3">
+      <div class="card-body">
+        <h6 class="card-title fw-bold mb-3">
+          <i class="bi bi-file-text me-2 text-primary"></i>Identificación
+        </h6>
+
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="titulo">
+            Título interno <span class="text-danger">*</span>
+          </label>
+          <input type="text" id="titulo" name="titulo" class="form-control"
+                 placeholder="Ej: Licitación Suturas – Municipio San Isidro – Mar 2025"
+                 value="{{ form.titulo if form else '' }}" required>
+          <div class="form-text">Nombre que usarás para identificar este caso internamente.</div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="organismo">Organismo / entidad</label>
+            <input type="text" id="organismo" name="organismo" class="form-control"
+                   placeholder="Ej: Municipalidad de San Isidro"
+                   value="{{ form.organismo if form else '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="nombre_licitacion">Nombre de la licitación</label>
+            <input type="text" id="nombre_licitacion" name="nombre_licitacion" class="form-control"
+                   placeholder="Ej: Provisión de material de sutura"
+                   value="{{ form.nombre_licitacion if form else '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="numero_proceso">Número de proceso</label>
+            <input type="text" id="numero_proceso" name="numero_proceso" class="form-control"
+                   placeholder="Ej: LC-2025-001"
+                   value="{{ form.numero_proceso if form else '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="expediente">Expediente</label>
+            <input type="text" id="expediente" name="expediente" class="form-control"
+                   placeholder="Ej: EXP-2025-12345"
+                   value="{{ form.expediente if form else '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# ── Bloque: archivos ── #}
+    <div class="card mb-3">
+      <div class="card-body">
+        <h6 class="card-title fw-bold mb-3">
+          <i class="bi bi-paperclip me-2 text-primary"></i>Archivos del pliego
+        </h6>
+
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('archivos').click()">
+          <i class="bi bi-cloud-upload" style="font-size:1.8rem; color:#0d6efd; display:block; margin-bottom:.5rem"></i>
+          <div class="fw-semibold mb-1">Arrastrá los archivos aquí o hacé clic para seleccionar</div>
+          <div class="text-muted" style="font-size:.82rem">
+            PDF, Word, Excel, imágenes — hasta 50 MB por archivo
+          </div>
+        </div>
+
+        <input type="file" id="archivos" name="archivos" multiple class="d-none"
+               accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.bmp,.tiff,.zip">
+
+        <div id="fileList" class="d-flex flex-column gap-2 mt-3"></div>
+      </div>
+    </div>
+
+    {# ── Bloque: observaciones ── #}
+    <div class="card mb-4">
+      <div class="card-body">
+        <h6 class="card-title fw-bold mb-3">
+          <i class="bi bi-chat-text me-2 text-primary"></i>Observaciones
+        </h6>
+        <textarea id="observaciones_usuario" name="observaciones_usuario"
+                  class="form-control" rows="4"
+                  placeholder="Indicá si hay algo particular a revisar, secciones problemáticas, dudas previas, etc.">{{ form.observaciones_usuario if form else '' }}</textarea>
+        <div class="form-text">Opcional. El administrador verá este texto antes de procesar el caso.</div>
+      </div>
+    </div>
+
+    {# ── Acciones ── #}
+    <div class="d-flex gap-2 flex-wrap">
+      <button type="submit" name="accion" value="enviar" class="btn btn-primary">
+        <i class="bi bi-send me-1"></i>Enviar solicitud
+      </button>
+      <button type="submit" name="accion" value="borrador" class="btn btn-outline-secondary">
+        <i class="bi bi-floppy me-1"></i>Guardar borrador
+      </button>
+      <a href="/mercado-publico/lectura-pliegos" class="btn btn-link text-muted">Cancelar</a>
+    </div>
+    <div class="form-text mt-2">
+      Al enviar, la solicitud queda en estado <strong>Pendiente de revisión</strong> y el administrador recibirá
+      notificación para procesarla. Al guardar como borrador, solo vos podés verla.
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const input = document.getElementById('archivos');
+  const zone = document.getElementById('uploadZone');
+  const list = document.getElementById('fileList');
+  let filesToUpload = new DataTransfer();
+
+  const ICONS = {
+    pdf: 'bi-file-earmark-pdf text-danger',
+    doc: 'bi-file-earmark-word text-primary',
+    docx: 'bi-file-earmark-word text-primary',
+    xls: 'bi-file-earmark-excel text-success',
+    xlsx: 'bi-file-earmark-excel text-success',
+    jpg: 'bi-file-earmark-image text-warning',
+    jpeg: 'bi-file-earmark-image text-warning',
+    png: 'bi-file-earmark-image text-warning',
+    bmp: 'bi-file-earmark-image text-warning',
+    tiff: 'bi-file-earmark-image text-warning',
+    zip: 'bi-file-earmark-zip text-secondary',
+  };
+
+  function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1048576).toFixed(1) + ' MB';
+  }
+
+  function getIcon(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    return ICONS[ext] || 'bi-file-earmark text-muted';
+  }
+
+  function renderList() {
+    list.innerHTML = '';
+    const files = filesToUpload.files;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const div = document.createElement('div');
+      div.className = 'file-item';
+      div.innerHTML = `
+        <span class="file-icon"><i class="bi ${getIcon(f.name)}"></i></span>
+        <span class="file-name" title="${f.name}">${f.name}</span>
+        <span class="file-size">${formatBytes(f.size)}</span>
+        <button type="button" class="remove-btn" data-idx="${i}" title="Quitar archivo">
+          <i class="bi bi-x-circle-fill"></i>
+        </button>
+      `;
+      list.appendChild(div);
+    }
+
+    list.querySelectorAll('.remove-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(this.dataset.idx);
+        const newDt = new DataTransfer();
+        const files2 = filesToUpload.files;
+        for (let j = 0; j < files2.length; j++) {
+          if (j !== idx) newDt.items.add(files2[j]);
+        }
+        filesToUpload = newDt;
+        input.files = filesToUpload.files;
+        renderList();
+      });
+    });
+  }
+
+  input.addEventListener('change', function () {
+    for (const f of this.files) {
+      filesToUpload.items.add(f);
+    }
+    input.files = filesToUpload.files;
+    renderList();
+  });
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    for (const f of e.dataTransfer.files) {
+      filesToUpload.items.add(f);
+    }
+    input.files = filesToUpload.files;
+    renderList();
+  });
+})();
+</script>
+{% endblock %}

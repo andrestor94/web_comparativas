@@ -24,9 +24,9 @@
     }
 
     .badge-sic-analista {
-        background: rgba(59, 130, 246, 0.15);
-        color: #93c5fd;
-        border: 1px solid rgba(59, 130, 246, 0.2);
+        background: rgba(87, 112, 176, 0.15);
+        color: #a8b8e8;
+        border: 1px solid rgba(87, 112, 176, 0.2);
     }
 
     .badge-sic-auditor {
@@ -43,10 +43,20 @@
         <h1 class="h3 fw-bold mb-1">Gestión de Usuarios</h1>
         <p class="text-white-50 small mb-0">Administración de accesos y roles de la plataforma.</p>
     </div>
-    <div class="col-auto">
+    <div class="col-auto d-flex align-items-center gap-2">
+        {% if (user.role or '')|lower in ['admin', 'administrator'] %}
+        <a href="/sic/password-resets"
+           class="btn btn-sic-ghost d-flex align-items-center gap-2">
+            <i class="bi bi-key"></i> Solicitudes de contraseña
+            <span id="users-pwd-reset-badge"
+                  class="badge rounded-pill ms-1"
+                  style="display:none;background:#ffc107;color:#000;font-size:.68rem;">
+            </span>
+        </a>
+        {% endif %}
         {% if (user.role or '')|lower != 'auditor' %}
         <a href="/sic/users/new" class="btn btn-sic-primary d-flex align-items-center gap-2">
-            <i class="ph-bold ph-plus"></i> Nuevo usuario
+            <i class="bi bi-plus-lg"></i> Nuevo usuario
         </a>
         {% endif %}
     </div>
@@ -55,43 +65,43 @@
 {# ====== Alertas de feedback ====== #}
 {% if ok == 'created' %}
 <div class="alert alert-success d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-check-circle"></i> Usuario creado correctamente.
+    <i class="bi bi-check-circle"></i> Usuario creado correctamente.
 </div>
 {% elif ok == 'updated' %}
 <div class="alert alert-success d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-check-circle"></i> Usuario actualizado correctamente.
+    <i class="bi bi-check-circle"></i> Usuario actualizado correctamente.
 </div>
 {% elif ok == 'deleted' %}
 <div class="alert alert-success d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-check-circle"></i> Usuario eliminado.
+    <i class="bi bi-check-circle"></i> Usuario eliminado.
 </div>
 {% endif %}
 
 {% if err == 'not_found' %}
 <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-warning"></i> Usuario no encontrado.
+    <i class="bi bi-exclamation-triangle"></i> Usuario no encontrado.
 </div>
 {% elif err == 'cannot_self' %}
 <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-warning"></i> No puedes eliminarte a ti mismo.
+    <i class="bi bi-exclamation-triangle"></i> No puedes eliminarte a ti mismo.
 </div>
 {% elif err == 'last_admin' %}
 <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-warning"></i> No puedes eliminar el último administrador.
+    <i class="bi bi-exclamation-triangle"></i> No puedes eliminar el último administrador.
 </div>
 {% elif err == 'delete_failed' %}
 <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-x-circle"></i> Ocurrió un error al eliminar el usuario.
+    <i class="bi bi-x-circle"></i> Ocurrió un error al eliminar el usuario.
 </div>
 {% elif err %}
 <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-x-circle"></i> Ocurrió un error: {{ err }}
+    <i class="bi bi-x-circle"></i> Ocurrió un error: {{ err }}
 </div>
 {% endif %}
 
 {% if error %}
 <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
-    <i class="ph-bold ph-x-circle"></i> {{ error }}
+    <i class="bi bi-x-circle"></i> {{ error }}
 </div>
 {% endif %}
 
@@ -99,7 +109,7 @@
     <div class="table-responsive">
         {% if not users or users|length == 0 %}
         <div class="text-center text-white-50 py-5">
-            <i class="ph-bold ph-users mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
+            <i class="bi bi-people mb-3 d-block" style="font-size: 2rem; opacity: 0.5;"></i>
             No hay usuarios cargados todavía.
             <div class="mt-2">
                 <a href="/sic/users/new" class="text-white text-decoration-underline">Crear el primero</a>
@@ -168,20 +178,20 @@
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-2">
                             <a class="btn btn-sm btn-sic-ghost" href="/sic/users/{{ u.id }}/edit" title="Editar">
-                                <i class="ph-bold ph-pencil-simple"></i>
+                                <i class="bi bi-pencil"></i>
                             </a>
                             {% if u.id == user.id %}
                             <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip"
                                 title="No puedes eliminarte a ti mismo">
                                 <button class="btn btn-sm btn-sic-ghost disabled"
                                     style="opacity: 0.5; cursor: not-allowed;">
-                                    <i class="ph-bold ph-trash"></i>
+                                    <i class="bi bi-trash"></i>
                                 </button>
                             </span>
                             {% else %}
                             <button type="button" class="btn btn-sm btn-sic-ghost text-danger border-danger-subtle"
                                 onclick="showDeleteModal({{ u.id }}, '{{ u.email }}')" title="Eliminar">
-                                <i class="ph-bold ph-trash"></i>
+                                <i class="bi bi-trash"></i>
                             </button>
                             {% endif %}
                         </div>
@@ -229,6 +239,22 @@
 
 {% block extra_js %}
 <script>
+    // Badge: solicitudes de contraseña pendientes
+    (function () {
+        const badge = document.getElementById('users-pwd-reset-badge');
+        if (!badge) return;
+        fetch('/sic/api/password-resets/pending-count')
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data) return;
+                const count = data.count || 0;
+                if (count > 0) {
+                    badge.textContent = count;
+                    badge.style.display = '';
+                }
+            }).catch(() => {});
+    })();
+
     let targetUserId = null;
     let deleteModal = null;
 

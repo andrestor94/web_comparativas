@@ -12,7 +12,7 @@ import json
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -24,8 +24,6 @@ from sqlalchemy import func
 from web_comparativas.models import (
     SessionLocal, db_session, User, init_db, Upload
 )
-from web_comparativas.auth import hash_password, verify_password
-
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
 from web_comparativas.visibility_service import (
@@ -47,9 +45,16 @@ REPORTS_DIR = BASE_DIR / "reports"
 OPP_DIR = BASE_DIR / "data" / "oportunidades"
 CLIENTES_PATH = BASE_DIR / "data" / "BASE_CLIENTES_SUIZO.xlsx"
 PDF_TEMPLATE_PATH = BASE_DIR / "static" / "reports" / "Informe Comparativas.pdf"
+FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 
 # === MIGRACIONES ===
-from web_comparativas.migrations import ensure_access_scope_column
+from web_comparativas.migrations import (
+    ensure_access_scope_column,
+    ensure_password_reset_columns,
+    ensure_normalized_storage_columns,
+    backfill_normalized_content,
+)
+from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 
 @app.on_event("startup")
 def run_startup_migrations():
@@ -59,8 +64,43 @@ def run_startup_migrations():
         print("[MIGRATION] SUCCESS: 'access_scope' checked/added.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning: {e}", flush=True)
-    
-    # print("[MIGRATION] SKIPPED (Deployment Fix)", flush=True)
+
+    try:
+        ensure_password_reset_columns()
+        print("[MIGRATION] SUCCESS: password reset columns/table checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning password reset: {e}", flush=True)
+
+    # Crear tablas nuevas del módulo Lectura de Pliegos (y cualquier tabla pendiente)
+    try:
+        from web_comparativas.models import Base, engine as _engine
+        Base.metadata.create_all(bind=_engine)
+        print("[MIGRATION] Tables ensured via create_all.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] create_all warning: {e}", flush=True)
+
+    try:
+        maybe_run_startup_ingestion()
+        print("[STARTUP] Dimensionamiento auto-ingest checked.", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Dimensionamiento auto-ingest warning: {e}", flush=True)
+
+    # Persistencia robusta: columnas para guardar contenido de archivos procesados en DB
+    # Esto evita pérdida de datos al redesplegar en Render (filesystem efímero)
+    try:
+        ensure_normalized_storage_columns()
+        print("[MIGRATION] SUCCESS: normalized storage columns checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning normalized storage: {e}", flush=True)
+
+    # Respaldar en DB los archivos ya procesados que aún no tengan contenido guardado
+    # Se ejecuta ANTES del primer request para proteger los datos del deploy actual
+    try:
+        backed_up = backfill_normalized_content()
+        print(f"[STARTUP] Backfill completado: {backed_up} uploads respaldados en DB.", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Backfill warning: {e}", flush=True)
+
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
 
 
@@ -132,18 +172,6 @@ async def attach_user_to_state(request: Request, call_next):
         # Inject Market Context from Session
         request.state.market_context = request.session.get("market_context", "public")
 
-        # === GERENTE ROUTE GUARD ===
-        if u and (u.role or "").lower() == "gerente":
-            path = request.url.path
-            allowed = (
-                path.startswith("/forecast")
-                or path.startswith("/api/forecast/")
-                or path.startswith("/mi/password")
-                or path.startswith("/static/")
-                or path in ("/login", "/logout", "/healthz", "/", "/markets", "/switch-market")
-            )
-            if not allowed:
-                return RedirectResponse("/forecast", 303)
     except Exception as e:
          print(f"[MW] Auth Error: {e}", flush=True)
          request.state.user = None
@@ -197,13 +225,17 @@ def health_check():
     return {"status": "ok", "stage": "19_debug"}
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return FileResponse(FAVICON_PATH)
+
+
 # === ROUTERS ===
 from web_comparativas.routers.sic_router import router as sic_router
 from web_comparativas.routers.dimensiones_router import router as dimensiones_router
 from web_comparativas.routers.notifications_router import router as notifications_router
 from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
-from web_comparativas.api_comments import ui_router as comments_ui_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
@@ -211,14 +243,9 @@ app.include_router(notifications_router)
 app.include_router(pliegos_router)
 app.include_router(comments_router)
 
-# === MODULES ===
-from web_comparativas.routers.forecast_router import router as forecast_router
-app.include_router(forecast_router)
-
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
 app.include_router(legacy_router)
-# app.include_router(comments_ui_router) # Si se usa
 
 # === CLIENTES (LAZY LOADING FIX) ===
 _clientes_index_cache = None
@@ -353,10 +380,6 @@ def home(request: Request):
 
     user = request.state.user
 
-    # === GERENTE → Forecast ===
-    if (user.role or "").lower() == "gerente":
-        return RedirectResponse("/forecast", 303)
-
     db = request.state.db
     
     # Context Check: If Private, redirect to Private Home
@@ -417,8 +440,6 @@ def home(request: Request):
         "opp_unseen": opp_unseen,
         "reset_ok": request.query_params.get("reset_ok"),
         "reset_err": request.query_params.get("reset_err"),
-        "reset_ok": request.query_params.get("reset_ok"),
-        "reset_err": request.query_params.get("reset_err"),
         "step_labels": {
             "pending": "Pendiente",
             "processing": "Procesando",
@@ -432,9 +453,6 @@ def home(request: Request):
 def markets_home(request: Request):
     if not request.state.user:
         return RedirectResponse("/login", 303)
-    # === GERENTE → Forecast ===
-    if (getattr(request.state.user, 'role', '') or '').lower() == 'gerente':
-        return RedirectResponse("/forecast", 303)
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
         "user": request.state.user
@@ -445,59 +463,6 @@ def markets_home(request: Request):
 def switch_market(request: Request):
     # Instead of toggle, go to Lobby
     return RedirectResponse("/markets", 303)
-
-@app.get("/mercado-publico")
-def mercado_publico_entry(request: Request):
-    request.session["market_context"] = "public"
-    return RedirectResponse("/", 303)
-
-@app.get("/mercado-publico/web-comparativas")
-def mercado_publico_wc(request: Request):
-    request.session["market_context"] = "public"
-    return RedirectResponse("/", 303)
-
-@app.get("/mercado-privado", response_class=HTMLResponse)
-def mercado_privado_home(request: Request):
-    # Set context on entry
-    request.session["market_context"] = "private"
-    
-    return templates.TemplateResponse("mercado_privado_home.html", {
-        "request": request,
-        "user": request.state.user,
-        "market_context": "private"
-    })
-
-@app.get("/mercado-privado/dimensiones", response_class=HTMLResponse)
-def mercado_privado_dimensiones(request: Request):
-    if request.session.get("market_context") != "private":
-        return RedirectResponse("/", 303)
-        
-    return templates.TemplateResponse("mercado_privado_dimensiones.html", {
-        "request": request,
-        "user": request.state.user,
-        "market_context": "private"
-    })
-
-
-@app.get("/login", response_class=HTMLResponse)
-def login(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/login")
-async def login_post(request: Request):
-    form = await request.form()
-    email = str(form.get("email", "")).strip().lower()
-    password = str(form.get("password", "")).strip()
-    u = db_session.query(User).filter(User.email == email).first()
-    if not u or not verify_password(password, u.password_hash):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Error"})
-    request.session["uid"] = u.id
-    return RedirectResponse("/", 303)
-
-@app.get("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse("/login", 303)
 
 @app.get("/ping")
 def ping():

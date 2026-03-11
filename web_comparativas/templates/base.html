@@ -19,12 +19,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#eeede8" />
+  <link rel="icon" href="{{ url_for('static', path='favicon.ico') }}" />
   <title>{% block title %}Web Comparativas{% endblock %}</title>
 
   <!-- Google Fonts: Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap"
     rel="stylesheet">
 
   <!-- Bootstrap CSS -->
@@ -33,7 +34,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
   <!-- Tema personalizado (global) + cache-busting -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=responsive-mobile-v2">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=sidebar-solid-v3">
 
   <style>
     /* SPLASH SCREEN (PREMIUM) */
@@ -142,6 +143,19 @@
 
   <!-- ========== Notificaciones SA (UI) ========== -->
   <style>
+    /* Hide ALL scrollbars in sidebar area (aggressive) */
+    .sidebar,
+    .sidebar * {
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+
+    .sidebar *::-webkit-scrollbar {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+    }
+
     /* ===== pill del usuario (header, arriba a la derecha) ===== */
     .top-user-pill {
       background-color: #6886c4;
@@ -317,8 +331,9 @@
       border: 0;
       text-align: left;
       width: 100%;
-      padding: .375rem .75rem;
+      padding: 0.75rem 1rem;
       border-radius: .375rem;
+      flex-shrink: 0;
     }
 
     .nav-link-toggle .caret {
@@ -333,6 +348,117 @@
     /* submenú con sangría */
     .nav .submenu a.nav-link {
       padding-left: 1.75rem;
+    }
+
+    .submenu-panel {
+      display: none;
+    }
+
+    .submenu-panel.is-open {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    .submenu-panel.is-open::-webkit-scrollbar {
+      display: none;
+    }
+
+    .sidebar .submenu-link {
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      visibility: visible !important;
+      opacity: 1 !important;
+      font-size: 0.95rem !important;
+      line-height: 1.3 !important;
+      color: rgba(255, 255, 255, 0.78) !important;
+      padding: 0.75rem 1rem 0.75rem 1.75rem !important;
+      border-radius: var(--radius-sm);
+      flex-shrink: 0 !important;
+    }
+
+    .sidebar .submenu-link:hover {
+      color: #fff !important;
+    }
+
+    .sidebar .submenu-link.active {
+      color: #fff !important;
+    }
+
+    .sidebar .submenu-section-title {
+      display: block !important;
+      font-size: 0.58rem !important;
+      line-height: 1.2 !important;
+      letter-spacing: 0.3px !important;
+      font-weight: 600 !important;
+      color: rgba(255, 255, 255, 0.65) !important;
+    }
+
+    .sidebar .submenu-panel.is-open>.submenu-section-title {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      color: rgba(255, 255, 255, 0.65) !important;
+      margin-top: 1.25rem !important;
+      margin-bottom: 0.5rem !important;
+      font-size: 0.58rem !important;
+    }
+
+    .sidebar,
+    .sidebar::before,
+    .sidebar::after {
+      background: #06486f !important;
+      background-color: #06486f !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }
+
+    .sidebar::before,
+    .sidebar::after {
+      content: none !important;
+      display: none !important;
+    }
+
+    .sidebar-brand-container,
+    .sidebar .nav,
+    .sidebar .signout,
+    .sidebar .submenu,
+    .sidebar .submenu-panel,
+    .sidebar .submenu-panel.is-open,
+    .sidebar .nav-link,
+    .sidebar .nav-link:hover,
+    .sidebar .nav-link:focus,
+    .sidebar .nav-link.active,
+    .sidebar .nav-link-toggle,
+    .sidebar .nav-link-toggle:hover,
+    .sidebar .nav-link-toggle:focus,
+    .sidebar .submenu-link,
+    .sidebar .submenu-link:hover,
+    .sidebar .submenu-link:focus,
+    .sidebar .submenu-link.active {
+      background: transparent !important;
+      background-color: transparent !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+    }
+
+    .sidebar .nav-link::before,
+    .sidebar .nav-link::after,
+    .sidebar .nav-link.active::after,
+    .sidebar .nav-link-toggle::before,
+    .sidebar .nav-link-toggle::after,
+    .sidebar .submenu-link::before,
+    .sidebar .submenu-link::after {
+      content: none !important;
+      display: none !important;
     }
 
     /* SIEM Sidebar Brand */
@@ -429,6 +555,8 @@
           <div class="sidebar-market-label" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado</div>
           {% elif market_context == 'forecast' %}
           <div class="sidebar-market-label" style="color: #059669;">Forecast</div>
+          {% elif market_context == 'notifications' %}
+          <div class="sidebar-market-label" style="color: #94a3b8;">Notificaciones</div>
           {% elif market_context == 'account' %}
           <div class="sidebar-market-label" style="color: #94a3b8;">Mi Cuenta</div>
           {% else %}
@@ -447,7 +575,7 @@
       {% set r = '' %}
       {% endif %}
 
-      <nav class="nav flex-column px-3 py-2 gap-1">
+      <nav class="nav flex-column flex-nowrap px-3 py-2 gap-1">
 
         {% if market_context == 'private' %}
         <!-- ================= MENÚ MERCADO PRIVADO ================= -->
@@ -486,13 +614,13 @@
         {% endif %}
 
         <!-- Mi contraseña -->
-        <a href="/mercado-privado/mi-password"
-          class="nav-link {% if request.url.path.startswith('/mercado-privado/mi-password') %}active{% endif %}">
+        <a href="/mi/password"
+          class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
           <div><i class="bi bi-key"></i> Mi contraseña</div>
         </a>
 
-        {% elif market_context == 'account' %}
-        <!-- ================= MI CUENTA (STANDALONE, SIN SIDEBAR DE MERCADO) ================= -->
+        {% elif market_context == 'account' or market_context == 'notifications' %}
+        <!-- ================= VISTA STANDALONE (SIN SIDEBAR DE MERCADO) ================= -->
         <a href="javascript:history.back()" class="nav-link">
           <div><i class="bi bi-arrow-left"></i> Volver</div>
         </a>
@@ -516,13 +644,8 @@
         {% set _pending = total_pending|default(None) %}
         {% set _done = total_done|default(None) %}
 
-        {# --- Abrir automáticamente los submenús si estamos en alguna de sus rutas --- #}
-        {% set wc_expand =
-        request.url.path.startswith('/mercado-publico/web-comparativas')
-        or request.url.path.startswith('/cargas')
-        or request.url.path == '/historial'
-        or request.url.path.startswith('/tablero')
-        or request.url.path.startswith('/grupos') %}
+        {# Comparativa siempre inicia colapsado; solo se abre por acción manual del usuario. #}
+        {% set wc_expand = false %}
 
         {% set op_expand =
         request.url.path.startswith('/oportunidades')
@@ -534,42 +657,26 @@
         </a>
 
         <!-- ====== Web Comparativa (submenú colapsable) ====== -->
-        <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
-          href="#wcMenu" role="button" aria-expanded="false" aria-controls="wcMenu">
+        <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+          data-submenu-target="#wcMenu" aria-expanded="{{ 'true' if wc_expand else 'false' }}" aria-controls="wcMenu">
           <div><i class="bi bi-intersect"></i> Comparativa</div>
           <span class="caret">▸</span>
-        </a>
+        </button>
 
-        <div id="wcMenu" class="collapse submenu">
-
-
-          {% if user and r == 'admin' %}
-          <!-- Sección: PRINCIPALES -->
-          <div class="px-3 mt-3 mb-1 text-uppercase"
-            style="font-size: 0.65rem; letter-spacing: 0.5px; font-weight: 700; color: rgba(255,255,255,0.65);">
-            Principales
-          </div>
-
-          <a href="/mercado-publico/pliegos"
-            class="nav-link {% if request.url.path.startswith('/mercado-publico/pliegos') %}active{% endif %}">
-            <div><i class="bi bi-file-pdf"></i> Lectura de Pliego IA</div>
-          </a>
-          {% endif %}
-
-          {% if user and r in ['admin','analista','supervisor'] %}
+        <div id="wcMenu" class="submenu submenu-panel{% if wc_expand %} is-open{% endif %}">
+{% if user and r in ['admin','analista','supervisor'] %}
           <a href="/otras-fuentes/nueva"
-            class="nav-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
-            <div><i class="bi bi-cloud-upload"></i> Nueva carga</div>
+            class="submenu-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
+            <span>Nueva carga</span>
           </a>
           {% endif %}
 
-          <div class="px-3 mt-3 mb-1 text-uppercase"
-            style="font-size: 0.65rem; letter-spacing: 0.5px; font-weight: 700; color: rgba(255,255,255,0.65);">
+          <div class="px-3 mt-2 mb-1 text-uppercase submenu-section-title">
             Otras Fuentes
           </div>
           <a href="/otras-fuentes-externas"
-            class="nav-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
-            <div><i class="bi bi-cloud-arrow-up"></i> Nueva carga</div>
+            class="submenu-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
+            <span>Nueva carga</span>
           </a>
 
           <!-- Separador -->
@@ -581,9 +688,8 @@
           or request.url.path == '/historial'
           or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
           or request.url.path.startswith('/tablero/') %}
-          <a href="/cargas/historial"
-            class="nav-link d-flex align-items-center justify-content-between {% if is_hist %}active{% endif %}">
-            <div><i class="bi bi-clock-history"></i> Historial</div>
+          <a href="/cargas/historial" class="submenu-link {% if is_hist %}active{% endif %}">
+            <span>Historial</span>
             <span class="ms-2">
               {% if _pending is not none and _pending|int > 0 %}
               <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
@@ -597,29 +703,36 @@
 
           {% if user and r in ['admin','supervisor'] %}
           {% set is_groups = request.url.path.startswith('/grupos') %}
-          <a href="/grupos" class="nav-link {% if is_groups %}active{% endif %}">
-            <div><i class="bi bi-people"></i> Grupos</div>
+          <a href="/grupos" class="submenu-link {% if is_groups %}active{% endif %}">
+            <span>Grupos</span>
           </a>
           {% endif %}
         </div>
         <!-- ====== /Web Comparativa ====== -->
 
-        <!-- ====== Oportunidades (submenú colapsable) ====== -->
+        
+        <!-- ====== Lectura de Pliegos ====== -->
+        {% if user and r in ['admin','analista','supervisor','auditor','visor'] %}
+        <a href="/mercado-publico/lectura-pliegos" class="nav-link {% if request.url.path.startswith('/mercado-publico/lectura-pliegos') %}active{% endif %}">
+          <div><i class="bi bi-file-earmark-text"></i> Lectura de Pliegos</div>
+        </a>
+        {% endif %}
+<!-- ====== Oportunidades (submenú colapsable) ====== -->
         {% if user and r in ['admin','analista','supervisor','auditor'] %}
-        <a class="nav-link nav-link-toggle d-flex align-items-center justify-content-between" data-bs-toggle="collapse"
-          href="#opMenu" role="button" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
+        <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+          data-submenu-target="#opMenu" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
           <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
           <span class="caret">▸</span>
-        </a>
+        </button>
 
-        <div id="opMenu" class="collapse submenu {% if op_expand %}show{% endif %}">
+        <div id="opMenu" class="submenu submenu-panel{% if op_expand %} is-open{% endif %}">
           <a href="/oportunidades/buscador"
-            class="nav-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
-            <div><i class="bi bi-search"></i> Buscador</div>
+            class="submenu-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
+            <span>Buscador</span>
           </a>
           <a href="/oportunidades/dimensiones"
-            class="nav-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
-            <div><i class="bi bi-rulers"></i> Dimensiones</div>
+            class="submenu-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
+            <span>Dimensiones</span>
           </a>
         </div>
         {% endif %}
@@ -667,7 +780,7 @@
 
       <div class="signout mt-auto px-3 py-3 border-top">
         {% if user %}
-        {% if market_context == 'account' %}
+        {% if market_context == 'account' or market_context == 'notifications' %}
         {# Account standalone: solo cerrar sesión #}
         <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
           href="/logout">
@@ -675,9 +788,6 @@
         </a>
         {% else %}
         {% if r != 'gerente' %}
-        <div class="small fw-semibold mb-2 text-muted px-1" style="font-size:0.7rem;">
-          Volver a la selección
-        </div>
         {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
         <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/switch-market">Cambiar Mercado</a>
         {% endif %}
@@ -718,17 +828,6 @@
         </div>
 
         <div class="ms-auto d-flex align-items-center gap-3">
-
-
-
-          <form class="search position-relative" role="search" aria-label="Buscar en historial" id="app-search-form">
-            <input class="form-control form-control-sm pe-5" id="app-search-input" type="search" placeholder="Buscar…"
-              aria-label="Buscar" value="{{ q|default('') }}" />
-            <span class="position-absolute top-50 end-0 translate-middle-y pe-2 text-muted">🔎</span>
-          </form>
-
-
-
           <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
 
             <!-- Notificaciones Icon -->
@@ -839,6 +938,86 @@
         }
       }
     });
+
+    // Sidebar submenus: force visible state inline to bypass inherited sidebar rules.
+    function applySidebarSubmenuState(panel, open) {
+      if (!panel) return;
+
+      panel.classList.toggle('is-open', open);
+      panel.style.display = open ? 'flex' : 'none';
+      panel.style.flexDirection = open ? 'column' : '';
+      panel.style.gap = open ? '0.15rem' : '';
+      panel.style.visibility = open ? 'visible' : 'hidden';
+      panel.style.opacity = open ? '1' : '0';
+
+      Array.prototype.forEach.call(panel.children, function (child) {
+        if (!open) {
+          child.style.display = '';
+          child.style.visibility = '';
+          child.style.opacity = '';
+          child.style.fontSize = '';
+          child.style.color = '';
+          child.style.lineHeight = '';
+          return;
+        }
+
+        if (child.tagName === 'A') {
+          child.style.display = 'flex';
+          child.style.visibility = 'visible';
+          child.style.opacity = '1';
+          child.style.fontSize = '0.95rem';
+          child.style.lineHeight = '1.3';
+          child.style.color = 'rgba(255,255,255,0.78)';
+        } else {
+          child.style.display = 'block';
+          child.style.visibility = 'visible';
+          child.style.opacity = '1';
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('[data-submenu-target]').forEach(function (trigger) {
+        var targetSelector = trigger.getAttribute('data-submenu-target');
+        var panel = targetSelector ? document.querySelector(targetSelector) : null;
+        if (!panel) return;
+
+        var isOpen = trigger.getAttribute('aria-expanded') === 'true' || panel.classList.contains('is-open');
+        applySidebarSubmenuState(panel, isOpen);
+      });
+    });
+
+    document.addEventListener('click', function (e) {
+      var trigger = e.target.closest('[data-submenu-target]');
+      if (!trigger) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var targetSelector = trigger.getAttribute('data-submenu-target');
+      if (!targetSelector) return;
+
+      var panel = document.querySelector(targetSelector);
+      if (!panel) return;
+
+      var willOpen = trigger.getAttribute('aria-expanded') !== 'true';
+
+      // Accordion mode: Close other open submenus
+      if (willOpen) {
+        document.querySelectorAll('[data-submenu-target]').forEach(function (otherTrigger) {
+          if (otherTrigger !== trigger && otherTrigger.getAttribute('aria-expanded') === 'true') {
+            var otherTargetSelector = otherTrigger.getAttribute('data-submenu-target');
+            var otherPanel = document.querySelector(otherTargetSelector);
+            if (otherPanel) {
+              applySidebarSubmenuState(otherPanel, false);
+              otherTrigger.setAttribute('aria-expanded', 'false');
+            }
+          }
+        });
+      }
+
+      applySidebarSubmenuState(panel, willOpen);
+      trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
   </script>
 
   <!-- Notify (UI de toasts/banners) -->
@@ -865,22 +1044,6 @@
       if (!wc.dataset.userDisplay) wc.dataset.userDisplay = APP_USER.display || 'Yo';
     }
     }) ();
-
-    // ====== Buscador superior → historial ======
-    (function () {
-      const form = document.getElementById('app-search-form');
-      const input = document.getElementById('app-search-input');
-      if (!form || !input) return;
-
-      function go() {
-        const q = (input.value || '').trim();
-        const url = q ? `/cargas/historial?q=${encodeURIComponent(q)}` : '/cargas/historial';
-        window.location.href = url;
-      }
-
-      form.addEventListener('submit', function (e) { e.preventDefault(); go(); });
-      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); }});
-    })();
 
     // ====== Badge "Mesa de ayuda" (abiertos) ======
     (function () {

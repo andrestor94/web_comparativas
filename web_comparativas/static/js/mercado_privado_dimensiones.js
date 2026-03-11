@@ -1,7 +1,4 @@
-/* Mercado Privado - Dimensiones Controller (Backend Integrated) */
-
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Global Configuration ---
     Chart.defaults.font.family = "'Outfit', sans-serif";
     Chart.defaults.color = '#64748b';
     Chart.defaults.scale.grid.color = 'rgba(226, 232, 240, 0.4)';
@@ -10,843 +7,509 @@ document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.plugins.tooltip.bodyFont = { size: 11, family: "'Outfit', sans-serif" };
     Chart.defaults.plugins.tooltip.cornerRadius = 8;
 
-    // --- State ---
-    let rawData = []; // The clean list from backend
-    let jsonFile = null;
-    let excelFile = null;
-    let globalFamilyPrices = {}; // Calculated once from rawData
-
-    // --- UI Elements ---
-    const jsonInput = document.getElementById('jsonFileInput');
-    const excelInput = document.getElementById('excelFileInput');
-    const processBtn = document.getElementById('processBtn');
-
-    const uploadContainer = document.getElementById('uploadContainer');
-    const dashboardContent = document.getElementById('dashboardContent');
-    const loadingOverlay = document.getElementById('loadingOverlay');
-    const loadingText = document.getElementById('loadingText');
-    const resetBtn = document.getElementById('resetBtn');
-
-    // Controls
-    const filters = {
-        client: document.getElementById('filterClient'),
-        province: document.getElementById('filterProvince'),
-        category: document.getElementById('filterCategory'),
-        start: document.getElementById('dateStart'),
-        end: document.getElementById('dateEnd'),
-        search: document.getElementById('searchGlobal'),
-        identified: document.getElementById('filterIdentified'),
-        isClient: document.getElementById('filterIsClient'),
-        isVolume: document.getElementById('toggleVolume') // New Toggle
+    const state = {
+        filtersLoaded: false,
+        areaChart: null,
+        pieChart: null,
+        barClientChart: null,
+        mapInstance: null,
+        mapMarkers: [],
+        // Mapeo de códigos numéricos de negocio a nombres descriptivos (Negocios.xlsx)
+        negocioLabels: { unidades: {}, subunidades: {} },
     };
 
-    // Chart Instances
-    let areaChart, pieChart, barClientChart;
+    const elements = {
+        loadingOverlay: document.getElementById('loadingOverlay'),
+        loadingText: document.getElementById('loadingText'),
+        emptyState: document.getElementById('emptyState'),
+        dashboardContent: document.getElementById('dashboardContent'),
+        reloadBtn: document.getElementById('reloadDashboardBtn'),
+        datasetStatusPill: document.getElementById('datasetStatusPill'),
+        datasetSource: document.getElementById('datasetSource'),
+        datasetUpdatedAt: document.getElementById('datasetUpdatedAt'),
+        datasetTotalRows: document.getElementById('datasetTotalRows'),
+        filterClient: document.getElementById('filterClient'),
+        filterProvince: document.getElementById('filterProvince'),
+        filterFamily: document.getElementById('filterFamily'),
+        filterUnit: document.getElementById('filterUnit'),
+        filterSubunit: document.getElementById('filterSubunit'),
+        dateStart: document.getElementById('dateStart'),
+        dateEnd: document.getElementById('dateEnd'),
+        filterIdentified: document.getElementById('filterIdentified'),
+        filterIsClient: document.getElementById('filterIsClient'),
+        searchGlobal: document.getElementById('searchGlobal'),
+        platformCheckboxes: Array.from(document.querySelectorAll('.platform-checkbox')),
+        applyPlatformsBtn: document.getElementById('applyPlatformsBtn'),
+        platformsLabel: document.getElementById('platformsLabel'),
+        kpiClients: document.getElementById('kpiClients'),
+        kpiRecords: document.getElementById('kpiRecords'),
+        kpiFamilies: document.getElementById('kpiFamilies'),
+        kpiQuantity: document.getElementById('kpiQuantity'),
+        familyListContainer: document.getElementById('familyListContainer'),
+        pivotHeader: document.getElementById('pivotHeader'),
+        pivotBody: document.getElementById('pivotBody'),
+    };
 
-    // --- Event Listeners ---
-    jsonInput.addEventListener('change', (e) => {
-        jsonFile = e.target.files[0];
-        checkFiles();
-    });
-
-    excelInput.addEventListener('change', (e) => {
-        excelFile = e.target.files[0];
-        checkFiles();
-    });
-
-    processBtn.addEventListener('click', handleProcess);
-
-    // Filter Events
-    Object.values(filters).forEach(el => {
-        if (el) el.addEventListener('change', updateDashboard);
-    });
-
-    let searchTimeout;
-    filters.search.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(updateDashboard, 400);
-    });
-
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            location.reload(); // Simplest reset
-        });
-    }
-
-    function checkFiles() {
-        if (jsonFile && excelFile) {
-            processBtn.disabled = false;
-        } else {
-            processBtn.disabled = true;
-        }
-    }
-
-    async function handleProcess() {
-        if (!jsonFile || !excelFile) return;
-
-        setLoading(true, "Procesando y unificando datos...");
-
-        try {
-            const formData = new FormData();
-            formData.append("json_file", jsonFile);
-            formData.append("excel_file", excelFile);
-
-            const response = await fetch("/api/mercado-privado/dimensiones/process", {
-                method: "POST",
-                body: formData
-            });
-
-            if (!response.ok) {
-                let errorMsg = "Error al procesar archivos";
-                try {
-                    const errorText = await response.text();
-                    try {
-                        const errJson = JSON.parse(errorText);
-                        errorMsg = errJson.detail || errorMsg;
-                    } catch (e) {
-                        errorMsg = "Error del Servidor: " + errorText.substring(0, 100); // Show raw text preview
-                    }
-                } catch (e) {
-                    errorMsg = "Error de red o servidor no disponible.";
-                }
-                throw new Error(errorMsg);
-            }
-
-            const result = await response.json();
-            rawData = result.data; // List of merged objects
-
-            // Initialize Filters Options
-            populateInitialFilters();
-
-            // Calculate Global Prices (Pass 0)
-            globalFamilyPrices = calculateGlobalPrices(rawData);
-
-            // Show Dashboard
-            uploadContainer.style.display = 'none';
-            document.getElementById('dashboardControls').style.display = 'block';
-            dashboardContent.style.display = 'contents';
-
-            updateDashboard();
-
-        } catch (error) {
-            alert("Error: " + error.message);
-        } finally {
-            setLoading(false);
-        }
-    }
-
-    function setLoading(show, text = "Cargando...") {
-        loadingOverlay.style.display = show ? 'flex' : 'none';
-        loadingText.textContent = text;
-    }
-
-    // --- Aggregation Logic (Client Side) ---
-
-    function calculateGlobalPrices(allData) {
-        const familyPricesStats = {};
-
-        allData.forEach(row => {
-            const fam = row.family;
-            if (!familyPricesStats[fam]) familyPricesStats[fam] = { prices: [] };
-            if (row.excel_price > 0 && row.excel_date) {
-                familyPricesStats[fam].prices.push({ p: row.excel_price, d: row.excel_date });
-            }
-        });
-
-        const familyPriceMap = {};
-        const now = new Date();
-        const sixtyDaysAgo = new Date();
-        sixtyDaysAgo.setDate(now.getDate() - 60);
-
-        Object.entries(familyPricesStats).forEach(([fam, meta]) => {
-            let finalPrice = 0;
-            if (meta.prices.length > 0) {
-                const recent = meta.prices.filter(x => {
-                    const d = new Date(x.d);
-                    return !isNaN(d) && d >= sixtyDaysAgo;
-                });
-                if (recent.length > 0) {
-                    const vals = recent.map(x => x.p);
-                    finalPrice = calculateMedian(vals);
-                } else {
-                    meta.prices.sort((a, b) => new Date(b.d) - new Date(a.d));
-                    finalPrice = meta.prices[0].p;
-                }
-            }
-            familyPriceMap[fam] = finalPrice;
-        });
-        return familyPriceMap;
-    }
-
-    function populateInitialFilters() {
-        const clients = new Set();
-        const provinces = new Set();
-        const categories = new Set();
-
-        let minTs = Infinity;
-        let maxTs = -Infinity;
-
-        rawData.forEach(row => {
-            if (row.client) clients.add(row.client);
-            if (row.province) provinces.add(row.province);
-            if (row.category) categories.add(row.category);
-
-            if (row.date) {
-                const d = new Date(row.date);
-                const ts = d.getTime();
-                if (!isNaN(ts)) {
-                    if (ts < minTs) minTs = ts;
-                    if (ts > maxTs) maxTs = ts;
-                }
-            }
-        });
-
-        populateSelect(filters.client, Array.from(clients).sort());
-        populateSelect(filters.province, Array.from(provinces).sort());
-        populateSelect(filters.category, Array.from(categories).sort());
-
-        // Set Date Range
-        if (minTs !== Infinity && maxTs !== -Infinity) {
-            const minDate = new Date(minTs);
-            const maxDate = new Date(maxTs);
-
-            try {
-                filters.start.value = minDate.toISOString().split('T')[0];
-                filters.end.value = maxDate.toISOString().split('T')[0];
-            } catch (e) {
-                console.warn("Could not auto-populate date range", e);
-            }
-        }
-    }
-
-    function updateDashboard() {
-        if (!rawData || rawData.length === 0) return;
-
-        // 1. Filter Data
-        const fClient = filters.client.value;
-        const fProv = filters.province.value;
-        const fCat = filters.category.value;
-        const fStart = filters.start.value ? new Date(filters.start.value) : null;
-        const fEnd = filters.end.value ? new Date(filters.end.value) : null;
-        if (fStart) fStart.setHours(0, 0, 0, 0);
-        if (fEnd) fEnd.setHours(23, 59, 59, 999);
-
-        const fSearch = filters.search.value.toLowerCase().trim();
-        const fIdentified = filters.identified.value;
-        const fIsClient = filters.isClient.value;
-
-        const filtered = rawData.filter(row => {
-            // Relation Filter (Client)
-            const isClient = row.is_client_bool;
-            if (fIsClient === 'yes' && !isClient) return false;
-            if (fIsClient === 'no' && isClient) return false;
-
-            // Dropdowns
-            if (fClient !== 'all' && row.client !== fClient) return false;
-            if (fProv !== 'all' && row.province !== fProv) return false;
-            if (fCat !== 'all' && row.category !== fCat) return false;
-
-            // Date
-            const d = new Date(row.date);
-            if (fStart && d < fStart) return false;
-            if (fEnd && d > fEnd) return false;
-
-            // Search
-            if (fSearch) {
-                const searchStr = `${row.client} ${row.family} ${row.process_id}`.toLowerCase();
-                if (!searchStr.includes(fSearch)) return false;
-            }
-
-            // Identified Filter
-            if (fIdentified === 'yes' && !row.identified) return false;
-            if (fIdentified === 'no' && row.identified) return false;
-
-            return true;
-        });
-
-        // 2. Aggregate Data
-        const stats = aggregateStats(filtered);
-
-        // 3. Render
-        renderDashboard(stats);
-    }
-
-    // --- Map Logic (Leaflet) ---
-    let mapInstance = null;
-    let mapMarkers = [];
-
-    // Approximate coordinates for Argentina Provinces
     const provinceCoords = {
         'Buenos Aires': [-36.6769, -60.5588],
         'CABA': [-34.6037, -58.3816],
         'Catamarca': [-28.4696, -65.7852],
         'Chaco': [-26.3366, -60.7663],
         'Chubut': [-43.7886, -68.8892],
-        'Córdoba': [-32.1429, -63.8017],
+        'Cordoba': [-32.1429, -63.8017],
         'Corrientes': [-28.7743, -57.7568],
-        'Entre Ríos': [-32.0588, -59.2014],
+        'Entre Rios': [-32.0588, -59.2014],
         'Formosa': [-24.8949, -59.5679],
         'Jujuy': [-23.3200, -65.7643],
         'La Pampa': [-37.1315, -65.4466],
         'La Rioja': [-29.6857, -67.1817],
         'Mendoza': [-34.3667, -68.9167],
         'Misiones': [-26.8753, -54.6518],
-        'Neuquén': [-38.9525, -68.9126],
-        'Río Negro': [-40.0388, -65.5525],
+        'Neuquen': [-38.9525, -68.9126],
+        'Rio Negro': [-40.0388, -65.5525],
         'Salta': [-24.2991, -64.8144],
         'San Juan': [-30.8653, -68.8892],
         'San Luis': [-33.7577, -66.0281],
         'Santa Cruz': [-48.8154, -69.2542],
         'Santa Fe': [-30.7069, -60.9498],
-        'Santiago del Estero': [-27.7824, -63.2523],
-        'Tierra del Fuego': [-53.4862, -68.3039],
-        'Tucumán': [-26.8241, -65.2226]
+        'Santiago Del Estero': [-27.7824, -63.2523],
+        'Tierra Del Fuego': [-53.4862, -68.3039],
+        'Tucuman': [-26.8241, -65.2226]
     };
 
-    function renderMapChart(provinceData, isVolume) {
-        const container = document.getElementById('mapContainer');
-        if (!container) return;
+    const seriesPalette = ['#064066', '#1e5c8a', '#5274ce', '#38bdf8', '#10b981', '#64748b'];
+    const resultPalette = ['#064066', '#1e5c8a', '#5274ce', '#38bdf8', '#10b981', '#94a3b8'];
 
-        if (!mapInstance) {
-            mapInstance = L.map('mapContainer').setView([-38.4161, -63.6167], 3); // Center of Argentina
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                subdomains: 'abcd',
-                maxZoom: 19
-            }).addTo(mapInstance);
-        }
+    bindEvents();
+    initDashboard();
 
-        // Clear existing markers
-        mapMarkers.forEach(m => mapInstance.removeLayer(m));
-        mapMarkers = [];
+    function bindEvents() {
+        const changeTargets = [
+            elements.filterClient,
+            elements.filterProvince,
+            elements.filterFamily,
+            elements.filterUnit,
+            elements.filterSubunit,
+            elements.dateStart,
+            elements.dateEnd,
+            elements.filterIdentified,
+            elements.filterIsClient,
+        ];
+        changeTargets.forEach((target) => target.addEventListener('change', loadDashboardData));
 
-        const fmt = isVolume
-            ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0, notation: 'compact' })
-            : new Intl.NumberFormat('es-AR');
-        const labelText = isVolume ? 'Volumen' : 'Registros';
-
-        // Add bubbles (Circles)
-        Object.entries(provinceData).forEach(([provName, count]) => {
-            const key = Object.keys(provinceCoords).find(k => k.toLowerCase() === provName.toLowerCase());
-
-            if (key) {
-                const coords = provinceCoords[key];
-                // Scale radius 
-                const radius = Math.min(Math.max(Math.log(count + 1) * 20000, 30000), 300000);
-
-                const circle = L.circle(coords, {
-                    color: '#5274ce',
-                    fillColor: '#5274ce',
-                    fillOpacity: 0.5,
-                    radius: radius,
-                    weight: 1
-                }).addTo(mapInstance);
-
-                // Tooltip
-                circle.bindTooltip(`<b>${provName}</b><br>${labelText}: ${fmt.format(count)}`, {
-                    direction: 'top',
-                    offset: [0, -10]
-                });
-
-                mapMarkers.push(circle);
+        // Plataformas: no recargar en cada click individual, solo al presionar "Aplicar"
+        elements.applyPlatformsBtn.addEventListener('click', () => {
+            const selected = elements.platformCheckboxes.filter((cb) => cb.checked);
+            if (selected.length === 0) {
+                // Garantizar al menos una selección
+                elements.platformCheckboxes[0].checked = true;
             }
+            updatePlatformLabel();
+            // Usar window.bootstrap para referenciar la librería Bootstrap (no la función local)
+            const dropdownEl = document.getElementById('platformsDropdownBtn');
+            const bsDropdown = window.bootstrap && window.bootstrap.Dropdown
+                ? window.bootstrap.Dropdown.getInstance(dropdownEl)
+                : null;
+            if (bsDropdown) bsDropdown.hide();
+            loadDashboardData();
         });
 
-        // Invalidate size
-        setTimeout(() => mapInstance.invalidateSize(), 200);
+        elements.reloadBtn.addEventListener('click', initDashboard);
+
+        let searchTimeout;
+        elements.searchGlobal.addEventListener('input', () => {
+            window.clearTimeout(searchTimeout);
+            searchTimeout = window.setTimeout(loadDashboardData, 400);
+        });
     }
 
-    function aggregateStats(data) {
-        const fIsVolume = filters.isVolume.checked;
+    function updatePlatformLabel() {
+        const all = elements.platformCheckboxes;
+        const selected = all.filter((cb) => cb.checked);
+        if (selected.length === 0 || selected.length === all.length) {
+            elements.platformsLabel.textContent = 'Todas';
+        } else {
+            elements.platformsLabel.textContent = selected
+                .map((cb) => cb.value.charAt(0) + cb.value.slice(1).toLowerCase())
+                .join(', ');
+        }
+    }
 
-        // --- AGGREGATION ---
-        // Uses globalFamilyPrices calculated from full dataset
+    async function initDashboard() {
+        setLoading(true, 'Consultando estado e índices...');
+        try {
+            // Cargamos status y labels de negocio en paralelo para no agregar latencia
+            const [statusResponse, labelsResponse] = await Promise.all([
+                apiGet('/status'),
+                apiGet('/negocio-labels').catch(() => ({ data: { unidades: {}, subunidades: {} } })),
+            ]);
+            const status = statusResponse.data;
+            renderStatus(status);
 
-        const clientsSet = new Set();
-        const processesSet = new Set();
-        const familiesSet = new Set();
+            // Guardar el mapeo en estado (el catch garantiza que nunca falla el init)
+            if (labelsResponse && labelsResponse.data) {
+                state.negocioLabels = labelsResponse.data;
+            }
 
-        const areaMap = {};
-        const resultMap = {};
-        const clientResultMap = {};
-        const provinceMap = {};
+            if (!status.has_data) {
+                elements.emptyState.style.display = 'block';
+                elements.dashboardContent.style.display = 'none';
+                return;
+            }
 
-        const familyYearMonthStats = {};
+            elements.emptyState.style.display = 'none';
+            elements.dashboardContent.style.display = 'contents';
 
-        // Family Local Stats (qty in selection)
-        const familyLocalStats = {}; // fam -> qty
+            await loadFilterOptions();
+            await loadDashboardData();
+        } catch (error) {
+            console.error(error);
+            elements.datasetStatusPill.textContent = 'Error';
+            elements.datasetStatusPill.className = 'badge text-bg-danger';
+            elements.emptyState.style.display = 'block';
+            elements.dashboardContent.style.display = 'none';
+            elements.emptyState.querySelector('p').textContent = `No se pudo cargar Dimensionamiento: ${error.message}`;
+        } finally {
+            setLoading(false);
+        }
+    }
 
-        const allMonths = new Set();
-        let totalVolume = 0;
+    // Carga inicial sin filtros activos: puebla los selects con todos los valores posibles
+    // y establece el rango de fechas por defecto.
+    async function loadFilterOptions() {
+        const response = await apiGet('/filters');
+        const data = response.data;
+        applyFilterOptions(data);
+        if (!state.filtersLoaded && data.date_range) {
+            elements.dateStart.value = data.date_range.min || '';
+            elements.dateEnd.value = data.date_range.max || '';
+            state.filtersLoaded = true;
+        }
+    }
 
-        data.forEach(row => {
-            clientsSet.add(row.client);
-            processesSet.add(row.process_id);
-            familiesSet.add(row.family);
+    // Actualiza las opciones de los selects manteniendo los valores ya seleccionados
+    // si siguen siendo válidos dentro del nuevo subconjunto.
+    function applyFilterOptions(data) {
+        populateSelect(elements.filterClient, data.clientes, 'Todos');
+        populateSelect(elements.filterProvince, data.provincias, 'Todas');
+        populateSelect(elements.filterFamily, data.familias, 'Todas');
 
-            const d = new Date(row.date);
-            if (isNaN(d.getTime())) return;
+        // Unidad de negocio: value = código original, label = descripción de Negocios.xlsx
+        const unidadOpts = (data.unidades_negocio || []).map((code) => ({
+            value: code,
+            label: resolveUnitLabel(code),
+        }));
+        populateSelect(elements.filterUnit, unidadOpts, 'Todas');
 
-            const m = d.getMonth() + 1;
-            const y = d.getFullYear();
-            const monthKey = `${y}-${String(m).padStart(2, '0')}`;
-            allMonths.add(monthKey);
+        // Subunidad: value = código original, label = descripción de Negocios.xlsx
+        // Para resolver el nombre usamos la unidad actualmente seleccionada como contexto
+        const currentUnit = elements.filterUnit.value || null;
+        const subunidadOpts = (data.subunidades_negocio || []).map((code) => ({
+            value: code,
+            label: resolveSubunitLabel(code, currentUnit),
+        }));
+        populateSelect(elements.filterSubunit, subunidadOpts, 'Todas');
+    }
 
-            // Family Stats (Local Qty)
-            const fam = row.family;
-            if (!familyLocalStats[fam]) familyLocalStats[fam] = 0;
-            familyLocalStats[fam] += row.quantity;
+    /**
+     * Resuelve el nombre descriptivo de una unidad de negocio.
+     * Normaliza el código (trim, to-int si es numérico) y busca en el mapeo.
+     * Fallback: retorna el código original si no hay match.
+     */
+    function resolveUnitLabel(code) {
+        if (!code && code !== 0) return String(code);
+        const key = _normalizeNegocioCode(code);
+        return state.negocioLabels.unidades[key] || String(code);
+    }
 
-            const famPrice = globalFamilyPrices[row.family] || 0;
+    /**
+     * Resuelve el nombre descriptivo de una subunidad de negocio.
+     * Cuando se conoce la unidad actual del filtro, usa clave compuesta "unidad|subunidad".
+     * Si no hay unidad seleccionada, busca la primera coincidencia de subunidad en cualquier unidad.
+     * Fallback: retorna el código original.
+     */
+    function resolveSubunitLabel(code, unitCode) {
+        if (!code && code !== 0) return String(code);
+        const sKey = _normalizeNegocioCode(code);
+        if (unitCode) {
+            const uKey = _normalizeNegocioCode(unitCode);
+            const compound = `${uKey}|${sKey}`;
+            if (state.negocioLabels.subunidades[compound]) {
+                return state.negocioLabels.subunidades[compound];
+            }
+        }
+        // Sin unidad de contexto: buscar primera coincidencia en cualquier unidad
+        const prefix = `|${sKey}`;
+        const hit = Object.entries(state.negocioLabels.subunidades)
+            .find(([k]) => k.endsWith(prefix));
+        return hit ? hit[1] : String(code);
+    }
 
-            // Value Determination
-            // If Volume: Qty * GlobalPrice
-            // If Qty: Count(1) for Charts, Qty for Pivot
-            const rowValueForCharts = fIsVolume ? (row.quantity * famPrice) : 1;
-            const rowValueForPivot = fIsVolume ? (row.quantity * famPrice) : row.quantity;
+    /** Normaliza un código de negocio a string entero para buscar en el mapeo. */
+    function _normalizeNegocioCode(code) {
+        const s = String(code).trim();
+        // Si parece numérico, convertir a entero (elimina ".0" de floats)
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? String(Math.round(n)) : s;
+    }
 
-            totalVolume += (row.quantity * famPrice);
+    async function loadDashboardData() {
+        setLoading(true, 'Consultando métricas agregadas...');
+        try {
+            const query = buildQueryParams();
 
-            // Area Chart
-            const cat = row.category;
-            if (!areaMap[monthKey]) areaMap[monthKey] = {};
-            if (!areaMap[monthKey][cat]) areaMap[monthKey][cat] = 0;
-            areaMap[monthKey][cat] += rowValueForCharts;
+            // Incluye /filters en el mismo lote paralelo para recalcular las opciones
+            // de cada selector según el subconjunto actualmente filtrado.
+            const [filtersResp, kpis, series, results, topFamilies, geo, clientsByResult, familyConsumption] = await Promise.all([
+                apiGet('/filters', query),
+                apiGet('/kpis', query),
+                apiGet('/series', query),
+                apiGet('/results', query),
+                apiGet('/top-families', { ...query, limit: 10 }),
+                apiGet('/geo', query),
+                apiGet('/clients-by-result', { ...query, limit: 10 }),
+                apiGet('/family-consumption', { ...query, limit: 20 }),
+            ]);
 
-            // Pie Chart
-            const res = row.result;
-            resultMap[res] = (resultMap[res] || 0) + rowValueForCharts;
+            // Sincronizar opciones de filtros con el subconjunto activo
+            applyFilterOptions(filtersResp.data);
 
-            // Client Bar
-            if (!clientResultMap[row.client]) clientResultMap[row.client] = {};
-            clientResultMap[row.client][res] = (clientResultMap[row.client][res] || 0) + rowValueForCharts;
+            renderKpis(kpis.data);
+            renderAreaChart(series.data);
+            renderPieChart(results.data);
+            renderFamilyList(topFamilies.data);
+            renderMapChart(geo.data);
+            renderBarClientChart(clientsByResult.data);
+            renderPivotTable(familyConsumption.data);
+        } catch (error) {
+            console.error(error);
+            alert(`No se pudo consultar el dashboard: ${error.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }
 
-            // Map
-            const prov = row.province || 'Desconocido';
-            provinceMap[prov] = (provinceMap[prov] || 0) + rowValueForCharts;
-
-            // Pivot (YearMonth sum)
-            const ymKey = `${y}-${String(m).padStart(2, '0')}`;
-            if (!familyYearMonthStats[fam]) familyYearMonthStats[fam] = {};
-            familyYearMonthStats[fam][ymKey] = (familyYearMonthStats[fam][ymKey] || 0) + rowValueForPivot;
-        });
-
-        // Finalize Aggregations
-        const sortedMonths = Array.from(allMonths).sort();
-
-        // Area Data
-        const catTotals = {};
-        Object.values(areaMap).forEach(dayMap => {
-            Object.entries(dayMap).forEach(([c, val]) => catTotals[c] = (catTotals[c] || 0) + val);
-        });
-        const topCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0]);
-
-        // Pie Data
-        const pieData = Object.entries(resultMap).map(([k, v]) => ({ label: k, value: v }));
-
-        // Family Pivot Sorting
-        // Sort by Volume if Volume Mode, else by Qty
-        const familyFinalStats = {};
-        Object.keys(familyLocalStats).forEach(fam => {
-            const qty = familyLocalStats[fam];
-            const price = globalFamilyPrices[fam] || 0;
-            familyFinalStats[fam] = fIsVolume ? (qty * price) : qty;
-        });
-
-        const topFamiliesPivot = Object.entries(familyFinalStats)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 20)
-            .map(x => x[0]);
-
-        const monthsIndices = Array.from({ length: 12 }, (_, i) => i + 1);
-
-        const pivotData = topFamiliesPivot.map(fam => {
-            const row = { family: fam };
-            const famStats = familyYearMonthStats[fam] || {};
-
-            monthsIndices.forEach(mIdx => {
-                const mStr = String(mIdx).padStart(2, '0');
-                const yearValues = [];
-                Object.keys(famStats).forEach(key => {
-                    if (key.endsWith(`-${mStr}`)) {
-                        yearValues.push(famStats[key]);
+    async function apiGet(path, params = {}) {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+            if (value === undefined || value === null || value === '') return;
+            if (Array.isArray(value)) {
+                value.forEach((item) => {
+                    if (item !== undefined && item !== null && item !== '') {
+                        query.append(key, item);
                     }
                 });
-
-                if (yearValues.length > 0) {
-                    const sum = yearValues.reduce((a, b) => a + b, 0);
-                    row[mIdx] = sum / yearValues.length;
-                } else {
-                    row[mIdx] = 0;
-                }
-            });
-            return row;
+                return;
+            }
+            query.append(key, value);
         });
 
+        const url = `/api/mercado-privado/dimensiones${path}${query.toString() ? `?${query}` : ''}`;
+        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+            throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
+        }
+        return payload;
+    }
 
-        // Family List (Top 50)
-        const familyList = Object.entries(familyFinalStats)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 50)
-            .map(([k, val]) => {
-                const qty = familyLocalStats[k];
-                const price = globalFamilyPrices[k] || 0;
-                return {
-                    name: k,
-                    count: qty,
-                    price: price,
-                    volume: qty * price,
-                    outdated: false
-                };
-            });
-
-        // Client Bar
-        const topClients = Object.entries(clientResultMap)
-            .map(([name, counts]) => ({
-                name,
-                total: Object.values(counts).reduce((a, b) => a + b, 0),
-                counts
-            }))
-            .sort((a, b) => b.total - a.total)
-            .slice(0, 10);
+    function buildQueryParams() {
+        const plataformas = elements.platformCheckboxes
+            .filter((checkbox) => checkbox.checked)
+            .map((checkbox) => checkbox.value);
 
         return {
-            isVolume: fIsVolume,
-            kpis: {
-                clients: clientsSet.size,
-                processes: processesSet.size,
-                families: familiesSet.size,
-                volume: totalVolume
-            },
-            charts: {
-                months: sortedMonths,
-                topCategories: topCats,
-                areaMap,
-                pie: pieData,
-                familyList,
-                clientBar: topClients,
-                pivot: {
-                    months: monthsIndices, // Fixed months 1-12
-                    data: pivotData
-                },
-                provinceMap: provinceMap
-            }
+            cliente: elements.filterClient.value ? [elements.filterClient.value] : [],
+            provincia: elements.filterProvince.value ? [elements.filterProvince.value] : [],
+            familia: elements.filterFamily.value ? [elements.filterFamily.value] : [],
+            unidad_negocio: elements.filterUnit.value ? [elements.filterUnit.value] : [],
+            subunidad_negocio: elements.filterSubunit.value ? [elements.filterSubunit.value] : [],
+            plataforma: plataformas,
+            fecha_desde: elements.dateStart.value || null,
+            fecha_hasta: elements.dateEnd.value || null,
+            identified: elements.filterIdentified.value || null,
+            is_client: elements.filterIsClient.value || null,
+            search: elements.searchGlobal.value.trim() || null,
         };
     }
 
-    function calculateMedian(values) {
-        if (!values || values.length === 0) return 0;
-        values.sort((a, b) => a - b);
-        const half = Math.floor(values.length / 2);
-        if (values.length % 2) return values[half];
-        return (values[half - 1] + values[half]) / 2.0;
+    function setLoading(show, text = 'Cargando...') {
+        elements.loadingOverlay.style.display = show ? 'flex' : 'none';
+        elements.loadingText.textContent = text;
     }
 
-    // --- Custom Legend Logic (Isolation Mode) ---
-    function handleLegendClick(e, legendItem, legend) {
-        // Resolve correct index: Line/Bar use datasetIndex, Pie uses index.
-        const index = typeof legendItem.datasetIndex !== 'undefined' ? legendItem.datasetIndex : legendItem.index;
-        const chart = legend.chart;
-        const type = chart.config.type;
+    function renderStatus(status) {
+        elements.datasetStatusPill.textContent = status.has_data ? 'Datos disponibles' : 'Sin datos';
+        elements.datasetStatusPill.className = status.has_data ? 'badge text-bg-success' : 'badge text-bg-secondary';
+        const sourcePath = status.last_import?.source_path || '';
+        elements.datasetSource.textContent = sourcePath ? formatDatasetName(sourcePath) : 'Sin fuente cargada';
+        elements.datasetSource.title = sourcePath || '';
+        elements.datasetUpdatedAt.textContent = status.last_import?.finished_at
+            ? new Date(status.last_import.finished_at).toLocaleString('es-AR')
+            : '-';
+        elements.datasetTotalRows.textContent = new Intl.NumberFormat('es-AR').format(status.total_rows || 0);
+    }
 
-        const isVisible = (i) => {
-            if (type === 'doughnut' || type === 'pie') return chart.getDataVisibility(i);
-            return chart.isDatasetVisible(i);
-        };
-        const setVisible = (i, val) => {
-            if (type === 'doughnut' || type === 'pie') {
-                if (chart.getDataVisibility(i) !== val) {
-                    chart.toggleDataVisibility(i);
-                }
+    /**
+     * Puebla un <select> con opciones, manteniendo la selección actual si el value sigue siendo válido.
+     * Soporta dos formatos de opciones:
+     *   - Array de strings: value y label son iguales al string
+     *   - Array de {value, label}: separa el valor real del texto visible
+     */
+    function populateSelect(select, options, defaultLabel) {
+        const currentValue = select.value;
+        select.innerHTML = `<option value="">${defaultLabel}</option>`;
+        options.forEach((option) => {
+            const el = document.createElement('option');
+            if (typeof option === 'object' && option !== null) {
+                el.value = option.value;
+                el.textContent = option.label || option.value;
             } else {
-                chart.setDatasetVisibility(i, val);
+                el.value = option;
+                el.textContent = option;
             }
-        };
-
-        const count = (type === 'doughnut' || type === 'pie')
-            ? chart.data.labels.length
-            : chart.data.datasets.length;
-
-        let allVisible = true;
-        for (let i = 0; i < count; i++) {
-            if (!isVisible(i)) {
-                allVisible = false;
-                break;
-            }
-        }
-
-        if (allVisible) {
-            for (let i = 0; i < count; i++) {
-                if (i !== index) setVisible(i, false);
-            }
-            setVisible(index, true);
-        } else {
-            if (!isVisible(index)) {
-                setVisible(index, true);
-            } else {
-                let visibleCount = 0;
-                for (let i = 0; i < count; i++) {
-                    if (isVisible(i)) visibleCount++;
-                }
-
-                if (visibleCount === 1) {
-                    for (let i = 0; i < count; i++) setVisible(i, true);
-                } else {
-                    setVisible(index, false);
-                }
-            }
-        }
-        chart.update();
-    }
-
-    // --- Rendering ---
-
-    function populateSelect(el, list) {
-        const current = el.value;
-        el.innerHTML = '<option value="all">Todas</option>';
-        list.forEach(item => {
-            const opt = document.createElement('option');
-            opt.value = item;
-            opt.textContent = item;
-            el.appendChild(opt);
+            select.appendChild(el);
         });
-        if (list.includes(current)) el.value = current;
+        // Restaurar selección previa si el value sigue existiendo
+        const validValues = Array.from(select.options).map((o) => o.value);
+        if (currentValue && validValues.includes(currentValue)) {
+            select.value = currentValue;
+        }
     }
 
-    function renderDashboard(data) {
-        const isVolume = data.isVolume;
-
-        // KPIs
-        animateNumber('kpiClients', data.kpis.clients);
-        animateNumber('kpiProcesses', data.kpis.processes);
-        animateNumber('kpiFamilies', data.kpis.families);
-        animateNumber('kpiVolume', data.kpis.volume, true);
-
-        // --- Save to LocalStorage for Home Page ---
+    function renderKpis(kpis) {
+        elements.kpiClients.textContent = formatInteger(kpis.clientes || 0);
+        elements.kpiRecords.textContent = formatInteger(kpis.renglones || 0);
+        elements.kpiFamilies.textContent = formatInteger(kpis.familias || 0);
+        elements.kpiQuantity.textContent = formatDecimal(kpis.cantidad_demandada || 0);
         try {
-            const kpiSummary = {
-                clients: data.kpis.clients,
-                processes: data.kpis.processes,
-                families: data.kpis.families,
-                lastUpdated: new Date().toISOString()
-            };
-            localStorage.setItem('mp_dimensiones_kpis', JSON.stringify(kpiSummary));
-        } catch (e) {
-            console.warn("Could not save KPIs to localStorage", e);
+            localStorage.setItem('mp_dimensiones_kpis', JSON.stringify({
+                clients: kpis.clientes || 0,
+                processes: kpis.renglones || 0,
+                families: kpis.familias || 0,
+                lastUpdated: new Date().toISOString(),
+            }));
+        } catch (error) {
+            console.warn('No se pudieron guardar KPIs de Dimensionamiento en localStorage', error);
         }
-
-        // Charts
-        renderAreaChart(data.charts, isVolume);
-        renderPieChart(data.charts.pie, isVolume);
-        renderFamilyList(data.charts.familyList, isVolume);
-        renderBarClientChart(data.charts.clientBar, isVolume);
-        renderPivotTable(data.charts.pivot, isVolume);
-        renderMapChart(data.charts.provinceMap, isVolume);
     }
 
-    function animateNumber(id, val, isCurrency = false) {
-        const el = document.getElementById(id);
-        const options = isCurrency
-            ? { style: 'currency', currency: 'ARS', maximumFractionDigits: 0, notation: val > 1000000 ? 'compact' : 'standard' }
-            : {};
-        const fmt = new Intl.NumberFormat('es-AR', options);
-        el.textContent = fmt.format(val);
-    }
-
-    // --- Chart Implementations ---
-
-    function renderAreaChart(chartData, isVolume) {
+    function renderAreaChart(series) {
         const ctx = document.getElementById('areaChart').getContext('2d');
-        if (areaChart) areaChart.destroy();
+        if (state.areaChart) state.areaChart.destroy();
 
-        const labels = chartData.months;
-        const palette = ['#064066', '#1e5c8a', '#5274ce', '#38bdf8', '#10b981', '#6366f1', '#64748b'];
-
-        const datasets = chartData.topCategories.map((cat, i) => {
-            const color = palette[i % palette.length];
-            const data = labels.map(m => (chartData.areaMap[m] && chartData.areaMap[m][cat]) || 0);
-            return {
-                label: cat,
-                data: data,
-                backgroundColor: color + '33', // 20% opacity
-                borderColor: color,
-                borderWidth: 2,
-                fill: true,
-                tension: 0.4,
-                pointRadius: 2,
-                pointHoverRadius: 5,
-                pointBackgroundColor: color,
-                pointBorderColor: '#fff',
-                pointBorderWidth: 1
-            };
-        });
-
-        areaChart = new Chart(ctx, {
+        state.areaChart = new Chart(ctx, {
             type: 'line',
-            data: { labels, datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                plugins: {
-                    legend: {
-                        position: 'top',
-                        align: 'end',
-                        labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } },
-                        onClick: handleLegendClick
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        titleColor: '#064066',
-                        bodyColor: '#64748b',
-                        borderColor: '#e2e8f0',
-                        borderWidth: 1,
-                        padding: 10,
-                        usePointStyle: true,
-                        callbacks: {
-                            label: function (context) {
-                                let val = context.parsed.y;
-                                if (isVolume) return context.dataset.label + ': ' + new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
-                                return context.dataset.label + ': ' + val;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { borderDash: [4, 4], color: '#e2e8f0' },
-                        ticks: {
-                            callback: function (val) {
-                                if (isVolume) return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', notation: 'compact' }).format(val);
-                                return val;
-                            }
-                        }
-                    },
-                    x: { grid: { display: false } }
-                }
-            }
+            data: {
+                labels: series.months || [],
+                datasets: (series.datasets || []).map((dataset, index) => ({
+                    label: resolveUnitLabel(dataset.label),
+                    data: dataset.values,
+                    backgroundColor: `${seriesPalette[index % seriesPalette.length]}33`,
+                    borderColor: seriesPalette[index % seriesPalette.length],
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 2,
+                    pointHoverRadius: 5,
+                })),
+            },
+            options: buildLineChartOptions(),
         });
     }
 
-    function renderPieChart(pieData, isVolume) {
+    function renderPieChart(results) {
         const ctx = document.getElementById('pieChart').getContext('2d');
-        if (pieChart) pieChart.destroy();
+        if (state.pieChart) state.pieChart.destroy();
 
-        const colorMap = {
-            'Confirmado': '#064066', 'Ganado': '#064066',
-            'No participó': '#94a3b8', 'No Participó': '#94a3b8',
-            'Comprado de Otra Empresa': '#1e5c8a', 'Perdido': '#ef4444',
-            'Contrato': '#10b981'
-        };
-        const defaultColors = ['#064066', '#1e5c8a', '#5274ce', '#38bdf8', '#10b981'];
-
-        pieChart = new Chart(ctx, {
+        state.pieChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: pieData.map(d => d.label),
+                labels: results.map((item) => item.resultado),
                 datasets: [{
-                    data: pieData.map(d => d.value),
-                    backgroundColor: pieData.map((d, i) => colorMap[d.label] || defaultColors[i % defaultColors.length]),
+                    data: results.map((item) => item.renglones),
+                    backgroundColor: results.map((_, index) => resultPalette[index % resultPalette.length]),
                     borderWidth: 0,
-                    hoverOffset: 8
-                }]
+                    hoverOffset: 8,
+                }],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                cutout: '70%',
+                cutout: '68%',
                 plugins: {
                     legend: {
                         position: 'bottom',
                         labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } },
-                        onClick: handleLegendClick
                     },
                     tooltip: {
                         callbacks: {
-                            label: function (context) {
-                                let val = context.parsed;
-                                if (isVolume) return context.label + ': ' + new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
-                                return context.label + ': ' + val;
-                            }
-                        }
-                    }
-                }
-            }
+                            label: (context) => `${context.label}: ${formatInteger(context.parsed)} renglones`,
+                        },
+                    },
+                },
+            },
         });
     }
 
-    function renderFamilyList(list, isVolume) {
-        const container = document.getElementById('familyListContainer');
-        container.innerHTML = '';
-        const tpl = document.createElement('table');
-        tpl.className = 'tech-table w-100';
-
-        const thead = document.createElement('thead');
-        const headerLabel = isVolume ? 'Volumen ($)' : 'Cant.';
-        thead.innerHTML = `<tr><th style="background:transparent; pl-0;">Familia</th><th class="text-end" style="background:transparent;">Precio</th><th class="text-end pe-3" style="background:transparent;">${headerLabel}</th></tr>`;
-        tpl.appendChild(thead);
-
+    function renderFamilyList(families) {
+        const table = document.createElement('table');
+        table.className = 'tech-table w-100 dim-family-table';
+        table.innerHTML = `
+            <colgroup>
+                <col class="dim-family-col-name">
+                <col class="dim-family-col-count">
+                <col class="dim-family-col-qty">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="dim-family-head dim-family-head-name" style="background:transparent;">Familia</th>
+                    <th class="dim-family-head dim-family-head-count text-end" style="background:transparent;">Renglones</th>
+                    <th class="dim-family-head dim-family-head-qty text-end" style="background:transparent;">Cantidad</th>
+                </tr>
+            </thead>
+        `;
         const tbody = document.createElement('tbody');
-        const fmtPrice = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 
-        const fmtValue = isVolume
-            ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', notation: 'compact', maximumFractionDigits: 1 })
-            : new Intl.NumberFormat('es-AR');
-
-        list.forEach(item => {
+        families.forEach((item) => {
             const tr = document.createElement('tr');
-            const displayVal = isVolume ? item.volume : item.count;
             tr.innerHTML = `
-                <td style="font-weight: 500; font-size: 0.75rem; padding: 0.35rem 0;">
-                    <div class="text-truncate" style="max-width: 110px;" title="${item.name}">${item.name}</div>
+                <td class="dim-family-name-cell" title="${item.familia}">
+                    <div class="dim-family-name-text">${item.familia}</div>
                 </td>
-                <td class="text-end small" style="padding: 0.35rem 0;">
-                    <span style="${item.outdated ? 'background-color: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: 500;' : 'color: #64748b;'}">
-                        ${item.price > 0 ? fmtPrice.format(item.price) : '-'}
-                    </span>
-                </td>
-                <td class="text-end fw-bold pe-3" style="color: var(--tech-blue-mid); padding: 0.35rem 0;">
-                    ${fmtValue.format(displayVal)}
+                <td class="text-end small text-muted dim-family-number dim-family-number-count">${formatInteger(item.renglones)}</td>
+                <td class="text-end fw-bold dim-family-number dim-family-number-qty" style="color: var(--tech-blue-mid);">
+                    ${formatDecimal(item.cantidad)}
                 </td>
             `;
             tbody.appendChild(tr);
         });
-        tpl.appendChild(tbody);
-        container.appendChild(tpl);
+
+        table.appendChild(tbody);
+        elements.familyListContainer.innerHTML = '';
+        elements.familyListContainer.appendChild(table);
     }
 
-    function renderBarClientChart(clients, isVolume) {
+    function renderBarClientChart(rows) {
         const ctx = document.getElementById('barClientChart').getContext('2d');
-        if (barClientChart) barClientChart.destroy();
+        if (state.barClientChart) state.barClientChart.destroy();
 
-        const labels = clients.map(c => c.name);
-        const allKeys = new Set();
-        clients.forEach(c => Object.keys(c.counts).forEach(k => allKeys.add(k)));
-        const keys = Array.from(allKeys).sort();
+        const labels = rows.map((row) => row.cliente);
+        const resultKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row.resultados || {}))));
 
-        const colorMap = {
-            'Confirmado': '#064066', 'Ganado': '#064066',
-            'No Participó': '#94a3b8', 'No participó': '#94a3b8',
-            'Comprado de Otra Empresa': '#1e5c8a'
-        };
-        const defaultColors = ['#064066', '#1e5c8a', '#5274ce', '#10b981'];
-
-        const datasets = keys.map((key, i) => ({
-            label: key,
-            data: clients.map(c => c.counts[key] || 0),
-            backgroundColor: colorMap[key] || defaultColors[i % defaultColors.length],
-            borderRadius: 4,
-            barPercentage: 0.6,
-            stack: 'stack1'
-        }));
-
-        barClientChart = new Chart(ctx, {
+        state.barClientChart = new Chart(ctx, {
             type: 'bar',
-            data: { labels, datasets },
+            data: {
+                labels,
+                datasets: resultKeys.map((key, index) => ({
+                    label: key,
+                    data: rows.map((row) => row.resultados?.[key] || 0),
+                    backgroundColor: resultPalette[index % resultPalette.length],
+                    borderRadius: 4,
+                    barPercentage: 0.7,
+                    stack: 'resultados',
+                })),
+            },
             options: {
                 indexAxis: 'y',
                 responsive: true,
@@ -855,79 +518,156 @@ document.addEventListener('DOMContentLoaded', () => {
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
-                            label: function (context) {
-                                let val = context.parsed.x;
-                                if (isVolume) return context.dataset.label + ': ' + new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val);
-                                return context.dataset.label + ': ' + val;
-                            }
-                        }
-                    }
+                            label: (context) => `${context.dataset.label}: ${formatInteger(context.parsed.x)} renglones`,
+                        },
+                    },
                 },
                 scales: {
                     x: {
                         stacked: true,
                         grid: { display: false },
-                        ticks: {
-                            display: false,
-                        }
+                        ticks: { display: false },
                     },
                     y: {
                         stacked: true,
                         grid: { display: false },
                         ticks: {
-                            font: { size: 9 }, callback: function (val) {
-                                const l = this.getLabelForValue(val);
-                                return l.length > 12 ? l.substr(0, 12) + '..' : l;
-                            }
-                        }
-                    }
-                }
-            }
+                            font: { size: 9 },
+                            callback: function (value) {
+                                const label = this.getLabelForValue(value);
+                                return label.length > 16 ? `${label.slice(0, 16)}..` : label;
+                            },
+                        },
+                    },
+                },
+            },
         });
     }
 
-    function renderPivotTable(pivot, isVolume) {
-        const thead = document.getElementById('pivotHeader');
-        const tbody = document.getElementById('pivotBody');
-        thead.innerHTML = '';
-        tbody.innerHTML = '';
+    function renderPivotTable(data) {
+        elements.pivotHeader.innerHTML = '';
+        elements.pivotBody.innerHTML = '';
 
-        const rowHeader = document.createElement('th');
-        rowHeader.textContent = 'Familia';
-        thead.appendChild(rowHeader);
+        const headerRow = document.createElement('tr');
+        const familyHeader = document.createElement('th');
+        familyHeader.textContent = 'Familia';
+        headerRow.appendChild(familyHeader);
 
-        const monthFmt = new Intl.DateTimeFormat('es-AR', { month: 'short' });
-
-        pivot.months.forEach(mIdx => { // 1..12
+        (data.months || []).forEach((month) => {
             const th = document.createElement('th');
-            const date = new Date(2024, mIdx - 1, 15);
-            let name = monthFmt.format(date);
-            name = name.charAt(0).toUpperCase() + name.slice(1);
-            th.textContent = name;
-            th.className = 'text-end text-capitalize';
-            thead.appendChild(th);
+            th.className = 'text-end';
+            th.textContent = formatMonthLabel(month);
+            headerRow.appendChild(th);
         });
+        elements.pivotHeader.appendChild(headerRow);
 
-        const fmt = isVolume
-            ? new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', notation: 'compact', maximumFractionDigits: 1 })
-            : new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
-
-        pivot.data.forEach(row => {
+        (data.rows || []).forEach((row) => {
             const tr = document.createElement('tr');
-            const tdName = document.createElement('td');
-            tdName.className = 'fw-bold text-secondary';
-            tdName.style.fontSize = '0.75rem';
-            tdName.textContent = row.family;
-            tr.appendChild(tdName);
+            const familyCell = document.createElement('td');
+            familyCell.className = 'fw-bold text-secondary';
+            familyCell.style.fontSize = '0.75rem';
+            familyCell.textContent = row.familia;
+            tr.appendChild(familyCell);
 
-            pivot.months.forEach(m => {
+            row.values.forEach((value) => {
                 const td = document.createElement('td');
                 td.className = 'text-end text-muted';
-                const val = row[m];
-                td.textContent = val > 0 ? fmt.format(val) : '-';
+                td.textContent = value > 0 ? formatDecimal(value) : '-';
                 tr.appendChild(td);
             });
-            tbody.appendChild(tr);
+            elements.pivotBody.appendChild(tr);
         });
+    }
+
+    function renderMapChart(rows) {
+        const container = document.getElementById('mapContainer');
+        if (!state.mapInstance) {
+            state.mapInstance = L.map(container).setView([-38.4161, -63.6167], 3);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 19,
+            }).addTo(state.mapInstance);
+        }
+
+        state.mapMarkers.forEach((marker) => state.mapInstance.removeLayer(marker));
+        state.mapMarkers = [];
+
+        rows.forEach((item) => {
+            const key = Object.keys(provinceCoords).find((province) => province.toLowerCase() === String(item.provincia).toLowerCase());
+            if (!key) return;
+
+            const marker = L.circle(provinceCoords[key], {
+                color: '#5274ce',
+                fillColor: '#5274ce',
+                fillOpacity: 0.45,
+                radius: Math.min(Math.max(Math.log((item.renglones || 0) + 1) * 22000, 30000), 300000),
+                weight: 1,
+            }).addTo(state.mapInstance);
+            marker.bindTooltip(`<b>${item.provincia}</b><br>Renglones: ${formatInteger(item.renglones)}`);
+            state.mapMarkers.push(marker);
+        });
+
+        window.setTimeout(() => state.mapInstance.invalidateSize(), 150);
+    }
+
+    function buildLineChartOptions() {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } },
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => `${context.dataset.label}: ${formatInteger(context.parsed.y)} renglones`,
+                    },
+                },
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { borderDash: [4, 4], color: '#e2e8f0' },
+                    ticks: {
+                        callback: (value) => formatCompactInteger(value),
+                    },
+                },
+                x: { grid: { display: false } },
+            },
+        };
+    }
+
+    function formatInteger(value) {
+        return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function formatDecimal(value) {
+        return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(value || 0);
+    }
+
+    function formatCompact(value) {
+        return new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
+    }
+
+    function formatCompactInteger(value) {
+        return new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    function formatMonthLabel(monthIso) {
+        if (/^\d{2}$/.test(String(monthIso))) {
+            const date = new Date(2024, Number(monthIso) - 1, 1);
+            return new Intl.DateTimeFormat('es-AR', { month: 'short' }).format(date);
+        }
+        const date = new Date(`${monthIso}T00:00:00`);
+        if (Number.isNaN(date.getTime())) return monthIso;
+        return new Intl.DateTimeFormat('es-AR', { month: 'short', year: '2-digit' }).format(date);
+    }
+
+    function formatDatasetName(sourcePath) {
+        return String(sourcePath).split(/[/\\]/).pop() || sourcePath;
     }
 });

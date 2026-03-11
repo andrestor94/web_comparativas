@@ -1,12 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Nueva carga – Web Comparativas{% endblock %}
 {% block header_title %}Nueva carga{% endblock %}
+{% block extra_head %}
+<style>
+  .otras-fuentes-form-shell {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-center align-items-start py-4">
-    <div class="card shadow-sm" style="max-width:900px; width:100%;">
-        <div class="card-body">
-            <h2 class="mb-4 fw-semibold text-primary">Cargar archivo</h2>
+
+<!-- ======= PAGE HEADER ======= -->
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Mercado Público</span>
+    <h1 class="h-page-header__title">Nueva carga</h1>
+    <p class="h-page-header__subtitle">Subí un archivo de cuadro comparativo para procesarlo</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a class="btn btn-outline-secondary btn-sm" href="/cargas/historial">
+      <i class="bi bi-clock-history me-1"></i> Historial
+    </a>
+  </div>
+</div>
+
+<div class="otras-fuentes-form-shell">
+  <div class="h-panel">
+            <h3 style="font-size:1.1rem;font-weight:600;color:#06486f;margin-bottom:1.5rem;">Datos del proceso</h3>
 
 
 
@@ -102,14 +125,14 @@
                 <input type="hidden" name="buyer_hint" id="buyer_hint" />
                 <input type="hidden" name="province_hint" id="province_hint" />
 
-                <div class="col-12 d-grid mt-3">
-                    <button class="btn btn-primary btn-lg">
-                        <i class="bi bi-upload me-2"></i> Subir archivo
+                <div class="col-12 mt-4">
+                    <button class="btn btn-primary d-inline-flex align-items-center gap-2" type="submit"
+                        style="padding: 0.6rem 1.5rem; font-weight: 600;">
+                        <i class="bi bi-upload"></i> Subir archivo
                     </button>
                 </div>
             </form>
-        </div>
-    </div>
+  </div>
 </div>
 
 <!-- Script principal (Reutilizado) -->
