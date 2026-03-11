@@ -3,7 +3,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import shutil
+import tempfile
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from web_comparativas.auth import require_roles
@@ -248,3 +251,57 @@ def deprecated_manual_process(_: AllowedUser):
             "para refrescar el módulo Dimensionamiento."
         ),
     )
+
+
+AdminUser = Annotated[
+    User,
+    Depends(require_roles("admin")),
+]
+
+
+def _run_ingestion_background(tmp_path: str) -> None:
+    """Ejecuta la ingesta del CSV y luego elimina el archivo temporal."""
+    from web_comparativas.dimensionamiento.ingestion import ingest_dimensionamiento_csv
+    try:
+        result = ingest_dimensionamiento_csv(csv_path=tmp_path, mode="replace", force=True)
+        print(f"[DIMENSIONAMIENTO] Ingesta completada: {result}", flush=True)
+    except Exception as exc:
+        print(f"[DIMENSIONAMIENTO] Error en ingesta background: {exc}", flush=True)
+    finally:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+@router.post("/upload-csv", status_code=202)
+async def upload_dimensionamiento_csv(
+    background_tasks: BackgroundTasks,
+    _: AdminUser,
+    file: UploadFile = File(...),
+):
+    """
+    (Solo admin) Recibe el CSV unificado, lo guarda en un archivo temporal
+    y dispara la ingesta en background. Devuelve 202 inmediatamente.
+    El progreso se puede consultar con GET /status.
+    """
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un CSV (.csv).")
+
+    # Guardar en /tmp (único directorio writable en Render)
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = str(Path(tmp_dir) / "dataset_unificado.csv")
+    try:
+        with open(tmp_path, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error al guardar el archivo: {exc}")
+    finally:
+        await file.close()
+
+    background_tasks.add_task(_run_ingestion_background, tmp_path)
+    return {
+        "ok": True,
+        "message": "Archivo recibido. La ingesta está corriendo en background.",
+        "hint": "Consultá GET /api/mercado-privado/dimensiones/status para ver el progreso.",
+    }
