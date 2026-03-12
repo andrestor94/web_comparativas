@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import gc
 import hashlib
 import json
 import logging
@@ -51,6 +52,33 @@ EXPECTED_COLUMNS = [
     "id_registro_unico",
     "fecha_procesamiento",
 ]
+
+OPTIONAL_FLAG_COLUMNS = [
+    "identificado",
+    "is_identified",
+    "identificado_flag",
+    "cliente",
+    "is_client",
+    "cliente_flag",
+]
+
+CSV_COLUMNS_TO_READ = tuple(dict.fromkeys([*EXPECTED_COLUMNS, *OPTIONAL_FLAG_COLUMNS]))
+
+CSV_CATEGORY_COLUMNS = {
+    "plataforma",
+    "provincia",
+    "familia",
+    "unidad_negocio",
+    "subunidad_negocio",
+    "resultado_participacion",
+    "clasificacion_suizo",
+    "cliente_nombre_homologado",
+}
+
+CSV_DTYPE_BY_COLUMN = {
+    column: ("category" if column in CSV_CATEGORY_COLUMNS else "string")
+    for column in CSV_COLUMNS_TO_READ
+}
 
 DEFAULT_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "dataset_unificado.csv"
 DEFAULT_CHUNK_SIZE = 10000
@@ -236,14 +264,47 @@ def _detect_delimiter(path: Path) -> str:
         return ","
 
 
-def _iter_csv_chunks(path: Path, chunk_size: int):
+def _resolve_csv_read_config(path: Path) -> tuple[str, list[str], list[str], dict[str, str]]:
     delimiter = _detect_delimiter(path)
+    header_frame = pd.read_csv(
+        path,
+        sep=delimiter,
+        nrows=0,
+        encoding="utf-8-sig",
+    )
+    original_columns = list(header_frame.columns)
+    observed_columns = [_clean_header(column) for column in original_columns]
+    _validate_required_columns(observed_columns)
+
+    selected_original_columns = [
+        original
+        for original, cleaned in zip(original_columns, observed_columns)
+        if cleaned in CSV_COLUMNS_TO_READ
+    ]
+    selected_dtype_map = {
+        original: CSV_DTYPE_BY_COLUMN[cleaned]
+        for original, cleaned in zip(original_columns, observed_columns)
+        if cleaned in CSV_COLUMNS_TO_READ
+    }
+    return delimiter, observed_columns, selected_original_columns, selected_dtype_map
+
+
+def _iter_csv_chunks(
+    path: Path,
+    chunk_size: int,
+    *,
+    delimiter: str,
+    usecols: list[str],
+    dtype_map: dict[str, str],
+):
     return pd.read_csv(
         path,
         sep=delimiter,
         chunksize=chunk_size,
-        dtype=str,
+        usecols=usecols,
+        dtype=dtype_map,
         keep_default_na=False,
+        na_filter=False,
         encoding="utf-8-sig",
         low_memory=True,
     )
@@ -510,21 +571,35 @@ def ingest_dimensionamiento_csv(
         total_inserted = 0
         total_updated = 0
         total_rejected = 0
-        observed_columns: list[str] | None = None
         line_offset = 1
+        delimiter, observed_columns, selected_columns, selected_dtype_map = _resolve_csv_read_config(path)
+        _dim_log(
+            "info",
+            "[DIM] CSV reader configured selected_columns=%s chunk_size=%s",
+            len(selected_columns),
+            chunk_size,
+        )
 
-        for chunk in _iter_csv_chunks(path, chunk_size):
+        for chunk_number, chunk in enumerate(
+            _iter_csv_chunks(
+                path,
+                chunk_size,
+                delimiter=delimiter,
+                usecols=selected_columns,
+                dtype_map=selected_dtype_map,
+            ),
+            start=1,
+        ):
             chunk.columns = [_clean_header(column) for column in chunk.columns]
-            if observed_columns is None:
-                observed_columns = list(chunk.columns)
-                _validate_required_columns(observed_columns)
-
-            rows = chunk.to_dict(orient="records")
+            chunk_rows = len(chunk.index)
+            _dim_log("info", "[DIM] Processing chunk %s rows=%s", chunk_number, chunk_rows)
             prepared_rows: list[dict[str, Any]] = []
             seen_ids: set[str] = set()
+            chunk_columns = list(chunk.columns)
 
-            for index, row in enumerate(rows, start=line_offset + 1):
+            for index, values in enumerate(chunk.itertuples(index=False, name=None), start=line_offset + 1):
                 total_processed += 1
+                row = dict(zip(chunk_columns, values))
                 try:
                     normalized = _normalize_row(row)
                     if not normalized["id_registro_unico"]:
@@ -540,8 +615,11 @@ def ingest_dimensionamiento_csv(
                     total_rejected += 1
                     _record_error(session, run.id, index, str(exc), row)
 
-            line_offset += len(rows)
+            line_offset += chunk_rows
             if not prepared_rows:
+                _dim_log("info", "[DIM] Inserted chunk %s rows=0", chunk_number)
+                del chunk, prepared_rows, seen_ids
+                gc.collect()
                 continue
 
             ids = [row["id_registro_unico"] for row in prepared_rows]
@@ -565,8 +643,11 @@ def ingest_dimensionamiento_csv(
                 session.execute(stmt)
 
             session.commit()
+            _dim_log("info", "[DIM] Inserted chunk %s", chunk_number)
+            del chunk, prepared_rows, ids, existing_ids, seen_ids
+            gc.collect()
 
-        if observed_columns is None:
+        if total_processed == 0:
             raise ValueError("El CSV no contiene filas de datos.")
 
         if mode == "replace":
