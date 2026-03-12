@@ -387,49 +387,85 @@ def build_filters(
 
 
 def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
+    use_direct_match = model is DimensionamientoFamilyMonthlySummary
     if filters.clientes:
         _visible = _cliente_visible_expr(model)
-        normalized_clients = _normalized_filter_values(filters.clientes)
-        if normalized_clients:
-            stmt = stmt.where(_sql_normalized_text(_visible).in_(normalized_clients))
+        if use_direct_match:
+            stmt = stmt.where(_visible.in_(filters.clientes))
             if applied_conditions is not None:
-                applied_conditions.append(f"cliente_visible IN {normalized_clients}")
+                applied_conditions.append(f"cliente_visible IN {filters.clientes}")
+        else:
+            normalized_clients = _normalized_filter_values(filters.clientes)
+            if normalized_clients:
+                stmt = stmt.where(_sql_normalized_text(_visible).in_(normalized_clients))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"cliente_visible IN {normalized_clients}")
     if filters.provincias:
-        normalized_provincias = _normalized_filter_values(filters.provincias)
-        if normalized_provincias:
-            stmt = stmt.where(_sql_normalized_text(model.provincia).in_(normalized_provincias))
+        if use_direct_match:
+            stmt = stmt.where(model.provincia.in_(filters.provincias))
             if applied_conditions is not None:
-                applied_conditions.append(f"provincia IN {normalized_provincias}")
+                applied_conditions.append(f"provincia IN {filters.provincias}")
+        else:
+            normalized_provincias = _normalized_filter_values(filters.provincias)
+            if normalized_provincias:
+                stmt = stmt.where(_sql_normalized_text(model.provincia).in_(normalized_provincias))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"provincia IN {normalized_provincias}")
     if filters.familias:
-        normalized_familias = _normalized_filter_values(filters.familias)
-        if normalized_familias:
-            stmt = stmt.where(_sql_normalized_text(model.familia).in_(normalized_familias))
+        if use_direct_match:
+            stmt = stmt.where(model.familia.in_(filters.familias))
             if applied_conditions is not None:
-                applied_conditions.append(f"familia IN {normalized_familias}")
+                applied_conditions.append(f"familia IN {filters.familias}")
+        else:
+            normalized_familias = _normalized_filter_values(filters.familias)
+            if normalized_familias:
+                stmt = stmt.where(_sql_normalized_text(model.familia).in_(normalized_familias))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"familia IN {normalized_familias}")
     if filters.plataformas:
-        normalized_plataformas = _normalized_filter_values(filters.plataformas)
-        if normalized_plataformas:
-            stmt = stmt.where(_sql_normalized_text(model.plataforma).in_(normalized_plataformas))
+        if use_direct_match:
+            stmt = stmt.where(model.plataforma.in_(filters.plataformas))
             if applied_conditions is not None:
-                applied_conditions.append(f"plataforma IN {normalized_plataformas}")
+                applied_conditions.append(f"plataforma IN {filters.plataformas}")
+        else:
+            normalized_plataformas = _normalized_filter_values(filters.plataformas)
+            if normalized_plataformas:
+                stmt = stmt.where(_sql_normalized_text(model.plataforma).in_(normalized_plataformas))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"plataforma IN {normalized_plataformas}")
     if filters.unidades_negocio:
-        normalized_unidades = _normalized_filter_values(filters.unidades_negocio)
-        if normalized_unidades:
-            stmt = stmt.where(_sql_normalized_text(model.unidad_negocio).in_(normalized_unidades))
+        if use_direct_match:
+            stmt = stmt.where(model.unidad_negocio.in_(filters.unidades_negocio))
             if applied_conditions is not None:
-                applied_conditions.append(f"unidad_negocio IN {normalized_unidades}")
+                applied_conditions.append(f"unidad_negocio IN {filters.unidades_negocio}")
+        else:
+            normalized_unidades = _normalized_filter_values(filters.unidades_negocio)
+            if normalized_unidades:
+                stmt = stmt.where(_sql_normalized_text(model.unidad_negocio).in_(normalized_unidades))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"unidad_negocio IN {normalized_unidades}")
     if filters.subunidades_negocio:
-        normalized_subunidades = _normalized_filter_values(filters.subunidades_negocio)
-        if normalized_subunidades:
-            stmt = stmt.where(_sql_normalized_text(model.subunidad_negocio).in_(normalized_subunidades))
+        if use_direct_match:
+            stmt = stmt.where(model.subunidad_negocio.in_(filters.subunidades_negocio))
             if applied_conditions is not None:
-                applied_conditions.append(f"subunidad_negocio IN {normalized_subunidades}")
+                applied_conditions.append(f"subunidad_negocio IN {filters.subunidades_negocio}")
+        else:
+            normalized_subunidades = _normalized_filter_values(filters.subunidades_negocio)
+            if normalized_subunidades:
+                stmt = stmt.where(_sql_normalized_text(model.subunidad_negocio).in_(normalized_subunidades))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"subunidad_negocio IN {normalized_subunidades}")
     if filters.resultados:
-        normalized_resultados = _normalized_filter_values(filters.resultados)
-        if normalized_resultados:
-            stmt = stmt.where(_sql_normalized_text(model.resultado_participacion).in_(normalized_resultados))
+        if use_direct_match:
+            stmt = stmt.where(model.resultado_participacion.in_(filters.resultados))
             if applied_conditions is not None:
-                applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
+                applied_conditions.append(f"resultado_participacion IN {filters.resultados}")
+        else:
+            normalized_resultados = _normalized_filter_values(filters.resultados)
+            if normalized_resultados:
+                stmt = stmt.where(_sql_normalized_text(model.resultado_participacion).in_(normalized_resultados))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
     if filters.identified is not None:
         stmt = stmt.where(model.is_identified.is_(filters.identified))
         if applied_conditions is not None:
