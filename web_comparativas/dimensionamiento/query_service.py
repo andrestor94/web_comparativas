@@ -79,6 +79,98 @@ def _empty_filter_options() -> dict[str, Any]:
     }
 
 
+def _coerce_date_value(value: Any) -> dt.date | None:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    normalized = text_value[:10] if len(text_value) >= 10 else text_value
+    try:
+        return dt.date.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _month_value_to_iso(value: Any) -> str:
+    coerced = _coerce_date_value(value)
+    if coerced is not None:
+        return coerced.isoformat()
+    text_value = str(value or "").strip()
+    if text_value.isdigit() and len(text_value) == 4:
+        return f"{text_value}-01-01"
+    if len(text_value) == 7 and text_value.count("-") == 1:
+        return f"{text_value}-01"
+    return text_value
+
+
+def _date_range_payload(min_value: Any, max_value: Any) -> dict[str, str | None]:
+    min_date = _coerce_date_value(min_value)
+    max_date = _coerce_date_value(max_value)
+    return {
+        "min": min_date.isoformat() if min_date else None,
+        "max": max_date.isoformat() if max_date else None,
+    }
+
+
+def _summary_health_snapshot(session: Session) -> dict[str, Any]:
+    summary_rows, raw_min_month, raw_max_month = session.execute(
+        text(
+            "SELECT COUNT(*), MIN(month), MAX(month) "
+            "FROM dimensionamiento_family_monthly_summary"
+        )
+    ).one()
+    min_month = _coerce_date_value(raw_min_month)
+    max_month = _coerce_date_value(raw_max_month)
+    return {
+        "rows": int(summary_rows or 0),
+        "raw_min_month": raw_min_month,
+        "raw_max_month": raw_max_month,
+        "min_month": min_month,
+        "max_month": max_month,
+        "usable": bool(summary_rows) and min_month is not None and max_month is not None,
+    }
+
+
+def _resolve_aggregate_model(
+    session: Session,
+    filters: DimensionamientoFilters,
+    endpoint_tag: str,
+    *,
+    summary_message: str = "using summary table",
+    base_message: str = "using base table",
+):
+    if filters.search:
+        logger.info("[DIM][%s] %s reason=search", endpoint_tag, base_message)
+        return DimensionamientoRecord
+
+    summary_state = _summary_health_snapshot(session)
+    if summary_state["usable"]:
+        logger.info(
+            "[DIM][%s] %s rows=%s min_month=%s max_month=%s",
+            endpoint_tag,
+            summary_message,
+            summary_state["rows"],
+            summary_state["min_month"].isoformat(),
+            summary_state["max_month"].isoformat(),
+        )
+        return DimensionamientoFamilyMonthlySummary
+
+    logger.warning(
+        "[DIM][%s] %s reason=summary_unavailable summary_rows=%s raw_min_month=%r raw_max_month=%r",
+        endpoint_tag,
+        base_message,
+        summary_state["rows"],
+        summary_state["raw_min_month"],
+        summary_state["raw_max_month"],
+    )
+    return DimensionamientoRecord
+
+
 def _apply_local_statement_timeout(session: Session, milliseconds: int) -> None:
     if IS_POSTGRES:
         safe_milliseconds = max(int(milliseconds), 1000)
@@ -448,22 +540,6 @@ def _distinct_filtered_summary_values(
     return [v for v in session.execute(outer_stmt).scalars().all() if v not in (None, "")]
 
 
-def _aggregate_model_for_filters(filters: DimensionamientoFilters):
-    """Selecciona el modelo óptimo para queries de agregación.
-
-    Sin filtro de texto → usa DimensionamientoFamilyMonthlySummary (tabla pre-agregada,
-    decenas de miles de filas vs 400k+ en la tabla de detalle). Esto elimina los full
-    scans con CASE WHEN que causaban timeouts en kpis, clients-by-result y series.
-
-    Con filtro de texto (search) → usa DimensionamientoRecord porque las columnas
-    descripcion, codigo_articulo y producto_nombre_original no existen en el resumen.
-    """
-    if filters.search:
-        return DimensionamientoRecord
-    return DimensionamientoFamilyMonthlySummary
-
-
-
 def get_status(session: Session) -> dict[str, Any]:
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_status start")
@@ -579,30 +655,34 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
     _apply_local_statement_timeout(session, 50000)
 
     try:
+        summary_state = _summary_health_snapshot(session)
+        has_active_filters = any(
+            [
+                filters.clientes,
+                filters.provincias,
+                filters.familias,
+                filters.plataformas,
+                filters.unidades_negocio,
+                filters.subunidades_negocio,
+                filters.resultados,
+                filters.fecha_desde is not None,
+                filters.fecha_hasta is not None,
+                filters.identified is not None,
+                filters.is_client is not None,
+                filters.search,
+            ]
+        )
         if (
-            not filters.clientes
-            and not filters.provincias
-            and not filters.familias
-            and not filters.plataformas
-            and not filters.unidades_negocio
-            and not filters.subunidades_negocio
-            and not filters.resultados
-            and filters.fecha_desde is None
-            and filters.fecha_hasta is None
-            and filters.identified is None
-            and filters.is_client is None
-            and not filters.search
+            not has_active_filters
+            and summary_state["usable"]
         ):
-            logger.info("[DIM][QUERY] get_filter_options using summary table fast path")
-            min_date, max_date = session.execute(
-                select(
-                    func.min(DimensionamientoFamilyMonthlySummary.month),
-                    func.max(DimensionamientoFamilyMonthlySummary.month),
-                )
-            ).one()
+            logger.info(
+                "[DIM][FILTERS] using summary clients path rows=%s min_month=%s max_month=%s",
+                summary_state["rows"],
+                summary_state["min_month"].isoformat(),
+                summary_state["max_month"].isoformat(),
+            )
             payload = {
-                # Usar la tabla resumen para clientes evita un full scan de 400k+ filas
-                # en dimensionamiento_records. La tabla resumen ya tiene los datos normalizados.
                 "clientes": _distinct_summary_clients(session),
                 "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia),
                 "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia),
@@ -610,19 +690,35 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 "unidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.unidad_negocio),
                 "subunidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.subunidad_negocio),
                 "resultados": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.resultado_participacion),
-                "date_range": {
-                    "min": min_date.isoformat() if min_date else None,
-                    "max": max_date.isoformat() if max_date else None,
-                },
+                "date_range": _date_range_payload(
+                    summary_state["min_month"],
+                    summary_state["max_month"],
+                ),
             }
         else:
             applied_conditions: list[str] = []
-            # Usar tabla resumen cuando no hay búsqueda de texto (mucho más rápido)
-            use_summary = not filters.search
+            use_summary = not filters.search and summary_state["usable"]
             filt_model = DimensionamientoFamilyMonthlySummary if use_summary else DimensionamientoRecord
+            if use_summary:
+                logger.info(
+                    "[DIM][FILTERS] using summary clients path rows=%s min_month=%s max_month=%s",
+                    summary_state["rows"],
+                    summary_state["min_month"].isoformat(),
+                    summary_state["max_month"].isoformat(),
+                )
+            else:
+                reason = "search" if filters.search else "summary_unavailable"
+                logger.info(
+                    "[DIM][FILTERS] using distinct_visible_clients base path reason=%s summary_rows=%s raw_min_month=%r raw_max_month=%r",
+                    reason,
+                    summary_state["rows"],
+                    summary_state["raw_min_month"],
+                    summary_state["raw_max_month"],
+                )
             date_col = _get_date_column(filt_model)
+            date_aggregate_col = cast(date_col, Text) if (use_summary and IS_SQLITE) else date_col
             date_bounds_stmt = _apply_common_filters(
-                select(func.min(date_col), func.max(date_col)),
+                select(func.min(date_aggregate_col), func.max(date_aggregate_col)),
                 filt_model,
                 filters,
                 applied_conditions,
@@ -631,7 +727,6 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
             min_date, max_date = session.execute(date_bounds_stmt).one()
 
             if use_summary:
-                # Ruta rápida con filtros activos: tabla resumen, sin CASE WHEN
                 s = DimensionamientoFamilyMonthlySummary
                 payload = {
                     "clientes": _distinct_filtered_summary_clients(session, filters),
@@ -641,13 +736,9 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     "unidades_negocio": _distinct_filtered_summary_values(session, s.unidad_negocio, filters),
                     "subunidades_negocio": _distinct_filtered_summary_values(session, s.subunidad_negocio, filters),
                     "resultados": _distinct_filtered_summary_values(session, s.resultado_participacion, filters),
-                    "date_range": {
-                        "min": min_date.isoformat() if min_date else None,
-                        "max": max_date.isoformat() if max_date else None,
-                    },
+                    "date_range": _date_range_payload(min_date, max_date),
                 }
             else:
-                # Solo cuando hay búsqueda de texto: tabla de detalle (necesaria)
                 payload = {
                     "clientes": _distinct_visible_clients(session, filters),
                     "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
@@ -656,10 +747,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, filters),
                     "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, filters),
                     "resultados": _distinct_values(session, DimensionamientoRecord.resultado_participacion, filters),
-                    "date_range": {
-                        "min": min_date.isoformat() if min_date else None,
-                        "max": max_date.isoformat() if max_date else None,
-                    },
+                    "date_range": _date_range_payload(min_date, max_date),
                 }
 
         _log_query_success(
@@ -683,7 +771,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
     started_at = _log_query_start("get_kpis", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(session, filters, "KPIS")
         applied_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
@@ -719,9 +807,13 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
             total_rows, total_families, total_quantity = session.execute(main_stmt).one()
             # Query 2: clientes únicos reales (is_client=True excluye SIN DATO)
+            normalized_client = _sql_normalized_text(model.cliente_nombre_homologado)
             client_stmt = _apply_common_filters(
                 select(func.count(distinct(model.cliente_nombre_homologado)))
-                .where(model.is_client == True),  # noqa: E712
+                .where(model.is_client == True)  # noqa: E712
+                .where(model.cliente_nombre_homologado.isnot(None))
+                .where(model.cliente_nombre_homologado != "")
+                .where(~normalized_client.in_(list(_SIN_DATO_SQL))),
                 model,
                 filters,
             )
@@ -746,7 +838,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
     started_at = _log_query_start("get_series", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(session, filters, "SERIES")
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         top_business_conditions: list[str] = []
@@ -765,8 +857,10 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
         _log_query_statement(session, "get_series.top_businesses", model, top_business_stmt, filters, top_business_conditions)
         top_businesses = [row[0] for row in session.execute(top_business_stmt).all()]
 
-        date_column = model.fecha if model is DimensionamientoRecord else model.month
-        month_expr = cast(_month_expr(date_column), Date) if (model is DimensionamientoRecord and not IS_SQLITE) else date_column
+        if model is DimensionamientoRecord:
+            month_expr = cast(_month_expr(model.fecha), Date) if not IS_SQLITE else func.date(model.fecha, "start of month")
+        else:
+            month_expr = cast(model.month, Text) if IS_SQLITE else model.month
         series_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
@@ -786,7 +880,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
         _log_query_statement(session, "get_series", model, stmt, filters, series_conditions)
         series_map: dict[str, dict[str, float]] = {}
         for month, negocio, total in session.execute(stmt).all():
-            month_key = month.isoformat() if hasattr(month, "isoformat") else str(month)
+            month_key = _month_value_to_iso(month)
             series_map.setdefault(month_key, {})[negocio] = float(total or 0)
 
         months = sorted(series_map.keys())
@@ -810,7 +904,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
     started_at = _log_query_start("get_results_breakdown", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(session, filters, "RESULTS")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
@@ -843,7 +937,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
     started_at = _log_query_start("get_top_families", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(session, filters, "TOP_FAMILIES")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         quantity_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
@@ -884,7 +978,7 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
     started_at = _log_query_start("get_geography_distribution", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(session, filters, "GEO")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
@@ -921,7 +1015,13 @@ def get_clients_by_result(
     started_at = _log_query_start("get_clients_by_result", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
+        model = _resolve_aggregate_model(
+            session,
+            filters,
+            "CLIENTS_BY_RESULT",
+            summary_message="using summary path",
+            base_message="using base path",
+        )
         subquery_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
@@ -945,6 +1045,7 @@ def get_clients_by_result(
             # Tabla resumen: sin CASE WHEN, columna directa + is_client=True
             # es_client=True garantiza que son clientes reales (no SIN DATO)
             total_expr = func.coalesce(func.sum(model.total_registros), 0)
+            normalized_client = _sql_normalized_text(model.cliente_nombre_homologado)
             subquery = _apply_common_filters(
                 select(
                     model.cliente_nombre_homologado.label("cliente"),
@@ -954,6 +1055,7 @@ def get_clients_by_result(
                 .where(model.is_client == True)  # noqa: E712
                 .where(model.cliente_nombre_homologado.isnot(None))
                 .where(model.cliente_nombre_homologado != "")
+                .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
                 .group_by(model.cliente_nombre_homologado, model.resultado_participacion),
                 model,
                 filters,
@@ -1003,8 +1105,7 @@ def get_family_consumption_table(
     started_at = _log_query_start("get_family_consumption_table", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _aggregate_model_for_filters(filters)
-        date_column = model.fecha if model is DimensionamientoRecord else model.month
+        model = _resolve_aggregate_model(session, filters, "FAMILY_CONSUMPTION")
         total_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
@@ -1038,7 +1139,10 @@ def get_family_consumption_table(
         # Paso 2: query mensual solo para las familias seleccionadas.
         # Usamos date_trunc('month', fecha) en lugar de to_char(fecha, 'MM') para que el
         # planificador pueda usar el índice en 'fecha'. Extraemos el número de mes en Python.
-        month_bucket = cast(_month_expr(date_column), Date)
+        if model is DimensionamientoRecord:
+            month_bucket = cast(_month_expr(model.fecha), Date) if not IS_SQLITE else func.date(model.fecha, "start of month")
+        else:
+            month_bucket = cast(model.month, Text) if IS_SQLITE else model.month
         monthly_conditions: list[str] = []
         monthly_stmt = _apply_common_filters(
             select(
@@ -1060,14 +1164,8 @@ def get_family_consumption_table(
         month_keys = [f"{index:02d}" for index in range(1, 13)]
         monthly_values: dict[str, dict[str, list[float]]] = {}
         for month_date, family, total in rows:
-            # Extraer número de mes del objeto date (o del string 'YYYY-MM-DD')
-            if hasattr(month_date, "month"):
-                month_key = f"{month_date.month:02d}"
-            else:
-                try:
-                    month_key = str(month_date)[5:7]
-                except Exception:
-                    month_key = "01"
+            month_iso = _month_value_to_iso(month_date)
+            month_key = month_iso[5:7] if len(month_iso) >= 7 else "01"
             family_name = family or "Sin familia"
             monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
 

@@ -236,16 +236,39 @@ def ensure_dimensionamiento_summary_populated():
             summary_count = session.execute(
                 select(sa_func.count()).select_from(DimensionamientoFamilyMonthlySummary)
             ).scalar_one()
+            raw_min_month, raw_max_month = session.execute(
+                text(
+                    "SELECT MIN(month), MAX(month) "
+                    "FROM dimensionamiento_family_monthly_summary"
+                )
+            ).one()
 
             print(
-                f"[MIGRATION] Dimensionamiento: records={records_count} summary_rows={summary_count}",
+                "[MIGRATION] Dimensionamiento: "
+                f"records={records_count} summary_rows={summary_count} "
+                f"min_month={raw_min_month!r} max_month={raw_max_month!r}",
                 flush=True,
             )
 
-            if records_count > 0 and summary_count == 0:
+            min_month_text = str(raw_min_month or "").strip()
+            max_month_text = str(raw_max_month or "").strip()
+            summary_has_valid_months = (
+                summary_count == 0
+                or (
+                    len(min_month_text) >= 7
+                    and "-" in min_month_text
+                    and len(max_month_text) >= 7
+                    and "-" in max_month_text
+                )
+            )
+            needs_rebuild = records_count > 0 and (
+                summary_count == 0 or not summary_has_valid_months
+            )
+
+            if needs_rebuild:
                 print(
                     "[MIGRATION] ALERTA: dimensionamiento_records tiene datos pero "
-                    "dimensionamiento_family_monthly_summary está vacía. "
+                    "dimensionamiento_family_monthly_summary está vacía o inválida. "
                     "Reconstruyendo tabla resumen...",
                     flush=True,
                 )
