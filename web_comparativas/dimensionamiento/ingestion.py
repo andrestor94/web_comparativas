@@ -17,7 +17,7 @@ from threading import Lock
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import Date, cast, delete, func, insert, or_, select
+from sqlalchemy import Date, cast, delete, func, insert, or_, select, text
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal, engine
@@ -457,13 +457,13 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     session.execute(delete(DimensionamientoFamilyMonthlySummary))
 
     if IS_SQLITE:
-        month_expr = func.date(DimensionamientoRecord.fecha, "start of month")
+        month_bucket = func.strftime("%Y-%m-01", DimensionamientoRecord.fecha)
     else:
-        month_expr = func.date_trunc("month", DimensionamientoRecord.fecha)
+        month_bucket = cast(func.date_trunc("month", DimensionamientoRecord.fecha), Date)
 
     summary_select = (
         select(
-            cast(month_expr, Date).label("month"),
+            month_bucket.label("month"),
             DimensionamientoRecord.plataforma,
             DimensionamientoRecord.cliente_nombre_homologado,
             DimensionamientoRecord.provincia,
@@ -479,7 +479,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
         )
         .group_by(
-            cast(month_expr, Date),
+            month_bucket,
             DimensionamientoRecord.plataforma,
             DimensionamientoRecord.cliente_nombre_homologado,
             DimensionamientoRecord.provincia,
