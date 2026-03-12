@@ -117,6 +117,26 @@ def get_db(request: Request) -> Session:
     return db
 
 
+def _request_debug_payload(request: Request) -> dict[str, Any]:
+    return {
+        "path": request.url.path,
+        "query_params": dict(request.query_params),
+    }
+
+
+def _safe_dashboard_response(request: Request, endpoint_name: str, fn, fallback_data):
+    payload = _request_debug_payload(request)
+    logger.info("[DIM][API] %s start payload=%s", endpoint_name, payload)
+    try:
+        data = fn()
+        result_count = len(data) if isinstance(data, list) else (len(data.get("rows", [])) if isinstance(data, dict) and "rows" in data else None)
+        logger.info("[DIM][API] %s success path=%s rows=%s", endpoint_name, request.url.path, result_count)
+        return {"ok": True, "data": data}
+    except Exception:
+        logger.exception("[DIM][API] %s failed payload=%s", endpoint_name, payload)
+        return {"ok": True, "data": fallback_data, "warning": f"{endpoint_name}_failed"}
+
+
 def _filters_from_query(
     cliente: list[str] | None = Query(default=None),
     provincia: list[str] | None = Query(default=None),
@@ -217,68 +237,116 @@ def dimensionamiento_filters(
 
 @router.get("/kpis")
 def dimensionamiento_kpis(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_kpis(db, filters)}
+    return _safe_dashboard_response(
+        request,
+        "kpis",
+        lambda: get_kpis(db, filters),
+        {
+            "total_rows": 0,
+            "clientes": 0,
+            "renglones": 0,
+            "familias": 0,
+            "cantidad_demandada": 0.0,
+        },
+    )
 
 
 @router.get("/series")
 def dimensionamiento_series(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_series(db, filters)}
+    return _safe_dashboard_response(
+        request,
+        "series",
+        lambda: get_series(db, filters),
+        {"months": [], "datasets": []},
+    )
 
 
 @router.get("/results")
 def dimensionamiento_results(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_results_breakdown(db, filters)}
+    return _safe_dashboard_response(
+        request,
+        "results",
+        lambda: get_results_breakdown(db, filters),
+        [],
+    )
 
 
 @router.get("/top-families")
 def dimensionamiento_top_families(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     limit: int = Query(default=10, ge=1, le=50),
 ):
-    return {"ok": True, "data": get_top_families(db, filters, limit=limit)}
+    return _safe_dashboard_response(
+        request,
+        "top_families",
+        lambda: get_top_families(db, filters, limit=limit),
+        [],
+    )
 
 
 @router.get("/geo")
 def dimensionamiento_geo(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_geography_distribution(db, filters)}
+    return _safe_dashboard_response(
+        request,
+        "geo",
+        lambda: get_geography_distribution(db, filters),
+        [],
+    )
 
 
 @router.get("/clients-by-result")
 def dimensionamiento_clients_by_result(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     limit: int = Query(default=10, ge=1, le=30),
 ):
-    return {"ok": True, "data": get_clients_by_result(db, filters, limit=limit)}
+    return _safe_dashboard_response(
+        request,
+        "clients_by_result",
+        lambda: get_clients_by_result(db, filters, limit=limit),
+        [],
+    )
 
 
 @router.get("/family-consumption")
 def dimensionamiento_family_consumption(
+    request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=50),
 ):
-    return {"ok": True, "data": get_family_consumption_table(db, filters, limit=limit)}
+    return _safe_dashboard_response(
+        request,
+        "family_consumption",
+        lambda: get_family_consumption_table(db, filters, limit=limit),
+        {"months": [], "rows": []},
+    )
 
 
 @router.post("/process")
