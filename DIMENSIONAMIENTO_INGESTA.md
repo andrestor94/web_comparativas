@@ -13,13 +13,16 @@
 
 ## Estrategia de actualización
 
-- Manual local:
-  - `ingestar_dimensionamiento.bat`
-  - o `python -m web_comparativas.dimensionamiento.ingestion --mode replace`
-- Auto al startup:
-  - `DIMENSIONAMIENTO_AUTO_INGEST=true`
+- Manual / one-off a PostgreSQL:
+  - `python -m web_comparativas.dimensionamiento.ingestion --source-url "$DIMENSIONAMIENTO_CSV_URL" --mode replace --force --require-postgres`
+  - o `ingestar_dimensionamiento.bat --source-url "https://...csv" --force --require-postgres`
+- Startup del web service:
+  - por defecto valida y loguea si `dimensionamiento_records` ya tiene datos
+  - para bootstrap automático si la tabla está vacía: `DIMENSIONAMIENTO_STARTUP_MODE=ingest-if-empty`
+  - modo legado de fuerza: `DIMENSIONAMIENTO_AUTO_INGEST=true`
 - Ruta alternativa del CSV:
   - `DIMENSIONAMIENTO_CSV_PATH=/ruta/al/archivo.csv`
+  - `DIMENSIONAMIENTO_CSV_URL=https://...`
 
 ## Notas de performance
 
@@ -40,3 +43,12 @@
   - insertadas
   - actualizadas
   - rechazadas
+- Logs explícitos de startup/ingesta:
+  - `[DIM] Startup ingestion start`
+  - `[DIM] Table row count = X`
+  - `[DIM] Using source URL ...`
+  - `[DIM] Download started`
+  - `[DIM] Download completed`
+  - `[DIM] CSV loaded with N rows`
+  - `[DIM] Ingestion completed`
+  - `[DIM] ERROR: ...`

@@ -9,6 +9,8 @@ services:
         sync: false
       - key: DIMENSIONAMIENTO_AUTO_INGEST
         sync: false
+      - key: DIMENSIONAMIENTO_STARTUP_MODE
+        sync: false
       - key: DIMENSIONAMIENTO_CSV_PATH
         sync: false
       - key: DIMENSIONAMIENTO_CSV_URL

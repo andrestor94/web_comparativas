@@ -8,15 +8,18 @@ import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 import unicodedata
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import pandas as pd
 from sqlalchemy import Date, cast, delete, func, insert, or_, select
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal
+from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal, engine
 
 from .models import (
     DimensionamientoFamilyMonthlySummary,
@@ -52,6 +55,12 @@ EXPECTED_COLUMNS = [
 DEFAULT_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "dataset_unificado.csv"
 DEFAULT_CHUNK_SIZE = 10000
 SQLITE_SAFE_BATCH_SIZE = 200
+STARTUP_MODE_VALIDATE = "validate"
+STARTUP_MODE_INGEST_IF_EMPTY = "ingest-if-empty"
+STARTUP_MODE_FORCE_INGEST = "force-ingest"
+
+_STARTUP_RUN_LOCK = Lock()
+_STARTUP_RUN_COMPLETED = False
 
 PLATFORM_MAP = {
     "bionexo": "BIONEXO",
@@ -75,6 +84,23 @@ PROVINCE_MAP = {
     "tucuman": "Tucuman",
     "tucumán": "Tucuman",
 }
+
+
+def _dim_log(level: str, message: str, *args: Any, exc_info: bool = False) -> None:
+    rendered = message % args if args else message
+    print(rendered, flush=True)
+    getattr(logger, level, logger.info)(rendered, exc_info=exc_info)
+
+
+def _db_target_summary() -> str:
+    url = engine.url
+    backend = url.get_backend_name()
+    host = getattr(url, "host", None) or "-"
+    database = getattr(url, "database", None) or "-"
+    return (
+        f"backend={backend} host={host} database={database} "
+        "table=dimensionamiento_records summary_table=dimensionamiento_family_monthly_summary"
+    )
 
 
 def _clean_header(value: Any) -> str:
@@ -228,6 +254,75 @@ def _batched(items: list[Any], batch_size: int):
         yield items[start:start + batch_size]
 
 
+def _count_dimensionamiento_rows() -> int:
+    session = SessionLocal()
+    try:
+        return session.execute(
+            select(func.count()).select_from(DimensionamientoRecord)
+        ).scalar_one()
+    finally:
+        session.close()
+
+
+def _normalize_startup_mode() -> str:
+    raw_mode = (os.getenv("DIMENSIONAMIENTO_STARTUP_MODE") or "").strip().lower()
+    legacy_force = (os.getenv("DIMENSIONAMIENTO_AUTO_INGEST") or "").strip().lower()
+
+    if legacy_force in {"1", "true", "yes", "si", "sí"}:
+        return STARTUP_MODE_FORCE_INGEST
+    if raw_mode in {"", STARTUP_MODE_VALIDATE}:
+        return STARTUP_MODE_VALIDATE
+    if raw_mode in {"bootstrap", "auto", STARTUP_MODE_INGEST_IF_EMPTY}:
+        return STARTUP_MODE_INGEST_IF_EMPTY
+    if raw_mode in {"force", STARTUP_MODE_FORCE_INGEST}:
+        return STARTUP_MODE_FORCE_INGEST
+
+    _dim_log(
+        "warning",
+        "[DIM] Unknown startup mode %r. Falling back to %s",
+        raw_mode,
+        STARTUP_MODE_VALIDATE,
+    )
+    return STARTUP_MODE_VALIDATE
+
+
+def _resolve_ingestion_source(
+    csv_path: str | os.PathLike[str] | None = None,
+    source_url: str | None = None,
+) -> tuple[str, str]:
+    if csv_path:
+        return "path", str(Path(csv_path).expanduser().resolve())
+    if source_url:
+        return "url", source_url.strip()
+
+    csv_path_env = (os.getenv("DIMENSIONAMIENTO_CSV_PATH") or "").strip()
+    csv_url_env = (os.getenv("DIMENSIONAMIENTO_CSV_URL") or "").strip()
+
+    if csv_path_env:
+        path = Path(csv_path_env).expanduser()
+        if path.exists():
+            return "path", str(path.resolve())
+        _dim_log("warning", "[DIM] Configured path does not exist: %s", path)
+
+    if csv_url_env:
+        return "url", csv_url_env
+
+    if DEFAULT_CSV_PATH.exists():
+        return "path", str(DEFAULT_CSV_PATH.resolve())
+
+    raise FileNotFoundError(
+        "No source found in DIMENSIONAMIENTO_CSV_PATH, DIMENSIONAMIENTO_CSV_URL or DEFAULT_CSV_PATH."
+    )
+
+
+def _looks_like_html(content_type: str, preview: bytes) -> bool:
+    lowered_type = (content_type or "").lower()
+    preview_text = preview[:2048].decode("utf-8", errors="ignore").lstrip().lower()
+    if "html" in lowered_type or "xml" in lowered_type:
+        return True
+    return preview_text.startswith("<!doctype html") or preview_text.startswith("<html") or "<html" in preview_text
+
+
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     record = {
         "id_registro_unico": _clean_text(row.get("id_registro_unico")),
@@ -367,6 +462,15 @@ def ingest_dimensionamiento_csv(
     if not path.exists():
         raise FileNotFoundError(f"No se encontró el CSV de dimensionamiento: {path}")
 
+    _dim_log(
+        "info",
+        "[DIM] Ingestion started path=%s chunk_size=%s mode=%s force=%s target=%s",
+        path,
+        chunk_size,
+        mode,
+        force,
+        _db_target_summary(),
+    )
     source_hash = _compute_sha256(path)
     source_mtime = dt.datetime.fromtimestamp(path.stat().st_mtime)
 
@@ -380,7 +484,7 @@ def ingest_dimensionamiento_csv(
             .limit(1)
         ).scalar_one_or_none()
         if latest_success and latest_success.source_hash == source_hash and not force:
-            logger.info("Dimensionamiento ingest skipped; source hash unchanged.")
+            _dim_log("info", "[DIM] Ingestion skipped because source hash is unchanged")
             return {
                 "status": "skipped",
                 "reason": "source_unchanged",
@@ -498,8 +602,10 @@ def ingest_dimensionamiento_csv(
         }
         session.commit()
 
-        logger.info(
-            "Dimensionamiento ingest success run_id=%s processed=%s inserted=%s updated=%s rejected=%s",
+        _dim_log("info", "[DIM] CSV loaded with %s rows", total_processed)
+        _dim_log(
+            "info",
+            "[DIM] Ingestion completed run_id=%s processed=%s inserted=%s updated=%s rejected=%s",
             run.id,
             total_processed,
             total_inserted,
@@ -517,7 +623,7 @@ def ingest_dimensionamiento_csv(
             "rows_rejected": total_rejected,
         }
     except Exception as exc:
-        logger.exception("Dimensionamiento ingest failed for %s", path)
+        _dim_log("error", "[DIM] ERROR: ingestion failed for %s: %s", path, exc, exc_info=True)
         session.rollback()
         if run is not None:
             run = session.merge(run)
@@ -532,109 +638,166 @@ def ingest_dimensionamiento_csv(
 
 def _tables_are_empty() -> bool:
     """Devuelve True si la tabla dimensionamiento_records no tiene ningún registro."""
-    session = SessionLocal()
     try:
-        count = session.execute(
-            select(func.count()).select_from(DimensionamientoRecord)
-        ).scalar_one()
-        return count == 0
+        return _count_dimensionamiento_rows() == 0
     except Exception:
         return True
-    finally:
-        session.close()
 
 
 def _download_csv_from_url(url: str, dest: Path) -> None:
     """Descarga el CSV desde una URL al destino indicado."""
-    import urllib.request
-    logger.info("[DIMENSIONAMIENTO] Descargando CSV desde URL: %s → %s", url, dest)
-    # Soporte para links de Google Drive (convierte /file/d/ID/view → /uc?export=download&id=ID)
+    import requests
     if "drive.google.com/file/d/" in url:
         file_id = url.split("/file/d/")[1].split("/")[0]
         url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-    urllib.request.urlretrieve(url, str(dest))
-    logger.info("[DIMENSIONAMIENTO] Descarga completada: %s bytes", dest.stat().st_size)
+    _dim_log("info", "[DIM] Using source URL %s", url)
+    _dim_log("info", "[DIM] Download started")
+    with requests.get(url, stream=True, timeout=(15, 300), allow_redirects=True) as response:
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type", "")
+        content_disposition = response.headers.get("Content-Disposition", "")
+        iterator = response.iter_content(chunk_size=1024 * 1024)
+        first_chunk = next(iterator, b"")
+        if _looks_like_html(content_type, first_chunk):
+            preview = first_chunk[:300].decode("utf-8", errors="ignore").strip().replace("\n", " ")
+            _dim_log(
+                "error",
+                "[DIM] ERROR: Source URL returned HTML instead of CSV. final_url=%s content_type=%s preview=%s",
+                response.url,
+                content_type or "-",
+                preview or "-",
+            )
+            raise ValueError(
+                "Source URL returned HTML instead of CSV. "
+                f"content_type={content_type or '-'} content_disposition={content_disposition or '-'}"
+            )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        bytes_written = 0
+        with dest.open("wb") as handle:
+            if first_chunk:
+                handle.write(first_chunk)
+                bytes_written += len(first_chunk)
+            for chunk in iterator:
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                bytes_written += len(chunk)
+    _dim_log(
+        "info",
+        "[DIM] Download completed bytes=%s content_type=%s content_disposition=%s",
+        bytes_written,
+        content_type or "-",
+        content_disposition or "-",
+    )
 
 
-def maybe_run_startup_ingestion() -> None:
+def bootstrap_dimensionamiento(
+    *,
+    csv_path: str | os.PathLike[str] | None = None,
+    source_url: str | None = None,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    mode: str = "replace",
+    force: bool = False,
+    require_postgres: bool = False,
+) -> dict[str, Any]:
+    if require_postgres and not IS_POSTGRES:
+        raise RuntimeError(f"[DIM] ERROR: Refusing to ingest into non-PostgreSQL target: {_db_target_summary()}")
+
+    source_kind, source_value = _resolve_ingestion_source(csv_path=csv_path, source_url=source_url)
+    temp_dir: Path | None = None
+
+    _dim_log("info", "[DIM] Target database = %s", _db_target_summary())
+
+    try:
+        if source_kind == "path":
+            working_path = Path(source_value).resolve()
+            _dim_log("info", "[DIM] Using source path %s", working_path)
+        else:
+            temp_dir = Path(tempfile.mkdtemp(prefix="dim-bootstrap-"))
+            working_path = temp_dir / "dimensionamiento_bootstrap.csv"
+            _download_csv_from_url(source_value, working_path)
+
+        return ingest_dimensionamiento_csv(
+            csv_path=working_path,
+            chunk_size=chunk_size,
+            mode=mode,
+            force=force,
+        )
+    finally:
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def maybe_run_startup_ingestion() -> dict[str, Any]:
     """
     Ingesta de arranque para Dimensionamiento.
 
     Lógica:
     1. Si la tabla ya tiene datos → no hace nada (PostgreSQL es la fuente de verdad).
-    2. Si la tabla está vacía, busca la fuente en este orden:
-       a. DIMENSIONAMIENTO_CSV_PATH  → ruta local al CSV
-       b. DIMENSIONAMIENTO_CSV_URL   → URL para descargar el CSV (ej. Google Drive, S3)
-       c. DEFAULT_CSV_PATH           → ruta local por defecto (solo en entornos con el archivo)
-    3. Si se encontró fuente → ingesta con mode="replace", force=True.
+    2. Si la tabla está vacía, solo ingiere si el startup está en modo bootstrap.
+    3. Si se encontró fuente → ingesta controlada con mode="replace".
     4. Si no hay fuente disponible → avisa en logs y sale sin errores.
 
-    Se activa automáticamente si la tabla está vacía, independientemente de DIMENSIONAMIENTO_AUTO_INGEST.
-    La variable DIMENSIONAMIENTO_AUTO_INGEST=true también puede forzar la ingesta incluso con datos.
+    Por defecto el startup solo valida si la tabla ya tiene datos.
+    Para habilitar bootstrap automático en startup:
+    - DIMENSIONAMIENTO_STARTUP_MODE=ingest-if-empty
+    - o DIMENSIONAMIENTO_AUTO_INGEST=true (legado, equivale a force-ingest)
     """
-    force_flag = (os.getenv("DIMENSIONAMIENTO_AUTO_INGEST") or "").strip().lower()
-    force_even_with_data = force_flag in {"1", "true", "yes", "si", "sí"}
+    global _STARTUP_RUN_COMPLETED
 
-    tables_empty = _tables_are_empty()
+    with _STARTUP_RUN_LOCK:
+        if _STARTUP_RUN_COMPLETED:
+            result = {"status": "skipped", "reason": "already_ran_in_process"}
+            _dim_log("info", "[DIM] Ingestion skipped because startup already ran in this process")
+            return result
+        _STARTUP_RUN_COMPLETED = True
 
-    if not tables_empty and not force_even_with_data:
-        logger.info(
-            "[DIMENSIONAMIENTO] Tabla con datos existentes. Startup ingestion omitida. "
-            "(Usar DIMENSIONAMIENTO_AUTO_INGEST=true para forzar re-ingesta.)"
+    _dim_log("info", "[DIM] Startup ingestion start")
+    _dim_log("info", "[DIM] Target database = %s", _db_target_summary())
+
+    row_count = _count_dimensionamiento_rows()
+    startup_mode = _normalize_startup_mode()
+
+    _dim_log("info", "[DIM] Table row count = %s", row_count)
+    _dim_log("info", "[DIM] Startup mode = %s", startup_mode)
+
+    if row_count > 0 and startup_mode != STARTUP_MODE_FORCE_INGEST:
+        result = {"status": "skipped", "reason": "table_has_data", "row_count": row_count}
+        _dim_log("info", "[DIM] Ingestion skipped because table already has data")
+        return result
+
+    if row_count == 0 and startup_mode == STARTUP_MODE_VALIDATE:
+        result = {"status": "skipped", "reason": "startup_validate_only", "row_count": row_count}
+        _dim_log(
+            "warning",
+            "[DIM] Table is empty but startup mode is validate. Run a manual one-off bootstrap to PostgreSQL or set DIMENSIONAMIENTO_STARTUP_MODE=ingest-if-empty",
         )
-        return
-
-    if not tables_empty and force_even_with_data:
-        logger.info("[DIMENSIONAMIENTO] DIMENSIONAMIENTO_AUTO_INGEST=true: forzando re-ingesta.")
-
-    if tables_empty:
-        logger.info("[DIMENSIONAMIENTO] Tabla vacía detectada. Intentando ingesta automática de startup.")
-
-    # Determinar fuente del CSV
-    csv_path_env = os.getenv("DIMENSIONAMIENTO_CSV_PATH") or ""
-    csv_url_env = os.getenv("DIMENSIONAMIENTO_CSV_URL") or ""
-    tmp_path: Path | None = None
+        return result
 
     try:
-        if csv_path_env and Path(csv_path_env).exists():
-            # Opción A: ruta local configurada
-            logger.info("[DIMENSIONAMIENTO] Usando CSV desde DIMENSIONAMIENTO_CSV_PATH: %s", csv_path_env)
-            result = ingest_dimensionamiento_csv(csv_path=csv_path_env, mode="replace", force=True)
-
-        elif csv_url_env:
-            # Opción B: descarga desde URL (Google Drive, S3, Dropbox direct link, etc.)
-            import tempfile
-            tmp_dir = Path(tempfile.mkdtemp())
-            tmp_path = tmp_dir / "dataset_unificado.csv"
-            try:
-                _download_csv_from_url(csv_url_env, tmp_path)
-                result = ingest_dimensionamiento_csv(csv_path=tmp_path, mode="replace", force=True)
-            finally:
-                if tmp_path and tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
-
-        elif DEFAULT_CSV_PATH.exists():
-            # Opción C: archivo local por defecto (útil en desarrollo)
-            logger.info("[DIMENSIONAMIENTO] Usando CSV por defecto: %s", DEFAULT_CSV_PATH)
-            result = ingest_dimensionamiento_csv(mode="replace", force=force_even_with_data)
-
-        else:
-            logger.warning(
-                "[DIMENSIONAMIENTO] No se encontró fuente de datos (DIMENSIONAMIENTO_CSV_PATH, "
-                "DIMENSIONAMIENTO_CSV_URL ni archivo local). "
-                "Configurá una de estas variables en Render para poblar la base de datos."
-            )
-            return
-
-        logger.info("[DIMENSIONAMIENTO] Startup ingestion result: %s", json.dumps(result, ensure_ascii=False))
-
+        result = bootstrap_dimensionamiento(
+            chunk_size=DEFAULT_CHUNK_SIZE,
+            mode="replace",
+            force=startup_mode == STARTUP_MODE_FORCE_INGEST,
+        )
+        _dim_log("info", "[DIM] Startup ingestion result = %s", json.dumps(result, ensure_ascii=False))
+        _dim_log("info", "[DIM] Table row count after startup = %s", _count_dimensionamiento_rows())
+        return result
+    except FileNotFoundError:
+        _dim_log(
+            "warning",
+            "[DIM] No source found in DIMENSIONAMIENTO_CSV_PATH, DIMENSIONAMIENTO_CSV_URL or DEFAULT_CSV_PATH",
+        )
+        return {"status": "skipped", "reason": "missing_source"}
     except Exception as exc:
-        logger.error("[DIMENSIONAMIENTO] Error en startup ingestion: %s", exc, exc_info=True)
+        _dim_log("error", "[DIM] ERROR: %s", exc, exc_info=True)
+        raise
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ingesta del CSV unificado de Dimensionamiento.")
     parser.add_argument("--csv-path", dest="csv_path", default=None, help="Ruta al CSV unificado.")
+    parser.add_argument("--source-url", dest="source_url", default=None, help="URL para descargar el CSV.")
     parser.add_argument("--chunk-size", dest="chunk_size", type=int, default=DEFAULT_CHUNK_SIZE)
     parser.add_argument(
         "--mode",
@@ -644,6 +807,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="replace: recarga total lógica; upsert: conserva registros ausentes.",
     )
     parser.add_argument("--force", dest="force", action="store_true", help="Ignora hash previo.")
+    parser.add_argument(
+        "--require-postgres",
+        dest="require_postgres",
+        action="store_true",
+        help="Falla si el target actual no es PostgreSQL.",
+    )
     return parser
 
 
@@ -653,11 +822,13 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     args = _build_arg_parser().parse_args()
-    result = ingest_dimensionamiento_csv(
+    result = bootstrap_dimensionamiento(
         csv_path=args.csv_path,
+        source_url=args.source_url,
         chunk_size=args.chunk_size,
         mode=args.mode,
         force=args.force,
+        require_postgres=args.require_postgres,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
