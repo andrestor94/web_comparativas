@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import Date, case, cast, distinct, func, or_, select
+from sqlalchemy import Date, case, cast, distinct, func, or_, select, text
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import IS_SQLITE
+from web_comparativas.models import IS_POSTGRES, IS_SQLITE
 
-from .models import DimensionamientoImportRun, DimensionamientoRecord
+from .models import DimensionamientoFamilyMonthlySummary, DimensionamientoImportRun, DimensionamientoRecord
+
+logger = logging.getLogger("wc.dimensionamiento.query")
 
 
 def _get_date_column(model):
@@ -42,6 +46,46 @@ class DimensionamientoFilters:
     identified: bool | None = None
     is_client: bool | None = None
     search: str | None = None
+
+
+def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
+    return {
+        "clientes": filters.clientes,
+        "provincias": filters.provincias,
+        "familias": filters.familias,
+        "plataformas": filters.plataformas,
+        "unidades_negocio": filters.unidades_negocio,
+        "subunidades_negocio": filters.subunidades_negocio,
+        "resultados": filters.resultados,
+        "fecha_desde": filters.fecha_desde.isoformat() if filters.fecha_desde else None,
+        "fecha_hasta": filters.fecha_hasta.isoformat() if filters.fecha_hasta else None,
+        "identified": filters.identified,
+        "is_client": filters.is_client,
+        "search": filters.search,
+    }
+
+
+def _empty_filter_options() -> dict[str, Any]:
+    return {
+        "clientes": [],
+        "provincias": [],
+        "familias": [],
+        "plataformas": [],
+        "unidades_negocio": [],
+        "subunidades_negocio": [],
+        "resultados": [],
+        "date_range": {"min": None, "max": None},
+    }
+
+
+def _apply_local_statement_timeout(session: Session, milliseconds: int) -> None:
+    if IS_POSTGRES:
+        session.execute(text("SET LOCAL statement_timeout = :ms"), {"ms": milliseconds})
+
+
+def _log_query_success(name: str, started_at: float, **counts: Any) -> None:
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    logger.info("[DIM][QUERY] %s completed in %sms counts=%s", name, elapsed_ms, counts)
 
 
 def _month_expr(column):
@@ -217,8 +261,21 @@ def _distinct_values(session: Session, column, filters: DimensionamientoFilters,
     return [value for value in session.execute(outer_stmt).scalars().all() if value not in (None, "")]
 
 
+def _distinct_summary_values(session: Session, column, order_by=None) -> list[str]:
+    stmt = (
+        select(distinct(column.label("_val")))
+        .where(column.is_not(None))
+        .order_by(order_by if order_by is not None else column)
+    )
+    return [value for value in session.execute(stmt).scalars().all() if value not in (None, "")]
+
+
 
 def get_status(session: Session) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    logger.info("[DIM][QUERY] get_status start")
+    _apply_local_statement_timeout(session, 30000)
+
     latest = session.execute(
         select(DimensionamientoImportRun)
         .where(DimensionamientoImportRun.status == "success")
@@ -239,7 +296,7 @@ def get_status(session: Session) -> dict[str, Any]:
         .order_by(DimensionamientoRecord.plataforma)
     ).all()
 
-    return {
+    payload = {
         "has_data": total_rows > 0,
         "total_rows": total_rows,
         "platforms": [{"name": name, "rows": rows} for name, rows in platform_rows],
@@ -256,32 +313,89 @@ def get_status(session: Session) -> dict[str, Any]:
         if latest
         else None,
     }
+    _log_query_success("get_status", started_at, total_rows=total_rows, platforms=len(platform_rows))
+    return payload
 
 
 def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
-    date_bounds_stmt = _apply_common_filters(
-        select(
-            func.min(DimensionamientoRecord.fecha),
-            func.max(DimensionamientoRecord.fecha),
-        ),
-        DimensionamientoRecord,
-        filters,
-    )
-    min_date, max_date = session.execute(date_bounds_stmt).one()
+    started_at = time.perf_counter()
+    logger.info("[DIM][QUERY] get_filter_options start filters=%s", _filters_debug_dict(filters))
+    _apply_local_statement_timeout(session, 30000)
 
-    return {
-        "clientes": _distinct_visible_clients(session, filters),
-        "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
-        "familias": _distinct_values(session, DimensionamientoRecord.familia, filters),
-        "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, filters),
-        "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, filters),
-        "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, filters),
-        "resultados": _distinct_values(session, DimensionamientoRecord.resultado_participacion, filters),
-        "date_range": {
-            "min": min_date.isoformat() if min_date else None,
-            "max": max_date.isoformat() if max_date else None,
-        },
-    }
+    try:
+        if (
+            not filters.clientes
+            and not filters.provincias
+            and not filters.familias
+            and not filters.plataformas
+            and not filters.unidades_negocio
+            and not filters.subunidades_negocio
+            and not filters.resultados
+            and filters.fecha_desde is None
+            and filters.fecha_hasta is None
+            and filters.identified is None
+            and filters.is_client is None
+            and not filters.search
+        ):
+            logger.info("[DIM][QUERY] get_filter_options using summary table fast path")
+            min_date, max_date = session.execute(
+                select(
+                    func.min(DimensionamientoFamilyMonthlySummary.month),
+                    func.max(DimensionamientoFamilyMonthlySummary.month),
+                )
+            ).one()
+            payload = {
+                "clientes": _distinct_visible_clients(session, filters),
+                "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia),
+                "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia),
+                "plataformas": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.plataforma),
+                "unidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.unidad_negocio),
+                "subunidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.subunidad_negocio),
+                "resultados": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.resultado_participacion),
+                "date_range": {
+                    "min": min_date.isoformat() if min_date else None,
+                    "max": max_date.isoformat() if max_date else None,
+                },
+            }
+        else:
+            date_bounds_stmt = _apply_common_filters(
+                select(
+                    func.min(DimensionamientoRecord.fecha),
+                    func.max(DimensionamientoRecord.fecha),
+                ),
+                DimensionamientoRecord,
+                filters,
+            )
+            min_date, max_date = session.execute(date_bounds_stmt).one()
+            payload = {
+                "clientes": _distinct_visible_clients(session, filters),
+                "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
+                "familias": _distinct_values(session, DimensionamientoRecord.familia, filters),
+                "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, filters),
+                "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, filters),
+                "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, filters),
+                "resultados": _distinct_values(session, DimensionamientoRecord.resultado_participacion, filters),
+                "date_range": {
+                    "min": min_date.isoformat() if min_date else None,
+                    "max": max_date.isoformat() if max_date else None,
+                },
+            }
+
+        _log_query_success(
+            "get_filter_options",
+            started_at,
+            clientes=len(payload["clientes"]),
+            provincias=len(payload["provincias"]),
+            familias=len(payload["familias"]),
+            plataformas=len(payload["plataformas"]),
+            unidades_negocio=len(payload["unidades_negocio"]),
+            subunidades_negocio=len(payload["subunidades_negocio"]),
+            resultados=len(payload["resultados"]),
+        )
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_filter_options failed filters=%s", _filters_debug_dict(filters))
+        raise
 
 
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:

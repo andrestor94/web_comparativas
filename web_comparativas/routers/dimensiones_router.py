@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -25,6 +26,7 @@ from web_comparativas.dimensionamiento.query_service import (
 from web_comparativas.models import User
 
 router = APIRouter(prefix="/api/mercado-privado/dimensiones", tags=["dimensiones"])
+logger = logging.getLogger("wc.dimensionamiento.api")
 
 # Ruta al archivo de mapeo de negocios (relativa al package web_comparativas)
 _NEGOCIOS_PATH = Path(__file__).resolve().parent.parent / "data" / "Negocios.xlsx"
@@ -150,7 +152,18 @@ def dimensionamiento_status(
     _: AllowedUser,
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_status(db)}
+    logger.info("[DIM][API] GET /status start")
+    try:
+        data = get_status(db)
+        logger.info(
+            "[DIM][API] GET /status success has_data=%s total_rows=%s",
+            data.get("has_data"),
+            data.get("total_rows"),
+        )
+        return {"ok": True, "data": data}
+    except Exception:
+        logger.exception("[DIM][API] GET /status failed")
+        raise
 
 
 @router.get("/negocio-labels")
@@ -173,7 +186,33 @@ def dimensionamiento_filters(
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    return {"ok": True, "data": get_filter_options(db, filters)}
+    logger.info("[DIM][API] GET /filters start filters=%s", filters)
+    try:
+        data = get_filter_options(db, filters)
+        logger.info(
+            "[DIM][API] GET /filters success clientes=%s provincias=%s familias=%s plataformas=%s",
+            len(data.get("clientes", [])),
+            len(data.get("provincias", [])),
+            len(data.get("familias", [])),
+            len(data.get("plataformas", [])),
+        )
+        return {"ok": True, "data": data}
+    except Exception:
+        logger.exception("[DIM][API] GET /filters failed filters=%s", filters)
+        return {
+            "ok": True,
+            "data": {
+                "clientes": [],
+                "provincias": [],
+                "familias": [],
+                "plataformas": [],
+                "unidades_negocio": [],
+                "subunidades_negocio": [],
+                "resultados": [],
+                "date_range": {"min": None, "max": None},
+            },
+            "warning": "filters_query_failed",
+        }
 
 
 @router.get("/kpis")
