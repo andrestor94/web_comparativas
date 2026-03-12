@@ -10,7 +10,7 @@ import datetime as dt
 import shutil
 import unicodedata
 import json
-from threading import Lock
+from threading import Lock, Thread
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
@@ -54,6 +54,8 @@ from web_comparativas.migrations import (
     ensure_password_reset_columns,
     ensure_normalized_storage_columns,
     backfill_normalized_content,
+    ensure_dimensionamiento_indexes,
+    ensure_dimensionamiento_summary_populated,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 
@@ -97,6 +99,14 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[STARTUP] Dimensionamiento auto-ingest warning: {e}", flush=True)
 
+    # Verificar que la tabla resumen esté poblada (puede estar vacía si el _rebuild
+    # falló en una carga anterior por timeout). Reconstruye si es necesario.
+    try:
+        ensure_dimensionamiento_summary_populated()
+        print("[MIGRATION] SUCCESS: Dimensionamiento summary table checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning dimensionamiento summary: {e}", flush=True)
+
     # Persistencia robusta: columnas para guardar contenido de archivos procesados en DB
     # Esto evita pérdida de datos al redesplegar en Render (filesystem efímero)
     try:
@@ -116,9 +126,31 @@ def run_startup_migrations_once() -> None:
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
 
 
+def _background_dimensionamiento_maintenance() -> None:
+    """
+    Crea índices funcionales en PostgreSQL en un thread separado para no bloquear el startup.
+
+    CREATE INDEX CONCURRENTLY sobre 338k+ filas puede tardar minutos.
+    Si se ejecuta en el startup bloqueante, Render mata el deploy por health-check timeout.
+    Al correr en background, la app ya está sirviendo mientras los índices se construyen.
+    Si los índices ya existen (despliegues subsiguientes), el retorno es casi inmediato.
+    """
+    import time
+    time.sleep(3)  # Espera mínima para que el servidor esté listo
+    try:
+        ensure_dimensionamiento_indexes()
+        print("[BACKGROUND] Dimensionamiento functional indexes checked.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning dimensionamiento indexes: {e}", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_startup_migrations_once()
+    # Los índices se crean en background: CREATE INDEX CONCURRENTLY no puede correr
+    # en startup bloqueante sin riesgo de timeout en Render.
+    t = Thread(target=_background_dimensionamiento_maintenance, daemon=True)
+    t.start()
     yield
 
 

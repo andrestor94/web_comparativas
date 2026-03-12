@@ -176,14 +176,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Carga inicial sin filtros activos: puebla los selects con todos los valores posibles
     // y establece el rango de fechas por defecto.
+    // Nunca lanza: un fallo en /filters no debe abortar la carga del dashboard.
     async function loadFilterOptions() {
-        const response = await apiGet('/filters');
-        const data = response.data;
-        applyFilterOptions(data);
-        if (!state.filtersLoaded && data.date_range) {
-            elements.dateStart.value = data.date_range.min || '';
-            elements.dateEnd.value = data.date_range.max || '';
-            state.filtersLoaded = true;
+        try {
+            const response = await apiGet('/filters');
+            const data = response.data;
+            applyFilterOptions(data);
+            if (!state.filtersLoaded && data.date_range) {
+                elements.dateStart.value = data.date_range.min || '';
+                elements.dateEnd.value = data.date_range.max || '';
+                state.filtersLoaded = true;
+            }
+        } catch (e) {
+            console.warn('[DIM] loadFilterOptions failed, continuing without filters:', e);
         }
     }
 
@@ -255,37 +260,126 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadDashboardData() {
         setLoading(true, 'Consultando métricas agregadas...');
-        try {
-            const query = buildQueryParams();
+        const query = buildQueryParams();
 
-            // Incluye /filters en el mismo lote paralelo para recalcular las opciones
-            // de cada selector según el subconjunto actualmente filtrado.
-            const [filtersResp, kpis, series, results, topFamilies, geo, clientsByResult, familyConsumption] = await Promise.all([
-                apiGet('/filters', query),
-                apiGet('/kpis', query),
-                apiGet('/series', query),
-                apiGet('/results', query),
-                apiGet('/top-families', { ...query, limit: 10 }),
-                apiGet('/geo', query),
-                apiGet('/clients-by-result', { ...query, limit: 10 }),
-                apiGet('/family-consumption', { ...query, limit: 20 }),
-            ]);
+        // Promise.allSettled: cada widget se resuelve o falla de forma independiente.
+        // Ningún fallo individual bloquea al resto del dashboard.
+        const [
+            filtersResult,
+            kpisResult,
+            seriesResult,
+            resultsResult,
+            familiesResult,
+            geoResult,
+            clientsResult,
+            consumptionResult,
+        ] = await Promise.allSettled([
+            apiGet('/filters', query),
+            apiGet('/kpis', query),
+            apiGet('/series', query),
+            apiGet('/results', query),
+            apiGet('/top-families', { ...query, limit: 10 }),
+            apiGet('/geo', query),
+            apiGet('/clients-by-result', { ...query, limit: 10 }),
+            apiGet('/family-consumption', { ...query, limit: 20 }),
+        ]);
 
-            // Sincronizar opciones de filtros con el subconjunto activo
-            applyFilterOptions(filtersResp.data);
+        // Filtros: sincronizar si están disponibles
+        if (filtersResult.status === 'fulfilled' && filtersResult.value.ok !== false) {
+            applyFilterOptions(filtersResult.value.data);
+        }
 
-            renderKpis(kpis.data);
-            renderAreaChart(series.data);
-            renderPieChart(results.data);
-            renderFamilyList(topFamilies.data);
-            renderMapChart(geo.data);
-            renderBarClientChart(clientsByResult.data);
-            renderPivotTable(familyConsumption.data);
-        } catch (error) {
-            console.error(error);
-            alert(`No se pudo consultar el dashboard: ${error.message}`);
-        } finally {
-            setLoading(false);
+        // Cada widget: éxito → renderizar, error → mostrar estado de error
+        _widgetRender(kpisResult,
+            (data) => renderKpis(data),
+            () => renderKpisError()
+        );
+        _widgetRender(seriesResult,
+            (data) => renderAreaChart(data),
+            (msg) => showCanvasError('areaChart', 'areaChart', msg)
+        );
+        _widgetRender(resultsResult,
+            (data) => renderPieChart(data),
+            (msg) => showCanvasError('pieChart', 'pieChart', msg)
+        );
+        _widgetRender(familiesResult,
+            (data) => renderFamilyList(data),
+            (msg) => showContainerError(elements.familyListContainer, msg)
+        );
+        _widgetRender(geoResult,
+            (data) => renderMapChart(data),
+            () => { /* el mapa muestra lo último que tenía; no se fuerza error visual */ }
+        );
+        _widgetRender(clientsResult,
+            (data) => renderBarClientChart(data),
+            (msg) => showCanvasError('barClientChart', 'barClientChart', msg)
+        );
+        _widgetRender(consumptionResult,
+            (data) => renderPivotTable(data),
+            (msg) => showPivotError(msg)
+        );
+
+        setLoading(false);
+    }
+
+    /**
+     * Ejecuta successFn con los datos si el resultado es exitoso (fulfilled + ok !== false).
+     * Si falló (rejected o ok === false), llama a errorFn con un mensaje de error breve.
+     */
+    function _widgetRender(result, successFn, errorFn) {
+        if (result.status === 'fulfilled' && result.value.ok !== false) {
+            try {
+                successFn(result.value.data);
+            } catch (renderError) {
+                console.error('[DIM] Error al renderizar widget:', renderError);
+                errorFn('Error al dibujar el widget.');
+            }
+            return;
+        }
+        const errMsg = (result.status === 'rejected')
+            ? (result.reason?.message || 'Error de red')
+            : (result.value?.message || 'No disponible temporalmente');
+        const errCode = (result.status === 'fulfilled') ? (result.value?.error_code || '') : 'network';
+        console.warn('[DIM] Widget no disponible. error_code=' + errCode + ' msg=' + errMsg);
+        errorFn(errMsg);
+    }
+
+    /** Muestra '--' en los KPIs cuando la query falló. */
+    function renderKpisError() {
+        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiQuantity]
+            .forEach((el) => { if (el) el.textContent = '--'; });
+    }
+
+    /** Muestra un mensaje de error en un canvas: destruye el gráfico previo y pinta texto. */
+    function showCanvasError(canvasId, chartStateKey, msg) {
+        if (state[chartStateKey]) {
+            state[chartStateKey].destroy();
+            state[chartStateKey] = null;
+        }
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(msg || 'No disponible temporalmente', canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+    }
+
+    /** Muestra un mensaje de error dentro de un contenedor genérico (div, tabla, etc.). */
+    function showContainerError(container, msg) {
+        if (!container) return;
+        container.innerHTML = `<div class="text-center text-muted py-4 small">${msg || 'No disponible temporalmente'}</div>`;
+    }
+
+    /** Muestra un mensaje de error en la tabla pivot (cabecera + cuerpo). */
+    function showPivotError(msg) {
+        if (elements.pivotHeader) elements.pivotHeader.innerHTML = '';
+        if (elements.pivotBody) {
+            elements.pivotBody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3 small">${msg || 'No disponible temporalmente'}</td></tr>`;
         }
     }
 
@@ -307,9 +401,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = `/api/mercado-privado/dimensiones${path}${query.toString() ? `?${query}` : ''}`;
         const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.ok) {
+
+        // Error HTTP real (4xx, 5xx): lanzar excepción para que el caller sepa
+        if (!response.ok) {
             throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
         }
+        // ok: false del backend (timeout, backend_error): retornar payload para que
+        // cada widget lo maneje de forma independiente con _widgetRender.
         return payload;
     }
 

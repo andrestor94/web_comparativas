@@ -452,6 +452,8 @@ def _build_upsert_statement(rows: list[dict[str, Any]]):
 
 def _rebuild_summary_table(session: Session, run_id: int) -> None:
     logger.info("Rebuilding monthly summary table for import_run_id=%s", run_id)
+    if IS_POSTGRES:
+        session.execute(text("SET LOCAL statement_timeout = 0"))
     session.execute(delete(DimensionamientoFamilyMonthlySummary))
 
     if IS_SQLITE:

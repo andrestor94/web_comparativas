@@ -129,6 +129,173 @@ def ensure_normalized_storage_columns():
     print("[MIGRATION] Columnas de persistencia de archivos verificadas/creadas.", flush=True)
 
 
+def ensure_dimensionamiento_indexes():
+    """
+    Crea índices funcionales en dimensionamiento_records para las expresiones
+    UPPER(TRIM(CAST(COALESCE(col, '') AS TEXT))) usadas en _apply_common_filters.
+
+    Sin estos índices, los WHERE con funciones en la columna hacen seq scan completo
+    sobre 400k+ filas. Con ellos, PostgreSQL puede usar index scan.
+
+    Solo aplica en PostgreSQL. En SQLite se omite (no soporta índices funcionales
+    con las mismas funciones).
+
+    También agrega el índice funcional sobre el CASE WHEN de cliente_visible para
+    acelerar las búsquedas de clientes en _distinct_visible_clients.
+    """
+    if IS_SQLITE:
+        print("[MIGRATION] ensure_dimensionamiento_indexes: SQLite, saltando.", flush=True)
+        return
+
+    indexes = [
+        (
+            "ix_dim_records_plataforma_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(plataforma, '') as text)))",
+        ),
+        (
+            "ix_dim_records_familia_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(familia, '') as text)))",
+        ),
+        (
+            "ix_dim_records_provincia_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(provincia, '') as text)))",
+        ),
+        (
+            "ix_dim_records_resultado_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(resultado_participacion, '') as text)))",
+        ),
+        (
+            "ix_dim_records_unidad_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(unidad_negocio, '') as text)))",
+        ),
+        (
+            "ix_dim_records_subunidad_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(subunidad_negocio, '') as text)))",
+        ),
+        (
+            "ix_dim_records_cliente_hom_norm",
+            "dimensionamiento_records",
+            "upper(trim(cast(coalesce(cliente_nombre_homologado, '') as text)))",
+        ),
+    ]
+
+    for idx_name, table_name, expr in indexes:
+        ddl = (
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {idx_name} "
+            f"ON {table_name} ({expr})"
+        )
+        try:
+            # CONCURRENTLY no puede ejecutarse dentro de una transacción explícita.
+            # Usamos autocommit=True via raw connection.
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text(ddl))
+            print(f"[MIGRATION] Índice funcional '{idx_name}' verificado/creado.", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                print(f"[MIGRATION] Índice '{idx_name}': ya existe. (OK)", flush=True)
+            else:
+                print(f"[MIGRATION] Índice '{idx_name}': advertencia – {e}", flush=True)
+
+
+def ensure_dimensionamiento_summary_populated():
+    """
+    Detecta si dimensionamiento_records tiene datos pero la tabla de resumen mensual
+    (dimensionamiento_family_monthly_summary) está vacía. Esto ocurre cuando la
+    ingesta de datos cargó los registros correctamente pero la reconstrucción de la
+    tabla resumen falló (por ejemplo, por timeout en la primera carga en Render).
+
+    Si se detecta el problema, intenta reconstruir la tabla resumen con los datos
+    existentes. Si falla, loguea la advertencia sin interrumpir el inicio de la app.
+
+    Impacto si no se ejecuta:
+    - get_filter_options fast-path devuelve listas vacías de provincias, familias, etc.
+    - El dashboard parece no tener datos aunque haya 300k+ registros en DB.
+    """
+    from sqlalchemy import select, func as sa_func
+
+    try:
+        from web_comparativas.dimensionamiento.models import (
+            DimensionamientoRecord,
+            DimensionamientoFamilyMonthlySummary,
+            DimensionamientoImportRun,
+        )
+        from web_comparativas.models import SessionLocal
+
+        session = SessionLocal()
+        try:
+            records_count = session.execute(
+                select(sa_func.count()).select_from(DimensionamientoRecord)
+            ).scalar_one()
+            summary_count = session.execute(
+                select(sa_func.count()).select_from(DimensionamientoFamilyMonthlySummary)
+            ).scalar_one()
+
+            print(
+                f"[MIGRATION] Dimensionamiento: records={records_count} summary_rows={summary_count}",
+                flush=True,
+            )
+
+            if records_count > 0 and summary_count == 0:
+                print(
+                    "[MIGRATION] ALERTA: dimensionamiento_records tiene datos pero "
+                    "dimensionamiento_family_monthly_summary está vacía. "
+                    "Reconstruyendo tabla resumen...",
+                    flush=True,
+                )
+                # Buscar el último import_run exitoso o el más reciente
+                latest_run = session.execute(
+                    select(DimensionamientoImportRun)
+                    .order_by(
+                        DimensionamientoImportRun.status.desc(),
+                        DimensionamientoImportRun.id.desc(),
+                    )
+                    .limit(1)
+                ).scalar_one_or_none()
+
+                if latest_run is None:
+                    print(
+                        "[MIGRATION] No se encontró import_run. "
+                        "La tabla resumen no puede reconstruirse automáticamente.",
+                        flush=True,
+                    )
+                    return
+
+                from web_comparativas.dimensionamiento.ingestion import _rebuild_summary_table
+
+                # Desactivar timeout local para esta operación batch
+                if not IS_SQLITE:
+                    session.execute(text("SET LOCAL statement_timeout = 0"))
+
+                _rebuild_summary_table(session, latest_run.id)
+                session.commit()
+                print(
+                    f"[MIGRATION] Tabla resumen reconstruida para import_run_id={latest_run.id}.",
+                    flush=True,
+                )
+            else:
+                print("[MIGRATION] Tabla resumen OK, no requiere reconstrucción.", flush=True)
+        except Exception as e:
+            session.rollback()
+            print(
+                f"[MIGRATION] ensure_dimensionamiento_summary_populated: advertencia – {e}",
+                flush=True,
+            )
+        finally:
+            session.close()
+    except ImportError as e:
+        print(
+            f"[MIGRATION] ensure_dimensionamiento_summary_populated: import error – {e}",
+            flush=True,
+        )
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados (status 'reviewing' o 'done') que aún no tienen
