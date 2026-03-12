@@ -205,14 +205,25 @@ def _distinct_summary_clients(session: Session) -> list[str]:
 
 def _cliente_visible_expr(model):
     """
-    Expresión SQL para el nombre visible del cliente:
-    - cliente_nombre_homologado si es válido (no vacío, no variante de SIN DATO)
-    - cliente_nombre_original como fallback cuando homologado es inválido
-    - NULL si ambos son nulos/vacíos
+    Expresión SQL para el nombre visible del cliente.
+
+    Para la tabla resumen (DimensionamientoFamilyMonthlySummary):
+      - Retorna cliente_nombre_homologado directamente. No hay CASE WHEN ni
+        funciones de cadena, lo que permite que el planificador use índices.
+
+    Para la tabla de detalle (DimensionamientoRecord):
+      - CASE WHEN: usa homologado si es válido, fallback a cliente_nombre_original,
+        NULL si ambos son inválidos o SIN DATO.
     """
     mapper = sa_inspect(model)
     mapped_cols = {attr.key for attr in mapper.mapper.column_attrs}
-    original_column = model.cliente_nombre_original if "cliente_nombre_original" in mapped_cols else literal(None)
+
+    # Tabla resumen: no tiene cliente_nombre_original.
+    # Retornar la columna directo elimina el CASE WHEN más costoso del módulo.
+    if "cliente_nombre_original" not in mapped_cols:
+        return model.cliente_nombre_homologado
+
+    original_column = model.cliente_nombre_original
     _homologado_upper = func.upper(func.trim(func.coalesce(model.cliente_nombre_homologado, "")))
     _homologado_is_invalid = or_(
         func.trim(func.coalesce(model.cliente_nombre_homologado, "")) == "",
@@ -392,8 +403,64 @@ def _distinct_summary_values(session: Session, column, order_by=None) -> list[st
     return [value for value in session.execute(stmt).scalars().all() if value not in (None, "")]
 
 
+def _distinct_filtered_summary_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
+    """Clientes únicos desde la tabla resumen aplicando filtros activos.
+
+    Más rápido que _distinct_visible_clients: no hace CASE WHEN ni full scan sobre
+    dimensionamiento_records. Filtra is_client=True para excluir variantes de SIN DATO.
+    Usa el mismo criterio de exclusión que _distinct_summary_clients.
+    """
+    model = DimensionamientoFamilyMonthlySummary
+    inner_stmt = _apply_common_filters(
+        select(model.cliente_nombre_homologado.label("_val"))
+        .where(model.cliente_nombre_homologado.isnot(None))
+        .where(model.is_client == True),  # noqa: E712
+        model,
+        filters,
+    )
+    subq = inner_stmt.subquery()
+    outer_stmt = (
+        select(distinct(subq.c._val))
+        .where(subq.c._val.isnot(None))
+        .where(subq.c._val != "")
+        .order_by(subq.c._val)
+    )
+    all_clients = [v for v in session.execute(outer_stmt).scalars().all() if v]
+    return [c for c in all_clients if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE]
+
+
+def _distinct_filtered_summary_values(
+    session: Session, column, filters: DimensionamientoFilters
+) -> list[str]:
+    """Valores únicos de una columna de la tabla resumen aplicando filtros activos."""
+    model = DimensionamientoFamilyMonthlySummary
+    inner_stmt = _apply_common_filters(
+        select(column.label("_val")).where(column.is_not(None)),
+        model,
+        filters,
+    )
+    subq = inner_stmt.subquery()
+    outer_stmt = (
+        select(distinct(subq.c._val))
+        .where(subq.c._val.isnot(None))
+        .order_by(subq.c._val)
+    )
+    return [v for v in session.execute(outer_stmt).scalars().all() if v not in (None, "")]
+
+
 def _aggregate_model_for_filters(filters: DimensionamientoFilters):
-    return DimensionamientoRecord
+    """Selecciona el modelo óptimo para queries de agregación.
+
+    Sin filtro de texto → usa DimensionamientoFamilyMonthlySummary (tabla pre-agregada,
+    decenas de miles de filas vs 400k+ en la tabla de detalle). Esto elimina los full
+    scans con CASE WHEN que causaban timeouts en kpis, clients-by-result y series.
+
+    Con filtro de texto (search) → usa DimensionamientoRecord porque las columnas
+    descripcion, codigo_articulo y producto_nombre_original no existen en el resumen.
+    """
+    if filters.search:
+        return DimensionamientoRecord
+    return DimensionamientoFamilyMonthlySummary
 
 
 
@@ -550,30 +617,50 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
             }
         else:
             applied_conditions: list[str] = []
+            # Usar tabla resumen cuando no hay búsqueda de texto (mucho más rápido)
+            use_summary = not filters.search
+            filt_model = DimensionamientoFamilyMonthlySummary if use_summary else DimensionamientoRecord
+            date_col = _get_date_column(filt_model)
             date_bounds_stmt = _apply_common_filters(
-                select(
-                    func.min(DimensionamientoRecord.fecha),
-                    func.max(DimensionamientoRecord.fecha),
-                ),
-                DimensionamientoRecord,
+                select(func.min(date_col), func.max(date_col)),
+                filt_model,
                 filters,
                 applied_conditions,
             )
-            _log_query_statement(session, "get_filter_options.date_bounds", DimensionamientoRecord, date_bounds_stmt, filters, applied_conditions)
+            _log_query_statement(session, "get_filter_options.date_bounds", filt_model, date_bounds_stmt, filters, applied_conditions)
             min_date, max_date = session.execute(date_bounds_stmt).one()
-            payload = {
-                "clientes": _distinct_visible_clients(session, filters),
-                "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
-                "familias": _distinct_values(session, DimensionamientoRecord.familia, filters),
-                "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, filters),
-                "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, filters),
-                "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, filters),
-                "resultados": _distinct_values(session, DimensionamientoRecord.resultado_participacion, filters),
-                "date_range": {
-                    "min": min_date.isoformat() if min_date else None,
-                    "max": max_date.isoformat() if max_date else None,
-                },
-            }
+
+            if use_summary:
+                # Ruta rápida con filtros activos: tabla resumen, sin CASE WHEN
+                s = DimensionamientoFamilyMonthlySummary
+                payload = {
+                    "clientes": _distinct_filtered_summary_clients(session, filters),
+                    "provincias": _distinct_filtered_summary_values(session, s.provincia, filters),
+                    "familias": _distinct_filtered_summary_values(session, s.familia, filters),
+                    "plataformas": _distinct_filtered_summary_values(session, s.plataforma, filters),
+                    "unidades_negocio": _distinct_filtered_summary_values(session, s.unidad_negocio, filters),
+                    "subunidades_negocio": _distinct_filtered_summary_values(session, s.subunidad_negocio, filters),
+                    "resultados": _distinct_filtered_summary_values(session, s.resultado_participacion, filters),
+                    "date_range": {
+                        "min": min_date.isoformat() if min_date else None,
+                        "max": max_date.isoformat() if max_date else None,
+                    },
+                }
+            else:
+                # Solo cuando hay búsqueda de texto: tabla de detalle (necesaria)
+                payload = {
+                    "clientes": _distinct_visible_clients(session, filters),
+                    "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
+                    "familias": _distinct_values(session, DimensionamientoRecord.familia, filters),
+                    "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, filters),
+                    "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, filters),
+                    "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, filters),
+                    "resultados": _distinct_values(session, DimensionamientoRecord.resultado_participacion, filters),
+                    "date_range": {
+                        "min": min_date.isoformat() if min_date else None,
+                        "max": max_date.isoformat() if max_date else None,
+                    },
+                }
 
         _log_query_success(
             "get_filter_options",
@@ -597,30 +684,55 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
     try:
         _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
-        _visible = _cliente_visible_expr(model)
         applied_conditions: list[str] = []
-        stmt = _apply_common_filters(
-            select(
-                func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0),
-                func.count(distinct(_visible)),
-                func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0),
-                func.count(distinct(model.familia)),
-                func.coalesce(
-                    func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
-                    0,
+
+        if model is DimensionamientoRecord:
+            # Tabla de detalle: query única con CASE WHEN para cliente visible
+            _visible = _cliente_visible_expr(model)
+            stmt = _apply_common_filters(
+                select(
+                    func.count(model.id),
+                    func.count(distinct(_visible)),
+                    func.count(model.id),
+                    func.count(distinct(model.familia)),
+                    func.coalesce(func.sum(model.cantidad_demandada), 0),
                 ),
-            ),
-            model,
-            filters,
-            applied_conditions,
-        )
-        _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
-        total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
+                model,
+                filters,
+                applied_conditions,
+            )
+            _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
+            total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
+        else:
+            # Tabla resumen: 2 queries rápidas evitan full scan de 400k+ filas
+            # Query 1: totales, familias, cantidad
+            main_stmt = _apply_common_filters(
+                select(
+                    func.coalesce(func.sum(model.total_registros), 0),
+                    func.count(distinct(model.familia)),
+                    func.coalesce(func.sum(model.total_cantidad), 0),
+                ),
+                model,
+                filters,
+                applied_conditions,
+            )
+            _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
+            total_rows, total_families, total_quantity = session.execute(main_stmt).one()
+            # Query 2: clientes únicos reales (is_client=True excluye SIN DATO)
+            client_stmt = _apply_common_filters(
+                select(func.count(distinct(model.cliente_nombre_homologado)))
+                .where(model.is_client == True),  # noqa: E712
+                model,
+                filters,
+            )
+            total_clients = session.execute(client_stmt).scalar_one()
+            total_records = total_rows
+
         payload = {
-            "total_rows": total_rows or 0,
-            "clientes": total_clients or 0,
-            "renglones": total_records or 0,
-            "familias": total_families or 0,
+            "total_rows": int(total_rows or 0),
+            "clientes": int(total_clients or 0),
+            "renglones": int(total_records or 0),
+            "familias": int(total_families or 0),
             "cantidad_demandada": float(total_quantity or 0),
         }
         _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
@@ -810,25 +922,43 @@ def get_clients_by_result(
     try:
         _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
-        _visible_raw = _cliente_visible_expr(model)
-        total_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         subquery_conditions: list[str] = []
-        subquery = _apply_common_filters(
-            select(
-                _visible_raw.label("cliente"),
-                model.resultado_participacion.label("resultado"),
-                total_expr.label("total"),
-            )
-            .where(_visible_raw.isnot(None))
-            .where(func.coalesce(_visible_raw, "") != "")
-            .group_by(
-                _visible_raw,
-                model.resultado_participacion,
-            ),
-            model,
-            filters,
-            subquery_conditions,
-        ).subquery()
+
+        if model is DimensionamientoRecord:
+            # Tabla de detalle: CASE WHEN necesario para resolver cliente_nombre_original
+            _visible_raw = _cliente_visible_expr(model)
+            total_expr = func.count(model.id)
+            subquery = _apply_common_filters(
+                select(
+                    _visible_raw.label("cliente"),
+                    model.resultado_participacion.label("resultado"),
+                    total_expr.label("total"),
+                )
+                .where(_visible_raw.isnot(None))
+                .where(func.coalesce(_visible_raw, "") != "")
+                .group_by(_visible_raw, model.resultado_participacion),
+                model,
+                filters,
+                subquery_conditions,
+            ).subquery()
+        else:
+            # Tabla resumen: sin CASE WHEN, columna directa + is_client=True
+            # es_client=True garantiza que son clientes reales (no SIN DATO)
+            total_expr = func.coalesce(func.sum(model.total_registros), 0)
+            subquery = _apply_common_filters(
+                select(
+                    model.cliente_nombre_homologado.label("cliente"),
+                    model.resultado_participacion.label("resultado"),
+                    total_expr.label("total"),
+                )
+                .where(model.is_client == True)  # noqa: E712
+                .where(model.cliente_nombre_homologado.isnot(None))
+                .where(model.cliente_nombre_homologado != "")
+                .group_by(model.cliente_nombre_homologado, model.resultado_participacion),
+                model,
+                filters,
+                subquery_conditions,
+            ).subquery()
         _log_query_statement(session, "get_clients_by_result.subquery", model, select(subquery), filters, subquery_conditions)
 
         top_clients_stmt = select(

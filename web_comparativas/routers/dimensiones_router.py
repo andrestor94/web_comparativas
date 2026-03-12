@@ -49,6 +49,11 @@ def _load_negocio_labels() -> dict[str, Any]:
     """
     result: dict[str, Any] = {"unidades": {}, "subunidades": {}}
     if not _NEGOCIOS_PATH.exists():
+        logger.warning(
+            "[NEGOCIO] Negocios.xlsx no encontrado en %s. "
+            "Los filtros de unidad/subunidad no tendrán etiquetas descriptivas.",
+            _NEGOCIOS_PATH,
+        )
         return result
     try:
         import openpyxl
@@ -101,8 +106,14 @@ def _load_negocio_labels() -> dict[str, Any]:
 
         result["unidades"] = unidades
         result["subunidades"] = subunidades
+        logger.info(
+            "[NEGOCIO] Negocios.xlsx cargado: %d unidades, %d subunidades desde %s",
+            len(unidades),
+            len(subunidades),
+            _NEGOCIOS_PATH,
+        )
     except Exception:
-        pass
+        logger.exception("[NEGOCIO] Error leyendo Negocios.xlsx en %s", _NEGOCIOS_PATH)
     return result
 
 AllowedUser = Annotated[
