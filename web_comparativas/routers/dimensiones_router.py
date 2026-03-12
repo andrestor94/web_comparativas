@@ -14,6 +14,7 @@ from web_comparativas.auth import require_roles
 from web_comparativas.dimensionamiento.query_service import (
     build_filters,
     get_clients_by_result,
+    get_debug_snapshot,
     get_family_consumption_table,
     get_filter_options,
     get_geography_distribution,
@@ -183,6 +184,27 @@ def dimensionamiento_status(
         return {"ok": True, "data": data}
     except Exception:
         logger.exception("[DIM][API] GET /status failed")
+        raise
+
+
+@router.get("/debug-snapshot")
+def dimensionamiento_debug_snapshot(
+    request: Request,
+    _: AllowedUser,
+    db: Session = Depends(get_db),
+):
+    payload = _request_debug_payload(request)
+    logger.info("[DIM][API] debug_snapshot start payload=%s", payload)
+    try:
+        data = get_debug_snapshot(db)
+        logger.info(
+            "[DIM][API] debug_snapshot success total_registros=%s table=%s",
+            data.get("total_registros"),
+            data.get("table"),
+        )
+        return {"ok": True, "data": data}
+    except Exception:
+        logger.exception("[DIM][API] debug_snapshot failed payload=%s", payload)
         raise
 
 

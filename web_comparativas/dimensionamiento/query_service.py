@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import Date, case, cast, distinct, func, literal, or_, select, text
+from sqlalchemy import Date, Text, case, cast, distinct, func, literal, or_, select, text
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from web_comparativas.models import IS_POSTGRES, IS_SQLITE
 from .models import DimensionamientoFamilyMonthlySummary, DimensionamientoImportRun, DimensionamientoRecord
 
 logger = logging.getLogger("wc.dimensionamiento.query")
+_NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 
 
 def _get_date_column(model):
@@ -107,14 +108,75 @@ def _normalize_list(values: Iterable[str] | None) -> list[str]:
     if not values:
         return []
     cleaned: list[str] = []
+    seen: set[str] = set()
     for value in values:
         if value is None:
             continue
         for part in str(value).split(","):
-            item = part.strip()
-            if item:
+            item = " ".join(str(part).strip().split())
+            if not item or item.lower() in _NO_FILTER_TOKENS:
+                continue
+            dedupe_key = item.casefold()
+            if dedupe_key not in seen:
+                seen.add(dedupe_key)
                 cleaned.append(item)
     return cleaned
+
+
+def _sql_normalized_text(column):
+    return func.upper(func.trim(cast(func.coalesce(column, ""), Text)))
+
+
+def _normalized_filter_values(values: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = " ".join(str(value or "").strip().split())
+        if not item or item.lower() in _NO_FILTER_TOKENS:
+            continue
+        key = item.upper()
+        if key not in seen:
+            seen.add(key)
+            normalized.append(key)
+    return normalized
+
+
+def _model_column_or_literal(model, column_name: str, default: str = ""):
+    mapper = sa_inspect(model)
+    mapped_cols = {attr.key for attr in mapper.mapper.column_attrs}
+    if column_name in mapped_cols:
+        return getattr(model, column_name)
+    return literal(default)
+
+
+def _compile_sql(session: Session, stmt) -> str:
+    try:
+        return str(
+            stmt.compile(
+                dialect=session.bind.dialect if session.bind is not None else None,
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+    except Exception:
+        return str(stmt)
+
+
+def _log_query_statement(
+    session: Session,
+    name: str,
+    model,
+    stmt,
+    filters: DimensionamientoFilters,
+    applied_conditions: list[str],
+) -> None:
+    logger.info(
+        "[DIM][QUERY] %s statement model=%s filters=%s conditions=%s sql=%s",
+        name,
+        getattr(model, "__tablename__", str(model)),
+        _filters_debug_dict(filters),
+        applied_conditions,
+        _compile_sql(session, stmt),
+    )
 
 
 _SIN_DATO_SQL = ("SIN DATO", "SIN_DATO")
@@ -200,56 +262,83 @@ def build_filters(
     )
 
 
-def _apply_common_filters(stmt, model, filters: DimensionamientoFilters):
+def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
     if filters.clientes:
-        # Filtrar por nombre visible: homologado si válido, original como fallback
         _visible = _cliente_visible_expr(model)
-        stmt = stmt.where(_visible.in_(filters.clientes))
+        normalized_clients = _normalized_filter_values(filters.clientes)
+        if normalized_clients:
+            stmt = stmt.where(_sql_normalized_text(_visible).in_(normalized_clients))
+            if applied_conditions is not None:
+                applied_conditions.append(f"cliente_visible IN {normalized_clients}")
     if filters.provincias:
-        stmt = stmt.where(model.provincia.in_(filters.provincias))
+        normalized_provincias = _normalized_filter_values(filters.provincias)
+        if normalized_provincias:
+            stmt = stmt.where(_sql_normalized_text(model.provincia).in_(normalized_provincias))
+            if applied_conditions is not None:
+                applied_conditions.append(f"provincia IN {normalized_provincias}")
     if filters.familias:
-        stmt = stmt.where(model.familia.in_(filters.familias))
+        normalized_familias = _normalized_filter_values(filters.familias)
+        if normalized_familias:
+            stmt = stmt.where(_sql_normalized_text(model.familia).in_(normalized_familias))
+            if applied_conditions is not None:
+                applied_conditions.append(f"familia IN {normalized_familias}")
     if filters.plataformas:
-        stmt = stmt.where(model.plataforma.in_(filters.plataformas))
+        normalized_plataformas = _normalized_filter_values(filters.plataformas)
+        if normalized_plataformas:
+            stmt = stmt.where(_sql_normalized_text(model.plataforma).in_(normalized_plataformas))
+            if applied_conditions is not None:
+                applied_conditions.append(f"plataforma IN {normalized_plataformas}")
     if filters.unidades_negocio:
-        stmt = stmt.where(model.unidad_negocio.in_(filters.unidades_negocio))
+        normalized_unidades = _normalized_filter_values(filters.unidades_negocio)
+        if normalized_unidades:
+            stmt = stmt.where(_sql_normalized_text(model.unidad_negocio).in_(normalized_unidades))
+            if applied_conditions is not None:
+                applied_conditions.append(f"unidad_negocio IN {normalized_unidades}")
     if filters.subunidades_negocio:
-        stmt = stmt.where(model.subunidad_negocio.in_(filters.subunidades_negocio))
+        normalized_subunidades = _normalized_filter_values(filters.subunidades_negocio)
+        if normalized_subunidades:
+            stmt = stmt.where(_sql_normalized_text(model.subunidad_negocio).in_(normalized_subunidades))
+            if applied_conditions is not None:
+                applied_conditions.append(f"subunidad_negocio IN {normalized_subunidades}")
     if filters.resultados:
-        stmt = stmt.where(model.resultado_participacion.in_(filters.resultados))
+        normalized_resultados = _normalized_filter_values(filters.resultados)
+        if normalized_resultados:
+            stmt = stmt.where(_sql_normalized_text(model.resultado_participacion).in_(normalized_resultados))
+            if applied_conditions is not None:
+                applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
     if filters.identified is not None:
         stmt = stmt.where(model.is_identified.is_(filters.identified))
+        if applied_conditions is not None:
+            applied_conditions.append(f"is_identified IS {filters.identified}")
     if filters.is_client is not None:
-        # Fuente de verdad: cliente_nombre_homologado.
-        # "SIN DATO" y sus variantes (sin_dato, mayúsculas, espacios extra) = no cliente.
-        _nombre_upper = func.upper(func.trim(func.coalesce(model.cliente_nombre_homologado, "")))
-        _is_empty_or_sin_dato = or_(
-            func.trim(func.coalesce(model.cliente_nombre_homologado, "")) == "",
-            _nombre_upper.in_(list(_SIN_DATO_SQL)),
-        )
-        if filters.is_client:
-            # Sí: nombre real (no vacío, no variante de SIN DATO)
-            stmt = stmt.where(~_is_empty_or_sin_dato)
-        else:
-            # No: nulo, vacío, o cualquier variante de SIN DATO
-            stmt = stmt.where(_is_empty_or_sin_dato)
-
+        stmt = stmt.where(model.is_client.is_(filters.is_client))
+        if applied_conditions is not None:
+            applied_conditions.append(f"is_client IS {filters.is_client}")
     if filters.fecha_desde is not None:
         date_column = _get_date_column(model)
         stmt = stmt.where(date_column >= filters.fecha_desde)
+        if applied_conditions is not None:
+            applied_conditions.append(f"{date_column.key} >= {filters.fecha_desde.isoformat()}")
     if filters.fecha_hasta is not None:
         date_column = _get_date_column(model)
         stmt = stmt.where(date_column <= filters.fecha_hasta)
+        if applied_conditions is not None:
+            applied_conditions.append(f"{date_column.key} <= {filters.fecha_hasta.isoformat()}")
 
     if filters.search:
         token = f"%{filters.search.lower()}%"
+        cliente_original_column = _model_column_or_literal(model, "cliente_nombre_original")
+        codigo_articulo_column = _model_column_or_literal(model, "codigo_articulo")
+        producto_original_column = _model_column_or_literal(model, "producto_nombre_original")
         stmt = stmt.where(
             func.lower(func.coalesce(model.cliente_nombre_homologado, "")).like(token)
-            | func.lower(func.coalesce(getattr(model, "cliente_nombre_original", ""), "")).like(token)
+            | func.lower(func.coalesce(cliente_original_column, "")).like(token)
             | func.lower(func.coalesce(model.familia, "")).like(token)
-            | func.lower(func.coalesce(getattr(model, "codigo_articulo", ""), "")).like(token)
-            | func.lower(func.coalesce(getattr(model, "producto_nombre_original", ""), "")).like(token)
+            | func.lower(func.coalesce(codigo_articulo_column, "")).like(token)
+            | func.lower(func.coalesce(producto_original_column, "")).like(token)
         )
+        if applied_conditions is not None:
+            applied_conditions.append(f"search LIKE {token}")
     return stmt
 
 
@@ -283,9 +372,7 @@ def _distinct_summary_values(session: Session, column, order_by=None) -> list[st
 
 
 def _aggregate_model_for_filters(filters: DimensionamientoFilters):
-    if filters.search:
-        return DimensionamientoRecord
-    return DimensionamientoFamilyMonthlySummary
+    return DimensionamientoRecord
 
 
 
@@ -335,6 +422,69 @@ def get_status(session: Session) -> dict[str, Any]:
     return payload
 
 
+def get_debug_snapshot(session: Session) -> dict[str, Any]:
+    started_at = _log_query_start("get_debug_snapshot")
+    _apply_local_statement_timeout(session, 30000)
+
+    total_rows = session.execute(select(func.count(DimensionamientoRecord.id))).scalar_one()
+    distinct_platforms = session.execute(
+        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.plataforma))))
+    ).scalar_one()
+    distinct_clients = session.execute(
+        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.cliente_nombre_homologado))))
+    ).scalar_one()
+    distinct_families = session.execute(
+        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.familia))))
+    ).scalar_one()
+    distinct_provinces = session.execute(
+        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.provincia))))
+    ).scalar_one()
+    min_date, max_date = session.execute(
+        select(func.min(DimensionamientoRecord.fecha), func.max(DimensionamientoRecord.fecha))
+    ).one()
+    top_results_stmt = (
+        select(
+            DimensionamientoRecord.resultado_participacion,
+            func.count(DimensionamientoRecord.id).label("rows"),
+        )
+        .group_by(DimensionamientoRecord.resultado_participacion)
+        .order_by(func.count(DimensionamientoRecord.id).desc(), DimensionamientoRecord.resultado_participacion.asc())
+        .limit(10)
+    )
+    top_results = [
+        {"resultado_participacion": resultado or "Sin resultado", "rows": rows or 0}
+        for resultado, rows in session.execute(top_results_stmt).all()
+    ]
+    sample_values = {
+        "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, build_filters())[:10],
+        "familias": _distinct_values(session, DimensionamientoRecord.familia, build_filters())[:10],
+        "provincias": _distinct_values(session, DimensionamientoRecord.provincia, build_filters())[:10],
+        "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, build_filters())[:10],
+        "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, build_filters())[:10],
+    }
+    payload = {
+        "table": DimensionamientoRecord.__tablename__,
+        "summary_table": DimensionamientoFamilyMonthlySummary.__tablename__,
+        "columns": [column.name for column in DimensionamientoRecord.__table__.columns],
+        "total_registros": total_rows or 0,
+        "count_distinct_plataforma": distinct_platforms or 0,
+        "count_distinct_cliente_nombre_homologado": distinct_clients or 0,
+        "count_distinct_familia": distinct_families or 0,
+        "count_distinct_provincia": distinct_provinces or 0,
+        "min_fecha": min_date.isoformat() if min_date else None,
+        "max_fecha": max_date.isoformat() if max_date else None,
+        "top_10_resultado_participacion": top_results,
+        "sample_values": sample_values,
+    }
+    _log_query_success(
+        "get_debug_snapshot",
+        started_at,
+        total_registros=payload["total_registros"],
+        top_resultados=len(top_results),
+    )
+    return payload
+
+
 def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_filter_options start filters=%s", _filters_debug_dict(filters))
@@ -376,6 +526,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 },
             }
         else:
+            applied_conditions: list[str] = []
             date_bounds_stmt = _apply_common_filters(
                 select(
                     func.min(DimensionamientoRecord.fecha),
@@ -383,7 +534,9 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 ),
                 DimensionamientoRecord,
                 filters,
+                applied_conditions,
             )
+            _log_query_statement(session, "get_filter_options.date_bounds", DimensionamientoRecord, date_bounds_stmt, filters, applied_conditions)
             min_date, max_date = session.execute(date_bounds_stmt).one()
             payload = {
                 "clientes": _distinct_visible_clients(session, filters),
@@ -422,6 +575,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
         _apply_local_statement_timeout(session, 30000)
         model = _aggregate_model_for_filters(filters)
         _visible = _cliente_visible_expr(model)
+        applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0),
@@ -435,7 +589,9 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             ),
             model,
             filters,
+            applied_conditions,
         )
+        _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
         total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
         payload = {
             "total_rows": total_rows or 0,
@@ -458,6 +614,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
         model = _aggregate_model_for_filters(filters)
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        top_business_conditions: list[str] = []
         top_business_stmt = _apply_common_filters(
             select(
                 negocio_expr.label("negocio"),
@@ -468,11 +625,14 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
             .limit(limit),
             model,
             filters,
+            top_business_conditions,
         )
+        _log_query_statement(session, "get_series.top_businesses", model, top_business_stmt, filters, top_business_conditions)
         top_businesses = [row[0] for row in session.execute(top_business_stmt).all()]
 
         date_column = model.fecha if model is DimensionamientoRecord else model.month
         month_expr = cast(_month_expr(date_column), Date) if (model is DimensionamientoRecord and not IS_SQLITE) else date_column
+        series_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 month_expr.label("month"),
@@ -484,7 +644,11 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
             .order_by(month_expr.asc(), negocio_expr.asc()),
             model,
             filters,
+            series_conditions,
         )
+        if top_businesses:
+            series_conditions.append(f"negocio IN {top_businesses}")
+        _log_query_statement(session, "get_series", model, stmt, filters, series_conditions)
         series_map: dict[str, dict[str, float]] = {}
         for month, negocio, total in session.execute(stmt).all():
             month_key = month.isoformat() if hasattr(month, "isoformat") else str(month)
@@ -513,6 +677,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
         _apply_local_statement_timeout(session, 30000)
         model = _aggregate_model_for_filters(filters)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.resultado_participacion,
@@ -522,7 +687,9 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
             .order_by(count_expr.desc()),
             model,
             filters,
+            applied_conditions,
         )
+        _log_query_statement(session, "get_results_breakdown", model, stmt, filters, applied_conditions)
         payload = [
             {
                 "resultado": resultado or "Sin resultado",
@@ -547,6 +714,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
         )
+        applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.familia,
@@ -559,7 +727,9 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
             .limit(limit),
             model,
             filters,
+            applied_conditions,
         )
+        _log_query_statement(session, "get_top_families", model, stmt, filters, applied_conditions)
         payload = [
             {
                 "familia": familia or "Sin familia",
@@ -581,6 +751,7 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
         _apply_local_statement_timeout(session, 30000)
         model = _aggregate_model_for_filters(filters)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.provincia,
@@ -590,7 +761,9 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
             .order_by(count_expr.desc()),
             model,
             filters,
+            applied_conditions,
         )
+        _log_query_statement(session, "get_geography_distribution", model, stmt, filters, applied_conditions)
         payload = [
             {
                 "provincia": provincia or "Sin provincia",
@@ -616,6 +789,7 @@ def get_clients_by_result(
         model = _aggregate_model_for_filters(filters)
         _visible_raw = _cliente_visible_expr(model)
         total_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        subquery_conditions: list[str] = []
         subquery = _apply_common_filters(
             select(
                 _visible_raw.label("cliente"),
@@ -630,12 +804,15 @@ def get_clients_by_result(
             ),
             model,
             filters,
+            subquery_conditions,
         ).subquery()
+        _log_query_statement(session, "get_clients_by_result.subquery", model, select(subquery), filters, subquery_conditions)
 
         top_clients_stmt = select(
             subquery.c.cliente,
             func.sum(subquery.c.total).label("grand_total"),
         ).group_by(subquery.c.cliente).order_by(func.sum(subquery.c.total).desc()).limit(limit)
+        _log_query_statement(session, "get_clients_by_result.top_clients", model, top_clients_stmt, filters, subquery_conditions)
         top_clients = [row[0] for row in session.execute(top_clients_stmt).all()]
         if not top_clients:
             _log_query_success("get_clients_by_result", started_at, rows=0)
@@ -646,6 +823,9 @@ def get_clients_by_result(
             .where(subquery.c.cliente.in_(top_clients))
             .order_by(subquery.c.cliente.asc(), subquery.c.resultado.asc())
         )
+        detail_conditions = list(subquery_conditions)
+        detail_conditions.append(f"cliente IN {top_clients}")
+        _log_query_statement(session, "get_clients_by_result.detail", model, detail_stmt, filters, detail_conditions)
 
         client_map: dict[str, dict[str, float]] = {}
         for cliente, resultado, total in session.execute(detail_stmt).all():
@@ -678,6 +858,7 @@ def get_family_consumption_table(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
         )
+        applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 year_number.label("year_number"),
@@ -694,7 +875,9 @@ def get_family_consumption_table(
             .order_by(model.familia.asc(), year_number.asc(), month_number.asc()),
             model,
             filters,
+            applied_conditions,
         )
+        _log_query_statement(session, "get_family_consumption_table", model, stmt, filters, applied_conditions)
         rows = session.execute(stmt).all()
         if not rows:
             payload = {"months": [], "rows": []}
