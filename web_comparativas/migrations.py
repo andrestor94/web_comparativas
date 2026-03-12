@@ -1,3 +1,4 @@
+import datetime as dt
 from pathlib import Path
 from sqlalchemy import text
 from web_comparativas.models import engine, IS_SQLITE
@@ -285,10 +286,37 @@ def ensure_dimensionamiento_summary_populated():
                 if latest_run is None:
                     print(
                         "[MIGRATION] No se encontró import_run. "
-                        "La tabla resumen no puede reconstruirse automáticamente.",
+                        "Creando import_run sintético para poder reconstruir la summary.",
                         flush=True,
                     )
-                    return
+                    latest_run = DimensionamientoImportRun(
+                        source_path="reconstructed://dimensionamiento_records",
+                        source_hash=None,
+                        source_mtime=None,
+                        mode="rebuild-summary",
+                        status="success",
+                        chunk_size=0,
+                        started_at=dt.datetime.utcnow(),
+                        finished_at=dt.datetime.utcnow(),
+                        rows_processed=records_count,
+                        rows_inserted=0,
+                        rows_updated=records_count,
+                        rows_rejected=0,
+                        expected_columns=None,
+                        observed_columns=None,
+                        summary={
+                            "reason": "summary_rebuild_without_import_run",
+                            "records_count": records_count,
+                        },
+                        error_message=None,
+                    )
+                    session.add(latest_run)
+                    session.commit()
+                    session.refresh(latest_run)
+                    print(
+                        f"[MIGRATION] Import_run sintético creado id={latest_run.id}.",
+                        flush=True,
+                    )
 
                 from web_comparativas.dimensionamiento.ingestion import _rebuild_summary_table
 
