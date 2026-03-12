@@ -132,10 +132,30 @@ def _safe_dashboard_response(request: Request, endpoint_name: str, fn, fallback_
         data = fn()
         result_count = len(data) if isinstance(data, list) else (len(data.get("rows", [])) if isinstance(data, dict) and "rows" in data else None)
         logger.info("[DIM][API] %s success path=%s rows=%s", endpoint_name, request.url.path, result_count)
-        return {"ok": True, "data": data}
-    except Exception:
-        logger.exception("[DIM][API] %s failed payload=%s", endpoint_name, payload)
-        return {"ok": True, "data": fallback_data, "warning": f"{endpoint_name}_failed"}
+        return {"ok": True, "has_data": bool(data), "data": data}
+    except Exception as exc:
+        exc_str = str(exc).lower()
+        exc_type = type(exc).__name__.lower()
+        if (
+            "statement timeout" in exc_str
+            or "canceling statement" in exc_str
+            or "querycanceled" in exc_type
+            or "querycancelled" in exc_type
+        ):
+            error_code = "timeout"
+            log_msg = "[DIM][API] %s TIMEOUT path=%s exc=%s"
+        else:
+            error_code = "backend_error"
+            log_msg = "[DIM][API] %s BACKEND_ERROR path=%s exc=%s"
+        logger.exception(log_msg, endpoint_name, request.url.path, exc)
+        return {
+            "ok": False,
+            "has_data": False,
+            "data": fallback_data,
+            "error": True,
+            "error_code": error_code,
+            "message": f"Widget '{endpoint_name}' no disponible temporalmente.",
+        }
 
 
 def _filters_from_query(
@@ -239,10 +259,13 @@ def dimensionamiento_filters(
             len(data.get("plataformas", [])),
         )
         return {"ok": True, "data": data}
-    except Exception:
+    except Exception as exc:
+        exc_str = str(exc).lower()
+        error_code = "timeout" if ("statement timeout" in exc_str or "canceling statement" in exc_str) else "backend_error"
         logger.exception("[DIM][API] GET /filters failed filters=%s", filters)
         return {
-            "ok": True,
+            "ok": False,
+            "has_data": False,
             "data": {
                 "clientes": [],
                 "provincias": [],
@@ -253,7 +276,9 @@ def dimensionamiento_filters(
                 "resultados": [],
                 "date_range": {"min": None, "max": None},
             },
-            "warning": "filters_query_failed",
+            "error": True,
+            "error_code": error_code,
+            "message": "Filtros no disponibles temporalmente.",
         }
 
 

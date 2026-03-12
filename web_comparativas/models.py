@@ -61,11 +61,14 @@ else:
     # Postgres en Render:
     # 1. Timeout de conexión (TCP): 10s
     # 2. SSL requerido
-    # 3. Timeout de consulta (statement): 5000ms para evitar hangs infinitos por bloqueos
+    # 3. Timeout de consulta (statement): 55000ms (55s) como red de seguridad global.
+    #    Las queries críticas setean su propio timeout via SET LOCAL en query_service.py.
+    #    El valor anterior (5000ms) era demasiado bajo y causaba timeouts en el módulo
+    #    Dimensionamiento, cuyas queries sobre 400k+ filas pueden tardar 10-40s.
     connect_args = {
         "connect_timeout": 10,
         "sslmode": "require",
-        "options": "-c statement_timeout=5000"
+        "options": "-c statement_timeout=55000"
     }
 
 engine = create_engine(
@@ -83,7 +86,7 @@ IS_SQLITE = engine.url.get_backend_name() == "sqlite"
 IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
 
 print(
-    f"[DB DEBUG] Config: SSL=require, Timeout=5s. Backend: {engine.url.get_backend_name()} "
+    f"[DB DEBUG] Config: SSL=require, Timeout=55s. Backend: {engine.url.get_backend_name()} "
     f"(database={engine.url.database})",
     flush=True
 )

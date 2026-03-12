@@ -180,6 +180,27 @@ def _log_query_statement(
 
 
 _SIN_DATO_SQL = ("SIN DATO", "SIN_DATO")
+_SUMMARY_CLIENT_EXCLUDE: frozenset[str] = frozenset({"SIN DATO", "SIN_DATO"})
+
+
+def _distinct_summary_clients(session: Session) -> list[str]:
+    """Fast path: nombres únicos de clientes desde la tabla de resumen mensual.
+
+    Evita un full scan sobre dimensionamiento_records (400k–500k filas) cuando no hay
+    filtros activos. La tabla resumen ya tiene los datos pre-agregados y normalizados.
+    Excluye variantes de 'SIN DATO' y valores vacíos.
+    """
+    stmt = (
+        select(distinct(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado))
+        .where(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado.isnot(None))
+        .where(func.coalesce(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado, "") != "")
+        .order_by(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado)
+    )
+    all_clients = [c for c in session.execute(stmt).scalars().all() if c]
+    return [
+        c for c in all_clients
+        if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE
+    ]
 
 
 def _cliente_visible_expr(model):
@@ -379,7 +400,7 @@ def _aggregate_model_for_filters(filters: DimensionamientoFilters):
 def get_status(session: Session) -> dict[str, Any]:
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_status start")
-    _apply_local_statement_timeout(session, 30000)
+    _apply_local_statement_timeout(session, 50000)
 
     latest = session.execute(
         select(DimensionamientoImportRun)
@@ -424,7 +445,7 @@ def get_status(session: Session) -> dict[str, Any]:
 
 def get_debug_snapshot(session: Session) -> dict[str, Any]:
     started_at = _log_query_start("get_debug_snapshot")
-    _apply_local_statement_timeout(session, 30000)
+    _apply_local_statement_timeout(session, 50000)
 
     total_rows = session.execute(select(func.count(DimensionamientoRecord.id))).scalar_one()
     distinct_platforms = session.execute(
@@ -488,7 +509,7 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
 def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_filter_options start filters=%s", _filters_debug_dict(filters))
-    _apply_local_statement_timeout(session, 30000)
+    _apply_local_statement_timeout(session, 50000)
 
     try:
         if (
@@ -513,7 +534,9 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 )
             ).one()
             payload = {
-                "clientes": _distinct_visible_clients(session, filters),
+                # Usar la tabla resumen para clientes evita un full scan de 400k+ filas
+                # en dimensionamiento_records. La tabla resumen ya tiene los datos normalizados.
+                "clientes": _distinct_summary_clients(session),
                 "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia),
                 "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia),
                 "plataformas": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.plataforma),
@@ -572,7 +595,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
     started_at = _log_query_start("get_kpis", filters)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         _visible = _cliente_visible_expr(model)
         applied_conditions: list[str] = []
@@ -610,7 +633,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
 def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 5) -> dict[str, Any]:
     started_at = _log_query_start("get_series", filters, limit=limit)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
@@ -674,7 +697,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
 def get_results_breakdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
     started_at = _log_query_start("get_results_breakdown", filters)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
@@ -707,7 +730,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
 def get_top_families(session: Session, filters: DimensionamientoFilters, limit: int = 10) -> list[dict[str, Any]]:
     started_at = _log_query_start("get_top_families", filters, limit=limit)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         quantity_expr = func.coalesce(
@@ -748,7 +771,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
 def get_geography_distribution(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
     started_at = _log_query_start("get_geography_distribution", filters)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
@@ -785,7 +808,7 @@ def get_clients_by_result(
 ) -> list[dict[str, Any]]:
     started_at = _log_query_start("get_clients_by_result", filters, limit=limit)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         _visible_raw = _cliente_visible_expr(model)
         total_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
@@ -849,54 +872,75 @@ def get_family_consumption_table(
 ) -> dict[str, Any]:
     started_at = _log_query_start("get_family_consumption_table", filters, limit=limit)
     try:
-        _apply_local_statement_timeout(session, 30000)
+        _apply_local_statement_timeout(session, 50000)
         model = _aggregate_model_for_filters(filters)
         date_column = model.fecha if model is DimensionamientoRecord else model.month
-        month_number = func.strftime("%m", date_column) if IS_SQLITE else func.to_char(date_column, "MM")
-        year_number = func.strftime("%Y", date_column) if IS_SQLITE else func.to_char(date_column, "YYYY")
         total_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
         )
+
+        # Paso 1: identificar las top N familias por cantidad total (query liviana con GROUP BY familia).
+        # Esto limita el scan principal a solo esas familias, evitando traer todos los datos.
         applied_conditions: list[str] = []
-        stmt = _apply_common_filters(
+        top_families_stmt = _apply_common_filters(
             select(
-                year_number.label("year_number"),
-                month_number.label("month_number"),
                 model.familia,
-                total_expr.label("total"),
+                total_expr.label("grand_total"),
             )
             .where(model.familia.is_not(None))
-            .group_by(
-                year_number,
-                month_number,
-                model.familia,
-            )
-            .order_by(model.familia.asc(), year_number.asc(), month_number.asc()),
+            .group_by(model.familia)
+            .order_by(total_expr.desc())
+            .limit(limit),
             model,
             filters,
             applied_conditions,
         )
-        _log_query_statement(session, "get_family_consumption_table", model, stmt, filters, applied_conditions)
-        rows = session.execute(stmt).all()
-        if not rows:
+        _log_query_statement(session, "get_family_consumption_table.top_families", model, top_families_stmt, filters, applied_conditions)
+        top_families_rows = session.execute(top_families_stmt).all()
+        if not top_families_rows:
             payload = {"months": [], "rows": []}
             _log_query_success("get_family_consumption_table", started_at, months=0, rows=0)
             return payload
 
-        family_totals: dict[str, float] = {}
+        top_families = [f for f, _ in top_families_rows]
+
+        # Paso 2: query mensual solo para las familias seleccionadas.
+        # Usamos date_trunc('month', fecha) en lugar de to_char(fecha, 'MM') para que el
+        # planificador pueda usar el índice en 'fecha'. Extraemos el número de mes en Python.
+        month_bucket = cast(_month_expr(date_column), Date)
+        monthly_conditions: list[str] = []
+        monthly_stmt = _apply_common_filters(
+            select(
+                month_bucket.label("month_bucket"),
+                model.familia,
+                total_expr.label("total"),
+            )
+            .where(model.familia.in_(top_families))
+            .group_by(month_bucket, model.familia)
+            .order_by(month_bucket.asc(), model.familia.asc()),
+            model,
+            filters,
+            monthly_conditions,
+        )
+        monthly_conditions.append(f"familia IN {top_families}")
+        _log_query_statement(session, "get_family_consumption_table.monthly", model, monthly_stmt, filters, monthly_conditions)
+        rows = session.execute(monthly_stmt).all()
+
         month_keys = [f"{index:02d}" for index in range(1, 13)]
         monthly_values: dict[str, dict[str, list[float]]] = {}
-        for _, month_number_value, family, total in rows:
-            month_key = str(month_number_value).zfill(2)
+        for month_date, family, total in rows:
+            # Extraer número de mes del objeto date (o del string 'YYYY-MM-DD')
+            if hasattr(month_date, "month"):
+                month_key = f"{month_date.month:02d}"
+            else:
+                try:
+                    month_key = str(month_date)[5:7]
+                except Exception:
+                    month_key = "01"
             family_name = family or "Sin familia"
-            family_totals[family_name] = family_totals.get(family_name, 0) + float(total or 0)
             monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
 
-        top_families = [
-            family
-            for family, _ in sorted(family_totals.items(), key=lambda item: item[1], reverse=True)[:limit]
-        ]
         data = []
         for family in top_families:
             family_months = monthly_values.get(family, {})
