@@ -1,4 +1,5 @@
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import os
@@ -9,6 +10,7 @@ import datetime as dt
 import shutil
 import unicodedata
 import json
+from threading import Lock
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
@@ -33,7 +35,6 @@ from web_comparativas.visibility_service import (
 # === SETUP ===
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-app = FastAPI()
 
 # Logging Console
 logger = logging.getLogger("wc.main")
@@ -56,9 +57,20 @@ from web_comparativas.migrations import (
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 
-@app.on_event("startup")
-def run_startup_migrations():
-    print("[MIGRATION] Startup event...", flush=True)
+_startup_once_lock = Lock()
+_startup_once_completed = False
+
+
+def run_startup_migrations_once() -> None:
+    global _startup_once_completed
+
+    with _startup_once_lock:
+        if _startup_once_completed:
+            print("[STARTUP] Duplicate startup invocation skipped for this process.", flush=True)
+            return
+        _startup_once_completed = True
+
+    print("[STARTUP] Lifespan startup begin", flush=True)
     try:
         ensure_access_scope_column()
         print("[MIGRATION] SUCCESS: 'access_scope' checked/added.", flush=True)
@@ -103,6 +115,14 @@ def run_startup_migrations():
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    run_startup_migrations_once()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 # === MIDDLEWARES + DEBUG ===
