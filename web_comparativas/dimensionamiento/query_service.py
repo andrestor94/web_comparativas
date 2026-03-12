@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import Date, case, cast, distinct, func, or_, select, text
+from sqlalchemy import Date, case, cast, distinct, func, literal, or_, select, text
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
@@ -80,12 +80,21 @@ def _empty_filter_options() -> dict[str, Any]:
 
 def _apply_local_statement_timeout(session: Session, milliseconds: int) -> None:
     if IS_POSTGRES:
-        session.execute(text("SET LOCAL statement_timeout = :ms"), {"ms": milliseconds})
+        safe_milliseconds = max(int(milliseconds), 1000)
+        session.execute(text(f"SET LOCAL statement_timeout = {safe_milliseconds}"))
 
 
 def _log_query_success(name: str, started_at: float, **counts: Any) -> None:
     elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
     logger.info("[DIM][QUERY] %s completed in %sms counts=%s", name, elapsed_ms, counts)
+
+
+def _log_query_start(name: str, filters: DimensionamientoFilters | None = None, **extra: Any) -> float:
+    payload = dict(extra)
+    if filters is not None:
+        payload["filters"] = _filters_debug_dict(filters)
+    logger.info("[DIM][QUERY] %s start payload=%s", name, payload)
+    return time.perf_counter()
 
 
 def _month_expr(column):
@@ -118,13 +127,16 @@ def _cliente_visible_expr(model):
     - cliente_nombre_original como fallback cuando homologado es inválido
     - NULL si ambos son nulos/vacíos
     """
+    mapper = sa_inspect(model)
+    mapped_cols = {attr.key for attr in mapper.mapper.column_attrs}
+    original_column = model.cliente_nombre_original if "cliente_nombre_original" in mapped_cols else literal(None)
     _homologado_upper = func.upper(func.trim(func.coalesce(model.cliente_nombre_homologado, "")))
     _homologado_is_invalid = or_(
         func.trim(func.coalesce(model.cliente_nombre_homologado, "")) == "",
         _homologado_upper.in_(list(_SIN_DATO_SQL)),
     )
     return case(
-        (_homologado_is_invalid, model.cliente_nombre_original),
+        (_homologado_is_invalid, original_column),
         else_=model.cliente_nombre_homologado,
     )
 
@@ -270,6 +282,12 @@ def _distinct_summary_values(session: Session, column, order_by=None) -> list[st
     return [value for value in session.execute(stmt).scalars().all() if value not in (None, "")]
 
 
+def _aggregate_model_for_filters(filters: DimensionamientoFilters):
+    if filters.search:
+        return DimensionamientoRecord
+    return DimensionamientoFamilyMonthlySummary
+
+
 
 def get_status(session: Session) -> dict[str, Any]:
     started_at = time.perf_counter()
@@ -399,135 +417,192 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
 
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
-    _visible = _cliente_visible_expr(DimensionamientoRecord)
-    stmt = _apply_common_filters(
-        select(
-            func.count(DimensionamientoRecord.id),
-            func.count(distinct(_visible)),
-            func.count(DimensionamientoRecord.id),
-            func.count(distinct(DimensionamientoRecord.familia)),
-            func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0),
-        ),
-        DimensionamientoRecord,
-        filters,
-    )
-    total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
-    return {
-        "total_rows": total_rows or 0,
-        "clientes": total_clients or 0,
-        "renglones": total_records or 0,
-        "familias": total_families or 0,
-        "cantidad_demandada": float(total_quantity or 0),
-    }
+    started_at = _log_query_start("get_kpis", filters)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        _visible = _cliente_visible_expr(model)
+        stmt = _apply_common_filters(
+            select(
+                func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0),
+                func.count(distinct(_visible)),
+                func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0),
+                func.count(distinct(model.familia)),
+                func.coalesce(
+                    func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
+                    0,
+                ),
+            ),
+            model,
+            filters,
+        )
+        total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
+        payload = {
+            "total_rows": total_rows or 0,
+            "clientes": total_clients or 0,
+            "renglones": total_records or 0,
+            "familias": total_families or 0,
+            "cantidad_demandada": float(total_quantity or 0),
+        }
+        _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_kpis failed filters=%s", _filters_debug_dict(filters))
+        raise
 
 
 def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 5) -> dict[str, Any]:
-    negocio_expr = func.coalesce(DimensionamientoRecord.unidad_negocio, "Sin negocio")
-    top_business_stmt = _apply_common_filters(
-        select(
-            negocio_expr.label("negocio"),
-            func.count(DimensionamientoRecord.id).label("renglones"),
+    started_at = _log_query_start("get_series", filters, limit=limit)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
+        count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        top_business_stmt = _apply_common_filters(
+            select(
+                negocio_expr.label("negocio"),
+                count_expr.label("renglones"),
+            )
+            .group_by(negocio_expr)
+            .order_by(count_expr.desc(), negocio_expr.asc())
+            .limit(limit),
+            model,
+            filters,
         )
-        .group_by(negocio_expr)
-        .order_by(func.count(DimensionamientoRecord.id).desc(), negocio_expr.asc())
-        .limit(limit),
-        DimensionamientoRecord,
-        filters,
-    )
-    top_businesses = [row[0] for row in session.execute(top_business_stmt).all()]
+        top_businesses = [row[0] for row in session.execute(top_business_stmt).all()]
 
-    month_expr = cast(_month_expr(DimensionamientoRecord.fecha), Date) if not IS_SQLITE else _month_expr(DimensionamientoRecord.fecha)
-    stmt = _apply_common_filters(
-        select(
-            month_expr.label("month"),
-            negocio_expr.label("negocio"),
-            func.count(DimensionamientoRecord.id).label("renglones"),
+        date_column = model.fecha if model is DimensionamientoRecord else model.month
+        month_expr = cast(_month_expr(date_column), Date) if (model is DimensionamientoRecord and not IS_SQLITE) else date_column
+        stmt = _apply_common_filters(
+            select(
+                month_expr.label("month"),
+                negocio_expr.label("negocio"),
+                count_expr.label("renglones"),
+            )
+            .where(negocio_expr.in_(top_businesses) if top_businesses else False)
+            .group_by(month_expr, negocio_expr)
+            .order_by(month_expr.asc(), negocio_expr.asc()),
+            model,
+            filters,
         )
-        .where(negocio_expr.in_(top_businesses) if top_businesses else False)
-        .group_by(month_expr, negocio_expr)
-        .order_by(month_expr.asc(), negocio_expr.asc()),
-        DimensionamientoRecord,
-        filters,
-    )
-    series_map: dict[str, dict[str, float]] = {}
-    for month, negocio, total in session.execute(stmt).all():
-        month_key = month.isoformat() if hasattr(month, "isoformat") else str(month)
-        series_map.setdefault(month_key, {})[negocio] = float(total or 0)
+        series_map: dict[str, dict[str, float]] = {}
+        for month, negocio, total in session.execute(stmt).all():
+            month_key = month.isoformat() if hasattr(month, "isoformat") else str(month)
+            series_map.setdefault(month_key, {})[negocio] = float(total or 0)
 
-    months = sorted(series_map.keys())
-    datasets = []
-    for negocio in top_businesses:
-        datasets.append(
-            {
-                "label": negocio,
-                "values": [series_map.get(month, {}).get(negocio, 0) for month in months],
-            }
-        )
-    return {"months": months, "datasets": datasets}
+        months = sorted(series_map.keys())
+        datasets = []
+        for negocio in top_businesses:
+            datasets.append(
+                {
+                    "label": negocio,
+                    "values": [series_map.get(month, {}).get(negocio, 0) for month in months],
+                }
+            )
+        payload = {"months": months, "datasets": datasets}
+        _log_query_success("get_series", started_at, months=len(months), datasets=len(datasets))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_series failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        raise
 
 
 def get_results_breakdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    stmt = _apply_common_filters(
-        select(
-            DimensionamientoRecord.resultado_participacion,
-            func.count(DimensionamientoRecord.id).label("rows"),
+    started_at = _log_query_start("get_results_breakdown", filters)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        stmt = _apply_common_filters(
+            select(
+                model.resultado_participacion,
+                count_expr.label("rows"),
+            )
+            .group_by(model.resultado_participacion)
+            .order_by(count_expr.desc()),
+            model,
+            filters,
         )
-        .group_by(DimensionamientoRecord.resultado_participacion)
-        .order_by(func.count(DimensionamientoRecord.id).desc()),
-        DimensionamientoRecord,
-        filters,
-    )
-    return [
-        {
-            "resultado": resultado or "Sin resultado",
-            "renglones": rows or 0,
-        }
-        for resultado, rows in session.execute(stmt).all()
-    ]
+        payload = [
+            {
+                "resultado": resultado or "Sin resultado",
+                "renglones": rows or 0,
+            }
+            for resultado, rows in session.execute(stmt).all()
+        ]
+        _log_query_success("get_results_breakdown", started_at, rows=len(payload))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_results_breakdown failed filters=%s", _filters_debug_dict(filters))
+        raise
 
 
 def get_top_families(session: Session, filters: DimensionamientoFilters, limit: int = 10) -> list[dict[str, Any]]:
-    stmt = _apply_common_filters(
-        select(
-            DimensionamientoRecord.familia,
-            func.count(DimensionamientoRecord.id).label("rows"),
-            func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0).label("quantity"),
+    started_at = _log_query_start("get_top_families", filters, limit=limit)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        quantity_expr = func.coalesce(
+            func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
+            0,
         )
-        .where(DimensionamientoRecord.familia.is_not(None))
-        .group_by(DimensionamientoRecord.familia)
-        .order_by(func.count(DimensionamientoRecord.id).desc(), DimensionamientoRecord.familia.asc())
-        .limit(limit),
-        DimensionamientoRecord,
-        filters,
-    )
-    return [
-        {
-            "familia": familia or "Sin familia",
-            "renglones": rows or 0,
-            "cantidad": float(quantity or 0),
-        }
-        for familia, rows, quantity in session.execute(stmt).all()
-    ]
+        stmt = _apply_common_filters(
+            select(
+                model.familia,
+                count_expr.label("rows"),
+                quantity_expr.label("quantity"),
+            )
+            .where(model.familia.is_not(None))
+            .group_by(model.familia)
+            .order_by(count_expr.desc(), model.familia.asc())
+            .limit(limit),
+            model,
+            filters,
+        )
+        payload = [
+            {
+                "familia": familia or "Sin familia",
+                "renglones": rows or 0,
+                "cantidad": float(quantity or 0),
+            }
+            for familia, rows, quantity in session.execute(stmt).all()
+        ]
+        _log_query_success("get_top_families", started_at, rows=len(payload))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_top_families failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        raise
 
 
 def get_geography_distribution(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    stmt = _apply_common_filters(
-        select(
-            DimensionamientoRecord.provincia,
-            func.count(DimensionamientoRecord.id).label("rows"),
+    started_at = _log_query_start("get_geography_distribution", filters)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        stmt = _apply_common_filters(
+            select(
+                model.provincia,
+                count_expr.label("rows"),
+            )
+            .group_by(model.provincia)
+            .order_by(count_expr.desc()),
+            model,
+            filters,
         )
-        .group_by(DimensionamientoRecord.provincia)
-        .order_by(func.count(DimensionamientoRecord.id).desc()),
-        DimensionamientoRecord,
-        filters,
-    )
-    return [
-        {
-            "provincia": provincia or "Sin provincia",
-            "renglones": rows or 0,
-        }
-        for provincia, rows in session.execute(stmt).all()
-    ]
+        payload = [
+            {
+                "provincia": provincia or "Sin provincia",
+                "renglones": rows or 0,
+            }
+            for provincia, rows in session.execute(stmt).all()
+        ]
+        _log_query_success("get_geography_distribution", started_at, rows=len(payload))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_geography_distribution failed filters=%s", _filters_debug_dict(filters))
+        raise
 
 
 def get_clients_by_result(
@@ -535,46 +610,56 @@ def get_clients_by_result(
     filters: DimensionamientoFilters,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
-    # Nombre visible: homologado si válido, original como fallback (nunca "SIN DATO")
-    _visible_raw = _cliente_visible_expr(DimensionamientoRecord)
-    subquery = _apply_common_filters(
-        select(
-            _visible_raw.label("cliente"),
-            DimensionamientoRecord.resultado_participacion.label("resultado"),
-            func.count(DimensionamientoRecord.id).label("total"),
+    started_at = _log_query_start("get_clients_by_result", filters, limit=limit)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        _visible_raw = _cliente_visible_expr(model)
+        total_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        subquery = _apply_common_filters(
+            select(
+                _visible_raw.label("cliente"),
+                model.resultado_participacion.label("resultado"),
+                total_expr.label("total"),
+            )
+            .where(_visible_raw.isnot(None))
+            .where(func.coalesce(_visible_raw, "") != "")
+            .group_by(
+                _visible_raw,
+                model.resultado_participacion,
+            ),
+            model,
+            filters,
+        ).subquery()
+
+        top_clients_stmt = select(
+            subquery.c.cliente,
+            func.sum(subquery.c.total).label("grand_total"),
+        ).group_by(subquery.c.cliente).order_by(func.sum(subquery.c.total).desc()).limit(limit)
+        top_clients = [row[0] for row in session.execute(top_clients_stmt).all()]
+        if not top_clients:
+            _log_query_success("get_clients_by_result", started_at, rows=0)
+            return []
+
+        detail_stmt = (
+            select(subquery.c.cliente, subquery.c.resultado, subquery.c.total)
+            .where(subquery.c.cliente.in_(top_clients))
+            .order_by(subquery.c.cliente.asc(), subquery.c.resultado.asc())
         )
-        .where(_visible_raw.isnot(None))
-        .where(func.coalesce(_visible_raw, "") != "")
-        .group_by(
-            _visible_raw,
-            DimensionamientoRecord.resultado_participacion,
-        ),
-        DimensionamientoRecord,
-        filters,
-    ).subquery()
 
-    top_clients_stmt = select(
-        subquery.c.cliente,
-        func.sum(subquery.c.total).label("grand_total"),
-    ).group_by(subquery.c.cliente).order_by(func.sum(subquery.c.total).desc()).limit(limit)
-    top_clients = [row[0] for row in session.execute(top_clients_stmt).all()]
-    if not top_clients:
-        return []
+        client_map: dict[str, dict[str, float]] = {}
+        for cliente, resultado, total in session.execute(detail_stmt).all():
+            client_map.setdefault(cliente, {})[resultado or "Sin resultado"] = float(total or 0)
 
-    detail_stmt = (
-        select(subquery.c.cliente, subquery.c.resultado, subquery.c.total)
-        .where(subquery.c.cliente.in_(top_clients))
-        .order_by(subquery.c.cliente.asc(), subquery.c.resultado.asc())
-    )
-
-    client_map: dict[str, dict[str, float]] = {}
-    for cliente, resultado, total in session.execute(detail_stmt).all():
-        client_map.setdefault(cliente, {})[resultado or "Sin resultado"] = float(total or 0)
-
-    return [
-        {"cliente": cliente, "resultados": client_map.get(cliente, {})}
-        for cliente in top_clients
-    ]
+        payload = [
+            {"cliente": cliente, "resultados": client_map.get(cliente, {})}
+            for cliente in top_clients
+        ]
+        _log_query_success("get_clients_by_result", started_at, rows=len(payload))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_clients_by_result failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        raise
 
 
 def get_family_consumption_table(
@@ -582,56 +667,72 @@ def get_family_consumption_table(
     filters: DimensionamientoFilters,
     limit: int = 20,
 ) -> dict[str, Any]:
-    month_number = func.strftime("%m", DimensionamientoRecord.fecha) if IS_SQLITE else func.to_char(DimensionamientoRecord.fecha, "MM")
-    year_number = func.strftime("%Y", DimensionamientoRecord.fecha) if IS_SQLITE else func.to_char(DimensionamientoRecord.fecha, "YYYY")
-    stmt = _apply_common_filters(
-        select(
-            year_number.label("year_number"),
-            month_number.label("month_number"),
-            DimensionamientoRecord.familia,
-            func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0).label("total"),
+    started_at = _log_query_start("get_family_consumption_table", filters, limit=limit)
+    try:
+        _apply_local_statement_timeout(session, 30000)
+        model = _aggregate_model_for_filters(filters)
+        date_column = model.fecha if model is DimensionamientoRecord else model.month
+        month_number = func.strftime("%m", date_column) if IS_SQLITE else func.to_char(date_column, "MM")
+        year_number = func.strftime("%Y", date_column) if IS_SQLITE else func.to_char(date_column, "YYYY")
+        total_expr = func.coalesce(
+            func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
+            0,
         )
-        .where(DimensionamientoRecord.familia.is_not(None))
-        .group_by(
-            year_number,
-            month_number,
-            DimensionamientoRecord.familia,
+        stmt = _apply_common_filters(
+            select(
+                year_number.label("year_number"),
+                month_number.label("month_number"),
+                model.familia,
+                total_expr.label("total"),
+            )
+            .where(model.familia.is_not(None))
+            .group_by(
+                year_number,
+                month_number,
+                model.familia,
+            )
+            .order_by(model.familia.asc(), year_number.asc(), month_number.asc()),
+            model,
+            filters,
         )
-        .order_by(DimensionamientoRecord.familia.asc(), year_number.asc(), month_number.asc()),
-        DimensionamientoRecord,
-        filters,
-    )
-    rows = session.execute(stmt).all()
-    if not rows:
-        return {"months": [], "rows": []}
+        rows = session.execute(stmt).all()
+        if not rows:
+            payload = {"months": [], "rows": []}
+            _log_query_success("get_family_consumption_table", started_at, months=0, rows=0)
+            return payload
 
-    family_totals: dict[str, float] = {}
-    month_keys = [f"{index:02d}" for index in range(1, 13)]
-    monthly_values: dict[str, dict[str, list[float]]] = {}
-    for _, month_number_value, family, total in rows:
-        month_key = str(month_number_value).zfill(2)
-        family_name = family or "Sin familia"
-        family_totals[family_name] = family_totals.get(family_name, 0) + float(total or 0)
-        monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
+        family_totals: dict[str, float] = {}
+        month_keys = [f"{index:02d}" for index in range(1, 13)]
+        monthly_values: dict[str, dict[str, list[float]]] = {}
+        for _, month_number_value, family, total in rows:
+            month_key = str(month_number_value).zfill(2)
+            family_name = family or "Sin familia"
+            family_totals[family_name] = family_totals.get(family_name, 0) + float(total or 0)
+            monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
 
-    top_families = [
-        family
-        for family, _ in sorted(family_totals.items(), key=lambda item: item[1], reverse=True)[:limit]
-    ]
-    data = []
-    for family in top_families:
-        family_months = monthly_values.get(family, {})
-        data.append(
-            {
-                "familia": family,
-                "values": [
-                    (
-                        sum(family_months.get(month, [])) / len(family_months.get(month, []))
-                        if family_months.get(month)
-                        else 0
-                    )
-                    for month in month_keys
-                ],
-            }
-        )
-    return {"months": month_keys, "rows": data}
+        top_families = [
+            family
+            for family, _ in sorted(family_totals.items(), key=lambda item: item[1], reverse=True)[:limit]
+        ]
+        data = []
+        for family in top_families:
+            family_months = monthly_values.get(family, {})
+            data.append(
+                {
+                    "familia": family,
+                    "values": [
+                        (
+                            sum(family_months.get(month, [])) / len(family_months.get(month, []))
+                            if family_months.get(month)
+                            else 0
+                        )
+                        for month in month_keys
+                    ],
+                }
+            )
+        payload = {"months": month_keys, "rows": data}
+        _log_query_success("get_family_consumption_table", started_at, months=len(payload["months"]), rows=len(payload["rows"]))
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        raise
