@@ -285,6 +285,7 @@ class Upload(Base):
 
     # Persistencia robusta: contenido del normalized.xlsx y dashboard en DB
     # Evita pérdida de datos al redesplegar en Render (filesystem efímero)
+    original_content = Column(LargeBinary, nullable=True)     # bytes del archivo original subido
     normalized_content = Column(LargeBinary, nullable=True)   # bytes del Excel procesado
     dashboard_json = Column(Text, nullable=True)              # JSON del dashboard procesado
 

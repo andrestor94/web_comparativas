@@ -4,9 +4,17 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn web_comparativas.main:app --host 0.0.0.0 --port $PORT
+    # Persistent Disk: sobrevive redespliegues. Montado en /opt/render/project/data
+    # Los archivos subidos se guardan aquí vía UPLOADS_PATH=/opt/render/project/data/uploads
+    disk:
+      name: siem-uploads-disk
+      mountPath: /opt/render/project/data
+      sizeGB: 5
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: UPLOADS_PATH
+        value: /opt/render/project/data/uploads
       - key: DIMENSIONAMIENTO_AUTO_INGEST
         sync: false
       - key: DIMENSIONAMIENTO_STARTUP_MODE
@@ -18,4 +26,4 @@ services:
       - key: RENDER
         value: "true"
       - key: PYTHON_VERSION
-        value: "3.10" # Based on .python-version if it exists
+        value: "3.10"

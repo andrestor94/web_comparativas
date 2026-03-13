@@ -134,6 +134,15 @@ def _set_status_by_id(upload_id: int, status_key: str):
 # === Helpers de rutas absolutas y detecciones ================================
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # raíz del proyecto
 
+# Directorio raíz de uploads: respeta UPLOADS_PATH si está configurado
+# (apunta al Render Persistent Disk en producción, p.ej. /opt/render/project/data/uploads).
+# En local, usa {PROJECT_ROOT}/data/uploads como antes.
+_uploads_path_env = os.environ.get("UPLOADS_PATH", "").strip()
+if _uploads_path_env:
+    UPLOADS_ROOT = Path(_uploads_path_env)
+else:
+    UPLOADS_ROOT = PROJECT_ROOT / "data" / "uploads"
+
 def _abs_path(p):
     if not p:
         return None
@@ -226,7 +235,7 @@ def get_normalized_path(upload: UploadModel) -> Path | None:
     base_dir_abs = _abs_path(base_dir) or (PROJECT_ROOT / "data" / "uploads")
 
     # Match isolation logic from classify_and_process
-    if base_dir_abs == (PROJECT_ROOT / "data" / "uploads"):
+    if base_dir_abs == UPLOADS_ROOT:
          return base_dir_abs / f"iso_{upload.id}" / "processed" / "normalized.xlsx"
     
     return base_dir_abs / "processed" / "normalized.xlsx"
@@ -403,12 +412,12 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
     # NUEVO: asegurar snapshot del cargador al entrar al pipeline
     _ensure_uploader_snapshot(up)
 
-    base_dir_abs = _abs_path(getattr(up, "base_dir", None)) or (PROJECT_ROOT / "data" / "uploads")
+    base_dir_abs = _abs_path(getattr(up, "base_dir", None)) or UPLOADS_ROOT
     
     # --- FIX: enforce isolation even if base_dir is shared ---
     # If base_dir is the root uploads folder, force a subdirectory based on ID or UUID
     # to prevents data leakage between processes.
-    if base_dir_abs == (PROJECT_ROOT / "data" / "uploads"):
+    if base_dir_abs == UPLOADS_ROOT:
         # Fallback isolation
         out_dir = base_dir_abs / f"iso_{upload_id}" / "processed"
     else:
@@ -423,10 +432,24 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         # === Validación temprana del archivo ===
         file_path = _resolve_original_path(up, base_dir_abs)
         if not file_path or not file_path.exists():
-            raise RuntimeError(
-                f"No se encontró archivo fuente en {base_dir_abs}. "
-                f"Suba un .xlsx/.xls/.csv/.pdf o verifique original_path."
-            )
+            # Fallback: si el archivo no está en disco (p.ej. tras un redeploy en Render),
+            # intentar restaurarlo desde original_content guardado en DB.
+            orig_bytes = getattr(up, "original_content", None)
+            if orig_bytes:
+                orig_fname = getattr(up, "original_filename", None) or "restored_file"
+                restored_path = base_dir_abs / orig_fname
+                base_dir_abs.mkdir(parents=True, exist_ok=True)
+                restored_path.write_bytes(bytes(orig_bytes))
+                logger.info(
+                    f"Upload {upload_id}: archivo restaurado desde DB → {restored_path}"
+                )
+                file_path = restored_path
+            else:
+                raise RuntimeError(
+                    f"No se encontró archivo fuente en {base_dir_abs} "
+                    "y no hay contenido guardado en DB. "
+                    "El archivo se perdió posiblemente por un redespliegue."
+                )
 
         valid_ext = {".xlsx", ".xls", ".csv", ".pdf", ".zip"}
         if file_path.suffix.lower() not in valid_ext:
