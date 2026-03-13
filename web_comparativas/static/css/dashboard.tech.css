@@ -663,9 +663,13 @@ body {
     min-height: 360px;
 }
 
-#dimensionamientoApp .dim-card-chart-compact,
-#dimensionamientoApp .dim-card-table-list {
+#dimensionamientoApp .dim-card-chart-compact {
     min-height: 330px;
+}
+
+/* Altura fija para que el flex-body interno quede constreñido y pueda hacer scroll */
+#dimensionamientoApp .dim-card-table-list {
+    height: 330px;
 }
 
 #dimensionamientoApp .dim-card-table-wide {
@@ -700,6 +704,25 @@ body {
 
 #dimensionamientoApp .dim-card-table-list .dim-scroll-body {
     overflow-x: hidden;
+    overflow-y: auto;
+    flex: 1 1 0;
+}
+
+/* ── Clientes por resultado: scroll interno con altura dinámica via JS ── */
+#dimensionamientoApp .dim-card-clients {
+    height: 330px;
+}
+
+#dimensionamientoApp .dim-chart-client-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#dimensionamientoApp .dim-chart-client-scroll .chart-container {
+    flex: none;
+    min-height: 100%;
 }
 
 #dimensionamientoApp .dim-table-wrap {
