@@ -6410,6 +6410,7 @@ def admin_reset_resolver(
 # ======================================================================
 @router.get("/cargas/{upload_id}/original")
 def descargar_archivo_original(
+    request: Request,
     upload_id: int,
     user: User = Depends(require_roles("admin")),  # solo admin revisa
 ):
