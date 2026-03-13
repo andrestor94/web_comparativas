@@ -1281,7 +1281,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "estado_dato": ["estado", "estado_dato"],
             "fuente": ["fuente"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             hito = _safe_str(row.get(col_map.get("hito", ""), ""))
             if not hito:
                 continue
@@ -1308,7 +1308,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "estado_dato": ["estado", "estado_dato"],
             "fuente": ["fuente"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
             if not desc:
                 continue
@@ -1337,7 +1337,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "estado_dato": ["estado", "estado_dato"],
             "fuente": ["fuente"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             tipo = _safe_str(row.get(col_map.get("tipo", ""), ""))
             if not tipo:
                 continue
@@ -1410,7 +1410,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "estado_lectura": ["estado", "estado_lectura"],
             "fecha": ["fecha"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             nombre = _safe_str(row.get(col_map.get("nombre", ""), ""))
             if not nombre:
                 continue
@@ -1435,7 +1435,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "organismo_emisor": ["organismo", "organismo_emisor"],
             "descripcion": ["descripcion", "descripción", "detalle"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             tipo = _safe_str(row.get(col_map.get("tipo_acto", ""), ""))
             if not tipo:
                 continue
@@ -1459,7 +1459,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "accion_sugerida": ["accion", "acción", "accion_sugerida"],
             "fuente": ["fuente"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             hallazgo = _safe_str(row.get(col_map.get("hallazgo", ""), ""))
             if not hallazgo:
                 continue
@@ -1483,7 +1483,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "accion_recomendada": ["accion", "accion_recomendada"],
             "estado": ["estado"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             campo = _safe_str(row.get(col_map.get("campo_objetivo", ""), ""))
             if not campo:
                 continue
@@ -1511,7 +1511,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "texto_evidencia": ["texto_evidencia"],
             "normalizacion_aplicada": ["normalizacion_aplicada"],
         })
-        for _, row in _iter_data_rows(df):
+        for row in _iter_data_rows(df):
             campo = _safe_str(row.get(col_map.get("campo", ""), ""))
             if not campo:
                 continue
