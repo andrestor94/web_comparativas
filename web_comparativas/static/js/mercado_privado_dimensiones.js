@@ -561,9 +561,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </colgroup>
             <thead>
                 <tr>
-                    <th class="dim-family-head dim-family-head-name" style="background:transparent;">Familia</th>
-                    <th class="dim-family-head dim-family-head-count text-end" style="background:transparent;">Renglones</th>
-                    <th class="dim-family-head dim-family-head-qty text-end" style="background:transparent;">Cantidad</th>
+                    <th class="dim-family-head dim-family-head-name">Familia</th>
+                    <th class="dim-family-head dim-family-head-count text-end">Renglones</th>
+                    <th class="dim-family-head dim-family-head-qty text-end">Cantidad</th>
                 </tr>
             </thead>
         `;
