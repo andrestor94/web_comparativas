@@ -592,6 +592,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = document.getElementById('barClientChart').getContext('2d');
         if (state.barClientChart) state.barClientChart.destroy();
 
+        // Altura dinámica: 32px por cliente + margen para eje X
+        const dynamicH = Math.max(200, rows.length * 32 + 28);
+        const container = ctx.canvas.closest('.chart-container');
+        if (container) container.style.height = dynamicH + 'px';
+
         const labels = rows.map((row) => row.cliente);
         const resultKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row.resultados || {}))));
 
