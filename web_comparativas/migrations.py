@@ -432,3 +432,76 @@ def backfill_normalized_content():
         session.close()
 
     return backed_up
+
+
+def backfill_original_content():
+    """
+    Recorre TODOS los uploads que no tienen original_content guardado en DB,
+    y si el archivo original existe en disco lo lee y lo guarda.
+
+    Esto repara el caso crítico donde:
+    - El archivo fue subido con el código viejo (sin persistencia en DB)
+    - El archivo sigue en el disco persistente de Render
+    - Pero tras un redeploy el fallback de DB devuelve NULL → 404
+
+    Se ejecuta en startup, después de ensure_original_content_column().
+    Devuelve el número de uploads respaldados.
+    """
+    from web_comparativas.models import SessionLocal, Upload as UploadModel
+
+    backed_up = 0
+    session = SessionLocal()
+    try:
+        uploads = (
+            session.query(UploadModel)
+            .filter(
+                UploadModel.original_content.is_(None),
+                UploadModel.original_path.isnot(None),
+            )
+            .all()
+        )
+        print(
+            f"[BACKFILL_ORIG] {len(uploads)} uploads sin original_content en DB. Iniciando respaldo...",
+            flush=True,
+        )
+
+        for up in uploads:
+            try:
+                orig_path = getattr(up, "original_path", None)
+                if not orig_path:
+                    continue
+                p = Path(orig_path)
+                if not p.is_absolute():
+                    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+                    p = (PROJECT_ROOT / p).resolve()
+                if p.exists():
+                    up.original_content = p.read_bytes()
+                    session.add(up)
+                    backed_up += 1
+                    print(
+                        f"[BACKFILL_ORIG] Upload {up.id} ({p.name}) respaldado "
+                        f"({p.stat().st_size} bytes).",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[BACKFILL_ORIG] Upload {up.id}: archivo no encontrado en disco ({p}).",
+                        flush=True,
+                    )
+            except Exception as e:
+                print(f"[BACKFILL_ORIG] Upload {up.id}: error – {e}", flush=True)
+                continue
+
+        if backed_up:
+            session.commit()
+        print(
+            f"[BACKFILL_ORIG] Respaldo completado: {backed_up} uploads guardados en DB.",
+            flush=True,
+        )
+    except Exception as e:
+        session.rollback()
+        print(f"[BACKFILL_ORIG] Error general: {e}", flush=True)
+    finally:
+        session.close()
+
+    return backed_up

@@ -55,6 +55,7 @@ from web_comparativas.migrations import (
     ensure_original_content_column,
     ensure_normalized_storage_columns,
     backfill_normalized_content,
+    backfill_original_content,
     ensure_dimensionamiento_indexes,
     ensure_dimensionamiento_summary_populated,
 )
@@ -159,9 +160,18 @@ def run_startup_migrations_once() -> None:
     # Se ejecuta ANTES del primer request para proteger los datos del deploy actual
     try:
         backed_up = backfill_normalized_content()
-        print(f"[STARTUP] Backfill completado: {backed_up} uploads respaldados en DB.", flush=True)
+        print(f"[STARTUP] Backfill normalizado completado: {backed_up} uploads respaldados en DB.", flush=True)
     except Exception as e:
-        print(f"[STARTUP] Backfill warning: {e}", flush=True)
+        print(f"[STARTUP] Backfill normalizado warning: {e}", flush=True)
+
+    # Respaldar archivos originales: lee desde disco persistente y guarda en DB
+    # Repara uploads subidos con código viejo (sin original_content) que aún tienen
+    # el archivo en el disco persistente de Render.
+    try:
+        orig_backed = backfill_original_content()
+        print(f"[STARTUP] Backfill original completado: {orig_backed} uploads respaldados en DB.", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Backfill original warning: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
 
