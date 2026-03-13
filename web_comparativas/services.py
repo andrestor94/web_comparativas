@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import json, re, importlib, logging, unicodedata  # <-- NUEVO: unicodedata
 from dataclasses import dataclass
 import yaml
