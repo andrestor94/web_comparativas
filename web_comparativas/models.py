@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import (
     declarative_base, relationship, sessionmaker, scoped_session, aliased
 )
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import foreign  # <-- para relación sin FK físico
 from sqlalchemy import inspect  # para introspección de columnas
 
@@ -71,15 +72,27 @@ else:
         "options": "-c statement_timeout=55000"
     }
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=1800,
-    connect_args=connect_args,
-    future=True
-)
+# SQLite (local): StaticPool — una sola conexión compartida, evita pool exhaustion
+# cuando el dashboard dispara 7-8 requests paralelos sobre queries lentas.
+# Postgres (Render): QueuePool estándar con los parámetros originales.
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args=connect_args,
+        poolclass=StaticPool,
+        future=True,
+    )
+else:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_recycle=1800,
+        pool_timeout=30,
+        connect_args=connect_args,
+        future=True,
+    )
 
 # Banderas útiles
 IS_SQLITE = engine.url.get_backend_name() == "sqlite"
