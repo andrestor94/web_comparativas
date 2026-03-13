@@ -52,6 +52,7 @@ FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 from web_comparativas.migrations import (
     ensure_access_scope_column,
     ensure_password_reset_columns,
+    ensure_original_content_column,
     ensure_normalized_storage_columns,
     backfill_normalized_content,
     ensure_dimensionamiento_indexes,
@@ -73,6 +74,39 @@ def run_startup_migrations_once() -> None:
         _startup_once_completed = True
 
     print("[STARTUP] Lifespan startup begin", flush=True)
+
+    # ── Diagnóstico de entorno ───────────────────────────────────────────
+    from web_comparativas.models import engine as _diag_engine, IS_POSTGRES, IS_SQLITE
+    _db_url = _diag_engine.url
+    print(
+        f"[STARTUP][DB] Backend: {_db_url.get_backend_name()} | "
+        f"Host: {_db_url.host or 'n/a'} | Database: {_db_url.database}",
+        flush=True,
+    )
+    if IS_POSTGRES:
+        print("[STARTUP][DB] Motor: PostgreSQL (Render) ✓", flush=True)
+    elif IS_SQLITE:
+        print(f"[STARTUP][DB] Motor: SQLite (local) – path={_db_url.database}", flush=True)
+    else:
+        print(f"[STARTUP][DB] Motor desconocido: {_db_url.get_backend_name()}", flush=True)
+
+    _uploads_path_env = os.getenv("UPLOADS_PATH", "")
+    from web_comparativas import services as _svc
+    _eff_uploads = _svc.UPLOADS_ROOT
+    _uploads_exists = _eff_uploads.exists()
+    print(
+        f"[STARTUP][FS] UPLOADS_PATH env='{_uploads_path_env}' | "
+        f"Efectivo='{_eff_uploads}' | Existe={_uploads_exists}",
+        flush=True,
+    )
+    if not _uploads_exists:
+        try:
+            _eff_uploads.mkdir(parents=True, exist_ok=True)
+            print(f"[STARTUP][FS] Carpeta uploads creada: {_eff_uploads}", flush=True)
+        except Exception as _mkdir_err:
+            print(f"[STARTUP][FS] ADVERTENCIA: no se pudo crear {_eff_uploads}: {_mkdir_err}", flush=True)
+    # ────────────────────────────────────────────────────────────────────
+
     try:
         ensure_access_scope_column()
         print("[MIGRATION] SUCCESS: 'access_scope' checked/added.", flush=True)
@@ -109,6 +143,12 @@ def run_startup_migrations_once() -> None:
 
     # Persistencia robusta: columnas para guardar contenido de archivos procesados en DB
     # Esto evita pérdida de datos al redesplegar en Render (filesystem efímero)
+    try:
+        ensure_original_content_column()
+        print("[MIGRATION] SUCCESS: original_content column checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning original_content: {e}", flush=True)
+
     try:
         ensure_normalized_storage_columns()
         print("[MIGRATION] SUCCESS: normalized storage columns checked.", flush=True)

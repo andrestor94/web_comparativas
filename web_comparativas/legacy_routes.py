@@ -3355,8 +3355,9 @@ async def crear_carga(
     Crea una carga y dispara el procesamiento en segundo plano.
     Tambi├®n evita duplicados usando el proceso_nro normalizado.
     """
-    # Carpeta base donde se guardan los uploads
-    root_uploads = services.PROJECT_ROOT / "data" / "uploads"
+    # Carpeta base donde se guardan los uploads — respeta UPLOADS_PATH env var
+    # (apunta al Render Persistent Disk si está configurado)
+    root_uploads = services.UPLOADS_ROOT
     root_uploads.mkdir(parents=True, exist_ok=True)
 
     # Carpeta única para esta carga (Aislamiento)
@@ -3485,6 +3486,9 @@ async def crear_carga(
         status="pending",
         created_at=dt.datetime.utcnow(),
         updated_at=dt.datetime.utcnow(),
+        # Persistencia robusta: guarda el archivo original en DB para sobrevivir
+        # redespliegues en Render donde el filesystem es efímero.
+        original_content=file_bytes if file_bytes else None,
     )
     db_session.add(up)
     db_session.commit()
@@ -3667,9 +3671,12 @@ async def crear_carga_otras_fuentes(
         final_filename = file.filename
         file_bytes = await file.read()
 
-    # Carpeta base donde se guardan los uploads
-    upload_dir = Path("data/uploads")
-    # --- Fin l├│gica por plataforma ---
+    # Carpeta base donde se guardan los uploads — usa UPLOADS_ROOT (respeta UPLOADS_PATH env var)
+    # FIX: usar ruta absoluta con UUID de aislamiento (antes era Path("data/uploads") relativo
+    # y sin aislamiento, causando colisiones de nombres y base_dir incorrecto en DB).
+    uid_otras = str(uuid.uuid4())
+    upload_dir = services.UPLOADS_ROOT / uid_otras
+    # --- Fin lógica por plataforma ---
 
     # Creamos la carpeta
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -3714,7 +3721,7 @@ async def crear_carga_otras_fuentes(
             status_code=303,
         )
 
-    # Crear la carga nueva (source=other implicito por ahora, o podr├¡amos agregar un campo si el modelo lo soportara)
+    # Crear la carga nueva
     up = UploadModel(
         user_id=user.id,
         proceso_nro=proceso_nro_clean,
@@ -3727,9 +3734,12 @@ async def crear_carga_otras_fuentes(
         original_filename=final_filename,
         original_path=str(file_path),
         base_dir=str(upload_dir),
-        status="pending", 
+        status="pending",
         created_at=dt.datetime.utcnow(),
         updated_at=dt.datetime.utcnow(),
+        # Persistencia robusta: guarda el archivo original en DB para sobrevivir
+        # redespliegues en Render donde el filesystem es efímero.
+        original_content=file_bytes if file_bytes else None,
     )
     db_session.add(up)
     db_session.commit()
@@ -4690,7 +4700,7 @@ async def api_restaurar_archivo(
     # Si no tiene original_path, construimos uno nuevo EN CARPETA ÚNICA (Aislamiento)
     if not orig_path_str:
         # Generar ID único para carpeta
-        root_uploads = services.PROJECT_ROOT / "data" / "uploads"
+        root_uploads = services.UPLOADS_ROOT  # respeta UPLOADS_PATH env var
         uid = str(uuid.uuid4())
         unique_dir = root_uploads / uid
         unique_dir.mkdir(parents=True, exist_ok=True)
@@ -6429,28 +6439,45 @@ def descargar_archivo_original(
 
     try:
         p = services._abs_path(orig_path) or Path(orig_path)
-        if not p.exists():
-            logger.warning(f"Download failed: File not found at {p}")
-            raise HTTPException(status_code=404, detail=f"El archivo original no se encuentra en el servidor ({p.name}).")
-            
-        # Nombre de archivo para la descarga
-        # Nombre de archivo para la descarga
-        filename = p.name
+        filename = getattr(up, "original_filename", None) or p.name
 
-        # Log
-        log_usage_event(
-            user=user,
-            action_type="download_original",
-            section="cargas_original",
-            request=request, 
-            resource_id=str(up.id),
-            extra_data={"filename": filename},
-        )
+        if p.exists():
+            log_usage_event(
+                user=user,
+                action_type="download_original",
+                section="cargas_original",
+                request=request,
+                resource_id=str(up.id),
+                extra_data={"filename": filename, "source": "disk"},
+            )
+            return FileResponse(
+                str(p),
+                filename=filename,
+                media_type="application/octet-stream",
+            )
 
-        return FileResponse(
-            str(p),
-            filename=filename,
-            media_type="application/octet-stream",
+        # Fallback: archivo en DB (sobrevive redespliegues en Render)
+        orig_bytes = getattr(up, "original_content", None)
+        if orig_bytes:
+            logger.info(f"Download original upload {upload_id}: serving from DB fallback.")
+            log_usage_event(
+                user=user,
+                action_type="download_original",
+                section="cargas_original",
+                request=request,
+                resource_id=str(up.id),
+                extra_data={"filename": filename, "source": "db_fallback"},
+            )
+            return Response(
+                content=bytes(orig_bytes),
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        logger.warning(f"Download failed: file not found at {p} and no DB fallback available.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"El archivo original no se encuentra en el servidor ({p.name}).",
         )
     except HTTPException:
         raise

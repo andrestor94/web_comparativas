@@ -100,6 +100,24 @@ def ensure_password_reset_columns():
             print(f"[MIGRATION] Tabla 'password_reset_requests': advertencia – {e}", flush=True)
 
 
+def ensure_original_content_column():
+    """
+    Agrega la columna original_content a la tabla uploads.
+    Almacena los bytes del archivo original subido por el usuario.
+    Esto permite que el archivo sobreviva redespliegues en Render
+    (filesystem efímero), sirviendo como fallback cuando el archivo
+    en disco ya no existe.
+    """
+    blob_type = "BYTEA" if not IS_SQLITE else "BLOB"
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            f"ALTER TABLE uploads ADD COLUMN original_content {blob_type}",
+            "uploads.original_content",
+        )
+    print("[MIGRATION] Columna uploads.original_content verificada/creada.", flush=True)
+
+
 def ensure_normalized_storage_columns():
     """
     Agrega columnas de persistencia robusta a la tabla 'uploads':
@@ -358,7 +376,10 @@ def backfill_normalized_content():
     from web_comparativas.models import SessionLocal, Upload as UploadModel
     import json as _json
 
+    import os as _os
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    _uploads_env = _os.environ.get("UPLOADS_PATH", "").strip()
+    _uploads_root = Path(_uploads_env) if _uploads_env else PROJECT_ROOT / "data" / "uploads"
     backed_up = 0
 
     session = SessionLocal()
@@ -383,7 +404,7 @@ def backfill_normalized_content():
                         p = (PROJECT_ROOT / p).resolve()
                     norm_path = p / "processed" / "normalized.xlsx"
                 else:
-                    norm_path = PROJECT_ROOT / "data" / "uploads" / f"iso_{up.id}" / "processed" / "normalized.xlsx"
+                    norm_path = _uploads_root / f"iso_{up.id}" / "processed" / "normalized.xlsx"
 
                 if norm_path.exists():
                     up.normalized_content = norm_path.read_bytes()
