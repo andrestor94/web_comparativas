@@ -819,6 +819,8 @@ body {
     top: 0;
     z-index: 2;
     background: var(--bg-card);
+    border-bottom: 2px solid #d6e0ea;
+    box-shadow: 0 2px 0 #d6e0ea;
     padding-top: 0.55rem;
     padding-bottom: 0.7rem;
     vertical-align: middle;
