@@ -4,88 +4,157 @@
 
 {% block extra_head %}
 <style>
+  /* ── Layout general ─────────────────────────── */
   .history-page {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 0.75rem;
   }
 
-  .history-filters {
-    padding: 1.25rem;
+  /* ── Barra de filtros primarios ─────────────── */
+  .history-filters-bar {
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    flex-wrap: wrap;
   }
 
-  .history-filters__form {
+  .history-filters-bar .hf-search {
+    flex: 1 1 220px;
+    min-width: 160px;
+  }
+
+  .history-filters-bar .hf-status {
+    flex: 0 1 180px;
+    min-width: 130px;
+  }
+
+  .history-filters-bar .hf-pagesize {
+    flex: 0 0 110px;
+  }
+
+  .history-filters-bar .form-control,
+  .history-filters-bar .form-select {
+    height: 36px;
+    font-size: 0.875rem;
+    border-color: #d6e0ea;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .history-filters-bar .form-control::placeholder {
+    color: #94a3b8;
+  }
+
+  .btn-filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 36px;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    border-color: #d6e0ea;
+    color: #334155;
+  }
+
+  .btn-filters-toggle:hover {
+    background: #f1f5f9;
+    border-color: #a8b9cc;
+  }
+
+  .hf-badge-active {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #06486f;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .history-filters-bar .btn-primary {
+    height: 36px;
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+
+  .history-filters-bar .btn-outline-secondary {
+    height: 36px;
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+
+  /* ── Panel de filtros avanzados ─────────────── */
+  .history-filters-advanced {
+    padding: 0.75rem 1rem 0.875rem;
+    border-top: 1px solid #e8edf3;
+    background: #f8fafc;
+  }
+
+  .history-filters-advanced__grid {
     display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.625rem;
     align-items: end;
   }
 
-  .history-filter {
+  .hf-adv-item {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.3rem;
     min-width: 0;
   }
 
-  .history-filter--search {
-    grid-column: span 4;
-  }
-
-  .history-filter--status,
-  .history-filter--uploader,
-  .history-filter--buyer,
-  .history-filter--filename {
-    grid-column: span 3;
-  }
-
-  .history-filter--page-size,
-  .history-filter--created-from,
-  .history-filter--created-to,
-  .history-filter--proceso,
-  .history-filter--cuenta,
-  .history-filter--platform,
-  .history-filter--province {
-    grid-column: span 2;
-  }
-
-  .history-filter__label {
+  .hf-adv-item .hf-label {
     margin: 0;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: #64748b;
   }
 
-  .history-filter .form-control,
-  .history-filter .form-select {
-    min-height: 44px;
-    font-size: 0.95rem;
+  .hf-adv-item .form-control,
+  .hf-adv-item .form-select {
+    height: 34px;
+    font-size: 0.845rem;
     border-color: #d6e0ea;
-    background: #fff;
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
-  .history-filter .form-control::placeholder {
-    color: #94a3b8;
-  }
-
-  .history-filters__actions {
-    grid-column: 1 / -1;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.75rem;
-    padding-top: 0.25rem;
-  }
-
+  /* ── Tabla ─────────────────────────────────── */
   .history-table-panel {
     padding: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .history-table-wrap {
-    overflow-x: auto;
+    overflow: auto;
+    /* Altura calculada: viewport menos header fijo, barra de navegación y filtros compactos.
+       Ajustar la constante si el layout cambia. */
+    max-height: calc(100vh - 230px);
+    min-height: 200px;
+    position: relative;
+  }
+
+  /* Sombra lateral para indicar contenido oculto a la derecha */
+  .history-table-wrap::after {
+    content: '';
+    position: sticky;
+    right: 0;
+    top: 0;
+    display: block;
+    width: 0;
+    height: 0;
+    pointer-events: none;
   }
 
   .history-table {
@@ -95,18 +164,45 @@
     border-spacing: 0;
   }
 
+  /* Encabezado sticky dentro del contenedor con scroll */
   .history-table thead th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 3;
     white-space: nowrap;
+    background: #f1f5f9;
   }
 
   .history-table th,
   .history-table td {
-    vertical-align: top;
+    vertical-align: middle;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
   }
 
+  /* Columna de acciones: sticky al borde derecho ─── */
+  .history-table__actions {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background: #fff;
+    min-width: 140px;
+    text-align: right;
+    white-space: nowrap;
+    box-shadow: -3px 0 8px rgba(0,0,0,0.06);
+  }
+
+  .history-table thead th.history-table__actions {
+    background: #f1f5f9;
+    z-index: 4;
+  }
+
+  /* Separación visual sticky */
+  .history-table tbody tr:hover td.history-table__actions {
+    background: #f8fafc;
+  }
+
+  /* Columnas */
   .history-table__id,
   .history-table__date,
   .history-table__account,
@@ -120,49 +216,45 @@
   }
 
   .history-table__buyer {
-    min-width: 180px;
+    min-width: 160px;
   }
 
   .history-table__province {
-    min-width: 150px;
+    min-width: 130px;
   }
 
   .history-table__file {
-    min-width: 240px;
-    max-width: 320px;
+    min-width: 200px;
+    max-width: 280px;
     word-break: break-word;
-    line-height: 1.45;
-  }
-
-  .history-table__actions {
-    min-width: 150px;
-    text-align: right;
-    white-space: nowrap;
+    line-height: 1.4;
   }
 
   .history-process {
     font-weight: 600;
     color: #06486f;
-    font-size: 0.95rem;
+    font-size: 0.925rem;
   }
 
   .history-muted {
-    font-size: 0.84rem;
+    font-size: 0.82rem;
     color: #64748b;
   }
 
+  /* Footer de tabla */
   .history-footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 1rem;
-    padding: 1rem 1.25rem;
+    padding: 0.625rem 1rem;
     border-top: 1px solid #e2e8f0;
     background: #fafbfc;
+    flex-shrink: 0;
   }
 
   .history-summary {
-    font-size: 0.84rem;
+    font-size: 0.82rem;
     color: #64748b;
   }
 
@@ -181,6 +273,8 @@
     margin-right: 0.2rem;
     border-color: #dbe3ee;
     color: #5770b0;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.82rem;
   }
 
   .history-pagination .page-item.active .page-link {
@@ -189,57 +283,18 @@
     color: #fff;
   }
 
-  @media (max-width: 1400px) {
-    .history-filters__form {
-      grid-template-columns: repeat(8, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 992px) {
-    .history-filters__form {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-    }
-
-    .history-footer {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-  }
-
+  /* ── Responsive ─────────────────────────────── */
   @media (max-width: 768px) {
-    .history-filters {
-      padding: 1rem;
+    .history-filters-bar {
+      padding: 0.625rem 0.75rem;
     }
 
-    .history-filters__form {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.85rem;
+    .history-filters-bar .hf-search {
+      flex: 1 1 100%;
     }
 
-    .history-filter,
-    .history-filter--search,
-    .history-filter--status,
-    .history-filter--uploader,
-    .history-filter--buyer,
-    .history-filter--filename,
-    .history-filter--page-size,
-    .history-filter--created-from,
-    .history-filter--created-to,
-    .history-filter--proceso,
-    .history-filter--cuenta,
-    .history-filter--platform,
-    .history-filter--province {
-      grid-column: span 2;
-    }
-
-    .history-filters__actions {
-      justify-content: stretch;
-      flex-wrap: wrap;
-    }
-
-    .history-filters__actions .btn {
-      flex: 1 1 180px;
-      justify-content: center;
+    .history-table-wrap {
+      max-height: calc(100vh - 280px);
     }
   }
 </style>
@@ -303,6 +358,19 @@
   '&filename=' ~ (f.filename|default('')|urlencode)
 ) %}
 
+{# Contar filtros avanzados activos para mostrar badge #}
+{% set adv_active = [] %}
+{% if f.created_from %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.created_to %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.uploader_id %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.proceso %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.cuenta %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.platform %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.buyer %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.province %}{% set _ = adv_active.append(1) %}{% endif %}
+{% if f.filename %}{% set _ = adv_active.append(1) %}{% endif %}
+{% set adv_count = adv_active|length %}
+
 <div class="h-page-header">
   <div>
     <span class="h-page-header__eyebrow">Mercado Publico</span>
@@ -319,99 +387,114 @@
 </div>
 
 <div class="history-page">
-  <div class="h-panel history-filters">
-    <form class="history-filters__form" method="get" action="">
-      <div class="history-filter history-filter--search">
-        <label class="history-filter__label" for="history-q">Busqueda</label>
-        <input id="history-q" class="form-control" type="search" name="q"
-          placeholder="Buscar por proceso, comprador o archivo" value="{{ f.q or '' }}">
-      </div>
 
-      <div class="history-filter history-filter--status">
-        <label class="history-filter__label" for="history-status">Estado</label>
-        <select id="history-status" class="form-select" name="status">
+  {# ── Panel de filtros ───────────────────────────── #}
+  <div class="h-panel" id="history-filters-panel">
+    <form id="history-form" method="get" action="">
+
+      {# Barra de filtros primarios (siempre visible) #}
+      <div class="history-filters-bar">
+        <input class="form-control hf-search" type="search" name="q"
+          placeholder="Buscar por proceso, comprador o archivo" value="{{ f.q or '' }}">
+
+        <select class="form-select hf-status" name="status">
           <option value="">Todos los estados</option>
           {% for key, label in STATUS_LABELS.items() %}
           <option value="{{ key }}" {{ (norm_status(f.status) == key) and 'selected' or '' }}>{{ label }}</option>
           {% endfor %}
         </select>
-      </div>
 
-      <div class="history-filter history-filter--page-size">
-        <label class="history-filter__label" for="history-page-size">Vista</label>
-        <select id="history-page-size" class="form-select" name="page_size">
+        <select class="form-select hf-pagesize" name="page_size">
           {% for ps in [10,20,50,100] %}
-          <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }} / pag.</option>
+          <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }} / pág.</option>
           {% endfor %}
         </select>
-      </div>
 
-      <div class="history-filter history-filter--created-from">
-        <label class="history-filter__label" for="history-created-from">Creado desde</label>
-        <input id="history-created-from" type="date" class="form-control" name="created_from"
-          value="{{ f.created_from or '' }}">
-      </div>
+        <button type="button" class="btn btn-outline-secondary btn-filters-toggle"
+          id="btn-adv-toggle"
+          aria-expanded="{{ 'true' if adv_count > 0 else 'false' }}"
+          aria-controls="adv-filters">
+          <i class="bi bi-sliders"></i>
+          Filtros
+          {% if adv_count > 0 %}
+          <span class="hf-badge-active">{{ adv_count }}</span>
+          {% endif %}
+        </button>
 
-      <div class="history-filter history-filter--created-to">
-        <label class="history-filter__label" for="history-created-to">Creado hasta</label>
-        <input id="history-created-to" type="date" class="form-control" name="created_to"
-          value="{{ f.created_to or '' }}">
-      </div>
-
-      {% if can_view_all %}
-      <div class="history-filter history-filter--uploader">
-        <label class="history-filter__label" for="history-uploader">Subido por</label>
-        <select id="history-uploader" class="form-select" name="uploader_id">
-          <option value="">Todos los usuarios</option>
-          {% for u in (users_options or []) %}
-          <option value="{{ u.id }}" {% if f.uploader_id and (f.uploader_id|string) == (u.id|string) %}selected{% endif %}>
-            {{ u.label }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-      {% endif %}
-
-      <div class="history-filter history-filter--proceso">
-        <label class="history-filter__label" for="history-proceso">N de proceso</label>
-        <input id="history-proceso" class="form-control" name="proceso" placeholder="Ej. 45/356"
-          value="{{ f.proceso or '' }}">
-      </div>
-
-      <div class="history-filter history-filter--cuenta">
-        <label class="history-filter__label" for="history-cuenta">Cuenta</label>
-        <input id="history-cuenta" class="form-control" name="cuenta" placeholder="Nro. de cuenta"
-          value="{{ f.cuenta or '' }}">
-      </div>
-
-      <div class="history-filter history-filter--platform">
-        <label class="history-filter__label" for="history-platform">Plataforma</label>
-        <input id="history-platform" class="form-control" name="platform" placeholder="BAC, COMPRAR, SIPROSA"
-          value="{{ f.platform or '' }}">
-      </div>
-
-      <div class="history-filter history-filter--buyer">
-        <label class="history-filter__label" for="history-buyer">Comprador</label>
-        <input id="history-buyer" class="form-control" name="buyer" placeholder="Organismo comprador"
-          value="{{ f.buyer or '' }}">
-      </div>
-
-      <div class="history-filter history-filter--province">
-        <label class="history-filter__label" for="history-province">Provincia o municipio</label>
-        <input id="history-province" class="form-control" name="province" placeholder="Ubicacion"
-          value="{{ f.province or '' }}">
-      </div>
-
-      <div class="history-filter history-filter--filename">
-        <label class="history-filter__label" for="history-filename">Archivo</label>
-        <input id="history-filename" class="form-control" name="filename" placeholder="Nombre del archivo"
-          value="{{ f.filename or '' }}">
-      </div>
-
-      <div class="history-filters__actions">
-        <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+        <button class="btn btn-primary" type="submit">Aplicar</button>
         <a class="btn btn-outline-secondary" href="/cargas/historial">Limpiar</a>
       </div>
+
+      {# Panel de filtros avanzados (colapsable) #}
+      <div class="history-filters-advanced collapse {{ 'show' if adv_count > 0 else '' }}"
+        id="adv-filters">
+        <div class="history-filters-advanced__grid">
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-created-from">Creado desde</label>
+            <input id="hf-created-from" type="date" class="form-control" name="created_from"
+              value="{{ f.created_from or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-created-to">Creado hasta</label>
+            <input id="hf-created-to" type="date" class="form-control" name="created_to"
+              value="{{ f.created_to or '' }}">
+          </div>
+
+          {% if can_view_all %}
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-uploader">Subido por</label>
+            <select id="hf-uploader" class="form-select" name="uploader_id">
+              <option value="">Todos los usuarios</option>
+              {% for u in (users_options or []) %}
+              <option value="{{ u.id }}" {% if f.uploader_id and (f.uploader_id|string) == (u.id|string) %}selected{% endif %}>
+                {{ u.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-proceso">N° de proceso</label>
+            <input id="hf-proceso" class="form-control" name="proceso" placeholder="Ej. 45/356"
+              value="{{ f.proceso or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-cuenta">Cuenta</label>
+            <input id="hf-cuenta" class="form-control" name="cuenta" placeholder="Nro. de cuenta"
+              value="{{ f.cuenta or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-platform">Plataforma</label>
+            <input id="hf-platform" class="form-control" name="platform" placeholder="BAC, SIPROSA…"
+              value="{{ f.platform or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-buyer">Comprador</label>
+            <input id="hf-buyer" class="form-control" name="buyer" placeholder="Organismo comprador"
+              value="{{ f.buyer or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-province">Provincia / Municipio</label>
+            <input id="hf-province" class="form-control" name="province" placeholder="Ubicación"
+              value="{{ f.province or '' }}">
+          </div>
+
+          <div class="hf-adv-item">
+            <label class="hf-label" for="hf-filename">Archivo</label>
+            <input id="hf-filename" class="form-control" name="filename" placeholder="Nombre del archivo"
+              value="{{ f.filename or '' }}">
+          </div>
+
+        </div>
+      </div>
+
     </form>
   </div>
 
@@ -419,13 +502,14 @@
   <div class="alert alert-danger">{{ error }}</div>
   {% endif %}
 
+  {# ── Tabla ──────────────────────────────────────── #}
   <div class="h-panel history-table-panel">
-    <div class="history-table-wrap">
+    <div class="history-table-wrap" id="history-table-wrap">
       <table class="h-table history-table">
         <thead>
           <tr>
             <th>ID</th>
-            <th class="history-table__process">N de proceso</th>
+            <th class="history-table__process">N° proceso</th>
             <th class="history-table__date">Fecha apertura</th>
             <th class="history-table__account">Cuenta</th>
             <th class="history-table__platform">Plataforma</th>
@@ -488,7 +572,7 @@
               <div class="h-empty">
                 <div class="h-empty__icon"><i class="bi bi-inbox"></i></div>
                 <p class="h-empty__title">No hay cargas para mostrar</p>
-                <p class="h-empty__desc">Proba ajustando los filtros o realiza una nueva carga.</p>
+                <p class="h-empty__desc">Probá ajustando los filtros o realizá una nueva carga.</p>
               </div>
             </td>
           </tr>
@@ -500,8 +584,8 @@
     <div class="history-footer">
       <div class="history-summary">
         <strong>Mostrando {{ showing_from }}-{{ showing_to }}</strong> de {{ total }} resultados.
-        {% if f.q %} | Busqueda: "{{ f.q }}"{% endif %}
-        {% if f.status %} | Estado: {{ STATUS_LABELS.get(norm_status(f.status), f.status|capitalize) }}{% endif %}
+        {% if f.q %} &middot; Búsqueda: "{{ f.q }}"{% endif %}
+        {% if f.status %} &middot; Estado: {{ STATUS_LABELS.get(norm_status(f.status), f.status|capitalize) }}{% endif %}
       </div>
 
       <nav aria-label="Paginacion">
@@ -529,5 +613,41 @@
     </div>
   </div>
 </div>
+
+<script>
+(function () {
+  // Toggle filtros avanzados
+  var btn = document.getElementById('btn-adv-toggle');
+  var panel = document.getElementById('adv-filters');
+  if (btn && panel) {
+    btn.addEventListener('click', function () {
+      var expanded = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', String(!expanded));
+      panel.classList.toggle('show', !expanded);
+    });
+  }
+
+  // Ajustar altura de la tabla según el espacio real disponible en viewport
+  function fitTableHeight() {
+    var wrap = document.getElementById('history-table-wrap');
+    if (!wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    // Reservar 80px para el footer de la tabla + algo de margen inferior
+    var available = window.innerHeight - rect.top - 80;
+    var min = 200;
+    wrap.style.maxHeight = Math.max(min, available) + 'px';
+  }
+
+  fitTableHeight();
+  window.addEventListener('resize', fitTableHeight);
+
+  // Re-calcular si el panel de filtros avanzados se abre/cierra
+  if (btn) {
+    btn.addEventListener('click', function () {
+      setTimeout(fitTableHeight, 320);
+    });
+  }
+})();
+</script>
 
 {% endblock %}
