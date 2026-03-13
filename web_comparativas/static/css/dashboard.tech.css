@@ -815,6 +815,10 @@ body {
 }
 
 #dimensionamientoApp .dim-family-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-card);
     padding-top: 0.55rem;
     padding-bottom: 0.7rem;
     vertical-align: middle;
