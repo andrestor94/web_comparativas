@@ -44,6 +44,7 @@ from web_comparativas.pliegos_rp import (
     build_canonical_output,
     export_canonical_excel_bytes,
 )
+from web_comparativas.pliegos_summary import build_debug_matrix, build_resumen_licitacion
 
 router = APIRouter()
 
@@ -905,7 +906,10 @@ def lectura_pliegos_validacion(
 
     criticos = [f for f in caso.faltantes if (f.criticidad or "").lower() == "alta"]
     rp_output = build_rp_output(caso)
-    completitud = rp_output["validation"]["porcentaje_completitud"]
+    resumen_summary = build_resumen_licitacion(caso)
+    completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
+    completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
+    completitud_tecnica = resumen_summary["completitud_tecnica"]
 
     errores_list = _decode_msgs(errores) if errores else []
     adv_list = _decode_msgs(advertencias) if advertencias else []
@@ -917,6 +921,8 @@ def lectura_pliegos_validacion(
         "resumen": resumen,
         "criticos": criticos,
         "completitud": completitud,
+        "completitud_ejecutiva": completitud_ejecutiva,
+        "completitud_tecnica": completitud_tecnica,
         "rp_output": rp_output,
         "rp_validation": rp_output["validation"],
         "rp_validation_by_group": rp_output["validation_by_group"],
@@ -986,8 +992,10 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
 
     # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion.html
     resumen = _build_resumen_licitacion(caso)
-    rp_output = build_rp_output(caso)
-    completitud = rp_output["validation"]["porcentaje_completitud"]
+    resumen_summary = build_resumen_licitacion(caso)
+    completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
+    completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
+    completitud_tecnica = resumen_summary["completitud_tecnica"]
     proceso = caso.datos_proceso.datos if caso.datos_proceso else {}
 
     req_por_cat: dict = {}
@@ -1017,6 +1025,8 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
         "proceso": proceso,
         "resumen": resumen,
         "completitud": completitud,
+        "completitud_ejecutiva": completitud_ejecutiva,
+        "completitud_tecnica": completitud_tecnica,
         "req_por_cat": req_por_cat,
         "hallazgos_ordenados": hallazgos_ordenados,
         "proceso_extras": proceso_extras,
@@ -1051,11 +1061,18 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
 
     rp_output = build_rp_output(caso)
     contexto_ampliado = _build_ampliada_context(caso, rp_output)
+    debug_matrix = build_debug_matrix(caso)
+    resumen_summary = build_resumen_licitacion(caso)
+    completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
+    completitud_tecnica = resumen_summary["completitud_tecnica"]
     return templates.TemplateResponse("pliegos/visualizacion_ampliada.html", {
         "request": request,
         "user": user,
         "caso": caso,
         "rp_output": rp_output,
+        "debug_matrix": debug_matrix,
+        "completitud_ejecutiva": completitud_ejecutiva,
+        "completitud_tecnica": completitud_tecnica,
         "es_admin": es_admin,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
         **contexto_ampliado,
@@ -1277,7 +1294,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
             "hito": ["hito", "evento", "item"],
             "fecha": ["fecha"],
             "hora": ["hora"],
-            "lugar_medio": ["lugar", "medio", "lugar/medio", "lugar_medio"],
+            "lugar_medio": ["lugar", "medio", "lugar/medio", "lugar_medio", "observaciones"],
             "estado_dato": ["estado", "estado_dato"],
             "fuente": ["fuente"],
         })
@@ -1300,8 +1317,8 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         df = xl.parse(sheet_map["Requisitos"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
             "categoria": ["categoria", "categoría", "tipo"],
-            "descripcion": ["descripcion", "descripción", "detalle"],
-            "obligatorio": ["obligatorio", "requerido"],
+            "descripcion": ["requisito", "descripcion", "descripción", "detalle"],
+            "obligatorio": ["obligatoriedad", "obligatorio", "requerido"],
             "momento_presentacion": ["momento", "momento_presentacion"],
             "medio_presentacion": ["medio", "medio_presentacion"],
             "vigencia": ["vigencia"],
@@ -1330,9 +1347,9 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         col_map = _col_map(df.columns, {
             "tipo": ["tipo", "tipo_garantia"],
             "requerida": ["requerida", "requerido"],
-            "porcentaje": ["porcentaje", "porcentaje_%", "%"],
+            "porcentaje": ["porcentaje_o_monto", "porcentaje", "porcentaje_%", "%"],
             "base_calculo": ["base", "base_calculo"],
-            "plazo": ["plazo"],
+            "plazo": ["momento_exigibilidad", "plazo"],
             "formas_admitidas": ["formas", "formas_admitidas"],
             "estado_dato": ["estado", "estado_dato"],
             "fuente": ["fuente"],
@@ -1357,12 +1374,12 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     if "Renglones" in sheet_map:
         df = xl.parse(sheet_map["Renglones"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
-            "orden": ["orden", "n°", "nro", "#"],
+            "orden": ["renglon_orden", "orden", "n°", "nro", "#"],
             "numero_renglon": ["numero_renglon", "renglón", "renglon", "nro_renglon"],
             "codigo_item": ["codigo", "código", "codigo_item", "cod"],
             "descripcion": ["descripcion", "descripción", "detalle"],
             "cantidad": ["cantidad", "cant"],
-            "unidad": ["unidad", "ud", "u.m."],
+            "unidad": ["unidad_medida", "unidad", "ud", "u.m."],
             "destino_efector": ["destino", "efector", "destino_efector"],
             "entrega_parcial": ["entrega_parcial", "entrega parcial"],
             "obs_tecnicas": ["observaciones", "obs", "obs_tecnicas"],
@@ -1403,9 +1420,9 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     if "Documentos" in sheet_map:
         df = xl.parse(sheet_map["Documentos"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
-            "nombre": ["nombre", "documento"],
-            "tipo": ["tipo"],
-            "rol": ["rol"],
+            "nombre": ["nombre_documento", "nombre", "documento"],
+            "tipo": ["tipo_documento", "tipo"],
+            "rol": ["prioridad_jerarquica", "rol"],
             "obligatorio": ["obligatorio"],
             "estado_lectura": ["estado", "estado_lectura"],
             "fecha": ["fecha"],
@@ -1454,9 +1471,9 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         df = xl.parse(sheet_map["Hallazgos_Extra"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
             "categoria": ["categoria", "categoría"],
-            "hallazgo": ["hallazgo", "descripcion", "detalle"],
+            "hallazgo": ["titulo", "hallazgo", "descripcion", "detalle"],
             "impacto": ["impacto"],
-            "accion_sugerida": ["accion", "acción", "accion_sugerida"],
+            "accion_sugerida": ["accion_sugerida", "accion", "acción"],
             "fuente": ["fuente"],
         })
         for row in _iter_data_rows(df):
@@ -1476,11 +1493,11 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     if "Faltantes_y_Dudas" in sheet_map:
         df = xl.parse(sheet_map["Faltantes_y_Dudas"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
-            "campo_objetivo": ["campo", "campo_objetivo"],
-            "motivo": ["motivo"],
+            "campo_objetivo": ["campo_o_tema", "campo", "campo_objetivo"],
+            "motivo": ["situacion", "motivo"],
             "detalle": ["detalle", "descripcion"],
             "criticidad": ["criticidad", "prioridad"],
-            "accion_recomendada": ["accion", "accion_recomendada"],
+            "accion_recomendada": ["accion_recomendada", "accion"],
             "estado": ["estado"],
         })
         for row in _iter_data_rows(df):
@@ -1503,12 +1520,13 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         col_map = _col_map(df.columns, {
             "campo": ["campo", "campo_objetivo"],
             "valor_extraido": ["valor", "valor_extraido"],
-            "documento_fuente": ["documento", "documento_fuente", "fuente"],
+            "documento_fuente": ["documento_origen", "documento", "documento_fuente", "fuente"],
             "pagina_seccion": ["pagina", "página", "seccion", "sección", "pagina_seccion"],
-            "tipo_evidencia": ["tipo_evidencia", "tipo"],
-            "observacion": ["observacion", "observación"],
+            "tipo_evidencia": ["tipo_documento", "tipo_evidencia", "tipo"],
+            "observacion": ["observaciones", "observacion", "observación"],
+            "estado_extraccion": ["estado"],
             "metodo_extraccion": ["metodo_extraccion"],
-            "texto_evidencia": ["texto_evidencia"],
+            "texto_evidencia": ["evidencia_breve", "texto_evidencia"],
             "normalizacion_aplicada": ["normalizacion_aplicada"],
         })
         for row in _iter_data_rows(df):
@@ -1517,9 +1535,10 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
                 continue
             observaciones = [
                 _safe_str(row.get(col_map.get("observacion", ""), "")),
-                f"Metodo: {_safe_str(row.get(col_map.get('metodo_extraccion', ''), ''))}" if col_map.get("metodo_extraccion") else "",
-                f"Texto evidencia: {_safe_str(row.get(col_map.get('texto_evidencia', ''), ''))}" if col_map.get("texto_evidencia") else "",
-                f"Normalizacion: {_safe_str(row.get(col_map.get('normalizacion_aplicada', ''), ''))}" if col_map.get("normalizacion_aplicada") else "",
+                f"Estado: {_safe_str(row.get(col_map.get('estado_extraccion', ''), ''))}" if col_map.get("estado_extraccion") and _safe_str(row.get(col_map.get("estado_extraccion", ""), "")) else "",
+                f"Metodo: {_safe_str(row.get(col_map.get('metodo_extraccion', ''), ''))}" if col_map.get("metodo_extraccion") and _safe_str(row.get(col_map.get("metodo_extraccion", ""), "")) else "",
+                f"Texto evidencia: {_safe_str(row.get(col_map.get('texto_evidencia', ''), ''))}" if col_map.get("texto_evidencia") and _safe_str(row.get(col_map.get("texto_evidencia", ""), "")) else "",
+                f"Normalizacion: {_safe_str(row.get(col_map.get('normalizacion_aplicada', ''), ''))}" if col_map.get("normalizacion_aplicada") and _safe_str(row.get(col_map.get("normalizacion_aplicada", ""), "")) else "",
             ]
             db.add(PliegoTrazabilidad(
                 solicitud_id=solicitud_id,

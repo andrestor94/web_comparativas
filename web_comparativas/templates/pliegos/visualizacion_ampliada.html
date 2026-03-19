@@ -275,6 +275,12 @@
       <span><i class="bi bi-diagram-3"></i> Trazabilidad</span>
       {% if caso.trazabilidad %}<span class="amp-nav-badge">{{ caso.trazabilidad|length }}</span>{% endif %}
     </button>
+    {% if debug_matrix %}
+    <button class="amp-nav-btn" data-target="depuracion">
+      <span><i class="bi bi-bug"></i> Depuración</span>
+      <span class="amp-nav-badge">{{ debug_matrix|length }}</span>
+    </button>
+    {% endif %}
     {% if proceso %}
     <button class="amp-nav-btn" data-target="extras">
       <span><i class="bi bi-database"></i> Datos del Proceso</span>
@@ -302,6 +308,71 @@
         <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" style="display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;background:#f8fafc;border:1px solid var(--border-soft);border-radius:8px;font-size:.85rem;font-weight:600;color:var(--text-secondary);text-decoration:none;white-space:nowrap;">
           <i class="bi bi-arrow-left"></i> Vista Resumida
         </a>
+      </div>
+
+      <!-- ── Tira de métricas de completitud ── -->
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.85rem;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border-soft);">
+
+        <!-- Ejecutiva -->
+        <div style="display:flex;flex-direction:column;gap:.18rem;">
+          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#059669;">
+            Completitud Ejecutiva
+          </span>
+          <span style="font-size:1.65rem;font-weight:800;color:var(--text-primary);line-height:1;">
+            {{ completitud_ejecutiva.porcentaje }}<span style="font-size:.9rem;color:var(--text-secondary);font-weight:600;">%</span>
+          </span>
+          <div style="height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
+            <div style="height:100%;width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);border-radius:999px;transition:width .4s;"></div>
+          </div>
+          <span style="font-size:.72rem;color:var(--text-secondary);">
+            {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} · Resumen de jefatura
+          </span>
+        </div>
+
+        <!-- Técnica -->
+        <div style="display:flex;flex-direction:column;gap:.18rem;">
+          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#2563eb;">
+            Completitud Técnica
+          </span>
+          <span style="font-size:1.65rem;font-weight:800;color:var(--text-primary);line-height:1;">
+            {{ completitud_tecnica.porcentaje }}<span style="font-size:.9rem;color:var(--text-secondary);font-weight:600;">%</span>
+          </span>
+          <div style="height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
+            <div style="height:100%;width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:999px;transition:width .4s;"></div>
+          </div>
+          <span style="font-size:.72rem;color:var(--text-secondary);">
+            {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} · Cobertura detallada
+          </span>
+        </div>
+
+        <!-- Faltantes documentales -->
+        <div style="display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:.18rem;padding-left:.85rem;border-left:1px solid var(--border-soft);">
+          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:{% if caso.faltantes %}#dc2626{% else %}#059669{% endif %};">
+            Faltantes Doc.
+          </span>
+          <span style="font-size:1.65rem;font-weight:800;line-height:1;color:{% if caso.faltantes %}#dc2626{% else %}#059669{% endif %};">
+            {{ caso.faltantes|length }}
+          </span>
+          <span style="font-size:.72rem;color:var(--text-secondary);">
+            {% if caso.faltantes|length == 1 %}faltante real{% else %}faltantes reales{% endif %}
+          </span>
+          {% if caso.faltantes %}
+          <a href="#" onclick="activateTab('faltantes');return false;" style="font-size:.7rem;color:#dc2626;font-weight:700;text-decoration:none;margin-top:.1rem;">
+            Ver detalle →
+          </a>
+          {% endif %}
+        </div>
+
+      </div>
+      <!-- Microcopy -->
+      <div style="margin-top:.85rem;font-size:.77rem;color:var(--text-secondary);display:flex;gap:.5rem;align-items:flex-start;">
+        <i class="bi bi-info-circle" style="flex-shrink:0;margin-top:.1rem;"></i>
+        <span>
+          <strong>Completitud ≠ Faltantes documentales.</strong>
+          Los porcentajes miden campos de datos identificados en el Excel.
+          Los faltantes documentales son problemas reales del expediente (renglones incompletos, anexos ausentes)
+          y son independientes del porcentaje de completitud.
+        </span>
       </div>
     </div>
 
@@ -575,6 +646,23 @@
           {% if caso.faltantes %}<span class="amp-badge" style="background:#fee2e2;color:#dc2626;">{{ caso.faltantes|length }}</span>{% endif %}
         </div>
         {% if caso.faltantes %}
+        <!-- Callout explicativo: faltantes documentales ≠ campos no resueltos -->
+        <div style="padding:.85rem 1.4rem;background:#fef9ec;border-bottom:1px solid #fde68a;">
+          <div class="d-flex gap-2 align-items-start">
+            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#d97706;margin-top:.1rem;"></i>
+            <div style="font-size:.81rem;color:#92400e;line-height:1.45;">
+              <strong>Faltantes documentales ≠ campos no resueltos.</strong>
+              Estos faltantes son problemas registrados del expediente: renglones incompletos, anexos no cargados o condiciones no especificadas en el pliego.
+              Son <em>independientes</em> de la completitud ejecutiva
+              (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>) y técnica
+              (<strong>{{ completitud_tecnica.porcentaje }}%</strong>), que miden si los campos de datos
+              fueron identificados en el Excel.
+              {% if completitud_ejecutiva.faltantes_criticos > 0 %}
+              Los faltantes críticos aplican un tope del 89% al porcentaje de completitud.
+              {% endif %}
+            </div>
+          </div>
+        </div>
         <div class="table-responsive">
           <table class="amp-table">
             <thead><tr><th>Campo Objetivo</th><th>Motivo / Detalle</th><th>Criticidad</th><th>Recomendación</th></tr></thead>
@@ -688,6 +776,138 @@
     </div>
     {% endif %}
 
+    <!-- PANEL: DEPURACIÓN DE CAMPOS -->
+    {% if debug_matrix %}
+    <div class="amp-panel" id="amp-panel-depuracion">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-bug text-info"></i> Depuración de Campos — Resolución por Fuente</h2>
+          <div class="d-flex align-items-center gap-2">
+            <input type="text" id="filtroDebug" class="form-control form-control-sm" placeholder="Filtrar campo..." style="max-width:220px;">
+            <select id="filtroEstadoDebug" class="form-select form-select-sm" style="max-width:180px;">
+              <option value="">Todos los estados</option>
+              <option value="Encontrado">Encontrado</option>
+              <option value="Inferido">Inferido</option>
+              <option value="Ambiguo">Ambiguo</option>
+              <option value="Contradictorio">Contradictorio</option>
+              <option value="No encontrado">No encontrado</option>
+              <option value="Pendiente validacion">Pendiente validación</option>
+            </select>
+            <span class="amp-badge">{{ debug_matrix|length }} campos</span>
+          </div>
+        </div>
+        <div class="amp-card-body p-0">
+          <p class="text-muted px-3 pt-3 pb-1" style="font-size:.82rem;">
+            Esta tabla muestra exactamente cómo se resolvió cada campo canónico del resumen:
+            qué fuente aportó el valor, qué alias coincidió, el estado del dato y el puntaje aplicado para la completitud.
+          </p>
+
+          <!-- Resumen rápido de puntajes -->
+          {% set enc = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Encontrado') | list | length %}
+          {% set inf = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Inferido') | list | length %}
+          {% set amb = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Ambiguo') | list | length %}
+          {% set falt = debug_matrix | rejectattr('valor_resuelto') | list | length %}
+          <div class="d-flex gap-3 px-3 pb-3 flex-wrap">
+            <span class="badge rounded-pill bg-success bg-opacity-15 text-success fw-semibold px-3 py-2">
+              <i class="bi bi-check-circle-fill me-1"></i>{{ enc }} Encontrados
+            </span>
+            <span class="badge rounded-pill bg-warning bg-opacity-15 text-warning fw-semibold px-3 py-2">
+              <i class="bi bi-lightning-fill me-1"></i>{{ inf }} Inferidos
+            </span>
+            <span class="badge rounded-pill bg-secondary bg-opacity-15 text-secondary fw-semibold px-3 py-2">
+              <i class="bi bi-question-circle-fill me-1"></i>{{ amb }} Ambiguos
+            </span>
+            <span class="badge rounded-pill bg-danger bg-opacity-15 text-danger fw-semibold px-3 py-2">
+              <i class="bi bi-x-circle-fill me-1"></i>{{ falt }} Sin valor
+            </span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="amp-table" id="tablaDebug" style="font-size:.8rem;">
+              <thead>
+                <tr>
+                  <th style="min-width:140px;">Campo canónico</th>
+                  <th style="min-width:100px;">Fuente resuelta</th>
+                  <th style="min-width:90px;">Hoja</th>
+                  <th style="min-width:110px;">Columna origen</th>
+                  <th style="min-width:110px;">Alias detectado</th>
+                  <th style="min-width:160px;">Valor resuelto</th>
+                  <th style="min-width:80px;">Estado</th>
+                  <th style="min-width:60px; text-align:center;">Puntaje</th>
+                  <th style="min-width:60px; text-align:center;">Cands.</th>
+                  <th>Motivo si no resuelve</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in debug_matrix %}
+                {% set pct = (row.puntaje_aplicado * 100)|int %}
+                {% set estado_css = {
+                    'Encontrado': 'success',
+                    'Inferido': 'warning',
+                    'Ambiguo': 'secondary',
+                    'Contradictorio': 'danger',
+                    'No encontrado': 'danger',
+                    'Pendiente validacion': 'secondary'
+                  }.get(row.estado_resuelto, 'secondary') %}
+                <tr data-search="{{ (row.campo_canonico + ' ' + row.fuente_resuelta + ' ' + row.valor_resuelto + ' ' + row.estado_resuelto)|lower }}"
+                    data-estado="{{ row.estado_resuelto }}">
+                  <td>
+                    <div class="fw-semibold" style="font-family:monospace;font-size:.78rem;color:#334155;">{{ row.campo_canonico }}</div>
+                    <div class="text-muted" style="font-size:.73rem;">{{ row.label_ui }}</div>
+                  </td>
+                  <td>
+                    {% if row.fuente_resuelta %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary" style="font-size:.73rem;">{{ row.fuente_resuelta }}</span>
+                    {% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                  <td>
+                    {% if row.hoja_origen %}
+                    <span style="font-size:.75rem;color:#64748b;">{{ row.hoja_origen }}</span>
+                    {% else %}<span class="text-muted">—</span>{% endif %}
+                  </td>
+                  <td style="font-family:monospace;font-size:.75rem;color:#475569;">
+                    {{ row.columna_origen or '—' }}
+                  </td>
+                  <td style="font-family:monospace;font-size:.75rem;color:#7c3aed;">
+                    {% if row.alias_detectado and row.alias_detectado != row.campo_canonico %}
+                    <i class="bi bi-arrow-right-short text-muted"></i> {{ row.alias_detectado }}
+                    {% elif row.alias_detectado %}
+                    {{ row.alias_detectado }}
+                    {% else %}—{% endif %}
+                  </td>
+                  <td>
+                    {% if row.valor_resuelto %}
+                    <div class="clamp-2" title="{{ row.valor_resuelto }}" style="font-size:.8rem;">{{ row.valor_resuelto }}</div>
+                    {% else %}<span class="text-muted fst-italic" style="font-size:.78rem;">Sin valor</span>{% endif %}
+                  </td>
+                  <td>
+                    <span class="badge bg-{{ estado_css }} bg-opacity-15 text-{{ estado_css }}" style="font-size:.72rem;">
+                      {{ row.estado_resuelto }}
+                    </span>
+                  </td>
+                  <td class="text-center">
+                    <span class="fw-bold" style="color:{% if pct >= 70 %}#16a34a{% elif pct >= 40 %}#d97706{% else %}#dc2626{% endif %};">
+                      {{ '%.1f'|format(row.puntaje_aplicado) }}
+                    </span>
+                  </td>
+                  <td class="text-center" style="font-size:.75rem;color:#64748b;">
+                    <span title="Proceso: {{ row.candidatos_proceso }} | Trazabilidad: {{ row.candidatos_trazab }} | Temáticos: {{ row.candidatos_tematicos }}">
+                      {{ row.candidatos_proceso + row.candidatos_trazab + row.candidatos_tematicos }}
+                    </span>
+                  </td>
+                  <td style="font-size:.75rem;color:#94a3b8;font-style:italic;max-width:200px;">
+                    {{ row.motivo_si_no_resuelve or '' }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
   </main>
 </div>
 {% endblock %}
@@ -753,5 +973,18 @@
       });
     });
   }
+
+  // Filtro depuración de campos
+  function applyDebugFilters() {
+    const q = (document.getElementById('filtroDebug')?.value || '').toLowerCase();
+    const estado = (document.getElementById('filtroEstadoDebug')?.value || '');
+    document.querySelectorAll('#tablaDebug tbody tr[data-search]').forEach(r => {
+      const matchText = !q || (r.dataset.search || '').includes(q);
+      const matchEstado = !estado || r.dataset.estado === estado;
+      r.style.display = (matchText && matchEstado) ? '' : 'none';
+    });
+  }
+  document.getElementById('filtroDebug')?.addEventListener('input', applyDebugFilters);
+  document.getElementById('filtroEstadoDebug')?.addEventListener('change', applyDebugFilters);
 </script>
 {% endblock %}

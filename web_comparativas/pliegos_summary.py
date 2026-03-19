@@ -34,46 +34,163 @@ MISSING_VALUE_MARKERS = {
     "abierto/cerrado",
     "literal/inferido/calculado",
     "texto/tabla/imagen",
+    # Palabras de estado usadas literalmente como valor — deben tratarse como dato faltante
+    "ambiguo",
+    "ambigua",
+    "contradictorio",
+    "contradictoria",
 }
 HIGH_CRIT_VALUES = {"alta", "critica", "crítica", "alto", "high"}
 SUMMARY_FIELD_ALIASES = {
-    "tipo_proceso": ["tipo_proceso", "clase_proceso", "tipo_licitacion", "tipo_compra"],
-    "numero_proceso": ["numero_proceso", "nro_proceso", "numero_de_proceso", "codigo_oficial"],
-    "expediente": ["expediente", "nro_expediente", "numero_expediente"],
-    "nombre_proceso": ["nombre_proceso", "titulo_proceso", "denominacion_proceso", "denominacion"],
-    "objeto_contratacion": ["objeto_contratacion", "objeto", "descripcion_objeto", "objeto_de_contratacion"],
-    "organismo_contratante": ["organismo_contratante", "organismo", "entidad_contratante", "reparticion"],
-    "unidad_operativa": ["unidad_operativa", "unidad_operativa_adquisiciones", "unidad_contratante", "uoa"],
-    "rubro": ["rubro", "categoria", "clase"],
-    "moneda": ["moneda", "divisa", "currency"],
-    "modalidad": ["modalidad", "modalidad_contratacion"],
-    "etapa": ["etapa", "fase"],
-    "alcance": ["alcance", "alcance_territorial"],
-    "presupuesto_oficial": ["presupuesto_oficial", "monto_estimado", "monto_oficial", "presupuesto", "valor_total_estimado"],
-    "requiere_pago_pliego": ["requiere_pago_pliego", "pago_pliego", "compra_pliego"],
-    "valor_pliego": ["valor_pliego", "precio_pliego", "monto_pliego", "costo_pliego"],
-    "plazo_mantenimiento_oferta": ["plazo_mantenimiento_oferta", "mantenimiento_oferta"],
-    "condiciones_pago": ["condiciones_pago", "forma_pago", "pago", "condicion_pago"],
-    "anticipo_financiero": ["anticipo_financiero", "anticipo"],
-    "contragarantia": ["contragarantia", "contragarantía", "contra_garantia"],
-    "duracion_contrato": ["duracion_contrato", "plazo_contrato", "duracion_del_contrato"],
-    "fecha_estimada_inicio": ["fecha_estimada_inicio", "fecha_inicio", "fecha_probable_inicio", "inicio_contrato"],
-    "tipo_adjudicacion": ["tipo_adjudicacion", "forma_adjudicacion"],
-    "tipo_cotizacion": ["tipo_cotizacion", "forma_cotizacion"],
-    "lugar_entrega": ["lugar_entrega", "lugares_entrega", "domicilio_entrega"],
-    "plazo_entrega": ["plazo_entrega", "tiempo_entrega"],
-    "periodicidad": ["periodicidad", "periodicidad_recepcion"],
-    "supervisor": ["supervisor", "responsable", "responsable_tecnico"],
-    "contactos": ["contactos", "contacto", "email_contacto", "correo_contacto", "telefono_contacto", "correo", "email"],
-    "observaciones": ["observaciones", "observaciones_generales", "notas"],
-    "id_documental": ["proceso_id", "id_documental", "codigo_pliego", "codigo_documental", "documento_particular"],
-    "jurisdiccion": ["jurisdiccion", "ministerio", "area"],
-    "documento_generado": ["documento_generado", "documento_contrato", "instrumento_generado"],
-    "recepcion_digital": ["recepcion_digital", "presentacion_digital"],
-    "acepta_redeterminacion": ["acepta_redeterminacion", "redeterminacion_precios"],
-    "acepta_actualizacion_precios": ["acepta_actualizacion_precios", "actualizacion_precios"],
-    "acepta_prorroga": ["acepta_prorroga", "prorroga"],
-    "fecha_apertura": ["fecha_apertura", "apertura"],
+    "tipo_proceso": [
+        "tipo_proceso", "procedimiento_seleccion", "clase_proceso",
+        "tipo_licitacion", "tipo_compra", "procedimiento_de_seleccion",
+        "tipo_de_proceso", "tipo_de_licitacion",
+    ],
+    "numero_proceso": [
+        "numero_proceso", "nro_proceso", "numero_de_proceso", "codigo_oficial",
+        "nro_de_proceso", "numero_proceso_compra",
+    ],
+    "expediente": [
+        "expediente", "nro_expediente", "numero_expediente",
+        "expediente_numero", "nro_exp",
+    ],
+    "nombre_proceso": [
+        "nombre_proceso", "titulo_proceso", "denominacion_proceso", "denominacion",
+        "nombre_de_proceso", "nombre_licitacion",
+    ],
+    "objeto_contratacion": [
+        "objeto_contratacion", "objeto", "detalle_productos_servicios",
+        "descripcion_objeto", "objeto_de_contratacion", "objeto_de_la_contratacion",
+    ],
+    "organismo_contratante": [
+        "organismo_contratante", "organismo", "entidad_contratante",
+        "reparticion", "organismo_de_aplicacion", "entidad", "organismo_comprador",
+    ],
+    "unidad_operativa": [
+        "unidad_operativa", "unidad_operativa_adquisiciones", "unidad_contratante",
+        "uoa", "unidad_ejecutora", "unidad_de_compra",
+    ],
+    "rubro": [
+        "rubro", "categoria", "clase", "rubro_objeto", "familia", "categoria_producto",
+    ],
+    "moneda": ["moneda", "divisa", "currency", "tipo_moneda"],
+    "modalidad": [
+        "modalidad", "modalidad_contratacion", "modalidad_de_contratacion",
+        "tipo_modalidad",
+    ],
+    "etapa": [
+        "etapa", "fase", "etapa_proceso", "fase_proceso",
+        "estado_etapa", "etapa_de_proceso",
+    ],
+    "alcance": [
+        "alcance", "alcance_territorial", "alcance_geografico",
+        "alcance_de_la_contratacion",
+    ],
+    "presupuesto_oficial": [
+        "presupuesto_oficial", "monto", "monto_estimado", "monto_oficial",
+        "presupuesto", "valor_total_estimado", "importe_total",
+        "monto_total_estimado", "presupuesto_total",
+    ],
+    "requiere_pago_pliego": [
+        "requiere_pago_pliego", "pago_pliego", "compra_pliego",
+        "costo_pliego", "pliego_de_pago",
+    ],
+    "valor_pliego": [
+        "valor_pliego", "precio_pliego", "monto_pliego", "costo_pliego",
+        "valor_del_pliego", "importe_pliego",
+    ],
+    "plazo_mantenimiento_oferta": [
+        "plazo_mantenimiento_oferta", "mantenimiento_oferta",
+        "plazo_de_mantenimiento", "mantenimiento_de_oferta",
+    ],
+    "condiciones_pago": [
+        "condiciones_pago", "facturacion", "forma_pago", "pago",
+        "condicion_pago", "condiciones_de_pago", "forma_de_pago",
+        "plazo_de_pago", "plazo_pago",
+    ],
+    "anticipo_financiero": [
+        "anticipo_financiero", "anticipo", "anticipo_financiero_porcentaje",
+        "porcentaje_anticipo",
+    ],
+    "contragarantia": [
+        "contragarantia", "contragarantía", "contra_garantia",
+        "garantia_de_contragarantia",
+    ],
+    "duracion_contrato": [
+        "duracion_contrato", "plazo_contrato", "duracion_del_contrato",
+        "duracion", "plazo_de_contrato", "vigencia_contrato",
+    ],
+    "fecha_estimada_inicio": [
+        "fecha_estimada_inicio", "fecha_inicio", "fecha_probable_inicio",
+        "inicio_contrato", "fecha_de_inicio", "inicio_estimado",
+    ],
+    "tipo_adjudicacion": [
+        "tipo_adjudicacion", "forma_adjudicacion", "tipo_de_adjudicacion",
+        "modalidad_adjudicacion",
+    ],
+    "tipo_cotizacion": [
+        "tipo_cotizacion", "forma_cotizacion", "tipo_de_cotizacion",
+        "modalidad_cotizacion",
+    ],
+    "lugar_entrega": [
+        "lugar_entrega", "modalidad_entrega", "lugares_entrega",
+        "domicilio_entrega", "lugar_de_entrega", "destino_efector",
+        "lugar_recepcion", "lugar_recepcion_fisica",
+    ],
+    "plazo_entrega": [
+        "plazo_entrega", "tiempo_entrega", "plazo_de_entrega",
+        "dias_entrega",
+    ],
+    "periodicidad": [
+        "periodicidad", "periodicidad_recepcion", "frecuencia_entrega",
+        "frecuencia",
+    ],
+    "supervisor": [
+        "supervisor", "responsable", "responsable_tecnico",
+        "responsable_de_compra", "funcionario_responsable",
+    ],
+    "contactos": [
+        "contactos", "contacto", "email_contacto", "correo_contacto",
+        "telefono_contacto", "correo", "email", "tel_contacto",
+        "datos_contacto",
+    ],
+    "observaciones": [
+        "observaciones", "observaciones_generales", "notas", "nota",
+        "observacion",
+    ],
+    "id_documental": [
+        "proceso_id", "id_documental", "codigo_pliego", "codigo_documental",
+        "documento_particular", "id_proceso", "identificador_documental",
+    ],
+    "jurisdiccion": [
+        "jurisdiccion", "ministerio", "area", "secretaria",
+        "subsecretaria", "organismos_jurisdiccion",
+    ],
+    "documento_generado": [
+        "documento_generado", "documento_contrato", "instrumento_generado",
+        "tipo_documento_generado",
+    ],
+    "recepcion_digital": [
+        "recepcion_digital", "presentacion_digital",
+        "oferta_digital", "presentacion_electronica",
+    ],
+    "acepta_redeterminacion": [
+        "acepta_redeterminacion", "redeterminacion_precios",
+        "redeterminacion", "acepta_redeterminacion_precios",
+    ],
+    "acepta_actualizacion_precios": [
+        "acepta_actualizacion_precios", "actualizacion_precios",
+        "actualizacion_de_precios", "indexacion_precios",
+    ],
+    "acepta_prorroga": [
+        "acepta_prorroga", "prorroga", "acepta_prorroga_contrato",
+        "prorroga_contrato",
+    ],
+    "fecha_apertura": [
+        "fecha_apertura", "fecha_hora_apertura", "apertura",
+        "fecha_acto_apertura", "fecha_de_apertura",
+    ],
 }
 SUMMARY_FIELD_META = {
     "tipo_proceso": {"label": "Tipo de proceso", "icon": "bi-tag"},
@@ -333,6 +450,22 @@ def _make_candidate(value: str, *, source_name: str, priority: int, source_type:
     }
 
 
+_VALID_TRACE_STATES = {
+    "Encontrado", "Inferido", "Ambiguo", "Contradictorio",
+    "No encontrado", "Pendiente validacion", "Pendiente validación",
+}
+_TRACE_STATE_NORMALIZE = {
+    "encontrado": "Encontrado",
+    "inferido": "Inferido",
+    "ambiguo": "Ambiguo",
+    "contradictorio": "Contradictorio",
+    "no encontrado": "No encontrado",
+    "pendiente validacion": "Pendiente validacion",
+    "pendiente validación": "Pendiente validacion",
+    "pendiente": "Pendiente validacion",
+}
+
+
 def _parse_trace_observation(observacion: str) -> dict:
     data = {}
     for raw_line in _safe_str(observacion).splitlines():
@@ -341,26 +474,42 @@ def _parse_trace_observation(observacion: str) -> dict:
             continue
         key, value = line.split(":", 1)
         norm_key = _normalize_key(key)
+        value_stripped = value.strip()
         if norm_key in {"metodo", "metodo_extraccion"}:
-            data["metodo_extraccion"] = value.strip()
+            data["metodo_extraccion"] = value_stripped
         elif norm_key in {"texto_evidencia", "evidencia"}:
-            data["texto_evidencia"] = value.strip()
+            data["texto_evidencia"] = value_stripped
         elif norm_key in {"normalizacion", "normalizacion_aplicada"}:
-            data["normalizacion_aplicada"] = value.strip()
+            data["normalizacion_aplicada"] = value_stripped
         elif norm_key == "observacion":
-            data["observacion"] = value.strip()
+            data["observacion"] = value_stripped
+        elif norm_key in {"estado", "estado_extraccion"}:
+            # Normalizar el estado al vocabulario canónico
+            normalized = _TRACE_STATE_NORMALIZE.get(value_stripped.lower().strip())
+            if normalized:
+                data["estado"] = normalized
+            elif value_stripped in _VALID_TRACE_STATES:
+                data["estado"] = value_stripped
     return data
 
 
 def _collect_process_candidates(datos: dict, field_key: str) -> list[dict]:
-    aliases = {_normalize_key(field_key), *(_normalize_key(alias) for alias in SUMMARY_FIELD_ALIASES.get(field_key, []))}
+    aliases_raw = [field_key] + SUMMARY_FIELD_ALIASES.get(field_key, [])
+    alias_norm_to_original = {_normalize_key(a): a for a in aliases_raw}
+    aliases = set(alias_norm_to_original.keys())
     candidates = []
     for raw_key, raw_value in (datos or {}).items():
         norm_key = _normalize_key(raw_key)
-        if norm_key and any(_alias_matches(norm_key, alias) for alias in aliases):
-            candidate = _make_candidate(raw_value, source_name="01_Proceso", priority=1, source_type="proceso")
-            if candidate:
-                candidates.append(candidate)
+        if not norm_key or not any(_alias_matches(norm_key, alias) for alias in aliases):
+            continue
+        # Detectar qué alias coincidió para incluirlo en la metadata de depuración
+        matched_alias_norm = next((a for a in aliases if _alias_matches(norm_key, a)), norm_key)
+        matched_alias_display = alias_norm_to_original.get(matched_alias_norm, raw_key)
+        candidate = _make_candidate(raw_value, source_name="01_Proceso", priority=1, source_type="proceso")
+        if candidate:
+            candidate["alias_matched"] = matched_alias_display
+            candidate["column_original"] = raw_key
+            candidates.append(candidate)
     return candidates
 
 
@@ -431,7 +580,9 @@ def _load_process_data_from_excel(caso: PliegoSolicitud) -> dict:
 
 
 def _collect_trace_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
-    aliases = {_normalize_key(field_key), *(_normalize_key(alias) for alias in SUMMARY_FIELD_ALIASES.get(field_key, []))}
+    aliases_raw = [field_key] + SUMMARY_FIELD_ALIASES.get(field_key, [])
+    alias_norm_to_original = {_normalize_key(a): a for a in aliases_raw}
+    aliases = set(alias_norm_to_original.keys())
     candidates = []
     for traza in caso.trazabilidad or []:
         campo_norm = _normalize_key(traza.campo)
@@ -448,16 +599,34 @@ def _collect_trace_candidates(caso: PliegoSolicitud, field_key: str) -> list[dic
             "normalizacion_aplicada": extra_trace.get("normalizacion_aplicada", ""),
             "observacion": extra_trace.get("observacion", "") or (traza.observacion or ""),
         }
-        state_source = " ".join(filter(None, [traza.valor_extraido or "", trace.get("metodo_extraccion", ""), trace.get("observacion", "")]))
+        # Prioridad 1: usar el estado explícito parseado del observacion ("Estado: Inferido")
+        parsed_estado = extra_trace.get("estado", "")
+        if parsed_estado:
+            resolved_state = parsed_estado
+        else:
+            # Prioridad 2: derivar el estado del contenido del texto
+            state_source = " ".join(filter(None, [
+                traza.valor_extraido or "",
+                trace.get("metodo_extraccion", ""),
+                trace.get("observacion", ""),
+            ]))
+            resolved_state = _field_state_from_value(state_source, "Encontrado")
+
+        # Detectar qué alias fue el que coincidió
+        matched_alias_norm = next((a for a in aliases if _alias_matches(campo_norm, a)), campo_norm)
+        matched_alias_display = alias_norm_to_original.get(matched_alias_norm, traza.campo or "")
+
         candidate = _make_candidate(
             traza.valor_extraido,
             source_name="10_Trazabilidad",
             priority=2,
             source_type="trazabilidad",
-            state=_field_state_from_value(state_source, "Encontrado"),
+            state=resolved_state,
             trace=trace,
         )
         if candidate:
+            candidate["alias_matched"] = matched_alias_display
+            candidate["column_original"] = traza.campo or ""
             candidates.append(candidate)
     return candidates
 
@@ -536,27 +705,72 @@ def _thematic_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
                 values.append(" ".join(parts))
         return _candidate_from_renglones(field_key, values)
     if field_key == "contragarantia":
+        # Solo coincide con "contragar" — incluye "contra garantia" (con espacio)
         for garantia in caso.garantias or []:
             tipo = _normalize_text(garantia.tipo)
-            if "contragar" not in tipo and "anticipo" not in tipo:
+            tipo_sin_espacio = tipo.replace(" ", "")
+            if "contragar" not in tipo_sin_espacio:
                 continue
             pieces = []
             if _safe_str(garantia.requerida):
                 pieces.append(_safe_str(garantia.requerida))
             if _safe_str(garantia.porcentaje):
-                pieces.append(f"{_safe_str(garantia.porcentaje)}%")
+                pct_raw = _safe_str(garantia.porcentaje)
+                if re.match(r"^\d", pct_raw.replace(",", "").replace(".", "").strip()):
+                    pieces.append(f"{pct_raw}%")
+                else:
+                    pieces.append(pct_raw)
             if _safe_str(garantia.base_calculo):
                 pieces.append(f"sobre {_safe_str(garantia.base_calculo)}")
+            estado_raw = _normalize_text(garantia.estado_dato or "")
+            estado_final = _TRACE_STATE_NORMALIZE.get(estado_raw) or ("Inferido" if pieces else "Pendiente validacion")
             candidate = _make_candidate(
                 "; ".join(pieces) or _safe_str(garantia.tipo),
                 source_name="04_Garantias",
                 priority=3,
                 source_type="tematica",
-                state=_field_state_from_value(garantia.estado_dato or "", "Encontrado"),
+                state=estado_final,
                 note=_safe_str(garantia.tipo),
             )
+            if candidate:
+                candidate["alias_matched"] = "contragarantia"
+                candidate["column_original"] = "tipo"
             return [candidate] if candidate else []
     if field_key == "anticipo_financiero":
+        # Fuente 1: hoja Garantias con tipo que contenga "anticipo"
+        for garantia in caso.garantias or []:
+            tipo = _normalize_text(garantia.tipo)
+            if "anticipo" not in tipo:
+                continue
+            pieces = []
+            if _safe_str(garantia.requerida):
+                pieces.append(_safe_str(garantia.requerida))
+            if _safe_str(garantia.porcentaje):
+                pct_raw = _safe_str(garantia.porcentaje)
+                # Solo agregar "%" si es un valor numérico; si es texto descriptivo, usarlo tal cual
+                if re.match(r"^\d", pct_raw.replace(",", "").replace(".", "").strip()):
+                    pieces.append(f"{pct_raw}%")
+                else:
+                    pieces.append(pct_raw)
+            if _safe_str(garantia.base_calculo):
+                pieces.append(f"sobre {_safe_str(garantia.base_calculo)}")
+            valor = "; ".join(pieces) or _safe_str(garantia.tipo)
+            # Estado: mapeo directo del estado_dato al vocabulario canónico
+            estado_raw = _normalize_text(garantia.estado_dato or "")
+            estado_final = _TRACE_STATE_NORMALIZE.get(estado_raw) or ("Inferido" if pieces else "Pendiente validacion")
+            candidate = _make_candidate(
+                valor,
+                source_name="04_Garantias",
+                priority=3,
+                source_type="tematica",
+                state=estado_final,
+                note=_safe_str(garantia.tipo),
+            )
+            if candidate:
+                candidate["alias_matched"] = "anticipo_financiero"
+                candidate["column_original"] = "tipo"
+            return [candidate] if candidate else []
+        # Fuente 2: hoja Hallazgos_Extra que mencione anticipo con porcentaje
         for hallazgo in caso.hallazgos or []:
             raw_text = " ".join(filter(None, [hallazgo.categoria, hallazgo.hallazgo, hallazgo.accion_sugerida]))
             if "anticipo" not in _normalize_text(raw_text):
@@ -564,24 +778,36 @@ def _thematic_candidates(caso: PliegoSolicitud, field_key: str) -> list[dict]:
             percentage = _extract_percentage(raw_text)
             candidate = _make_candidate(
                 percentage or _safe_str(hallazgo.hallazgo),
-                source_name="08_Hallazgos_extra",
+                source_name="08_Hallazgos_Extra",
                 priority=3,
                 source_type="tematica",
                 state="Encontrado" if percentage else "Inferido",
             )
+            if candidate:
+                candidate["alias_matched"] = "anticipo_financiero"
+                candidate["column_original"] = "hallazgo"
             return [candidate] if candidate else []
     if field_key == "tipo_adjudicacion":
         for hallazgo in caso.hallazgos or []:
             normalized = _normalize_text(" ".join(filter(None, [hallazgo.categoria, hallazgo.hallazgo])))
-            if "adjudicacion parcial" in normalized:
-                candidate = _make_candidate("Parcial", source_name="08_Hallazgos_extra", priority=3, source_type="tematica", state="Inferido")
-                return [candidate] if candidate else []
-            if "adjudicacion total" in normalized:
-                candidate = _make_candidate("Total", source_name="08_Hallazgos_extra", priority=3, source_type="tematica", state="Inferido")
+            valor = None
+            if "adjudicacion parcial" in normalized or "adjudicacion por item" in normalized:
+                valor = "Parcial"
+            elif "adjudicacion total" in normalized:
+                valor = "Total"
+            if valor:
+                candidate = _make_candidate(valor, source_name="08_Hallazgos_Extra", priority=3, source_type="tematica", state="Inferido")
+                if candidate:
+                    candidate["alias_matched"] = "tipo_adjudicacion"
+                    candidate["column_original"] = "hallazgo"
                 return [candidate] if candidate else []
     if field_key == "id_documental":
         values = [_safe_str(acto.numero) for acto in caso.actos_admin or [] if _safe_str(acto.numero)]
-        return _candidate_from_renglones(field_key, values)
+        cands = _candidate_from_renglones(field_key, values)
+        for c in cands:
+            c.setdefault("alias_matched", "id_documental")
+            c.setdefault("column_original", "numero")
+        return cands
     return []
 
 
@@ -630,7 +856,15 @@ def _pick_best_candidate(field_key: str, candidates: list[dict]):
                 continue
             compact.append(value)
         normalized_values = compact or normalized_values
-    if len(normalized_values) > 1 and selected["state"] not in {"Ambiguo", "Contradictorio"}:
+    # Solo detectar conflicto si hay valores distintos DENTRO del mismo nivel de prioridad
+    # Si el mejor candidato es prioridad 1 (Proceso) con Encontrado, no lo degradamos por fuentes temáticas
+    best_priority = selected["priority"]
+    same_priority_values = [
+        _comparable_field_value(field_key, c["value"])
+        for c in usable if c["priority"] == best_priority and not _is_explicit_missing(c["value"])
+    ]
+    same_priority_unique = len(set(same_priority_values))
+    if same_priority_unique > 1 and selected["state"] not in {"Ambiguo", "Contradictorio"}:
         bool_like = {"requiere_pago_pliego", "recepcion_digital", "acepta_redeterminacion", "acepta_actualizacion_precios", "acepta_prorroga"}
         selected["state"] = "Contradictorio" if field_key in bool_like else "Ambiguo"
         selected["note"] = (selected.get("note", "") + " | " if selected.get("note") else "") + "Multiples valores detectados"
@@ -946,3 +1180,81 @@ def build_resumen_licitacion(caso: PliegoSolicitud) -> dict:
 
 def calcular_completitud(caso: PliegoSolicitud) -> int:
     return build_resumen_licitacion(caso)["completitud_ejecutiva"]["porcentaje"]
+
+
+def build_debug_matrix(caso: PliegoSolicitud) -> list[dict]:
+    """
+    Genera la matriz de depuración técnica por campo canónico.
+    Usa el mismo pipeline de build_resumen_licitacion para garantizar que los scores
+    y estados son idénticos a los que se muestran en la UI de completitud.
+
+    Columnas:
+    - campo_canonico      : clave interna del campo
+    - label_ui            : etiqueta visible en el dashboard
+    - fuente_resuelta     : nombre de la hoja/fuente que aportó el valor
+    - hoja_origen         : tipo de fuente (proceso, trazabilidad, tematica)
+    - columna_origen      : nombre de columna exacta en la fuente
+    - alias_detectado     : alias que coincidió con el campo canónico
+    - valor_resuelto      : valor final adoptado
+    - estado_resuelto     : estado del dato (Encontrado, Inferido, Ambiguo, etc.)
+    - puntaje_aplicado    : peso numérico según el estado (0.0 - 1.0)
+    - candidatos_proceso  : cuántos candidatos vinieron de 01_Proceso
+    - candidatos_trazab   : cuántos candidatos vinieron de 10_Trazabilidad
+    - candidatos_tematicos: cuántos vinieron de hojas temáticas
+    - motivo_si_no_resuelve: explicación cuando el campo queda vacío
+    """
+    # Usar el mismo pipeline que build_resumen_licitacion para garantizar consistencia
+    resumen = build_resumen_licitacion(caso)
+    campos = resumen["campos"]
+    datos = resumen.get("_datos_raw", {})
+
+    matrix = []
+    for field_key, meta in SUMMARY_FIELD_META.items():
+        campo = campos.get(field_key, {})
+
+        # Recalcular candidatos para metadata de debug
+        process_cands = _collect_process_candidates(datos, field_key)
+        trace_cands = _collect_trace_candidates(caso, field_key)
+        thematic_cands = _thematic_candidates(caso, field_key)
+        all_cands = process_cands + trace_cands + thematic_cands
+        best_for_debug = _pick_best_candidate(field_key, all_cands)
+
+        # Usar el estado y score del campo ya resuelto (pipeline unificado)
+        has_value = bool(campo.get("has_value"))
+        state = campo.get("state", "No encontrado")
+        score = _score_from_state(state, has_value=has_value)
+
+        # Construir el motivo cuando no se resuelve
+        motivo = ""
+        if not has_value:
+            faltante = _find_matching_faltante(caso, field_key)
+            if faltante:
+                partes = [f"Registrado como faltante ({faltante.criticidad or 'sin criticidad'})"]
+                if faltante.motivo:
+                    partes.append(faltante.motivo)
+                if faltante.detalle:
+                    partes.append(faltante.detalle)
+                motivo = " | ".join(partes)
+            elif not all_cands:
+                motivo = "Sin candidatos en ninguna fuente (Proceso, Trazabilidad ni hojas temáticas)"
+            else:
+                motivo = "Candidatos encontrados pero todos con valor vacío o marcador de faltante"
+
+        best = best_for_debug
+        matrix.append({
+            "campo_canonico": field_key,
+            "label_ui": meta["label"],
+            "fuente_resuelta": campo.get("source_name", "") if has_value else "",
+            "hoja_origen": campo.get("trace", {}).get("source_type", best.get("source_type", "") if best else "") if has_value else "",
+            "columna_origen": best.get("column_original", "") if best and has_value else "",
+            "alias_detectado": best.get("alias_matched", "") if best and has_value else "",
+            "valor_resuelto": campo.get("value", "") if has_value else "",
+            "estado_resuelto": state,
+            "puntaje_aplicado": score,
+            "candidatos_proceso": len(process_cands),
+            "candidatos_trazab": len(trace_cands),
+            "candidatos_tematicos": len(thematic_cands),
+            "motivo_si_no_resuelve": motivo,
+        })
+
+    return matrix

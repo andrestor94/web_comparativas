@@ -253,12 +253,25 @@
                     {% set _back_url = '/markets' %}
                 {% endif %}
                 <a href="{{ _back_url }}" class="nav-link text-decoration-none small">Volver a SIEM</a>
-                <div class="d-flex align-items-center gap-2 text-white small">
-                    <div
-                        style="width: 32px; height: 32px; background: rgba(255,255,255,0.1); border-radius: 50%; display:flex; align-items:center; justify-content:center;">
-                        <i class="bi bi-person"></i>
-                    </div>
-                    <span>{{ user_display(user) if user else 'Admin' }}</span>
+                <!-- Menú de usuario S.I.C -->
+                <div class="dropdown">
+                    <button class="btn btn-link p-0 d-flex align-items-center gap-2 text-white text-decoration-none small"
+                            type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <div style="width:32px;height:32px;background:rgba(255,255,255,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                            <i class="bi bi-person"></i>
+                        </div>
+                        <span>{{ user_display(user) if user else 'Admin' }}</span>
+                        <i class="bi bi-chevron-down opacity-50" style="font-size:0.7rem;"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end border-0 shadow"
+                        style="background:#0d2a40;border:1px solid rgba(255,255,255,0.12) !important;min-width:175px;">
+                        <li>
+                            <a class="dropdown-item d-flex align-items-center gap-2 small" href="/logout"
+                               style="color:#f87171;">
+                                <i class="bi bi-box-arrow-right"></i>Cerrar sesión
+                            </a>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>

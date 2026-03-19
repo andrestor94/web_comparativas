@@ -66,10 +66,6 @@
   --header-bg: rgba(255, 255, 255, 0.95);
 }
 
-/* ---------- Dark Mode Overrides ---------- */
-
-
-
 /* ---------- Global Reset & Base ---------- */
 *,
 *::before,
@@ -82,11 +78,6 @@ body {
   font-family: 'Outfit', sans-serif;
   color: var(--ink-900);
   background-color: var(--brand-bg);
-  background-image:
-    linear-gradient(rgba(82, 116, 206, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(82, 116, 206, 0.03) 1px, transparent 1px);
-  background-size: 32px 32px;
-  background-attachment: fixed;
   line-height: 1.5;
 }
 
@@ -804,8 +795,8 @@ label {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  background: var(--brand-white);
-  border: 1px solid var(--ink-200);
+  background: #ffffff;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: var(--radius-md);
   padding: 0.5rem 0.75rem;
   box-shadow: var(--shadow-sm);
@@ -822,14 +813,14 @@ label {
   align-items: center;
   gap: 0.5rem;
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
   transition: all 0.2s;
 }
 
 .search-box-tech .input-group:focus-within {
-  background: var(--brand-white);
+  background: #ffffff;
   border-color: #5770b0;
   box-shadow: 0 0 0 3px rgba(82, 116, 206, 0.1);
 }
@@ -1012,7 +1003,7 @@ label {
 .filter-card--compact,
 .filter-card--band,
 .filter-card--date {
-  background: var(--brand-white);
+  background: #ffffff;
   /* Suizo Blue Left Accent - Adds color without clutter */
   border-left: 4px solid #06486f !important;
   border-top: 1px solid #e2e8f0;
@@ -1065,8 +1056,7 @@ label {
 .field select,
 .dates-row input {
   background: #f8fafc;
-  /* Very light slate */
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--ink-200, #e2e8f0);
   color: #334155;
   font-weight: 500;
   border-radius: 6px;
@@ -1215,7 +1205,7 @@ label {
   padding: 0.75rem;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  border: 1px solid var(--ink-100);
+  border: 1px solid var(--ink-200, #f1f5f9);
   font-size: 0.9rem;
   position: relative;
 }
@@ -1244,7 +1234,7 @@ label {
 .wc-form {
   padding: 0.75rem 1rem;
   background: #fff;
-  border-top: 1px solid var(--ink-200);
+  border-top: 1px solid var(--ink-200, #e2e8f0);
   border-radius: 0 0 12px 12px;
 }
 
@@ -1276,7 +1266,7 @@ label {
   width: 100%;
   height: 60px;
   padding: 0.6rem;
-  border: 1px solid var(--ink-200);
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: 6px;
   font-family: inherit;
   font-size: 0.9rem;
@@ -1348,11 +1338,8 @@ label {
 .card-tech {
   background: #ffffff;
   border: 1px solid rgba(226, 232, 240, 0.8);
-  /* Softer border */
   border-radius: 12px;
-  /* More modern radius */
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.03);
-  /* Base subtle shadow */
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease;
 }
 
@@ -1710,10 +1697,6 @@ body {
   --color-error:    #dc2626;              /* rojo semántico       */
   --color-process:  var(--brand-azul-2);  /* procesando           */
   --color-review:   #93D667;              /* revisión verde claro */
-
-  --surface-1: #f7f9fc;   /* fondo general frío claro */
-  --surface-2: #ffffff;   /* superficie de card       */
-  --surface-3: #f1f5f9;   /* fondo de inputs          */
 }
 
 /* ─── btn-ghost (faltaba) ────────────────────────────────── */
@@ -1774,8 +1757,8 @@ body {
 
 /* ─── KPI Card con acento de marca ──────────────────────── */
 .kpi-card-brand {
-  background: var(--surface-2);
-  border: 1px solid var(--ink-200);
+  background: #ffffff;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: var(--radius-md);
   padding: 1.25rem 1.5rem 1.125rem;
   position: relative;
@@ -1832,7 +1815,7 @@ body {
 }
 .kpi-card-brand .kpi-sub {
   font-size: 0.78rem;
-  color: var(--ink-400);
+  color: var(--ink-300);
   display: block;
 }
 
@@ -1844,8 +1827,8 @@ body {
 
 /* ─── Section Panel ──────────────────────────────────────── */
 .section-panel {
-  background: var(--surface-2);
-  border: 1px solid var(--ink-200);
+  background: #ffffff;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: var(--radius-md);
   padding: 1.5rem;
   margin-bottom: 1.5rem;
@@ -1882,7 +1865,7 @@ body {
 }
 .section-panel__desc {
   font-size: 0.8rem;
-  color: var(--ink-400);
+  color: var(--ink-300);
   margin: 0;
 }
 
@@ -1991,14 +1974,14 @@ body {
 }
 .empty-state__desc {
   font-size: 0.84rem;
-  color: var(--ink-400);
+  color: var(--ink-300);
   max-width: 320px;
 }
 
 /* ─── Market Card v2 (Selector de módulos) ───────────────── */
 .market-card-v2 {
-  background: var(--surface-2);
-  border: 1px solid var(--ink-200);
+  background: #ffffff;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: var(--radius-lg);
   padding: 1.75rem;
   position: relative;
@@ -2110,28 +2093,28 @@ body {
   gap: 1rem;
   margin-bottom: 1.75rem;
   padding-bottom: 1.25rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--ink-200, #e2e8f0);
 }
 .h-page-header__eyebrow {
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #5770b0;
+  color: var(--brand-azul-2, #5770b0);
   margin-bottom: 0.3rem;
   display: block;
 }
 .h-page-header__title {
   font-size: 1.625rem;
   font-weight: 700;
-  color: #06486f;
+  color: var(--brand-azul, #06486f);
   margin: 0 0 0.2rem;
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
 .h-page-header__subtitle {
   font-size: 0.85rem;
-  color: #64748b;
+  color: var(--ink-500, #64748b);
   margin: 0;
 }
 .h-page-header__actions {
@@ -2144,7 +2127,7 @@ body {
 /* ─── Panel contenedor (h-panel) ────────────────────────── */
 .h-panel {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: 12px;
   padding: 1.5rem 1.75rem;
   margin-bottom: 1.5rem;
@@ -2166,7 +2149,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  color: #06486f;
+  color: var(--brand-azul, #06486f);
   margin: 0 0 0.15rem;
   display: block;
 }
@@ -2178,7 +2161,7 @@ body {
 }
 .h-panel__desc {
   font-size: 0.8rem;
-  color: #64748b;
+  color: var(--ink-500, #64748b);
   margin: 0;
 }
 
@@ -2193,7 +2176,7 @@ body {
 }
 .kpi-card {
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--ink-200, #e2e8f0);
   border-radius: 10px;
   padding: 1.25rem 1.375rem 1.125rem;
   position: relative;
@@ -2217,7 +2200,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.09em;
-  color: #64748b;
+  color: var(--ink-500, #64748b);
   display: block;
   margin-bottom: 0.5rem;
 }
@@ -2248,14 +2231,14 @@ body {
   font-size: 0.875rem;
 }
 .h-table thead tr {
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid var(--ink-200, #e2e8f0);
 }
 .h-table th {
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #64748b;
+  color: var(--ink-500, #64748b);
   padding: 0.625rem 1rem;
   background: #f8fafc;
   white-space: nowrap;
@@ -2264,7 +2247,7 @@ body {
 .h-table th:last-child  { border-radius: 0 8px 0 0; }
 .h-table td {
   padding: 0.875rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--ink-200, #f1f5f9);
   vertical-align: middle;
   color: #334155;
 }

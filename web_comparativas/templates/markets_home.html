@@ -388,9 +388,22 @@
                     style="height: 48px; width: auto;">
             </a>
 
-            <div class="user-pill" title="{{ user.email if user else '' }}">
-                <i class="bi bi-person-circle"></i>
-                {{ user_display(user) if user else 'Invitado' }}
+            <div class="dropdown">
+                <button class="user-pill border-0 bg-transparent"
+                        type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                        title="{{ user.email if user else '' }}"
+                        style="cursor:pointer;">
+                    <i class="bi bi-person-circle"></i>
+                    {{ user_display(user) if user else 'Invitado' }}
+                    <i class="bi bi-chevron-down ms-1 opacity-50" style="font-size:0.7rem;"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width:175px;">
+                    <li>
+                        <a class="dropdown-item d-flex align-items-center gap-2 text-danger small" href="/logout">
+                            <i class="bi bi-box-arrow-right"></i>Cerrar sesión
+                        </a>
+                    </li>
+                </ul>
             </div>
         </div>
     </nav>
@@ -477,6 +490,9 @@
             <div class="splash-loader"></div>
         </div>
     </div>
+
+    <!-- Bootstrap JS (necesario para dropdowns) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         (function () {
