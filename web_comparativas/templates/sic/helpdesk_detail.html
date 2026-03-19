@@ -251,7 +251,55 @@
                     </div>
                 </div>
 
-                <!-- Admin Action: Delete -->
+                <!-- Contexto: Lectura de Pliegos -->
+                {% if ticket.modulo_origen == 'lectura_pliegos' %}
+                <div class="mb-4 p-3 rounded-3" style="background:rgba(6,72,111,.18); border:1px solid rgba(87,112,176,.25);">
+                    <div class="text-uppercase fw-bold mb-2" style="font-size:.62rem; letter-spacing:1px; color:#8ba4d8;">
+                        <i class="bi bi-file-earmark-text me-1"></i>Lectura de Pliegos
+                    </div>
+                    {% if ticket.pliego_solicitud %}
+                    {% set pliego = ticket.pliego_solicitud %}
+                    <div class="d-flex flex-column gap-1" style="font-size:.78rem;">
+                        {% if pliego.numero_proceso %}
+                        <div class="d-flex gap-2">
+                            <span class="text-white-50" style="min-width:90px;">N° proceso</span>
+                            <span class="text-white fw-medium">{{ pliego.numero_proceso }}</span>
+                        </div>
+                        {% endif %}
+                        {% if pliego.nombre_licitacion %}
+                        <div class="d-flex gap-2">
+                            <span class="text-white-50" style="min-width:90px;">Licitación</span>
+                            <span class="text-white fw-medium">{{ pliego.nombre_licitacion[:60] }}{% if pliego.nombre_licitacion|length > 60 %}…{% endif %}</span>
+                        </div>
+                        {% endif %}
+                        {% if pliego.organismo %}
+                        <div class="d-flex gap-2">
+                            <span class="text-white-50" style="min-width:90px;">Organismo</span>
+                            <span class="text-white fw-medium">{{ pliego.organismo }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="d-flex gap-2">
+                            <span class="text-white-50" style="min-width:90px;">Estado caso</span>
+                            <span class="text-white fw-medium text-capitalize">{{ pliego.estado | replace('_', ' ') }}</span>
+                        </div>
+                    </div>
+                    <div class="mt-2 pt-2 border-top border-white border-opacity-10">
+                        <a href="/mercado-publico/lectura-pliegos/{{ pliego.id }}"
+                           class="small text-decoration-none" style="color:#8ba4d8;">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Ver solicitud #{{ pliego.id }}
+                        </a>
+                        {% if is_admin %}
+                        <a href="/mercado-publico/lectura-pliegos/{{ pliego.id }}/admin"
+                           class="small text-decoration-none ms-3" style="color:#8ba4d8;">
+                            <i class="bi bi-gear me-1"></i>Gestionar
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+            <!-- Admin Action: Delete -->
                 {% if is_admin %}
                 <div class="mt-4 pt-3 border-top border-white border-opacity-10">
                     <div id="deleteContainer">

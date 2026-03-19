@@ -82,6 +82,16 @@
 {% endblock %}
 
 {% block content %}
+{# ── Widget flotante de notas rápidas ── #}
+<div id="pliego-widget-root"
+     data-pliego-id="{{ caso.id }}"
+     data-numero-proceso="{{ caso.numero_proceso or '' }}"
+     data-nombre-licitacion="{{ caso.nombre_licitacion or '' }}"
+     data-organismo="{{ caso.organismo or '' }}"
+     data-titulo-caso="{{ caso.titulo or '' }}"
+     data-seccion="detalle">
+</div>
+
 {% set error = request.query_params.get('error') %}
 {% if error %}
 <div class="alert alert-danger alert-dismissible fade show mx-3 mt-2 py-2">
@@ -486,4 +496,8 @@
     </div>{# /col lateral #}
   </div>{# /row #}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
 {% endblock %}

@@ -1378,18 +1378,24 @@ class Ticket(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    
+
     title = Column(String, nullable=False)
-    category = Column(String, default="consulta") # error, sugerencia, consulta, acceso
+    category = Column(String, default="consulta") # error, sugerencia, consulta, acceso, lectura_pliegos
     priority = Column(String, default="media")    # baja, media, alta
     status = Column(String, default="abierto")    # abierto, pendiente, resuelto, cerrado
-    
+
     created_at = Column(DateTime, default=dt.datetime.utcnow)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+    # Contexto de origen (para tickets generados desde módulos externos como Lectura de Pliegos)
+    modulo_origen = Column(String, nullable=True, index=True)  # e.g. "lectura_pliegos"
+    pliego_solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"), nullable=True, index=True)
+    contexto_extra = Column(Text, nullable=True)  # JSON: {numero_proceso, nombre_licitacion, organismo, seccion}
 
     # Relationships
     user = relationship("User", backref="tickets")
     messages = relationship("TicketMessage", back_populates="ticket", cascade="all, delete-orphan", order_by="TicketMessage.created_at")
+    pliego_solicitud = relationship("PliegoSolicitud", foreign_keys=[pliego_solicitud_id], backref="tickets_soporte")
 
 class TicketMessage(Base):
     __tablename__ = "ticket_messages"

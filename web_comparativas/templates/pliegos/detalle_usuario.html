@@ -35,6 +35,17 @@
 {% endblock %}
 
 {% block content %}
+
+{# ── Widget flotante de notas rápidas ── #}
+<div id="pliego-widget-root"
+     data-pliego-id="{{ caso.id }}"
+     data-numero-proceso="{{ caso.numero_proceso or '' }}"
+     data-nombre-licitacion="{{ caso.nombre_licitacion or '' }}"
+     data-organismo="{{ caso.organismo or '' }}"
+     data-titulo-caso="{{ caso.titulo or '' }}"
+     data-seccion="detalle">
+</div>
+
 <div class="py-3 px-1" style="max-width:760px">
 
   <nav style="font-size:.82rem" class="mb-3">
@@ -194,4 +205,8 @@
   {% endif %}
 
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
 {% endblock %}

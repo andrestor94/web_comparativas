@@ -365,6 +365,40 @@ def ensure_dimensionamiento_summary_populated():
         )
 
 
+def ensure_ticket_pliego_columns():
+    """
+    Agrega columnas de contexto de origen al modelo Ticket para soporte
+    del widget de comentarios rápidos en Lectura de Pliegos.
+
+    Columnas nuevas:
+      - modulo_origen      VARCHAR(50)  – identifica la sección de origen (e.g. "lectura_pliegos")
+      - pliego_solicitud_id INTEGER FK  – vínculo al caso PliegoSolicitud
+      - contexto_extra      TEXT        – JSON con datos contextuales del pliego al momento del envío
+
+    Cada ALTER TABLE corre en su propia transacción para que el fallo de
+    una columna ya existente no revierta las demás.
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE tickets ADD COLUMN modulo_origen VARCHAR(50)",
+            "tickets.modulo_origen",
+        )
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE tickets ADD COLUMN pliego_solicitud_id INTEGER REFERENCES pliego_solicitudes(id) ON DELETE SET NULL",
+            "tickets.pliego_solicitud_id",
+        )
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE tickets ADD COLUMN contexto_extra TEXT",
+            "tickets.contexto_extra",
+        )
+    print("[MIGRATION] Columnas de widget Lectura de Pliegos verificadas/creadas.", flush=True)
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados (status 'reviewing' o 'done') que aún no tienen
