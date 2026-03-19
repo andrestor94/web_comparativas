@@ -70,6 +70,26 @@
         <p class="text-white-50 small mb-0">Gestión de consultas, soporte y comunicación con administración.</p>
     </div>
 </div>
+
+{# ── Filtro rápido por módulo (solo visible para admin/auditor) ── #}
+{% if is_admin or (user.role or '')|lower == 'auditor' %}
+{% set mod_filter = request.query_params.get('modulo', '') %}
+<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+    <span class="text-white-50 small me-1">Filtrar:</span>
+    <a href="/sic/helpdesk"
+       class="badge rounded-pill text-decoration-none fw-normal px-3 py-2
+              {% if not mod_filter %}bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25{% else %}bg-white bg-opacity-10 text-white-50 border border-white border-opacity-10{% endif %}"
+       style="font-size:.72rem">
+        Todos
+    </a>
+    <a href="/sic/helpdesk?modulo=lectura_pliegos"
+       class="badge rounded-pill text-decoration-none fw-normal px-3 py-2
+              {% if mod_filter == 'lectura_pliegos' %}text-white border border-opacity-25{% else %}bg-white bg-opacity-10 text-white-50 border border-white border-opacity-10{% endif %}"
+       style="font-size:.72rem; {% if mod_filter == 'lectura_pliegos' %}background:rgba(6,72,111,.45); border-color:rgba(87,112,176,.4);{% endif %}">
+        <i class="bi bi-file-earmark-text me-1"></i>Lectura de Pliegos
+    </a>
+</div>
+{% endif %}
 {% if (user.role or '')|lower != 'auditor' %}
 <div class="col-auto">
     <a href="/sic/helpdesk/new" class="btn btn-sic-primary d-flex align-items-center gap-2">
@@ -138,11 +158,17 @@
                     </td>
                     {% endif %}
                     <td>
-                        <span
-                            class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal px-2 py-1"
-                            style="font-size: 0.7rem;">
+                        {% if t.category == 'lectura_pliegos' %}
+                        <span class="badge rounded-pill fw-normal px-2 py-1"
+                              style="font-size:.7rem; background:rgba(6,72,111,.3); color:#8ba4d8; border:1px solid rgba(87,112,176,.3);">
+                            <i class="bi bi-file-earmark-text me-1"></i>Lectura de Pliegos
+                        </span>
+                        {% else %}
+                        <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal px-2 py-1"
+                              style="font-size:.7rem;">
                             {{ t.category|capitalize }}
                         </span>
+                        {% endif %}
                     </td>
                     <td>
                         {% set p_cls = 'priority-media' %}

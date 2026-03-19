@@ -183,6 +183,16 @@
 {% endblock %}
 
 {% block content %}
+{# ── Widget flotante de notas rápidas ── #}
+<div id="pliego-widget-root"
+     data-pliego-id="{{ caso.id }}"
+     data-numero-proceso="{{ caso.numero_proceso or '' }}"
+     data-nombre-licitacion="{{ caso.nombre_licitacion or '' }}"
+     data-organismo="{{ caso.organismo or '' }}"
+     data-titulo-caso="{{ caso.titulo or '' }}"
+     data-seccion="vista-principal">
+</div>
+
 {% set base_general = canonical_output._base.general_fields %}
 
 {% set origen = (base_general | selectattr("label", "equalto", "Origen") | list | first) %}
@@ -449,6 +459,11 @@
   </div>
 </div>
 {% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
+{% endblock %}
+
   .erp-item-value-compact {
     display: -webkit-box;
     -webkit-line-clamp: 2;

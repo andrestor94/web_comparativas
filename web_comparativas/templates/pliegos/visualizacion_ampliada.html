@@ -201,10 +201,135 @@
     .amp-nav-btn { flex-basis: calc(50% - 0.5rem); }
     .amp-nav-title, .nav-cta-resumida { width: 100%; }
   }
+
+  /* ═══════════════════════════════════════════════════════
+     TABLA DEPURACIÓN — Scroll avanzado
+     Scoped a #amp-panel-depuracion para no afectar otras tablas
+  ════════════════════════════════════════════════════════ */
+
+  /* overflow:hidden en amp-card rompe position:sticky;
+     lo sobreescribimos sólo para el panel de depuración */
+  #amp-panel-depuracion .amp-card { overflow: visible; }
+
+  /* Microayuda superior */
+  .debug-scroll-hint {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .72rem;
+    color: var(--text-secondary);
+    padding: .25rem 1.4rem .5rem;
+    margin: 0;
+    opacity: .8;
+  }
+
+  /* Wrapper externo — referencia para la sombra lateral */
+  .debug-scroll-outer {
+    position: relative;
+  }
+
+  /* ── Scrollbar espejo en la parte SUPERIOR ── */
+  .debug-scroll-top {
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 14px;
+    background: #f1f5f9;
+    border: 1px solid var(--border-soft);
+    border-bottom: none;
+    border-radius: 0;
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 transparent;
+  }
+  .debug-scroll-top::-webkit-scrollbar { height: 8px; }
+  .debug-scroll-top::-webkit-scrollbar-track { background: transparent; }
+  .debug-scroll-top::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+  .debug-scroll-top-inner { height: 1px; } /* anchura seteada por JS */
+
+  /* ── Contenedor principal con altura fija y scroll doble ── */
+  .debug-scroll-wrap {
+    overflow: auto;
+    max-height: 62vh;
+    border: 1px solid var(--border-soft);
+    border-radius: 0 0 10px 10px;
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 #f1f5f9;
+    position: relative;
+  }
+  .debug-scroll-wrap::-webkit-scrollbar { width: 7px; height: 7px; }
+  .debug-scroll-wrap::-webkit-scrollbar-track { background: #f8fafc; }
+  .debug-scroll-wrap::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+  .debug-scroll-wrap::-webkit-scrollbar-corner { background: #f8fafc; }
+
+  /* ── Sombra lateral derecha: indica más contenido ── */
+  .debug-scroll-outer::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 14px;   /* debajo del scrollbar espejo */
+    bottom: 0;
+    width: 72px;
+    pointer-events: none;
+    background: linear-gradient(to left, rgba(255,255,255,0.92) 0%, transparent 100%);
+    border-radius: 0 0 10px 0;
+    z-index: 5;
+    transition: opacity .25s;
+  }
+  .debug-scroll-outer.debug-at-end::after { opacity: 0; }
+  /* Si no hay overflow real, tampoco mostrar sombra */
+  .debug-scroll-outer.debug-no-overflow::after { display: none; }
+
+  /* ── Encabezado sticky (vertical) ── */
+  #tablaDebug thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #f8fafc;
+    /* Borde inferior que se mantiene visible al hacer scroll */
+    box-shadow: inset 0 -2px 0 var(--border-soft);
+  }
+
+  /* ── Primera columna sticky (horizontal) ── */
+  #tablaDebug th:first-child,
+  #tablaDebug td:first-child {
+    position: sticky;
+    left: 0;
+  }
+  /* Esquina superior-izquierda: thead + primera col */
+  #tablaDebug thead th:first-child {
+    z-index: 6;
+    background: #eef2f8;
+    box-shadow:
+      inset 0 -2px 0 var(--border-soft),
+      inset -2px 0 0 #d1dae8;
+  }
+  /* Celdas de la primera columna en tbody */
+  #tablaDebug tbody td:first-child {
+    z-index: 2;
+    background: #ffffff;
+    box-shadow: inset -2px 0 0 var(--border-soft);
+  }
+  #tablaDebug tbody tr:hover td:first-child {
+    background: #f8fafc;
+  }
+
+  @media (max-width: 768px) {
+    .debug-scroll-wrap { max-height: 55vh; }
+    .debug-scroll-hint { display: none; } /* en mobile es obvio que hay scroll */
+  }
 </style>
 {% endblock %}
 
 {% block content %}
+{# ── Widget flotante de notas rápidas ── #}
+<div id="pliego-widget-root"
+     data-pliego-id="{{ caso.id }}"
+     data-numero-proceso="{{ caso.numero_proceso or '' }}"
+     data-nombre-licitacion="{{ caso.nombre_licitacion or '' }}"
+     data-organismo="{{ caso.organismo or '' }}"
+     data-titulo-caso="{{ caso.titulo or '' }}"
+     data-seccion="vista-ampliada">
+</div>
+
 <div class="amp-layout">
 
   {%- macro status_badge(estado) -%}
@@ -822,8 +947,16 @@
             </span>
           </div>
 
-          <div class="table-responsive">
-            <table class="amp-table" id="tablaDebug" style="font-size:.8rem;">
+          <p class="debug-scroll-hint">
+            <i class="bi bi-arrows-move"></i>
+            Desplazá horizontalmente para ver todas las columnas — el encabezado y la primera columna quedan fijos.
+          </p>
+          <div class="debug-scroll-outer" id="debugScrollOuter">
+            <div class="debug-scroll-top" id="debugScrollTop">
+              <div class="debug-scroll-top-inner" id="debugScrollTopInner"></div>
+            </div>
+            <div class="debug-scroll-wrap" id="debugScrollWrap">
+              <table class="amp-table" id="tablaDebug" style="font-size:.8rem;">
               <thead>
                 <tr>
                   <th style="min-width:140px;">Campo canónico</th>
@@ -901,11 +1034,12 @@
                 </tr>
                 {% endfor %}
               </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
+              </table>
+            </div><!-- /debug-scroll-wrap -->
+          </div><!-- /debug-scroll-outer -->
+        </div><!-- /amp-card-body -->
+      </div><!-- /amp-card -->
+    </div><!-- /amp-panel-depuracion -->
     {% endif %}
 
   </main>
@@ -986,5 +1120,62 @@
   }
   document.getElementById('filtroDebug')?.addEventListener('input', applyDebugFilters);
   document.getElementById('filtroEstadoDebug')?.addEventListener('change', applyDebugFilters);
+
+  // ─── Depuración: scroll sincronizado + sombra lateral ───
+  (function() {
+    const outer    = document.getElementById('debugScrollOuter');
+    const topBar   = document.getElementById('debugScrollTop');
+    const topInner = document.getElementById('debugScrollTopInner');
+    const wrap     = document.getElementById('debugScrollWrap');
+    const tabla    = document.getElementById('tablaDebug');
+    if (!outer || !topBar || !topInner || !wrap || !tabla) return;
+
+    // Actualizar ancho del "espejo" superior para que coincida con la tabla real
+    function syncTopWidth() {
+      topInner.style.width = tabla.scrollWidth + 'px';
+    }
+
+    // Verificar si hay overflow horizontal (para mostrar/ocultar sombra)
+    function checkOverflow() {
+      const hasOverflow = wrap.scrollWidth > wrap.clientWidth + 4;
+      outer.classList.toggle('debug-no-overflow', !hasOverflow);
+      if (hasOverflow) {
+        const atEnd = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 4;
+        outer.classList.toggle('debug-at-end', atEnd);
+      }
+    }
+
+    // Inicializar
+    syncTopWidth();
+    checkOverflow();
+
+    // Resync cuando la tabla cambia (filtros ocultan/muestran filas)
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(function() { syncTopWidth(); checkOverflow(); });
+      ro.observe(tabla);
+    }
+
+    // Sincronización bidireccional de scroll horizontal
+    let syncing = false;
+
+    topBar.addEventListener('scroll', function() {
+      if (syncing) return;
+      syncing = true;
+      wrap.scrollLeft = topBar.scrollLeft;
+      syncing = false;
+    });
+
+    wrap.addEventListener('scroll', function() {
+      if (syncing) return;
+      syncing = true;
+      topBar.scrollLeft = wrap.scrollLeft;
+      const atEnd = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 4;
+      outer.classList.toggle('debug-at-end', atEnd);
+      syncing = false;
+    });
+
+    window.addEventListener('resize', function() { syncTopWidth(); checkOverflow(); });
+  })();
 </script>
+<script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
 {% endblock %}

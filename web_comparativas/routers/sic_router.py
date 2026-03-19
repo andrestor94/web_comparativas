@@ -7,7 +7,7 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest
+from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
 
@@ -61,23 +61,28 @@ def sic_helpdesk(request: Request, user: User = Depends(sic_access_required)):
     # Roles with full visibility
     full_access_roles = ["admin", "auditor"]
     user_role = (user.role or "").lower()
-    
+
     has_full_access = user_role in full_access_roles
-    
+
     q = db_session.query(Ticket)
     if not has_full_access:
         # Supervisors and Analysts only see their own tickets
         q = q.filter(Ticket.user_id == user.id)
-        
+
+    # Filtro opcional por módulo (e.g. ?modulo=lectura_pliegos)
+    mod_filter = request.query_params.get("modulo", "").strip()
+    if mod_filter:
+        q = q.filter(Ticket.modulo_origen == mod_filter)
+
     tickets = q.order_by(Ticket.updated_at.desc()).all()
-    
+
     ctx = {
         "request": request,
         "user": user,
         "user_display": user_display,
         "section": "helpdesk",
         "tickets": tickets,
-        "is_admin": "admin" in user_role
+        "is_admin": "admin" in user_role,
     }
     return templates.TemplateResponse("sic/helpdesk.html", ctx)
 
@@ -150,9 +155,9 @@ def sic_api_ticket_create(
             ctx_info += f" [Proceso: {payload.process_code}]"
         if payload.upload_id:
             ctx_info += f" [UploadID: {payload.upload_id}]"
-            
+
         full_title = f"{payload.title} {ctx_info}".strip()
-        
+
         # Create Ticket
         ticket = Ticket(
             user_id=user.id,
@@ -172,11 +177,182 @@ def sic_api_ticket_create(
         )
         db_session.add(msg)
         db_session.commit()
-        
+
         return {"ok": True, "ticket_id": ticket.id, "redirect_url": f"/sic/helpdesk/{ticket.id}"}
     except Exception as e:
         db_session.rollback()
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# WIDGET: Lectura de Pliegos — comentarios rápidos contextuales
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+class PliegoWidgetCommentSchema(BaseModel):
+    pliego_id: int
+    message: str
+    # Contexto automático capturado por el widget en el frontend
+    numero_proceso: Optional[str] = None
+    nombre_licitacion: Optional[str] = None
+    organismo: Optional[str] = None
+    titulo_caso: Optional[str] = None
+    seccion: Optional[str] = None   # "lista" | "detalle"
+
+
+@router.post("/api/tickets/pliego-comment", response_class=JSONResponse)
+def sic_api_pliego_comment(
+    request: Request,
+    payload: PliegoWidgetCommentSchema,
+    user: User = Depends(sic_access_required),
+):
+    """
+    Crea o reutiliza un ticket de Mesa de Ayuda asociado a un caso de Lectura de Pliegos.
+
+    Regla de agrupación:
+      - Si el usuario ya tiene un ticket ABIERTO para el mismo pliego (modulo_origen +
+        pliego_solicitud_id + usuario), el mensaje se agrega a ese ticket existente.
+      - Si no existe ninguno abierto, se crea uno nuevo.
+
+    Esto evita fragmentar la conversación en muchos tickets cuando el usuario
+    envía varias notas sobre el mismo proceso.
+    """
+    try:
+        pliego = db_session.get(PliegoSolicitud, payload.pliego_id)
+        if not pliego:
+            return JSONResponse({"ok": False, "error": "Caso de pliego no encontrado."}, status_code=404)
+
+        # Buscar ticket activo del mismo usuario para el mismo pliego
+        existing = (
+            db_session.query(Ticket)
+            .filter(
+                Ticket.modulo_origen == "lectura_pliegos",
+                Ticket.pliego_solicitud_id == payload.pliego_id,
+                Ticket.user_id == user.id,
+                Ticket.status.in_(["abierto", "pendiente"]),
+            )
+            .order_by(Ticket.updated_at.desc())
+            .first()
+        )
+
+        contexto = {
+            "pliego_id": payload.pliego_id,
+            "numero_proceso": payload.numero_proceso or pliego.numero_proceso,
+            "nombre_licitacion": payload.nombre_licitacion or pliego.nombre_licitacion,
+            "organismo": payload.organismo or pliego.organismo,
+            "titulo_caso": payload.titulo_caso or pliego.titulo,
+            "seccion": payload.seccion or "detalle",
+        }
+
+        is_new = False
+        if existing:
+            ticket = existing
+            ticket.updated_at = dt.datetime.utcnow()
+            # Reabre si estaba cerrado/resuelto (no debería, por el filtro, pero por seguridad)
+            if ticket.status not in ("abierto", "pendiente"):
+                ticket.status = "abierto"
+        else:
+            # Armar título descriptivo automático
+            proceso_str = pliego.numero_proceso or ""
+            licit_str = pliego.nombre_licitacion or pliego.titulo or f"Pliego #{pliego.id}"
+            title_parts = ["[Lectura de Pliegos]"]
+            if proceso_str:
+                title_parts.append(f"Proceso {proceso_str}")
+            title_parts.append(licit_str[:80])
+            auto_title = " – ".join(title_parts)[:200]
+
+            ticket = Ticket(
+                user_id=user.id,
+                title=auto_title,
+                category="lectura_pliegos",
+                priority="media",
+                status="abierto",
+                modulo_origen="lectura_pliegos",
+                pliego_solicitud_id=payload.pliego_id,
+                contexto_extra=_json.dumps(contexto, ensure_ascii=False),
+            )
+            db_session.add(ticket)
+            db_session.flush()
+            is_new = True
+
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=payload.message,
+        )
+        db_session.add(msg)
+        db_session.commit()
+
+        return JSONResponse({
+            "ok": True,
+            "ticket_id": ticket.id,
+            "is_new": is_new,
+            "message_count": len(ticket.messages),
+        })
+    except Exception as e:
+        db_session.rollback()
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/tickets/pliego/{pliego_id}/summary", response_class=JSONResponse)
+def sic_api_pliego_summary(
+    request: Request,
+    pliego_id: int,
+    user: User = Depends(sic_access_required),
+):
+    """
+    Retorna el resumen de tickets activos para un pliego dado y el usuario actual.
+    Usado por el widget para mostrar el badge de cantidad y el historial resumido.
+    """
+    try:
+        tickets = (
+            db_session.query(Ticket)
+            .filter(
+                Ticket.modulo_origen == "lectura_pliegos",
+                Ticket.pliego_solicitud_id == pliego_id,
+                Ticket.user_id == user.id,
+            )
+            .order_by(Ticket.updated_at.desc())
+            .all()
+        )
+
+        open_count = sum(1 for t in tickets if t.status in ("abierto", "pendiente"))
+        total_msgs = sum(len(t.messages) for t in tickets)
+
+        # Historial compacto para el widget (últimos 10 mensajes del ticket más reciente)
+        recent_messages = []
+        if tickets:
+            latest = tickets[0]
+            for m in latest.messages[-10:]:
+                sender_name = (
+                    "Tú" if m.user_id == user.id
+                    else (m.user.name or m.user.email.split("@")[0].capitalize())
+                )
+                is_admin = "admin" in (m.user.role or "").lower() or "supervisor" in (m.user.role or "").lower()
+                recent_messages.append({
+                    "id": m.id,
+                    "message": m.message,
+                    "sender": sender_name,
+                    "is_admin": is_admin,
+                    "is_me": m.user_id == user.id,
+                    "created_at": m.created_at.strftime("%d/%m %H:%M"),
+                })
+
+        active_ticket = tickets[0] if tickets else None
+
+        return JSONResponse({
+            "ok": True,
+            "open_count": open_count,
+            "total_tickets": len(tickets),
+            "total_messages": total_msgs,
+            "active_ticket_id": active_ticket.id if active_ticket else None,
+            "active_ticket_status": active_ticket.status if active_ticket else None,
+            "recent_messages": recent_messages,
+        })
+    except Exception as e:
+        db_session.rollback()
+        return JSONResponse({"ok": False, "error": str(e), "open_count": 0}, status_code=500)
 
 
 @router.get("/helpdesk/{ticket_id}", response_class=HTMLResponse)
