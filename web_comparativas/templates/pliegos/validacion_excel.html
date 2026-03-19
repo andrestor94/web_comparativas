@@ -59,32 +59,110 @@
   {% endif %}
 
   {% if not errores %}
+  <!-- ╔══════════════════════════════════════════════════════════╗
+       ║  COMPLETITUD DEL CASO (ejecutiva + técnica)             ║
+       ╚══════════════════════════════════════════════════════════╝ -->
   <div class="val-card">
     <div class="card-body">
-      <div class="d-flex align-items-center justify-content-between gap-3 mb-3 flex-wrap">
-        <div>
-          <h6 class="fw-bold mb-0">Completitud de carga</h6>
-          <div class="text-muted" style="font-size:.82rem">{{ caso.titulo }}</div>
+      <div class="mb-3">
+        <h6 class="fw-bold mb-0">Completitud del caso</h6>
+        <div class="text-muted" style="font-size:.82rem">{{ caso.titulo }}</div>
+      </div>
+
+      <!-- Dos métricas principales -->
+      <div class="row g-3 mb-3">
+        <!-- Ejecutiva -->
+        <div class="col-md-6">
+          <div class="p-3 rounded" style="background:#f0fdf4;border:1px solid #a7f3d0;">
+            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#059669;font-weight:800;">
+              Completitud Ejecutiva
+            </div>
+            <div class="d-flex align-items-baseline gap-2 mt-1">
+              <span style="font-size:2rem;font-weight:800;color:#065f46;line-height:1;">{{ completitud_ejecutiva.porcentaje }}%</span>
+              <span style="font-size:.8rem;color:#059669;font-weight:600;">
+                {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} campos
+              </span>
+            </div>
+            <div class="progress-bar-wrap mt-2" style="height:6px;">
+              <div class="progress-bar-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
+            </div>
+            <div style="font-size:.73rem;color:#6b7280;margin-top:.45rem;">
+              Resumen para decisión rápida de jefatura · 18 ítems clave
+            </div>
+          </div>
         </div>
-        <div class="text-end">
-          <div style="font-size:.72rem; color:#888; text-transform:uppercase">Porcentaje</div>
-          <div class="fw-bold" style="font-size:1.4rem; color:{% if completitud >= 80 %}#198754{% elif completitud >= 50 %}#fd7e14{% else %}#dc3545{% endif %}">
-            {{ completitud }}%
+        <!-- Técnica -->
+        <div class="col-md-6">
+          <div class="p-3 rounded" style="background:#eff6ff;border:1px solid #93c5fd;">
+            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#2563eb;font-weight:800;">
+              Completitud Técnica
+            </div>
+            <div class="d-flex align-items-baseline gap-2 mt-1">
+              <span style="font-size:2rem;font-weight:800;color:#1e3a8a;line-height:1;">{{ completitud_tecnica.porcentaje }}%</span>
+              <span style="font-size:.8rem;color:#2563eb;font-weight:600;">
+                {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} campos
+              </span>
+            </div>
+            <div class="progress-bar-wrap mt-2" style="height:6px;">
+              <div class="progress-bar-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
+            </div>
+            <div style="font-size:.73rem;color:#6b7280;margin-top:.45rem;">
+              Cobertura detallada de campos canónicos · 33 campos
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="progress-bar-wrap mb-4">
-        <div class="progress-bar-fill" style="width:{{ completitud }}%"></div>
+      <!-- 3 contadores de síntesis -->
+      <div class="row g-2 mb-3">
+        <div class="col-4">
+          <div class="text-center p-2 rounded" style="background:#f0fdf4;border:1px solid #bbf7d0;">
+            <div style="font-size:1.4rem;font-weight:800;color:#059669;">{{ completitud_ejecutiva.campos_encontrados }}</div>
+            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Campos completos</div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="text-center p-2 rounded" style="background:#fffbeb;border:1px solid #fde68a;">
+            <div style="font-size:1.4rem;font-weight:800;color:#d97706;">{{ completitud_ejecutiva.campos_ambiguos + completitud_ejecutiva.campos_inferidos }}</div>
+            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Con observaciones</div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="text-center p-2 rounded" style="background:#fef2f2;border:1px solid #fecaca;">
+            <div style="font-size:1.4rem;font-weight:800;color:#dc2626;">{{ caso.faltantes|length }}</div>
+            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Faltantes documentales</div>
+          </div>
+        </div>
       </div>
 
+      <!-- Microcopy explicativo -->
+      <div class="d-flex gap-2 p-3 rounded" style="background:#f8fafc;border:1px solid #e2e8f0;font-size:.79rem;color:#475569;">
+        <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#2563eb;font-size:.95rem;margin-top:.1rem;"></i>
+        <div>
+          <strong>Completitud alta no equivale a expediente sin problemas.</strong>
+          La completitud ejecutiva y técnica miden si los <em>campos de datos</em> del pliego fueron
+          identificados en el Excel. Los <strong>faltantes documentales</strong> son problemas independientes:
+          renglones incompletos, anexos ausentes o condiciones no especificadas en el pliego.
+          Ambas métricas coexisten y deben evaluarse por separado.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cobertura de campos RP (análisis auxiliar de mapeo) -->
+  <div class="val-card">
+    <div class="card-body">
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <h6 class="fw-bold mb-0">Cobertura de campos RP</h6>
+        <span class="badge text-bg-secondary fw-normal" style="font-size:.68rem;">análisis auxiliar de mapeo</span>
+      </div>
       <div class="metrics-grid">
         <div class="metric-box"><div class="num">{{ rp_validation.completos }}</div><div class="lbl">Completos</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation.ambiguos }}</div><div class="lbl">Ambiguos</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation.requieren_validacion_manual }}</div><div class="lbl">Manual</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation.faltantes_reales }}</div><div class="lbl">Faltantes reales</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation.total_campos_rp }}</div><div class="lbl">Campos principales</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation_by_group['Datos generales del proceso'].completos }}</div><div class="lbl">Datos del proceso</div></div>
+        <div class="metric-box"><div class="num">{{ rp_validation.total_campos_rp }}</div><div class="lbl">Campos RP</div></div>
+        <div class="metric-box"><div class="num">{{ rp_validation_by_group['Datos generales del proceso'].completos }}</div><div class="lbl">Datos proceso</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Detalle'].completos }}</div><div class="lbl">Detalle</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Matriz Requerimiento del Pliego'].completos }}</div><div class="lbl">Matriz</div></div>
       </div>

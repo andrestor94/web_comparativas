@@ -34,7 +34,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
   <!-- Tema personalizado (global) + cache-busting -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=sidebar-solid-v3">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=revert-v1">
 
   <style>
     /* SPLASH SCREEN (PREMIUM) */
@@ -490,7 +490,7 @@
       font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: var(--ink-400);
+      color: var(--ink-300);
       font-weight: 700;
       margin-top: 2px;
     }
@@ -842,23 +842,28 @@
               </a>
             </div>
 
-            {% if user_display is defined %}
-            <span>{{ user_display(user) }}</span>
-            {% else %}
-            <span>{{ _display_name or '—' }}</span>
-            {% endif %}
+            <!-- Menú de usuario -->
+            <div class="dropdown">
+              <button class="btn btn-link text-secondary p-0 d-flex align-items-center gap-2 text-decoration-none"
+                      type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <div style="width:28px;height:28px;background:#e8edf5;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                  <i class="bi bi-person-fill" style="font-size:0.8rem;color:#6c757d;"></i>
+                </div>
+                <span class="small">
+                  {% if user_display is defined %}{{ user_display(user) }}{% else %}{{ _display_name or '—' }}{% endif %}
+                </span>
+                <span class="top-user-pill">{{ (r or '')|capitalize }}</span>
+                <i class="bi bi-chevron-down opacity-50" style="font-size:0.7rem;"></i>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width:170px;">
+                <li>
+                  <a class="dropdown-item d-flex align-items-center gap-2 text-danger small" href="/logout">
+                    <i class="bi bi-box-arrow-right"></i>Cerrar sesión
+                  </a>
+                </li>
+              </ul>
+            </div>
 
-            <!-- pill de rol -->
-            <span class="top-user-pill">
-              {{ (r or '')|capitalize }}
-            </span>
-
-            <!-- Cerrar sesión (header) -->
-            <a href="/logout" class="text-secondary opacity-75 ms-1" title="Cerrar sesión" style="font-size: 1.1rem;">
-              <i class="bi bi-box-arrow-right"></i>
-            </a>
-
-            <!-- Toggle Dark Mode (Tech/Pill) -->
 
           </div>
         </div>
@@ -1200,6 +1205,7 @@
   {% endif %}
 
   {% block extra_js %}{% endblock %}
+
 </body>
 
 </html>
