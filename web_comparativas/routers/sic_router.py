@@ -421,8 +421,8 @@ def sic_helpdesk_reply(
                 category="helpdesk",
                 link=f"/sic/helpdesk/{ticket.id}"
             )
-    except Exception as e:
-        print(f"Error notificando reply: {e}")
+    except Exception:
+        pass
 
     return RedirectResponse(f"/sic/helpdesk/{ticket.id}", status_code=303)
 
@@ -474,28 +474,22 @@ def sic_helpdesk_delete(
     ticket_id: int,
     user: User = Depends(sic_access_required)
 ):
-    print(f"DEBUG: Attempting to delete ticket {ticket_id} by {user.email}")
     is_admin = "admin" in (user.role or "").lower()
-    # Explicitly check for auditor just in case logic changes
     if (user.role or "").lower() == "auditor":
         is_admin = False
     if not is_admin:
-        print("DEBUG: Delete denied - Not admin")
         return RedirectResponse("/sic/helpdesk?err=permiso_denegado", status_code=303)
 
     ticket = db_session.get(Ticket, ticket_id)
     if not ticket:
-        print("DEBUG: Delete failed - Ticket not found")
         raise HTTPException(status_code=404, detail="Consulta no encontrada")
 
     try:
         db_session.delete(ticket)
         db_session.commit()
-        print(f"DEBUG: Ticket {ticket_id} deleted successfully")
         return RedirectResponse("/sic/helpdesk?ok=deleted", status_code=303)
     except Exception as e:
         db_session.rollback()
-        print(f"DEBUG: Delete exception: {e}")
         return RedirectResponse(f"/sic/helpdesk?err=EXCEPTION_{str(e)}", status_code=303)
 
 
@@ -524,8 +518,10 @@ def sic_api_usage_summary(
     request: Request,
     date_from: str = Query("", description="Fecha desde"),
     date_to: str = Query("", description="Fecha hasta"),
-    role: str = Query("analistas_y_supervisores"),
+    role: str = Query(""),
+    team: str = Query("", description="Grupo / equipo"),
     view: str = Query("day"),
+    granularity: str = Query("", description="Alias de view"),
     user: User = Depends(sic_access_required)
 ):
     """
@@ -541,19 +537,108 @@ def sic_api_usage_summary(
         date_from=date_from,
         date_to=date_to,
         role_filter=role,
-        view=view,
+        team_filter=team,
+        view=granularity or view,
     )
     
     # Log specific event for SIC usage
     log_usage_event(
         user=user,
-        action_type="page_view",
+        action_type="api_call",
         section="sic_tracking_api",
         request=request,
     )
 
     return JSONResponse({"ok": True, **summary})
 
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+
+class TrackEventSchema(BaseModel):
+    action_type: str
+    section: Optional[str] = None
+    resource_id: Optional[str] = None
+    duration_ms: Optional[int] = None
+    extra_data: Optional[Dict[str, Any]] = None
+
+@router.post("/api/track-event", response_class=JSONResponse)
+def sic_api_track_event(
+    request: Request,
+    payload: TrackEventSchema,
+    user: User = Depends(sic_access_required)
+):
+    """
+    Recibe eventos granulares desde el frontend JS (heartbeat, export, search, etc)
+    """
+    log_usage_event(
+        user=user,
+        action_type=payload.action_type,
+        section=payload.section,
+        resource_id=payload.resource_id,
+        duration_ms=payload.duration_ms,
+        extra_data=payload.extra_data,
+        request=request
+    )
+    return JSONResponse({"ok": True})
+
+from web_comparativas.usage_service import get_live_users_data, get_user_profile_timeline
+from web_comparativas.visibility_service import get_visible_user_ids
+
+@router.get("/api/usage/user-profile/{user_id}", response_class=JSONResponse)
+def sic_api_user_profile(
+    request: Request,
+    user_id: int,
+    user: User = Depends(sic_access_required)
+):
+    """
+    Devuelve el perfil completo + timeline de un usuario específico.
+    Solo accesible por admin, supervisor y auditor, respetando visibilidad.
+    """
+    user_role = (user.role or "").lower()
+    has_access = user_role in ["admin", "supervisor", "auditor"]
+    if not has_access:
+        return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
+
+    session = db_session()
+    try:
+        visible_ids = get_visible_user_ids(session, user)
+        visible_ids.add(int(user.id))
+        if user_id not in visible_ids:
+            return JSONResponse({"ok": False, "error": "No autorizado para ver este usuario"}, status_code=403)
+
+        profile = get_user_profile_timeline(session, user_id)
+    finally:
+        session.close()
+
+    return JSONResponse({"ok": True, "profile": profile})
+
+@router.get("/api/usage/live-users", response_class=JSONResponse)
+def sic_api_usage_live_users(
+    request: Request,
+    user: User = Depends(sic_access_required)
+):
+    """
+    Devuelve los usuarios que han emitido heatbeats recientes.
+    Revisando permisos: solo Admin, Supervisor y Auditor pueden ver esta info fina.
+    """
+    user_role = (user.role or "").lower()
+    has_access = user_role in ["admin", "supervisor", "auditor"]
+    if not has_access:
+         return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
+         
+    # Restringir según visibilidad
+    session = db_session()
+    try:
+        visible_ids = get_visible_user_ids(session, user)
+        visible_ids.add(int(user.id))
+        live_data = get_live_users_data(session, visible_ids)
+    finally:
+        session.close()
+    
+    # Log the API hit quietly
+    log_usage_event(user=user, action_type="api_call", section="live_users_dashboard", request=request)
+    
+    return JSONResponse({"ok": True, "users": live_data})
 
 # --- USERS MANAGEMENT ---
 
@@ -654,11 +739,9 @@ def sic_users_create(
     unit_ok = normalize_unit_business(unit_business)
 
     if not email:
-        print("DEBUG: User create failed - Email empty")
         return RedirectResponse("/sic/users/new?err=email_vacio", status_code=303)
 
     try:
-        print(f"DEBUG: Attempting to create user {email}")
         exists = db_session.query(User).filter(func.lower(User.email) == email).first()
         if exists:
             return RedirectResponse("/sic/users/new?err=email_existe", status_code=303)
@@ -677,7 +760,6 @@ def sic_users_create(
         return RedirectResponse("/sic/users?ok=created", status_code=303)
     except Exception as e:
         db_session.rollback()
-        print(f"DEBUG: User create exception: {e}")
         return RedirectResponse(f"/sic/users/new?err={str(e)}", status_code=303)
 
 @router.get("/users/{user_id}/edit", response_class=HTMLResponse)

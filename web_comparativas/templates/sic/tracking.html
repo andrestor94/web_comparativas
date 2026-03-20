@@ -1,9 +1,8 @@
-{% extends "sic/base_sic.html" %}
-{% block title %}Seguimiento de Usuarios – S.I.C{% endblock %}
+﻿{% extends "sic/base_sic.html" %}
+{% block title %}Seguimiento de Usuarios - S.I.C{% endblock %}
 
 {% block extra_css %}
 <style>
-    /* Override or specific styles for tracking page */
     .usage-filters-bar {
         background: var(--sic-card-bg);
         border-radius: 16px;
@@ -13,113 +12,380 @@
         backdrop-filter: blur(10px);
     }
 
-    .sic-card {
-        /* Ensure stats cards align */
+    .usage-kpi-card {
         height: 100%;
-        min-height: 140px;
+        min-height: 110px;
+        border-radius: 12px;
+        padding: 16px 18px;
+        background: var(--sic-card-bg);
+        border: 1px solid var(--sic-border);
+        transition: border-color .2s;
     }
+    .usage-kpi-card:hover { border-color: rgba(0,164,135,.4); }
 
     .usage-card-title {
-        font-size: 13px;
+        font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: .6px;
         font-weight: 600;
         color: var(--sic-text-muted);
-        margin-bottom: 8px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
     }
-
     .usage-card-value {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 700;
         color: var(--sic-highlight);
-        /* Use SIC highlight */
-        line-height: 1.2;
-        margin-bottom: 4px;
+        line-height: 1.1;
+        margin-bottom: 2px;
+    }
+    .usage-card-sub {
+        font-size: 11px;
+        color: var(--sic-text-muted);
+        line-height: 1.3;
     }
 
-    /* Tabs styling adaptation */
+    .kpi-help {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: rgba(148,163,184,.15);
+        color: var(--sic-text-muted);
+        font-size: 9px;
+        cursor: help;
+        flex-shrink: 0;
+    }
+
     .nav-pills .nav-link {
         color: var(--sic-text-muted);
         border-radius: 8px;
-        padding: 10px 20px;
-        font-size: 14px;
+        padding: 9px 18px;
+        font-size: 13px;
         font-weight: 500;
     }
-
     .nav-pills .nav-link.active {
         background-color: var(--sic-highlight);
         color: #fff;
     }
-
     .nav-pills .nav-link:hover:not(.active) {
-        background-color: rgba(255, 255, 255, 0.05);
+        background-color: rgba(255,255,255,.05);
         color: #fff;
     }
 
-    /* Charts panel */
-    .usage-chart {
-        min-height: 280px;
-    }
-
+    .usage-chart { min-height: 280px; }
     .usage-panel-header {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
         display: flex;
         align-items: center;
         gap: 8px;
         color: #fff;
     }
-
     .usage-panel-header::before {
         content: "";
         display: inline-block;
-        width: 6px;
-        height: 6px;
+        width: 5px;
+        height: 5px;
         border-radius: 50%;
-        background-color: var(--sic-highlight);
+        background: var(--sic-highlight);
+        flex-shrink: 0;
     }
-
     .usage-panel-sub {
-        font-size: 13px;
-        color: var(--sic-text-muted);
-        margin-bottom: 16px;
-    }
-
-    /* User detail styling */
-    .usage-user-detail-title {
-        font-size: 13px;
-        color: var(--sic-text-muted);
-        margin-bottom: 2px;
-    }
-
-    .usage-user-detail-main {
-        font-size: 15px;
-        font-weight: 600;
-        color: #fff;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .usage-user-detail-sub {
         font-size: 12px;
         color: var(--sic-text-muted);
+        margin-bottom: 14px;
     }
 
     .usage-empty {
-        font-size: 14px;
+        font-size: 13px;
         color: var(--sic-text-muted);
-        padding: 32px;
+        padding: 36px;
         text-align: center;
         font-style: italic;
     }
 
-    /* Fix for dark mode date inputs */
+    .status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .status-dot.activo { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); }
+    .status-dot.inactivo { background: #f59e0b; }
+    .status-dot.offline { background: #ef4444; }
+
+    .activity-badge {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 20px;
+        letter-spacing: .3px;
+        text-transform: lowercase;
+    }
+    .ab-navegando { background: rgba(59,130,246,.15); color: #93c5fd; }
+    .ab-buscando { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    .ab-cargando { background: rgba(34,197,94,.15); color: #86efac; }
+    .ab-exportando { background: rgba(234,179,8,.15); color: #fde047; }
+    .ab-editando { background: rgba(168,85,247,.15); color: #d8b4fe; }
+    .ab-activo { background: rgba(148,163,184,.1); color: #94a3b8; }
+
+    .risk-alto { background: rgba(239,68,68,.15); color: #fca5a5; }
+    .risk-medio { background: rgba(245,158,11,.15); color: #fde68a; }
+    .risk-bajo { background: rgba(34,197,94,.15); color: #86efac; }
+
+    .score-bar-wrap {
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255,255,255,.06);
+        margin-top: 4px;
+        overflow: hidden;
+    }
+    .score-bar-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width .4s;
+    }
+
+    .trend-up { color: #4ade80; font-size: 13px; }
+    .trend-down { color: #f87171; font-size: 13px; }
+    .trend-stable { color: #94a3b8; font-size: 13px; }
+
     input[type="date"]::-webkit-calendar-picker-indicator {
         filter: invert(1);
         cursor: pointer;
     }
+
+    .score-legend {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        color: var(--sic-text-muted);
+        margin-bottom: 12px;
+        padding: 10px 14px;
+        background: rgba(255,255,255,.03);
+        border-radius: 8px;
+        border: 1px solid var(--sic-border);
+    }
+    .score-legend-item { display: flex; align-items: center; gap: 5px; }
+    .score-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    .alert-card {
+        background: rgba(15,23,42,.45);
+        border-radius: 10px;
+        padding: 14px 16px;
+        border-left: 3px solid;
+        height: 100%;
+    }
+    .alert-card.sev-alta { border-color: #ef4444; }
+    .alert-card.sev-media { border-color: #f59e0b; }
+    .alert-card.sev-baja { border-color: #60a5fa; }
+    .alert-card.sev-info { border-color: #4ade80; }
+    .alert-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+    .alert-card-user {
+        font-size: 11px;
+        color: var(--sic-text-muted);
+        margin-top: 2px;
+    }
+    .alert-severity-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .3px;
+        text-transform: uppercase;
+        border: 1px solid rgba(255,255,255,.08);
+    }
+    .alert-severity-badge.sev-alta { background: rgba(239,68,68,.15); color: #fecaca; }
+    .alert-severity-badge.sev-media { background: rgba(245,158,11,.15); color: #fde68a; }
+    .alert-severity-badge.sev-baja { background: rgba(96,165,250,.15); color: #bfdbfe; }
+    .alert-severity-badge.sev-info { background: rgba(74,222,128,.12); color: #bbf7d0; }
+    .alert-rec {
+        font-size: 11px;
+        color: var(--sic-text-muted);
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255,255,255,.06);
+    }
+
+    .prof-stat-box {
+        text-align: center;
+        padding: 10px 8px;
+        background: rgba(255,255,255,.04);
+        border-radius: 8px;
+        border: 1px solid rgba(255,255,255,.06);
+    }
+    .prof-stat-val {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--sic-highlight);
+        line-height: 1;
+        margin-bottom: 2px;
+    }
+    .prof-stat-lbl {
+        font-size: 10px;
+        color: var(--sic-text-muted);
+        text-transform: uppercase;
+        letter-spacing: .4px;
+    }
+    .timeline-event {
+        display: flex;
+        gap: 10px;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+    .timeline-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(255,255,255,.05);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 13px;
+    }
+    .table-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .table-meta strong,
+    .table-meta span:first-child {
+        color: #fff;
+        font-weight: 600;
+    }
+    .table-meta small {
+        color: var(--sic-text-muted);
+        font-size: 11px;
+    }
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        border: 1px solid rgba(255,255,255,.08);
+        background: rgba(255,255,255,.04);
+        color: #e2e8f0;
+        white-space: nowrap;
+    }
+    .status-pill.is-live { background: rgba(34,197,94,.12); color: #86efac; border-color: rgba(34,197,94,.25); }
+    .status-pill.is-idle { background: rgba(245,158,11,.12); color: #fde68a; border-color: rgba(245,158,11,.25); }
+    .status-pill.is-offline,
+    .status-pill.is-risk { background: rgba(239,68,68,.12); color: #fca5a5; border-color: rgba(239,68,68,.2); }
+    .table-chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .metric-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.04);
+        border: 1px solid rgba(255,255,255,.06);
+        color: #cbd5e1;
+        font-size: 11px;
+        line-height: 1;
+    }
+    .profile-section {
+        background: rgba(255,255,255,.03);
+        border: 1px solid rgba(255,255,255,.06);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+    .profile-section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    .profile-section-title h6 {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: .4px;
+        color: var(--sic-text-muted);
+        text-transform: uppercase;
+    }
+    .profile-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    .profile-kv-label {
+        display: block;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .4px;
+        color: var(--sic-text-muted);
+        margin-bottom: 4px;
+    }
+    .profile-kv-value {
+        color: #fff;
+        font-size: 13px;
+        line-height: 1.35;
+        word-break: break-word;
+    }
+    .profile-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .profile-list-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 9px 10px;
+        border-radius: 10px;
+        background: rgba(255,255,255,.03);
+        border: 1px solid rgba(255,255,255,.05);
+    }
+    .profile-list-item strong { display: block; color: #fff; font-size: 12px; }
+    .profile-list-item small { display: block; color: var(--sic-text-muted); font-size: 11px; }
+    .profile-list-item span:last-child { text-align: right; color: #e2e8f0; font-size: 12px; white-space: nowrap; }
+    .profile-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .profile-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(59,130,246,.12);
+        border: 1px solid rgba(59,130,246,.16);
+        color: #bfdbfe;
+        font-size: 11px;
+    }
+    .profile-note { font-size: 11px; color: var(--sic-text-muted); }
+    .profile-timeline { max-height: 280px; overflow-y: auto; padding-right: 4px; }
+    @media (max-width: 767.98px) { .profile-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 
@@ -127,199 +393,203 @@
 <div class="row align-items-center mb-4">
     <div class="col">
         <h1 class="h3 fw-bold mb-1">Seguimiento de usuarios</h1>
-        <p class="text-white-50 small mb-0">Monitoreo de actividad y adopción de la plataforma.</p>
+        <p class="text-white-50 small mb-0">Monitoreo de actividad, adopcion y salud de uso de la plataforma.</p>
     </div>
 </div>
 
-<!-- Filtros -->
 <form id="usage-filters-form" class="usage-filters-bar">
     <div class="row g-2 align-items-end">
-        <div class="col-6 col-md-3 col-lg-2">
-            <label class="form-label mb-1 small text-white-50">Rango de fechas (desde)</label>
-            <input type="date" id="flt-date-from" name="date_from"
-                class="form-control form-control-sm form-control-sic">
-        </div>
-        <div class="col-6 col-md-3 col-lg-2">
-            <label class="form-label mb-1 small text-white-50">Rango de fechas (hasta)</label>
-            <input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm form-control-sic">
-        </div>
-
+        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Desde</label><input type="date" id="flt-date-from" name="date_from" class="form-control form-control-sm form-control-sic"></div>
+        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Hasta</label><input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm form-control-sic"></div>
         <div class="col-6 col-md-3 col-lg-2">
             <label class="form-label mb-1 small text-white-50">Rol</label>
             <select id="flt-role" name="role" class="form-select form-select-sm form-select-sic">
-                <option value="">Analistas y Supervisores</option>
+                <option value="">Todos los roles</option>
                 <option value="analista">Analistas</option>
                 <option value="supervisor">Supervisores</option>
+                <option value="auditor">Auditores</option>
+                <option value="admin">Admin</option>
             </select>
         </div>
-
-        <div class="col-6 col-md-3 col-lg-2">
-            <label class="form-label mb-1 small text-white-50">Equipo / grupo</label>
-            <select id="flt-team" name="team" class="form-select form-select-sm form-select-sic">
-                <option value="">Todos los equipos</option>
-                <!-- si después querés, populamos esto con datos reales -->
-            </select>
-        </div>
-
-        <div class="col-6 col-md-3 col-lg-2">
-            <label class="form-label mb-1 small text-white-50">Vista temporal</label>
-            <select id="flt-granularity" name="granularity" class="form-select form-select-sm form-select-sic">
-                <option value="day">Día</option>
-                <option value="week">Semana</option>
-                <option value="month">Mes</option>
-            </select>
-        </div>
-
-        <div class="col-6 col-md-3 col-lg-2 text-md-end d-flex gap-2 justify-content-end">
-            <button id="usage-refresh-btn" type="button" class="btn btn-sic-outline btn-sm mt-2 mt-md-0"
-                title="Actualizar datos ahora" onclick="window.sicRefreshTracking && window.sicRefreshTracking()">
-                <i class="bi bi-arrow-clockwise"></i>
-            </button>
-            <button id="usage-apply-filters" type="submit" class="btn btn-sic-primary btn-sm mt-2 mt-md-0 w-100">
-                Aplicar filtros
-            </button>
+        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Equipo / grupo</label><select id="flt-team" name="team" class="form-select form-select-sm form-select-sic"><option value="">Todos los equipos</option></select></div>
+        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Vista temporal</label><select id="flt-granularity" name="granularity" class="form-select form-select-sm form-select-sic"><option value="day">Dia</option><option value="week">Semana</option><option value="month">Mes</option></select></div>
+        <div class="col-6 col-md-3 col-lg-2 d-flex gap-2 justify-content-end align-items-end">
+            <button id="usage-refresh-btn" type="button" class="btn btn-sic-outline btn-sm" title="Actualizar datos" onclick="window.sicRefreshTracking && window.sicRefreshTracking()"><i class="bi bi-arrow-clockwise"></i></button>
+            <button id="usage-apply-filters" type="submit" class="btn btn-sic-primary btn-sm flex-grow-1">Aplicar</button>
         </div>
     </div>
 </form>
 
-<!-- KPIs -->
 <div class="row g-3 mb-4">
-    <div class="col-12 col-md-4">
-        <div class="sic-card">
-            <div class="usage-card-title">Usuarios activos</div>
-            <div class="usage-card-value" id="card-active-users">0</div>
-            <div class="small text-white-50" id="card-active-users-sub">
-                Sin actividad registrada en el rango seleccionado.
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4">
-        <div class="sic-card">
-            <div class="usage-card-title">Archivos cargados</div>
-            <div class="usage-card-value" id="card-files">0</div>
-            <div class="small text-white-50" id="card-files-sub">
-                Todavía no se registraron cargas en el rango seleccionado.
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4">
-        <div class="sic-card">
-            <div class="usage-card-title">Horas activas</div>
-            <div class="usage-card-value" id="card-active-hours">0,0</div>
-            <div class="small text-white-50" id="card-active-hours-sub">
-                Sin tiempo activo registrado en el rango seleccionado.
-            </div>
-        </div>
-    </div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card" style="border-color: rgba(34,197,94,.25);"><div class="usage-card-title text-success"><i class="bi bi-broadcast"></i> Conectados ahora <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios con actividad en los ultimos 5 minutos. El tablero en vivo se refresca cada 60 segundos.">?</span></div><div class="usage-card-value text-success" id="card-live-users" style="font-size:30px;">0</div><div class="usage-card-sub">en este momento</div></div></div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-graph-up-arrow"></i> Tasa de adopcion <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="% de usuarios con score >= 30/100. Formula base: dias activos (20), cargas (40), busquedas (20) y exportaciones/descargas (20), normalizado a 100.">?</span></div><div class="usage-card-value d-flex align-items-baseline gap-1"><span id="card-adoption-val">0</span><span class="fs-6 fw-normal">%</span></div><div class="usage-card-sub">score >= 30 pts en el periodo</div></div></div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title text-warning"><i class="bi bi-moon"></i> Inactivos <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios detectados en el periodo cuyo ultimo acceso supera los 7 dias. Senala riesgo de abandono.">?</span></div><div class="usage-card-value text-warning" id="card-inactive-users">0</div><div class="usage-card-sub">sin actividad > 7 dias</div></div></div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-people"></i> Usuarios activos <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios unicos con al menos un evento en el periodo seleccionado.">?</span></div><div class="usage-card-value" id="card-active-users">0</div><div class="usage-card-sub">en el periodo</div></div></div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-clock-history"></i> Horas activas <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Suma estimada del tiempo efectivo en el sistema a partir de sesiones reconstruidas.">?</span></div><div class="usage-card-value" id="card-active-hours">0</div><div class="usage-card-sub">suma de sesiones del periodo</div></div></div>
+    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-arrow-up-circle"></i> Productividad <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Promedio de cargas por sesion. Sirve como proxy de uso orientado a trabajo real.">?</span></div><div class="usage-card-value" id="card-prod-index">0,0</div><div class="usage-card-sub">cargas / sesion (promedio)</div></div></div>
 </div>
+<div id="usage-kpi-state" class="small text-white-50 mb-4">Cargando indicadores del periodo...</div>
 
-<!-- Tabs -->
 <ul class="nav nav-pills usage-tabs mb-4" id="usage-tabs">
-    <li class="nav-item">
-        <button class="nav-link active" type="button" data-usage-tab-target="#usage-tab-summary">
-            Resumen general
-        </button>
-    </li>
-    <li class="nav-item">
-        <button class="nav-link" type="button" data-usage-tab-target="#usage-tab-by-user">
-            Por usuario
-        </button>
-    </li>
+    <li class="nav-item"><button class="nav-link active" type="button" data-usage-tab-target="#usage-tab-live"><i class="bi bi-broadcast me-1 text-success"></i> Monitoreo en Vivo</button></li>
+    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-summary">Uso General y Adopcion</button></li>
+    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-by-user">Vista por Usuario</button></li>
+    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-alerts">Alertas de Uso <span id="nav-alerts-badge" class="badge bg-danger ms-1" style="display:none;">0</span></button></li>
 </ul>
 
-<!-- Panels -->
-<div class="tab-content">
-
-    <!-- 1. Resumen general -->
-    <div id="usage-tab-summary" class="tab-pane show active" data-usage-tab-panel>
-        <div class="row g-3">
-            <div class="col-12 col-lg-6">
-                <div class="sic-card">
-                    <div class="usage-panel-header">Actividad por día de la semana</div>
-                    <div class="usage-panel-sub">
-                        Eventos de uso agregados por día (Lun–Dom).
-                    </div>
-                    <div id="usage-chart-weekday" class="usage-chart"></div>
-                </div>
-            </div>
-            <div class="col-12 col-lg-6">
-                <div class="sic-card">
-                    <div class="usage-panel-header">Usuario vs Usuario</div>
-                    <div class="usage-panel-sub">
-                        Eventos y horas activas por usuario.
-                    </div>
-                    <div id="usage-chart-roles" class="usage-chart"></div>
-                </div>
-            </div>
-
-            <div class="col-12 col-lg-6">
-                <div class="sic-card">
-                    <div class="usage-panel-header">Eventos día/hora</div>
-                    <div class="usage-panel-sub">
-                        Intensidad de eventos por franja horaria y día.
-                    </div>
-                    <div id="usage-chart-heatmap" class="usage-chart"></div>
-                </div>
-            </div>
-            <div class="col-12 col-lg-6">
-                <div class="sic-card">
-                    <div class="usage-panel-header">Secciones más usadas</div>
-                    <div class="usage-panel-sub">
-                        Vistas y acciones por sección de la interfaz.
-                    </div>
-                    <div id="usage-chart-sections" class="usage-chart"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 2. Por usuario -->
-    <div id="usage-tab-by-user" class="tab-pane" data-usage-tab-panel>
-
-        <!-- Encabezado -->
-        <div class="d-flex justify-content-between align-items-center mb-2">
+<div class="tab-content" style="min-height: 50vh;">
+    <div id="usage-tab-live" class="tab-pane show active" data-usage-tab-panel>
+        <div class="d-flex justify-content-between align-items-start mb-3">
             <div>
-                <div class="h5 text-white mb-1">Por usuario</div>
-                <div class="small text-white-50 mb-0">
-                    Detalle de actividad por persona: sesiones, días activos, horas activas y último acceso.
-                </div>
+                <div class="h5 text-white mb-1 d-flex align-items-center gap-2">Usuarios Online <span class="sic-badge bg-success text-white border-0" id="live-count-badge">0</span><div class="spinner-grow spinner-grow-sm text-success" role="status" id="live-spinner" style="width:.6rem;height:.6rem;" title="Actualizando..."><span class="visually-hidden">Loading...</span></div></div>
+                <div class="small text-white-50">Vista viva de estado, seccion y tipo de actividad. Verde indica actividad reciente; amarillo indica sesion ociosa dentro de la ventana de monitoreo.</div>
             </div>
         </div>
-
-        <!-- Tabla de resumen por usuario -->
-        <div class="sic-card p-0 overflow-hidden mt-3">
+        <div class="sic-card p-0 overflow-hidden">
             <div class="table-responsive">
                 <table class="sic-table mb-0">
                     <thead>
                         <tr>
-                            <th>Usuario</th>
-                            <th>Rol</th>
-                            <th class="text-end">Sesiones</th>
-                            <th class="text-end">Días activos</th>
-                            <th class="text-end">Horas activas</th>
-                            <th class="text-end">Archivos cargados</th>
-                            <th>Último acceso</th>
+                            <th>Usuario</th><th>Rol</th><th>Unidad de negocio</th><th>Grupo</th><th>Seccion actual</th><th>Ultima accion</th><th class="text-end" title="Tiempo desde la ultima actividad util">Tiempo desde ultima actividad</th><th>Estado</th><th>Inicio de sesion actual</th><th>Ultima senal / ping</th><th>Tipo de actividad</th>
                         </tr>
                     </thead>
-                    <tbody id="su-users-byuser-tbody">
+                    <tbody id="usage-live-tbody"><tr><td colspan="11" class="usage-empty pe-none">Buscando usuarios conectados...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="mt-2 text-end"><span class="small text-white-50" id="live-last-update">--</span></div>
+    </div>
+
+    <div id="usage-tab-summary" class="tab-pane" data-usage-tab-panel>
+        <div class="row g-3">
+            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Actividad por dia de la semana</div><div class="usage-panel-sub">Cantidad total de eventos agrupados por dia.</div><div id="usage-chart-weekday" class="usage-chart"></div></div></div>
+            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Comparativa por usuario (Top 15)</div><div class="usage-panel-sub">Eventos totales y horas activas por usuario, ordenados por actividad.</div><div id="usage-chart-roles" class="usage-chart"></div></div></div>
+            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Mapa de calor dia / hora</div><div class="usage-panel-sub">Intensidad de uso por franja horaria y dia de la semana.</div><div id="usage-chart-heatmap" class="usage-chart"></div></div></div>
+            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Secciones mas utilizadas</div><div class="usage-panel-sub">Modulos y secciones con mayor volumen de eventos en el periodo.</div><div id="usage-chart-sections" class="usage-chart"></div></div></div>
+        </div>
+    </div>
+    <div id="usage-tab-by-user" class="tab-pane" data-usage-tab-panel>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <div class="h5 text-white mb-1">Salud de adopcion por usuario</div>
+                <div class="small text-white-50">Score, salud operativa y tendencia versus el periodo anterior. Clic en una fila para abrir el perfil lateral.</div>
+            </div>
+        </div>
+
+        <div class="score-legend">
+            <span class="fw-semibold text-white me-1" style="font-size:11px;">Score adopcion:</span>
+            <span class="score-legend-item"><span class="score-dot" style="background:#22c55e;"></span> >= 80 pts - Referente</span>
+            <span class="score-legend-item"><span class="score-dot" style="background:#3b82f6;"></span> 50-79 pts - Consolidado</span>
+            <span class="score-legend-item"><span class="score-dot" style="background:#f59e0b;"></span> 30-49 pts - En progreso</span>
+            <span class="score-legend-item"><span class="score-dot" style="background:#ef4444;"></span> &lt; 30 pts - Baja adopcion</span>
+            <span class="ms-auto text-white-50">Formula base: dias activos (20) + cargas (40) + busquedas (20) + exportaciones/descargas (20), normalizado a 100.</span>
+        </div>
+
+        <div class="sic-card p-0 overflow-hidden">
+            <div class="table-responsive">
+                <table class="sic-table mb-0" style="font-size:13px;">
+                    <thead>
                         <tr>
-                            <td colspan="7" class="usage-empty">
-                                Aún no hay registros de actividad para mostrar en la tabla.
-                            </td>
+                            <th title="Score de adopcion 0-100">Score</th><th>Usuario</th><th>Rol</th><th>Unidad</th><th>Grupo</th><th>Estado actual</th><th class="text-center" title="Nivel de riesgo segun actividad reciente">Riesgo</th><th class="text-end">Sesiones</th><th class="text-end">Dias activos</th><th class="text-end">Horas activas</th><th class="text-end">Vistas</th><th class="text-end">Busquedas</th><th class="text-end">Descargas</th><th class="text-end">Cargas</th><th>Modulos usados</th><th>Frecuencia</th><th class="text-end">Ultimo acceso</th><th class="text-center" title="Tendencia vs periodo anterior comparable">Tendencia vs periodo anterior</th>
                         </tr>
-                    </tbody>
+                    </thead>
+                    <tbody id="su-users-byuser-tbody"><tr><td colspan="18" class="usage-empty pe-none">Cargando datos de usuarios...</td></tr></tbody>
                 </table>
             </div>
         </div>
     </div>
 
+    <div id="usage-tab-alerts" class="tab-pane" data-usage-tab-panel>
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+                <div class="h5 text-white mb-1">Alertas de uso</div>
+                <div class="small text-white-50">Situaciones detectadas que requieren atencion del administrador. Cada alerta incluye usuario, motivo, severidad y recomendacion accionable.</div>
+            </div>
+        </div>
+        <div id="alerts-container" class="row g-3"><div class="col-12"><div class="usage-empty pe-none">Calculando alertas del periodo...</div></div></div>
+    </div>
+</div>
+
+<div class="offcanvas offcanvas-end border-0" tabindex="-1" id="userProfileOffcanvas" style="width: 480px; background: rgba(7,23,38,.98) !important; color: white;">
+    <div class="offcanvas-header" style="border-bottom: 1px solid var(--sic-border);">
+        <h5 class="offcanvas-title mb-0 d-flex align-items-center gap-2"><i class="bi bi-person-bounding-box" style="color: var(--sic-highlight);"></i> Perfil de usuario</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body position-relative px-3 pb-3 pt-3">
+        <div id="profile-loading" class="text-center py-5"><div class="spinner-grow text-success" role="status"><span class="visually-hidden">Cargando...</span></div></div>
+        <div id="profile-content" style="display:none;">
+            <div class="text-center mb-3">
+                <div id="prof-online-badge" class="mb-2" style="display:none;"><span class="badge" style="background:rgba(34,197,94,.15);color:#4ade80;font-size:11px;"><span class="status-dot activo me-1"></span> Conectado ahora</span><span id="prof-online-section" class="ms-1 small text-white-50"></span></div>
+                <h4 id="prof-name" class="fw-bold mb-0">...</h4>
+                <div id="prof-email" class="small text-white-50 mb-2">...</div>
+                <div class="d-flex justify-content-center gap-2 flex-wrap"><span id="prof-role" class="sic-badge border-0" style="background:#0b3a5b;color:#7dd3fc;"></span><span id="prof-bu" class="sic-badge border-0" style="background:rgba(255,255,255,.05);color:#cbd5e1;"></span><span id="prof-group" class="sic-badge border-0" style="background:rgba(99,102,241,.1);color:#a5b4fc;display:none;"></span></div>
+                <div class="mt-2 d-flex justify-content-center gap-2 flex-wrap"><span id="prof-score-badge" class="sic-badge border-0"></span><span id="prof-current-status-badge" class="sic-badge border-0" style="background:rgba(255,255,255,.06);color:#e2e8f0;"></span><span id="prof-risk-badge" class="sic-badge border-0" style="display:none;"></span></div>
+            </div>
+
+            <div class="row g-2 mb-3" id="prof-stats-row">
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-sessions">--</div><div class="prof-stat-lbl">Sesiones</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-hours">--</div><div class="prof-stat-lbl">Tiempo activo</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-days">--</div><div class="prof-stat-lbl">Dias activos</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-views">--</div><div class="prof-stat-lbl">Vistas</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-searches">--</div><div class="prof-stat-lbl">Busquedas</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-uploads">--</div><div class="prof-stat-lbl">Cargas</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-exports">--</div><div class="prof-stat-lbl">Exportaciones</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-downloads">--</div><div class="prof-stat-lbl">Descargas</div></div></div>
+                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-modules">--</div><div class="prof-stat-lbl">Modulos</div></div></div>
+            </div>
+
+            <div class="profile-section">
+                <div class="profile-section-title"><h6><i class="bi bi-person-lines-fill me-1"></i> Resumen actual</h6><span id="prof-last-access-pill" class="profile-note">Ultimo acceso: --</span></div>
+                <div class="profile-grid">
+                    <div><span class="profile-kv-label">Estado actual</span><div class="profile-kv-value" id="prof-current-status">--</div></div>
+                    <div><span class="profile-kv-label">Fecha de alta</span><div class="profile-kv-value" id="prof-created">--</div></div>
+                    <div><span class="profile-kv-label">Ultimo acceso</span><div class="profile-kv-value" id="prof-last-access">--</div></div>
+                    <div><span class="profile-kv-label">Frecuencia</span><div class="profile-kv-value" id="prof-frequency">--</div></div>
+                    <div><span class="profile-kv-label">Evolucion de uso</span><div class="profile-kv-value" id="prof-usage-evolution">--</div></div>
+                    <div><span class="profile-kv-label">Sesiones recientes</span><div class="profile-kv-value" id="prof-recent-sessions-summary">--</div></div>
+                </div>
+            </div>
+            <div class="profile-section">
+                <div class="profile-section-title"><h6><i class="bi bi-collection me-1"></i> Modulos y acciones</h6><span class="profile-note">Ultimo periodo filtrado</span></div>
+                <div id="prof-modules" class="profile-chip-list mb-2"></div>
+                <div class="table-chip-list">
+                    <span class="metric-pill"><i class="bi bi-search"></i> Busquedas: <strong id="prof-search-count">--</strong></span>
+                    <span class="metric-pill"><i class="bi bi-cloud-upload"></i> Cargas: <strong id="prof-upload-count">--</strong></span>
+                    <span class="metric-pill"><i class="bi bi-download"></i> Descargas: <strong id="prof-download-count">--</strong></span>
+                    <span class="metric-pill"><i class="bi bi-box-arrow-up-right"></i> Exportaciones: <strong id="prof-export-count">--</strong></span>
+                    <span class="metric-pill"><i class="bi bi-clock-history"></i> Tiempo activo: <strong id="prof-active-time">--</strong></span>
+                </div>
+            </div>
+
+            <div class="profile-section">
+                <div class="profile-section-title"><h6><i class="bi bi-journal-text me-1"></i> Sesiones recientes</h6><span class="profile-note" id="prof-sessions-note">Detalle de sesiones reconstruidas</span></div>
+                <div id="prof-recent-sessions" class="profile-list"><div class="usage-empty py-3">Sin sesiones recientes.</div></div>
+            </div>
+
+            <div class="profile-section">
+                <div class="profile-section-title"><h6><i class="bi bi-bell me-1"></i> Alertas asociadas</h6><span class="profile-note">Riesgos y recomendaciones</span></div>
+                <div id="prof-alerts" class="profile-list"><div class="usage-empty py-3">Sin alertas para este usuario.</div></div>
+            </div>
+
+            <div class="profile-section">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold mb-0" style="color: var(--sic-text-muted); font-size:12px;"><i class="bi bi-clock-history me-1"></i> ACTIVIDAD RECIENTE</h6>
+                    <span class="badge" style="background:#0b3a5b;color:#7dd3fc;font-weight:400;font-size:10px;" id="prof-timeline-badge">Ultimas 200</span>
+                </div>
+                <div id="prof-timeline" class="profile-timeline"></div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-{# 1) Librería de gráficos #}
-<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-
-{# 2) JS específico de Seguimiento de usuarios #}
-<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2025"></script>
+<script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
+<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2026c"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const tooltipEls = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        tooltipEls.forEach(el => new bootstrap.Tooltip(el, { trigger: 'hover' }));
+    });
+</script>
 {% endblock %}

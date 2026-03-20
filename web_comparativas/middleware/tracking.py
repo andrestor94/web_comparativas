@@ -1,8 +1,10 @@
 import time
 import logging
+import asyncio
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from web_comparativas.usage_service import log_usage_event
 
@@ -25,9 +27,11 @@ class TrackingMiddleware(BaseHTTPMiddleware):
         # Calcular duración
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Filtrar estáticos y favicon
+        # Filtrar estáticos, favicon y endpoints que trackean por sí mismos
         path = request.url.path
         if path.startswith("/static") or path == "/favicon.ico":
+            return response
+        if path.startswith("/sic/api/track-event") or path.startswith("/sic/api/usage"):
             return response
 
         # Intentar obtener usuario del state (auth middleware corre antes)
@@ -61,15 +65,16 @@ class TrackingMiddleware(BaseHTTPMiddleware):
                 if "upload" in path:
                     action = "file_upload"
             
-            # (Si es una API call JSON, tal vez queramos diferenciar, pero page_view está bien por ahora para navegar)
-
-            # Fire & Forget (log_usage_event maneja su propia sesión/db y no bloquea 100% si falla try/catch interno)
-            log_usage_event(
-                user=user,
-                action_type=action,
-                section=section,
-                duration_ms=duration_ms,
-                request=request
+            # Fire & Forget en threadpool para no bloquear el event loop principal si la BD es lenta o bloquea SQLite
+            asyncio.create_task(
+                run_in_threadpool(
+                    log_usage_event,
+                    user=user,
+                    action_type=action,
+                    section=section,
+                    duration_ms=duration_ms,
+                    request=request
+                )
             )
 
         return response
