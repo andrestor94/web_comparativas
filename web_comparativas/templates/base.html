@@ -1206,6 +1206,41 @@
 
   {% block extra_js %}{% endblock %}
 
+  {% if user %}
+  {# ── Heartbeat global: mantiene la presencia del usuario en Monitoreo en Vivo ── #}
+  <script>
+  (function () {
+    var _hbSection = (function () {
+      var p = window.location.pathname;
+      if (p === "/" || p === "") return "home";
+      if (p.indexOf("/sic/tracking") !== -1) return "sic_tracking";
+      if (p.indexOf("/sic/usuarios") !== -1) return "sic_usuarios";
+      if (p.indexOf("/sic/helpdesk") !== -1) return "sic_helpdesk";
+      if (p.indexOf("/sic") !== -1) return "sic";
+      if (p.indexOf("/mercado-privado/dimensiones") !== -1) return "mercado_privado_dimensiones";
+      if (p.indexOf("/mercado-privado") !== -1) return "mercado_privado";
+      if (p.indexOf("/mercado-publico") !== -1) return "mercado_publico";
+      return "otro";
+    })();
+
+    function _sendHeartbeat() {
+      fetch("/api/heartbeat?section=" + encodeURIComponent(_hbSection), {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+        keepalive: true,
+      }).catch(function () {
+        /* silencioso — no interrumpir la experiencia del usuario */
+      });
+    }
+
+    /* Primera señal: 5 s después de cargar la página */
+    setTimeout(_sendHeartbeat, 5000);
+    /* Señales periódicas cada 30 s */
+    setInterval(_sendHeartbeat, 30000);
+  })();
+  </script>
+  {% endif %}
+
 </body>
 
 </html>

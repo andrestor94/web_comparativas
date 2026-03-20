@@ -122,6 +122,64 @@ def _get_activity_category(action_type: str) -> str:
 # Registro de eventos
 # ======================================================================
 
+def log_usage_event_raw(
+    *,
+    user_id: int,
+    user_role: str,
+    action_type: str,
+    section: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> None:
+    """
+    Versión fire-and-forget segura de log_usage_event: recibe solo primitivos,
+    sin objetos SQLAlchemy ni request. Diseñada para ser llamada desde el
+    TrackingMiddleware en un background task donde el objeto User/Request
+    puede estar detached o fuera de scope.
+    """
+    try:
+        # Actualizar presencia en memoria (no requiere DB)
+        update_online_presence(user_id, section or "", True, action_type)
+
+        # Heartbeats: muestrear para no saturar la DB
+        if action_type == "heartbeat" and not _should_persist_heartbeat(
+            user_id, section or "", True
+        ):
+            return
+
+        s = db_session()
+        ev = UsageEvent(
+            timestamp=dt.datetime.utcnow(),
+            session_id="legacy",
+            user_id=user_id,
+            user_role=user_role,
+            action_type=action_type,
+            section=section,
+            duration_ms=duration_ms,
+            extra_data={},
+            ip=ip,
+            user_agent=(user_agent[:1000] if user_agent else None),
+        )
+        s.add(ev)
+        s.commit()
+        print(
+            f"[TRACKING] uid={user_id} role={user_role} action={action_type} section={section!r}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[TRACKING] Error logging event for uid={user_id}: {exc}", flush=True)
+        try:
+            s.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 def log_usage_event(
     *,
     user: Optional[User],
@@ -250,43 +308,59 @@ def update_online_presence(
 
 def _restore_presence_from_db(session, visible_ids: Set[int]) -> None:
     """
-    Post-restart recovery: si ONLINE_USERS está vacío, recupera datos de presencia
-    reciente desde la DB (últimos 5 minutos). Evita que un reinicio de Render
-    muestre 0 usuarios conectados cuando hay actividad reciente.
+    Recupera desde la DB la presencia de usuarios visibles que NO están en memoria.
 
-    NOTA DE ARQUITECTURA: Esta función mitiga la pérdida de datos en reinicios
-    simples (single-worker). Para entornos multi-worker, se requeriría Redis
-    u otro almacén compartido.
+    Ejecuta siempre (no solo en reinicio), cubriendo dos escenarios:
+      1. Reinicio del servidor: ONLINE_USERS vacío → restaura todos los usuarios recientes.
+      2. Multi-worker / otro worker tiene usuarios: el worker local los recupera de DB.
+
+    La ventana de búsqueda es 15 min (= _LIVE_ABSENT_THRESHOLD) para que solo
+    usuarios realmente recientes sean restaurados.
+
+    NOTA DE ARQUITECTURA: Esta función es suficiente para single-worker con reinicios.
+    Para multi-worker estable se recomienda Redis como almacén compartido.
     """
-    if ONLINE_USERS:
-        return  # Ya hay datos en memoria, no restaurar
+    # Usuarios visibles que NO están en memoria local
+    missing_ids = visible_ids - set(ONLINE_USERS.keys())
+    if not missing_ids:
+        return  # Todos los usuarios visibles ya están en memoria
 
-    cutoff = dt.datetime.utcnow() - dt.timedelta(minutes=5)
+    cutoff = dt.datetime.utcnow() - dt.timedelta(minutes=15)
     try:
         recent = (
             session.query(UsageEvent)
             .filter(
-                UsageEvent.user_id.in_(visible_ids),
+                UsageEvent.user_id.in_(missing_ids),
                 UsageEvent.timestamp >= cutoff,
+                func.lower(UsageEvent.action_type) != "api_call",
             )
             .order_by(UsageEvent.user_id, UsageEvent.timestamp.desc())
             .all()
         )
 
         seen: Set[int] = set()
+        restored = 0
         for ev in recent:
             uid = int(ev.user_id)
             if uid in seen:
                 continue
             seen.add(uid)
             update_online_presence(uid, ev.section or "", True, ev.action_type or "")
-            # Ajustar timestamps al del evento (más preciso que utcnow)
+            # Sobreescribir timestamps con los del evento (más precisos que utcnow)
             entry = ONLINE_USERS.get(uid)
             if entry and ev.timestamp:
                 entry["last_heartbeat"] = ev.timestamp
                 entry["last_action_ts"] = ev.timestamp
-    except Exception:
-        pass  # Fallo silencioso, no critico
+            restored += 1
+
+        if restored:
+            print(
+                f"[PRESENCE] Restaurados {restored} usuario(s) desde DB "
+                f"(missing_ids={len(missing_ids)}, visible_ids={len(visible_ids)})",
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"[PRESENCE] Error en _restore_presence_from_db: {exc}", flush=True)
 
 
 _NON_ADOPTION_ROLES = {"admin", "administrator", "administrador"}
@@ -492,7 +566,16 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
 
 
 def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
+    print(
+        f"[LIVE] get_live_users_data: visible_ids={len(visible_ids)} "
+        f"ONLINE_USERS_memory={len(ONLINE_USERS)}",
+        flush=True,
+    )
     presence_map = _build_live_presence_map(session, visible_ids)
+    print(
+        f"[LIVE] presence_map={len(presence_map)} usuarios con señal reciente",
+        flush=True,
+    )
     if not presence_map:
         return []
 

@@ -321,9 +321,9 @@ async def db_session_lifecycle(request: Request, call_next):
             request.state.db.close()
         print(f"[MW] DB Closed", flush=True)
 
-# Tracking
-# app.add_middleware(TrackingMiddleware)
-print("DEBUG: TrackingMiddleware DISABLED for stability", flush=True)
+# Tracking — re-habilitado con diseño robusto (solo pasa primitivos al background task)
+app.add_middleware(TrackingMiddleware)
+print("DEBUG: TrackingMiddleware ENABLED (robust mode)", flush=True)
 
 
 # Session
@@ -582,6 +582,37 @@ def switch_market(request: Request):
 @app.get("/ping")
 def ping():
     return {"status": "ok", "stage": "full_restore_lazy_load"}
+
+
+@app.post("/api/heartbeat")
+async def user_heartbeat(request: Request):
+    """
+    Endpoint de presencia en tiempo real — accesible para TODOS los usuarios autenticados.
+    El frontend lo llama cada 30 s desde cualquier página para mantener la sesión activa
+    en el mapa de Monitoreo en Vivo.
+    """
+    user = getattr(request.state, "user", None)
+    if not user:
+        return {"ok": False, "error": "not_authenticated"}
+
+    section = (request.query_params.get("section") or "").strip()[:64]
+
+    try:
+        from web_comparativas.usage_service import log_usage_event
+        log_usage_event(
+            user=user,
+            action_type="heartbeat",
+            section=section or "unknown",
+            request=request,
+        )
+        print(
+            f"[HEARTBEAT] uid={user.id} role={user.role} section={section!r}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[HEARTBEAT] Error: {exc}", flush=True)
+
+    return {"ok": True, "ts": dt.datetime.utcnow().isoformat() + "Z"}
 
 @app.get("/comentarios")
 def comentarios_alias(request: Request):

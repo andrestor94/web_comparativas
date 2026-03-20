@@ -675,7 +675,9 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       if (data?.ok === false) throw new Error(data?.error || "live_error");
-      renderLiveUsers(data.users || data.data || [], "ok");
+      const users = data.users || data.data || [];
+      console.log(`[SeguimientoUsuarios] live-users recibidos: ${users.length}`, users.map((u) => `${u.name || u.email} (${u.status})`));
+      renderLiveUsers(users, "ok");
       if (liveLastUpdate) liveLastUpdate.textContent = `Actualizado ${fmtDateTime(new Date())}`;
     } catch (error) {
       console.error("[SeguimientoUsuarios] live", error);
@@ -734,6 +736,6 @@
   loadSummary();
   fetchLiveUsers();
   setInterval(loadSummary, 300000);
-  setInterval(fetchLiveUsers, 60000);
+  setInterval(fetchLiveUsers, 30000);  // 30 s — sincronizado con el heartbeat de base.html
   window.sicRefreshTracking = () => { loadSummary(); fetchLiveUsers(); };
 })();
