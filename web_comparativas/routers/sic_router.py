@@ -119,6 +119,24 @@ def sic_helpdesk_create(
         )
         db_session.add(msg)
         db_session.commit()
+
+        # --- Notificar a los admins sobre el nuevo ticket ---
+        user_role = (user.role or "").lower()
+        is_staff = user_role in ("admin", "supervisor")
+        if not is_staff:
+            try:
+                from .notifications_service import notify_admins
+                nombre = user.name or user.email.split("@")[0]
+                notify_admins(
+                    db_session,
+                    title="Nuevo ticket en Mesa de Ayuda",
+                    message=f"{nombre} abrió una consulta: «{title[:60]}»",
+                    category="helpdesk",
+                    link=f"/sic/helpdesk/{ticket.id}",
+                )
+            except Exception:
+                pass
+
         return RedirectResponse(f"/sic/helpdesk/{ticket.id}", status_code=303)
     except Exception as e:
         db_session.rollback()
@@ -171,6 +189,22 @@ def sic_api_ticket_create(
         )
         db_session.add(msg)
         db_session.commit()
+
+        # --- Notificar a los admins sobre el nuevo ticket (si lo crea un no-admin) ---
+        _creator_role = (user.role or "").lower()
+        if _creator_role not in ("admin", "supervisor"):
+            try:
+                from .notifications_service import notify_admins
+                _nombre = user.name or user.email.split("@")[0]
+                notify_admins(
+                    db_session,
+                    title="Nuevo ticket en Mesa de Ayuda",
+                    message=f"{_nombre} abrió una consulta: «{full_title[:60]}»",
+                    category="helpdesk",
+                    link=f"/sic/helpdesk/{ticket.id}",
+                )
+            except Exception:
+                pass
 
         return {"ok": True, "ticket_id": ticket.id, "redirect_url": f"/sic/helpdesk/{ticket.id}"}
     except Exception as e:
@@ -277,6 +311,22 @@ def sic_api_pliego_comment(
         )
         db_session.add(msg)
         db_session.commit()
+
+        # --- Notificar a admins sobre el comentario de pliego ---
+        try:
+            from .notifications_service import notify_admins
+            _nombre = user.name or user.email.split("@")[0]
+            _licit = contexto.get("nombre_licitacion") or contexto.get("titulo_caso") or f"Pliego #{payload.pliego_id}"
+            _accion = "nuevo comentario" if not is_new else "nueva consulta"
+            notify_admins(
+                db_session,
+                title="Comentario en Lectura de Pliegos",
+                message=f"{_nombre} dejó un {_accion} sobre «{str(_licit)[:60]}»",
+                category="helpdesk",
+                link=f"/sic/helpdesk/{ticket.id}",
+            )
+        except Exception:
+            pass
 
         return JSONResponse({
             "ok": True,
@@ -407,19 +457,29 @@ def sic_helpdesk_reply(
     
     db_session.commit()
 
-    # --- Notificación ---
+    # --- Notificación bidireccional ---
     try:
-        from .notifications_service import create_notification
-        # Si responde ADMIN/SUPERVISOR -> Notificar al dueño del ticket
+        from .notifications_service import create_notification, notify_admins
         is_staff = "admin" in (user.role or "").lower() or "supervisor" in (user.role or "").lower()
         if is_staff and ticket.user_id != user.id:
+            # Admin/supervisor respondió → notificar al dueño del ticket
             create_notification(
                 db_session,
                 user_id=ticket.user_id,
                 title="Nueva respuesta en Mesa de Ayuda",
-                message=f"Respondieron a tu consulta: {ticket.title[:30]}...",
+                message=f"Respondieron a tu consulta: «{ticket.title[:50]}»",
                 category="helpdesk",
-                link=f"/sic/helpdesk/{ticket.id}"
+                link=f"/sic/helpdesk/{ticket.id}",
+            )
+        elif not is_staff:
+            # Usuario respondió → notificar a los admins
+            _nombre = user.name or user.email.split("@")[0]
+            notify_admins(
+                db_session,
+                title="El usuario respondió en Mesa de Ayuda",
+                message=f"{_nombre} respondió en la consulta: «{ticket.title[:50]}»",
+                category="helpdesk",
+                link=f"/sic/helpdesk/{ticket.id}",
             )
     except Exception:
         pass
@@ -1058,6 +1118,23 @@ def sic_password_reset_resolver(
             section="sic_password_resets",
             request=request,
         )
+
+        # --- Notificar al usuario que su contraseña fue restablecida ---
+        try:
+            from .notifications_service import create_notification
+            _msg = "Tu contraseña fue restablecida por el administrador."
+            if force_change:
+                _msg += " Deberás cambiarla en tu próximo inicio de sesión."
+            create_notification(
+                db_session,
+                user_id=target_user.id,
+                title="Tu contraseña fue restablecida",
+                message=_msg,
+                category="system",
+                link=None,
+            )
+        except Exception:
+            pass
 
         redirect_url = f"/sic/password-resets/{req_id}?ok=resuelto"
         if tmp_pwd_plain:
