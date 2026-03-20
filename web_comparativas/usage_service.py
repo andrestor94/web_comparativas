@@ -4,7 +4,8 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from sqlalchemy import func
 
-from .models import db_session, UsageEvent, User, visible_user_ids
+from .models import db_session, UsageEvent, User
+from .visibility_service import get_visible_user_ids as visible_user_ids  # fuente única de verdad
 
 
 # ======================================================================

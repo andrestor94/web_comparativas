@@ -23,11 +23,14 @@ DONE_STATUS = "done"
 # ----------------------------------------------------------------------
 # Roles y normalizadores
 # ----------------------------------------------------------------------
-ADMIN_ROLES = {"admin", "administrator", "administrador"}
-AUDITOR_ROLES = {"auditor", "visor", "viewer"}
-MANAGER_ROLES = {"gerente", "manager"}
+ADMIN_ROLES    = {"admin", "administrator", "administrador"}
+AUDITOR_ROLES  = {"auditor", "visor", "viewer"}
+MANAGER_ROLES  = {"gerente", "manager"}
 SUPERVISOR_ROLES = {"supervisor"}
-ANALYST_ROLES = {"analista", "analyst"}  # nombre(s) de rol para analistas
+ANALYST_ROLES  = {"analista", "analyst"}
+
+# Conjunto de roles con acceso de lectura total (sin filtro por usuario/BU)
+_FULL_READ_ROLES = ADMIN_ROLES | AUDITOR_ROLES | MANAGER_ROLES
 
 
 def _norm(s) -> str:
@@ -35,14 +38,24 @@ def _norm(s) -> str:
 
 
 def _role_of(user) -> str:
-    # tolera "rol" por compatibilidad
+    """Devuelve el rol del usuario normalizado. Tolera el atributo 'rol' por compatibilidad."""
     return _norm(getattr(user, "role", "") or getattr(user, "rol", ""))
 
 
 def _is_admin(user) -> bool:
-    # Lectura total para admin y auditor
-    r = _role_of(user)
-    return (r in ADMIN_ROLES) or (r in AUDITOR_ROLES)
+    """Admin O Auditor O Gerente: cualquier rol con visibilidad total.
+    Nombre histórico mantenido para no romper callers existentes."""
+    return _role_of(user) in _FULL_READ_ROLES
+
+
+def _has_full_access(user) -> bool:
+    """Alias explícito de _is_admin. Preferir este nombre en código nuevo."""
+    return _role_of(user) in _FULL_READ_ROLES
+
+
+def _is_auditor(user) -> bool:
+    """Auditor estricto (solo lectura). Ve todo pero no puede modificar nada."""
+    return _role_of(user) in AUDITOR_ROLES
 
 
 def _is_supervisor(user) -> bool:

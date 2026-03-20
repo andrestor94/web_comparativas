@@ -18,31 +18,26 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 # Create Router
 router = APIRouter(prefix="/sic", tags=["sic"])
 
+# Roles que pueden acceder al módulo S.I.C.
+_SIC_ALLOWED_ROLES = {"admin", "auditor", "supervisor", "analista"}
+
 # --- Security Dependency ---
-def sic_access_required(request: Request):
-    user: User = request.state.user if hasattr(request.state, "user") else None
+def sic_access_required(request: Request) -> User:
+    """
+    Dependencia de seguridad para el módulo S.I.C.
+    - Requiere sesión autenticada → 401 si no hay usuario.
+    - Requiere rol dentro de _SIC_ALLOWED_ROLES → 403 si el rol no está permitido.
+    - El contenido visible dentro de cada endpoint se restringe según el rol
+      (admin/auditor ven todo; supervisor/analista ven solo lo propio).
+    """
+    user: User = getattr(request.state, "user", None)
     if not user:
-         raise HTTPException(status_code=401, detail="S.I.C Restricted Area: Please login.")
-    
-    # Access Control: Admin and Auditor have full access
-    # Supervisors and Analysts have restricted access (handled in endpoints)
-    # But for "Entry", we allow them all if they have a valid user.
-    # The requirement says Auditor needs full navigation.
-    
-    # We verify if roles are valid for SIC
-    allowed_roles = ["admin", "auditor", "supervisor", "analista"]
-    role = (user.role or "").lower()
-    
-    if role not in allowed_roles:
-         # If strict restriction is needed:
-         # raise HTTPException(status_code=403, detail="Access Denied: Uncleared Role.")
-         pass 
-         
-    # Legacy check was: if role != "admin": raise...
-    # We now allow more roles to enter SIC, but individual views will restrict content.
-    if role not in ["admin", "auditor", "supervisor", "analista"]:
-         pass # O hacemos raise si queremos bloquear roles desconocidos
-         
+        raise HTTPException(status_code=401, detail="S.I.C.: sesión requerida.")
+
+    role = (user.role or "").strip().lower()
+    if role not in _SIC_ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="S.I.C.: rol no autorizado.")
+
     return user
 
 # --- HOME ---
@@ -58,15 +53,14 @@ def sic_home(request: Request, user: User = Depends(sic_access_required)):
 
 @router.get("/helpdesk", response_class=HTMLResponse)
 def sic_helpdesk(request: Request, user: User = Depends(sic_access_required)):
-    # Roles with full visibility
-    full_access_roles = ["admin", "auditor"]
-    user_role = (user.role or "").lower()
-
+    # Admin y Auditor ven todos los tickets; el resto solo los propios.
+    full_access_roles = {"admin", "auditor"}
+    user_role = (user.role or "").strip().lower()
     has_full_access = user_role in full_access_roles
 
-    q = db_session.query(Ticket)
+    db = getattr(request.state, "db", db_session)
+    q = db.query(Ticket)
     if not has_full_access:
-        # Supervisors and Analysts only see their own tickets
         q = q.filter(Ticket.user_id == user.id)
 
     # Filtro opcional por módulo (e.g. ?modulo=lectura_pliegos)
