@@ -24,12 +24,18 @@ from sqlalchemy import func
 
 # === PROYECTO ===
 from web_comparativas.models import (
-    SessionLocal, db_session, User, init_db, Upload
+    SessionLocal, db_session, User, init_db,
 )
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
 from web_comparativas.visibility_service import (
-    uploads_visible_query, visible_user_ids
+    uploads_visible_query,
+    visible_user_ids,
+    kpis_for_home as _kpis_for_home,
+    recent_done as _vis_recent_done,
+    _is_admin as _vs_is_admin,
+    _is_analyst as _vs_is_analyst,
+    _is_supervisor as _vs_is_supervisor,
 )
 
 # === SETUP ===
@@ -488,56 +494,56 @@ def home(request: Request):
         return RedirectResponse("/login", 303)
 
     user = request.state.user
-
     db = request.state.db
-    
-    # Context Check: If Private, redirect to Private Home
+
+    # Analistas y Supervisores siempre van a su mercado asignado.
+    # Nunca deben ver esta vista genérica (que en versiones anteriores no filtraba).
+    if _vs_is_analyst(user) or _vs_is_supervisor(user):
+        scope = (getattr(user, "access_scope", None) or "").strip().lower()
+        if scope in ("privado", "mercado_privado"):
+            return RedirectResponse("/mercado-privado", 303)
+        return RedirectResponse("/mercado-publico", 303)
+
+    # Mercado privado: redirige según contexto de sesión
     if getattr(request.state, "market_context", "public") == "private":
         print("[HOME] Redirecting to private market", flush=True)
         return RedirectResponse("/mercado-privado", 303)
 
-    # 1. KPIs de Cargas (Uploads)
-    # Filtro por scope? Por ahora "todos" o segun logica
-    query = db.query(Upload)
-    # Si quisieramos filtrar por usuario/scope, aqui iría.
-    
-    total_all = query.count()
-    total_pending = query.filter(Upload.status != "done").count()
-    total_done = query.filter(Upload.status == "done").count()
-    
-    # Ultimos completados
-    last_done = query.filter(Upload.status == "done").order_by(Upload.updated_at.desc()).limit(5).all()
-    # Recientes genericos (usamos lo mismo)
-    recent_done = last_done 
+    # ── KPIs de Cargas con visibilidad aplicada ──────────────────────────
+    # Para Admin/Auditor: ve todo. Para otros roles: filtrado por visibility_service.
+    kpis = _kpis_for_home(db, user)
+    total_all = kpis["total"]
+    total_pending = kpis["pending"]
+    total_done = kpis["done"]
 
-    # 2. KPIs Oportunidades (leyendo Excel)
+    # Últimos finalizados visibles (respeta permisos)
+    last_done = _vis_recent_done(db, user, limit=5)
+    recent_done = last_done
+
+    # ── KPIs Oportunidades ───────────────────────────────────────────────
     opp_total = 0
-    opp_accepted = 0 # Placeholder, se calcula en JS con info local, pero template pide variable
-    opp_unseen = 0   # Placeholder
-    
+    opp_accepted = 0
+    opp_unseen = 0
+
     OPP_FILE = OPP_DIR / "reporte_oportunidades.xlsx"
     if OPP_FILE.exists():
         try:
             import pandas as pd
             df = pd.read_excel(OPP_FILE, engine="openpyxl")
             print(f"[OPP] Loaded {len(df)} rows from Excel", flush=True)
-            
-            # Filter by Apertura date - only show active/future opportunities
-            if 'Apertura' in df.columns:
-                df['Apertura'] = pd.to_datetime(df['Apertura'], errors='coerce')
+
+            if "Apertura" in df.columns:
+                df["Apertura"] = pd.to_datetime(df["Apertura"], errors="coerce")
                 now = dt.datetime.now()
-                df = df[df['Apertura'] >= now]
-            
+                df = df[df["Apertura"] >= now]
+
             opp_total = len(df)
-            # Force reload
-            opp_unseen = opp_total # Asumimos todo unseen backend, el JS lo corrige
+            opp_unseen = opp_total
         except Exception as e:
             print(f"[OPP] ERROR: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
 
     return templates.TemplateResponse("home.html", {
-        "request": request, 
+        "request": request,
         "user": user,
         "total_all": total_all,
         "total_pending": total_pending,
@@ -553,9 +559,9 @@ def home(request: Request):
             "pending": "Pendiente",
             "processing": "Procesando",
             "done": "Completado",
-            "error": "Error"
+            "error": "Error",
         },
-        "market_context": "public" # Force explicit context for template
+        "market_context": "public",
     })
 
 @app.get("/markets", response_class=HTMLResponse)

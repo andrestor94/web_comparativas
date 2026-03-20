@@ -101,11 +101,12 @@ from .visibility_service import (
     visible_user_ids,
     kpis_for_home,
     recent_done as vis_recent_done,
+    _is_auditor,   # función centralizada — no redefinir localmente
 )
+from .policy import resolve_login_redirect as _resolve_login_redirect
 
 # === Visibilidad extendida para AUDITOR ================================
-def _is_auditor(user: User) -> bool:
-    return (user.role or "").strip().lower() == "auditor"
+# _is_auditor ya importada desde visibility_service: no duplicar definición.
 
 
 def uploads_visible_ext(session, user: User):
@@ -3304,7 +3305,7 @@ def oportunidades_dimensiones(
 @router.get("/cargas/nueva", response_class=HTMLResponse)
 async def form_nueva_carga(
     request: Request,
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor")),
 ):
     """
     Muestra el formulario para cargar un nuevo archivo.
@@ -3349,10 +3350,11 @@ async def crear_carga(
     file_siprosa_1: UploadFile = File(None),
     file_siprosa_2: UploadFile = File(None),
     file_siprosa_3: UploadFile = File(None),
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor")),
 ):
     """
     Crea una carga y dispara el procesamiento en segundo plano.
+    Auditor excluido: solo lectura (policy.can_create_upload = False para auditor).
     Tambi├®n evita duplicados usando el proceso_nro normalizado.
     """
     # Carpeta base donde se guardan los uploads — respeta UPLOADS_PATH env var
@@ -3545,7 +3547,7 @@ def page_otras_fuentes_externas(
 @router.get("/otras-fuentes/nueva", response_class=HTMLResponse)
 async def form_nueva_carga_otras_fuentes(
     request: Request,
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor")),
 ):
     """
     Muestra el formulario para cargar un nuevo archivo (Principales).
@@ -3589,10 +3591,11 @@ async def crear_carga_otras_fuentes(
     file_siprosa_1: UploadFile = File(None),
     file_siprosa_2: UploadFile = File(None),
     file_siprosa_3: UploadFile = File(None),
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor")),
 ):
     """
     Maneja la carga de 'Principales'.
+    Auditor excluido: solo lectura (policy.can_create_upload = False para auditor).
     Por ahora guarda el archivo y crea el registro, pero NO dispara la normalizaci├│n est├índar
     ya que requiere scripts espec├¡ficos.
     """
@@ -5961,17 +5964,8 @@ def login_submit(
     if getattr(u, "must_change_password", False):
         return RedirectResponse("/mi/password?force=1", status_code=303)
 
-    # Redirect logic based on Role and Business Unit
-    target_url = "/"
-    role = (u.role or "").lower()
-    bu = (u.unit_business or "").strip()
-
-    if role in ("analista", "supervisor"):
-        if bu == "Mercado P├║blico":
-            target_url = "/mercado-publico"
-        elif bu == "Mercado Privado":
-            target_url = "/mercado-privado"
-
+    # Redirect centralizado en policy.resolve_login_redirect (fuente única de verdad).
+    target_url = _resolve_login_redirect(u)
     return RedirectResponse(target_url, status_code=303)
 
 
