@@ -590,19 +590,35 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         return {"normalized_path": str(normalized_path), "summary": summary}
 
     except Exception as e:
-        # --- NUEVO BLOQUE DE ALERTA ---
+        # --- BLOQUE DE ALERTA ---
         err_msg = f"Error al procesar upload {upload_id}: {e}"
-        (out_dir / "error.log").write_text(err_msg, encoding="utf-8")
+        try:
+            (out_dir / "error.log").write_text(err_msg, encoding="utf-8")
+        except Exception:
+            pass
         logger.error(err_msg)
 
-        # 🔔 ALERTA AL ADMIN (puede reemplazarse luego por correo o notificación)
+        # Notificación in-app a admins + log de respaldo
         try:
-            admin_log = PROJECT_ROOT / "data" / "alerts_admin.log"
-            admin_log.parent.mkdir(parents=True, exist_ok=True)
-            with open(admin_log, "a", encoding="utf-8") as f:
-                f.write(f"[ALERTA] {err_msg}\n")
-        except Exception as log_err:
-            logger.warning(f"No se pudo registrar alerta admin: {log_err}")
+            from .notifications_service import notify_admins
+            _nombre_archivo = getattr(up, "original_filename", None) or f"Upload #{upload_id}"
+            notify_admins(
+                db_session,
+                title="Error en procesamiento de archivo",
+                message=f"Falló el procesamiento de «{_nombre_archivo}» (Upload #{upload_id}). Revisá el caso para reprocesar.",
+                category="processing",
+                link=f"/tablero/{upload_id}",
+            )
+        except Exception as notif_err:
+            logger.warning(f"No se pudo crear notificación de error: {notif_err}")
+            # Fallback: escribir en log de admin
+            try:
+                admin_log = PROJECT_ROOT / "data" / "alerts_admin.log"
+                admin_log.parent.mkdir(parents=True, exist_ok=True)
+                with open(admin_log, "a", encoding="utf-8") as f:
+                    f.write(f"[ALERTA] {err_msg}\n")
+            except Exception:
+                pass
 
         return {"error": str(e)}
 

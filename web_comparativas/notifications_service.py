@@ -2,6 +2,32 @@ from sqlalchemy.orm import Session
 from .models import Notification, User
 import datetime as dt
 
+def notify_admins(
+    db: Session,
+    title: str,
+    message: str,
+    category: str = "system",
+    link: str | None = None
+):
+    """
+    Crea una notificación para todos los usuarios con rol 'admin'.
+    Útil para alertar al equipo de administración sobre eventos que requieren atención.
+    """
+    admins = db.query(User).filter(User.role == "admin").all()
+    for admin in admins:
+        notif = Notification(
+            user_id=admin.id,
+            title=title,
+            message=message,
+            category=category,
+            link=link,
+            created_at=dt.datetime.utcnow(),
+            is_read=False,
+        )
+        db.add(notif)
+    db.commit()
+
+
 def create_notification(
     db: Session,
     user_id: int,

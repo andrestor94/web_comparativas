@@ -508,6 +508,22 @@ async def lectura_pliegos_nueva_submit(
             db.add(archivo)
 
     db.commit()
+
+    # --- Notificación a admins solo si la solicitud fue enviada (no borrador) ---
+    if estado_inicial == "pendiente_revision":
+        try:
+            from web_comparativas.notifications_service import notify_admins
+            nombre_remitente = user.name or user.email.split("@")[0]
+            notify_admins(
+                db,
+                title="Nueva solicitud de Lectura de Pliegos",
+                message=f"{nombre_remitente} envió una nueva solicitud: «{titulo[:60]}»",
+                category="pliegos",
+                link=f"/mercado-publico/lectura-pliegos/{caso.id}/admin",
+            )
+        except Exception:
+            pass
+
     return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso.id}", 303)
 
 
@@ -625,6 +641,49 @@ async def lectura_pliegos_cambiar_estado(
         caso.admin_responsable_id = user.id
 
     db.commit()
+
+    # --- Notificación al usuario creador según el nuevo estado ---
+    _MENSAJES_ESTADO = {
+        "en_revision": (
+            "Tu solicitud está siendo revisada",
+            "El administrador tomó tu solicitud «{titulo}» y está en revisión.",
+        ),
+        "observado": (
+            "Tu solicitud tiene una observación — requiere tu atención",
+            "El administrador dejó una observación en «{titulo}». Ingresá para ver el detalle.",
+        ),
+        "rechazado": (
+            "Tu solicitud fue rechazada",
+            "La solicitud «{titulo}» fue rechazada. Revisá los comentarios del administrador.",
+        ),
+        "listo": (
+            "Tu solicitud está lista ✓",
+            "La solicitud «{titulo}» fue procesada y ya está disponible para consultar.",
+        ),
+        "pendiente_procesamiento": (
+            "Tu solicitud está en procesamiento externo",
+            "La solicitud «{titulo}» fue enviada a procesamiento. Te avisaremos cuando haya novedades.",
+        ),
+        "archivado": (
+            "Tu solicitud fue archivada",
+            "La solicitud «{titulo}» fue archivada por el administrador.",
+        ),
+    }
+    if nuevo_estado in _MENSAJES_ESTADO and caso.creado_por_id:
+        try:
+            from web_comparativas.notifications_service import create_notification
+            titulo_notif, msg_tpl = _MENSAJES_ESTADO[nuevo_estado]
+            create_notification(
+                db,
+                user_id=caso.creado_por_id,
+                title=titulo_notif,
+                message=msg_tpl.format(titulo=caso.titulo[:55]),
+                category="pliegos",
+                link=f"/mercado-publico/lectura-pliegos/{caso_id}",
+            )
+        except Exception:
+            pass
+
     return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}/admin", 303)
 
 
@@ -655,6 +714,22 @@ async def lectura_pliegos_observacion(
     _registrar_historial(db, caso.id, caso.estado, caso.estado,
                          f"Observación interna actualizada", user.id)
     db.commit()
+
+    # --- Notificar al usuario que el admin dejó una observación ---
+    if caso.creado_por_id:
+        try:
+            from web_comparativas.notifications_service import create_notification
+            create_notification(
+                db,
+                user_id=caso.creado_por_id,
+                title="El administrador dejó una observación en tu solicitud",
+                message=f"Revisá la observación en «{caso.titulo[:55]}» para continuar con el proceso.",
+                category="pliegos",
+                link=f"/mercado-publico/lectura-pliegos/{caso_id}",
+            )
+        except Exception:
+            pass
+
     return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}/admin", 303)
 
 
