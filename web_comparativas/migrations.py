@@ -406,6 +406,12 @@ def backfill_normalized_content():
 
     Se ejecuta en startup para proteger los archivos actuales del siguiente deploy.
     Devuelve el número de uploads respaldados.
+
+    FIX CRÍTICO: El código anterior usaba `base_dir / "processed" / "normalized.xlsx"`
+    directamente. Si base_dir era UPLOADS_ROOT (código viejo sin subdirectorios UUID),
+    todos los uploads compartían la misma ruta y el mismo archivo, guardando los bytes
+    del último procesamiento para TODOS los uploads. Ahora se aplica la misma lógica
+    de aislamiento de classify_and_process: si base_dir == UPLOADS_ROOT se usa iso_{id}.
     """
     from web_comparativas.models import SessionLocal, Upload as UploadModel
     import json as _json
@@ -415,6 +421,7 @@ def backfill_normalized_content():
     _uploads_env = _os.environ.get("UPLOADS_PATH", "").strip()
     _uploads_root = Path(_uploads_env) if _uploads_env else PROJECT_ROOT / "data" / "uploads"
     backed_up = 0
+    skipped_shared = 0
 
     session = SessionLocal()
     try:
@@ -430,14 +437,28 @@ def backfill_normalized_content():
 
         for up in uploads:
             try:
-                # Determinar ruta del normalized.xlsx
+                # Determinar ruta del normalized.xlsx con aislamiento correcto
                 base_dir = getattr(up, "base_dir", None)
                 if base_dir:
                     p = Path(base_dir)
                     if not p.is_absolute():
                         p = (PROJECT_ROOT / p).resolve()
-                    norm_path = p / "processed" / "normalized.xlsx"
+
+                    # FIX: si base_dir apunta a la raíz compartida UPLOADS_ROOT,
+                    # usar subdirectorio iso_{id} para evitar que todos los uploads
+                    # lean el mismo archivo (el del último procesamiento).
+                    if p == _uploads_root:
+                        # Upload viejo con base_dir == UPLOADS_ROOT.
+                        # El archivo aislado está en iso_{id}/processed/normalized.xlsx.
+                        # El archivo COMPARTIDO en UPLOADS_ROOT/processed/normalized.xlsx
+                        # NO debe usarse: tendría datos del último procesamiento
+                        # y contaminaría TODOS los uploads con ese mismo contenido.
+                        norm_path = p / f"iso_{up.id}" / "processed" / "normalized.xlsx"
+                    else:
+                        # Upload normal con subdirectorio UUID propio
+                        norm_path = p / "processed" / "normalized.xlsx"
                 else:
+                    # Sin base_dir: usar iso_{id} (coherente con classify_and_process)
                     norm_path = _uploads_root / f"iso_{up.id}" / "processed" / "normalized.xlsx"
 
                 if norm_path.exists():
@@ -452,13 +473,19 @@ def backfill_normalized_content():
                     session.add(up)
                     backed_up += 1
                     print(f"[BACKFILL] Upload {up.id} respaldado en DB ({norm_path.stat().st_size} bytes).", flush=True)
+                else:
+                    print(f"[BACKFILL] Upload {up.id}: archivo no encontrado en {norm_path} – omitido.", flush=True)
             except Exception as e:
                 print(f"[BACKFILL] Upload {up.id}: error al respaldar – {e}", flush=True)
                 continue
 
         if backed_up:
             session.commit()
-        print(f"[BACKFILL] Respaldo completado: {backed_up} uploads guardados en DB.", flush=True)
+        print(
+            f"[BACKFILL] Respaldo completado: {backed_up} uploads guardados en DB. "
+            f"{skipped_shared} omitidos por ruta compartida.",
+            flush=True,
+        )
     except Exception as e:
         session.rollback()
         print(f"[BACKFILL] Error general: {e}", flush=True)
@@ -539,3 +566,59 @@ def backfill_original_content():
         session.close()
 
     return backed_up
+
+
+def ensure_dimensionamiento_text_columns():
+    """
+    Convierte de VARCHAR(255) a TEXT las columnas descriptivas largas de las
+    tablas de dimensionamiento en PostgreSQL.
+
+    El error `StringDataRightTruncation: value too long for type character
+    varying(255)` ocurre porque algunas columnas del CSV superan 255 caracteres.
+    TEXT en PostgreSQL no tiene límite práctico y es el tipo correcto para estos
+    campos descriptivos.
+
+    Columnas afectadas en dimensionamiento_records:
+      - producto_nombre_original (causa directa del error)
+      - cliente_nombre_homologado, cliente_nombre_original
+      - clasificacion_suizo, familia, unidad_negocio, subunidad_negocio
+
+    Columnas afectadas en dimensionamiento_family_monthly_summary:
+      - cliente_nombre_homologado, familia, unidad_negocio, subunidad_negocio
+
+    Compatible solo con PostgreSQL; en SQLite TEXT ya es el tipo nativo y
+    no requiere ALTER TABLE.
+    """
+    if IS_SQLITE:
+        print("[MIGRATION] ensure_dimensionamiento_text_columns: SQLite, saltando.", flush=True)
+        return
+
+    records_columns = [
+        "producto_nombre_original",
+        "cliente_nombre_homologado",
+        "cliente_nombre_original",
+        "clasificacion_suizo",
+        "familia",
+        "unidad_negocio",
+        "subunidad_negocio",
+    ]
+    summary_columns = [
+        "cliente_nombre_homologado",
+        "familia",
+        "unidad_negocio",
+        "subunidad_negocio",
+    ]
+
+    for table, columns in [
+        ("dimensionamiento_records", records_columns),
+        ("dimensionamiento_family_monthly_summary", summary_columns),
+    ]:
+        for col in columns:
+            with engine.begin() as conn:
+                _add_column_safe(
+                    conn,
+                    f"ALTER TABLE {table} ALTER COLUMN {col} TYPE TEXT",
+                    f"{table}.{col} → TEXT",
+                )
+
+    print("[MIGRATION] ensure_dimensionamiento_text_columns completado.", flush=True)
