@@ -67,6 +67,7 @@ from web_comparativas.migrations import (
     ensure_ticket_pliego_columns,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
+from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
 
 _startup_once_lock = Lock()
 _startup_once_completed = False
@@ -147,13 +148,7 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[STARTUP] Dimensionamiento auto-ingest warning: {e}", flush=True)
 
-    # Verificar que la tabla resumen esté poblada (puede estar vacía si el _rebuild
-    # falló en una carga anterior por timeout). Reconstruye si es necesario.
-    try:
-        ensure_dimensionamiento_summary_populated()
-        print("[MIGRATION] SUCCESS: Dimensionamiento summary table checked.", flush=True)
-    except Exception as e:
-        print(f"[MIGRATION] Warning dimensionamiento summary: {e}", flush=True)
+    print("[MIGRATION] Dimensionamiento summary check deferred to background maintenance.", flush=True)
 
     # Persistencia robusta: columnas para guardar contenido de archivos procesados en DB
     # Esto evita pérdida de datos al redesplegar en Render (filesystem efímero)
@@ -201,10 +196,24 @@ def _background_dimensionamiento_maintenance() -> None:
     import time
     time.sleep(3)  # Espera mínima para que el servidor esté listo
     try:
+        ensure_dimensionamiento_summary_populated()
+        print("[BACKGROUND] Dimensionamiento summary checked.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning dimensionamiento summary: {e}", flush=True)
+
+    try:
         ensure_dimensionamiento_indexes()
         print("[BACKGROUND] Dimensionamiento functional indexes checked.", flush=True)
     except Exception as e:
         print(f"[BACKGROUND] Warning dimensionamiento indexes: {e}", flush=True)
+
+    try:
+        with SessionLocal() as session:
+            snapshot = ensure_default_dashboard_snapshot(session)
+            snapshot_state = "ready" if snapshot else "not_needed"
+            print(f"[BACKGROUND] Dimensionamiento dashboard snapshot {snapshot_state}.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning dimensionamiento snapshot: {e}", flush=True)
 
 
 @asynccontextmanager

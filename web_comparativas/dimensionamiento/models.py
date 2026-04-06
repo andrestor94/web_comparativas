@@ -46,6 +46,7 @@ class DimensionamientoImportRun(Base):
 
     records = relationship("DimensionamientoRecord", back_populates="import_run")
     summaries = relationship("DimensionamientoFamilyMonthlySummary", back_populates="import_run")
+    snapshots = relationship("DimensionamientoDashboardSnapshot", back_populates="import_run")
     errors = relationship(
         "DimensionamientoImportError",
         back_populates="import_run",
@@ -175,3 +176,21 @@ class DimensionamientoImportError(Base):
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
 
     import_run = relationship("DimensionamientoImportRun", back_populates="errors")
+
+
+class DimensionamientoDashboardSnapshot(Base):
+    __tablename__ = "dimensionamiento_dashboard_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    snapshot_key = Column(String(100), nullable=False, unique=True, index=True)
+    version = Column(String(20), nullable=False, default="v1", index=True)
+    payload = Column(JSON, nullable=False)
+    generated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+    import_run_id = Column(
+        Integer,
+        ForeignKey("dimensionamiento_import_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    import_run = relationship("DimensionamientoImportRun", back_populates="snapshots")
