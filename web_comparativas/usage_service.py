@@ -148,7 +148,8 @@ def log_usage_event_raw(
         ):
             return
 
-        s = db_session()
+        from .models import SessionLocal
+        s = SessionLocal()
         ev = UsageEvent(
             timestamp=dt.datetime.utcnow(),
             session_id="legacy",
@@ -198,7 +199,8 @@ def log_usage_event(
         return
 
     try:
-        s = db_session()
+        from .models import SessionLocal
+        s = SessionLocal()
 
         ip = None
         ua = None
