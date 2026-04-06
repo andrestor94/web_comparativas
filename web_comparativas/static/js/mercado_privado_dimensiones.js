@@ -136,17 +136,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function initDashboard() {
-        setLoading(true, 'Consultando estado e índices...');
+        setLoading(true, 'Leyendo snapshot persistido...');
         try {
-            // Cargamos status y labels de negocio en paralelo para no agregar latencia
-            const [statusResponse, labelsResponse] = await Promise.all([
-                apiGet('/status'),
+            const [bootstrapResponse, labelsResponse] = await Promise.all([
+                apiGet('/bootstrap'),
                 apiGet('/negocio-labels').catch(() => ({ data: { unidades: {}, subunidades: {} } })),
             ]);
-            const status = statusResponse.data;
+            const bootstrap = bootstrapResponse.data || {};
+            const status = bootstrap.status || {};
             renderStatus(status);
 
-            // Guardar el mapeo en estado (el catch garantiza que nunca falla el init)
             if (labelsResponse && labelsResponse.data) {
                 state.negocioLabels = labelsResponse.data;
             }
@@ -159,9 +158,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             elements.emptyState.style.display = 'none';
             elements.dashboardContent.style.display = 'contents';
+            renderBootstrapPayload(bootstrap);
 
-            await loadFilterOptions();
-            await loadDashboardData();
+            if (bootstrap.meta?.stale) {
+                window.setTimeout(loadDashboardData, 0);
+            }
         } catch (error) {
             console.error(error);
             elements.datasetStatusPill.textContent = 'Error';
@@ -190,6 +191,32 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('[DIM] loadFilterOptions failed, continuing without filters:', e);
         }
+    }
+
+    function renderBootstrapPayload(bootstrap) {
+        const filterData = bootstrap.filters || {
+            clientes: [],
+            provincias: [],
+            familias: [],
+            unidades_negocio: [],
+            subunidades_negocio: [],
+            resultados: [],
+            date_range: { min: null, max: null },
+        };
+        applyFilterOptions(filterData);
+        if (!state.filtersLoaded && filterData.date_range) {
+            elements.dateStart.value = filterData.date_range.min || '';
+            elements.dateEnd.value = filterData.date_range.max || '';
+            state.filtersLoaded = true;
+        }
+
+        renderKpis(bootstrap.kpis || {});
+        renderAreaChart(bootstrap.series || { months: [], datasets: [] });
+        renderPieChart(bootstrap.results || []);
+        renderFamilyList(bootstrap.top_families || []);
+        renderMapChart(bootstrap.geo || []);
+        renderBarClientChart(bootstrap.clients_by_result || []);
+        renderPivotTable(bootstrap.family_consumption || { months: [], rows: [] });
     }
 
     // Actualiza las opciones de los selects manteniendo los valores ya seleccionados
@@ -262,23 +289,21 @@ document.addEventListener('DOMContentLoaded', () => {
         setLoading(true, 'Consultando métricas agregadas...');
         const query = buildQueryParams();
 
-        // Promise.allSettled: cada widget se resuelve o falla de forma independiente.
-        // Ningún fallo individual bloquea al resto del dashboard.
         const [
             filtersResult,
             kpisResult,
             seriesResult,
             resultsResult,
             familiesResult,
-            geoResult,
-            clientsResult,
-            consumptionResult,
         ] = await Promise.allSettled([
             apiGet('/filters', query),
             apiGet('/kpis', query),
             apiGet('/series', query),
             apiGet('/results', query),
             apiGet('/top-families', { ...query, limit: 10 }),
+        ]);
+
+        const secondaryPromise = Promise.allSettled([
             apiGet('/geo', query),
             apiGet('/clients-by-result', { ...query, limit: 10 }),
             apiGet('/family-consumption', { ...query, limit: 20 }),
@@ -306,6 +331,10 @@ document.addEventListener('DOMContentLoaded', () => {
             (data) => renderFamilyList(data),
             (msg) => showContainerError(elements.familyListContainer, msg)
         );
+
+        setLoading(false);
+
+        const [geoResult, clientsResult, consumptionResult] = await secondaryPromise;
         _widgetRender(geoResult,
             (data) => renderMapChart(data),
             () => { /* el mapa muestra lo último que tenía; no se fuerza error visual */ }
@@ -318,8 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
             (data) => renderPivotTable(data),
             (msg) => showPivotError(msg)
         );
-
-        setLoading(false);
     }
 
     /**

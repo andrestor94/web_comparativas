@@ -28,6 +28,7 @@ from .models import (
     DimensionamientoImportRun,
     DimensionamientoRecord,
 )
+from .query_service import refresh_default_dashboard_snapshot
 
 logger = logging.getLogger("wc.dimensionamiento.ingestion")
 
@@ -683,6 +684,16 @@ def ingest_dimensionamiento_csv(
                 }
             ),
         }
+        try:
+            refresh_default_dashboard_snapshot(session, import_run_id=run.id, commit=False)
+            _dim_log("info", "[DIM] Dashboard snapshot refreshed for run_id=%s", run.id)
+        except Exception as snapshot_exc:
+            _dim_log(
+                "warning",
+                "[DIM] Dashboard snapshot refresh failed for run_id=%s: %s",
+                run.id,
+                snapshot_exc,
+            )
         session.commit()
 
         _dim_log("info", "[DIM] CSV loaded with %s rows", total_processed)

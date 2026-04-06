@@ -12,10 +12,17 @@ from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE
 
-from .models import DimensionamientoFamilyMonthlySummary, DimensionamientoImportRun, DimensionamientoRecord
+from .models import (
+    DimensionamientoDashboardSnapshot,
+    DimensionamientoFamilyMonthlySummary,
+    DimensionamientoImportRun,
+    DimensionamientoRecord,
+)
 
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
+DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v1"
 
 
 def _get_date_column(model):
@@ -77,6 +84,25 @@ def _empty_filter_options() -> dict[str, Any]:
         "resultados": [],
         "date_range": {"min": None, "max": None},
     }
+
+
+def _has_active_filters(filters: DimensionamientoFilters) -> bool:
+    return any(
+        [
+            filters.clientes,
+            filters.provincias,
+            filters.familias,
+            filters.plataformas,
+            filters.unidades_negocio,
+            filters.subunidades_negocio,
+            filters.resultados,
+            filters.fecha_desde is not None,
+            filters.fecha_hasta is not None,
+            filters.identified is not None,
+            filters.is_client is not None,
+            filters.search,
+        ]
+    )
 
 
 def _coerce_date_value(value: Any) -> dt.date | None:
@@ -576,6 +602,98 @@ def _distinct_filtered_summary_values(
     return [v for v in session.execute(outer_stmt).scalars().all() if v not in (None, "")]
 
 
+def _latest_success_import_run(session: Session) -> DimensionamientoImportRun | None:
+    return session.execute(
+        select(DimensionamientoImportRun)
+        .where(DimensionamientoImportRun.status == "success")
+        .order_by(DimensionamientoImportRun.finished_at.desc(), DimensionamientoImportRun.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _get_dashboard_snapshot(session: Session) -> DimensionamientoDashboardSnapshot | None:
+    return session.execute(
+        select(DimensionamientoDashboardSnapshot)
+        .where(
+            DimensionamientoDashboardSnapshot.snapshot_key == DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+            DimensionamientoDashboardSnapshot.version == DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _snapshot_meta_payload(snapshot: DimensionamientoDashboardSnapshot | None) -> dict[str, Any]:
+    return {
+        "snapshot_key": DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+        "snapshot_version": DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+        "generated_at": snapshot.generated_at.isoformat() if snapshot and snapshot.generated_at else None,
+        "import_run_id": snapshot.import_run_id if snapshot else None,
+    }
+
+
+def _build_dashboard_bootstrap_payload(session: Session) -> dict[str, Any]:
+    base_filters = build_filters()
+    return {
+        "status": get_status(session),
+        "filters": get_filter_options(session, base_filters),
+        "kpis": get_kpis(session, base_filters),
+        "series": get_series(session, base_filters),
+        "results": get_results_breakdown(session, base_filters),
+        "top_families": get_top_families(session, base_filters, limit=10),
+        "geo": get_geography_distribution(session, base_filters),
+        "clients_by_result": get_clients_by_result(session, base_filters, limit=10),
+        "family_consumption": get_family_consumption_table(session, base_filters, limit=20),
+    }
+
+
+def refresh_default_dashboard_snapshot(
+    session: Session,
+    *,
+    import_run_id: int | None = None,
+    commit: bool = True,
+) -> dict[str, Any]:
+    started_at = _log_query_start("refresh_default_dashboard_snapshot", import_run_id=import_run_id)
+    payload = _build_dashboard_bootstrap_payload(session)
+    snapshot = _get_dashboard_snapshot(session)
+    latest = _latest_success_import_run(session)
+    if snapshot is None:
+        snapshot = DimensionamientoDashboardSnapshot(
+            snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+            version=DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+        )
+    payload["meta"] = {
+        **_snapshot_meta_payload(snapshot),
+        "source": "snapshot",
+        "stale": False,
+    }
+    snapshot.version = DEFAULT_DASHBOARD_SNAPSHOT_VERSION
+    snapshot.import_run_id = import_run_id if import_run_id is not None else (latest.id if latest else None)
+    snapshot.generated_at = dt.datetime.utcnow()
+    payload["meta"].update(_snapshot_meta_payload(snapshot))
+    snapshot.payload = payload
+    session.add(snapshot)
+    if commit:
+        session.commit()
+        session.refresh(snapshot)
+        snapshot.payload["meta"].update(_snapshot_meta_payload(snapshot))
+    _log_query_success(
+        "refresh_default_dashboard_snapshot",
+        started_at,
+        import_run_id=snapshot.import_run_id,
+    )
+    return snapshot.payload
+
+
+def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None:
+    latest = _latest_success_import_run(session)
+    snapshot = _get_dashboard_snapshot(session)
+    if latest is None:
+        return snapshot.payload if snapshot else None
+    if snapshot and snapshot.import_run_id == latest.id:
+        return snapshot.payload
+    return refresh_default_dashboard_snapshot(session, import_run_id=latest.id, commit=True)
+
+
 def get_status(session: Session) -> dict[str, Any]:
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_status start")
@@ -692,22 +810,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
     try:
         summary_state = _summary_health_snapshot(session)
-        has_active_filters = any(
-            [
-                filters.clientes,
-                filters.provincias,
-                filters.familias,
-                filters.plataformas,
-                filters.unidades_negocio,
-                filters.subunidades_negocio,
-                filters.resultados,
-                filters.fecha_desde is not None,
-                filters.fecha_hasta is not None,
-                filters.identified is not None,
-                filters.is_client is not None,
-                filters.search,
-            ]
-        )
+        has_active_filters = _has_active_filters(filters)
         if (
             not has_active_filters
             and summary_state["usable"]
@@ -1226,4 +1329,77 @@ def get_family_consumption_table(
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        raise
+
+
+def get_dashboard_bootstrap(
+    session: Session,
+    filters: DimensionamientoFilters | None = None,
+) -> dict[str, Any]:
+    filters = filters or build_filters()
+    started_at = _log_query_start("get_dashboard_bootstrap", filters)
+    try:
+        _apply_local_statement_timeout(session, 50000)
+        if not _has_active_filters(filters):
+            snapshot = _get_dashboard_snapshot(session)
+            latest = _latest_success_import_run(session)
+            if snapshot and (latest is None or snapshot.import_run_id == latest.id):
+                payload = dict(snapshot.payload or {})
+                payload["meta"] = {
+                    **dict(payload.get("meta") or {}),
+                    **_snapshot_meta_payload(snapshot),
+                    "source": "snapshot",
+                    "stale": False,
+                }
+                _log_query_success(
+                    "get_dashboard_bootstrap",
+                    started_at,
+                    source="snapshot",
+                    import_run_id=snapshot.import_run_id,
+                )
+                return payload
+
+            if snapshot:
+                payload = dict(snapshot.payload or {})
+                payload["meta"] = {
+                    **dict(payload.get("meta") or {}),
+                    **_snapshot_meta_payload(snapshot),
+                    "source": "snapshot",
+                    "stale": True,
+                    "latest_import_run_id": latest.id if latest else None,
+                }
+                _log_query_success(
+                    "get_dashboard_bootstrap",
+                    started_at,
+                    source="snapshot_stale",
+                    import_run_id=snapshot.import_run_id,
+                )
+                return payload
+
+        payload = {
+            "status": get_status(session),
+            "filters": get_filter_options(session, filters),
+            "kpis": get_kpis(session, filters),
+            "series": get_series(session, filters),
+            "results": get_results_breakdown(session, filters),
+            "top_families": get_top_families(session, filters, limit=10),
+            "geo": get_geography_distribution(session, filters),
+            "clients_by_result": get_clients_by_result(session, filters, limit=10),
+            "family_consumption": get_family_consumption_table(session, filters, limit=20),
+            "meta": {
+                "source": "live",
+                "stale": False,
+                "snapshot_key": DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+                "snapshot_version": DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+            },
+        }
+        _log_query_success(
+            "get_dashboard_bootstrap",
+            started_at,
+            source=payload["meta"]["source"],
+            has_data=payload["status"].get("has_data"),
+        )
+        return payload
+    except Exception:
+        logger.exception("[DIM][QUERY] get_dashboard_bootstrap failed filters=%s", _filters_debug_dict(filters))
         raise

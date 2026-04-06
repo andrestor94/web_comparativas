@@ -14,6 +14,7 @@ from web_comparativas.auth import require_roles
 from web_comparativas.dimensionamiento.query_service import (
     build_filters,
     get_clients_by_result,
+    get_dashboard_bootstrap,
     get_debug_snapshot,
     get_family_consumption_table,
     get_filter_options,
@@ -216,6 +217,47 @@ def dimensionamiento_status(
     except Exception:
         logger.exception("[DIM][API] GET /status failed")
         raise
+
+
+@router.get("/bootstrap")
+def dimensionamiento_bootstrap(
+    request: Request,
+    _: AllowedUser,
+    filters=Depends(_filters_from_query),
+    db: Session = Depends(get_db),
+):
+    return _safe_dashboard_response(
+        request,
+        "bootstrap",
+        lambda: get_dashboard_bootstrap(db, filters),
+        {
+            "status": {"has_data": False, "total_rows": 0, "platforms": [], "last_import": None},
+            "filters": {
+                "clientes": [],
+                "provincias": [],
+                "familias": [],
+                "plataformas": [],
+                "unidades_negocio": [],
+                "subunidades_negocio": [],
+                "resultados": [],
+                "date_range": {"min": None, "max": None},
+            },
+            "kpis": {
+                "total_rows": 0,
+                "clientes": 0,
+                "renglones": 0,
+                "familias": 0,
+                "cantidad_demandada": 0.0,
+            },
+            "series": {"months": [], "datasets": []},
+            "results": [],
+            "top_families": [],
+            "geo": [],
+            "clients_by_result": [],
+            "family_consumption": {"months": [], "rows": []},
+            "meta": {"source": "fallback", "stale": False},
+        },
+    )
 
 
 @router.get("/debug-snapshot")
