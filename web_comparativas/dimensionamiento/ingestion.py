@@ -5,6 +5,7 @@ import csv
 import datetime as dt
 import gc
 import hashlib
+import io
 import json
 import logging
 import os
@@ -84,6 +85,7 @@ CSV_DTYPE_BY_COLUMN = {
 DEFAULT_CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "dataset_unificado.csv"
 DEFAULT_CHUNK_SIZE = 10000
 SQLITE_SAFE_BATCH_SIZE = 200
+POSTGRES_STAGE_TABLE_PREFIX = "dimensionamiento_stage_"
 STARTUP_MODE_VALIDATE = "validate"
 STARTUP_MODE_INGEST_IF_EMPTY = "ingest-if-empty"
 STARTUP_MODE_FORCE_INGEST = "force-ingest"
@@ -229,6 +231,31 @@ def _derive_is_identified(row: dict[str, Any]) -> bool:
 
 
 _SIN_DATO_NORM: frozenset[str] = frozenset({"sin dato", "sin_dato"})
+TARGET_RECORD_COLUMNS = [
+    "id_registro_unico",
+    "fecha",
+    "plataforma",
+    "cliente_nombre_homologado",
+    "cliente_nombre_original",
+    "cuit",
+    "provincia",
+    "cuenta_interna",
+    "codigo_articulo",
+    "descripcion",
+    "clasificacion_suizo",
+    "descripcion_articulo",
+    "familia",
+    "unidad_negocio",
+    "subunidad_negocio",
+    "cantidad_demandada",
+    "resultado_participacion",
+    "producto_nombre_original",
+    "fecha_procesamiento",
+    "is_identified",
+    "is_client",
+    "import_run_id",
+]
+POSTGRES_STAGE_COPY_COLUMNS = ["source_row_number", *TARGET_RECORD_COLUMNS]
 
 
 def _is_sin_dato(text: str | None) -> bool:
@@ -429,6 +456,240 @@ def _record_error(session: Session, run_id: int, row_number: int, error_message:
     )
 
 
+def _record_errors_bulk(
+    session: Session,
+    run_id: int,
+    errors: list[dict[str, Any]],
+) -> None:
+    if not errors:
+        return
+    session.execute(
+        insert(DimensionamientoImportError),
+        [
+            {
+                "import_run_id": run_id,
+                "row_number": error["row_number"],
+                "error_message": error["error_message"],
+                "raw_payload": error["raw_payload"],
+            }
+            for error in errors
+        ],
+    )
+
+
+def _postgres_stage_table_name(run_id: int) -> str:
+    return f"{POSTGRES_STAGE_TABLE_PREFIX}{int(run_id)}"
+
+
+def _postgres_stage_columns_ddl() -> str:
+    return """
+        source_row_number BIGINT NOT NULL,
+        id_registro_unico TEXT NOT NULL,
+        fecha DATE NOT NULL,
+        plataforma VARCHAR(40) NOT NULL,
+        cliente_nombre_homologado VARCHAR(255),
+        cliente_nombre_original VARCHAR(255),
+        cuit VARCHAR(32),
+        provincia VARCHAR(120),
+        cuenta_interna VARCHAR(120),
+        codigo_articulo VARCHAR(120),
+        descripcion TEXT,
+        clasificacion_suizo VARCHAR(255),
+        descripcion_articulo TEXT,
+        familia VARCHAR(255),
+        unidad_negocio VARCHAR(255),
+        subunidad_negocio VARCHAR(255),
+        cantidad_demandada DOUBLE PRECISION NOT NULL,
+        resultado_participacion VARCHAR(120),
+        producto_nombre_original VARCHAR(255),
+        fecha_procesamiento TIMESTAMP NULL,
+        is_identified BOOLEAN NOT NULL,
+        is_client BOOLEAN NOT NULL,
+        import_run_id INTEGER NOT NULL
+    """.strip()
+
+
+def _create_postgres_stage_table(session: Session, table_name: str) -> None:
+    session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+    session.execute(
+        text(
+            f"""
+            CREATE UNLOGGED TABLE {table_name} (
+                {_postgres_stage_columns_ddl()}
+            )
+            """
+        )
+    )
+    session.commit()
+
+
+def _drop_postgres_stage_table(table_name: str) -> None:
+    cleanup_session = SessionLocal()
+    try:
+        cleanup_session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+        cleanup_session.commit()
+    except Exception as exc:
+        cleanup_session.rollback()
+        _dim_log("warning", "[DIM] Could not drop staging table %s: %s", table_name, exc)
+    finally:
+        cleanup_session.close()
+
+
+def _copy_scalar_for_postgres(value: Any) -> str:
+    if value is None:
+        return r"\N"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dt.datetime):
+        return value.isoformat(sep=" ", timespec="seconds")
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value)
+
+
+def _copy_rows_to_postgres_stage(table_name: str, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    for row in rows:
+        writer.writerow([_copy_scalar_for_postgres(row.get(column)) for column in POSTGRES_STAGE_COPY_COLUMNS])
+    buffer.seek(0)
+
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            cursor.execute("SET statement_timeout = 0")
+            cursor.copy_expert(
+                f"""
+                COPY {table_name} ({", ".join(POSTGRES_STAGE_COPY_COLUMNS)})
+                FROM STDIN WITH (FORMAT CSV, NULL '\\N')
+                """,
+                buffer,
+            )
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def _postgres_dedup_select_sql(table_name: str) -> str:
+    cols = ", ".join(TARGET_RECORD_COLUMNS)
+    return f"""
+        SELECT DISTINCT ON (id_registro_unico) {cols}
+        FROM {table_name}
+        WHERE id_registro_unico IS NOT NULL
+        ORDER BY id_registro_unico, source_row_number DESC
+    """
+
+
+def _postgres_count_dedup_rows(session: Session, table_name: str) -> int:
+    return int(
+        session.execute(
+            text(f"SELECT COUNT(*) FROM ({_postgres_dedup_select_sql(table_name)}) AS dedup")
+        ).scalar_one()
+    )
+
+
+def _postgres_count_existing_matches(session: Session, table_name: str) -> int:
+    return int(
+        session.execute(
+            text(
+                f"""
+                SELECT COUNT(*)
+                FROM ({_postgres_dedup_select_sql(table_name)}) AS dedup
+                INNER JOIN dimensionamiento_records existing
+                    ON existing.id_registro_unico = dedup.id_registro_unico
+                """
+            )
+        ).scalar_one()
+    )
+
+
+def _finalize_postgres_stage(
+    session: Session,
+    table_name: str,
+    *,
+    mode: str,
+) -> tuple[int, int]:
+    session.execute(text("SET LOCAL statement_timeout = 0"))
+    session.execute(text(f"CREATE INDEX IF NOT EXISTS {table_name}_id_row_idx ON {table_name} (id_registro_unico, source_row_number DESC)"))
+    session.execute(text(f"ANALYZE {table_name}"))
+
+    dedup_rows = _postgres_count_dedup_rows(session, table_name)
+    existing_matches = 0
+
+    insert_columns_sql = ", ".join(TARGET_RECORD_COLUMNS)
+    if mode == "replace":
+        session.execute(text("TRUNCATE TABLE dimensionamiento_records RESTART IDENTITY"))
+        session.execute(
+            text(
+                f"""
+                INSERT INTO dimensionamiento_records ({insert_columns_sql})
+                {_postgres_dedup_select_sql(table_name)}
+                """
+            )
+        )
+        return dedup_rows, existing_matches
+
+    existing_matches = _postgres_count_existing_matches(session, table_name)
+    update_columns = [
+        column
+        for column in TARGET_RECORD_COLUMNS
+        if column not in {"id_registro_unico", "import_run_id"}
+    ]
+    update_set_sql = ", ".join(f"{column} = EXCLUDED.{column}" for column in update_columns)
+    update_set_sql += ", import_run_id = EXCLUDED.import_run_id, updated_at = NOW()"
+    session.execute(
+        text(
+            f"""
+            INSERT INTO dimensionamiento_records ({insert_columns_sql})
+            {_postgres_dedup_select_sql(table_name)}
+            ON CONFLICT (id_registro_unico) DO UPDATE
+            SET {update_set_sql}
+            """
+        )
+    )
+    return dedup_rows, existing_matches
+
+
+def _normalize_rows_for_chunk(
+    chunk: pd.DataFrame,
+    *,
+    run_id: int,
+    line_offset: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    prepared_rows: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    total_processed = 0
+    chunk_columns = list(chunk.columns)
+
+    for row_number, values in enumerate(chunk.itertuples(index=False, name=None), start=line_offset + 1):
+        total_processed += 1
+        row = dict(zip(chunk_columns, values))
+        try:
+            normalized = _normalize_row(row)
+            if not normalized["id_registro_unico"]:
+                raise ValueError("id_registro_unico vacío")
+            if not normalized["fecha"]:
+                raise ValueError("fecha inválida")
+            normalized["import_run_id"] = run_id
+            normalized["source_row_number"] = row_number
+            prepared_rows.append(normalized)
+        except Exception as exc:
+            errors.append(
+                {
+                    "row_number": row_number,
+                    "error_message": str(exc),
+                    "raw_payload": row,
+                }
+            )
+    return prepared_rows, errors, total_processed
+
+
 def _build_upsert_statement(rows: list[dict[str, Any]]):
     if IS_POSTGRES:
         from sqlalchemy.dialects.postgresql import insert as dialect_insert
@@ -515,7 +776,158 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     session.execute(insert_stmt)
 
 
-def ingest_dimensionamiento_csv(
+def _ingest_dimensionamiento_via_sqlalchemy(
+    session: Session,
+    *,
+    path: Path,
+    run: DimensionamientoImportRun,
+    chunk_size: int,
+) -> tuple[int, int, int, int, list[str]]:
+    total_processed = 0
+    total_inserted = 0
+    total_updated = 0
+    total_rejected = 0
+    line_offset = 1
+    delimiter, observed_columns, selected_columns, selected_dtype_map = _resolve_csv_read_config(path)
+    _dim_log(
+        "info",
+        "[DIM] CSV reader configured selected_columns=%s chunk_size=%s",
+        len(selected_columns),
+        chunk_size,
+    )
+
+    for chunk_number, chunk in enumerate(
+        _iter_csv_chunks(
+            path,
+            chunk_size,
+            delimiter=delimiter,
+            usecols=selected_columns,
+            dtype_map=selected_dtype_map,
+        ),
+        start=1,
+    ):
+        chunk.columns = [_clean_header(column) for column in chunk.columns]
+        chunk_rows = len(chunk.index)
+        _dim_log("info", "[DIM] Processing chunk %s rows=%s", chunk_number, chunk_rows)
+        prepared_rows, errors, processed_in_chunk = _normalize_rows_for_chunk(
+            chunk,
+            run_id=run.id,
+            line_offset=line_offset,
+        )
+        total_processed += processed_in_chunk
+        total_rejected += len(errors)
+        line_offset += chunk_rows
+
+        if errors:
+            _record_errors_bulk(session, run.id, errors)
+
+        if not prepared_rows:
+            session.commit()
+            _dim_log("info", "[DIM] Inserted chunk %s rows=0", chunk_number)
+            del chunk, prepared_rows, errors
+            gc.collect()
+            continue
+
+        ids = [row["id_registro_unico"] for row in prepared_rows]
+        existing_ids: set[str] = set()
+        id_batch_size = SQLITE_SAFE_BATCH_SIZE if IS_SQLITE else chunk_size
+        for id_batch in _batched(ids, id_batch_size):
+            existing_ids.update(
+                session.execute(
+                    select(DimensionamientoRecord.id_registro_unico).where(
+                        DimensionamientoRecord.id_registro_unico.in_(id_batch)
+                    )
+                ).scalars().all()
+            )
+
+        total_inserted += len([row_id for row_id in ids if row_id not in existing_ids])
+        total_updated += len([row_id for row_id in ids if row_id in existing_ids])
+
+        write_batch_size = SQLITE_SAFE_BATCH_SIZE if IS_SQLITE else len(prepared_rows)
+        for row_batch in _batched(prepared_rows, write_batch_size):
+            stmt = _build_upsert_statement(row_batch)
+            session.execute(stmt)
+
+        session.commit()
+        _dim_log("info", "[DIM] Inserted chunk %s", chunk_number)
+        del chunk, prepared_rows, errors, ids, existing_ids
+        gc.collect()
+
+    return total_processed, total_inserted, total_updated, total_rejected, observed_columns
+
+
+def _ingest_dimensionamiento_via_postgres_copy(
+    session: Session,
+    *,
+    path: Path,
+    run: DimensionamientoImportRun,
+    chunk_size: int,
+    mode: str,
+) -> tuple[int, int, int, int, list[str]]:
+    total_processed = 0
+    total_rejected = 0
+    line_offset = 1
+    stage_table_name = _postgres_stage_table_name(run.id)
+    delimiter, observed_columns, selected_columns, selected_dtype_map = _resolve_csv_read_config(path)
+    _dim_log(
+        "info",
+        "[DIM] PostgreSQL staging configured selected_columns=%s chunk_size=%s stage_table=%s",
+        len(selected_columns),
+        chunk_size,
+        stage_table_name,
+    )
+
+    _create_postgres_stage_table(session, stage_table_name)
+    try:
+        for chunk_number, chunk in enumerate(
+            _iter_csv_chunks(
+                path,
+                chunk_size,
+                delimiter=delimiter,
+                usecols=selected_columns,
+                dtype_map=selected_dtype_map,
+            ),
+            start=1,
+        ):
+            chunk.columns = [_clean_header(column) for column in chunk.columns]
+            chunk_rows = len(chunk.index)
+            _dim_log("info", "[DIM] Processing chunk %s rows=%s via COPY", chunk_number, chunk_rows)
+            prepared_rows, errors, processed_in_chunk = _normalize_rows_for_chunk(
+                chunk,
+                run_id=run.id,
+                line_offset=line_offset,
+            )
+            total_processed += processed_in_chunk
+            total_rejected += len(errors)
+            line_offset += chunk_rows
+
+            if errors:
+                _record_errors_bulk(session, run.id, errors)
+                session.commit()
+
+            if prepared_rows:
+                _copy_rows_to_postgres_stage(stage_table_name, prepared_rows)
+                _dim_log("info", "[DIM] Copied chunk %s to staging rows=%s", chunk_number, len(prepared_rows))
+            else:
+                _dim_log("info", "[DIM] Copied chunk %s to staging rows=0", chunk_number)
+
+            del chunk, prepared_rows, errors
+            gc.collect()
+
+        dedup_rows, existing_matches = _finalize_postgres_stage(
+            session,
+            stage_table_name,
+            mode=mode,
+        )
+        session.commit()
+        total_inserted = dedup_rows if mode == "replace" else max(dedup_rows - existing_matches, 0)
+        total_updated = 0 if mode == "replace" else existing_matches
+        return total_processed, total_inserted, total_updated, total_rejected, observed_columns
+    finally:
+        _drop_postgres_stage_table(stage_table_name)
+
+
+def _ingest_dimensionamiento_csv_legacy(
     csv_path: str | os.PathLike[str] | None = None,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
@@ -654,6 +1066,169 @@ def ingest_dimensionamiento_csv(
             raise ValueError("El CSV no contiene filas de datos.")
 
         if mode == "replace":
+            session.execute(
+                delete(DimensionamientoRecord).where(
+                    or_(
+                        DimensionamientoRecord.import_run_id.is_(None),
+                        DimensionamientoRecord.import_run_id != run.id,
+                    )
+                )
+            )
+
+        _rebuild_summary_table(session, run.id)
+
+        run.status = "success"
+        run.finished_at = dt.datetime.utcnow()
+        run.observed_columns = observed_columns
+        run.rows_processed = total_processed
+        run.rows_inserted = total_inserted
+        run.rows_updated = total_updated
+        run.rows_rejected = total_rejected
+        run.summary = {
+            "mode": mode,
+            "platforms": sorted(
+                {
+                    platform
+                    for platform in session.execute(
+                        select(DimensionamientoRecord.plataforma).distinct()
+                    ).scalars().all()
+                    if platform
+                }
+            ),
+        }
+        try:
+            refresh_default_dashboard_snapshot(session, import_run_id=run.id, commit=False)
+            _dim_log("info", "[DIM] Dashboard snapshot refreshed for run_id=%s", run.id)
+        except Exception as snapshot_exc:
+            _dim_log(
+                "warning",
+                "[DIM] Dashboard snapshot refresh failed for run_id=%s: %s",
+                run.id,
+                snapshot_exc,
+            )
+        session.commit()
+
+        _dim_log("info", "[DIM] CSV loaded with %s rows", total_processed)
+        _dim_log(
+            "info",
+            "[DIM] Ingestion completed run_id=%s processed=%s inserted=%s updated=%s rejected=%s",
+            run.id,
+            total_processed,
+            total_inserted,
+            total_updated,
+            total_rejected,
+        )
+        return {
+            "status": "success",
+            "run_id": run.id,
+            "source_path": str(path),
+            "source_hash": source_hash,
+            "rows_processed": total_processed,
+            "rows_inserted": total_inserted,
+            "rows_updated": total_updated,
+            "rows_rejected": total_rejected,
+        }
+    except Exception as exc:
+        _dim_log("error", "[DIM] ERROR: ingestion failed for %s: %s", path, exc, exc_info=True)
+        session.rollback()
+        if run is not None:
+            run = session.merge(run)
+            run.status = "failed"
+            run.finished_at = dt.datetime.utcnow()
+            run.error_message = str(exc)
+            session.commit()
+        raise
+    finally:
+        session.close()
+
+
+def ingest_dimensionamiento_csv(
+    csv_path: str | os.PathLike[str] | None = None,
+    *,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    mode: str = "replace",
+    force: bool = False,
+) -> dict[str, Any]:
+    path = Path(csv_path or os.getenv("DIMENSIONAMIENTO_CSV_PATH") or DEFAULT_CSV_PATH).resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"No se encontrÃ³ el CSV de dimensionamiento: {path}")
+
+    _dim_log(
+        "info",
+        "[DIM] Ingestion started path=%s chunk_size=%s mode=%s force=%s target=%s",
+        path,
+        chunk_size,
+        mode,
+        force,
+        _db_target_summary(),
+    )
+    source_hash = _compute_sha256(path)
+    source_mtime = dt.datetime.fromtimestamp(path.stat().st_mtime)
+
+    session = SessionLocal()
+    run = None
+    try:
+        latest_success = session.execute(
+            select(DimensionamientoImportRun)
+            .where(DimensionamientoImportRun.status == "success")
+            .order_by(DimensionamientoImportRun.finished_at.desc(), DimensionamientoImportRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if latest_success and latest_success.source_hash == source_hash and not force:
+            _dim_log("info", "[DIM] Ingestion skipped because source hash is unchanged")
+            return {
+                "status": "skipped",
+                "reason": "source_unchanged",
+                "source_path": str(path),
+                "source_hash": source_hash,
+                "last_run_id": latest_success.id,
+            }
+
+        run = DimensionamientoImportRun(
+            source_path=str(path),
+            source_hash=source_hash,
+            source_mtime=source_mtime,
+            mode=mode,
+            status="running",
+            chunk_size=chunk_size,
+            expected_columns=EXPECTED_COLUMNS,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+
+        if IS_POSTGRES:
+            (
+                total_processed,
+                total_inserted,
+                total_updated,
+                total_rejected,
+                observed_columns,
+            ) = _ingest_dimensionamiento_via_postgres_copy(
+                session,
+                path=path,
+                run=run,
+                chunk_size=chunk_size,
+                mode=mode,
+            )
+        else:
+            (
+                total_processed,
+                total_inserted,
+                total_updated,
+                total_rejected,
+                observed_columns,
+            ) = _ingest_dimensionamiento_via_sqlalchemy(
+                session,
+                path=path,
+                run=run,
+                chunk_size=chunk_size,
+            )
+
+        if total_processed == 0:
+            raise ValueError("El CSV no contiene filas de datos.")
+
+        if mode == "replace" and not IS_POSTGRES:
             session.execute(
                 delete(DimensionamientoRecord).where(
                     or_(

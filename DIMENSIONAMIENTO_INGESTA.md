@@ -34,6 +34,11 @@
 - Resumen mensual precalculado en `dimensionamiento_family_monthly_summary`
 - El navegador ya no recibe datasets completos ni procesa archivos pesados
 
+Notas extra de PostgreSQL:
+- La carga grande ya no usa flush ORM por lotes para `dimensionamiento_records`.
+- El flujo recomendado en Render es staging `UNLOGGED` + `COPY FROM STDIN` + merge/replace SQL.
+- Al finalizar la ingesta se recalculan summary y snapshot del dashboard.
+
 ## Observabilidad
 
 - Cada corrida queda en `dimensionamiento_import_runs`
