@@ -111,6 +111,17 @@ def _get_upload(upload_id: int) -> UploadModel:
     up = db_session.get(UploadModel, int(upload_id))
     if not up:
         raise RuntimeError(f"Upload {upload_id} no existe")
+    # FIX: Forzar refresh desde DB para evitar datos stale del identity map.
+    # expire_on_commit=True debería cubrir esto, pero refresh explícito
+    # garantiza datos frescos incluso en background tasks con sesiones largas.
+    try:
+        db_session.refresh(up)
+    except Exception:
+        # Si refresh falla (e.g. objeto expirado/detached), re-fetch limpio
+        db_session.expire(up)
+        up = db_session.get(UploadModel, int(upload_id))
+        if not up:
+            raise RuntimeError(f"Upload {upload_id} no existe (re-fetch)")
     return up
 
 def _commit_safe():
@@ -231,14 +242,18 @@ def get_normalized_path(upload: UploadModel) -> Path | None:
     p = getattr(upload, "normalized_path", None)
     if p:
         return Path(p)
-    
-    base_dir = getattr(upload, "base_dir", None)
-    base_dir_abs = _abs_path(base_dir) or (PROJECT_ROOT / "data" / "uploads")
 
-    # Match isolation logic from classify_and_process
-    if base_dir_abs == UPLOADS_ROOT:
-         return base_dir_abs / f"iso_{upload.id}" / "processed" / "normalized.xlsx"
-    
+    base_dir = getattr(upload, "base_dir", None)
+    base_dir_abs = _abs_path(base_dir)
+
+    # FIX: si base_dir está ausente o apunta a la raíz compartida UPLOADS_ROOT
+    # (uploads creados con código viejo que no tenía subdirectorios UUID),
+    # usar el subdirectorio de aislamiento iso_{upload.id} para evitar
+    # que todos los uploads compartan el mismo archivo normalized.xlsx.
+    if not base_dir_abs or base_dir_abs == UPLOADS_ROOT:
+        return UPLOADS_ROOT / f"iso_{upload.id}" / "processed" / "normalized.xlsx"
+
+    # base_dir es el directorio UUID del upload: {UPLOADS_ROOT}/{uuid}/
     return base_dir_abs / "processed" / "normalized.xlsx"
 
 def normalized_exists(upload: UploadModel) -> bool:
@@ -254,25 +269,50 @@ def normalized_exists(upload: UploadModel) -> bool:
 
 def get_normalized_bytes(upload: UploadModel) -> bytes | None:
     """
-    Devuelve los bytes del normalized.xlsx.
-    Prioridad: disco local → contenido en DB.
-    Así funciona aunque el filesystem de Render se haya reiniciado.
+    Devuelve los bytes del normalized.xlsx para este upload específico.
+    Prioridad: contenido en DB (BLOB por upload) → disco local como fallback.
+
+    FIX CRÍTICO: Se invirtió el orden de prioridad.
+    Antes era disco → DB, lo que causaba que si había un archivo compartido
+    en disco (uploads viejos con base_dir == UPLOADS_ROOT) todos los uploads
+    devolvieran el mismo contenido (el último procesado en esa ruta compartida).
+    Ahora el BLOB de DB es fuente de verdad per-upload y el disco es fallback
+    solo cuando el BLOB no existe (uploads muy viejos sin normalización en DB).
     """
+    # 1. Fuente principal: BLOB en DB (garantiza aislamiento por upload)
+    content = getattr(upload, "normalized_content", None)
+    if content:
+        return bytes(content)
+
+    # 2. Fallback: leer desde disco (útil para uploads procesados antes de
+    #    que existiera la columna normalized_content, si el archivo aún existe)
     try:
         p = get_normalized_path(upload)
         if p and p.exists():
             return p.read_bytes()
     except Exception:
         pass
-    content = getattr(upload, "normalized_content", None)
-    return bytes(content) if content else None
+
+    return None
 
 
 def get_dashboard_data(upload: UploadModel) -> dict:
     """
-    Devuelve el dict del dashboard.json.
-    Prioridad: archivo en disco → campo dashboard_json en DB.
+    Devuelve el dict del dashboard.json para este upload específico.
+    Prioridad: campo dashboard_json en DB → archivo en disco como fallback.
+
+    FIX: Se invirtió el orden de prioridad (igual que get_normalized_bytes)
+    para evitar que todos los uploads compartan el mismo dashboard.json en disco.
     """
+    # 1. Fuente principal: campo dashboard_json en DB (per-upload)
+    stored = getattr(upload, "dashboard_json", None)
+    if stored:
+        try:
+            return json.loads(stored)
+        except Exception:
+            pass
+
+    # 2. Fallback: disco (para uploads muy viejos sin datos en DB)
     try:
         p = get_normalized_path(upload)
         if p and p.exists():
@@ -281,12 +321,7 @@ def get_dashboard_data(upload: UploadModel) -> dict:
                 return json.loads(dash_path.read_text(encoding="utf-8"))
     except Exception:
         pass
-    stored = getattr(upload, "dashboard_json", None)
-    if stored:
-        try:
-            return json.loads(stored)
-        except Exception:
-            pass
+
     return {}
 
 def refresh_flags(upload: UploadModel) -> dict:

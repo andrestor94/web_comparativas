@@ -223,6 +223,9 @@ app = FastAPI(lifespan=lifespan)
 # === MIDDLEWARES + DEBUG ===
 def _reset_session():
     try:
+        # Expire all cached objects to prevent stale data between requests
+        if hasattr(db_session, "expire_all"):
+            db_session.expire_all()
         if hasattr(db_session, "remove"):
             db_session.remove()
         else:

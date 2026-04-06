@@ -1,4 +1,4 @@
-﻿# === main.py ==================================================
+# === main.py ==================================================
 from __future__ import annotations
 
 from pathlib import Path
@@ -909,6 +909,9 @@ def _reset_session():
     Esta funci├│n intenta devolverlo a un estado limpio.
     """
     try:
+        # Expire all cached objects to prevent stale data between requests
+        if hasattr(db_session, "expire_all"):
+            db_session.expire_all()
         if hasattr(db_session, "remove"):
             db_session.remove()
         else:
@@ -4061,6 +4064,11 @@ def view_upload(
     upload = db_session.get(UploadModel, upload_id)
     if not upload:
         raise HTTPException(status_code=404, detail="Carga no encontrada")
+    # FIX: Forzar recarga desde DB para datos frescos del proceso correcto
+    try:
+        db_session.refresh(upload)
+    except Exception:
+        db_session.expire(upload)
 
     PROCESS_STEPS_LOC = {
         "pending": "Pendiente",
@@ -4117,6 +4125,11 @@ def api_carga_status(
     up = db_session.get(UploadModel, upload_id)
     if not up:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    # FIX: Forzar recarga desde DB para datos frescos
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
 
     # Enriquecido desde services
     try:
@@ -4648,6 +4661,11 @@ def api_descargar_final(
     up = db_session.get(UploadModel, upload_id)
     if not up:
         raise HTTPException(status_code=404, detail="Proceso no encontrado")
+    # FIX: Forzar recarga desde DB para descargar los datos del proceso correcto
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
 
     norm_bytes = services.get_normalized_bytes(up)
     if not norm_bytes:
@@ -4763,6 +4781,11 @@ def api_tablero_ranking(
     up = db_session.get(UploadModel, upload_id)
     if not up:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    # FIX: Forzar recarga desde DB para ranking correcto
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
 
     # ­ƒöÆ visibilidad por grupos (pero auditor ve todo)
     if up.user_id not in visible_user_ids_ext(db_session, user):
@@ -5601,6 +5624,14 @@ def tablero_show(
     if not up:
         return HTMLResponse("Carga no encontrada", status_code=404)
 
+    # FIX CRÍTICO: Forzar recarga completa desde DB para garantizar que
+    # normalized_content y dashboard_json corresponden a ESTE upload_id,
+    # no a un objeto stale del identity map de la sesión.
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
+
     # ­ƒöÆ Verificar visibilidad por grupos (auditor ve todo).
     # Si el proceso es del propio usuario, SIEMPRE permitir.
     vis_ids = visible_user_ids_ext(db_session, user)
@@ -6415,6 +6446,11 @@ def descargar_archivo_original(
     up = db_session.get(UploadModel, upload_id)
     if not up:
         raise HTTPException(status_code=404, detail="Carga no encontrada")
+    # FIX: Forzar recarga desde DB para descargar el archivo original correcto
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
 
     # ­ƒöÆ Verificar visibilidad por grupos (auditor ver├¡a todo, pero ac├í solo admin)
     vis_ids = visible_user_ids_ext(db_session, user)
@@ -6494,6 +6530,11 @@ def descargar_normalizado(
     up = db_session.get(UploadModel, upload_id)
     if not up:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    # FIX: Forzar recarga desde DB para descargar el archivo correcto de este proceso
+    try:
+        db_session.refresh(up)
+    except Exception:
+        db_session.expire(up)
 
     # ­ƒöÆ Verificar visibilidad por grupos (auditor ve todo)
     vis_ids = visible_user_ids_ext(db_session, user)

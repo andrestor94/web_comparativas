@@ -113,7 +113,7 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
         cursor.close()
 
 # Session factory + scoped_session
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=True, future=True)
 db_session = scoped_session(SessionLocal)
 
 Base = declarative_base()
