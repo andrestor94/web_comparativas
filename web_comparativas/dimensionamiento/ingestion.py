@@ -622,14 +622,28 @@ def _finalize_postgres_stage(
     dedup_rows = _postgres_count_dedup_rows(session, table_name)
     existing_matches = 0
 
-    insert_columns_sql = ", ".join(TARGET_RECORD_COLUMNS)
+    # created_at / updated_at are NOT NULL in dimensionamiento_records but are NOT
+    # stored in the staging table. We inject CURRENT_TIMESTAMP explicitly in the
+    # SELECT so the INSERT never receives NULL for those columns.
+    insert_columns = [*TARGET_RECORD_COLUMNS, "created_at", "updated_at"]
+    insert_columns_sql = ", ".join(insert_columns)
+
+    # Wrap the dedup SELECT to append the two timestamps as computed columns.
+    dedup_cols_sql = ", ".join(f"dedup.{col}" for col in TARGET_RECORD_COLUMNS)
+    full_select_sql = (
+        f"SELECT {dedup_cols_sql},"
+        f" CURRENT_TIMESTAMP AS created_at,"
+        f" CURRENT_TIMESTAMP AS updated_at"
+        f" FROM ({_postgres_dedup_select_sql(table_name)}) AS dedup"
+    )
+
     if mode == "replace":
         session.execute(text("TRUNCATE TABLE dimensionamiento_records RESTART IDENTITY"))
         session.execute(
             text(
                 f"""
                 INSERT INTO dimensionamiento_records ({insert_columns_sql})
-                {_postgres_dedup_select_sql(table_name)}
+                {full_select_sql}
                 """
             )
         )
@@ -642,12 +656,13 @@ def _finalize_postgres_stage(
         if column not in {"id_registro_unico", "import_run_id"}
     ]
     update_set_sql = ", ".join(f"{column} = EXCLUDED.{column}" for column in update_columns)
+    # On conflict: refresh updated_at but preserve the original created_at.
     update_set_sql += ", import_run_id = EXCLUDED.import_run_id, updated_at = NOW()"
     session.execute(
         text(
             f"""
             INSERT INTO dimensionamiento_records ({insert_columns_sql})
-            {_postgres_dedup_select_sql(table_name)}
+            {full_select_sql}
             ON CONFLICT (id_registro_unico) DO UPDATE
             SET {update_set_sql}
             """
