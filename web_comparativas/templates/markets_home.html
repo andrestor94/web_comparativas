@@ -111,21 +111,20 @@
         }
 
         .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(340px, 380px));
+            display: flex;
+            flex-wrap: wrap;
             justify-content: center;
             align-items: stretch;
-            gap: 2rem;
+            gap: 1.75rem;
             width: 100%;
-            max-width: 1220px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 0;
         }
 
-        @media (max-width: 1200px) {
+        @media (max-width: 1300px) {
             .cards-grid {
-                grid-template-columns: repeat(auto-fit, minmax(320px, 360px));
-                max-width: 1100px;
+                max-width: 720px; /* Fuerza comportamiento 2x2 para ser simétrico en pantallas medianas */
             }
         }
 
@@ -136,7 +135,6 @@
             }
 
             .cards-grid {
-                grid-template-columns: repeat(auto-fit, minmax(300px, 360px));
                 gap: 1.5rem;
             }
         }
@@ -147,19 +145,21 @@
             }
 
             .cards-grid {
-                grid-template-columns: minmax(0, 1fr);
                 max-width: 460px;
             }
 
             .market-card {
-                min-height: auto;
-                padding: 1.75rem;
+                min-height: auto !important;
+                padding: 1.75rem !important;
+                max-width: 100% !important;
             }
         }
 
         /* Market cards: reutilizamos .market-card-v2 del design system,
            aquí sólo ajustes contextuales de esta página */
         .market-card {
+            flex: 1 1 270px;  /* Ancho base flex */
+            max-width: 320px; /* Para que al haber 3, no se vuelvan gigantes */
             background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 16px;
@@ -195,9 +195,10 @@
         .market-card:hover::before { height: 4px; }
 
         /* Variantes de acento */
-        .market-card--publico { --mc-accent: #06486f; }
-        .market-card--privado { --mc-accent: #5770b0; }
-        .market-card--sic     { --mc-accent: #00A487; }
+        .market-card--publico   { --mc-accent: #06486f; }
+        .market-card--privado   { --mc-accent: #5770b0; }
+        .market-card--sic       { --mc-accent: #00A487; }
+        .market-card--forecast  { --mc-accent: #6366F1; }
 
         .card-icon-wrapper {
             width: 54px;
@@ -447,6 +448,26 @@
                         <p class="card-text">
                             Análisis de cotizaciones a organizaciones privadas dentro y fuera de plataformas especializadas.
                             Dimensión de mercado y reportes especializados.
+                        </p>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-badge status-available">Disponible</span>
+                        <div class="arrow-link">
+                            Ingresar <i class="bi bi-arrow-right"></i>
+                        </div>
+                    </div>
+                </a>
+
+                <!-- Forecast -->
+                <a href="/forecast/" class="market-card market-card--forecast">
+                    <div class="card-icon-wrapper">
+                        <i class="bi bi-graph-up-arrow"></i>
+                    </div>
+                    <div>
+                        <h2 class="card-heading">Forecast</h2>
+                        <p class="card-text">
+                            Proyecciones de venta. Análisis de demanda histórica y proyección estadística por producto,
+                            negocio y cliente. Visualización de tendencias con expectativa de crecimiento configurable.
                         </p>
                     </div>
                     <div class="card-footer">

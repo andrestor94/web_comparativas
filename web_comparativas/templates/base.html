@@ -28,10 +28,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap"
     rel="stylesheet">
 
-  <!-- Bootstrap CSS -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <!-- Bootstrap Icons -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <!-- Bootstrap CSS (local) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap/css/bootstrap.min.css') }}">
+  <!-- Bootstrap Icons (local) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap-icons/font/bootstrap-icons.min.css') }}">
 
   <!-- Tema personalizado (global) + cache-busting -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=revert-v1">
@@ -888,8 +888,8 @@
   <div id="banner-root" aria-live="polite" aria-atomic="true"></div>
   <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Bootstrap JS -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Bootstrap JS (local) -->
+  <script src="{{ url_for('static', path='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
 
   <!-- ====== SIDEBAR TOGGLE (isolated script so it never breaks) ====== -->
   <script>
