@@ -1,0 +1,2091 @@
+{% extends "base.html" %}
+{% block title %}Forecast – Proyecciones de Venta{% endblock %}
+{% block header_title %}Forecast{% endblock %}
+
+{% block extra_head %}
+<!-- Plotly.js (local) -->
+<script src="{{ url_for('static', path='vendor/plotly/plotly.min.js') }}"></script>
+<!-- ag-Grid Community (local) -->
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/ag-grid/ag-grid.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/ag-grid/ag-theme-alpine.css') }}">
+<script src="{{ url_for('static', path='vendor/ag-grid/ag-grid-community.min.js') }}"></script>
+<!-- Flatpickr (local) -->
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.css') }}">
+<script src="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.js') }}"></script>
+
+<style>
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+  .fc-wrap {
+    display: flex;
+    height: calc(100vh - 70px);
+    overflow: hidden;
+    font-family: Outfit, system-ui, -apple-system, sans-serif;
+    background: #F8FAFC;
+    color: #0F172A;
+  }
+
+  /* ── Left Sidebar — oculto (contenido migrado al dashboard) ─────────── */
+  .fc-sidebar { display: none; }
+
+  /* ── Section title (reutilizado en explorador inline) ───────────────── */
+  .fc-section-title {
+    color: #64748B;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fc-section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #E2E8F0;
+  }
+
+  /* ── Scroll único: evitar scroll del body (Fix C) ───────────────────── */
+  body:has(#fcApp) { overflow: hidden; }
+
+  /* ── Date inputs inline en filter bar ───────────────────────────────── */
+  .fc-date-inline {
+    display: flex;
+    align-items: center;       /* alineación vertical correcta de todos los hijos */
+    gap: 6px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 0 10px;
+    height: 32px;              /* misma altura que .fc-filter-btn */
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+  .fc-date-inline-label {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #475569;
+    white-space: nowrap;
+    line-height: 1;
+    margin: 0;
+  }
+  .fc-date-inline-sep {
+    color: #CBD5E1;
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+  .fc-date-group-inline {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+  }
+  .fc-date-group-inline label {
+    font-size: 0.7rem;
+    color: #94A3B8;
+    font-weight: 500;
+    white-space: nowrap;
+    line-height: 1;
+    margin: 0;
+  }
+  /* Flatpickr oculta el input original y añade un altInput hermano.
+     Ambos heredan estos estilos; el original queda hidden, el altInput visible. */
+  .fc-date-group-inline input,
+  .fc-date-group-inline .flatpickr-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 0.78rem;
+    color: #0F172A;
+    font-family: inherit;
+    cursor: pointer;
+    width: 84px;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
+    vertical-align: middle;
+    display: inline-block;
+  }
+
+  /* ── Lab row + Search (en explorador inline) ────────────────────────── */
+  .fc-lab-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .fc-lab-row select {
+    flex: 1; background: #F8FAFC; border: 1px solid #E2E8F0;
+    border-radius: 6px; padding: 5px 8px; font-size: 0.78rem;
+    color: #0F172A; font-family: inherit; outline: none;
+  }
+  .fc-lab-row label { font-size: 0.72rem; color: #64748B; white-space: nowrap; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .fc-search-wrap { position: relative; margin-bottom: 8px; }
+  .fc-search {
+    width: 100%; background: #F8FAFC; border: 1px solid #E2E8F0;
+    border-radius: 6px; padding: 6px 10px 6px 28px; font-size: 0.78rem;
+    color: #0F172A; font-family: inherit; outline: none;
+    transition: border-color .15s; box-sizing: border-box;
+  }
+  .fc-search:focus { border-color: #94A3B8; background: #fff; }
+  .fc-search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #94A3B8; font-size: 0.82rem; pointer-events: none; }
+  #prodGrid .ag-root-wrapper { border-radius: 6px; border: 1px solid #E2E8F0 !important; font-family: Outfit, system-ui, sans-serif !important; font-size: 12px !important; }
+  #prodGrid .ag-header { display: none; }
+  #prodGrid .ag-row { border-bottom: 1px solid #F1F5F9; }
+  #prodGrid.ag-theme-alpine { --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; --ag-row-hover-color: #F8FAFC; --ag-selected-row-background-color: #EFF6FF; --ag-font-size: 12px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; }
+  .fc-prod-caption { font-size: 0.68rem; color: #94A3B8; margin-top: 5px; text-align: right; }
+
+  /* Sombreado elegante para productos destacados por laboratorio */
+  .fc-lab-highlight { background-color: #FFF9C4 !important; }
+  .fc-lab-highlight:hover { background-color: #FEF08A !important; }
+
+  /* ── Chart + Explorer horizontal layout ─────────────────────────────── */
+  .fc-chart-explorer-row {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;   /* ambas columnas tienen la misma altura */
+  }
+  .fc-chart-col {
+    flex: 1 1 0;
+    min-width: 0;
+    position: relative;
+  }
+  .fc-explorer-col {
+    width: 270px;
+    min-width: 240px;
+    max-width: 290px;
+    min-height: 420px;         /* garantiza altura al inicializar ag-Grid (antes de Plotly) */
+    flex-shrink: 0;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 14px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;          /* el prodGrid maneja su propio scroll interno */
+    box-sizing: border-box;
+  }
+  /* prodGrid llena el espacio restante dentro del explorador */
+  .fc-explorer-col #prodGrid {
+    flex: 1;
+    min-height: 0;             /* clave para que flex respete el límite del padre */
+  }
+
+  /* ── Main ────────────────────────────────────────────────────────────── */
+  .fc-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .fc-main__header {
+    padding: 16px 24px 14px;
+    border-bottom: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    flex-shrink: 0;
+  }
+  .fc-main__header h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; color: #0F172A; margin: 0; }
+  .fc-main__header p { color: #64748B; font-size: 0.9rem; margin: 0; }
+
+  /* Filter bar */
+  .fc-filter-bar {
+    padding: 10px 24px;
+    border-bottom: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .fc-filter-pill { position: relative; display: inline-block; }
+  .fc-filter-btn {
+    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;
+    padding: 6px 12px; font-size: 0.8rem; font-weight: 500; color: #475569;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+    transition: border-color .15s, background .15s;
+  }
+  .fc-filter-btn:hover, .fc-filter-btn.active { border-color: #94A3B8; background: #fff; }
+  .fc-filter-btn.has-selection { border-color: #3B82F6; color: #1D4ED8; background: #EFF6FF; }
+  .fc-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 999;
+    background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.1); min-width: 260px; max-height: 380px;
+    overflow: hidden; display: none; flex-direction: column;
+  }
+  .fc-dropdown.open { display: flex; }
+  .fc-dropdown__actions { display: flex; gap: 6px; padding: 10px 12px 8px; border-bottom: 1px solid #F1F5F9; flex-shrink: 0; }
+  .fc-dropdown__actions button { flex: 1; padding: 4px 0; font-size: 0.72rem; font-weight: 600; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC; cursor: pointer; font-family: inherit; color: #475569; }
+  .fc-dropdown__actions button.apply { background: #3B82F6; color: #fff; border-color: #3B82F6; }
+  .fc-dropdown__list { overflow-y: auto; padding: 8px 4px; flex: 1; scrollbar-width: thin; }
+  .fc-dropdown__item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer; border-radius: 4px; color: #334155; transition: background .1s; }
+  .fc-dropdown__item:hover { background: #F8FAFC; }
+  .fc-dropdown__item input[type=checkbox] { cursor: pointer; accent-color: #3B82F6; }
+
+  /* ── Parámetros Financieros chip (en filter bar) ────────────────────── */
+  .fc-param-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;            /* empuja el chip hacia la derecha */
+    background: #F0FDF4;
+    border: 1px solid #BBF7D0;
+    border-radius: 6px;
+    padding: 0 10px;
+    height: 32px;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    color: #166534;
+    font-weight: 500;
+  }
+  .fc-param-chip i { color: #16A34A; }
+  .fc-param-chip strong { font-weight: 700; }
+
+  /* ── Lab filter mejorado dentro del explorador ──────────────────────── */
+  .fc-lab-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .fc-lab-filter-row select {
+    flex: 1;
+    min-width: 0;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 0.78rem;
+    color: #0F172A;
+    font-family: inherit;
+    outline: none;
+  }
+  .fc-lab-filter-row select:disabled { opacity: 0.5; cursor: not-allowed; }
+  .fc-lab-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    color: #475569;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    padding: 4px 7px;
+    border: 1px solid #E2E8F0;
+    border-radius: 5px;
+    background: #F8FAFC;
+    transition: background .15s, border-color .15s;
+    user-select: none;
+  }
+  .fc-lab-checkbox-label:hover { background: #EFF6FF; border-color: #93C5FD; }
+  .fc-lab-checkbox-label input[type=checkbox] { accent-color: #3B82F6; cursor: pointer; margin: 0; }
+  .fc-lab-active-badge {
+    display: none;
+    font-size: 0.62rem;
+    font-weight: 700;
+    background: #DBEAFE;
+    color: #1D4ED8;
+    border-radius: 999px;
+    padding: 1px 6px;
+    margin-left: 2px;
+  }
+  .fc-lab-active .fc-lab-active-badge { display: inline; }
+  .fc-lab-active .fc-lab-checkbox-label { border-color: #3B82F6; background: #EFF6FF; color: #1D4ED8; }
+
+  /* ── Scrollable content ──────────────────────────────────────────────── */
+  .fc-content { flex: 1; overflow-y: auto; padding: 20px 24px 40px; scrollbar-width: thin; scrollbar-color: #E2E8F0 transparent; }
+
+  /* ── KPI Cards ───────────────────────────────────────────────────────── */
+  .fc-kpi-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 20px; }
+  .kpi-card {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border-radius: 14px;
+    padding: 14px 16px;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 6px 20px rgba(6,72,111,0.06);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .kpi-title { color: #5E7388; font-size: clamp(0.62rem, 0.15vw + 0.6rem, 0.72rem); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .kpi-value { color: #06486F; font-size: clamp(1.1rem, 0.8vw + 0.85rem, 1.55rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1; }
+  .kpi-trend { display: flex; align-items: center; gap: 5px; margin-top: auto; padding-top: 8px; font-size: clamp(0.62rem, 0.12vw + 0.6rem, 0.72rem); font-weight: 600; }
+  .trend-up { color: #2C8E67; }
+  .trend-down { color: #D66D6D; }
+  .trend-neutral { color: #5E7388; }
+
+  /* ── Chart ───────────────────────────────────────────────────────────── */
+  .fc-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .fc-chart-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; }
+  .fc-growth-wrap { display: flex; align-items: center; gap: 8px; }
+  .fc-growth-wrap label { font-size: 0.75rem; color: #64748B; font-weight: 500; white-space: nowrap; }
+  .fc-growth-input {
+    width: 90px; background: #F8FAFC; border: 1px solid #E2E8F0;
+    border-radius: 6px; padding: 5px 8px; font-size: 0.8rem;
+    color: #0F172A; font-family: inherit; outline: none; text-align: right;
+  }
+  .fc-growth-input:focus { border-color: #94A3B8; }
+  #forecastChart { width: 100%; border-radius: 8px; background: #FFFFFF; border: 1px solid #E2E8F0; }
+  .fc-divider { height: 1px; background: #E2E8F0; margin: 20px 0; }
+
+  /* ── Treemap ─────────────────────────────────────────────────────────── */
+  .fc-treemap-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; gap: 16px; }
+  .fc-treemap-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; flex-shrink: 0; }
+  .fc-treemap-controls { display: flex; align-items: flex-start; gap: 12px; }
+  .fc-period-label { font-size: 0.7rem; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+  .fc-period-select { font-size: 0.82rem; color: #1E293B; background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; padding: 4px 8px; cursor: pointer; min-width: 140px; }
+  .fc-treemap-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 10px; }
+  .fc-treemap-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 0.75rem; color: #475569; white-space: nowrap; }
+  .fc-treemap-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .fc-treemap-caption { font-size: 0.78rem; color: #64748B; margin-top: 6px; }
+  #treemapChart { width: 100%; border-radius: 8px; background: #FFFFFF; border: 1px solid #E2E8F0; }
+
+  /* ── Table ───────────────────────────────────────────────────────────── */
+  .fc-table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .fc-table-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; }
+  .fc-toggle-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #475569; }
+  .fc-toggle { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+  .fc-toggle input { display: none; }
+  .fc-toggle-slider { position: absolute; inset: 0; background: #CBD5E1; border-radius: 10px; cursor: pointer; transition: background .2s; }
+  .fc-toggle-slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform .2s; }
+  .fc-toggle input:checked + .fc-toggle-slider { background: #3B82F6; }
+  .fc-toggle input:checked + .fc-toggle-slider::before { transform: translateX(18px); }
+
+  #clientGrid.ag-theme-alpine { --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; --ag-row-hover-color: #F8FAFC; --ag-font-size: 13px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; --ag-header-background-color: #F8FAFC; --ag-header-foreground-color: #475569; }
+  #clientGrid .ag-root-wrapper { border-radius: 8px; border: 1px solid #E2E8F0 !important; }
+  #clientGrid .ag-header-cell { font-weight: 600 !important; font-size: 12px !important; text-transform: uppercase; letter-spacing: 0.04em; }
+  .fc-total-caption { font-size: 0.8rem; color: #64748B; margin-top: 8px; text-align: right; }
+  /* ── Client search bar ─────────────────────────────────────────────── */
+  .fc-client-search-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px 12px; max-width: 380px; }
+  .fc-client-search-icon { font-size: 0.9rem; color: #94A3B8; line-height: 1; }
+  .fc-client-search-input { flex: 1; border: none; background: transparent; outline: none; font-size: 0.85rem; color: #334155; font-family: inherit; }
+  .fc-client-search-input::placeholder { color: #94A3B8; }
+  .fc-client-search-clear { border: none; background: transparent; cursor: pointer; color: #94A3B8; font-size: 0.85rem; padding: 0; line-height: 1; }
+  .fc-client-search-clear:hover { color: #475569; }
+
+  /* ── Loaders ─────────────────────────────────────────────────────────── */
+  .fc-loading { position: absolute; inset: 0; background: rgba(248,250,252,0.75); display: flex; align-items: center; justify-content: center; z-index: 50; backdrop-filter: blur(2px); border-radius: 8px; }
+  .fc-spinner { width: 32px; height: 32px; border: 3px solid #E2E8F0; border-top-color: #3B82F6; border-radius: 50%; animation: fc-spin 0.7s linear infinite; }
+  @keyframes fc-spin { to { transform: rotate(360deg); } }
+
+  /* ── Modal overlay ───────────────────────────────────────────────────── */
+  .fc-modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.45);
+    z-index: 1050; align-items: center; justify-content: center;
+    padding: 20px; box-sizing: border-box;
+  }
+  .fc-modal-overlay.open { display: flex; }
+  .fc-modal {
+    background: #FFFFFF; border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+    width: 100%; max-width: 1200px;
+    max-height: 90vh; display: flex; flex-direction: column;
+    font-family: Outfit, system-ui, sans-serif;
+  }
+  .fc-modal__header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #E2E8F0;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .fc-modal__title { font-size: 1.1rem; font-weight: 700; color: #0F172A; margin: 0; }
+  .fc-modal__close { background: none; border: none; font-size: 1.4rem; color: #94A3B8; cursor: pointer; line-height: 1; padding: 0; }
+  .fc-modal__close:hover { color: #475569; }
+  .fc-modal__body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .fc-modal__footer {
+    padding: 14px 24px; border-top: 1px solid #E2E8F0;
+    display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-shrink: 0;
+  }
+  .fc-modal__footer-actions { display: flex; gap: 8px; align-items: center; }
+  /* Visual indicator when modal has unsaved changes */
+  .fc-modal--dirty .fc-modal__title::after { content: ' •'; color: #F59E0B; font-size: 1rem; }
+
+  /* Modal info boxes */
+  .fc-modal-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .fc-modal-info-box { background: #F1F5F9; padding: 10px 14px; border-radius: 6px; font-size: 0.875rem; }
+  .fc-modal-info-box strong { color: #0F172A; }
+  .fc-modal-growth-caption { font-size: 0.8rem; color: #64748B; margin-bottom: 14px; }
+
+  /* Modal section expander */
+  .fc-modal-neg { margin-bottom: 10px; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; }
+  .fc-modal-neg__header {
+    background: #F8FAFC; padding: 10px 16px;
+    font-size: 0.85rem; font-weight: 600; color: #334155;
+    cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+    user-select: none;
+  }
+  .fc-modal-neg__header:hover { background: #F1F5F9; }
+  .fc-modal-neg__arrow { transition: transform .2s; font-size: 0.8rem; color: #94A3B8; }
+  .fc-modal-neg__arrow.open { transform: rotate(90deg); }
+  .fc-modal-neg__body { display: none; }
+  .fc-modal-neg__body.open { display: block; }
+
+  /* Modal tabs */
+  .fc-modal-tabs { display: flex; border-bottom: 2px solid #E2E8F0; margin: 10px 0 0; padding: 0 12px; }
+  .fc-modal-tab { padding: 8px 14px; font-size: 0.8rem; font-weight: 500; color: #64748B; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+  .fc-modal-tab.active { color: #2563EB; border-bottom-color: #2563EB; font-weight: 600; }
+
+  /* Modal subneg growth */
+  .fc-modal-subneg-growth { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: 0.8rem; color: #64748B; border-bottom: 1px solid #F1F5F9; }
+  .fc-modal-subneg-growth input[type=number] { width: 80px; padding: 3px 6px; border: 1px solid #E2E8F0; border-radius: 4px; font-size: 0.8rem; font-family: inherit; outline: none; text-align: right; }
+
+  /* Modal ag-grid */
+  .fc-modal-grid { padding: 10px 12px 14px; }
+  .fc-modal-grid .ag-theme-alpine { --ag-font-size: 12px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; --ag-header-background-color: #F8FAFC; --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; }
+  .fc-modal-grid .ag-root-wrapper { border: 1px solid #E2E8F0 !important; border-radius: 6px; }
+  .fc-modal-grid .ag-header-group-cell { background: #F1F5F9 !important; font-weight: 600; font-size: 11px; text-align: center; border-right: 1px solid #E2E8F0; }
+  .fc-modal-grid .ag-header-cell { font-weight: 600 !important; font-size: 11px; border-right: 1px solid #E2E8F0; }
+
+  /* ── View Tabs ───────────────────────────────────────────────────────── */
+  .fc-view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 24px 0;
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    flex-shrink: 0;
+  }
+  .fc-view-tab {
+    padding: 9px 20px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #64748B;
+    cursor: pointer;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    transition: color .15s;
+    white-space: nowrap;
+  }
+  .fc-view-tab:hover { color: #334155; }
+  .fc-view-tab.active {
+    color: #1D4ED8;
+    border-bottom-color: #3B82F6;
+    font-weight: 600;
+  }
+  .fc-view-tab .fc-tab-badge {
+    font-size: 0.68rem;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #F1F5F9;
+    color: #64748B;
+    font-weight: 600;
+  }
+  .fc-view-tab.active .fc-tab-badge {
+    background: #DBEAFE;
+    color: #1D4ED8;
+  }
+
+  /* Tab panels */
+  .fc-tab-panel { display: none; }
+  .fc-tab-panel.active { display: block; }
+
+  /* ── Responsive ──────────────────────────────────────────────────────── */
+  @media (max-width: 1400px) { .fc-kpi-row { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 1100px) { .fc-kpi-row { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 900px)  {
+    .fc-kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .fc-chart-explorer-row { flex-direction: column; }
+    .fc-explorer-col { width: 100%; max-width: 100%; }
+    .fc-date-inline { flex-wrap: wrap; }
+  }
+  @media (max-width: 700px) {
+    .fc-wrap { flex-direction: column; height: auto; }
+    .fc-main { min-height: 80vh; }
+    .fc-kpi-row { grid-template-columns: 1fr 1fr; }
+    .fc-view-tabs { padding: 8px 12px 0; }
+    .fc-view-tab { padding: 8px 14px; font-size: 0.78rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fc-wrap" id="fcApp">
+
+  <!-- ================================================================= -->
+  <!-- MAIN CONTENT                                                        -->
+  <!-- ================================================================= -->
+  <main class="fc-main">
+
+    <!-- Header -->
+    <div class="fc-main__header">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <h1>Proyección de ventas</h1>
+          <p>Suizo Argentina · Unidad Productos Hospitalarios</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()" title="Actualizar">
+          <i class="bi bi-arrow-repeat me-1"></i> Actualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="fc-filter-bar" id="filterBar">
+
+      <!-- Período de fechas -->
+      <div class="fc-date-inline">
+        <span class="fc-date-inline-label"><i class="bi bi-calendar3 me-1"></i>Período:</span>
+        <div class="fc-date-group-inline">
+          <label>Desde</label>
+          <input type="text" id="startDate" placeholder="dd/mm/aaaa" readonly>
+        </div>
+        <span class="fc-date-inline-sep">—</span>
+        <div class="fc-date-group-inline">
+          <label>Hasta</label>
+          <input type="text" id="endDate" placeholder="dd/mm/aaaa" readonly>
+        </div>
+      </div>
+
+      <div class="fc-filter-pill" id="pill-perfil">
+        <button class="fc-filter-btn" onclick="toggleDropdown('dd-perfil','pill-perfil')">
+          <i class="bi bi-funnel me-1"></i><span id="lbl-perfil">Perfil: Todos</span>
+        </button>
+        <div class="fc-dropdown" id="dd-perfil">
+          <div class="fc-dropdown__actions">
+            <button onclick="selectAll('perfil')">Todos</button>
+            <button onclick="clearFilter('perfil')">Limpiar</button>
+            <button class="apply" onclick="applyFilter('perfil')">Aplicar</button>
+          </div>
+          <div class="fc-dropdown__list" id="list-perfil"></div>
+        </div>
+      </div>
+
+      <div class="fc-filter-pill" id="pill-neg">
+        <button class="fc-filter-btn" onclick="toggleDropdown('dd-neg','pill-neg')">
+          <i class="bi bi-building me-1"></i><span id="lbl-neg">Negocio: Todos</span>
+        </button>
+        <div class="fc-dropdown" id="dd-neg">
+          <div class="fc-dropdown__actions">
+            <button onclick="selectAll('neg')">Todos</button>
+            <button onclick="clearFilter('neg')">Limpiar</button>
+            <button class="apply" onclick="applyFilter('neg')">Aplicar</button>
+          </div>
+          <div class="fc-dropdown__list" id="list-neg"></div>
+        </div>
+      </div>
+
+      <div class="fc-filter-pill" id="pill-subneg">
+        <button class="fc-filter-btn" onclick="toggleDropdown('dd-subneg','pill-subneg')">
+          <i class="bi bi-diagram-3 me-1"></i><span id="lbl-subneg">Subnegocio: Todos</span>
+        </button>
+        <div class="fc-dropdown" id="dd-subneg">
+          <div class="fc-dropdown__actions">
+            <button onclick="selectAll('subneg')">Todos</button>
+            <button onclick="clearFilter('subneg')">Limpiar</button>
+            <button class="apply" onclick="applyFilter('subneg')">Aplicar</button>
+          </div>
+          <div class="fc-dropdown__list" id="list-subneg"></div>
+        </div>
+      </div>
+
+      <!-- Parámetros Financieros — chip informativo (valor dinámico desde KPIs) -->
+      <div class="fc-param-chip" id="fcParamChip" title="Parámetros Financieros">
+        <i class="bi bi-graph-up-arrow"></i>
+        <span>Inflación mens. fija: <strong id="fc-inflation-param">—</strong></span>
+      </div>
+    </div>
+
+    <!-- ── View Tabs ───────────────────────────────────────────────── -->
+    <div class="fc-view-tabs" id="fcViewTabs">
+      <button class="fc-view-tab active" id="tab-analisis" onclick="switchTab('analisis')">
+        <i class="bi bi-bar-chart-line"></i>
+        Análisis General
+        <span class="fc-tab-badge">Vista 1</span>
+      </button>
+      <button class="fc-view-tab" id="tab-detalle" onclick="switchTab('detalle')">
+        <i class="bi bi-table"></i>
+        Detalle Operativo
+        <span class="fc-tab-badge">Vista 2</span>
+      </button>
+    </div>
+
+    <!-- Scrollable content -->
+    <div class="fc-content">
+
+      <!-- ════════════════════════════════════════════════════════════ -->
+      <!-- PANEL 1 — ANÁLISIS GENERAL                                  -->
+      <!-- ════════════════════════════════════════════════════════════ -->
+      <div class="fc-tab-panel active" id="panel-analisis">
+
+      <!-- ── KPI Cards (7 — réplica exacta del Forecast original) ──── -->
+      <div class="fc-kpi-row" id="kpiRow">
+        <!-- KPI 1: Monto Total Proyectado Anual -->
+        <div class="kpi-card" id="kpi-fcst2026">
+          <div class="kpi-title">Monto Total Proyectado (Anual)</div>
+          <div class="kpi-value" id="kpi-fcst2026-val">—</div>
+          <div class="kpi-trend" id="kpi-fcst2026-sub"></div>
+        </div>
+        <!-- KPI 2: Variación Nominal sobre 2025 -->
+        <div class="kpi-card" id="kpi-varnominal">
+          <div class="kpi-title">Variación Nominal sobre 2025</div>
+          <div class="kpi-value" id="kpi-varnominal-val">—</div>
+          <div class="kpi-trend trend-neutral" id="kpi-varnominal-sub">Var. Nominal Anual (%)</div>
+        </div>
+        <!-- KPI 3: Inflación Esperada -->
+        <div class="kpi-card" id="kpi-inflation">
+          <div class="kpi-title">Inflación Esperada</div>
+          <div class="kpi-value" id="kpi-inflation-val">—</div>
+          <div class="kpi-trend trend-neutral" id="kpi-inflation-sub"></div>
+        </div>
+        <!-- KPI 4: Variación Real sobre 2025 -->
+        <div class="kpi-card" id="kpi-varreal">
+          <div class="kpi-title">Variación Real sobre 2025</div>
+          <div class="kpi-value" id="kpi-varreal-val">—</div>
+          <div class="kpi-trend" id="kpi-varreal-sub">Var. Real Anual (%)</div>
+        </div>
+        <!-- KPI 5: Coincidencia Acumulada del Modelo -->
+        <div class="kpi-card" id="kpi-accuracy">
+          <div class="kpi-title">Coincidencia Acumulada ($) del Mod.</div>
+          <div class="kpi-value" id="kpi-accuracy-val">—</div>
+          <div class="kpi-trend trend-neutral" id="kpi-accuracy-sub">Coincidencia</div>
+        </div>
+        <!-- KPI 6: Coincidencia Expectativa -->
+        <div class="kpi-card" id="kpi-accuracy-exp">
+          <div class="kpi-title">Coincidencia Acum. Expec.</div>
+          <div class="kpi-value" id="kpi-accuracy-exp-val">—</div>
+          <div class="kpi-trend trend-neutral" id="kpi-accuracy-exp-sub">Coincidencia</div>
+        </div>
+        <!-- KPI 7: Facturado 2026 -->
+        <div class="kpi-card" id="kpi-fact2026">
+          <div class="kpi-title">Facturado 2026</div>
+          <div class="kpi-value" id="kpi-fact2026-val">—</div>
+          <div class="kpi-trend" id="kpi-fact2026-sub"></div>
+        </div>
+      </div>
+
+      <!-- ── Chart + Explorador de Productos ─────────────────────── -->
+      <div class="fc-chart-header">
+        <h3 id="chartTitle">Evolución y proyección de venta ($)</h3>
+        <div class="fc-growth-wrap">
+          <label for="growthInput">Expect. crec. (%):</label>
+          <input type="number" id="growthInput" class="fc-growth-input"
+                 value="0" step="1" min="-50" max="500" placeholder="0.0">
+        </div>
+      </div>
+
+      <div class="fc-chart-explorer-row">
+
+        <!-- Gráfico principal -->
+        <div class="fc-chart-col">
+          <div id="forecastChart" style="height:420px;"></div>
+          <div class="fc-loading" id="chartLoader" style="display:none;position:absolute;inset:0;"><div class="fc-spinner"></div></div>
+        </div>
+
+        <!-- Explorador de Productos (panel lateral derecho del gráfico) -->
+        <div class="fc-explorer-col">
+          <div class="fc-section-title">Explorador de Productos</div>
+
+          <!-- Filtrar por laboratorio -->
+          <div class="fc-lab-filter-row" id="fcLabFilterRow">
+            <select id="labSelect">
+              <option value="">Seleccionar laboratorio…</option>
+            </select>
+            <label class="fc-lab-checkbox-label" for="filterByLab">
+              <input type="checkbox" id="filterByLab">
+              Filtrar
+              <span class="fc-lab-active-badge">activo</span>
+            </label>
+          </div>
+
+          <div class="fc-search-wrap">
+            <i class="bi bi-search fc-search-icon"></i>
+            <input type="text" class="fc-search" id="prodSearch" placeholder="Buscar productos...">
+          </div>
+
+          <div id="prodGrid" class="ag-theme-alpine"></div>
+          <div class="fc-prod-caption" id="prodCaption">Cargando...</div>
+        </div>
+
+      </div><!-- /fc-chart-explorer-row -->
+
+      <div class="fc-divider"></div>
+
+      <!-- ── Treemap ────────────────────────────────────────────────── -->
+      <div class="fc-treemap-header">
+        <h3>Composición ponderada de proyección ($)</h3>
+        <div class="fc-treemap-controls">
+          <div>
+            <div class="fc-period-label">Vista Periodo</div>
+            <select id="treemapPeriod" class="fc-period-select"></select>
+          </div>
+        </div>
+      </div>
+      <div id="treemapLegend" class="fc-treemap-legend"></div>
+      <div style="position:relative;">
+        <div id="treemapChart" style="height:420px;"></div>
+        <div class="fc-loading" id="treemapLoader" style="display:none;"><div class="fc-spinner"></div></div>
+      </div>
+      <div class="fc-treemap-caption">Haz clic en un canal o en 'Otras' para ver los grupos y cuentas que lo componen.</div>
+
+      </div><!-- /panel-analisis -->
+
+      <!-- ════════════════════════════════════════════════════════════ -->
+      <!-- PANEL 2 — DETALLE OPERATIVO                                 -->
+      <!-- ════════════════════════════════════════════════════════════ -->
+      <div class="fc-tab-panel" id="panel-detalle">
+
+      <!-- ── Client table ───────────────────────────────────────────── -->
+      <div class="fc-table-header">
+        <h3>Proyección más expectativa de crecimiento</h3>
+        <div class="fc-toggle-wrap">
+          Ver en Montos ($)
+          <label class="fc-toggle">
+            <input type="checkbox" id="toggleMoney" checked>
+            <span class="fc-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <!-- ── Search bar ─────────────────────────────────────────────── -->
+      <div class="fc-client-search-wrap">
+        <span class="fc-client-search-icon">🔍</span>
+        <input type="text" id="clientSearchInput" class="fc-client-search-input" placeholder="Buscar cliente..." autocomplete="off">
+        <button class="fc-client-search-clear" id="clientSearchClear" title="Limpiar búsqueda" style="display:none;">✕</button>
+      </div>
+      <div style="position:relative;">
+        <div id="clientGrid" class="ag-theme-alpine" style="height:550px;"></div>
+        <div class="fc-loading" id="tableLoader" style="display:none;"><div class="fc-spinner"></div></div>
+      </div>
+      <div class="fc-total-caption" id="totalCaption"></div>
+
+      </div><!-- /panel-detalle -->
+
+    </div><!-- /fc-content -->
+  </main>
+</div>
+
+<!-- ================================================================= -->
+<!-- EDIT MODAL (exact replica of Streamlit edit_projection_dialog)     -->
+<!-- ================================================================= -->
+<div class="fc-modal-overlay" id="fcEditOverlay">
+  <div class="fc-modal">
+    <div class="fc-modal__header">
+      <h5 class="fc-modal__title" id="fcModalTitle">Editar Proyección</h5>
+      <button class="fc-modal__close" onclick="closeModal()">×</button>
+    </div>
+    <div class="fc-modal__body" id="fcModalBody">
+      <div class="d-flex justify-content-center py-4">
+        <div class="fc-spinner"></div>
+      </div>
+    </div>
+    <div class="fc-modal__footer">
+      <a id="fcModalDownload" style="display:none;" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-download me-1"></i> Descargar CSV
+      </a>
+      <div class="fc-modal__footer-actions">
+        <button type="button" id="fcBtnUndo" class="btn btn-sm btn-outline-warning" onclick="undoModalChanges()" disabled title="Revertir a los valores de cuando se abrió el modal">
+          <i class="bi bi-arrow-counterclockwise me-1"></i> Deshacer cambios
+        </button>
+        <button type="button" id="fcBtnSave" class="btn btn-sm btn-primary" onclick="saveModalChanges()" disabled>
+          <i class="bi bi-check-lg me-1"></i> Guardar
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================= -->
+<!-- JAVASCRIPT                                                          -->
+<!-- ================================================================= -->
+<script>
+/* ===================================================================
+   VIEW TABS — switch between Análisis General and Detalle Operativo
+   =================================================================== */
+let _tableIsStale = true;  // true = table needs (re)load before showing
+
+function switchTab(name) {
+  // Update tab buttons
+  document.querySelectorAll('.fc-view-tab').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = document.getElementById('tab-' + name);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  // Update panels
+  document.querySelectorAll('.fc-tab-panel').forEach(p => p.classList.remove('active'));
+  const activePanel = document.getElementById('panel-' + name);
+  if (activePanel) activePanel.classList.add('active');
+
+  if (name === 'detalle') {
+    // Lazy-load: only fetch table data the first time (or when stale after a filter change)
+    if (_tableIsStale) {
+      _tableIsStale = false;
+      loadTable();
+    }
+  } else {
+    // Trigger resize on charts in case they were hidden during render
+    setTimeout(() => {
+      if (window.Plotly) {
+        const chartEl = document.getElementById('forecastChart');
+        const tmEl    = document.getElementById('treemapChart');
+        if (chartEl && chartEl.data) Plotly.Plots.resize(chartEl);
+        if (tmEl    && tmEl.data)    Plotly.Plots.resize(tmEl);
+      }
+    }, 50);
+  }
+}
+
+/* ===================================================================
+   STATE
+   =================================================================== */
+const STATE = {
+  filterOptions: { profiles: [], neg: [], subneg: [], labs: [], min_date: null, max_date: null },
+  selected: { perfil: [], neg: [], subneg: [] },
+  pending:  { perfil: [], neg: [], subneg: [] },
+  selectedProducts: [],
+  allProducts: [],
+  viewMoney: true,
+  growthPct: 0,
+  labFilter: false,
+  selectedLab: '',
+  startDate: null,
+  endDate: null,
+  maxHistDate: null,
+  modalClientData: null,       // current client detail data
+  modalSubnegGrowths: {},      // subneg overrides per modal session
+  // ── Edit session state ────────────────────────────────────────────────
+  _modalSessionSnapshot: null, // deep copy of modalClientData when modal opened (for undo)
+  _modalSnapshotGrowths: {},   // copy of subneg growths when modal opened (for undo)
+  _modalIsDirty: false,        // true when user has made unsaved changes
+};
+
+/* ===================================================================
+   UTILS
+   =================================================================== */
+function fmtMoney(v) {
+  if (v == null) return '—';
+  return '$ ' + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+function fmtUnits(v) {
+  if (v == null) return '—';
+  return Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+function fmtK(v) {
+  if (v == null) return '—';
+  if (Math.abs(v) >= 1e9) return '$ ' + (v / 1e9).toFixed(1) + 'B';
+  if (Math.abs(v) >= 1e6) return '$ ' + (v / 1e6).toFixed(1) + 'M';
+  if (Math.abs(v) >= 1e3) return '$ ' + (v / 1e3).toFixed(0) + 'K';
+  return '$ ' + Math.round(v).toString();
+}
+function fmt(v) { return STATE.viewMoney ? fmtMoney(v) : fmtUnits(v); }
+
+function buildQS(extra = {}) {
+  const p = new URLSearchParams();
+  if (STATE.startDate) p.append('start_date', STATE.startDate);
+  if (STATE.endDate)   p.append('end_date',   STATE.endDate);
+  STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
+  STATE.selected.neg.forEach(v   => p.append('neg[]', v));
+  STATE.selected.subneg.forEach(v => p.append('subneg[]', v));
+  STATE.selectedProducts.forEach(v => p.append('products[]', v));
+  p.append('view_money', STATE.viewMoney ? 'true' : 'false');
+  p.append('growth_pct', STATE.growthPct);
+  Object.entries(extra).forEach(([k, v]) => p.append(k, v));
+  return p.toString();
+}
+
+/* ===================================================================
+   FLATPICKR — locale español embebido para evitar dependencia CDN
+   =================================================================== */
+const _fpEsLocale = {
+  weekdays:{shorthand:["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"],longhand:["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"]},
+  months:{shorthand:["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"],longhand:["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]},
+  firstDayOfWeek:1,ordinal:()=>"º",rangeSeparator:" a ",weekAbbreviation:"Sem",scrollTitle:"Desplázate para incrementar",toggleTitle:"Haz clic para cambiar",amPM:["AM","PM"],yearAriaLabel:"Año",time_24hr:true
+};
+if (typeof flatpickr !== 'undefined' && flatpickr.l10ns) {
+  flatpickr.l10ns.es = _fpEsLocale;
+}
+
+let fpStart, fpEnd;
+function initDates(minDate, maxDate) {
+  // Siempre establecer los valores de estado primero, ANTES de inicializar Flatpickr
+  // para que las llamadas API funcionen aunque Flatpickr no cargue
+  let defaultStart = minDate;
+  if (maxDate) {
+    const maxYear = parseInt(maxDate.slice(0, 4), 10);
+    const candidateStart = (maxYear - 1) + '-01-01';
+    defaultStart = candidateStart >= minDate ? candidateStart : minDate;
+  }
+  STATE.startDate = defaultStart;
+  STATE.endDate = maxDate;
+
+  if (typeof flatpickr === 'undefined') {
+    // Flatpickr no cargó. Usar inputs nativos de fecha.
+    const s = document.getElementById('startDate');
+    const e = document.getElementById('endDate');
+    if (s) {
+      s.type = 'date'; s.min = minDate; s.max = maxDate; s.value = defaultStart;
+      s.removeAttribute('readonly');
+      s.addEventListener('change', () => { STATE.startDate = s.value || defaultStart; debounceRefresh(); });
+    }
+    if (e) {
+      e.type = 'date'; e.min = minDate; e.max = maxDate; e.value = maxDate;
+      e.removeAttribute('readonly');
+      e.addEventListener('change', () => { STATE.endDate = e.value || maxDate; debounceRefresh(); });
+    }
+    return;
+  }
+
+  // dateFormat: 'Y-m-d' stores ISO internally (so minDate/maxDate strings parse correctly).
+  // altInput + altFormat: 'd/m/Y' shows the Spanish dd/mm/yyyy display to the user.
+  const opts = {
+    locale: _fpEsLocale,
+    dateFormat: 'Y-m-d',
+    altInput: true,
+    altFormat: 'd/m/Y',
+    allowInput: false,
+    disableMobile: true,
+  };
+
+  fpStart = flatpickr('#startDate', {
+    ...opts, minDate, maxDate, defaultDate: defaultStart,
+    onChange([d]) {
+      STATE.startDate = d ? d.toISOString().slice(0, 10) : defaultStart;
+      if (fpEnd) fpEnd.set('minDate', STATE.startDate);
+      debounceRefresh();
+    },
+  });
+  fpEnd = flatpickr('#endDate', {
+    ...opts, minDate, maxDate, defaultDate: maxDate,
+    onChange([d]) {
+      STATE.endDate = d ? d.toISOString().slice(0, 10) : maxDate;
+      if (fpStart) fpStart.set('maxDate', STATE.endDate);
+      debounceRefresh();
+    },
+  });
+}
+
+/* ===================================================================
+   FILTER DROPDOWNS
+   =================================================================== */
+function buildDropdownList(key, options) {
+  const container = document.getElementById('list-' + key);
+  if (!container) return;
+  container.innerHTML = '';
+  options.forEach(opt => {
+    const div = document.createElement('div');
+    div.className = 'fc-dropdown__item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = opt;
+    cb.checked = STATE.pending[key].includes(opt);
+    cb.addEventListener('change', () => {
+      if (cb.checked) { if (!STATE.pending[key].includes(opt)) STATE.pending[key].push(opt); }
+      else { STATE.pending[key] = STATE.pending[key].filter(x => x !== opt); }
+    });
+    const lbl = document.createElement('label');
+    lbl.textContent = opt;
+    lbl.style.cssText = 'cursor:pointer;flex:1;';
+    lbl.addEventListener('click', () => cb.click());
+    div.appendChild(cb);
+    div.appendChild(lbl);
+    container.appendChild(div);
+  });
+}
+function toggleDropdown(ddId, pillId) {
+  ['dd-perfil','dd-neg','dd-subneg'].forEach(id => { if (id !== ddId) document.getElementById(id).classList.remove('open'); });
+  const dd = document.getElementById(ddId);
+  const isOpen = dd.classList.toggle('open');
+  if (isOpen) {
+    const key = ddId.replace('dd-', '');
+    STATE.pending[key] = [...STATE.selected[key]];
+    buildDropdownList(key, getOptionsForKey(key));
+  }
+}
+function getOptionsForKey(key) {
+  if (key === 'perfil') return STATE.filterOptions.profiles;
+  if (key === 'neg')    return STATE.filterOptions.neg;
+  if (key === 'subneg') return STATE.filterOptions.subneg;
+  return [];
+}
+function selectAll(key) { STATE.pending[key] = [...getOptionsForKey(key)]; buildDropdownList(key, getOptionsForKey(key)); }
+function clearFilter(key) { STATE.pending[key] = []; buildDropdownList(key, getOptionsForKey(key)); }
+function applyFilter(key) {
+  STATE.selected[key] = [...STATE.pending[key]];
+  document.getElementById('dd-' + key).classList.remove('open');
+  updateFilterLabels();
+  debounceRefresh();
+}
+function updateFilterLabels() {
+  const update = (key, prefix) => {
+    const sel = STATE.selected[key];
+    const total = getOptionsForKey(key).length;
+    const lbl = document.getElementById('lbl-' + key);
+    const btn = document.querySelector(`#pill-${key} .fc-filter-btn`);
+    if (!lbl) return;
+    if (sel.length === 0 || sel.length === total) { lbl.textContent = prefix + ': Todos'; btn.classList.remove('has-selection'); }
+    else { lbl.textContent = prefix + ': ' + sel.length + ' sel.'; btn.classList.add('has-selection'); }
+  };
+  update('perfil', 'Perfil'); update('neg', 'Negocio'); update('subneg', 'Subnegocio');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.fc-filter-pill')) document.querySelectorAll('.fc-dropdown').forEach(d => d.classList.remove('open'));
+});
+
+/* ===================================================================
+   PRODUCT SIDEBAR GRID
+   =================================================================== */
+let prodGridApi;
+function buildProdGrid() {
+  const gridOptions = {
+    columnDefs: [{
+      field: 'descripcion', headerName: 'Producto', flex: 1,
+      checkboxSelection: true, headerCheckboxSelection: true,
+      cellRenderer: params => {
+        // Quitamos el punto amarillo y aseguramos que haya un tooltip sobre el nombre completo
+        return `<span title="${params.value}" style="display:block; width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${params.value}</span>`;
+      },
+    }],
+    rowSelection: 'multiple',
+    rowMultiSelectWithClick: true,
+    suppressRowClickSelection: false,
+    rowClassRules: {
+      'fc-lab-highlight': params => params.data && params.data._isLab
+    },
+    defaultColDef: { resizable: false, sortable: false, filter: false },
+    headerHeight: 0, rowHeight: 32, animateRows: false, suppressCellFocus: true,
+    onSelectionChanged: () => {
+      const rows = prodGridApi.getSelectedRows();
+      const newSel = rows.map(r => r.descripcion);
+      if (JSON.stringify(newSel.sort()) !== JSON.stringify([...STATE.selectedProducts].sort())) {
+        STATE.selectedProducts = newSel;
+        debounceRefresh();
+      }
+    },
+  };
+  prodGridApi = agGrid.createGrid(document.getElementById('prodGrid'), gridOptions);
+}
+
+function updateProdGrid(products) {
+  if (!prodGridApi) return;
+  STATE.allProducts = products;
+  const search = (document.getElementById('prodSearch').value || '').toLowerCase();
+  let filtered = products;
+  if (STATE.labFilter && STATE.selectedLab) filtered = filtered.filter(p => p.labs && p.labs.includes(STATE.selectedLab));
+  if (search) filtered = filtered.filter(p => p.descripcion.toLowerCase().includes(search));
+  const rows = filtered.map(p => ({
+    descripcion: p.descripcion, neg: p.neg, vol_venta: p.vol_venta, labs: p.labs,
+    _isLab: !!(STATE.selectedLab && p.labs && p.labs.includes(STATE.selectedLab)),
+  }));
+  prodGridApi.setGridOption('rowData', rows);
+  prodGridApi.forEachNode(node => {
+    if (STATE.selectedProducts.includes(node.data.descripcion)) node.setSelected(true, false, 'api');
+  });
+  document.getElementById('prodCaption').textContent = 'Total mostrados: ' + rows.length;
+}
+
+let _prodSearchTimer;
+document.getElementById('prodSearch').addEventListener('input', () => {
+  clearTimeout(_prodSearchTimer);
+  _prodSearchTimer = setTimeout(() => updateProdGrid(STATE.allProducts), 150);
+});
+
+/* ── Lab filter: aplica sobre todo el dashboard ───────────────────────
+   Cuando el filtro está activo + hay laboratorio seleccionado:
+   1. STATE.selectedProducts se auto-puebla con todos los productos del lab
+   2. buildQS() los incluye como products[] → chart, treemap y tabla se filtran
+   3. La guard de onSelectionChanged evita doble refresh
+   ─────────────────────────────────────────────────────────────────── */
+function _applyLabSelection() {
+  const row = document.getElementById('fcLabFilterRow');
+  if (STATE.labFilter && STATE.selectedLab) {
+    // Auto-seleccionar todos los productos del laboratorio
+    STATE.selectedProducts = STATE.allProducts
+      .filter(p => p.labs && p.labs.includes(STATE.selectedLab))
+      .map(p => p.descripcion);
+    if (row) row.classList.add('fc-lab-active');
+  } else {
+    // Sin filtro activo → limpiar selección automática
+    STATE.selectedProducts = [];
+    if (row) row.classList.remove('fc-lab-active');
+  }
+  // Habilitar/deshabilitar el select según estado del checkbox
+  const sel = document.getElementById('labSelect');
+  if (sel) sel.disabled = !STATE.labFilter;
+}
+
+document.getElementById('filterByLab').addEventListener('change', function() {
+  STATE.labFilter = this.checked;
+  _applyLabSelection();
+  updateProdGrid(STATE.allProducts);   // refleja selección visual en la grilla
+  debounceRefresh();                   // actualiza chart + treemap + tabla + KPIs
+});
+
+document.getElementById('labSelect').addEventListener('change', function() {
+  STATE.selectedLab = this.value;
+  if (STATE.labFilter) {
+    _applyLabSelection();
+    updateProdGrid(STATE.allProducts);
+    debounceRefresh();
+  } else {
+    updateProdGrid(STATE.allProducts); // solo actualiza la lista visual
+  }
+});
+
+/* ===================================================================
+   KPI CARDS — 7 métricas, réplica exacta del Forecast original
+   =================================================================== */
+function fmtKpiMoney(v, sym) {
+  // Formato profesional: M/K con puntos de miles y símbolo monetario
+  if (v == null) return '—';
+  const neg = v < 0;
+  const abs = Math.abs(v);
+  let res;
+  if (abs >= 1e9)      res = (abs/1e9).toFixed(1).replace('.', ',') + ' B';
+  else if (abs >= 1e6) res = (abs/1e6).toFixed(1).replace('.', ',') + ' M';
+  else if (abs >= 1e3) res = (abs/1e3).toFixed(1).replace('.', ',') + ' K';
+  else                 res = Math.round(abs).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return sym + ' ' + (neg ? '-' : '') + res;
+}
+
+function renderKPIs(kpis, growthPct) {
+  const sym = STATE.viewMoney ? '$' : 'u';
+
+  // ── KPI 1: Monto Total Proyectado Anual 2026 ──────────────────────
+  const fcst2026 = kpis.total_proyeccion_2026 != null ? kpis.total_proyeccion_2026 : (kpis.total_proyeccion || 0);
+  document.getElementById('kpi-fcst2026-val').textContent = fmtKpiMoney(fcst2026, sym);
+  const sub1 = document.getElementById('kpi-fcst2026-sub');
+  sub1.className = 'kpi-trend ' + (growthPct > 0 ? 'trend-up' : growthPct < 0 ? 'trend-down' : 'trend-neutral');
+  sub1.textContent = 'Var. Nominal ($): ' + (growthPct >= 0 ? '+' : '') + growthPct.toFixed(0) + '%';
+
+  // ── KPI 2: Variación Nominal sobre 2025 ──────────────────────────
+  const varNom = kpis.var_nominal_2025 != null ? kpis.var_nominal_2025 : 0;
+  document.getElementById('kpi-varnominal-val').textContent = (varNom >= 0 ? '+' : '') + varNom.toFixed(1) + '%';
+  const sub2 = document.getElementById('kpi-varnominal-sub');
+  sub2.className = 'kpi-trend ' + (varNom > 0 ? 'trend-up' : varNom < 0 ? 'trend-down' : 'trend-neutral');
+  sub2.textContent = 'Var. Nominal Anual (%)';
+
+  // ── KPI 3: Inflación Esperada ─────────────────────────────────────
+  const infPct = kpis.inflation_pct != null ? kpis.inflation_pct : 40.5;
+  const infMo  = kpis.inflation_mo_pct != null ? kpis.inflation_mo_pct : 2.9;
+  document.getElementById('kpi-inflation-val').textContent = infPct.toFixed(1) + '%';
+  document.getElementById('kpi-inflation-sub').textContent = infMo.toFixed(1) + '% mensual';
+  // Actualizar chip "Parámetros Financieros" en la filter bar
+  const inflChip = document.getElementById('fc-inflation-param');
+  if (inflChip) inflChip.textContent = infMo.toFixed(1) + '%';
+
+  // ── KPI 4: Variación Real sobre 2025 ─────────────────────────────
+  const varReal = kpis.var_real_2025 != null ? kpis.var_real_2025 : 0;
+  document.getElementById('kpi-varreal-val').textContent = (varReal >= 0 ? '+' : '') + varReal.toFixed(1) + '%';
+  const sub4 = document.getElementById('kpi-varreal-sub');
+  sub4.className = 'kpi-trend ' + (varReal > 0 ? 'trend-up' : varReal < 0 ? 'trend-down' : 'trend-neutral');
+  sub4.textContent = 'Var. Real Anual (%)';
+
+  // ── KPI 5: Coincidencia Acumulada del Modelo ─────────────────────
+  const acc = kpis.accuracy_val != null ? kpis.accuracy_val : 0;
+  document.getElementById('kpi-accuracy-val').textContent = acc.toFixed(1) + '%';
+  document.getElementById('kpi-accuracy-sub').textContent = 'Coincidencia';
+
+  // ── KPI 6: Coincidencia Acumulada Expectativa ─────────────────────
+  const accExp = kpis.expectation_accuracy_val != null ? kpis.expectation_accuracy_val : 0;
+  document.getElementById('kpi-accuracy-exp-val').textContent = accExp.toFixed(1) + '%';
+  document.getElementById('kpi-accuracy-exp-sub').textContent = 'Coincidencia';
+
+  // ── KPI 7: Facturado 2026 + Meta ─────────────────────────────────
+  const fact2026 = kpis.fact_2026 != null ? kpis.fact_2026 : 0;
+  const meta     = kpis.meta_completeness != null ? kpis.meta_completeness : 0;
+  document.getElementById('kpi-fact2026-val').textContent = fmtKpiMoney(fact2026, sym);
+  const sub7 = document.getElementById('kpi-fact2026-sub');
+  sub7.className = 'kpi-trend ' + (meta >= 100 ? 'trend-up' : meta > 0 ? 'trend-neutral' : 'trend-neutral');
+  sub7.textContent = meta.toFixed(1) + '% de Meta Anual';
+}
+
+/* ===================================================================
+   PLOTLY CHART
+   =================================================================== */
+function renderChart(data) {
+  const chartEl = document.getElementById('forecastChart');
+  const hist = data.history || [];
+  const fcst = data.forecast || [];
+  const val2026 = data.val_2026 || [];
+  STATE.maxHistDate = data.max_hist_date || null;
+
+  // ── Confidence band (purple, matches original rgba(165,118,255,0.16)) ──
+  const traceUpper = {
+    x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Ls||0),
+    mode:'lines', line:{width:0, shape:'spline', smoothing:1.0},
+    showlegend:false, hoverinfo:'skip', name:'Upper Bound',
+  };
+  const traceLower = {
+    x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Li||0),
+    mode:'lines', line:{width:0, shape:'spline', smoothing:1.0},
+    fill:'tonexty', fillcolor:'rgba(165,118,255,0.16)',
+    showlegend:false, hoverinfo:'skip', name:'Lower Bound',
+  };
+
+  // ── Proyección (Base) — dashed blue #5770B0 ──────────────────────────
+  const traceFcst = {
+    x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Forecast||0),
+    name:'Proyección (Base)', mode:'lines+markers',
+    line:{color:'#5770B0', width:2.5, dash:'dash', shape:'spline', smoothing:0.95},
+    marker:{size:6, opacity:1.0, symbol:'circle'},
+    hovertemplate:'<b>Proyección (Base)</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+  };
+  const traces = [traceUpper, traceLower, traceFcst];
+
+  // ── Proyección Ajustada (growth expectation) ──────────────────────────
+  if (STATE.growthPct !== 0) {
+    traces.push({
+      x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Adj||0),
+      name:`Proyección (+${STATE.growthPct.toFixed(1)}%)`, mode:'lines',
+      line:{color:'#10B981', width:2.5, dash:'dot', shape:'spline', smoothing:1.3},
+      hovertemplate:`<b>Proyección (+${STATE.growthPct.toFixed(1)}%)</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>`,
+    });
+  }
+
+  // ── Facturación 2025 (Historia) — dark blue #06486F ──────────────────
+  traces.push({
+    x: hist.map(d=>d.fecha), y: hist.map(d=>d.Total_Venta||0),
+    name:'Facturación 2025', mode:'lines+markers',
+    line:{color:'#06486F', width:3, shape:'spline', smoothing:1.3},
+    marker:{size:4},
+    hovertemplate:'<b>Facturación 2025</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+  });
+
+  // ── Facturación 2026 (real billing Jan-Feb) — orange #E07A2F ─────────
+  if (val2026.length > 0) {
+    traces.push({
+      x: val2026.map(d=>d.fecha), y: val2026.map(d=>d.Total_Venta||0),
+      name:'Facturación 2026', mode:'lines+markers',
+      line:{color:'#E07A2F', width:3.2, shape:'spline', smoothing:0.85},
+      marker:{size:9, symbol:'diamond', color:'#E07A2F', line:{color:'#FFFFFF', width:0.8}},
+      hovertemplate:'<b>Facturación 2026</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+    });
+  }
+
+  // ── Vertical separator Actual / Forecast ──────────────────────────────
+  const shapes=[], annotations=[];
+  if (STATE.maxHistDate) {
+    shapes.push({type:'line', x0:STATE.maxHistDate, x1:STATE.maxHistDate, y0:0, y1:1, yref:'paper', line:{color:'#CBD5E1', width:1, dash:'dot'}});
+    annotations.push(
+      {x:STATE.maxHistDate, y:1, yref:'paper', text:'Actual', showarrow:false, font:{size:10,color:'#5E7388'}, xanchor:'right', xshift:-5},
+      {x:STATE.maxHistDate, y:1, yref:'paper', text:'Forecast', showarrow:false, font:{size:10,color:'#A576FF'}, xanchor:'left', xshift:5},
+    );
+  }
+
+  // ── Eje X: rango exacto + ticks en español ────────────────────────────
+  // Recopilar todas las fechas de todas las series para calcular el dominio real
+  const _allX = [
+    ...hist.map(d => d.fecha),
+    ...fcst.map(d => d.fecha),
+    ...val2026.map(d => d.fecha),
+  ].filter(Boolean).sort();
+  const xStart = _allX[0]                   || STATE.startDate;
+  const xEnd   = _allX[_allX.length - 1]   || STATE.endDate;
+
+  // Generar ticks trimestrales con nombres de mes en español
+  const _MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const _tickvals = [], _ticktext = [];
+  const _tStart = new Date(xStart + 'T00:00:00Z');
+  const _tEnd   = new Date(xEnd   + 'T00:00:00Z');
+  // Primer tick en el mes del primer dato
+  let _tc = new Date(Date.UTC(_tStart.getUTCFullYear(), _tStart.getUTCMonth(), 1));
+  while (_tc <= _tEnd) {
+    _tickvals.push(_tc.toISOString().slice(0, 10));   // 'YYYY-MM-01'
+    _ticktext.push(_MESES_ES[_tc.getUTCMonth()] + ' ' + _tc.getUTCFullYear());
+    _tc = new Date(Date.UTC(_tc.getUTCFullYear(), _tc.getUTCMonth() + 3, 1)); // cada trimestre
+  }
+
+  Plotly.react(chartEl, traces, {
+    height:420, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+    hovermode:'x unified', separators:'.,', margin:{t:40,l:0,r:20,b:40},
+    font:{family:'Outfit, Inter, sans-serif', color:'#475569', size:12},
+    legend:{orientation:'h', yanchor:'bottom', y:1.05, xanchor:'left', x:0, bgcolor:'rgba(0,0,0,0)', font:{size:12,color:'#0F172A'}},
+    xaxis:{
+      showgrid:false, zeroline:false, showline:true, linecolor:'#E2E8F0', title:'',
+      tickfont:{color:'#94A3B8'},
+      type:'date',
+      range:[xStart, xEnd],   // dominio exacto: sin padding automático de Plotly
+      autorange:false,
+      tickvals:_tickvals,      // posiciones en español (trimestral)
+      ticktext:_ticktext,
+    },
+    yaxis:{showgrid:true, gridcolor:'#F1F5F9', gridwidth:1, zeroline:false, showline:false, title:'', tickfont:{color:'#94A3B8'}, tickformat:',.0f'},
+    shapes, annotations,
+  }, {responsive:true, displayModeBar:false, displaylogo:false});
+
+  // Update chart header title
+  const chartTitleEl = document.getElementById('chartTitle');
+  if (chartTitleEl) chartTitleEl.textContent = 'Evolución y proyección de venta (' + (STATE.viewMoney ? '$' : 'u') + ')';
+
+  // Render KPIs from chart response
+  if (data.kpis) renderKPIs(data.kpis, STATE.growthPct);
+}
+
+/* ===================================================================
+   PLOTLY TREEMAP
+   =================================================================== */
+function renderTreemap(data) {
+  const el = document.getElementById('treemapChart');
+  if (!data.ids || data.ids.length === 0) {
+    try { Plotly.purge(el); } catch(e) {}
+    el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94A3B8;font-size:0.9rem;">Sin datos para el período/filtros seleccionados</div>';
+    return;
+  }
+  const isMoney = document.getElementById('toggleMoney')?.checked !== false;
+  const unitSym = isMoney ? '$ ' : '';
+  Plotly.react(el, [{
+    type: 'treemap',
+    ids: data.ids,
+    labels: data.labels,
+    parents: data.parents,
+    values: data.values,
+    branchvalues: 'total',
+    maxdepth: 2,
+    textinfo: 'label+percent root',
+    hovertemplate: '<b>%{label}</b><br>Valor: ' + unitSym + '%{value:,.0f}<br>% Total: %{percentRoot:.1%}<extra></extra>',
+    marker: {
+      colors: data.colors,
+      line: {color: 'rgba(255,255,255,0.88)', width: 1.0},
+      pad: {t: 2, l: 2, r: 2, b: 2},
+    },
+    textfont: {size: 13, color: '#1C3550', family: 'Outfit, Inter, sans-serif'},
+    pathbar: {visible: true, textfont: {size: 12, color: '#5E7388', family: 'Outfit, Inter, sans-serif'}},
+    root_color: '#EAF0F5',
+  }], {
+    height: 420,
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    margin: {t: 8, l: 0, r: 0, b: 10},
+    font: {family: 'Outfit, Inter, sans-serif'},
+    separators: '.,',
+    uniformtext: {minsize: 11, mode: 'hide'},
+  }, {responsive: true, displayModeBar: false});
+}
+
+/* ===================================================================
+   AG-GRID CLIENT TABLE
+   =================================================================== */
+/* ── Client grid: grouping state (ag-Grid Community — manual hierarchy) ── */
+let clientGridApi;
+let _clientRawRows    = [];   // flat rows from API (with Grupo field)
+let _clientMonths     = [];   // current month column names
+const _groupExpanded  = {};   // groupName → boolean (undefined = collapsed by default)
+let _clientSearchTerm = '';   // current search filter (lowercase)
+
+/** Build interleaved rows: group-header rows + client rows (respects _groupExpanded + _clientSearchTerm). */
+function _buildGroupedRows(rawRows, months) {
+  const grouped   = new Map();   // groupName → client rows[]
+  const ungrouped = [];
+  const term      = _clientSearchTerm.trim().toLowerCase();
+
+  rawRows.forEach(r => {
+    const g = (r.Grupo || '').trim();
+    if (g) {
+      if (!grouped.has(g)) grouped.set(g, []);
+      grouped.get(g).push(r);
+    } else {
+      ungrouped.push(r);
+    }
+  });
+
+  const result = [];
+
+  grouped.forEach((clients, groupName) => {
+    // When searching: keep only clients whose name matches the term
+    const visibleClients = term
+      ? clients.filter(c => (c.Cliente || '').toLowerCase().includes(term))
+      : clients;
+
+    // Skip groups with no matching clients when a search is active
+    if (term && visibleClients.length === 0) return;
+
+    // When searching, always expand matching groups; otherwise honour manual state (default: collapsed)
+    const isExpanded = term ? true : (_groupExpanded[groupName] === true);
+
+    // Group totals (sum of ALL children, not only visible ones)
+    const totals = {};
+    months.forEach(m => { totals[m] = clients.reduce((s, c) => s + (c[m] || 0), 0); });
+
+    result.push({
+      Cliente: groupName,
+      _isGroup: true, _groupKey: groupName,
+      _expanded: isExpanded, _childCount: clients.length,
+      _lab: 0, ...totals,
+    });
+
+    if (isExpanded) {
+      visibleClients.forEach(c => result.push({ ...c, _isGroup: false }));
+    }
+  });
+
+  // Ungrouped clients at the end — filter by search term if active
+  const visibleUngrouped = term
+    ? ungrouped.filter(c => (c.Cliente || '').toLowerCase().includes(term))
+    : ungrouped;
+  visibleUngrouped.forEach(c => result.push({ ...c, _isGroup: false }));
+
+  return result;
+}
+
+/** Toggle expand/collapse of a group and redraw. */
+function _toggleClientGroup(groupKey) {
+  _groupExpanded[groupKey] = (_groupExpanded[groupKey] === true) ? false : true;
+  if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+}
+
+/** Apply search filter and redraw the grid. */
+function _applyClientSearch(term) {
+  _clientSearchTerm = (term || '').toLowerCase();
+  const clearBtn = document.getElementById('clientSearchClear');
+  if (clearBtn) clearBtn.style.display = _clientSearchTerm ? 'inline' : 'none';
+  if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+}
+
+function buildClientGrid() {
+  clientGridApi = agGrid.createGrid(document.getElementById('clientGrid'), {
+    columnDefs: [], rowData: [],
+    defaultColDef: {resizable:true, sortable:false, filter:false, suppressHeaderMenuButton:true},
+    rowHeight: 38, headerHeight: 40, animateRows: true,
+    suppressCellFocus: true, pinnedBottomRowData: [],
+    onCellClicked: params => {
+      // Click anywhere on a group row → toggle expand/collapse
+      if (params.data && params.data._isGroup) {
+        _toggleClientGroup(params.data._groupKey);
+        return;
+      }
+      // Pencil icon → open edit modal
+      if (params.column.getColId() === '_edit') {
+        const row = params.data;
+        if (row && row.Cliente && !String(row.Cliente).includes('TOTAL')) openEditModal(row.Cliente);
+      }
+    },
+  });
+}
+
+function updateClientGrid(tableData) {
+  if (!clientGridApi) return;
+  const { months, rows, totals, min_val, max_val, total_projected } = tableData;
+  if (!months || !months.length) {
+    clientGridApi.setGridOption('columnDefs', []);
+    clientGridApi.setGridOption('rowData', []);
+    _clientRawRows = []; _clientMonths = [];
+    document.getElementById('totalCaption').textContent = '';
+    return;
+  }
+
+  // Store raw rows so expand/collapse can rebuild without a new API call
+  _clientRawRows = rows;
+  _clientMonths  = months;
+
+  const heatmap = (params) => {
+    if (params.node.rowPinned === 'bottom')
+      return {backgroundColor:'#F8FAFC', fontWeight:'700', color:'#475569', borderTop:'2px solid #CBD5E1', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', fontSize:'13px'};
+    // Group rows: neutral background, no heatmap tinting
+    if (params.data && params.data._isGroup)
+      return {backgroundColor:'#F1F5F9', fontWeight:'600', color:'#334155', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', borderBottom:'1px solid #E2E8F0'};
+    const x = parseFloat(params.value) || 0;
+    let bg = '#ffffff', color = '#334155';
+    if (x === 0) { color = '#CBD5E1'; }
+    else if (max_val > min_val) {
+      const norm = (x - min_val) / (max_val - min_val);
+      bg = `rgb(${Math.floor(255+(110-255)*norm)},${Math.floor(255+(231-255)*norm)},${Math.floor(255+(183-255)*norm)})`;
+    }
+    return {backgroundColor:bg, color, display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', borderBottom:'1px solid #F1F5F9', fontSize:'13px'};
+  };
+
+  const vf = (params) => {
+    if (params.value == null) return '';
+    return STATE.viewMoney ? fmtMoney(params.value) : fmtUnits(params.value);
+  };
+
+  const colDefs = [
+    // ── Pencil: hidden for group rows ────────────────────────────────────────
+    {
+      field: '_edit', headerName: '', width: 40, pinned: 'left', sortable: false,
+      cellRenderer: params => {
+        if (params.data && params.data._isGroup) return '';
+        return '<span style="cursor:pointer;color:#94A3B8;font-size:1.1rem;">✎</span>';
+      },
+      cellStyle: {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:'#ffffff', borderRight:'1px solid #F1F5F9'},
+    },
+    // ── Cliente: shows group header (expandable) or client name (indented) ──
+    {
+      field: 'Cliente', headerName: 'Cliente', pinned: 'left', minWidth: 300, width: 300, sortable: false,
+      cellRenderer: params => {
+        if (!params.data) return '';
+        if (params.data._isGroup) {
+          const icon  = params.data._expanded !== false ? '▾' : '▸';
+          const count = params.data._childCount || 0;
+          return `<span style="display:flex;align-items:center;gap:6px;cursor:pointer;width:100%;">` +
+            `<span style="font-size:0.9rem;color:#64748B;user-select:none;">${icon}</span>` +
+            `<span style="font-weight:700;color:#1E293B;">${params.value || ''}</span>` +
+            `<span style="font-size:0.68rem;color:#94A3B8;font-weight:400;">(${count})</span>` +
+            `</span>`;
+        }
+        return `<span style="padding-left:24px;font-weight:500;color:#334155;">${params.value || ''}</span>`;
+      },
+      cellStyle: params => {
+        if (params.data && params.data._isGroup)
+          return {display:'flex', alignItems:'center', background:'#F8FAFC', cursor:'pointer', borderBottom:'1px solid #E2E8F0'};
+        return {display:'flex', alignItems:'center'};
+      },
+    },
+  ];
+  months.forEach(m => colDefs.push({field:m, headerName:m, type:'numericColumn', minWidth:115, width:115, valueFormatter:vf, cellStyle:heatmap, headerClass:'ag-right-aligned-header'}));
+
+  const totalRow = {Cliente:`TOTAL${STATE.growthPct!==0?' (Aj. +'+STATE.growthPct.toFixed(0)+'%)':''}`, _lab:0, _edit:'', _isGroup:false};
+  months.forEach(m => { totalRow[m] = totals[m] || 0; });
+
+  clientGridApi.setGridOption('columnDefs', colDefs);
+  clientGridApi.setGridOption('rowData', _buildGroupedRows(rows, months));
+  clientGridApi.setGridOption('pinnedBottomRowData', [totalRow]);
+  clientGridApi.setGridOption('getRowStyle', params => {
+    if (params.node.rowPinned) return null;
+    if (params.data && params.data._isGroup) return {background:'#F8FAFC'};
+    if (params.data && params.data._lab === 1) return {background:'#FFF9C4'};
+    return null;
+  });
+
+  const totStr = (total_projected||0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  document.getElementById('totalCaption').textContent = `Total Proyectado en vista: ${STATE.viewMoney?'$ ':''}${totStr}`;
+}
+
+/* ===================================================================
+   EDIT MODAL (exact replica of Streamlit edit_projection_dialog)
+   =================================================================== */
+function openEditModal(clientId) {
+  STATE.modalClientData = null;
+  STATE.modalSubnegGrowths = {};
+  STATE._modalSessionSnapshot = null;
+  STATE._modalSnapshotGrowths = {};
+  STATE._modalIsDirty = false;
+  _setModalDirty(false);
+
+  document.getElementById('fcModalTitle').textContent = 'Editar Proyección — ' + clientId;
+  document.getElementById('fcModalBody').innerHTML = '<div style="display:flex;justify-content:center;padding:32px;"><div class="fc-spinner"></div></div>';
+  document.getElementById('fcModalDownload').style.display = 'none';
+  document.getElementById('fcEditOverlay').classList.add('open');
+
+  const qs = new URLSearchParams(buildQS());
+  qs.set('client_id', clientId);
+  qs.delete('view_money');
+
+  fetch('/forecast/api/client-detail?' + qs.toString())
+    .then(r => r.json())
+    .then(data => {
+      STATE.modalClientData = data;
+      // Snapshot for undo (deep copy)
+      STATE._modalSessionSnapshot = JSON.parse(JSON.stringify(data));
+      renderModalBody(data);
+      // Capture subneg growth snapshot AFTER renderModalBody initialises STATE.modalSubnegGrowths
+      STATE._modalSnapshotGrowths = { ...STATE.modalSubnegGrowths };
+    })
+    .catch(err => {
+      document.getElementById('fcModalBody').innerHTML = '<p class="text-danger text-center py-3">Error cargando datos del cliente.</p>';
+      console.error(err);
+    });
+}
+
+function closeModal() {
+  document.getElementById('fcEditOverlay').classList.remove('open');
+  STATE.modalClientData = null;
+  STATE.modalSubnegGrowths = {};
+  STATE._modalSessionSnapshot = null;
+  STATE._modalSnapshotGrowths = {};
+  STATE._modalIsDirty = false;
+  // Free memory by destroying ag-Grid instances on modal close
+  Object.keys(_modalGridApis).forEach(k => {
+    try { _modalGridApis[k].destroy(); } catch(e){}
+  });
+  _modalGridApis = {};
+  // Reset button HTML (may have been replaced with spinner during save)
+  const btnSave = document.getElementById('fcBtnSave');
+  if (btnSave) btnSave.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar';
+  _setModalDirty(false);
+}
+
+// Close modal on overlay click
+document.getElementById('fcEditOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+/* ── Dirty-state helpers ────────────────────────────────────────────────── */
+function _setModalDirty(dirty) {
+  STATE._modalIsDirty = dirty;
+  const modal   = document.querySelector('.fc-modal');
+  const btnSave = document.getElementById('fcBtnSave');
+  const btnUndo = document.getElementById('fcBtnUndo');
+  if (modal)   modal.classList.toggle('fc-modal--dirty', dirty);
+  if (btnSave) btnSave.disabled = !dirty;
+  if (btnUndo) btnUndo.disabled = !dirty;
+}
+
+/* ── Collect all current grid values as override payload ────────────────── */
+function _collectOverrides() {
+  const overrides = [];
+  const data = STATE.modalClientData;
+  if (!data) return overrides;
+  const dates        = data.dates || [];
+  const maxHistDate  = data.max_hist_date || null;
+
+  Object.entries(_modalGridApis).forEach(([, api]) => {
+    api.forEachNode(node => {
+      const row = node.data;
+      if (!row || !row.articulo) return;
+      dates.forEach(ds => {
+        if (maxHistDate && ds <= maxHistDate) return;  // skip history
+        const pct = row[ds + ' (%)'];
+        if (pct != null) {
+          // Always send all future-date pct values (including 0) so the backend
+          // can store the user's explicit choice (even "no adjustment").
+          overrides.push({ articulo: String(row.articulo), date: ds, pct: Number(pct) });
+        }
+      });
+    });
+  });
+  return overrides;
+}
+
+/* ── Save: POST overrides → backend, then refresh whole dashboard ───────── */
+async function saveModalChanges() {
+  const data = STATE.modalClientData;
+  if (!data) return;
+  const overrides = _collectOverrides();
+  const btnSave = document.getElementById('fcBtnSave');
+  if (btnSave) { btnSave.disabled = true; btnSave.innerHTML = '<span class="fc-spinner" style="width:14px;height:14px;border-width:2px;"></span>'; }
+
+  try {
+    const resp = await fetch('/forecast/api/save-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: data.client_id, overrides }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    _setModalDirty(false);
+    closeModal();
+    await refreshAll();
+  } catch (err) {
+    console.error('Save error', err);
+    alert('Error al guardar los cambios. Por favor intente nuevamente.');
+    if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar'; }
+  }
+}
+
+/* ── Undo: restore grid to the state it had when the modal was opened ────── */
+function undoModalChanges() {
+  if (!STATE._modalSessionSnapshot) return;
+  // Restore subneg growths to snapshot
+  STATE.modalSubnegGrowths = { ...STATE._modalSnapshotGrowths };
+  // Re-render modal body from the session snapshot (no backend call)
+  renderModalBody(STATE._modalSessionSnapshot);
+  // After re-render, STATE.modalClientData is still the live data; keep it
+  _setModalDirty(false);
+}
+
+function renderModalBody(data) {
+  const body = document.getElementById('fcModalBody');
+  const perfil = data.perfil || 'N/A';
+  const negVal = data.neg || 'N/A';
+  const growthPct = data.growth_pct || 0;
+  const dates = data.dates || [];
+  const maxHistDate = data.max_hist_date || null;
+
+  let html = `
+    <div class="fc-modal-info">
+      <div class="fc-modal-info-box"><strong>Perfil:</strong> ${perfil}</div>
+      <div class="fc-modal-info-box"><strong>Negocio:</strong> ${negVal}</div>
+    </div>`;
+
+  if (growthPct !== 0) {
+    const ra = growthPct / 100;
+    const rm = (Math.pow(1 + ra, 1/12) - 1) * 100;
+    html += `<div class="fc-modal-growth-caption">📈 Crecimiento Anual: ${growthPct}% → Tasa Mensual Compuesta: ${rm.toFixed(4)}%</div>`;
+  }
+
+  html += '<div id="fcNegSections">';
+  (data.negocios || []).forEach((negSection, ni) => {
+    const negId = 'neg-section-' + ni;
+    html += `
+      <div class="fc-modal-neg">
+        <div class="fc-modal-neg__header" onclick="toggleNegSection('${negId}')">
+          <span>${negSection.neg} (${countProducts(negSection)} artículos)</span>
+          <span class="fc-modal-neg__arrow" id="arr-${negId}">▶</span>
+        </div>
+        <div class="fc-modal-neg__body" id="${negId}">
+          ${renderSubnegs(negSection, negId, dates, maxHistDate, growthPct)}
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+
+  body.innerHTML = html;
+
+  // Build grids for each subneg
+  (data.negocios || []).forEach((negSection, ni) => {
+    negSection.subnegs.forEach((subSection, si) => {
+      buildModalGrid(`modal-grid-${ni}-${si}`, subSection.products, dates, maxHistDate, data.growth_pct || 0);
+    });
+  });
+
+  // Build download CSV link
+  buildDownloadLink(data);
+
+  // Initialize subneg growths from data defaults
+  (data.negocios || []).forEach(neg => {
+    neg.subnegs.forEach(sub => {
+      STATE.modalSubnegGrowths[sub.subneg] = STATE.modalSubnegGrowths[sub.subneg] ?? (data.growth_pct || 0);
+    });
+  });
+}
+
+function countProducts(negSection) {
+  return (negSection.subnegs || []).reduce((acc, s) => acc + (s.products || []).length, 0);
+}
+
+function toggleNegSection(negId) {
+  const body = document.getElementById(negId);
+  const arr  = document.getElementById('arr-' + negId);
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (arr) { arr.classList.toggle('open', isOpen); arr.textContent = isOpen ? '▼' : '▶'; }
+}
+
+function renderSubnegs(negSection, negId, dates, maxHistDate, growthPct) {
+  const subnegs = negSection.subnegs || [];
+  const ni = negId.replace('neg-section-', '');
+  if (subnegs.length === 0) return '<p class="text-muted py-2 px-3">Sin productos.</p>';
+
+  if (subnegs.length === 1) {
+    // No tabs, just direct grid
+    const sub = subnegs[0];
+    return renderSubnegContent(ni, 0, sub, dates, maxHistDate, growthPct);
+  }
+
+  // Tabs
+  let tabsHtml = '<div class="fc-modal-tabs" id="tabs-' + negId + '">';
+  subnegs.forEach((sub, si) => {
+    tabsHtml += `<div class="fc-modal-tab ${si===0?'active':''}" onclick="switchSubnegTab('${negId}',${si})">${sub.subneg}</div>`;
+  });
+  tabsHtml += '</div>';
+
+  subnegs.forEach((sub, si) => {
+    tabsHtml += `<div id="subneg-panel-${negId}-${si}" style="${si===0?'':'display:none;'}">` + renderSubnegContent(ni, si, sub, dates, maxHistDate, growthPct) + '</div>';
+  });
+  return tabsHtml;
+}
+
+function switchSubnegTab(negId, targetSi) {
+  const tabs = document.querySelectorAll(`#tabs-${negId} .fc-modal-tab`);
+  tabs.forEach((t, i) => t.classList.toggle('active', i === targetSi));
+  const ni = negId.replace('neg-section-', '');
+  document.querySelectorAll(`[id^="subneg-panel-${negId}-"]`).forEach((p, i) => {
+    p.style.display = i === targetSi ? '' : 'none';
+  });
+}
+
+function renderSubnegContent(ni, si, sub, dates, maxHistDate, growthPct) {
+  const subKey = sub.subneg;
+  const currentGrowth = STATE.modalSubnegGrowths[subKey] ?? growthPct;
+  return `
+    <div class="fc-modal-subneg-growth">
+      <span>📈 Crec. (${subKey}): <strong>${currentGrowth.toFixed(1)}%</strong></span>
+      <input type="number" id="subneg-growth-${ni}-${si}"
+             value="${currentGrowth}" step="1" min="-50" max="500"
+             onchange="onSubnegGrowthChange('${subKey}', this.value, ${ni}, ${si})"
+             title="Expectativa de crecimiento para ${subKey}">
+    </div>
+    <div class="fc-modal-grid">
+      <div id="modal-grid-${ni}-${si}" class="ag-theme-alpine" style="width:100%;"></div>
+    </div>`;
+}
+
+function onSubnegGrowthChange(subKey, val, ni, si) {
+  const v = parseFloat(val) || 0;
+  STATE.modalSubnegGrowths[subKey] = v;
+  _setModalDirty(true);
+  // Rebuild the grid for this subneg with new growth
+  if (!STATE.modalClientData) return;
+  const data = STATE.modalClientData;
+  const negSection = data.negocios[ni];
+  if (!negSection) return;
+  const sub = negSection.subnegs[si];
+  if (!sub) return;
+  buildModalGrid(`modal-grid-${ni}-${si}`, sub.products, data.dates, data.max_hist_date, v, false);
+}
+
+let _modalGridApis = {};
+/**
+ * Build (or rebuild) a modal ag-Grid for a subneg.
+ * useApiValues=true  → usa m.pct / m.nuevo de la API (carga inicial, muestra overrides guardados)
+ * useApiValues=false → recalcula desde growthPct (cuando el usuario cambia el % del subneg)
+ */
+function buildModalGrid(gridId, products, dates, maxHistDate, growthPct, useApiValues = true) {
+  const el = document.getElementById(gridId);
+  if (!el) return;
+
+  const rows = products.map(prod => {
+    const row = {
+      articulo: prod.articulo,
+      descripcion: prod.descripcion,
+      unidad_medida: prod.unidad_medida,
+      nivel_agregacion: prod.nivel_agregacion,
+      precio: prod.precio,
+    };
+    dates.forEach(ds => {
+      const m = prod.months[ds] || {};
+      const orig = m.orig != null ? m.orig : 0;
+      let adj = orig, pct = 0;
+
+      if (useApiValues) {
+        // La API ya resolvió la prioridad: override guardado > growthPct global
+        pct = m.pct   != null ? m.pct   : 0;
+        adj = m.nuevo != null ? m.nuevo : orig;
+      } else if (maxHistDate && ds > maxHistDate && growthPct !== 0) {
+        // El usuario cambió el % del subneg → recalcular con nuevo growthPct
+        const [origYear, origMonth] = maxHistDate.split('-').map(Number);
+        const [dYear, dMonth] = ds.split('-').map(Number);
+        const t = (dYear - origYear) * 12 + (dMonth - origMonth);
+        const ra = growthPct / 100;
+        const rm = Math.pow(1 + ra, 1/12) - 1;
+        adj = orig * Math.pow(1 + rm, t);
+        pct = parseFloat((rm * 100).toFixed(4));
+      }
+
+      row[ds + ' (Orig)']  = orig;
+      row[ds + ' (%)']     = pct;
+      row[ds + ' (Nuevo)'] = adj;
+      row[ds + ' ($)']     = Math.round(adj * prod.precio);
+    });
+    return row;
+  });
+
+  // Build grouped column defs
+  const MONTHS_ES = {1:'Enero',2:'Febrero',3:'Marzo',4:'Abril',5:'Mayo',6:'Junio',7:'Julio',8:'Agosto',9:'Septiembre',10:'Octubre',11:'Noviembre',12:'Diciembre'};
+  const fixedCols = [
+    {field:'articulo', hide:true},
+    {field:'nivel_agregacion', hide:true},
+    {field:'descripcion', headerName:'Producto', pinned:'left', width:320, minWidth:320, editable:false, resizable:true, cellStyle:{fontWeight:'600'}},
+    {field:'unidad_medida', headerName:'U.M.', width:80, minWidth:80, editable:false, resizable:true, cellStyle:{color:'#64748B'}},
+  ];
+
+  const dateCols = dates.map((ds, di) => {
+    const [year, month] = ds.split('-').map(Number);
+    const monthLabel = `${MONTHS_ES[month]||ds} ${year}`;
+    const isHist = maxHistDate && ds <= maxHistDate;
+    const palBg = di % 2 === 0 ? '#F1F5F9' : '#FFFFFF';
+    const palHdr = di % 2 === 0 ? '#E2E8F0' : '#F8FAFC';
+    const children = [
+      {field:`${ds} (Orig)`, headerName:'🔒 Orig', editable:false, width:120, minWidth:120, resizable:true, cellStyle:{textAlign:'right',color:'#64748B',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
+      {field:`${ds} (%)`,    headerName:'📈 %',    editable:!isHist, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:0,max:1000,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle:{backgroundColor:palBg}},
+      {field:`${ds} (Nuevo)`,headerName:'✏️ Nuevo',editable:false, width:120, minWidth:120, resizable:true, cellStyle:{fontWeight:'bold',textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
+      {field:`${ds} ($)`,    headerName:'💰 $',    editable:false, width:130, minWidth:130, resizable:true, cellStyle:{textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtMoney(p.value):'')},
+    ];
+    return {headerName:monthLabel, children, marryChildren:true};
+  });
+
+  const colDefs = [...fixedCols, ...dateCols];
+  const gridOptions = {
+    columnDefs: colDefs,
+    rowData: rows,
+    defaultColDef:{resizable:true, sortable:false, filter:false},
+    suppressRowClickSelection: true,
+    domLayout: 'autoHeight',
+    onCellValueChanged: params => {
+      // Recalculate (Nuevo) and ($) when (%) is edited
+      const field = params.column.getColId();
+      if (!field.endsWith(' (%)')) return;
+      const ds = field.replace(' (%)', '');
+      const newPct = parseFloat(params.newValue) || 0;
+      const orig = params.data[ds + ' (Orig)'] || 0;
+      const ra = newPct / 100;
+      const adj = orig * (1 + ra);
+      params.node.setDataValue(ds + ' (Nuevo)', adj);
+      params.node.setDataValue(ds + ' ($)', Math.round(adj * (params.data.precio || 0)));
+      _setModalDirty(true);
+    },
+  };
+
+  // Destroy existing grid if any
+  if (_modalGridApis[gridId]) {
+    try { _modalGridApis[gridId].destroy(); } catch(e) {}
+    delete _modalGridApis[gridId];
+  }
+  el.innerHTML = '';
+  _modalGridApis[gridId] = agGrid.createGrid(el, gridOptions);
+}
+
+function buildDownloadLink(data) {
+  // Build CSV from current modal data
+  const dlBtn = document.getElementById('fcModalDownload');
+  dlBtn.style.display = 'inline-block';
+  dlBtn.onclick = () => {
+    if (!data) return;
+    const dates = data.dates || [];
+    let csvRows = ['articulo;descripcion;unidad_medida;periodo;yhat_orig;pct;yhat_nuevo;monto'];
+    (data.negocios || []).forEach(neg => {
+      neg.subnegs.forEach(sub => {
+        sub.products.forEach(prod => {
+          dates.forEach(ds => {
+            const m = prod.months[ds] || {};
+            csvRows.push([prod.articulo, prod.descripcion, prod.unidad_medida, ds, m.orig||0, m.pct||0, m.nuevo||0, m.money||0].join(';'));
+          });
+        });
+      });
+    });
+    const blob = new Blob([csvRows.join('\n')], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `proyeccion_${data.client_id}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+}
+
+/* ===================================================================
+   DATA FETCHING
+   =================================================================== */
+let refreshTimer = null;
+function debounceRefresh(delay = 350) {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(refreshAll, delay);
+}
+
+async function loadFilterOptions() {
+  const resp = await fetch('/forecast/api/filter-options');
+  const data = await resp.json();
+  STATE.filterOptions = data;
+  const labSel = document.getElementById('labSelect');
+  data.labs.forEach(l => {
+    const opt = document.createElement('option');
+    opt.value = l; opt.textContent = l;
+    labSel.appendChild(opt);
+  });
+  buildDropdownList('perfil', data.profiles);
+  buildDropdownList('neg', data.neg);
+  buildDropdownList('subneg', data.subneg);
+  if (data.min_date && data.max_date) initDates(data.min_date, data.max_date);
+}
+
+let _lastProductFilterKey = null;
+async function loadProducts() {
+  const filterKey = JSON.stringify({ perfil: STATE.selected.perfil, neg: STATE.selected.neg });
+  if (_lastProductFilterKey === filterKey && STATE.allProducts && STATE.allProducts.length > 0) return;
+  
+  const p = new URLSearchParams();
+  STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
+  STATE.selected.neg.forEach(v => p.append('neg[]', v));
+  try {
+    const resp = await fetch('/forecast/api/product-list?' + p.toString());
+    const data = await resp.json();
+    _lastProductFilterKey = filterKey;
+    updateProdGrid(data);
+  } catch (e) {
+    console.error('Error loading products', e);
+  }
+}
+
+async function loadChart() {
+  document.getElementById('chartLoader').style.display = 'flex';
+  try {
+    const data = await fetch('/forecast/api/chart-data?' + buildQS()).then(r => r.json());
+    renderChart(data);
+  } catch(e) { console.error('Chart error', e); }
+  finally { document.getElementById('chartLoader').style.display = 'none'; }
+}
+
+async function loadTreemap() {
+  document.getElementById('treemapLoader').style.display = 'flex';
+  try {
+    const qs = new URLSearchParams(buildQS());
+    const selectedPeriod = document.getElementById('treemapPeriod')?.value;
+    if (selectedPeriod && selectedPeriod !== '__all__') qs.set('period_date', selectedPeriod);
+    const data = await fetch('/forecast/api/treemap-data?' + qs.toString()).then(r => r.json());
+
+    // Populate Vista Periodo selector (only on first load or if options changed)
+    const sel = document.getElementById('treemapPeriod');
+    if (sel && data.periods && data.periods.length) {
+      const currentOptions = Array.from(sel.options).map(o => o.value).filter(v => v !== '__all__').join(',');
+      const newOptions = data.periods.join(',');
+      if (currentOptions !== newOptions) {
+        const current = sel.value;
+        sel.innerHTML = '<option value="__all__">Acumulado 2026</option>';
+        data.periods.forEach(p => {
+          const d = new Date(p + 'T00:00:00');
+          const label = d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' });
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+          sel.appendChild(opt);
+        });
+        if (current) sel.value = current;
+      }
+    }
+
+    // Populate legend chips
+    const legend = document.getElementById('treemapLegend');
+    if (legend && data.canals && data.canals.length) {
+      legend.innerHTML = data.canals.map(c =>
+        `<span class="fc-treemap-legend-item"><span class="fc-treemap-legend-swatch" style="background:${c.color};"></span>${c.name}</span>`
+      ).join('');
+    }
+
+    renderTreemap(data);
+  } catch(e) { console.error('Treemap error', e); }
+  finally { document.getElementById('treemapLoader').style.display = 'none'; }
+}
+
+async function loadTable() {
+  document.getElementById('tableLoader').style.display = 'flex';
+  try {
+    const params = new URLSearchParams(buildQS());
+    if (STATE.labFilter && STATE.selectedLab) {
+      STATE.allProducts
+        .filter(prod => prod.labs && prod.labs.includes(STATE.selectedLab))
+        .forEach(prod => params.append('lab_products[]', prod.descripcion));
+    }
+    const data = await fetch('/forecast/api/client-table?' + params.toString()).then(r => r.json());
+    updateClientGrid(data);
+  } catch(e) { console.error('Table error', e); }
+  finally { document.getElementById('tableLoader').style.display = 'none'; }
+}
+
+async function refreshAll() {
+  const isDetalleActivo = document.getElementById('tab-detalle')?.classList.contains('active');
+  const tasks = [loadProducts(), loadChart(), loadTreemap()];
+  if (isDetalleActivo) {
+    tasks.push(loadTable());
+    _tableIsStale = false;
+  } else {
+    _tableIsStale = true;
+  }
+  await Promise.all(tasks);
+}
+
+/* ===================================================================
+   CONTROLS WIRING
+   =================================================================== */
+document.getElementById('toggleMoney').addEventListener('change', function() {
+  STATE.viewMoney = this.checked;
+  debounceRefresh();
+});
+document.getElementById('growthInput').addEventListener('input', function() {
+  const v = parseFloat(this.value);
+  STATE.growthPct = isNaN(v) ? 0 : v;
+  debounceRefresh(500);
+});
+document.getElementById('treemapPeriod').addEventListener('change', function() {
+  loadTreemap();
+});
+document.getElementById('clientSearchInput').addEventListener('input', function() {
+  _applyClientSearch(this.value);
+});
+document.getElementById('clientSearchClear').addEventListener('click', function() {
+  const inp = document.getElementById('clientSearchInput');
+  inp.value = '';
+  _applyClientSearch('');
+  inp.focus();
+});
+
+/* ===================================================================
+   INIT
+   =================================================================== */
+document.addEventListener('DOMContentLoaded', async () => {
+  // El select de laboratorio empieza deshabilitado hasta que se active el checkbox
+  const _labSel = document.getElementById('labSelect');
+  if (_labSel) _labSel.disabled = true;
+
+  buildProdGrid();
+  buildClientGrid();
+  await loadFilterOptions();
+  await refreshAll();
+});
+</script>
+{% endblock %}

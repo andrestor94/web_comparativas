@@ -370,12 +370,14 @@ from web_comparativas.routers.dimensiones_router import router as dimensiones_ro
 from web_comparativas.routers.notifications_router import router as notifications_router
 from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
+from web_comparativas.routers.forecast_router import router as forecast_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
 app.include_router(notifications_router)
 app.include_router(pliegos_router)
 app.include_router(comments_router)
+app.include_router(forecast_router)
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
