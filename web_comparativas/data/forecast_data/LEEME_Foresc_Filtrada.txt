@@ -1,0 +1,4 @@
+Colocar aquí el archivo 00_input/Foresc_Filtrada.csv (mismo nombre) para:
+- Etapa 3 (consumo ponderado por cliente)
+- Enriquecimiento de Descrip_art para Etapa 2 cuando Familia está vacía
+- Traducción automática en Etapa 4 si el forecast viene con codigo_serie numérico
