@@ -198,6 +198,17 @@ def api_client_detail(
         raise HTTPException(500, str(exc))
 
 
+@router.get("/api/debug-schema")
+def api_debug_schema(request: Request, _user: User = Depends(_require_user)):
+    """Return actual column names for all forecast tables from information_schema.
+    Use this to verify the real PostgreSQL schema matches what the code expects."""
+    try:
+        return svc.get_forecast_schema_info()
+    except Exception as exc:
+        logger.error("debug-schema error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
 @router.post("/api/reload")
 def api_reload(request: Request, _user: User = Depends(_require_user)):
     if (getattr(_user, "role", "") or "").lower() not in ("admin", "auditor"):
