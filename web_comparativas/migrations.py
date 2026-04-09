@@ -531,57 +531,71 @@ def backfill_original_content():
     return backed_up
 
 
+def _col_type(table: str, column: str) -> str:
+    """Returns the data_type from information_schema for a given table.column, or '' if not found."""
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = :t AND column_name = :c"
+            ), {"t": table, "c": column}).fetchone()
+        return (row[0] or "").lower() if row else ""
+    except Exception:
+        return ""
+
+
 def ensure_dimensionamiento_text_columns():
     """
     Convierte de VARCHAR(255) a TEXT las columnas descriptivas largas de las
     tablas de dimensionamiento en PostgreSQL.
 
-    El error `StringDataRightTruncation: value too long for type character
-    varying(255)` ocurre porque algunas columnas del CSV superan 255 caracteres.
-    TEXT en PostgreSQL no tiene límite práctico y es el tipo correcto para estos
-    campos descriptivos.
-
-    Columnas afectadas en dimensionamiento_records:
-      - producto_nombre_original (causa directa del error)
-      - cliente_nombre_homologado, cliente_nombre_original
-      - clasificacion_suizo, familia, unidad_negocio, subunidad_negocio
-
-    Columnas afectadas en dimensionamiento_family_monthly_summary:
-      - cliente_nombre_homologado, familia, unidad_negocio, subunidad_negocio
-
-    Compatible solo con PostgreSQL; en SQLite TEXT ya es el tipo nativo y
-    no requiere ALTER TABLE.
+    IDEMPOTENTE: verifica information_schema antes de cada ALTER. Si la columna
+    ya es TEXT (deploys posteriores), la operación no se ejecuta y el impacto
+    en memoria es prácticamente nulo.
     """
     if IS_SQLITE:
         print("[MIGRATION] ensure_dimensionamiento_text_columns: SQLite, saltando.", flush=True)
         return
 
-    records_columns = [
-        "producto_nombre_original",
-        "cliente_nombre_homologado",
-        "cliente_nombre_original",
-        "clasificacion_suizo",
-        "familia",
-        "unidad_negocio",
-        "subunidad_negocio",
-    ]
-    summary_columns = [
-        "cliente_nombre_homologado",
-        "familia",
-        "unidad_negocio",
-        "subunidad_negocio",
+    targets = [
+        ("dimensionamiento_records", [
+            "producto_nombre_original",
+            "cliente_nombre_homologado",
+            "cliente_nombre_original",
+            "clasificacion_suizo",
+            "familia",
+            "unidad_negocio",
+            "subunidad_negocio",
+        ]),
+        ("dimensionamiento_family_monthly_summary", [
+            "cliente_nombre_homologado",
+            "familia",
+            "unidad_negocio",
+            "subunidad_negocio",
+        ]),
     ]
 
-    for table, columns in [
-        ("dimensionamiento_records", records_columns),
-        ("dimensionamiento_family_monthly_summary", summary_columns),
-    ]:
+    any_altered = False
+    for table, columns in targets:
         for col in columns:
-            with engine.begin() as conn:
-                _add_column_safe(
-                    conn,
-                    f"ALTER TABLE {table} ALTER COLUMN {col} TYPE TEXT",
-                    f"{table}.{col} → TEXT",
-                )
+            current_type = _col_type(table, col)
+            if current_type == "text":
+                print(f"[MIGRATION] {table}.{col}: ya es TEXT. (OK)", flush=True)
+                continue
+            if not current_type:
+                # Tabla o columna no existe aún — se creará con el tipo correcto
+                print(f"[MIGRATION] {table}.{col}: columna no encontrada, saltando.", flush=True)
+                continue
+            # Needs conversion
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE TEXT"))
+                print(f"[MIGRATION] {table}.{col}: convertida a TEXT.", flush=True)
+                any_altered = True
+            except Exception as e:
+                print(f"[MIGRATION] {table}.{col}: advertencia ALTER TYPE – {e}", flush=True)
 
-    print("[MIGRATION] ensure_dimensionamiento_text_columns completado.", flush=True)
+    if any_altered:
+        print("[MIGRATION] ensure_dimensionamiento_text_columns: columnas convertidas.", flush=True)
+    else:
+        print("[MIGRATION] ensure_dimensionamiento_text_columns: todo ya era TEXT. (OK)", flush=True)
