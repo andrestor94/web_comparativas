@@ -642,20 +642,37 @@ def _pg_resolve_prod_codes(products: list) -> "list | None":
 # ---------------------------------------------------------------------------
 
 def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
+    """Return product list with volume ranking.
+    Two-query strategy:
+      1. forecast_main  → neg/codigo_serie mapping (TEXT ops only — no numeric aggregation)
+      2. forecast_valorizado → monto_yhat volume (FLOAT, reliable)
+    Avoids SUM on TEXT columns (y/yhat in forecast_main are TEXT in production).
+    """
     import json
-    where = _build_filter_sql(profiles=profiles, neg=neg)
-    # forecast_main has no descripcion column — use codigo_serie as display name
-    df = _query_agg(
-        f"SELECT neg, codigo_serie, "
-        f"SUM(COALESCE(y, 0)) AS y, SUM(COALESCE(yhat, 0)) AS yhat, "
-        f"AVG(COALESCE(precio, 0)) AS precio "
-        f"FROM forecast_main WHERE {where} "
-        f"GROUP BY neg, codigo_serie"
+    neg_where = _build_filter_sql(profiles=profiles, neg=neg)
+    # Query 1: channel mapping — only distinct text columns, no numeric aggregation
+    df_neg = _query_agg(
+        f"SELECT DISTINCT neg, codigo_serie FROM forecast_main WHERE {neg_where}"
     )
-    if df.empty:
+    if df_neg.empty:
         return []
-    df["descripcion"] = df["codigo_serie"]  # alias for frontend compatibility
-    df["vol_venta"] = (df["y"].fillna(0) + df["yhat"].fillna(0)) * df["precio"].fillna(0)
+
+    # Query 2: monetary volume from forecast_valorizado (monto_yhat is FLOAT)
+    vol_where = _build_filter_sql(profiles=profiles, neg=neg)
+    df_vol = _query_agg(
+        f"SELECT codigo_serie, SUM(COALESCE(monto_yhat, 0)) AS vol_venta "
+        f"FROM forecast_valorizado WHERE {vol_where} GROUP BY codigo_serie"
+    )
+    # vol_venta alias is already lowercase — PostgreSQL preserves it as-is ✓
+
+    # Merge: left join so all products appear even if not in forecast_valorizado
+    if df_vol.empty:
+        df = df_neg.copy()
+        df["vol_venta"] = 0.0
+    else:
+        df = pd.merge(df_neg, df_vol, on="codigo_serie", how="left")
+        df["vol_venta"] = df["vol_venta"].fillna(0.0)
+
     labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
     lab_map: dict = {}
     for _, row in labs_df.iterrows():
@@ -753,36 +770,37 @@ def _pg_get_chart_data_inner(
 
     logger.info("[FORECAST chart] step=query_hist view_money=%s hist_where=%s", view_money, hist_where[:80])
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
+    # NOTE: PostgreSQL returns column aliases in lowercase regardless of AS casing.
+    # All queries use lowercase aliases; rename to Title-Case after each query so the
+    # rest of the function keeps its existing column references unchanged.
     if view_money:
         df_hist = _query_agg(
-            f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS Total_Venta "
+            f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
             f"FROM forecast_imp_hist WHERE {hist_where} GROUP BY fecha ORDER BY fecha"
         )
-        if df_hist.empty:
-            df_hist = _query_agg(
-                f"SELECT fecha, SUM(COALESCE(y, 0) * COALESCE(precio, 1)) AS Total_Venta "
-                f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
-            )
+        # forecast_main fallback intentionally omitted: y/yhat are TEXT in production,
+        # SUM(COALESCE(y,0)) raises a type error caught by _query_agg → empty anyway.
     else:
+        # Units path — forecast_main.y is TEXT in production so this will be empty;
+        # kept for local/SQLite mode where y is numeric.
         df_hist = _query_agg(
-            f"SELECT fecha, SUM(COALESCE(y, 0)) AS Total_Venta "
+            f"SELECT fecha, SUM(COALESCE(y::numeric, 0)) AS total_venta "
             f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
         )
+    # Normalise alias to Title-Case so downstream code is unchanged
+    if not df_hist.empty and "total_venta" in df_hist.columns:
+        df_hist.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
 
     logger.info("[FORECAST chart] step=query_fcst df_hist_rows=%s", len(df_hist))
     # Forecast: from valorizado (monto_yhat = money, yhat_cliente = units)
     val_col = "monto_yhat" if view_money else "yhat_cliente"
     df_fcst = _query_agg(
-        f"SELECT fecha, SUM(COALESCE({val_col}, 0)) AS Total_Forecast "
+        f"SELECT fecha, SUM(COALESCE({val_col}, 0)) AS total_forecast "
         f"FROM forecast_valorizado WHERE {val_where} GROUP BY fecha ORDER BY fecha"
     )
-    if df_fcst.empty:
-        # Fallback: forecast_main yhat×precio
-        col_sql = "yhat" if not view_money else "yhat * COALESCE(precio, 1)"
-        df_fcst = _query_agg(
-            f"SELECT fecha, SUM(COALESCE({col_sql}, 0)) AS Total_Forecast "
-            f"FROM forecast_main WHERE {main_where} AND tipo = 'forecast' GROUP BY fecha ORDER BY fecha"
-        )
+    # Normalise alias
+    if not df_fcst.empty and "total_forecast" in df_fcst.columns:
+        df_fcst.rename(columns={"total_forecast": "Total_Forecast"}, inplace=True)
     if not df_fcst.empty:
         df_fcst["Total_Li"] = df_fcst["Total_Forecast"]
         df_fcst["Total_Ls"] = df_fcst["Total_Forecast"]
@@ -808,10 +826,13 @@ def _pg_get_chart_data_inner(
     logger.info("[FORECAST chart] step=query_fact2026")
     # Facturación real 2026
     df_fact_raw = _query_agg(
-        f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS Total_Venta "
+        f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
         f"FROM forecast_fact_2026 WHERE {fact_where} AND fecha >= '2026-01-01' "
         f"GROUP BY fecha ORDER BY fecha"
     )
+    # Normalise alias
+    if not df_fact_raw.empty and "total_venta" in df_fact_raw.columns:
+        df_fact_raw.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
     val_2026_records: list = []
     fact_2026_sum = 0.0
     if not df_fact_raw.empty:
