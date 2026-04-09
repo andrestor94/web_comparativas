@@ -560,6 +560,653 @@ def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=Non
         logger.error(f"SQL DB Query Error ({table}): {e}")
         return pd.DataFrame()
 
+# ---------------------------------------------------------------------------
+# PostgreSQL aggregation helpers — avoid loading full tables into RAM
+# ---------------------------------------------------------------------------
+
+def _has_overrides() -> bool:
+    with _overrides_lock:
+        return bool(_client_overrides)
+
+
+def _build_filter_sql(
+    start_date=None,
+    end_date=None,
+    profiles=None,
+    neg=None,
+    subneg=None,
+    products=None,           # filter by (codigo_serie OR descripcion) — tables with both cols
+    products_as_codes=None,  # filter by codigo_serie only; [] means "no matches → empty"
+    extra=None,
+) -> str:
+    """Build a SQL WHERE clause from dashboard filter params."""
+    parts = ["1=1"]
+    if start_date:
+        parts.append(f"fecha >= '{start_date}'")
+    if end_date:
+        parts.append(f"fecha <= '{end_date}'")
+    if profiles:
+        c = _safe_in("perfil", profiles)
+        if c:
+            parts.append(c)
+    if neg:
+        c = _safe_in("neg", neg)
+        if c:
+            parts.append(c)
+    if subneg:
+        c = _safe_in("subneg", subneg)
+        if c:
+            parts.append(c)
+    if products_as_codes is not None:
+        if len(products_as_codes) == 0:
+            parts.append("1=0")  # no matching series → empty result
+        else:
+            parts.append(_safe_in("codigo_serie", products_as_codes))
+    elif products:
+        p = _safe_in("codigo_serie", products)
+        d = _safe_in("descripcion", products)
+        parts.append(f"({p} OR {d})")
+    if extra:
+        parts.append(extra)
+    return " AND ".join(parts)
+
+
+def _query_agg(sql: str) -> "pd.DataFrame":
+    """Execute a read-only SQL query on PostgreSQL; returns empty DataFrame on any error."""
+    try:
+        if engine is None or "sqlite" in str(engine.url):
+            return pd.DataFrame()
+        with engine.connect() as conn:
+            df = pd.read_sql(sql, conn)
+        if "fecha" in df.columns:
+            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        return df
+    except Exception as exc:
+        logger.error("DB agg query error: %s | SQL (first 300 chars): %.300s", exc, sql)
+        return pd.DataFrame()
+
+
+def _pg_resolve_prod_codes(products: list) -> "list | None":
+    """Return codigo_serie list for given product names/codes, or None if no product filter."""
+    if not products:
+        return None
+    where = _build_filter_sql(products=products)
+    df = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}")
+    return df["codigo_serie"].tolist() if not df.empty else []
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL-optimized implementations (use SQL GROUP BY, no full-table loads)
+# ---------------------------------------------------------------------------
+
+def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
+    import json
+    where = _build_filter_sql(profiles=profiles, neg=neg)
+    df = _query_agg(
+        f"SELECT neg, descripcion, codigo_serie, "
+        f"SUM(COALESCE(y, 0)) AS y, SUM(COALESCE(yhat, 0)) AS yhat, "
+        f"AVG(COALESCE(precio, 0)) AS precio "
+        f"FROM forecast_main WHERE {where} "
+        f"GROUP BY neg, descripcion, codigo_serie"
+    )
+    if df.empty:
+        return []
+    df["vol_venta"] = (df["y"].fillna(0) + df["yhat"].fillna(0)) * df["precio"].fillna(0)
+    labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
+    lab_map: dict = {}
+    for _, row in labs_df.iterrows():
+        try:
+            lab_map[str(row["codigo_serie"])] = json.loads(row["laboratorios"])
+        except Exception:
+            pass
+    ranking = (
+        df.groupby(["neg", "descripcion"])["vol_venta"]
+        .sum()
+        .reset_index()
+        .sort_values(["neg", "vol_venta"], ascending=[True, False])
+    )
+    codigo_map = df.groupby("descripcion")["codigo_serie"].first().to_dict()
+    ranking["codigo_serie"] = ranking["descripcion"].map(codigo_map)
+    ranking["labs"] = ranking["codigo_serie"].apply(
+        lambda x: lab_map.get(str(x) if pd.notna(x) else "", [])
+    )
+    return ranking.to_dict(orient="records")
+
+
+def _pg_get_chart_data(
+    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+) -> dict:
+    """Memory-safe PostgreSQL chart data: all heavy aggregation runs in SQL."""
+    _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
+
+    # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
+    prod_codes = _pg_resolve_prod_codes(products)
+
+    # WHERE for forecast_main (supports both codigo_serie and descripcion cols)
+    main_where = _build_filter_sql(
+        start_date=start_date, end_date=end_date,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+        products=None if prod_codes is not None else products,
+    )
+    # Lightweight metadata: n_products + max history date
+    df_meta = _query_agg(
+        f"SELECT COUNT(DISTINCT descripcion) AS n_products, "
+        f"MAX(CASE WHEN tipo = 'hist' THEN fecha END) AS max_hist_date "
+        f"FROM forecast_main WHERE {main_where}"
+    )
+    if df_meta.empty:
+        return _EMPTY
+    n_products = int(df_meta["n_products"].iloc[0] or 0)
+    _mhd = df_meta["max_hist_date"].iloc[0] if not df_meta.empty else None
+    max_hist = pd.to_datetime(_mhd) if pd.notna(_mhd) else pd.Timestamp("2000-01-01")
+
+    # WHERE for tables without descripcion (imp_hist, fact_2026, valorizado)
+    hist_where = _build_filter_sql(
+        start_date=start_date, end_date=end_date,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+    )
+    val_where = _build_filter_sql(
+        start_date=start_date, end_date=end_date,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+        products=None if prod_codes is not None else products,
+    )
+    fact_where = _build_filter_sql(
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+    )
+
+    # History: from imp_hist (real billing, already in money) or forecast_main y×precio
+    if view_money:
+        df_hist = _query_agg(
+            f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS Total_Venta "
+            f"FROM forecast_imp_hist WHERE {hist_where} GROUP BY fecha ORDER BY fecha"
+        )
+        if df_hist.empty:
+            df_hist = _query_agg(
+                f"SELECT fecha, SUM(COALESCE(y, 0) * COALESCE(precio, 1)) AS Total_Venta "
+                f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
+            )
+    else:
+        df_hist = _query_agg(
+            f"SELECT fecha, SUM(COALESCE(y, 0)) AS Total_Venta "
+            f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
+        )
+
+    # Forecast: from valorizado (monto_yhat = money, yhat_cliente = units)
+    val_col = "monto_yhat" if view_money else "yhat_cliente"
+    df_fcst = _query_agg(
+        f"SELECT fecha, SUM(COALESCE({val_col}, 0)) AS Total_Forecast "
+        f"FROM forecast_valorizado WHERE {val_where} GROUP BY fecha ORDER BY fecha"
+    )
+    if df_fcst.empty:
+        # Fallback: forecast_main yhat×precio
+        col_sql = "yhat" if not view_money else "yhat * COALESCE(precio, 1)"
+        df_fcst = _query_agg(
+            f"SELECT fecha, SUM(COALESCE({col_sql}, 0)) AS Total_Forecast "
+            f"FROM forecast_main WHERE {main_where} AND tipo = 'forecast' GROUP BY fecha ORDER BY fecha"
+        )
+    if not df_fcst.empty:
+        df_fcst["Total_Li"] = df_fcst["Total_Forecast"]
+        df_fcst["Total_Ls"] = df_fcst["Total_Forecast"]
+        df_fcst["Total_Adj"] = df_fcst["Total_Forecast"]
+        if growth_pct != 0:
+            g = 1.0 + growth_pct / 100.0
+            future = df_fcst["fecha"] > max_hist
+            df_fcst.loc[future, "Total_Adj"] = df_fcst.loc[future, "Total_Forecast"] * g
+
+    # Bridge: connect last history point to start of forecast line
+    if not df_hist.empty and not df_fcst.empty:
+        hist_last = df_hist.sort_values("fecha").iloc[-1]
+        bridge = pd.DataFrame([{
+            "fecha": hist_last["fecha"],
+            "Total_Forecast": float(hist_last["Total_Venta"]),
+            "Total_Li": float(hist_last["Total_Venta"]),
+            "Total_Ls": float(hist_last["Total_Venta"]),
+            "Total_Adj": float(hist_last["Total_Venta"]),
+        }])
+        df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
+
+    # Facturación real 2026
+    df_fact_raw = _query_agg(
+        f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS Total_Venta "
+        f"FROM forecast_fact_2026 WHERE {fact_where} AND fecha >= '2026-01-01' "
+        f"GROUP BY fecha ORDER BY fecha"
+    )
+    val_2026_records: list = []
+    fact_2026_sum = 0.0
+    if not df_fact_raw.empty:
+        fact_2026_sum = float(df_fact_raw["Total_Venta"].sum())
+        df_v2026_chart = df_fact_raw[df_fact_raw["fecha"] < pd.Timestamp("2026-03-01")].copy()
+        if not df_hist.empty and not df_v2026_chart.empty:
+            hist_last = df_hist.sort_values("fecha").iloc[-1]
+            brow = pd.DataFrame([{"fecha": hist_last["fecha"],
+                                   "Total_Venta": float(hist_last["Total_Venta"])}])
+            df_v2026_chart = pd.concat([brow, df_v2026_chart], ignore_index=True)
+        for _, row in df_v2026_chart.sort_values("fecha").iterrows():
+            val_2026_records.append({
+                "fecha": row["fecha"].strftime("%Y-%m-%d") if pd.notna(row["fecha"]) else None,
+                "Total_Venta": round(float(row.get("Total_Venta", 0)), 0),
+            })
+
+    # KPIs
+    total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0.0
+    total_real_2025 = 0.0
+    if not df_hist.empty:
+        m25 = df_hist["fecha"].dt.year == 2025
+        total_real_2025 = float(df_hist.loc[m25, "Total_Venta"].sum()) if m25.any() else 0.0
+    total_fcst = total_adj = 0.0
+    if not df_fcst.empty:
+        m26 = df_fcst["fecha"].dt.year == 2026
+        total_fcst = float(df_fcst.loc[m26, "Total_Forecast"].sum()) if m26.any() else 0.0
+        total_adj  = float(df_fcst.loc[m26, "Total_Adj"].sum())      if m26.any() else total_fcst
+
+    INFLATION_MO_PCT = 2.9
+    inflation_pct = ((1 + INFLATION_MO_PCT / 100) ** 12 - 1) * 100
+    var_nominal = ((total_adj / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
+    var_real    = ((total_adj / (1 + inflation_pct / 100) / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
+    meta_completeness = (fact_2026_sum / total_adj * 100) if total_adj > 0 else 0.0
+
+    accuracy_val = 0.0
+    if not df_fact_raw.empty and not df_fcst.empty:
+        try:
+            val_months = sorted(m for m in df_fact_raw["fecha"].dropna().unique()
+                                if pd.Timestamp(m).year == 2026)
+            closed = val_months[:-1] if len(val_months) > 1 else val_months
+            scores = []
+            for m in closed:
+                actual = float(df_fact_raw[df_fact_raw["fecha"] == m]["Total_Venta"].sum())
+                proj   = float(df_fcst[df_fcst["fecha"] == m]["Total_Forecast"].sum()) if not df_fcst.empty else 0.0
+                if actual > 0:
+                    scores.append(max(0.0, (1 - abs(actual - proj) / actual) * 100))
+            accuracy_val = float(np.mean(scores)) if scores else 0.0
+        except Exception:
+            pass
+
+    def _fmt(dfs: "pd.DataFrame", cols: list) -> list:
+        out = []
+        for _, row in dfs.sort_values("fecha").iterrows():
+            rec = {"fecha": row["fecha"].strftime("%Y-%m-%d") if pd.notna(row["fecha"]) else None}
+            for c in cols:
+                v = row.get(c, 0)
+                rec[c] = round(float(v), 0) if pd.notna(v) else 0
+            out.append(rec)
+        return out
+
+    return {
+        "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
+        "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj"]) if not df_fcst.empty else [],
+        "val_2026": val_2026_records,
+        "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
+        "kpis": {
+            "total_proyeccion_2026":    round(total_adj, 0),
+            "var_nominal_2025":         round(var_nominal, 2),
+            "inflation_pct":            round(inflation_pct, 1),
+            "inflation_mo_pct":         INFLATION_MO_PCT,
+            "var_real_2025":            round(var_real, 2),
+            "accuracy_val":             round(accuracy_val, 1),
+            "expectation_accuracy_val": 0.0,
+            "fact_2026":                round(fact_2026_sum, 0),
+            "meta_completeness":        round(meta_completeness, 1),
+            "total_historia":           round(total_hist, 0),
+            "total_proyeccion":         round(total_fcst, 0),
+            "total_proyeccion_adj":     round(total_adj, 0),
+            "total_real_2025":          round(total_real_2025, 0),
+            "n_products":               n_products,
+        },
+    }
+
+
+def _pg_get_client_table(
+    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+) -> dict:
+    """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha)."""
+    _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
+
+    prod_codes = _pg_resolve_prod_codes(products)
+    val_col = "monto_yhat" if view_money else "yhat_cliente"
+    val_where = _build_filter_sql(
+        start_date=start_date, end_date=end_date,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+        products=None if prod_codes is not None else products,
+    )
+    df_agg = _query_agg(
+        f"SELECT fantasia, nombre_grupo, fecha, "
+        f"SUM(COALESCE({val_col}, 0)) AS val "
+        f"FROM forecast_valorizado WHERE {val_where} "
+        f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
+    )
+    if df_agg.empty:
+        return _EMPTY
+
+    # Max hist date for growth adjustment
+    df_mhd = _query_agg(
+        f"SELECT MAX(fecha) AS max_hist_date FROM forecast_main "
+        f"WHERE {_build_filter_sql(profiles=profiles, neg=neg, subneg=subneg)} AND tipo = 'hist'"
+    )
+    max_hist_date = None
+    if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
+        max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
+
+    # Growth adjustment on future months
+    if growth_pct != 0 and max_hist_date is not None:
+        future_mask = df_agg["fecha"] > max_hist_date
+        df_agg.loc[future_mask, "val"] = df_agg.loc[future_mask, "val"] * (1.0 + growth_pct / 100.0)
+
+    # Normalise client/group display names
+    df_agg["fantasia"]     = df_agg["fantasia"].fillna("").astype(str).str.strip()
+    df_agg["nombre_grupo"] = df_agg["nombre_grupo"].fillna("").astype(str).str.strip()
+    sin_mask  = df_agg["nombre_grupo"].str.upper().isin({"SIN GRUPO", ""})
+    self_mask = df_agg["fantasia"] == df_agg["nombre_grupo"]
+    df_agg.loc[sin_mask | self_mask, "nombre_grupo"] = ""
+
+    # Lab highlighting
+    clients_with_lab: set = set()
+    if lab_products:
+        lab_codes = _pg_resolve_prod_codes(lab_products)
+        if lab_codes:
+            lab_where = _build_filter_sql(
+                products_as_codes=lab_codes,
+                profiles=profiles, neg=neg, subneg=subneg,
+            )
+            df_lab = _query_agg(
+                f"SELECT DISTINCT fantasia FROM forecast_valorizado WHERE {lab_where}"
+            )
+            if not df_lab.empty:
+                clients_with_lab = set(df_lab["fantasia"].dropna().tolist())
+
+    # Pivot → (fantasia, nombre_grupo) × fecha
+    pivot = (
+        df_agg.groupby(["fantasia", "nombre_grupo", "fecha"])["val"]
+        .sum()
+        .reset_index()
+        .set_index(["fantasia", "nombre_grupo", "fecha"])["val"]
+        .unstack("fecha")
+        .fillna(0)
+    )
+    pivot = pivot.sort_index(axis=1)
+    pivot["_total"] = pivot.sum(axis=1)
+    pivot = pivot.sort_values("_total", ascending=False)
+    pivot.drop(columns=["_total"], inplace=True)
+
+    date_cols = list(pivot.columns)
+    col_names = [d.strftime("%b %Y").title() for d in date_cols]
+    pivot.columns = col_names
+    pivot_reset = pivot.reset_index()
+    pivot_reset.rename(columns={"fantasia": "Cliente", "nombre_grupo": "Grupo"}, inplace=True)
+
+    rows = []
+    for _, row in pivot_reset.iterrows():
+        r = {
+            "Cliente": str(row.get("Cliente", "")),
+            "Grupo":   str(row.get("Grupo", "")),
+            "_lab":    1 if row.get("Cliente") in clients_with_lab else 0,
+        }
+        for mn in col_names:
+            r[mn] = round(float(row.get(mn, 0)), 0)
+        rows.append(r)
+
+    totals       = {mn: round(float(pivot_reset[mn].sum()), 0) for mn in col_names}
+    vals_flat    = [v for r in rows for k, v in r.items() if k in col_names and isinstance(v, (int, float))]
+    min_val      = float(min(vals_flat)) if vals_flat else 0
+    max_val      = float(max(vals_flat)) if vals_flat else 0
+    total_projected = round(sum(totals.values()), 0)
+
+    return {
+        "months": col_names, "rows": rows, "totals": totals,
+        "min_val": min_val, "max_val": max_val, "total_projected": total_projected,
+    }
+
+
+def _pg_get_treemap_data(
+    start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+) -> dict:
+    """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
+    _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
+
+    # All available periods (unfiltered)
+    periods_df = _query_agg("SELECT DISTINCT fecha FROM forecast_valorizado ORDER BY fecha")
+    periods = [str(r["fecha"])[:10] for _, r in periods_df.iterrows() if pd.notna(r["fecha"])]
+
+    prod_codes = _pg_resolve_prod_codes(products)
+    val_col    = "monto_yhat" if view_money else "yhat_cliente"
+
+    extra = None
+    if period_date:
+        target = pd.to_datetime(period_date).replace(day=1).strftime("%Y-%m-%d")
+        extra = f"fecha = '{target}'"
+
+    val_where = _build_filter_sql(
+        start_date=start_date if not period_date else None,
+        end_date=end_date     if not period_date else None,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+        products=None if prod_codes is not None else products,
+        extra=extra,
+    )
+    df_tree = _query_agg(
+        f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
+        f"SUM(COALESCE({val_col}, 0)) AS Monto "
+        f"FROM forecast_valorizado WHERE {val_where} "
+        f"GROUP BY perfil, nombre_grupo, fantasia, cliente_id"
+    )
+    if df_tree.empty:
+        return {**_EMPTY, "periods": periods}
+
+    # Build display columns (same logic as get_treemap_data)
+    df_tree["_canal"] = df_tree["perfil"].astype(str).str.upper().str.strip()
+    df_tree["_canal"] = df_tree["_canal"].replace(
+        {"NO_ASIGNADO": "POTENCIAL", "NO_ASIGNADA": "POTENCIAL", "SIN ASIGNAR": "POTENCIAL"}
+    )
+    cli = df_tree["fantasia"].astype(str).str.strip().replace("nan", pd.NA)
+    cli = cli.fillna(df_tree["cliente_id"].astype(str).str.strip())
+    df_tree["_cliente_display"] = cli.fillna("Sin dato")
+
+    grp_raw  = df_tree["nombre_grupo"].astype(str).str.strip()
+    sin_mask = grp_raw.str.upper().isin({"SIN GRUPO", "SIN GRUPO / OTROS", "", "NAN", "NONE"})
+    df_tree["_grupo_display"] = grp_raw
+    df_tree.loc[sin_mask, "_grupo_display"] = df_tree.loc[sin_mask, "_cliente_display"]
+
+    tree_df = (
+        df_tree.groupby(["_canal", "_grupo_display", "_cliente_display"], dropna=False)["Monto"]
+        .sum().reset_index()
+    )
+    tree_df.columns = ["Canal", "Grupo", "Cliente", "Monto"]
+    tree_df = tree_df[tree_df["Monto"] > 0].copy()
+    if tree_df.empty:
+        return {**_EMPTY, "periods": periods}
+
+    unique_canals = sorted(tree_df["Canal"].unique().tolist())
+    canals = [{"name": c, "color": _get_segment_color(c)} for c in unique_canals]
+
+    ids: list = []; labels: list = []; parents: list = []
+    values: list = []; colors: list = []
+
+    def _add(nid, label, parent, value, color):
+        ids.append(nid); labels.append(label); parents.append(parent)
+        values.append(float(value)); colors.append(color)
+
+    _add("total", "Total", "", float(tree_df["Monto"].sum()), "#EAF0F5")
+
+    group_totals = tree_df.groupby(["Canal", "Grupo"], as_index=False)["Monto"].sum()
+    group_totals["rank_grupo"]   = group_totals.groupby("Canal")["Monto"].rank(method="first", ascending=False)
+    group_totals["share_canal"]  = group_totals["Monto"] / group_totals.groupby("Canal")["Monto"].transform("sum")
+    group_totals["show_direct"]  = (group_totals["rank_grupo"] <= 8) | (group_totals["share_canal"] >= 0.06)
+
+    for canal, canal_df in tree_df.groupby("Canal", sort=False):
+        bc       = _get_segment_color(str(canal))
+        canal_id = f"canal::{canal}"
+        _add(canal_id, str(canal), "total", float(canal_df["Monto"].sum()), _blend_with_white(bc, 0.22))
+
+        cg      = group_totals[group_totals["Canal"] == canal].copy()
+        small_g = cg[~cg["show_direct"]]
+        otras_g = None
+        if not small_g.empty:
+            otras_g = f"{canal_id}::otras_grupos"
+            _add(otras_g, "Otras", canal_id, float(small_g["Monto"].sum()), _blend_with_white(bc, 0.14))
+
+        for _, gr in cg.iterrows():
+            grupo   = gr["Grupo"]
+            g_par   = canal_id if gr["show_direct"] else otras_g
+            if g_par is None:
+                continue
+            gid = f"{canal_id}::grupo::{grupo}"
+            _add(gid, str(grupo), g_par, float(gr["Monto"]),
+                 _blend_with_white(bc, 0.33 if gr["show_direct"] else 0.43))
+
+            grp_cli = canal_df[canal_df["Grupo"] == grupo].copy()
+            grp_cli = grp_cli.assign(
+                rank_c=grp_cli["Monto"].rank(method="first", ascending=False),
+                share_g=grp_cli["Monto"] / grp_cli["Monto"].sum(),
+            )
+            grp_cli["show_c"] = (grp_cli["rank_c"] <= 6) | (grp_cli["share_g"] >= 0.08)
+            small_c = grp_cli[~grp_cli["show_c"]]
+            otras_c = None
+            if not small_c.empty:
+                otras_c = f"{gid}::otras_clientes"
+                _add(otras_c, "Otras", gid, float(small_c["Monto"].sum()), _blend_with_white(bc, 0.24))
+            for _, cr in grp_cli.iterrows():
+                c_par = gid if cr["show_c"] else otras_c
+                if c_par is None:
+                    continue
+                tone = 0.56 - min(float(cr["share_g"]) * 0.35, 0.22)
+                _add(f"{gid}::cliente::{cr['Cliente']}", str(cr["Cliente"]),
+                     c_par, float(cr["Monto"]), _blend_with_white(bc, max(0.10, tone)))
+
+    return {"ids": ids, "labels": labels, "parents": parents, "values": values,
+            "colors": colors, "periods": periods, "canals": canals}
+
+
+def _pg_get_client_detail(
+    client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct
+) -> dict:
+    """Memory-safe PostgreSQL client detail: loads only single client's rows."""
+    _EMPTY = {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
+
+    # Filter strictly by this client (fantasia or cliente_id)
+    safe_cid  = str(client_id).replace("'", "''")
+    cli_extra = f"(fantasia = '{safe_cid}' OR cliente_id = '{safe_cid}')"
+    prod_codes = _pg_resolve_prod_codes(products)
+    val_where  = _build_filter_sql(
+        start_date=start_date, end_date=end_date,
+        profiles=profiles, neg=neg, subneg=subneg,
+        products_as_codes=prod_codes,
+        products=None if prod_codes is not None else products,
+        extra=cli_extra,
+    )
+    df_c = _query_agg(
+        f"SELECT fecha, articulo, codigo_serie, descripcion, neg, subneg, perfil, "
+        f"fantasia, yhat_cliente, monto_yhat, unidad_medida, nivel_agregacion "
+        f"FROM forecast_valorizado WHERE {val_where}"
+    )
+    if df_c.empty:
+        return _EMPTY
+
+    # max hist date
+    df_mhd = _query_agg("SELECT MAX(fecha) AS mhd FROM forecast_main WHERE tipo = 'hist'")
+    max_hist_date = None
+    if not df_mhd.empty and pd.notna(df_mhd["mhd"].iloc[0]):
+        max_hist_date = pd.to_datetime(df_mhd["mhd"].iloc[0])
+
+    # Price map from forecast_main (avg precio per codigo_serie)
+    df_price = _query_agg(
+        "SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS precio FROM forecast_main GROUP BY codigo_serie"
+    )
+    price_map: dict = {}
+    if not df_price.empty:
+        price_map = df_price.set_index("codigo_serie")["precio"].to_dict()
+
+    saved_overrides = _get_client_overrides_snapshot(client_id)
+
+    # Ensure required columns
+    for col, default in [("unidad_medida", "Unid."), ("nivel_agregacion", "ARTICULO"),
+                          ("neg", "Sin Negocio"), ("subneg", "General")]:
+        if col not in df_c.columns:
+            df_c[col] = default
+        else:
+            df_c[col] = df_c[col].fillna(default)
+    if "articulo" not in df_c.columns and "codigo_serie" in df_c.columns:
+        df_c["articulo"] = df_c["codigo_serie"].astype(str)
+    if "descripcion" not in df_c.columns:
+        df_c["descripcion"] = df_c.get("articulo", "")
+
+    first    = df_c.iloc[0]
+    perfil   = str(first.get("perfil", ""))
+    neg_val  = str(first.get("neg", ""))
+
+    val_col = next((c for c in ("yhat_cliente", "yhat", "monto_yhat") if c in df_c.columns), None)
+    if val_col is None:
+        return _EMPTY
+
+    grp_keys = [k for k in ["articulo", "descripcion", "unidad_medida",
+                              "nivel_agregacion", "neg", "subneg", "fecha"]
+                if k in df_c.columns]
+    agg       = df_c.groupby(grp_keys)[val_col].sum().reset_index()
+    all_dates = sorted(agg["fecha"].unique())
+    date_strs = [d.strftime("%Y-%m") for d in all_dates]
+
+    def _get_price(articulo):
+        return float(price_map.get(str(articulo), 0) or 0)
+
+    negocios_out = []
+    for neg_name, df_neg in agg.groupby("neg"):
+        subnegs_out = []
+        sub_col = "subneg" if "subneg" in df_neg.columns else None
+        for subneg_name, df_sub in (df_neg.groupby("subneg") if sub_col else [("General", df_neg)]):
+            products_out = []
+            for _, prow in df_sub.groupby(["articulo", "descripcion"]):
+                art   = str(prow.iloc[0]["articulo"])
+                desc  = str(prow.iloc[0]["descripcion"])
+                um    = str(prow.iloc[0].get("unidad_medida", "Unid."))
+                nivel = str(prow.iloc[0].get("nivel_agregacion", "ARTICULO"))
+                precio = _get_price(art)
+                months_data = {}
+                for d, ds in zip(all_dates, date_strs):
+                    row_d = prow[prow["fecha"] == d]
+                    orig  = float(row_d[val_col].sum()) if not row_d.empty else 0.0
+                    adj = orig; pct = 0.0
+                    saved_pct = saved_overrides.get((art, ds), None)
+                    if saved_pct is not None:
+                        pct = saved_pct
+                        adj = orig * (1.0 + pct / 100.0)
+                    elif max_hist_date and d > max_hist_date and growth_pct != 0:
+                        t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
+                        rm = (1 + growth_pct / 100.0) ** (1 / 12.0) - 1
+                        adj = orig * (1 + rm) ** t
+                        pct = round(rm * 100, 4)
+                    months_data[ds] = {
+                        "orig": round(orig, 2), "pct": round(pct, 4),
+                        "nuevo": round(adj, 2), "money": round(adj * precio, 0),
+                    }
+                total_nuevo = sum(v["nuevo"] for v in months_data.values())
+                total_money = round(total_nuevo * precio, 0)
+                if total_nuevo > 0 or any(v["orig"] > 0 for v in months_data.values()):
+                    products_out.append({
+                        "articulo": art, "descripcion": desc,
+                        "unidad_medida": um, "nivel_agregacion": nivel,
+                        "precio": round(precio, 2),
+                        "total_nuevo": round(total_nuevo, 2), "total_money": total_money,
+                        "months": months_data,
+                    })
+            products_out.sort(key=lambda x: x["total_money"], reverse=True)
+            subnegs_out.append({"subneg": str(subneg_name), "products": products_out})
+        negocios_out.append({"neg": str(neg_name), "subnegs": subnegs_out})
+
+    return {
+        "client_id": client_id, "perfil": perfil, "neg": neg_val,
+        "negocios": negocios_out, "dates": date_strs,
+        "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
+        "growth_pct": growth_pct,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public cache / data access
+# ---------------------------------------------------------------------------
+
 def get_data() -> dict[str, Any]:
     global _data_cache
     if _data_cache:
@@ -576,14 +1223,20 @@ def get_data() -> dict[str, Any]:
 
 def reload_data() -> None:
     global _data_cache
+    if engine is not None and "postgresql" in str(engine.url):
+        # PostgreSQL mode: data lives in DB, not in CSV files.
+        # Just clear the in-memory cache (which is {} anyway in this mode).
+        with _cache_lock:
+            _data_cache = {}
+        logger.info("[FORECAST] PostgreSQL mode: cache cleared (no CSV reload needed)")
+        return
     with _cache_lock:
         _data_cache = _load_all_data()
 
 
 def get_filter_options() -> dict:
+    import json  # needed in both branches
     if engine is not None and "postgresql" in str(engine.url):
-        import pandas as pd
-        import json
         with engine.begin() as conn:
             from sqlalchemy import text
             try:
@@ -638,11 +1291,7 @@ def get_filter_options() -> dict:
 def get_product_list(profiles: list | None = None, neg: list | None = None) -> list[dict]:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        df = _query_db("forecast_main", profiles=profiles, neg=neg)
-        import json
-        with engine.begin() as conn:
-            labs_df = pd.read_sql("SELECT * FROM forecast_product_labs", conn)
-        lab_map = {row["codigo_serie"]: json.loads(row["laboratorios"]) for _, row in labs_df.iterrows()} if not labs_df.empty else {}
+        return _pg_get_product_list(profiles=profiles, neg=neg)
     else:
         data = get_data()
         df = data.get("df_main", pd.DataFrame())
@@ -693,17 +1342,17 @@ def get_chart_data(
 ) -> dict:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        df = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
-        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
-        df_val = _get_patched_df_val(df_val)
-        df_imp_hist = _query_db("forecast_imp_hist", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
-        df_fact_2026 = _query_db("forecast_fact_2026", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
-    else:
-        data = get_data()
-        df = data.get("df_main", pd.DataFrame())
-        df_val = _get_patched_df_val()
-        df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
-        df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
+        return _pg_get_chart_data(
+            start_date=start_date, end_date=end_date,
+            profiles=profiles, neg=neg, subneg=subneg,
+            products=products, view_money=view_money, growth_pct=growth_pct,
+        )
+
+    data = get_data()
+    df = data.get("df_main", pd.DataFrame())
+    df_val = _get_patched_df_val()
+    df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
+    df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
 
     if df.empty:
         return {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
@@ -1004,13 +1653,16 @@ def get_client_table(
 ) -> dict:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
-        df_val = _get_patched_df_val(df_val)
-        df_main = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
-    else:
-        data = get_data()
-        df_val = _get_patched_df_val()
-        df_main = data.get("df_main", pd.DataFrame())
+        return _pg_get_client_table(
+            start_date=start_date, end_date=end_date,
+            profiles=profiles, neg=neg, subneg=subneg,
+            products=products, view_money=view_money,
+            growth_pct=growth_pct, lab_products=lab_products,
+        )
+
+    data = get_data()
+    df_val = _get_patched_df_val()
+    df_main = data.get("df_main", pd.DataFrame())
 
     if df_val.empty:
         return {"months": [], "rows": [], "totals": [], "min_val": 0, "max_val": 0, "total_projected": 0}
@@ -1179,10 +1831,13 @@ def get_treemap_data(
 
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
-        df_val = _get_patched_df_val(df_val)
-    else:
-        df_val = _get_patched_df_val()
+        return _pg_get_treemap_data(
+            start_date=start_date, end_date=end_date,
+            profiles=profiles, neg=neg, subneg=subneg,
+            products=products, view_money=view_money, period_date=period_date,
+        )
+
+    df_val = _get_patched_df_val()
     if df_val.empty:
         return _EMPTY
 
@@ -1366,14 +2021,17 @@ def get_client_detail(
     """
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products, extra_where=f"cliente_id = '{client_id}'")
-        df_main = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
-        price_lookup = {}
-    else:
-        data = get_data()
-        df_val = data.get("df_valorizado", pd.DataFrame()).copy()
-        df_main = data.get("df_main", pd.DataFrame())
-        price_lookup = data.get("price_lookup", {})
+        return _pg_get_client_detail(
+            client_id=client_id,
+            start_date=start_date, end_date=end_date,
+            profiles=profiles, neg=neg, subneg=subneg,
+            products=products, growth_pct=growth_pct,
+        )
+
+    data = get_data()
+    df_val = data.get("df_valorizado", pd.DataFrame()).copy()
+    df_main = data.get("df_main", pd.DataFrame())
+    price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
     saved_overrides = _get_client_overrides_snapshot(client_id)
 
