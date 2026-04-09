@@ -785,9 +785,16 @@ def _pg_get_chart_data_inner(
     # All queries use lowercase aliases; rename to Title-Case after each query so the
     # rest of the function keeps its existing column references unchanged.
     if view_money:
+        # CANONICAL SERIES FILTER: restrict imp_hist to the 3039 series that exist in
+        # forecast_valorizado (same inner-join the original app.py applied at load time).
+        # Without this filter forecast_imp_hist returns 44 861 rows / $109.1B (all series).
+        # With it: 38 758 rows / $98.0B — the correct real-2025 baseline.
         df_hist = _query_agg(
             f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
-            f"FROM forecast_imp_hist WHERE {hist_where} GROUP BY fecha ORDER BY fecha"
+            f"FROM forecast_imp_hist "
+            f"WHERE {hist_where} "
+            f"AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado) "
+            f"GROUP BY fecha ORDER BY fecha"
         )
         # forecast_main fallback intentionally omitted: y/yhat are TEXT in production,
         # SUM(COALESCE(y,0)) raises a type error caught by _query_agg → empty anyway.
