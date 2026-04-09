@@ -12,32 +12,36 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+try:
+    from web_comparativas.models import engine
+except ImportError:
+    engine = None
+
 logger = logging.getLogger("wc.forecast")
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
-# Hierarchy: web_comparativas/ → web_comparativas_v2/ → web_comparativas_v2- ok/ → web_comparativas_v2- ok/ (git root)
-FORECAST_DIR = BASE_DIR.parent.parent.parent / "Forecast ultimo"
+# Now using inline data folder packaged for the deployed repository.
+FORECAST_DIR = BASE_DIR / "data" / "forecast_data"
 
-# Original Forecast directory (4 levels up → Desktop/Forecast ultimo/Forecast ultimo/)
-# Contains the authoritative prepared tables with pre-computed monto_yhat (702K rows)
-_ORIG_FORECAST_DIR = BASE_DIR.parent.parent.parent.parent / "Forecast ultimo" / "Forecast ultimo"
+# Original Forecast directory
+_ORIG_FORECAST_DIR = FORECAST_DIR
 # Prepared fact_forecast_valorizado.csv (comma-sep, monto_yhat pre-computed, 702K rows)
-_VALORIZADO_PREPARED = _ORIG_FORECAST_DIR / "01_output" / "dashboard" / "fact_forecast_valorizado.csv"
+_VALORIZADO_PREPARED = _ORIG_FORECAST_DIR / "fact_forecast_valorizado.csv"
 # Fallback: SIEM copy (semicolon-sep, only 110K rows — incomplete)
-_VALORIZADO_FALLBACK = FORECAST_DIR / "01_output" / "etapa5" / "forecast_valorizado_v2.csv"
+_VALORIZADO_FALLBACK = FORECAST_DIR / "forecast_valorizado_v2.csv"
 
-FORECAST_FILE   = FORECAST_DIR / "01_output" / "etapa2" / "forecast_base_consolidado.csv"
-MASTER_FILE     = FORECAST_DIR / "00_input" / "Articulos 1.csv"
-NEGOCIOS_FILE   = FORECAST_DIR / "00_input" / "Negocios.csv"
-SERIES_FILE     = FORECAST_DIR / "01_output" / "etapa1" / "dataset_base.csv"
-ARTICULOS_FILE  = FORECAST_DIR / "00_input" / "Articulos 1.csv"
-VALORIZADO_FILE = FORECAST_DIR / "01_output" / "etapa5" / "forecast_valorizado_v2.csv"
-CLIENTES_FILE   = FORECAST_DIR / "00_input" / "clientes.csv"
-IMP_HIST_FILE   = FORECAST_DIR / "01_output" / "etapa1" / "importe_historico.csv"
-FACT_2026_FILE  = FORECAST_DIR / "01_output" / "etapa1" / "facturacion_real_2026.csv"
+FORECAST_FILE   = FORECAST_DIR / "forecast_base_consolidado.csv"
+MASTER_FILE     = FORECAST_DIR / "Articulos 1.csv"
+NEGOCIOS_FILE   = FORECAST_DIR / "Negocios.csv"
+SERIES_FILE     = FORECAST_DIR / "dataset_base.csv"
+ARTICULOS_FILE  = FORECAST_DIR / "Articulos 1.csv"
+VALORIZADO_FILE = FORECAST_DIR / "forecast_valorizado_v2.csv"
+CLIENTES_FILE   = FORECAST_DIR / "clientes.csv"
+IMP_HIST_FILE   = FORECAST_DIR / "importe_historico.csv"
+FACT_2026_FILE  = FORECAST_DIR / "facturacion_real_2026.csv"
 
 _cache_lock = threading.Lock()
 _data_cache: dict[str, Any] = {}
@@ -75,12 +79,13 @@ def _get_client_overrides_snapshot(client_id: str) -> dict:
         return dict(_client_overrides.get(client_id, {}))
 
 
-def _get_patched_df_val() -> "pd.DataFrame":
-    """Return df_valorizado with all saved overrides applied (copy — never mutates cache).
-    For each stored (client_id, articulo, date): yhat *= (1 + pct/100).
-    """
-    data = get_data()
-    df = data.get("df_valorizado", None)
+def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
+    """Return df_valorizado with all saved overrides applied (copy — never mutates cache)."""
+    if df_source is not None:
+        df = df_source
+    else:
+        data = get_data()
+        df = data.get("df_valorizado", None)
     if df is None or df.empty:
         return df if df is not None else __import__("pandas").DataFrame()
     with _overrides_lock:
@@ -524,6 +529,37 @@ def _load_all_data() -> dict[str, Any]:
 # Public API
 # ---------------------------------------------------------------------------
 
+
+def _safe_in(col: str, vals: list) -> str:
+    if not vals: return ""
+    clean_vals = ["'" + str(v).replace("'", "''") + "'" for v in vals]
+    return f"{col} IN ({','.join(clean_vals)})"
+
+def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=None, subneg=None, products=None, extra_where=None) -> "pd.DataFrame":
+    import pandas as pd
+    try:
+        if engine is None or "sqlite" in str(engine.url): return pd.DataFrame()
+        query = f"SELECT * FROM {table} WHERE 1=1"
+        if start_date: query += f" AND fecha >= '{start_date}'"
+        if end_date: query += f" AND fecha <= '{end_date}'"
+        if profiles: query += " AND " + _safe_in("perfil", profiles)
+        if neg: query += " AND " + _safe_in("neg", neg)
+        if subneg: query += " AND " + _safe_in("subneg", subneg)
+        if products:
+            p_cond = _safe_in("codigo_serie", products)
+            desc_cond = _safe_in("descripcion", products)
+            query += f" AND ({p_cond} OR {desc_cond})"
+        if extra_where: query += f" AND {extra_where}"
+        
+        with engine.begin() as conn:
+            df = pd.read_sql(query, conn)
+        if "fecha" in df.columns:
+            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        return df
+    except Exception as e:
+        logger.error(f"SQL DB Query Error ({table}): {e}")
+        return pd.DataFrame()
+
 def get_data() -> dict[str, Any]:
     global _data_cache
     if _data_cache:
@@ -565,8 +601,17 @@ def get_filter_options() -> dict:
 
 
 def get_product_list(profiles: list | None = None, neg: list | None = None) -> list[dict]:
-    data = get_data()
-    df = data.get("df_main", pd.DataFrame())
+    import pandas as pd
+    if engine is not None and "postgresql" in str(engine.url):
+        df = _query_db("forecast_main", profiles=profiles, neg=neg)
+        import json
+        with engine.begin() as conn:
+            labs_df = pd.read_sql("SELECT * FROM forecast_product_labs", conn)
+        lab_map = {row["codigo_serie"]: json.loads(row["laboratorios"]) for _, row in labs_df.iterrows()} if not labs_df.empty else {}
+    else:
+        data = get_data()
+        df = data.get("df_main", pd.DataFrame())
+        lab_map = data.get("product_lab_map", {})
     if df.empty:
         return []
 
@@ -595,8 +640,8 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
     )
 
     # Add lab info
-    lab_map = data.get("product_lab_map", {})
-    ranking["labs"] = ranking["descripcion"].apply(lambda x: lab_map.get(x, []))
+    # lab_map already acquired via DB overlay
+    ranking["labs"] = ranking["codigo_serie" if "codigo_serie" in ranking.columns else "descripcion"].apply(lambda x: lab_map.get(x, []))
 
     return ranking.to_dict(orient="records")
 
@@ -611,9 +656,15 @@ def get_chart_data(
     view_money: bool = True,
     growth_pct: float = 0.0,
 ) -> dict:
-    data = get_data()
-    df = data.get("df_main", pd.DataFrame())
-    df_val = _get_patched_df_val()
+    import pandas as pd
+    if engine is not None and "postgresql" in str(engine.url):
+        df = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
+        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
+        df_val = _get_patched_df_val(df_val)
+    else:
+        data = get_data()
+        df = data.get("df_main", pd.DataFrame())
+        df_val = _get_patched_df_val()
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
     df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
 
@@ -1083,7 +1134,12 @@ def get_treemap_data(
 
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
 
-    df_val = _get_patched_df_val()
+    import pandas as pd
+    if engine is not None and "postgresql" in str(engine.url):
+        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
+        df_val = _get_patched_df_val(df_val)
+    else:
+        df_val = _get_patched_df_val()
     if df_val.empty:
         return _EMPTY
 
@@ -1265,11 +1321,16 @@ def get_client_detail(
     Always uses the RAW (unpatched) df_valorizado so that 'orig' = CSV baseline.
     Saved % overrides are injected directly into months_data so the modal shows them.
     """
-    data = get_data()
-    # Use raw df_val so that 'orig' never drifts from the CSV baseline.
-    df_val = data.get("df_valorizado", pd.DataFrame()).copy()
-    df_main = data.get("df_main", pd.DataFrame())
-    price_lookup = data.get("price_lookup", {})
+    import pandas as pd
+    if engine is not None and "postgresql" in str(engine.url):
+        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products, extra_where=f"cliente_id = '{client_id}'")
+        df_main = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
+        price_lookup = {}
+    else:
+        data = get_data()
+        df_val = data.get("df_valorizado", pd.DataFrame()).copy()
+        df_main = data.get("df_main", pd.DataFrame())
+        price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
     saved_overrides = _get_client_overrides_snapshot(client_id)
 
