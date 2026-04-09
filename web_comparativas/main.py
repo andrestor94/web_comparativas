@@ -14,7 +14,7 @@ from threading import Lock, Thread
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -314,12 +314,28 @@ async def db_session_lifecycle(request: Request, call_next):
     if request.url.path == "/healthz":
         return await call_next(request)
 
-    print(f"[MW] DB Start (Outer): {request.url.path}", flush=True)
+    path = request.url.path
+    is_api = "/api/" in path or path.startswith("/api")
+    print(f"[MW] DB Start (Outer): {path}", flush=True)
     _reset_session()
-    
+
+    # --- Create DB session (may fail when DB is in recovery/maintenance) ---
     try:
         request.state.db = SessionLocal()
         print(f"[MW] Session Created", flush=True)
+    except Exception as e:
+        print(f"[MW] DB session creation failed: {e}", flush=True)
+        request.state.db = None
+        if is_api:
+            return JSONResponse(
+                {"error": "Base de datos temporalmente no disponible. Reintentá en unos segundos.",
+                 "status": 503},
+                status_code=503,
+            )
+        return PlainTextResponse("Servicio temporalmente no disponible (DB)", status_code=503)
+
+    # --- Process request ---
+    try:
         response = await call_next(request)
         print(f"[MW] Committing...", flush=True)
         request.state.db.commit()
@@ -327,11 +343,22 @@ async def db_session_lifecycle(request: Request, call_next):
         return response
     except Exception as e:
         print(f"[MW] DB Error/Rollback: {e}", flush=True)
-        if hasattr(request.state, "db"):
+        try:
             request.state.db.rollback()
+        except Exception:
+            pass
+        # For API routes return JSON so the frontend gets a parseable error,
+        # not Starlette's default HTML 500 page.
+        if is_api:
+            logger.error("Unhandled error on API path %s: %s", path, e, exc_info=True)
+            return JSONResponse(
+                {"error": "Error interno del servidor. Reintentá en unos segundos.",
+                 "status": 500},
+                status_code=500,
+            )
         raise
     finally:
-        if hasattr(request.state, "db"):
+        if hasattr(request.state, "db") and request.state.db is not None:
             request.state.db.close()
         print(f"[MW] DB Closed", flush=True)
 
@@ -500,7 +527,15 @@ def upload_oportunidades(file: UploadFile = File(...), user: User = Depends(get_
 # === BASIC ROUTES ===
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    if exc.status_code == 401: return RedirectResponse("/login", 303)
+    path = request.url.path
+    # API routes must ALWAYS return JSON — never redirect or plain-text
+    if "/api/" in path or path.startswith("/api"):
+        return JSONResponse(
+            {"error": str(exc.detail), "status": exc.status_code},
+            status_code=exc.status_code,
+        )
+    if exc.status_code == 401:
+        return RedirectResponse("/login", 303)
     return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
 
 @app.get("/", response_class=HTMLResponse)
