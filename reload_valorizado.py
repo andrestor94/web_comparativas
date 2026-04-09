@@ -135,8 +135,8 @@ def _enrich_batch(
         df["fantasia"]     = df["fantasia"].fillna(df["cliente_id"])
         df["nombre_grupo"] = df["nombre_grupo"].fillna("SIN GRUPO")
     else:
-        df.setdefault("fantasia",     pd.NA)
-        df.setdefault("nombre_grupo", "SIN GRUPO")
+        if "fantasia"     not in df.columns: df["fantasia"]     = pd.NA
+        if "nombre_grupo" not in df.columns: df["nombre_grupo"] = "SIN GRUPO"
 
     # Join neg / subneg desde neg_map
     if not neg_map.empty and "codigo_serie" in df.columns:
@@ -150,7 +150,7 @@ def _enrich_batch(
                     df[col] = df[col].fillna(df[col_nm])
                 df.drop(columns=[col_nm], inplace=True, errors="ignore")
     for col in ("neg", "subneg"):
-        df.setdefault(col, pd.NA)
+        if col not in df.columns: df[col] = pd.NA
 
     # descripcion fallback
     if "descripcion" not in df.columns and "codigo_serie" in df.columns:
