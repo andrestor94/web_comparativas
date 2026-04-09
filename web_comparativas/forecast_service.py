@@ -575,9 +575,10 @@ def _build_filter_sql(
     profiles=None,
     neg=None,
     subneg=None,
-    products=None,           # filter by (codigo_serie OR descripcion) — tables with both cols
+    products=None,           # filter by codigo_serie only (descripcion = codigo_serie in DB)
     products_as_codes=None,  # filter by codigo_serie only; [] means "no matches → empty"
     extra=None,
+    skip_neg=False,          # True for tables without neg/subneg cols (imp_hist, fact_2026)
 ) -> str:
     """Build a SQL WHERE clause from dashboard filter params."""
     parts = ["1=1"]
@@ -589,23 +590,23 @@ def _build_filter_sql(
         c = _safe_in("perfil", profiles)
         if c:
             parts.append(c)
-    if neg:
-        c = _safe_in("neg", neg)
-        if c:
-            parts.append(c)
-    if subneg:
-        c = _safe_in("subneg", subneg)
-        if c:
-            parts.append(c)
+    if not skip_neg:
+        if neg:
+            c = _safe_in("neg", neg)
+            if c:
+                parts.append(c)
+        if subneg:
+            c = _safe_in("subneg", subneg)
+            if c:
+                parts.append(c)
     if products_as_codes is not None:
         if len(products_as_codes) == 0:
             parts.append("1=0")  # no matching series → empty result
         else:
             parts.append(_safe_in("codigo_serie", products_as_codes))
     elif products:
-        p = _safe_in("codigo_serie", products)
-        d = _safe_in("descripcion", products)
-        parts.append(f"({p} OR {d})")
+        # descripcion = codigo_serie in all tables; filter by codigo_serie only
+        parts.append(_safe_in("codigo_serie", products))
     if extra:
         parts.append(extra)
     return " AND ".join(parts)
@@ -627,10 +628,11 @@ def _query_agg(sql: str) -> "pd.DataFrame":
 
 
 def _pg_resolve_prod_codes(products: list) -> "list | None":
-    """Return codigo_serie list for given product names/codes, or None if no product filter."""
+    """Return codigo_serie list for given product names/codes, or None if no product filter.
+    Uses only codigo_serie filter — forecast_main has no descripcion column."""
     if not products:
         return None
-    where = _build_filter_sql(products=products)
+    where = _safe_in("codigo_serie", products)
     df = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}")
     return df["codigo_serie"].tolist() if not df.empty else []
 
@@ -642,15 +644,17 @@ def _pg_resolve_prod_codes(products: list) -> "list | None":
 def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     import json
     where = _build_filter_sql(profiles=profiles, neg=neg)
+    # forecast_main has no descripcion column — use codigo_serie as display name
     df = _query_agg(
-        f"SELECT neg, descripcion, codigo_serie, "
+        f"SELECT neg, codigo_serie, "
         f"SUM(COALESCE(y, 0)) AS y, SUM(COALESCE(yhat, 0)) AS yhat, "
         f"AVG(COALESCE(precio, 0)) AS precio "
         f"FROM forecast_main WHERE {where} "
-        f"GROUP BY neg, descripcion, codigo_serie"
+        f"GROUP BY neg, codigo_serie"
     )
     if df.empty:
         return []
+    df["descripcion"] = df["codigo_serie"]  # alias for frontend compatibility
     df["vol_venta"] = (df["y"].fillna(0) + df["yhat"].fillna(0)) * df["precio"].fillna(0)
     labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
     lab_map: dict = {}
@@ -660,13 +664,12 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
         except Exception:
             pass
     ranking = (
-        df.groupby(["neg", "descripcion"])["vol_venta"]
+        df.groupby(["neg", "codigo_serie"])["vol_venta"]
         .sum()
         .reset_index()
         .sort_values(["neg", "vol_venta"], ascending=[True, False])
     )
-    codigo_map = df.groupby("descripcion")["codigo_serie"].first().to_dict()
-    ranking["codigo_serie"] = ranking["descripcion"].map(codigo_map)
+    ranking["descripcion"] = ranking["codigo_serie"]
     ranking["labs"] = ranking["codigo_serie"].apply(
         lambda x: lab_map.get(str(x) if pd.notna(x) else "", [])
     )
@@ -682,7 +685,7 @@ def _pg_get_chart_data(
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
 
-    # WHERE for forecast_main (supports both codigo_serie and descripcion cols)
+    # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
     main_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
@@ -690,8 +693,9 @@ def _pg_get_chart_data(
         products=None if prod_codes is not None else products,
     )
     # Lightweight metadata: n_products + max history date
+    # forecast_main has no descripcion — count by codigo_serie
     df_meta = _query_agg(
-        f"SELECT COUNT(DISTINCT descripcion) AS n_products, "
+        f"SELECT COUNT(DISTINCT codigo_serie) AS n_products, "
         f"MAX(CASE WHEN tipo = 'hist' THEN fecha END) AS max_hist_date "
         f"FROM forecast_main WHERE {main_where}"
     )
@@ -701,21 +705,25 @@ def _pg_get_chart_data(
     _mhd = df_meta["max_hist_date"].iloc[0] if not df_meta.empty else None
     max_hist = pd.to_datetime(_mhd) if pd.notna(_mhd) else pd.Timestamp("2000-01-01")
 
-    # WHERE for tables without descripcion (imp_hist, fact_2026, valorizado)
+    # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
     hist_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
-        profiles=profiles, neg=neg, subneg=subneg,
+        profiles=profiles,
         products_as_codes=prod_codes,
+        skip_neg=True,
     )
+    # WHERE for forecast_valorizado: has neg/subneg
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
         products_as_codes=prod_codes,
         products=None if prod_codes is not None else products,
     )
+    # WHERE for forecast_fact_2026: only has perfil + codigo_serie + fecha (no neg/subneg)
     fact_where = _build_filter_sql(
-        profiles=profiles, neg=neg, subneg=subneg,
+        profiles=profiles,
         products_as_codes=prod_codes,
+        skip_neg=True,
     )
 
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
@@ -989,11 +997,18 @@ def _pg_get_treemap_data(
     )
     df_tree = _query_agg(
         f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
-        f"SUM(COALESCE({val_col}, 0)) AS Monto "
+        f"SUM(COALESCE({val_col}, 0)) AS monto "
         f"FROM forecast_valorizado WHERE {val_where} "
         f"GROUP BY perfil, nombre_grupo, fantasia, cliente_id"
     )
     if df_tree.empty:
+        return {**_EMPTY, "periods": periods}
+
+    # Normalise column name — PostgreSQL always returns lowercase aliases
+    if "monto" not in df_tree.columns and "Monto" in df_tree.columns:
+        df_tree.rename(columns={"Monto": "monto"}, inplace=True)
+    if "monto" not in df_tree.columns:
+        logger.error("treemap: expected column 'monto' not found. Columns: %s", list(df_tree.columns))
         return {**_EMPTY, "periods": periods}
 
     # Build display columns (same logic as get_treemap_data)
@@ -1011,7 +1026,7 @@ def _pg_get_treemap_data(
     df_tree.loc[sin_mask, "_grupo_display"] = df_tree.loc[sin_mask, "_cliente_display"]
 
     tree_df = (
-        df_tree.groupby(["_canal", "_grupo_display", "_cliente_display"], dropna=False)["Monto"]
+        df_tree.groupby(["_canal", "_grupo_display", "_cliente_display"], dropna=False)["monto"]
         .sum().reset_index()
     )
     tree_df.columns = ["Canal", "Grupo", "Cliente", "Monto"]
@@ -1097,9 +1112,12 @@ def _pg_get_client_detail(
         products=None if prod_codes is not None else products,
         extra=cli_extra,
     )
+    # forecast_valorizado has no 'articulo' column — use codigo_serie as fallback.
+    # 'descripcion' may or may not exist; use COALESCE. 'unidad_medida' is absent too.
     df_c = _query_agg(
-        f"SELECT fecha, articulo, codigo_serie, descripcion, neg, subneg, perfil, "
-        f"fantasia, yhat_cliente, monto_yhat, unidad_medida, nivel_agregacion "
+        f"SELECT fecha, codigo_serie, "
+        f"COALESCE(descripcion, codigo_serie) AS descripcion, "
+        f"neg, subneg, perfil, fantasia, yhat_cliente, monto_yhat, nivel_agregacion "
         f"FROM forecast_valorizado WHERE {val_where}"
     )
     if df_c.empty:
@@ -1121,17 +1139,17 @@ def _pg_get_client_detail(
 
     saved_overrides = _get_client_overrides_snapshot(client_id)
 
-    # Ensure required columns
+    # Ensure required columns — articulo and unidad_medida absent from forecast_valorizado
+    if "articulo" not in df_c.columns:
+        df_c["articulo"] = df_c["codigo_serie"].astype(str) if "codigo_serie" in df_c.columns else ""
+    if "descripcion" not in df_c.columns:
+        df_c["descripcion"] = df_c["articulo"]
     for col, default in [("unidad_medida", "Unid."), ("nivel_agregacion", "ARTICULO"),
                           ("neg", "Sin Negocio"), ("subneg", "General")]:
         if col not in df_c.columns:
             df_c[col] = default
         else:
             df_c[col] = df_c[col].fillna(default)
-    if "articulo" not in df_c.columns and "codigo_serie" in df_c.columns:
-        df_c["articulo"] = df_c["codigo_serie"].astype(str)
-    if "descripcion" not in df_c.columns:
-        df_c["descripcion"] = df_c.get("articulo", "")
 
     first    = df_c.iloc[0]
     perfil   = str(first.get("perfil", ""))
