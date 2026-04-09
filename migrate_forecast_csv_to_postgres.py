@@ -14,7 +14,8 @@ from sqlalchemy import text
 from web_comparativas.forecast_service import (
     _apply_neg_names, _get_col_ci, FORECAST_FILE, VALORIZADO_FILE, IMP_HIST_FILE,
     FACT_2026_FILE, CLIENTES_FILE, NEGOCIOS_FILE, SERIES_FILE, ARTICULOS_FILE,
-    _VALORIZADO_PREPARED, _build_price_lookup, _apply_prices, _process_dataframe, MASTER_FILE
+    _VALORIZADO_PREPARED, _VALORIZADO_PARQUET,
+    _build_price_lookup, _apply_prices, _process_dataframe, MASTER_FILE
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -58,10 +59,15 @@ def run_migration():
     del df_main
     gc.collect()
 
-    # 2. df_valorizado (CHUNK-BASED)
-    _val_file = _VALORIZADO_PREPARED if _VALORIZADO_PREPARED.exists() else VALORIZADO_FILE
-    if _val_file.exists():
-        logger.info(f"Uploading forecast_valorizado via chunks...")
+    # 2. df_valorizado
+    # Priority: canonical parquet (9MB, 702K rows, $121.7B, includes monto_li/monto_ls)
+    # Fallback: legacy CSV (only used if parquet absent — incomplete, do not use in production)
+    _use_parquet = _VALORIZADO_PARQUET.exists()
+    _val_file = None if _use_parquet else (_VALORIZADO_PREPARED if _VALORIZADO_PREPARED.exists() else VALORIZADO_FILE)
+    _val_available = _use_parquet or (_val_file is not None and _val_file.exists())
+
+    if _val_available:
+        logger.info("Uploading forecast_valorizado via %s...", "parquet" if _use_parquet else f"CSV {_val_file}")
         cli_lu = None
         grupo_set = set()
         if CLIENTES_FILE.exists():
@@ -69,16 +75,29 @@ def run_migration():
             df_cli.columns = [c.lower().strip() for c in df_cli.columns]
             df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
             cli_lu = df_cli[["codigo", "fantasia", "nombre_grupo"]].drop_duplicates("codigo")
-            
             grupo_set = set(df_cli["nombre_grupo"].dropna().unique())
             del df_cli
             gc.collect()
 
         first_chunk = True
-        sep = "," if _VALORIZADO_PREPARED.exists() else ";"
-        dec = "." if _VALORIZADO_PREPARED.exists() else ","
+
+        def _valorizado_chunks():
+            """Yield chunks of the valorizado data regardless of source format."""
+            if _use_parquet:
+                df_full = pd.read_parquet(str(_VALORIZADO_PARQUET))
+                chunk_size = 25000
+                for start in range(0, len(df_full), chunk_size):
+                    yield df_full.iloc[start:start + chunk_size].copy()
+                del df_full
+                gc.collect()
+            else:
+                sep = "," if (_val_file == _VALORIZADO_PREPARED) else ";"
+                dec = "." if (_val_file == _VALORIZADO_PREPARED) else ","
+                yield from pd.read_csv(str(_val_file), sep=sep, decimal=dec,
+                                       encoding="utf-8-sig", chunksize=25000, low_memory=False)
+
         try:
-            for chunk in pd.read_csv(str(_val_file), sep=sep, decimal=dec, encoding="utf-8-sig", chunksize=25000, low_memory=False):
+            for chunk in _valorizado_chunks():
                 chunk.columns = [c.lower().strip() for c in chunk.columns]
                 if "periodo" in chunk.columns and "fecha" not in chunk.columns:
                     chunk["fecha"] = pd.to_datetime(chunk["periodo"], format="%Y-%m", errors="coerce")

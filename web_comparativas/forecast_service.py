@@ -28,9 +28,12 @@ FORECAST_DIR = BASE_DIR / "data" / "forecast_data"
 
 # Original Forecast directory
 _ORIG_FORECAST_DIR = FORECAST_DIR
-# Prepared fact_forecast_valorizado.csv (comma-sep, monto_yhat pre-computed, 702K rows)
+# Canonical slim parquet (9MB, 702K rows, monto_yhat+monto_li+monto_ls pre-computed, $121.7B)
+# This is the authoritative source for both local CSV mode and the PostgreSQL migration.
+_VALORIZADO_PARQUET  = FORECAST_DIR / "fact_forecast_valorizado.parquet"
+# Legacy CSV path (kept for backward compat — parquet is preferred)
 _VALORIZADO_PREPARED = _ORIG_FORECAST_DIR / "fact_forecast_valorizado.csv"
-# Fallback: SIEM copy (semicolon-sep, only 110K rows — incomplete)
+# Fallback: incomplete copy (110K rows, 1838 series, ~$52B — DO NOT USE for production)
 _VALORIZADO_FALLBACK = FORECAST_DIR / "forecast_valorizado_v2.csv"
 
 FORECAST_FILE   = FORECAST_DIR / "forecast_base_consolidado.csv"
@@ -340,20 +343,28 @@ def _load_all_data() -> dict[str, Any]:
         result["df_main"] = df_main
 
     # ── Valorizado (etapa 5) ──────────────────────────────────────────────
-    # Priority: original prepared file (702K rows, comma-sep, monto_yhat pre-computed)
-    # Fallback: SIEM copy (110K rows — incomplete, use only if original unavailable)
+    # Priority 1: canonical parquet (9MB, 702K rows, $121.7B — correct source)
+    # Priority 2: legacy prepared CSV (comma-sep, if parquet absent)
+    # DO NOT fall back to forecast_valorizado_v2.csv — it has only 110K rows / $52B
     df_val = pd.DataFrame()
-    _use_prepared = _VALORIZADO_PREPARED.exists()
-    _val_file = _VALORIZADO_PREPARED if _use_prepared else (VALORIZADO_FILE if VALORIZADO_FILE.exists() else None)
-    if _val_file is not None:
+    _val_file = None
+    _use_parquet = False
+    if _VALORIZADO_PARQUET.exists():
+        _use_parquet = True
+    elif _VALORIZADO_PREPARED.exists():
+        _val_file = _VALORIZADO_PREPARED
+    # Intentionally skip VALORIZADO_FILE / _VALORIZADO_FALLBACK — incomplete data
+
+    if _use_parquet or _val_file is not None:
         try:
-            if _use_prepared:
-                # Prepared file is comma-separated, no decimal override needed
-                df_val = pd.read_csv(str(_val_file), sep=",", encoding="utf-8-sig", low_memory=False)
-                logger.info("[FORECAST] Loaded valorizado from PREPARED file: %d rows", len(df_val))
+            if _use_parquet:
+                df_val = pd.read_parquet(str(_VALORIZADO_PARQUET))
+                logger.info("[FORECAST] Loaded valorizado from PARQUET: %d rows, monto_yhat=$%.0fB",
+                            len(df_val), df_val["monto_yhat"].sum() / 1e9 if "monto_yhat" in df_val.columns else 0)
             else:
-                df_val = pd.read_csv(str(_val_file), sep=";", decimal=",", encoding="utf-8-sig", low_memory=False)
-                logger.info("[FORECAST] Loaded valorizado from FALLBACK file: %d rows", len(df_val))
+                # Legacy CSV (comma-sep, decimal='.')
+                df_val = pd.read_csv(str(_val_file), sep=",", encoding="utf-8-sig", low_memory=False)
+                logger.info("[FORECAST] Loaded valorizado from CSV: %d rows", len(df_val))
             df_val.columns = [c.lower().strip() for c in df_val.columns]
             if "periodo" in df_val.columns and "fecha" not in df_val.columns:
                 df_val["fecha"] = pd.to_datetime(df_val["periodo"], format="%Y-%m", errors="coerce")
@@ -792,18 +803,32 @@ def _pg_get_chart_data_inner(
         df_hist.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
 
     logger.info("[FORECAST chart] step=query_fcst df_hist_rows=%s", len(df_hist))
-    # Forecast: from valorizado (monto_yhat = money, yhat_cliente = units)
-    val_col = "monto_yhat" if view_money else "yhat_cliente"
+    # Forecast: from valorizado (monto_yhat=money, yhat_cliente=units; monto_li/monto_ls=band)
+    val_col    = "monto_yhat"    if view_money else "yhat_cliente"
+    val_col_li = "monto_li"      if view_money else "li_cliente"
+    val_col_ls = "monto_ls"      if view_money else "ls_cliente"
     df_fcst = _query_agg(
-        f"SELECT fecha, SUM(COALESCE({val_col}, 0)) AS total_forecast "
+        f"SELECT fecha, "
+        f"SUM(COALESCE({val_col}, 0)) AS total_forecast, "
+        f"SUM(COALESCE({val_col_li}, 0)) AS total_li, "
+        f"SUM(COALESCE({val_col_ls}, 0)) AS total_ls "
         f"FROM forecast_valorizado WHERE {val_where} GROUP BY fecha ORDER BY fecha"
     )
-    # Normalise alias
-    if not df_fcst.empty and "total_forecast" in df_fcst.columns:
-        df_fcst.rename(columns={"total_forecast": "Total_Forecast"}, inplace=True)
+    # Normalise aliases (PostgreSQL returns lowercase regardless of AS casing)
     if not df_fcst.empty:
-        df_fcst["Total_Li"] = df_fcst["Total_Forecast"]
-        df_fcst["Total_Ls"] = df_fcst["Total_Forecast"]
+        rename_map = {k: v for k, v in {
+            "total_forecast": "Total_Forecast",
+            "total_li": "Total_Li",
+            "total_ls": "Total_Ls",
+        }.items() if k in df_fcst.columns}
+        if rename_map:
+            df_fcst.rename(columns=rename_map, inplace=True)
+    if not df_fcst.empty:
+        # If li/ls columns absent from table (older migration), fall back to flat band
+        if "Total_Li" not in df_fcst.columns:
+            df_fcst["Total_Li"] = df_fcst.get("Total_Forecast", 0)
+        if "Total_Ls" not in df_fcst.columns:
+            df_fcst["Total_Ls"] = df_fcst.get("Total_Forecast", 0)
         df_fcst["Total_Adj"] = df_fcst["Total_Forecast"]
         if growth_pct != 0:
             g = 1.0 + growth_pct / 100.0
