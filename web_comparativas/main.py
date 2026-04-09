@@ -171,37 +171,18 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[MIGRATION] Warning normalized storage: {e}", flush=True)
 
-    # Respaldar en DB los archivos ya procesados que aún no tengan contenido guardado
-    # Se ejecuta ANTES del primer request para proteger los datos del deploy actual
-    try:
-        backed_up = backfill_normalized_content()
-        print(f"[STARTUP] Backfill normalizado completado: {backed_up} uploads respaldados en DB.", flush=True)
-    except Exception as e:
-        print(f"[STARTUP] Backfill normalizado warning: {e}", flush=True)
-
-    # Respaldar archivos originales: lee desde disco persistente y guarda en DB
-    # Repara uploads subidos con código viejo (sin original_content) que aún tienen
-    # el archivo en el disco persistente de Render.
-    try:
-        orig_backed = backfill_original_content()
-        print(f"[STARTUP] Backfill original completado: {orig_backed} uploads respaldados en DB.", flush=True)
-    except Exception as e:
-        print(f"[STARTUP] Backfill original warning: {e}", flush=True)
-
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
+    # Backfill runs in background to avoid OOM during startup
+
 
 
 def _background_dimensionamiento_maintenance() -> None:
     """
-    Crea índices funcionales en PostgreSQL en un thread separado para no bloquear el startup.
-
-    CREATE INDEX CONCURRENTLY sobre 338k+ filas puede tardar minutos.
-    Si se ejecuta en el startup bloqueante, Render mata el deploy por health-check timeout.
-    Al correr en background, la app ya está sirviendo mientras los índices se construyen.
-    Si los índices ya existen (despliegues subsiguientes), el retorno es casi inmediato.
+    Mantenimiento en background: crea índices, verifica summary y corre backfill.
+    CREATE INDEX CONCURRENTLY y backfill de archivos corren aquí para no bloquear startup.
     """
     import time
-    time.sleep(3)  # Espera mínima para que el servidor esté listo
+    time.sleep(5)  # Espera a que el servidor esté listo y acepte health checks
     try:
         ensure_dimensionamiento_summary_populated()
         print("[BACKGROUND] Dimensionamiento summary checked.", flush=True)
@@ -221,6 +202,20 @@ def _background_dimensionamiento_maintenance() -> None:
             print(f"[BACKGROUND] Dimensionamiento dashboard snapshot {snapshot_state}.", flush=True)
     except Exception as e:
         print(f"[BACKGROUND] Warning dimensionamiento snapshot: {e}", flush=True)
+
+    # Backfill de archivos — corre después del startup para no acumular RAM en el inicio
+    time.sleep(5)
+    try:
+        backed_up = backfill_normalized_content()
+        print(f"[BACKGROUND] Backfill normalizado: {backed_up} uploads respaldados.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning backfill normalizado: {e}", flush=True)
+
+    try:
+        orig_backed = backfill_original_content()
+        print(f"[BACKGROUND] Backfill original: {orig_backed} uploads respaldados.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning backfill original: {e}", flush=True)
 
 
 @asynccontextmanager
