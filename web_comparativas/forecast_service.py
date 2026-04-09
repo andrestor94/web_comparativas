@@ -857,9 +857,16 @@ def _pg_get_chart_data_inner(
 
     logger.info("[FORECAST chart] step=query_fact2026")
     # Facturación real 2026
+    # CANONICAL SERIES FILTER: restrict fact_2026 to the series that exist in
+    # forecast_valorizado (same inner-join the original app.py applied at load time).
+    # Without this filter, extra rows from series not in the model are included,
+    # inflating the total: 17.661B (17.7B) instead of 17.618B (17.6B),
+    # and accuracy: 91.2% instead of 90.9%.  Mirrors the identical filter on
+    # forecast_imp_hist (AND codigo_serie IN (SELECT DISTINCT ... FROM forecast_valorizado)).
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
         f"FROM forecast_fact_2026 WHERE {fact_where} AND fecha >= '2026-01-01' "
+        f"AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado) "
         f"GROUP BY fecha ORDER BY fecha"
     )
     # Normalise alias
