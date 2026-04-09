@@ -696,12 +696,14 @@ def get_chart_data(
         df = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
         df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
         df_val = _get_patched_df_val(df_val)
+        df_imp_hist = _query_db("forecast_imp_hist", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
+        df_fact_2026 = _query_db("forecast_fact_2026", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
     else:
         data = get_data()
         df = data.get("df_main", pd.DataFrame())
         df_val = _get_patched_df_val()
-    df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
-    df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
+        df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
+        df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
 
     if df.empty:
         return {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
@@ -1000,9 +1002,15 @@ def get_client_table(
     growth_pct: float = 0.0,
     lab_products: list | None = None,
 ) -> dict:
-    data = get_data()
-    df_val = _get_patched_df_val()
-    df_main = data.get("df_main", pd.DataFrame())
+    import pandas as pd
+    if engine is not None and "postgresql" in str(engine.url):
+        df_val = _query_db("forecast_valorizado", start_date=start_date, end_date=end_date, profiles=profiles, neg=neg, subneg=subneg, products=products)
+        df_val = _get_patched_df_val(df_val)
+        df_main = _query_db("forecast_main", profiles=profiles, neg=neg, subneg=subneg, products=products)
+    else:
+        data = get_data()
+        df_val = _get_patched_df_val()
+        df_main = data.get("df_main", pd.DataFrame())
 
     if df_val.empty:
         return {"months": [], "rows": [], "totals": [], "min_val": 0, "max_val": 0, "total_projected": 0}
