@@ -681,10 +681,31 @@ def _pg_get_chart_data(
 ) -> dict:
     """Memory-safe PostgreSQL chart data: all heavy aggregation runs in SQL."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
+    _step = "init"
+    try:
+        return _pg_get_chart_data_inner(
+            start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+        )
+    except Exception as exc:
+        import traceback
+        logger.error(
+            "[FORECAST] _pg_get_chart_data FAILED at step=%s: %s\n%s",
+            _step, exc, traceback.format_exc(),
+        )
+        return _EMPTY
 
+
+def _pg_get_chart_data_inner(
+    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+) -> dict:
+    """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
+    _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
+
+    logger.info("[FORECAST chart] step=resolve_prod_codes")
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
 
+    logger.info("[FORECAST chart] step=build_where")
     # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
     main_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
@@ -692,6 +713,7 @@ def _pg_get_chart_data(
         products_as_codes=prod_codes,
         products=None if prod_codes is not None else products,
     )
+    logger.info("[FORECAST chart] step=query_meta main_where=%s", main_where[:100])
     # Lightweight metadata: n_products + max history date
     # forecast_main has no descripcion — count by codigo_serie
     df_meta = _query_agg(
@@ -700,10 +722,13 @@ def _pg_get_chart_data(
         f"FROM forecast_main WHERE {main_where}"
     )
     if df_meta.empty:
+        logger.warning("[FORECAST chart] df_meta empty — returning _EMPTY")
         return _EMPTY
+    logger.info("[FORECAST chart] step=parse_meta cols=%s", list(df_meta.columns))
     n_products = int(df_meta["n_products"].iloc[0] or 0)
     _mhd = df_meta["max_hist_date"].iloc[0] if not df_meta.empty else None
     max_hist = pd.to_datetime(_mhd) if pd.notna(_mhd) else pd.Timestamp("2000-01-01")
+    logger.info("[FORECAST chart] n_products=%s max_hist=%s", n_products, max_hist)
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
     hist_where = _build_filter_sql(
@@ -726,6 +751,7 @@ def _pg_get_chart_data(
         skip_neg=True,
     )
 
+    logger.info("[FORECAST chart] step=query_hist view_money=%s hist_where=%s", view_money, hist_where[:80])
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
     if view_money:
         df_hist = _query_agg(
@@ -743,6 +769,7 @@ def _pg_get_chart_data(
             f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
         )
 
+    logger.info("[FORECAST chart] step=query_fcst df_hist_rows=%s", len(df_hist))
     # Forecast: from valorizado (monto_yhat = money, yhat_cliente = units)
     val_col = "monto_yhat" if view_money else "yhat_cliente"
     df_fcst = _query_agg(
@@ -765,6 +792,7 @@ def _pg_get_chart_data(
             future = df_fcst["fecha"] > max_hist
             df_fcst.loc[future, "Total_Adj"] = df_fcst.loc[future, "Total_Forecast"] * g
 
+    logger.info("[FORECAST chart] step=bridge df_fcst_rows=%s df_hist_rows=%s", len(df_fcst), len(df_hist))
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
         hist_last = df_hist.sort_values("fecha").iloc[-1]
@@ -777,6 +805,7 @@ def _pg_get_chart_data(
         }])
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
+    logger.info("[FORECAST chart] step=query_fact2026")
     # Facturación real 2026
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS Total_Venta "
@@ -799,6 +828,7 @@ def _pg_get_chart_data(
                 "Total_Venta": round(float(row.get("Total_Venta", 0)), 0),
             })
 
+    logger.info("[FORECAST chart] step=kpis df_fact_raw_rows=%s", len(df_fact_raw))
     # KPIs
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0.0
     total_real_2025 = 0.0
@@ -843,6 +873,7 @@ def _pg_get_chart_data(
             out.append(rec)
         return out
 
+    logger.info("[FORECAST chart] step=serialize total_adj=%s n_products=%s", round(total_adj, 0), n_products)
     return {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
         "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj"]) if not df_fcst.empty else [],
@@ -1250,6 +1281,46 @@ def reload_data() -> None:
         return
     with _cache_lock:
         _data_cache = _load_all_data()
+
+
+def get_forecast_schema_info() -> dict:
+    """Return actual column names + dtypes for all forecast tables from information_schema.
+    Used for debugging schema mismatches between code and production DB."""
+    tables = [
+        "forecast_main", "forecast_valorizado",
+        "forecast_imp_hist", "forecast_fact_2026", "forecast_product_labs",
+    ]
+    result: dict = {}
+    if engine is None or "postgresql" not in str(engine.url):
+        return {"error": "Solo disponible en modo PostgreSQL", "tables": {}}
+    try:
+        with engine.connect() as conn:
+            for tbl in tables:
+                df = pd.read_sql(
+                    f"SELECT column_name, data_type "
+                    f"FROM information_schema.columns "
+                    f"WHERE table_name = '{tbl}' ORDER BY ordinal_position",
+                    conn,
+                )
+                if df.empty:
+                    result[tbl] = {"exists": False, "columns": []}
+                else:
+                    result[tbl] = {
+                        "exists": True,
+                        "columns": [
+                            {"name": r["column_name"], "type": r["data_type"]}
+                            for _, r in df.iterrows()
+                        ],
+                    }
+                    # Quick row count
+                    try:
+                        cnt = pd.read_sql(f"SELECT COUNT(*) AS n FROM {tbl}", conn)
+                        result[tbl]["row_count"] = int(cnt["n"].iloc[0])
+                    except Exception:
+                        result[tbl]["row_count"] = -1
+    except Exception as exc:
+        return {"error": str(exc), "tables": result}
+    return {"tables": result}
 
 
 def get_filter_options() -> dict:
