@@ -566,7 +566,11 @@ def get_data() -> dict[str, Any]:
         return _data_cache
     with _cache_lock:
         if not _data_cache:
-            _data_cache = _load_all_data()
+            if engine is not None and "postgresql" in str(engine.url):
+                # NEVER LOAD GLOBALLY ON RENDER! OOM RISK
+                return {}
+            else:
+                _data_cache = _load_all_data()
     return _data_cache
 
 
@@ -577,27 +581,58 @@ def reload_data() -> None:
 
 
 def get_filter_options() -> dict:
-    data = get_data()
-    df = data.get("df_main", pd.DataFrame())
-    all_labs: set = set()
-    for labs in data.get("product_lab_map", {}).values():
-        all_labs.update(labs)
+    if engine is not None and "postgresql" in str(engine.url):
+        import pandas as pd
+        import json
+        with engine.begin() as conn:
+            from sqlalchemy import text
+            try:
+                perfiles = pd.read_sql("SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn)["perfil"].tolist()
+                negs = pd.read_sql("SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn)["neg"].tolist()
+                subnegs = pd.read_sql("SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn)["subneg"].tolist()
+                valid_dates = pd.read_sql("SELECT min(fecha) as min_d, max(fecha) as max_d FROM forecast_main", conn)
+                min_date = valid_dates["min_d"].iloc[0].strftime("%Y-%m-%d") if pd.notnull(valid_dates["min_d"].iloc[0]) else None
+                max_date = valid_dates["max_d"].iloc[0].strftime("%Y-%m-%d") if pd.notnull(valid_dates["max_d"].iloc[0]) else None
+                
+                labs_df = pd.read_sql("SELECT * FROM forecast_product_labs", conn)
+                all_labs = set()
+                if not labs_df.empty:
+                    for _, row in labs_df.iterrows():
+                        all_labs.update(json.loads(row["laboratorios"]))
+            except Exception as e:
+                logger.error(f"Filter options DB Error: {e}")
+                return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
 
-    min_date = max_date = None
-    if not df.empty and "fecha" in df.columns:
-        valid = df["fecha"].dropna()
-        if not valid.empty:
-            min_date = valid.min().strftime("%Y-%m-%d")
-            max_date = valid.max().strftime("%Y-%m-%d")
+        return {
+            "profiles": sorted(perfiles),
+            "neg": sorted(negs),
+            "subneg": sorted(subnegs),
+            "labs": sorted(all_labs),
+            "min_date": min_date,
+            "max_date": max_date,
+        }
+    else:
+        data = get_data()
+        df = data.get("df_main", pd.DataFrame())
+        all_labs: set = set()
+        for labs in data.get("product_lab_map", {}).values():
+            all_labs.update(labs)
 
-    return {
-        "profiles": sorted(df["perfil"].dropna().unique().tolist()) if "perfil" in df.columns else [],
-        "neg": sorted(df["neg"].dropna().unique().tolist()) if "neg" in df.columns else [],
-        "subneg": sorted(df["subneg"].dropna().unique().tolist()) if "subneg" in df.columns else [],
-        "labs": sorted(all_labs),
-        "min_date": min_date,
-        "max_date": max_date,
-    }
+        min_date = max_date = None
+        if not df.empty and "fecha" in df.columns:
+            valid = df["fecha"].dropna()
+            if not valid.empty:
+                min_date = valid.min().strftime("%Y-%m-%d")
+                max_date = valid.max().strftime("%Y-%m-%d")
+
+        return {
+            "profiles": sorted(df["perfil"].dropna().unique().tolist()) if "perfil" in df.columns else [],
+            "neg": sorted(df["neg"].dropna().unique().tolist()) if "neg" in df.columns else [],
+            "subneg": sorted(df["subneg"].dropna().unique().tolist()) if "subneg" in df.columns else [],
+            "labs": sorted(all_labs),
+            "min_date": min_date,
+            "max_date": max_date,
+        }
 
 
 def get_product_list(profiles: list | None = None, neg: list | None = None) -> list[dict]:
