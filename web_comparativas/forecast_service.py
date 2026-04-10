@@ -717,6 +717,54 @@ def _pg_resolve_prod_codes(products: list) -> "list | None":
     return df["codigo_serie"].tolist() if not df.empty else []
 
 
+# Cache for schema check — checked once per process lifetime.
+_val_has_codigo_serie: "bool | None" = None
+_val_schema_lock = threading.Lock()
+
+
+def _pg_valorizado_has_codigo_serie() -> bool:
+    """Return True if forecast_valorizado has a codigo_serie column (cached after first check).
+
+    Older migrations may not have this column.  When absent, product-level filtering
+    on forecast_valorizado must be skipped — data degrades gracefully to the broader
+    neg/subneg/perfil filter rather than returning an empty result set.
+    """
+    global _val_has_codigo_serie
+    with _val_schema_lock:
+        if _val_has_codigo_serie is not None:
+            return _val_has_codigo_serie
+    # Run outside lock to avoid holding it during the DB round-trip
+    df = _query_agg(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name='forecast_valorizado' AND column_name='codigo_serie'"
+    )
+    result = not df.empty
+    with _val_schema_lock:
+        _val_has_codigo_serie = result
+    logger.info("[FORECAST schema] forecast_valorizado.codigo_serie present: %s", result)
+    return result
+
+
+def _val_prod_filter(prod_codes: "list | None") -> "list | None":
+    """Return prod_codes only when forecast_valorizado actually has the column.
+
+    If the column is absent, returns None so _build_filter_sql skips the IN-list
+    instead of generating a WHERE that raises UndefinedColumn and silently empties
+    every query that touches forecast_valorizado.
+    """
+    if prod_codes is None:
+        return None
+    if not _pg_valorizado_has_codigo_serie():
+        logger.warning(
+            "[FORECAST schema] forecast_valorizado lacks codigo_serie — "
+            "product filter (%d codes) skipped on valorizado queries; "
+            "run migration to restore full product-level accuracy.",
+            len(prod_codes),
+        )
+        return None   # None → no filter (graceful degradation)
+    return prod_codes
+
+
 # ---------------------------------------------------------------------------
 # PostgreSQL-optimized implementations (use SQL GROUP BY, no full-table loads)
 # ---------------------------------------------------------------------------
@@ -801,6 +849,8 @@ def _pg_get_chart_data_inner(
     logger.info("[FORECAST chart] step=resolve_prod_codes")
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
+    # val_prod: None when forecast_valorizado lacks the column (graceful degradation)
+    val_prod   = _val_prod_filter(prod_codes)
 
     logger.info("[FORECAST chart] step=build_where")
     # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
@@ -828,18 +878,19 @@ def _pg_get_chart_data_inner(
     logger.info("[FORECAST chart] n_products=%s max_hist=%s", n_products, max_hist)
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
+    # hist/fact tables always have codigo_serie — use prod_codes (not val_prod) here.
     hist_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles,
         products_as_codes=prod_codes,
         skip_neg=True,
     )
-    # WHERE for forecast_valorizado: has neg/subneg
+    # WHERE for forecast_valorizado: use val_prod (None when column absent → no crash)
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
-        products_as_codes=prod_codes,
-        products=None if prod_codes is not None else products,
+        products_as_codes=val_prod,
+        products=None if val_prod is not None else products,
     )
     # WHERE for forecast_fact_2026: only has perfil + codigo_serie + fecha (no neg/subneg)
     fact_where = _build_filter_sql(
@@ -1042,11 +1093,12 @@ def _pg_get_client_table(
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
 
     prod_codes = _pg_resolve_prod_codes(products)
+    val_prod   = _val_prod_filter(prod_codes)
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
-        products_as_codes=prod_codes,
-        products=None if prod_codes is not None else products,
+        products_as_codes=val_prod,
+        products=None if val_prod is not None else products,
     )
 
     if view_money:
@@ -1187,6 +1239,7 @@ def _pg_get_treemap_data(
     periods = [str(r["fecha"])[:10] for _, r in periods_df.iterrows() if pd.notna(r["fecha"])]
 
     prod_codes = _pg_resolve_prod_codes(products)
+    val_prod   = _val_prod_filter(prod_codes)
     val_col    = "monto_yhat" if view_money else "yhat_cliente"
 
     extra = None
@@ -1198,8 +1251,8 @@ def _pg_get_treemap_data(
         start_date=start_date if not period_date else None,
         end_date=end_date     if not period_date else None,
         profiles=profiles, neg=neg, subneg=subneg,
-        products_as_codes=prod_codes,
-        products=None if prod_codes is not None else products,
+        products_as_codes=val_prod,
+        products=None if val_prod is not None else products,
         extra=extra,
     )
     df_tree = _query_agg(
@@ -1312,11 +1365,12 @@ def _pg_get_client_detail(
     safe_cid  = str(client_id).replace("'", "''")
     cli_extra = f"(fantasia = '{safe_cid}' OR cliente_id = '{safe_cid}')"
     prod_codes = _pg_resolve_prod_codes(products)
+    val_prod   = _val_prod_filter(prod_codes)
     val_where  = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
-        products_as_codes=prod_codes,
-        products=None if prod_codes is not None else products,
+        products_as_codes=val_prod,
+        products=None if val_prod is not None else products,
         extra=cli_extra,
     )
     # forecast_valorizado has no 'articulo' column — use codigo_serie as fallback.
@@ -1447,8 +1501,11 @@ def get_data() -> dict[str, Any]:
 
 
 def reload_data() -> None:
-    global _data_cache
+    global _data_cache, _val_has_codigo_serie
     clear_response_cache()   # Always flush response cache on explicit reload
+    # Reset schema cache so a just-run migration is detected on next request
+    with _val_schema_lock:
+        _val_has_codigo_serie = None
     if engine is not None and "postgresql" in str(engine.url):
         # PostgreSQL mode: data lives in DB, not in CSV files.
         # Just clear the in-memory cache (which is {} anyway in this mode).
