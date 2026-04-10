@@ -629,7 +629,7 @@
         <!-- ================= MENÚ FORECAST (INDEPENDIENTE) ================= -->
 
         <!-- Home Alternativo (opcional si hay sub-rutas, hoy apunta a /forecast) -->
-        <a href="/forecast" class="nav-link {% if request.url.path == '/forecast' %}active{% endif %}">
+        <a href="/forecast/" class="nav-link {% if request.url.path.startswith('/forecast') %}active{% endif %}">
           <div><i class="bi bi-graph-up-arrow"></i> Forecast</div>
         </a>
 
