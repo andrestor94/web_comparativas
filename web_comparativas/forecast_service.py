@@ -20,6 +20,11 @@ try:
 except ImportError:
     engine = None
 
+try:
+    from sqlalchemy import text as _sa_text
+except ImportError:
+    _sa_text = None  # type: ignore[assignment]
+
 logger = logging.getLogger("wc.forecast")
 
 # ---------------------------------------------------------------------------
@@ -693,13 +698,21 @@ def _build_filter_sql(
 
 
 def _query_agg(sql: str) -> "pd.DataFrame":
-    """Execute a read-only SQL query on PostgreSQL; returns empty DataFrame on any error."""
+    """Execute a read-only SQL query on PostgreSQL; returns empty DataFrame on any error.
+
+    Uses conn.execute(text(sql)).mappings() instead of pd.read_sql(raw_string, conn)
+    to avoid the SQLAlchemy 2.x + pandas incompatibility where Row objects backed by
+    immutabledict raise "immutabledict is not a sequence" when pandas tries to treat
+    each row as a plain sequence/tuple.
+    """
     try:
         if engine is None or "sqlite" in str(engine.url):
             return pd.DataFrame()
+        stmt = _sa_text(sql) if _sa_text is not None else sql
         with engine.connect() as conn:
-            df = pd.read_sql(sql, conn)
-        if "fecha" in df.columns:
+            result = conn.execute(stmt)
+            df = pd.DataFrame(result.mappings().all())
+        if not df.empty and "fecha" in df.columns:
             df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         return df
     except Exception as exc:
