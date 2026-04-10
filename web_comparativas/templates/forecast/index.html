@@ -1083,13 +1083,21 @@ document.addEventListener('click', e => {
    PRODUCT SIDEBAR GRID
    =================================================================== */
 let prodGridApi;
+// Guard flag: set to true while updateProdGrid is doing programmatic selection.
+// Prevents onSelectionChanged from wiping STATE.selectedProducts when ag-Grid
+// clears its internal selection model during setGridOption('rowData', ...).
+// Root cause of lab-filter inconsistency: setGridOption fires onSelectionChanged
+// with getSelectedRows()=[] *before* forEachNode can re-apply the selection,
+// causing STATE.selectedProducts = [] → buildQS sends no products[] → charts
+// render the global dataset instead of the lab subset.
+let _suppressProdSelection = false;
+
 function buildProdGrid() {
   const gridOptions = {
     columnDefs: [{
       field: 'descripcion', headerName: 'Producto', flex: 1,
       checkboxSelection: true, headerCheckboxSelection: true,
       cellRenderer: params => {
-        // Quitamos el punto amarillo y aseguramos que haya un tooltip sobre el nombre completo
         return `<span title="${params.value}" style="display:block; width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${params.value}</span>`;
       },
     }],
@@ -1102,6 +1110,8 @@ function buildProdGrid() {
     defaultColDef: { resizable: false, sortable: false, filter: false },
     headerHeight: 0, rowHeight: 32, animateRows: false, suppressCellFocus: true,
     onSelectionChanged: () => {
+      // Ignore events fired during programmatic rowData replacement / re-selection
+      if (_suppressProdSelection) return;
       const rows = prodGridApi.getSelectedRows();
       const newSel = rows.map(r => r.descripcion);
       if (JSON.stringify(newSel.sort()) !== JSON.stringify([...STATE.selectedProducts].sort())) {
@@ -1124,10 +1134,15 @@ function updateProdGrid(products) {
     descripcion: p.descripcion, neg: p.neg, vol_venta: p.vol_venta, labs: p.labs,
     _isLab: !!(STATE.selectedLab && p.labs && p.labs.includes(STATE.selectedLab)),
   }));
+  // Suppress onSelectionChanged while we replace rowData + re-apply selections
+  // so the intermediate "all deselected" event doesn't overwrite STATE.selectedProducts.
+  _suppressProdSelection = true;
   prodGridApi.setGridOption('rowData', rows);
   prodGridApi.forEachNode(node => {
     if (STATE.selectedProducts.includes(node.data.descripcion)) node.setSelected(true, false, 'api');
   });
+  // Clear on next tick — after ag-Grid finishes any async event dispatch
+  setTimeout(() => { _suppressProdSelection = false; }, 0);
   document.getElementById('prodCaption').textContent = 'Total mostrados: ' + rows.length;
 }
 
