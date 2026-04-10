@@ -981,44 +981,43 @@ def _pg_get_client_table(
     )
 
     if view_money:
-        # Fetch both pre-computed money AND units in one query so the fallback
-        # path requires no extra round-trip to the DB.
+        # Primary: SUM(monto_yhat) per (fantasia, nombre_grupo, fecha).
+        # Does NOT select codigo_serie from forecast_valorizado — backward-compatible
+        # with older migrations where that column may be absent (avoids UndefinedColumn
+        # → empty DataFrame → "No Rows To Show" regression).
         df_agg = _query_agg(
-            f"SELECT fantasia, nombre_grupo, fecha, codigo_serie, "
-            f"SUM(COALESCE(monto_yhat, 0)) AS val_money, "
-            f"SUM(COALESCE(yhat_cliente, 0)) AS val_units "
+            f"SELECT fantasia, nombre_grupo, fecha, "
+            f"SUM(COALESCE(monto_yhat, 0)) AS val "
             f"FROM forecast_valorizado WHERE {val_where} "
-            f"GROUP BY fantasia, nombre_grupo, fecha, codigo_serie ORDER BY fecha"
+            f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
         )
         if df_agg.empty:
             return _EMPTY
 
-        if df_agg["val_money"].sum() > 0:
-            # monto_yhat is populated — use it directly (fast path)
-            df_agg["val"] = df_agg["val_money"]
-        else:
-            # Fallback: monto_yhat is zero/null (stale migration without parquet).
-            # Compute monetization from units × avg precio per serie from forecast_main.
+        if df_agg["val"].sum() == 0:
+            # monto_yhat all-zero (stale migration without parquet):
+            # attempt per-serie price fallback via subquery so val_where column
+            # references are unambiguous (no JOIN column name clash).
+            # If forecast_valorizado lacks codigo_serie, _query_agg catches the
+            # UndefinedColumn error and returns empty — in that case we keep df_agg
+            # (rows present with val=0: visible but unvalorized, better than no rows).
             logger.warning(
                 "[FORECAST client-table] monto_yhat is all-zero — "
                 "falling back to yhat_cliente × avg(precio). Run the migration to fix permanently."
             )
-            df_prices = _query_agg(
-                "SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
-                "FROM forecast_main GROUP BY codigo_serie"
+            df_fallback = _query_agg(
+                f"SELECT v.fantasia, v.nombre_grupo, v.fecha, "
+                f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS val "
+                f"FROM (SELECT fantasia, nombre_grupo, fecha, codigo_serie, yhat_cliente "
+                f"      FROM forecast_valorizado WHERE {val_where}) v "
+                f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                f"           FROM forecast_main GROUP BY codigo_serie) m "
+                f"  ON v.codigo_serie = m.codigo_serie "
+                f"GROUP BY v.fantasia, v.nombre_grupo, v.fecha ORDER BY v.fecha"
             )
-            if not df_prices.empty:
-                df_agg = df_agg.merge(df_prices, on="codigo_serie", how="left")
-                df_agg["val"] = df_agg["val_units"] * df_agg["avg_precio"].fillna(0)
-            else:
-                df_agg["val"] = df_agg["val_units"]
-
-        # Collapse back to (fantasia, nombre_grupo, fecha) after per-serie computation
-        df_agg = (
-            df_agg.groupby(["fantasia", "nombre_grupo", "fecha"])["val"]
-            .sum()
-            .reset_index()
-        )
+            if not df_fallback.empty and df_fallback["val"].sum() > 0:
+                df_agg = df_fallback
+            # else: keep df_agg — rows exist (val=0), table renders rather than going blank
     else:
         df_agg = _query_agg(
             f"SELECT fantasia, nombre_grupo, fecha, "
