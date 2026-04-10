@@ -317,6 +317,11 @@
     color: #0F172A; font-family: inherit; outline: none; text-align: right;
   }
   .fc-growth-input:focus { border-color: #94A3B8; }
+  .fc-growth-input:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+    color: #0F172A;
+  }
   #forecastChart { width: 100%; border-radius: 8px; background: #FFFFFF; border: 1px solid #E2E8F0; }
   .fc-divider { height: 1px; background: #E2E8F0; margin: 20px 0; }
 
@@ -673,7 +678,7 @@
         <div class="fc-growth-wrap">
           <label for="growthInput">Expect. crec. (%):</label>
           <input type="number" id="growthInput" class="fc-growth-input"
-                 value="0" step="1" min="-50" max="500" placeholder="0.0">
+                 value="25" step="1" min="-50" max="500" placeholder="25" disabled>
         </div>
       </div>
 
@@ -848,7 +853,7 @@ const STATE = {
   selectedProducts: [],
   allProducts: [],
   viewMoney: true,
-  growthPct: 0,
+  growthPct: 25,
   labFilter: false,
   selectedLab: '',
   startDate: null,
@@ -876,6 +881,7 @@ const _FC_TTL_DATA   = 5  * 60 * 1000;   // 5 min — chart, table, treemap, pro
 const _FC_TTL_STATIC = 15 * 60 * 1000;   // 15 min — filter-options
 const _FC_TTL_VIEW   = 30 * 60 * 1000;   // 30 min — UI state + last active tab
 const _FC_VIEW_KEY   = _FC_PFX + '__view_state';
+const LOCKED_MAIN_GROWTH_PCT = 25;
 const _fcInFlight    = new Map();
 const _fcReqSeq      = { filters: 0, products: 0, chart: 0, treemap: 0, table: 0 };
 
@@ -965,7 +971,7 @@ function _restoreForecastView() {
     };
     STATE.selectedProducts = Array.isArray(data.selectedProducts) ? [...data.selectedProducts] : [];
     STATE.viewMoney = data.viewMoney !== false;
-    STATE.growthPct = Number.isFinite(Number(data.growthPct)) ? Number(data.growthPct) : 0;
+    STATE.growthPct = LOCKED_MAIN_GROWTH_PCT;
     STATE.labFilter = !!data.labFilter;
     STATE.selectedLab = typeof data.selectedLab === 'string' ? data.selectedLab : '';
     STATE.startDate = typeof data.startDate === 'string' ? data.startDate : null;
@@ -995,7 +1001,8 @@ function _syncForecastControls() {
   const treemapPeriod = document.getElementById('treemapPeriod');
 
   if (toggleMoney) toggleMoney.checked = STATE.viewMoney;
-  if (growthInput) growthInput.value = STATE.growthPct;
+  STATE.growthPct = LOCKED_MAIN_GROWTH_PCT;
+  if (growthInput) growthInput.value = LOCKED_MAIN_GROWTH_PCT;
   if (labToggle) labToggle.checked = STATE.labFilter;
   if (labSelect) labSelect.value = STATE.selectedLab || '';
   if (clientSearch) clientSearch.value = window.__fcRestoredView?.clientSearch || '';
