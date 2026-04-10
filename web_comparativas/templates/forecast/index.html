@@ -808,19 +808,18 @@
 let _tableIsStale = true;  // true = table needs (re)load before showing
 
 function switchTab(name) {
-  // Update tab buttons
+  STATE.activeTab = name === 'detalle' ? 'detalle' : 'analisis';
+
   document.querySelectorAll('.fc-view-tab').forEach(btn => btn.classList.remove('active'));
-  const activeBtn = document.getElementById('tab-' + name);
+  const activeBtn = document.getElementById('tab-' + STATE.activeTab);
   if (activeBtn) activeBtn.classList.add('active');
 
-  // Update panels
   document.querySelectorAll('.fc-tab-panel').forEach(p => p.classList.remove('active'));
-  const activePanel = document.getElementById('panel-' + name);
+  const activePanel = document.getElementById('panel-' + STATE.activeTab);
   if (activePanel) activePanel.classList.add('active');
 
-  if (name === 'detalle') {
-    // Lazy-load: only fetch table data the first time (or when stale after a filter change)
-    if (_tableIsStale) {
+  if (STATE.activeTab === 'detalle') {
+    if (_tableIsStale && STATE.startDate && STATE.endDate) {
       _tableIsStale = false;
       loadTable();
     }
@@ -835,6 +834,8 @@ function switchTab(name) {
       }
     }, 50);
   }
+
+  _persistForecastView();
 }
 
 /* ===================================================================
@@ -853,6 +854,7 @@ const STATE = {
   startDate: null,
   endDate: null,
   maxHistDate: null,
+  activeTab: 'analisis',
   modalClientData: null,       // current client detail data
   modalSubnegGrowths: {},      // subneg overrides per modal session
   // ── Edit session state ────────────────────────────────────────────────
@@ -872,6 +874,10 @@ const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on r
 const _FC_PFX        = 'fc_' + _FC_V + '_';
 const _FC_TTL_DATA   = 5  * 60 * 1000;   // 5 min — chart, table, treemap, products
 const _FC_TTL_STATIC = 15 * 60 * 1000;   // 15 min — filter-options
+const _FC_TTL_VIEW   = 30 * 60 * 1000;   // 30 min — UI state + last active tab
+const _FC_VIEW_KEY   = _FC_PFX + '__view_state';
+const _fcInFlight    = new Map();
+const _fcReqSeq      = { filters: 0, products: 0, chart: 0, treemap: 0, table: 0 };
 
 function _fcGet(url) {
   try {
@@ -898,6 +904,143 @@ function _fcClear() {
       .filter(k => k.startsWith('fc_'))
       .forEach(k => sessionStorage.removeItem(k));
   } catch {}
+}
+
+function _fcFetchJson(url) {
+  if (_fcInFlight.has(url)) return _fcInFlight.get(url);
+  const req = fetch(url)
+    .then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
+    })
+    .finally(() => _fcInFlight.delete(url));
+  _fcInFlight.set(url, req);
+  return req;
+}
+
+function _captureForecastView() {
+  return {
+    selected: STATE.selected,
+    selectedProducts: STATE.selectedProducts,
+    viewMoney: STATE.viewMoney,
+    growthPct: STATE.growthPct,
+    labFilter: STATE.labFilter,
+    selectedLab: STATE.selectedLab,
+    startDate: STATE.startDate,
+    endDate: STATE.endDate,
+    activeTab: STATE.activeTab,
+    treemapPeriod: document.getElementById('treemapPeriod')?.value || '__all__',
+    clientSearch: document.getElementById('clientSearchInput')?.value || '',
+    groupExpanded: _groupExpanded,
+    scrollTop: document.querySelector('.fc-content')?.scrollTop || 0,
+  };
+}
+
+function _persistForecastView() {
+  try {
+    sessionStorage.setItem(_FC_VIEW_KEY, JSON.stringify({ ts: Date.now(), data: _captureForecastView() }));
+  } catch {}
+}
+
+function _restoreForecastView() {
+  try {
+    const raw = sessionStorage.getItem(_FC_VIEW_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || (Date.now() - parsed.ts) > _FC_TTL_VIEW) {
+      sessionStorage.removeItem(_FC_VIEW_KEY);
+      return false;
+    }
+
+    const data = parsed.data || {};
+    STATE.selected = {
+      perfil: Array.isArray(data.selected?.perfil) ? [...data.selected.perfil] : [],
+      neg: Array.isArray(data.selected?.neg) ? [...data.selected.neg] : [],
+      subneg: Array.isArray(data.selected?.subneg) ? [...data.selected.subneg] : [],
+    };
+    STATE.pending = {
+      perfil: [...STATE.selected.perfil],
+      neg: [...STATE.selected.neg],
+      subneg: [...STATE.selected.subneg],
+    };
+    STATE.selectedProducts = Array.isArray(data.selectedProducts) ? [...data.selectedProducts] : [];
+    STATE.viewMoney = data.viewMoney !== false;
+    STATE.growthPct = Number.isFinite(Number(data.growthPct)) ? Number(data.growthPct) : 0;
+    STATE.labFilter = !!data.labFilter;
+    STATE.selectedLab = typeof data.selectedLab === 'string' ? data.selectedLab : '';
+    STATE.startDate = typeof data.startDate === 'string' ? data.startDate : null;
+    STATE.endDate = typeof data.endDate === 'string' ? data.endDate : null;
+    STATE.activeTab = data.activeTab === 'detalle' ? 'detalle' : 'analisis';
+
+    Object.keys(_groupExpanded).forEach(k => delete _groupExpanded[k]);
+    Object.assign(_groupExpanded, data.groupExpanded || {});
+
+    window.__fcRestoredView = {
+      treemapPeriod: data.treemapPeriod || '__all__',
+      clientSearch: data.clientSearch || '',
+      scrollTop: Number.isFinite(Number(data.scrollTop)) ? Number(data.scrollTop) : 0,
+    };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function _syncForecastControls() {
+  const toggleMoney = document.getElementById('toggleMoney');
+  const growthInput = document.getElementById('growthInput');
+  const labToggle = document.getElementById('filterByLab');
+  const labSelect = document.getElementById('labSelect');
+  const clientSearch = document.getElementById('clientSearchInput');
+  const treemapPeriod = document.getElementById('treemapPeriod');
+
+  if (toggleMoney) toggleMoney.checked = STATE.viewMoney;
+  if (growthInput) growthInput.value = STATE.growthPct;
+  if (labToggle) labToggle.checked = STATE.labFilter;
+  if (labSelect) labSelect.value = STATE.selectedLab || '';
+  if (clientSearch) clientSearch.value = window.__fcRestoredView?.clientSearch || '';
+  _clientSearchTerm = (window.__fcRestoredView?.clientSearch || '').toLowerCase();
+  if (treemapPeriod && window.__fcRestoredView?.treemapPeriod) {
+    treemapPeriod.value = window.__fcRestoredView.treemapPeriod;
+  }
+}
+
+async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loaderId = null, applyData, background = true }) {
+  const reqId = (_fcReqSeq[requestKey] || 0) + 1;
+  _fcReqSeq[requestKey] = reqId;
+
+  const cached = _fcGet(url);
+  if (cached) {
+    applyData(cached, { source: 'cache' });
+    _persistForecastView();
+
+    if (background) {
+      _fcFetchJson(url)
+        .then(fresh => {
+          _fcSet(url, fresh, cacheTtl);
+          if (_fcReqSeq[requestKey] === reqId) {
+            applyData(fresh, { source: 'network' });
+            _persistForecastView();
+          }
+        })
+        .catch(err => console.error(requestKey + ' refresh error', err));
+    }
+    return cached;
+  }
+
+  const loader = loaderId ? document.getElementById(loaderId) : null;
+  if (loader) loader.style.display = 'flex';
+  try {
+    const fresh = await _fcFetchJson(url);
+    _fcSet(url, fresh, cacheTtl);
+    if (_fcReqSeq[requestKey] === reqId) {
+      applyData(fresh, { source: 'network' });
+      _persistForecastView();
+    }
+    return fresh;
+  } finally {
+    if (loader && _fcReqSeq[requestKey] === reqId) loader.style.display = 'none';
+  }
 }
 
 // Hard refresh: wipe cache first, then reload everything from the server
@@ -941,6 +1084,29 @@ function buildQS(extra = {}) {
   return p.toString();
 }
 
+function _clampList(values, options) {
+  const allowed = new Set(options || []);
+  return (Array.isArray(values) ? values : []).filter(v => allowed.has(v));
+}
+
+function _normalizeDateRange(startDate, endDate, minDate, maxDate) {
+  let start = startDate;
+  let end = endDate;
+
+  let defaultStart = minDate;
+  if (maxDate) {
+    const maxYear = parseInt(maxDate.slice(0, 4), 10);
+    const candidateStart = (maxYear - 1) + '-01-01';
+    defaultStart = candidateStart >= minDate ? candidateStart : minDate;
+  }
+
+  if (!start || start < minDate || start > maxDate) start = defaultStart;
+  if (!end || end < minDate || end > maxDate) end = maxDate;
+  if (start > end) start = minDate;
+
+  return { start, end };
+}
+
 /* ===================================================================
    FLATPICKR — locale español embebido para evitar dependencia CDN
    =================================================================== */
@@ -954,31 +1120,40 @@ if (typeof flatpickr !== 'undefined' && flatpickr.l10ns) {
 }
 
 let fpStart, fpEnd;
-function initDates(minDate, maxDate) {
-  // Siempre establecer los valores de estado primero, ANTES de inicializar Flatpickr
-  // para que las llamadas API funcionen aunque Flatpickr no cargue
-  let defaultStart = minDate;
-  if (maxDate) {
-    const maxYear = parseInt(maxDate.slice(0, 4), 10);
-    const candidateStart = (maxYear - 1) + '-01-01';
-    defaultStart = candidateStart >= minDate ? candidateStart : minDate;
-  }
-  STATE.startDate = defaultStart;
-  STATE.endDate = maxDate;
+function initDates(minDate, maxDate, { preserveState = true } = {}) {
+  const { start, end } = _normalizeDateRange(
+    preserveState ? STATE.startDate : null,
+    preserveState ? STATE.endDate : null,
+    minDate,
+    maxDate,
+  );
+  STATE.startDate = start;
+  STATE.endDate = end;
+
+  if (fpStart) { try { fpStart.destroy(); } catch {} fpStart = null; }
+  if (fpEnd) { try { fpEnd.destroy(); } catch {} fpEnd = null; }
 
   if (typeof flatpickr === 'undefined') {
     // Flatpickr no cargó. Usar inputs nativos de fecha.
     const s = document.getElementById('startDate');
     const e = document.getElementById('endDate');
     if (s) {
-      s.type = 'date'; s.min = minDate; s.max = maxDate; s.value = defaultStart;
+      s.type = 'date'; s.min = minDate; s.max = maxDate; s.value = start;
       s.removeAttribute('readonly');
-      s.addEventListener('change', () => { STATE.startDate = s.value || defaultStart; debounceRefresh(); });
+      s.onchange = () => {
+        STATE.startDate = s.value || start;
+        _persistForecastView();
+        debounceRefresh();
+      };
     }
     if (e) {
-      e.type = 'date'; e.min = minDate; e.max = maxDate; e.value = maxDate;
+      e.type = 'date'; e.min = minDate; e.max = maxDate; e.value = end;
       e.removeAttribute('readonly');
-      e.addEventListener('change', () => { STATE.endDate = e.value || maxDate; debounceRefresh(); });
+      e.onchange = () => {
+        STATE.endDate = e.value || end;
+        _persistForecastView();
+        debounceRefresh();
+      };
     }
     return;
   }
@@ -995,18 +1170,20 @@ function initDates(minDate, maxDate) {
   };
 
   fpStart = flatpickr('#startDate', {
-    ...opts, minDate, maxDate, defaultDate: defaultStart,
+    ...opts, minDate, maxDate, defaultDate: start,
     onChange([d]) {
-      STATE.startDate = d ? d.toISOString().slice(0, 10) : defaultStart;
+      STATE.startDate = d ? d.toISOString().slice(0, 10) : start;
       if (fpEnd) fpEnd.set('minDate', STATE.startDate);
+      _persistForecastView();
       debounceRefresh();
     },
   });
   fpEnd = flatpickr('#endDate', {
-    ...opts, minDate, maxDate, defaultDate: maxDate,
+    ...opts, minDate, maxDate, defaultDate: end,
     onChange([d]) {
-      STATE.endDate = d ? d.toISOString().slice(0, 10) : maxDate;
+      STATE.endDate = d ? d.toISOString().slice(0, 10) : end;
       if (fpStart) fpStart.set('maxDate', STATE.endDate);
+      _persistForecastView();
       debounceRefresh();
     },
   });
@@ -1061,6 +1238,7 @@ function applyFilter(key) {
   STATE.selected[key] = [...STATE.pending[key]];
   document.getElementById('dd-' + key).classList.remove('open');
   updateFilterLabels();
+  _persistForecastView();
   debounceRefresh();
 }
 function updateFilterLabels() {
@@ -1116,6 +1294,7 @@ function buildProdGrid() {
       const newSel = rows.map(r => r.descripcion);
       if (JSON.stringify(newSel.sort()) !== JSON.stringify([...STATE.selectedProducts].sort())) {
         STATE.selectedProducts = newSel;
+        _persistForecastView();
         debounceRefresh();
       }
     },
@@ -1144,12 +1323,14 @@ function updateProdGrid(products) {
   // Clear on next tick — after ag-Grid finishes any async event dispatch
   setTimeout(() => { _suppressProdSelection = false; }, 0);
   document.getElementById('prodCaption').textContent = 'Total mostrados: ' + rows.length;
+  _persistForecastView();
 }
 
 let _prodSearchTimer;
 document.getElementById('prodSearch').addEventListener('input', () => {
   clearTimeout(_prodSearchTimer);
   _prodSearchTimer = setTimeout(() => updateProdGrid(STATE.allProducts), 150);
+  _persistForecastView();
 });
 
 /* ── Lab filter: aplica sobre todo el dashboard ───────────────────────
@@ -1174,12 +1355,14 @@ function _applyLabSelection() {
   // Habilitar/deshabilitar el select según estado del checkbox
   const sel = document.getElementById('labSelect');
   if (sel) sel.disabled = !STATE.labFilter;
+  _persistForecastView();
 }
 
 document.getElementById('filterByLab').addEventListener('change', function() {
   STATE.labFilter = this.checked;
   _applyLabSelection();
   updateProdGrid(STATE.allProducts);   // refleja selección visual en la grilla
+  _persistForecastView();
   debounceRefresh();                   // actualiza chart + treemap + tabla + KPIs
 });
 
@@ -1188,9 +1371,11 @@ document.getElementById('labSelect').addEventListener('change', function() {
   if (STATE.labFilter) {
     _applyLabSelection();
     updateProdGrid(STATE.allProducts);
+    _persistForecastView();
     debounceRefresh();
   } else {
     updateProdGrid(STATE.allProducts); // solo actualiza la lista visual
+    _persistForecastView();
   }
 });
 
@@ -1494,6 +1679,7 @@ function _buildGroupedRows(rawRows, months) {
 function _toggleClientGroup(groupKey) {
   _groupExpanded[groupKey] = (_groupExpanded[groupKey] === true) ? false : true;
   if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+  _persistForecastView();
 }
 
 /** Apply search filter and redraw the grid. */
@@ -1502,6 +1688,7 @@ function _applyClientSearch(term) {
   const clearBtn = document.getElementById('clientSearchClear');
   if (clearBtn) clearBtn.style.display = _clientSearchTerm ? 'inline' : 'none';
   if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+  _persistForecastView();
 }
 
 function buildClientGrid() {
@@ -2017,77 +2204,110 @@ function debounceRefresh(delay = 350) {
 
 function _applyFilterOptions(data) {
   STATE.filterOptions = data;
+  STATE.selected.perfil = _clampList(STATE.selected.perfil, data.profiles);
+  STATE.selected.neg = _clampList(STATE.selected.neg, data.neg);
+  STATE.selected.subneg = _clampList(STATE.selected.subneg, data.subneg);
+  STATE.pending = {
+    perfil: [...STATE.selected.perfil],
+    neg: [...STATE.selected.neg],
+    subneg: [...STATE.selected.subneg],
+  };
+
   const labSel = document.getElementById('labSelect');
-  // Only populate labs list if empty (avoids duplication on revalidation)
-  if (labSel && labSel.options.length <= 1 && data.labs && data.labs.length) {
-    data.labs.forEach(l => {
+  if (labSel) {
+    const current = STATE.selectedLab;
+    labSel.innerHTML = '<option value="">Todos los laboratorios</option>';
+    (data.labs || []).forEach(l => {
       const opt = document.createElement('option');
-      opt.value = l; opt.textContent = l;
+      opt.value = l;
+      opt.textContent = l;
       labSel.appendChild(opt);
     });
+    if (current && (data.labs || []).includes(current)) {
+      labSel.value = current;
+    } else {
+      STATE.selectedLab = '';
+      if (STATE.labFilter) STATE.labFilter = false;
+    }
   }
+
   buildDropdownList('perfil', data.profiles);
   buildDropdownList('neg', data.neg);
   buildDropdownList('subneg', data.subneg);
-  if (data.min_date && data.max_date) initDates(data.min_date, data.max_date);
+  updateFilterLabels();
+
+  if (data.min_date && data.max_date) {
+    initDates(data.min_date, data.max_date, { preserveState: true });
+  }
+
+  _syncForecastControls();
 }
 
 async function loadFilterOptions() {
   const url = '/forecast/api/filter-options';
-  const cached = _fcGet(url);
-  if (cached) {
-    _applyFilterOptions(cached);
-    // Silently revalidate in background so cache stays fresh for next visit
-    fetch(url).then(r => r.json()).then(fresh => _fcSet(url, fresh, _FC_TTL_STATIC)).catch(() => {});
-    return;
-  }
-  const data = await fetch(url).then(r => r.json());
-  _fcSet(url, data, _FC_TTL_STATIC);
-  _applyFilterOptions(data);
+  return _loadWithCache({
+    url,
+    requestKey: 'filters',
+    cacheTtl: _FC_TTL_STATIC,
+    applyData: data => _applyFilterOptions(data),
+    background: true,
+  });
 }
 
 let _lastProductFilterKey = null;
 async function loadProducts() {
   const filterKey = JSON.stringify({ perfil: STATE.selected.perfil, neg: STATE.selected.neg });
-  if (_lastProductFilterKey === filterKey && STATE.allProducts && STATE.allProducts.length > 0) return;
+  if (_lastProductFilterKey === filterKey && STATE.allProducts && STATE.allProducts.length > 0) {
+    updateProdGrid(STATE.allProducts);
+    return STATE.allProducts;
+  }
 
   const p = new URLSearchParams();
   STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
   STATE.selected.neg.forEach(v => p.append('neg[]', v));
   const url = '/forecast/api/product-list?' + p.toString();
 
-  const cached = _fcGet(url);
-  if (cached) { _lastProductFilterKey = filterKey; updateProdGrid(cached); return; }
-
   try {
-    const data = await fetch(url).then(r => r.json());
-    _fcSet(url, data);
-    _lastProductFilterKey = filterKey;
-    updateProdGrid(data);
-  } catch (e) { console.error('Error loading products', e); }
+    return await _loadWithCache({
+      url,
+      requestKey: 'products',
+      applyData: data => {
+        _lastProductFilterKey = filterKey;
+        STATE.allProducts = data;
+        if (STATE.labFilter && STATE.selectedLab) _applyLabSelection();
+        updateProdGrid(data);
+      },
+      background: true,
+    });
+  } catch (e) {
+    console.error('Error loading products', e);
+    return [];
+  }
 }
 
 async function loadChart() {
   const url = '/forecast/api/chart-data?' + buildQS();
-  const cached = _fcGet(url);
-  if (cached) { renderChart(cached); return; }
-  document.getElementById('chartLoader').style.display = 'flex';
   try {
-    const data = await fetch(url).then(r => r.json());
-    _fcSet(url, data);
-    renderChart(data);
-  } catch(e) { console.error('Chart error', e); }
-  finally { document.getElementById('chartLoader').style.display = 'none'; }
+    return await _loadWithCache({
+      url,
+      requestKey: 'chart',
+      loaderId: 'chartLoader',
+      applyData: data => renderChart(data),
+      background: true,
+    });
+  } catch (e) {
+    console.error('Chart error', e);
+    return null;
+  }
 }
 
 function _applyTreemapData(data) {
-  // Populate Vista Periodo selector (only if options changed)
   const sel = document.getElementById('treemapPeriod');
   if (sel && data.periods && data.periods.length) {
     const currentOptions = Array.from(sel.options).map(o => o.value).filter(v => v !== '__all__').join(',');
     const newOptions = data.periods.join(',');
     if (currentOptions !== newOptions) {
-      const current = sel.value;
+      const preferred = sel.value || window.__fcRestoredView?.treemapPeriod || '__all__';
       sel.innerHTML = '<option value="__all__">Acumulado 2026</option>';
       data.periods.forEach(p => {
         const d = new Date(p + 'T00:00:00');
@@ -2097,10 +2317,10 @@ function _applyTreemapData(data) {
         opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
         sel.appendChild(opt);
       });
-      if (current) sel.value = current;
+      sel.value = Array.from(sel.options).some(o => o.value === preferred) ? preferred : '__all__';
     }
   }
-  // Populate legend chips
+
   const legend = document.getElementById('treemapLegend');
   if (legend && data.canals && data.canals.length) {
     legend.innerHTML = data.canals.map(c =>
@@ -2116,16 +2336,18 @@ async function loadTreemap() {
   if (selectedPeriod && selectedPeriod !== '__all__') qs.set('period_date', selectedPeriod);
   const url = '/forecast/api/treemap-data?' + qs.toString();
 
-  const cached = _fcGet(url);
-  if (cached) { _applyTreemapData(cached); return; }
-
-  document.getElementById('treemapLoader').style.display = 'flex';
   try {
-    const data = await fetch(url).then(r => r.json());
-    _fcSet(url, data);
-    _applyTreemapData(data);
-  } catch(e) { console.error('Treemap error', e); }
-  finally { document.getElementById('treemapLoader').style.display = 'none'; }
+    return await _loadWithCache({
+      url,
+      requestKey: 'treemap',
+      loaderId: 'treemapLoader',
+      applyData: data => _applyTreemapData(data),
+      background: true,
+    });
+  } catch (e) {
+    console.error('Treemap error', e);
+    return null;
+  }
 }
 
 async function loadTable() {
@@ -2137,23 +2359,26 @@ async function loadTable() {
   }
   const url = '/forecast/api/client-table?' + params.toString();
 
-  const cached = _fcGet(url);
-  if (cached) { updateClientGrid(cached); return; }
-
-  document.getElementById('tableLoader').style.display = 'flex';
   try {
-    const data = await fetch(url).then(r => r.json());
-    _fcSet(url, data);
-    updateClientGrid(data);
-  } catch(e) { console.error('Table error', e); }
-  finally { document.getElementById('tableLoader').style.display = 'none'; }
+    return await _loadWithCache({
+      url,
+      requestKey: 'table',
+      loaderId: 'tableLoader',
+      applyData: data => updateClientGrid(data),
+      background: true,
+    });
+  } catch (e) {
+    console.error('Table error', e);
+    return null;
+  }
 }
 
 async function refreshAll() {
-  const isDetalleActivo = document.getElementById('tab-detalle')?.classList.contains('active');
-  const tasks = [loadProducts(), loadChart(), loadTreemap()];
+  const isDetalleActivo = STATE.activeTab === 'detalle' || document.getElementById('tab-detalle')?.classList.contains('active');
+  const productsTask = loadProducts();
+  const tasks = [productsTask, loadChart(), loadTreemap()];
   if (isDetalleActivo) {
-    tasks.push(loadTable());
+    tasks.push(productsTask.then(() => loadTable()));
     _tableIsStale = false;
   } else {
     _tableIsStale = true;
@@ -2166,44 +2391,57 @@ async function refreshAll() {
    =================================================================== */
 document.getElementById('toggleMoney').addEventListener('change', function() {
   STATE.viewMoney = this.checked;
+  _persistForecastView();
   debounceRefresh();
 });
 document.getElementById('growthInput').addEventListener('input', function() {
   const v = parseFloat(this.value);
   STATE.growthPct = isNaN(v) ? 0 : v;
+  _persistForecastView();
   debounceRefresh(500);
 });
 document.getElementById('treemapPeriod').addEventListener('change', function() {
+  _persistForecastView();
   loadTreemap();
 });
 document.getElementById('clientSearchInput').addEventListener('input', function() {
   _applyClientSearch(this.value);
+  _persistForecastView();
 });
 document.getElementById('clientSearchClear').addEventListener('click', function() {
   const inp = document.getElementById('clientSearchInput');
   inp.value = '';
   _applyClientSearch('');
+  _persistForecastView();
   inp.focus();
 });
+
+window.addEventListener('pagehide', _persistForecastView);
 
 /* ===================================================================
    INIT
    =================================================================== */
 document.addEventListener('DOMContentLoaded', async () => {
+  _restoreForecastView();
+
   const _labSel = document.getElementById('labSelect');
   if (_labSel) _labSel.disabled = true;
 
+  _syncForecastControls();
   buildProdGrid();
   buildClientGrid();
+  _applyClientSearch(window.__fcRestoredView?.clientSearch || '');
+  switchTab(STATE.activeTab);
 
-  const _filtersCached = !!_fcGet('/forecast/api/filter-options');
-  if (_filtersCached) {
-    // Cache hit: fire filter-options + data in parallel → page renders in <100 ms
-    await Promise.all([loadFilterOptions(), refreshAll()]);
-  } else {
-    // First visit: sequential — refreshAll needs dates from filter-options
+  try {
     await loadFilterOptions();
     await refreshAll();
+  } finally {
+    const contentEl = document.querySelector('.fc-content');
+    const savedScroll = window.__fcRestoredView?.scrollTop || 0;
+    if (contentEl && savedScroll > 0) {
+      requestAnimationFrame(() => { contentEl.scrollTop = savedScroll; });
+    }
   }
 });
 </script>

@@ -148,6 +148,7 @@ def clear_client_overrides(client_id: str) -> None:
     """Remove all overrides for a client (full undo to CSV baseline)."""
     with _overrides_lock:
         _client_overrides.pop(client_id, None)
+    clear_response_cache()
 
 
 def _get_client_overrides_snapshot(client_id: str) -> dict:
@@ -2372,6 +2373,7 @@ def get_treemap_data(
     }
 
 
+@_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_client_detail(
     client_id: str,
     start_date: str | None = None,

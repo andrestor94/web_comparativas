@@ -45,6 +45,7 @@ def _require_user(request: Request) -> User:
 # Main page
 # ---------------------------------------------------------------------------
 
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/", response_class=HTMLResponse)
 def forecast_home(request: Request, user: User = Depends(_require_user)):
     return templates.TemplateResponse(
