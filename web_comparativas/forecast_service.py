@@ -961,25 +961,73 @@ def _pg_get_chart_data_inner(
 def _pg_get_client_table(
     start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
 ) -> dict:
-    """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha)."""
+    """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha).
+
+    Valorization strategy (view_money=True):
+      1. Try monto_yhat (pre-computed monetary column from the parquet migration).
+      2. If the total is zero (column absent or all-NULL in DB — stale migration),
+         fall back to yhat_cliente (units) × avg(precio) from forecast_main.
+    This makes the table robust to Render deploys where the migration
+    hasn't been re-run yet with the latest parquet file.
+    """
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
 
     prod_codes = _pg_resolve_prod_codes(products)
-    val_col = "monto_yhat" if view_money else "yhat_cliente"
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
         products_as_codes=prod_codes,
         products=None if prod_codes is not None else products,
     )
-    df_agg = _query_agg(
-        f"SELECT fantasia, nombre_grupo, fecha, "
-        f"SUM(COALESCE({val_col}, 0)) AS val "
-        f"FROM forecast_valorizado WHERE {val_where} "
-        f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
-    )
-    if df_agg.empty:
-        return _EMPTY
+
+    if view_money:
+        # Fetch both pre-computed money AND units in one query so the fallback
+        # path requires no extra round-trip to the DB.
+        df_agg = _query_agg(
+            f"SELECT fantasia, nombre_grupo, fecha, codigo_serie, "
+            f"SUM(COALESCE(monto_yhat, 0)) AS val_money, "
+            f"SUM(COALESCE(yhat_cliente, 0)) AS val_units "
+            f"FROM forecast_valorizado WHERE {val_where} "
+            f"GROUP BY fantasia, nombre_grupo, fecha, codigo_serie ORDER BY fecha"
+        )
+        if df_agg.empty:
+            return _EMPTY
+
+        if df_agg["val_money"].sum() > 0:
+            # monto_yhat is populated — use it directly (fast path)
+            df_agg["val"] = df_agg["val_money"]
+        else:
+            # Fallback: monto_yhat is zero/null (stale migration without parquet).
+            # Compute monetization from units × avg precio per serie from forecast_main.
+            logger.warning(
+                "[FORECAST client-table] monto_yhat is all-zero — "
+                "falling back to yhat_cliente × avg(precio). Run the migration to fix permanently."
+            )
+            df_prices = _query_agg(
+                "SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                "FROM forecast_main GROUP BY codigo_serie"
+            )
+            if not df_prices.empty:
+                df_agg = df_agg.merge(df_prices, on="codigo_serie", how="left")
+                df_agg["val"] = df_agg["val_units"] * df_agg["avg_precio"].fillna(0)
+            else:
+                df_agg["val"] = df_agg["val_units"]
+
+        # Collapse back to (fantasia, nombre_grupo, fecha) after per-serie computation
+        df_agg = (
+            df_agg.groupby(["fantasia", "nombre_grupo", "fecha"])["val"]
+            .sum()
+            .reset_index()
+        )
+    else:
+        df_agg = _query_agg(
+            f"SELECT fantasia, nombre_grupo, fecha, "
+            f"SUM(COALESCE(yhat_cliente, 0)) AS val "
+            f"FROM forecast_valorizado WHERE {val_where} "
+            f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
+        )
+        if df_agg.empty:
+            return _EMPTY
 
     # Max hist date for growth adjustment
     df_mhd = _query_agg(
@@ -1386,24 +1434,51 @@ def get_forecast_schema_info() -> dict:
 def get_filter_options() -> dict:
     import json  # needed in both branches
     if engine is not None and "postgresql" in str(engine.url):
-        with engine.begin() as conn:
-            from sqlalchemy import text
-            try:
-                perfiles = pd.read_sql("SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn)["perfil"].tolist()
-                negs = pd.read_sql("SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn)["neg"].tolist()
-                subnegs = pd.read_sql("SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn)["subneg"].tolist()
-                valid_dates = pd.read_sql("SELECT min(fecha) as min_d, max(fecha) as max_d FROM forecast_main", conn)
-                min_date = valid_dates["min_d"].iloc[0].strftime("%Y-%m-%d") if pd.notnull(valid_dates["min_d"].iloc[0]) else None
-                max_date = valid_dates["max_d"].iloc[0].strftime("%Y-%m-%d") if pd.notnull(valid_dates["max_d"].iloc[0]) else None
-                
-                labs_df = pd.read_sql("SELECT * FROM forecast_product_labs", conn)
-                all_labs = set()
+        # ── Core filters: profiles, neg, subneg, dates ────────────────────
+        # Isolated in their own try/except so a labs table absence does NOT
+        # wipe out the core filter options (critical for Problem 2).
+        perfiles: list = []
+        negs: list = []
+        subnegs: list = []
+        min_date = max_date = None
+        try:
+            with engine.connect() as conn:
+                perfiles = pd.read_sql(
+                    "SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn
+                )["perfil"].tolist()
+                negs = pd.read_sql(
+                    "SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn
+                )["neg"].tolist()
+                subnegs = pd.read_sql(
+                    "SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn
+                )["subneg"].tolist()
+                valid_dates = pd.read_sql(
+                    "SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_main", conn
+                )
+                if not valid_dates.empty:
+                    if pd.notnull(valid_dates["min_d"].iloc[0]):
+                        min_date = valid_dates["min_d"].iloc[0].strftime("%Y-%m-%d")
+                    if pd.notnull(valid_dates["max_d"].iloc[0]):
+                        max_date = valid_dates["max_d"].iloc[0].strftime("%Y-%m-%d")
+        except Exception as exc:
+            logger.error("Filter options DB error (core): %s", exc, exc_info=True)
+            return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
+
+        # ── Labs: optional — failure here must NOT affect core filters ────
+        all_labs: set = set()
+        try:
+            with engine.connect() as conn:
+                labs_df = pd.read_sql(
+                    "SELECT codigo_serie, laboratorios FROM forecast_product_labs", conn
+                )
                 if not labs_df.empty:
                     for _, row in labs_df.iterrows():
-                        all_labs.update(json.loads(row["laboratorios"]))
-            except Exception as e:
-                logger.error(f"Filter options DB Error: {e}")
-                return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
+                        try:
+                            all_labs.update(json.loads(row["laboratorios"]))
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.warning("Filter options: forecast_product_labs not available (%s)", exc)
 
         return {
             "profiles": sorted(perfiles),
