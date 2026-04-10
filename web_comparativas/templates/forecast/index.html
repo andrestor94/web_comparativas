@@ -527,7 +527,7 @@
           <h1>Proyección de ventas</h1>
           <p>Suizo Argentina · Unidad Productos Hospitalarios</p>
         </div>
-        <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()" title="Actualizar">
+        <button class="btn btn-outline-secondary btn-sm" onclick="_fcHardRefresh()" title="Forzar recarga completa (omite caché)">
           <i class="bi bi-arrow-repeat me-1"></i> Actualizar
         </button>
       </div>
@@ -860,6 +860,52 @@ const STATE = {
   _modalSnapshotGrowths: {},   // copy of subneg growths when modal opened (for undo)
   _modalIsDirty: false,        // true when user has made unsaved changes
 };
+
+/* ===================================================================
+   SESSION CACHE
+   Persists API responses in sessionStorage across page navigations.
+   On re-entry to Forecast, all endpoints hit cache → render in <50 ms.
+   TTL: 5 min for data, 15 min for filter-options.
+   Versioned prefix (_FC_V) forces a clean slate after each deploy.
+   =================================================================== */
+const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
+const _FC_PFX        = 'fc_' + _FC_V + '_';
+const _FC_TTL_DATA   = 5  * 60 * 1000;   // 5 min — chart, table, treemap, products
+const _FC_TTL_STATIC = 15 * 60 * 1000;   // 15 min — filter-options
+
+function _fcGet(url) {
+  try {
+    const raw = sessionStorage.getItem(_FC_PFX + url);
+    if (!raw) return null;
+    const { ts, data, ttl } = JSON.parse(raw);
+    if (Date.now() - ts > (ttl || _FC_TTL_DATA)) {
+      sessionStorage.removeItem(_FC_PFX + url);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+}
+
+function _fcSet(url, data, ttl = _FC_TTL_DATA) {
+  try {
+    sessionStorage.setItem(_FC_PFX + url, JSON.stringify({ ts: Date.now(), data, ttl }));
+  } catch { /* quota exceeded — silently skip */ }
+}
+
+function _fcClear() {
+  try {
+    Object.keys(sessionStorage)
+      .filter(k => k.startsWith('fc_'))
+      .forEach(k => sessionStorage.removeItem(k));
+  } catch {}
+}
+
+// Hard refresh: wipe cache first, then reload everything from the server
+async function _fcHardRefresh() {
+  _fcClear();
+  await loadFilterOptions();
+  await refreshAll();
+}
 
 /* ===================================================================
    UTILS
@@ -1665,6 +1711,7 @@ async function saveModalChanges() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     _setModalDirty(false);
     closeModal();
+    _fcClear();   // Overrides altered the dataset — force fresh data on next render
     await refreshAll();
   } catch (err) {
     console.error('Save error', err);
@@ -1953,100 +2000,135 @@ function debounceRefresh(delay = 350) {
   refreshTimer = setTimeout(refreshAll, delay);
 }
 
-async function loadFilterOptions() {
-  const resp = await fetch('/forecast/api/filter-options');
-  const data = await resp.json();
+function _applyFilterOptions(data) {
   STATE.filterOptions = data;
   const labSel = document.getElementById('labSelect');
-  data.labs.forEach(l => {
-    const opt = document.createElement('option');
-    opt.value = l; opt.textContent = l;
-    labSel.appendChild(opt);
-  });
+  // Only populate labs list if empty (avoids duplication on revalidation)
+  if (labSel && labSel.options.length <= 1 && data.labs && data.labs.length) {
+    data.labs.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l; opt.textContent = l;
+      labSel.appendChild(opt);
+    });
+  }
   buildDropdownList('perfil', data.profiles);
   buildDropdownList('neg', data.neg);
   buildDropdownList('subneg', data.subneg);
   if (data.min_date && data.max_date) initDates(data.min_date, data.max_date);
 }
 
+async function loadFilterOptions() {
+  const url = '/forecast/api/filter-options';
+  const cached = _fcGet(url);
+  if (cached) {
+    _applyFilterOptions(cached);
+    // Silently revalidate in background so cache stays fresh for next visit
+    fetch(url).then(r => r.json()).then(fresh => _fcSet(url, fresh, _FC_TTL_STATIC)).catch(() => {});
+    return;
+  }
+  const data = await fetch(url).then(r => r.json());
+  _fcSet(url, data, _FC_TTL_STATIC);
+  _applyFilterOptions(data);
+}
+
 let _lastProductFilterKey = null;
 async function loadProducts() {
   const filterKey = JSON.stringify({ perfil: STATE.selected.perfil, neg: STATE.selected.neg });
   if (_lastProductFilterKey === filterKey && STATE.allProducts && STATE.allProducts.length > 0) return;
-  
+
   const p = new URLSearchParams();
   STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
   STATE.selected.neg.forEach(v => p.append('neg[]', v));
+  const url = '/forecast/api/product-list?' + p.toString();
+
+  const cached = _fcGet(url);
+  if (cached) { _lastProductFilterKey = filterKey; updateProdGrid(cached); return; }
+
   try {
-    const resp = await fetch('/forecast/api/product-list?' + p.toString());
-    const data = await resp.json();
+    const data = await fetch(url).then(r => r.json());
+    _fcSet(url, data);
     _lastProductFilterKey = filterKey;
     updateProdGrid(data);
-  } catch (e) {
-    console.error('Error loading products', e);
-  }
+  } catch (e) { console.error('Error loading products', e); }
 }
 
 async function loadChart() {
+  const url = '/forecast/api/chart-data?' + buildQS();
+  const cached = _fcGet(url);
+  if (cached) { renderChart(cached); return; }
   document.getElementById('chartLoader').style.display = 'flex';
   try {
-    const data = await fetch('/forecast/api/chart-data?' + buildQS()).then(r => r.json());
+    const data = await fetch(url).then(r => r.json());
+    _fcSet(url, data);
     renderChart(data);
   } catch(e) { console.error('Chart error', e); }
   finally { document.getElementById('chartLoader').style.display = 'none'; }
 }
 
+function _applyTreemapData(data) {
+  // Populate Vista Periodo selector (only if options changed)
+  const sel = document.getElementById('treemapPeriod');
+  if (sel && data.periods && data.periods.length) {
+    const currentOptions = Array.from(sel.options).map(o => o.value).filter(v => v !== '__all__').join(',');
+    const newOptions = data.periods.join(',');
+    if (currentOptions !== newOptions) {
+      const current = sel.value;
+      sel.innerHTML = '<option value="__all__">Acumulado 2026</option>';
+      data.periods.forEach(p => {
+        const d = new Date(p + 'T00:00:00');
+        const label = d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' });
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+        sel.appendChild(opt);
+      });
+      if (current) sel.value = current;
+    }
+  }
+  // Populate legend chips
+  const legend = document.getElementById('treemapLegend');
+  if (legend && data.canals && data.canals.length) {
+    legend.innerHTML = data.canals.map(c =>
+      `<span class="fc-treemap-legend-item"><span class="fc-treemap-legend-swatch" style="background:${c.color};"></span>${c.name}</span>`
+    ).join('');
+  }
+  renderTreemap(data);
+}
+
 async function loadTreemap() {
+  const qs = new URLSearchParams(buildQS());
+  const selectedPeriod = document.getElementById('treemapPeriod')?.value;
+  if (selectedPeriod && selectedPeriod !== '__all__') qs.set('period_date', selectedPeriod);
+  const url = '/forecast/api/treemap-data?' + qs.toString();
+
+  const cached = _fcGet(url);
+  if (cached) { _applyTreemapData(cached); return; }
+
   document.getElementById('treemapLoader').style.display = 'flex';
   try {
-    const qs = new URLSearchParams(buildQS());
-    const selectedPeriod = document.getElementById('treemapPeriod')?.value;
-    if (selectedPeriod && selectedPeriod !== '__all__') qs.set('period_date', selectedPeriod);
-    const data = await fetch('/forecast/api/treemap-data?' + qs.toString()).then(r => r.json());
-
-    // Populate Vista Periodo selector (only on first load or if options changed)
-    const sel = document.getElementById('treemapPeriod');
-    if (sel && data.periods && data.periods.length) {
-      const currentOptions = Array.from(sel.options).map(o => o.value).filter(v => v !== '__all__').join(',');
-      const newOptions = data.periods.join(',');
-      if (currentOptions !== newOptions) {
-        const current = sel.value;
-        sel.innerHTML = '<option value="__all__">Acumulado 2026</option>';
-        data.periods.forEach(p => {
-          const d = new Date(p + 'T00:00:00');
-          const label = d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' });
-          const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-          sel.appendChild(opt);
-        });
-        if (current) sel.value = current;
-      }
-    }
-
-    // Populate legend chips
-    const legend = document.getElementById('treemapLegend');
-    if (legend && data.canals && data.canals.length) {
-      legend.innerHTML = data.canals.map(c =>
-        `<span class="fc-treemap-legend-item"><span class="fc-treemap-legend-swatch" style="background:${c.color};"></span>${c.name}</span>`
-      ).join('');
-    }
-
-    renderTreemap(data);
+    const data = await fetch(url).then(r => r.json());
+    _fcSet(url, data);
+    _applyTreemapData(data);
   } catch(e) { console.error('Treemap error', e); }
   finally { document.getElementById('treemapLoader').style.display = 'none'; }
 }
 
 async function loadTable() {
+  const params = new URLSearchParams(buildQS());
+  if (STATE.labFilter && STATE.selectedLab) {
+    STATE.allProducts
+      .filter(prod => prod.labs && prod.labs.includes(STATE.selectedLab))
+      .forEach(prod => params.append('lab_products[]', prod.descripcion));
+  }
+  const url = '/forecast/api/client-table?' + params.toString();
+
+  const cached = _fcGet(url);
+  if (cached) { updateClientGrid(cached); return; }
+
   document.getElementById('tableLoader').style.display = 'flex';
   try {
-    const params = new URLSearchParams(buildQS());
-    if (STATE.labFilter && STATE.selectedLab) {
-      STATE.allProducts
-        .filter(prod => prod.labs && prod.labs.includes(STATE.selectedLab))
-        .forEach(prod => params.append('lab_products[]', prod.descripcion));
-    }
-    const data = await fetch('/forecast/api/client-table?' + params.toString()).then(r => r.json());
+    const data = await fetch(url).then(r => r.json());
+    _fcSet(url, data);
     updateClientGrid(data);
   } catch(e) { console.error('Table error', e); }
   finally { document.getElementById('tableLoader').style.display = 'none'; }
@@ -2093,14 +2175,21 @@ document.getElementById('clientSearchClear').addEventListener('click', function(
    INIT
    =================================================================== */
 document.addEventListener('DOMContentLoaded', async () => {
-  // El select de laboratorio empieza deshabilitado hasta que se active el checkbox
   const _labSel = document.getElementById('labSelect');
   if (_labSel) _labSel.disabled = true;
 
   buildProdGrid();
   buildClientGrid();
-  await loadFilterOptions();
-  await refreshAll();
+
+  const _filtersCached = !!_fcGet('/forecast/api/filter-options');
+  if (_filtersCached) {
+    // Cache hit: fire filter-options + data in parallel → page renders in <100 ms
+    await Promise.all([loadFilterOptions(), refreshAll()]);
+  } else {
+    // First visit: sequential — refreshAll needs dates from filter-options
+    await loadFilterOptions();
+    await refreshAll();
+  }
 });
 </script>
 {% endblock %}

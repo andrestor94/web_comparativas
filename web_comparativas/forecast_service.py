@@ -4,8 +4,11 @@ Pure Python/pandas, zero Streamlit dependencies.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
+import time
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +61,69 @@ _data_cache: dict[str, Any] = {}
 _overrides_lock = threading.Lock()
 _client_overrides: dict[str, dict[tuple, float]] = {}
 
+# ---------------------------------------------------------------------------
+# Service-level TTL response cache
+# Caches the serialisable dict/list returned by each public get_* function.
+# Key: function name + normalised filter args (lists → sorted for stable keys).
+# TTL: 5 min for data, 15 min for filter-options (rarely changes mid-session).
+# Cleared on: a) reload_data(), b) save_client_overrides() (overrides alter data).
+# ---------------------------------------------------------------------------
+_resp_cache: dict[str, tuple[float, Any]] = {}
+_resp_cache_lock = threading.Lock()
+_RESP_TTL_DATA   = 300   # 5 min — chart, table, treemap, product-list
+_RESP_TTL_STATIC = 900   # 15 min — filter-options
+
+
+def _resp_key(fn_name: str, *args, **kwargs) -> str:
+    """Stable JSON key from fn name + args (lists normalised to sorted for consistency)."""
+    def _norm(v):
+        if isinstance(v, list):
+            return sorted(str(x) for x in v if x is not None)
+        return v
+    return json.dumps(
+        [fn_name, [_norm(a) for a in args], {k: _norm(v) for k, v in sorted(kwargs.items())}],
+        default=str,
+    )
+
+
+def _resp_get(key: str, ttl: float) -> "Any | None":
+    with _resp_cache_lock:
+        entry = _resp_cache.get(key)
+    if entry is None:
+        return None
+    ts, value = entry
+    return value if (time.monotonic() - ts) < ttl else None
+
+
+def _resp_set(key: str, value: Any) -> None:
+    with _resp_cache_lock:
+        _resp_cache[key] = (time.monotonic(), value)
+
+
+def clear_response_cache() -> None:
+    """Flush the service-level response cache (after reload or client-save)."""
+    with _resp_cache_lock:
+        _resp_cache.clear()
+    logger.info("[FORECAST cache] Response cache cleared.")
+
+
+def _with_resp_cache(ttl: float):
+    """Decorator: transparently cache the return value of a public get_* function."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            key = _resp_key(fn.__name__, *args, **kwargs)
+            cached = _resp_get(key, ttl)
+            if cached is not None:
+                logger.debug("[FORECAST cache] HIT  %s", fn.__name__)
+                return cached
+            logger.debug("[FORECAST cache] MISS %s", fn.__name__)
+            result = fn(*args, **kwargs)
+            _resp_set(key, result)
+            return result
+        return wrapper
+    return decorator
+
 
 def save_client_overrides(client_id: str, overrides: list[dict]) -> None:
     """Persist per-product % adjustments for a client.
@@ -68,6 +134,9 @@ def save_client_overrides(client_id: str, overrides: list[dict]) -> None:
         for ov in overrides:
             key = (str(ov["articulo"]), str(ov["date"]))
             store[key] = float(ov["pct"])
+    # Overrides alter the projected data — flush cached responses so the next
+    # request reflects the change rather than serving stale aggregates.
+    clear_response_cache()
 
 
 def clear_client_overrides(client_id: str) -> None:
@@ -1379,6 +1448,7 @@ def get_data() -> dict[str, Any]:
 
 def reload_data() -> None:
     global _data_cache
+    clear_response_cache()   # Always flush response cache on explicit reload
     if engine is not None and "postgresql" in str(engine.url):
         # PostgreSQL mode: data lives in DB, not in CSV files.
         # Just clear the in-memory cache (which is {} anyway in this mode).
@@ -1430,6 +1500,7 @@ def get_forecast_schema_info() -> dict:
     return {"tables": result}
 
 
+@_with_resp_cache(ttl=_RESP_TTL_STATIC)
 def get_filter_options() -> dict:
     import json  # needed in both branches
     if engine is not None and "postgresql" in str(engine.url):
@@ -1511,6 +1582,7 @@ def get_filter_options() -> dict:
         }
 
 
+@_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_product_list(profiles: list | None = None, neg: list | None = None) -> list[dict]:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
@@ -1553,6 +1625,7 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
     return ranking.to_dict(orient="records")
 
 
+@_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_chart_data(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -1863,6 +1936,7 @@ def get_chart_data(
     }
 
 
+@_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_client_table(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -2031,6 +2105,7 @@ def _blend_with_white(hex_color: str, weight: float) -> str:
     return "#{:02x}{:02x}{:02x}".format(*out)
 
 
+@_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_treemap_data(
     start_date: str | None = None,
     end_date: str | None = None,
