@@ -370,20 +370,22 @@
   .fc-modal {
     background: #FFFFFF; border-radius: 12px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-    width: 100%; max-width: 1200px;
-    max-height: 90vh; display: flex; flex-direction: column;
+    width: 100%; max-width: min(1400px, 96vw);
+    max-height: 92vh; display: flex; flex-direction: column;
     font-family: Outfit, system-ui, sans-serif;
   }
   .fc-modal__header {
-    padding: 20px 24px 16px;
+    padding: 16px 24px 14px;
     border-bottom: 1px solid #E2E8F0;
     display: flex; align-items: center; justify-content: space-between;
     flex-shrink: 0;
   }
-  .fc-modal__title { font-size: 1.1rem; font-weight: 700; color: #0F172A; margin: 0; }
+  .fc-modal__title { font-size: 1.05rem; font-weight: 700; color: #0F172A; margin: 0; }
   .fc-modal__close { background: none; border: none; font-size: 1.4rem; color: #94A3B8; cursor: pointer; line-height: 1; padding: 0; }
   .fc-modal__close:hover { color: #475569; }
-  .fc-modal__body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  /* Modal body: the ag-Grid within handles its own vertical scroll (domLayout:normal),
+     so the modal body itself only scrolls when there are multiple neg sections. */
+  .fc-modal__body { flex: 1; overflow-y: auto; padding: 16px 20px; min-height: 0; }
   .fc-modal__footer {
     padding: 14px 24px; border-top: 1px solid #E2E8F0;
     display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-shrink: 0;
@@ -423,7 +425,20 @@
 
   /* Modal ag-grid */
   .fc-modal-grid { padding: 10px 12px 14px; }
-  .fc-modal-grid .ag-theme-alpine { --ag-font-size: 12px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; --ag-header-background-color: #F8FAFC; --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; }
+  /* Fixed height so the horizontal scrollbar is always visible at the bottom
+     of the grid, regardless of how many products are listed. Uses domLayout:'normal'
+     (ag-Grid internal scroll), so the user never needs to scroll the whole modal
+     just to reach the horizontal scrollbar. */
+  .fc-modal-grid .ag-theme-alpine {
+    height: clamp(220px, 44vh, 500px);
+    width: 100%;
+    --ag-font-size: 12px;
+    --ag-font-family: Outfit, system-ui, sans-serif;
+    --ag-border-color: #E2E8F0;
+    --ag-header-background-color: #F8FAFC;
+    --ag-background-color: #FFFFFF;
+    --ag-odd-row-background-color: #FFFFFF;
+  }
   .fc-modal-grid .ag-root-wrapper { border: 1px solid #E2E8F0 !important; border-radius: 6px; }
   .fc-modal-grid .ag-header-group-cell { background: #F1F5F9 !important; font-weight: 600; font-size: 11px; text-align: center; border-right: 1px solid #E2E8F0; }
   .fc-modal-grid .ag-header-cell { font-weight: 600 !important; font-size: 11px; border-right: 1px solid #E2E8F0; }
@@ -1876,7 +1891,7 @@ function buildModalGrid(gridId, products, dates, maxHistDate, growthPct, useApiV
     rowData: rows,
     defaultColDef:{resizable:true, sortable:false, filter:false},
     suppressRowClickSelection: true,
-    domLayout: 'autoHeight',
+    domLayout: 'normal',   // fixed height → horizontal scrollbar always at the bottom of the grid
     onCellValueChanged: params => {
       // Recalculate (Nuevo) and ($) when (%) is edited
       const field = params.column.getColId();
