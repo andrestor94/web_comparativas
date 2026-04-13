@@ -847,10 +847,9 @@ def _pg_get_chart_data(
         )
     except Exception as exc:
         import traceback
-        logger.error(
-            "[FORECAST] _pg_get_chart_data FAILED at step=%s: %s\n%s",
-            _step, exc, traceback.format_exc(),
-        )
+        _tb_str = traceback.format_exc()
+        logger.error("[FORECAST] _pg_get_chart_data FAILED at step=%s: %s\n%s", _step, exc, _tb_str)
+        print(f"[FORECAST] _pg_get_chart_data FAILED step={_step}: {exc}\n{_tb_str}", flush=True)
         return _EMPTY
 
 
@@ -1167,6 +1166,24 @@ def _pg_get_chart_data_inner(
 def _pg_get_client_table(
     start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
 ) -> dict:
+    """Shell: catches all exceptions so the router never sees a 500 from this path."""
+    _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
+    try:
+        return _pg_get_client_table_inner(
+            start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+        )
+    except Exception as exc:
+        import traceback as _tb
+        print(
+            f"[FORECAST] _pg_get_client_table FAILED: {exc}\n{_tb.format_exc()}",
+            flush=True,
+        )
+        return _EMPTY
+
+
+def _pg_get_client_table_inner(
+    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+) -> dict:
     """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha).
 
     Valorization strategy (view_money=True):
@@ -1315,6 +1332,24 @@ def _pg_get_client_table(
 
 
 def _pg_get_treemap_data(
+    start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+) -> dict:
+    """Shell: catches all exceptions so the router never sees a 500 from this path."""
+    _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
+    try:
+        return _pg_get_treemap_data_inner(
+            start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+        )
+    except Exception as exc:
+        import traceback as _tb
+        print(
+            f"[FORECAST] _pg_get_treemap_data FAILED: {exc}\n{_tb.format_exc()}",
+            flush=True,
+        )
+        return _EMPTY
+
+
+def _pg_get_treemap_data_inner(
     start_date, end_date, profiles, neg, subneg, products, view_money, period_date
 ) -> dict:
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""

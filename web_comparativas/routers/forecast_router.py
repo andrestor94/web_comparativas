@@ -104,8 +104,15 @@ def api_chart_data(
     growth_pct: float = Query(default=0.0),
     _user: User = Depends(_require_user),
 ):
+    import traceback as _tb
+    print(
+        f"[FORECAST ROUTER] chart-data start_date={start_date} end_date={end_date} "
+        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
+        f"view_money={view_money} growth_pct={growth_pct}",
+        flush=True,
+    )
     try:
-        return svc.get_chart_data(
+        result = svc.get_chart_data(
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -115,7 +122,11 @@ def api_chart_data(
             view_money=view_money,
             growth_pct=growth_pct,
         )
+        print(f"[FORECAST ROUTER] chart-data OK keys={list(result.keys()) if isinstance(result, dict) else type(result)}", flush=True)
+        return result
     except Exception as exc:
+        _tb_str = _tb.format_exc()
+        print(f"[FORECAST ROUTER] chart-data EXCEPTION: {exc}\n{_tb_str}", flush=True)
         logger.error("chart-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
@@ -134,8 +145,15 @@ def api_client_table(
     lab_products: Optional[List[str]] = Query(default=None, alias="lab_products[]"),
     _user: User = Depends(_require_user),
 ):
+    import traceback as _tb
+    print(
+        f"[FORECAST ROUTER] client-table start_date={start_date} end_date={end_date} "
+        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
+        f"view_money={view_money} growth_pct={growth_pct} lab_products={lab_products}",
+        flush=True,
+    )
     try:
-        return svc.get_client_table(
+        result = svc.get_client_table(
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -146,7 +164,11 @@ def api_client_table(
             growth_pct=growth_pct,
             lab_products=lab_products,
         )
+        print(f"[FORECAST ROUTER] client-table OK rows={len(result.get('rows', [])) if isinstance(result, dict) else '?'}", flush=True)
+        return result
     except Exception as exc:
+        _tb_str = _tb.format_exc()
+        print(f"[FORECAST ROUTER] client-table EXCEPTION: {exc}\n{_tb_str}", flush=True)
         logger.error("client-table error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
@@ -164,8 +186,15 @@ def api_treemap_data(
     period_date: Optional[str] = Query(default=None),
     _user: User = Depends(_require_user),
 ):
+    import traceback as _tb
+    print(
+        f"[FORECAST ROUTER] treemap-data start_date={start_date} end_date={end_date} "
+        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
+        f"view_money={view_money} period_date={period_date}",
+        flush=True,
+    )
     try:
-        return svc.get_treemap_data(
+        result = svc.get_treemap_data(
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -175,7 +204,11 @@ def api_treemap_data(
             view_money=view_money,
             period_date=period_date,
         )
+        print(f"[FORECAST ROUTER] treemap-data OK ids={len(result.get('ids', [])) if isinstance(result, dict) else '?'}", flush=True)
+        return result
     except Exception as exc:
+        _tb_str = _tb.format_exc()
+        print(f"[FORECAST ROUTER] treemap-data EXCEPTION: {exc}\n{_tb_str}", flush=True)
         logger.error("treemap-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
