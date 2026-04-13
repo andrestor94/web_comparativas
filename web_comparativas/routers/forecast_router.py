@@ -105,10 +105,12 @@ def api_chart_data(
     _user: User = Depends(_require_user),
 ):
     import traceback as _tb
+    import json as _json
     print(
-        f"[FORECAST ROUTER] chart-data start_date={start_date} end_date={end_date} "
+        f"[FORECAST ROUTER] chart-data START — start_date={start_date} end_date={end_date} "
         f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"view_money={view_money} growth_pct={growth_pct}",
+        f"view_money={view_money} growth_pct={growth_pct} "
+        f"user={getattr(_user, 'email', '?')}",
         flush=True,
     )
     try:
@@ -122,11 +124,53 @@ def api_chart_data(
             view_money=view_money,
             growth_pct=growth_pct,
         )
-        print(f"[FORECAST ROUTER] chart-data OK keys={list(result.keys()) if isinstance(result, dict) else type(result)}", flush=True)
+        print(
+            f"[FORECAST ROUTER] chart-data GOT RESULT — "
+            f"type={type(result).__name__} "
+            f"keys={list(result.keys()) if isinstance(result, dict) else '?'} "
+            f"history_len={len(result.get('history', [])) if isinstance(result, dict) else '?'} "
+            f"forecast_len={len(result.get('forecast', [])) if isinstance(result, dict) else '?'} "
+            f"has_overrides={result.get('has_overrides') if isinstance(result, dict) else '?'}",
+            flush=True,
+        )
+        # Validate JSON serializability BEFORE FastAPI tries to serialize it.
+        # If this fails, we get the traceback here — not silently in the middleware.
+        try:
+            _json.dumps(result)
+            print(f"[FORECAST ROUTER] chart-data JSON OK — returning 200", flush=True)
+        except Exception as _json_exc:
+            _tb_str2 = _tb.format_exc()
+            print(
+                f"[FORECAST ROUTER] chart-data JSON SERIALIZATION FAILED: {_json_exc}\n{_tb_str2}",
+                flush=True,
+            )
+            # Sanitize: replace non-serializable scalars in-place and retry
+            import math as _math
+            def _sanitize(obj):
+                if isinstance(obj, dict):
+                    return {k: _sanitize(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_sanitize(v) for v in obj]
+                if isinstance(obj, float):
+                    if _math.isnan(obj) or _math.isinf(obj):
+                        return 0.0
+                    return obj
+                try:
+                    import numpy as _np
+                    if isinstance(obj, _np.floating):
+                        v = float(obj)
+                        return 0.0 if (_math.isnan(v) or _math.isinf(v)) else v
+                    if isinstance(obj, _np.integer):
+                        return int(obj)
+                except ImportError:
+                    pass
+                return obj
+            result = _sanitize(result)
+            print(f"[FORECAST ROUTER] chart-data sanitized — retrying JSON", flush=True)
         return result
     except Exception as exc:
         _tb_str = _tb.format_exc()
-        print(f"[FORECAST ROUTER] chart-data EXCEPTION: {exc}\n{_tb_str}", flush=True)
+        print(f"[FORECAST ROUTER] chart-data EXCEPTION: {type(exc).__name__}: {exc}\n{_tb_str}", flush=True)
         logger.error("chart-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
