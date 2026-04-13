@@ -185,7 +185,11 @@
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload),
       })
-        .then((r) => r.json())
+        .then((r) => {
+          const ct = r.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) throw new Error('unexpected_html');
+          return r.json();
+        })
         .then((data) => {
           if (data.ok) {
             textarea.value = '';
@@ -208,9 +212,15 @@
 
     function loadSummary() {
       fetch('/forecast/api/comments/summary')
-        .then((r) => r.json())
+        .then((r) => {
+          // If the server returns HTML (redirect to login or error page),
+          // content-type will not be application/json — skip silently.
+          const ct = r.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) return null;
+          return r.json();
+        })
         .then((data) => {
-          if (!data.ok) return;
+          if (!data || !data.ok) return;
 
           // Badge en FAB
           const count = data.open_count || 0;

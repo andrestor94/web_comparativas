@@ -41,6 +41,12 @@ router = APIRouter(prefix="/forecast", tags=["forecast"])
 def _require_user(request: Request) -> User:
     user = getattr(request.state, "user", None)
     if not user:
+        # Log session state to diagnose 401s in production
+        uid = getattr(request.session, "get", lambda k, d=None: d)("uid") if hasattr(request, "session") else None
+        logger.warning(
+            "forecast 401 — path=%s uid_in_session=%s has_state_user=%s",
+            request.url.path, uid, hasattr(request.state, "user"),
+        )
         raise HTTPException(status_code=401, detail="No autenticado")
     return user
 
