@@ -85,10 +85,10 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
 else:
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-        pool_recycle=1800,
+        pool_pre_ping=True,       # Validates connection before use — detects stale SSL
+        pool_size=5,              # Reduced: Render free tier has a 25-connection limit
+        max_overflow=10,
+        pool_recycle=300,         # Recycle every 5 min — Render closes idle PG conns ~10min
         pool_timeout=30,
         connect_args=connect_args,
         future=True,
