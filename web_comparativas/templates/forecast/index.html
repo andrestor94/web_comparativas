@@ -1081,9 +1081,18 @@ function buildQS(extra = {}) {
   const p = new URLSearchParams();
   if (STATE.startDate) p.append('start_date', STATE.startDate);
   if (STATE.endDate)   p.append('end_date',   STATE.endDate);
-  STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
-  STATE.selected.neg.forEach(v   => p.append('neg[]', v));
-  STATE.selected.subneg.forEach(v => p.append('subneg[]', v));
+  // Normalize "all selected" → "no filter" (idéntico a Limpiar).
+  // SQL IN() no matchea filas con NULL: enviar todos los valores filtraría
+  // registros sin perfil/neg/subneg asignado, dando menos datos que Limpiar.
+  const _aPerfil = STATE.filterOptions.profiles || [];
+  const _aNeg    = STATE.filterOptions.neg      || [];
+  const _aSubneg = STATE.filterOptions.subneg   || [];
+  if (STATE.selected.perfil.length > 0 && STATE.selected.perfil.length < _aPerfil.length)
+    STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
+  if (STATE.selected.neg.length > 0 && STATE.selected.neg.length < _aNeg.length)
+    STATE.selected.neg.forEach(v => p.append('neg[]', v));
+  if (STATE.selected.subneg.length > 0 && STATE.selected.subneg.length < _aSubneg.length)
+    STATE.selected.subneg.forEach(v => p.append('subneg[]', v));
   STATE.selectedProducts.forEach(v => p.append('products[]', v));
   p.append('view_money', STATE.viewMoney ? 'true' : 'false');
   p.append('growth_pct', STATE.growthPct);
@@ -1477,23 +1486,39 @@ function renderChart(data) {
     showlegend:false, hoverinfo:'skip', name:'Lower Bound',
   };
 
-  // ── Proyección (Base) — dashed blue #5770B0 ──────────────────────────
+  // ── Línea 2: Forecast base / modelo (sin overrides, sin crecimiento) ──
+  const _vSym = STATE.viewMoney ? '$' : 'u';
   const traceFcst = {
     x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Forecast||0),
     name:'Proyección (Base)', mode:'lines+markers',
     line:{color:'#5770B0', width:2.5, dash:'dash', shape:'spline', smoothing:0.95},
     marker:{size:6, opacity:1.0, symbol:'circle'},
-    hovertemplate:'<b>Proyección (Base)</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+    hovertemplate:`<b>Proyección (Base)</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
   };
   const traces = [traceUpper, traceLower, traceFcst];
 
-  // ── Proyección Ajustada (growth expectation) ──────────────────────────
+  // ── Línea 3: Proyección comercial estándar (+X%) ──────────────────────
+  // Crecimiento uniforme global aplicado sobre el modelo base.
   if (STATE.growthPct !== 0) {
     traces.push({
       x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Adj||0),
       name:`Proyección (+${STATE.growthPct.toFixed(1)}%)`, mode:'lines',
       line:{color:'#10B981', width:2.5, dash:'dot', shape:'spline', smoothing:1.3},
-      hovertemplate:`<b>Proyección (+${STATE.growthPct.toFixed(1)}%)</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>`,
+      hovertemplate:`<b>Proyección (+${STATE.growthPct.toFixed(1)}%)</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
+    });
+  }
+
+  // ── Línea 4: Proyección comercial ajustada por usuario ────────────────
+  // Misma arquitectura que la línea "+X%", pero aplicando la tasa de crecimiento
+  // editada por el usuario en "Proyección más expectativa de crecimiento".
+  // Se muestra solo cuando hay overrides guardados; convive con la línea estándar.
+  if (data.has_overrides) {
+    traces.push({
+      x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_User_Adj||0),
+      name:'Proyección ajustada (usuario)', mode:'lines+markers',
+      line:{color:'#F59E0B', width:2.8, dash:'solid', shape:'spline', smoothing:0.95},
+      marker:{size:5, symbol:'diamond', opacity:0.9},
+      hovertemplate:`<b>Proyección ajustada</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
     });
   }
 
@@ -1948,6 +1973,34 @@ function renderModalBody(data) {
   const dates = data.dates || [];
   const maxHistDate = data.max_hist_date || null;
 
+  // ── Pre-poblar STATE.modalSubnegGrowths ANTES de construir el HTML ──
+  // Esto garantiza que renderSubnegContent lea el valor correcto (guardado o global)
+  // cuando genera el encabezado de cada subneg. Sin esto, el header siempre mostraría
+  // growthPct global porque STATE.modalSubnegGrowths aún está vacío al renderizar.
+  const _futureDates = (data.dates || []).filter(ds => ds > (data.max_hist_date || ''));
+  (data.negocios || []).forEach(neg => {
+    neg.subnegs.forEach(sub => {
+      // Solo inferir si aún no fue establecido (ej: usuario ya cambió el % en esta sesión)
+      if (STATE.modalSubnegGrowths[sub.subneg] == null) {
+        let inferred = growthPct;
+        // Buscar el pct del primer mes futuro del primer producto del subneg.
+        // pct almacenado = tasa mensual compuesta (ej: 3.4074 para 50% anual).
+        if (_futureDates.length > 0 && sub.products && sub.products.length > 0) {
+          const firstProd = sub.products[0];
+          const m = (firstProd.months || {})[_futureDates[0]];
+          if (m && m.pct != null && m.pct > 0) {
+            // m.pct es tasa MENSUAL compuesta (ej: 3.4074 para 50% anual).
+            // Reconvertir a tasa anual para mostrar en el encabezado del subneg.
+            const rm = m.pct / 100;
+            const annualRate = (Math.pow(1 + rm, 12) - 1) * 100;
+            inferred = Math.round(annualRate * 10) / 10;  // redondear a 1 decimal
+          }
+        }
+        STATE.modalSubnegGrowths[sub.subneg] = inferred;
+      }
+    });
+  });
+
   let html = `
     <div class="fc-modal-info">
       <div class="fc-modal-info-box"><strong>Perfil:</strong> ${perfil}</div>
@@ -1955,9 +2008,9 @@ function renderModalBody(data) {
     </div>`;
 
   if (growthPct !== 0) {
-    const ra = growthPct / 100;
-    const rm = (Math.pow(1 + ra, 1/12) - 1) * 100;
-    html += `<div class="fc-modal-growth-caption">📈 Crecimiento Anual: ${growthPct}% → Tasa Mensual Compuesta: ${rm.toFixed(4)}%</div>`;
+    const _ra = growthPct / 100;
+    const _rm = (Math.pow(1 + _ra, 1/12) - 1) * 100;
+    html += `<div class="fc-modal-growth-caption">📈 Crecimiento Anual: ${growthPct}% → Tasa Mensual Compuesta: ${_rm.toFixed(4)}%</div>`;
   }
 
   html += '<div id="fcNegSections">';
@@ -1987,13 +2040,6 @@ function renderModalBody(data) {
 
   // Build download CSV link
   buildDownloadLink(data);
-
-  // Initialize subneg growths from data defaults
-  (data.negocios || []).forEach(neg => {
-    neg.subnegs.forEach(sub => {
-      STATE.modalSubnegGrowths[sub.subneg] = STATE.modalSubnegGrowths[sub.subneg] ?? (data.growth_pct || 0);
-    });
-  });
 }
 
 function countProducts(negSection) {
@@ -2099,13 +2145,14 @@ function buildModalGrid(gridId, products, dates, maxHistDate, growthPct, useApiV
         pct = m.pct   != null ? m.pct   : 0;
         adj = m.nuevo != null ? m.nuevo : orig;
       } else if (maxHistDate && ds > maxHistDate && growthPct !== 0) {
-        // El usuario cambió el % del subneg → recalcular con nuevo growthPct
+        // El usuario cambió el % del subneg → distribuir en tasa mensual compuesta
         const [origYear, origMonth] = maxHistDate.split('-').map(Number);
         const [dYear, dMonth] = ds.split('-').map(Number);
         const t = (dYear - origYear) * 12 + (dMonth - origMonth);
         const ra = growthPct / 100;
         const rm = Math.pow(1 + ra, 1/12) - 1;
         adj = orig * Math.pow(1 + rm, t);
+        // Guardamos la tasa MENSUAL — el gráfico la reconvierte a anual vía (1+rm)^12
         pct = parseFloat((rm * 100).toFixed(4));
       }
 
@@ -2270,8 +2317,12 @@ async function loadProducts() {
   }
 
   const p = new URLSearchParams();
-  STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
-  STATE.selected.neg.forEach(v => p.append('neg[]', v));
+  const _pPerfil = STATE.filterOptions.profiles || [];
+  const _pNeg    = STATE.filterOptions.neg      || [];
+  if (STATE.selected.perfil.length > 0 && STATE.selected.perfil.length < _pPerfil.length)
+    STATE.selected.perfil.forEach(v => p.append('profiles[]', v));
+  if (STATE.selected.neg.length > 0 && STATE.selected.neg.length < _pNeg.length)
+    STATE.selected.neg.forEach(v => p.append('neg[]', v));
   const url = '/forecast/api/product-list?' + p.toString();
 
   try {
@@ -2428,6 +2479,7 @@ window.addEventListener('pagehide', _persistForecastView);
 /* ===================================================================
    INIT
    =================================================================== */
+
 document.addEventListener('DOMContentLoaded', async () => {
   _restoreForecastView();
 
@@ -2452,4 +2504,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 </script>
+
+{# ── Widget flotante de notas Forecast ── #}
+{# Mismo patrón que pliego_widget.js / Lectura de Pliegos.                  #}
+{# Los mensajes se guardan como Tickets con modulo_origen="forecast" y       #}
+{# son visibles en Mesa de Ayuda bajo el filtro "Forecast".                  #}
+<div id="forecast-widget-root"
+     data-empresa="Suizo Argentina"
+     data-unidad="Unidad Productos Hospitalarios">
+</div>
+<script src="{{ url_for('static', path='js/forecast_widget.js') }}?v=1"></script>
 {% endblock %}
