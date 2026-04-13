@@ -859,13 +859,19 @@ def _pg_get_chart_data_inner(
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
 
-    logger.info("[FORECAST chart] step=resolve_prod_codes")
+    print(
+        f"[FORECAST INNER] ETAPA 1 — resolve_prod_codes "
+        f"start={start_date} end={end_date} growth_pct={growth_pct} "
+        f"view_money={view_money} profiles={profiles} neg={neg} subneg={subneg} products={products} "
+        f"has_overrides={_has_overrides()}",
+        flush=True,
+    )
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
     # val_prod: None when forecast_valorizado lacks the column (graceful degradation)
     val_prod   = _val_prod_filter(prod_codes)
 
-    logger.info("[FORECAST chart] step=build_where")
+    print(f"[FORECAST INNER] ETAPA 2 — build_where prod_codes_count={len(prod_codes) if prod_codes is not None else 'None'}", flush=True)
     # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
     main_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
@@ -873,7 +879,7 @@ def _pg_get_chart_data_inner(
         products_as_codes=prod_codes,
         products=None if prod_codes is not None else products,
     )
-    logger.info("[FORECAST chart] step=query_meta main_where=%s", main_where[:100])
+    print(f"[FORECAST INNER] ETAPA 3 — query_meta main_where_len={len(main_where)}", flush=True)
     # Lightweight metadata: n_products + max history date
     # forecast_main has no descripcion — count by codigo_serie
     df_meta = _query_agg(
@@ -882,13 +888,12 @@ def _pg_get_chart_data_inner(
         f"FROM forecast_main WHERE {main_where}"
     )
     if df_meta.empty:
-        logger.warning("[FORECAST chart] df_meta empty — returning _EMPTY")
+        print(f"[FORECAST INNER] df_meta empty — returning _EMPTY", flush=True)
         return _EMPTY
-    logger.info("[FORECAST chart] step=parse_meta cols=%s", list(df_meta.columns))
     n_products = int(df_meta["n_products"].iloc[0] or 0)
     _mhd = df_meta["max_hist_date"].iloc[0] if not df_meta.empty else None
     max_hist = pd.to_datetime(_mhd) if pd.notna(_mhd) else pd.Timestamp("2000-01-01")
-    logger.info("[FORECAST chart] n_products=%s max_hist=%s", n_products, max_hist)
+    print(f"[FORECAST INNER] meta OK — n_products={n_products} max_hist={max_hist}", flush=True)
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
     # hist/fact tables always have codigo_serie — use prod_codes (not val_prod) here.
@@ -912,7 +917,7 @@ def _pg_get_chart_data_inner(
         skip_neg=True,
     )
 
-    logger.info("[FORECAST chart] step=query_hist view_money=%s hist_where=%s", view_money, hist_where[:80])
+    print(f"[FORECAST INNER] ETAPA 4 — query_hist view_money={view_money}", flush=True)
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
     # NOTE: PostgreSQL returns column aliases in lowercase regardless of AS casing.
     # All queries use lowercase aliases; rename to Title-Case after each query so the
@@ -942,7 +947,7 @@ def _pg_get_chart_data_inner(
     if not df_hist.empty and "total_venta" in df_hist.columns:
         df_hist.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
 
-    logger.info("[FORECAST chart] step=query_fcst df_hist_rows=%s", len(df_hist))
+    print(f"[FORECAST INNER] ETAPA 5 — query_fcst df_hist_rows={len(df_hist)} hist_cols={list(df_hist.columns) if not df_hist.empty else []}", flush=True)
     # Forecast: from valorizado (monto_yhat=money, yhat_cliente=units; monto_li/monto_ls=band)
     val_col    = "monto_yhat"    if view_money else "yhat_cliente"
     val_col_li = "monto_li"      if view_money else "li_cliente"
@@ -981,10 +986,21 @@ def _pg_get_chart_data_inner(
         # Parte de Total_Adj (crecimiento estándar) y aplica un delta por producto/mes
         # donde el usuario editó la tasa: delta = orig × (override_pct − growth_pct) / 100.
         # Rows sin override contribuyen igual a Total_Adj → solo los editados difieren.
+        print(
+            f"[FORECAST INNER] ETAPA 6 — df_fcst base OK "
+            f"df_fcst_rows={len(df_fcst)} df_fcst_cols={list(df_fcst.columns)}",
+            flush=True,
+        )
         df_fcst["Total_User_Adj"] = df_fcst["Total_Adj"].copy()
         if _has_overrides():
             with _overrides_lock:
                 overrides_snapshot = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+            print(
+                f"[FORECAST INNER] ETAPA 7 — applying overrides "
+                f"n_clients={len(overrides_snapshot)} "
+                f"total_overrides={sum(len(v) for v in overrides_snapshot.values())}",
+                flush=True,
+            )
             if overrides_snapshot:
                 cli_col = "fantasia"
                 # forecast_valorizado has no 'articulo' column — use codigo_serie.
@@ -1007,6 +1023,7 @@ def _pg_get_chart_data_inner(
                             f" AND DATE_TRUNC('month', fecha) = '{safe_dt}')"
                         )
                         params_map[(str(client_id), str(articulo), date_str)] = pct
+                print(f"[FORECAST INNER] ETAPA 7b — n_conditions={len(conditions)} params_map_keys={list(params_map.keys())[:5]}", flush=True)
                 if conditions:
                     where_ovr = " OR ".join(conditions)
                     df_orig = _query_agg(
@@ -1015,6 +1032,7 @@ def _pg_get_chart_data_inner(
                         f"FROM forecast_valorizado WHERE {where_ovr} "
                         f"GROUP BY fecha, {cli_col}, {art_col}"
                     )
+                    print(f"[FORECAST INNER] ETAPA 7c — df_orig rows={len(df_orig)} cols={list(df_orig.columns) if not df_orig.empty else []}", flush=True)
                     if not df_orig.empty:
                         df_orig["_ds"] = df_orig["fecha"].dt.strftime("%Y-%m")
                         df_orig["_override_pct"] = df_orig.apply(
@@ -1035,6 +1053,12 @@ def _pg_get_chart_data_inner(
                         )
                         df_delta = df_orig.groupby("fecha")["_delta"].sum().reset_index()
                         df_delta.rename(columns={"_delta": "User_Delta"}, inplace=True)
+                        print(
+                            f"[FORECAST INNER] ETAPA 7d — delta computed "
+                            f"df_delta rows={len(df_delta)} "
+                            f"df_fcst_before_merge cols={list(df_fcst.columns)}",
+                            flush=True,
+                        )
                         df_fcst = df_fcst.merge(df_delta, on="fecha", how="left")
                         df_fcst["User_Delta"] = df_fcst["User_Delta"].fillna(0)
                         # Apply delta only to forecast months (bridge point stays at hist value)
@@ -1044,8 +1068,14 @@ def _pg_get_chart_data_inner(
                             + df_fcst.loc[future_mask, "User_Delta"]
                         )
                         df_fcst.drop(columns=["User_Delta"], inplace=True)
+                        print(
+                            f"[FORECAST INNER] ETAPA 7e — after merge "
+                            f"df_fcst cols={list(df_fcst.columns)} rows={len(df_fcst)} "
+                            f"Total_User_Adj_nulls={df_fcst['Total_User_Adj'].isna().sum() if 'Total_User_Adj' in df_fcst.columns else 'MISSING'}",
+                            flush=True,
+                        )
 
-    logger.info("[FORECAST chart] step=bridge df_fcst_rows=%s df_hist_rows=%s", len(df_fcst), len(df_hist))
+    print(f"[FORECAST INNER] ETAPA 8 — bridge df_fcst_rows={len(df_fcst)} df_hist_rows={len(df_hist)}", flush=True)
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
         hist_last = df_hist.sort_values("fecha").iloc[-1]
@@ -1059,7 +1089,7 @@ def _pg_get_chart_data_inner(
         }])
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
-    logger.info("[FORECAST chart] step=query_fact2026")
+    print(f"[FORECAST INNER] ETAPA 9 — query_fact2026", flush=True)
     # Facturación real 2026
     # CANONICAL SERIES FILTER: restrict fact_2026 to the series that exist in
     # forecast_valorizado (same inner-join the original app.py applied at load time).
@@ -1092,7 +1122,7 @@ def _pg_get_chart_data_inner(
                 "Total_Venta": round(float(row.get("Total_Venta", 0)), 0),
             })
 
-    logger.info("[FORECAST chart] step=kpis df_fact_raw_rows=%s", len(df_fact_raw))
+    print(f"[FORECAST INNER] ETAPA 10 — kpis df_fact_raw_rows={len(df_fact_raw)}", flush=True)
     # KPIs
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0.0
     total_real_2025 = 0.0
@@ -1137,7 +1167,13 @@ def _pg_get_chart_data_inner(
             out.append(rec)
         return out
 
-    logger.info("[FORECAST chart] step=serialize total_adj=%s n_products=%s", round(total_adj, 0), n_products)
+    print(
+        f"[FORECAST INNER] ETAPA 11 — serialize "
+        f"total_adj={round(total_adj, 0)} total_hist={round(total_hist, 0)} "
+        f"total_fcst={round(total_fcst, 0)} n_products={n_products} "
+        f"forecast_cols={list(df_fcst.columns) if not df_fcst.empty else []}",
+        flush=True,
+    )
     return {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
         "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]) if not df_fcst.empty else [],

@@ -357,7 +357,9 @@ async def db_session_lifecycle(request: Request, call_next):
         print(f"[MW] Committed OK", flush=True)
         return response
     except Exception as e:
-        print(f"[MW] DB Error/Rollback: {e}", flush=True)
+        import traceback as _mw_tb
+        _mw_tb_str = _mw_tb.format_exc()
+        print(f"[MW] DB Error/Rollback on {path}: {type(e).__name__}: {e}\n{_mw_tb_str}", flush=True)
         try:
             request.state.db.rollback()
         except Exception:
