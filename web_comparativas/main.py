@@ -250,10 +250,10 @@ def get_current_user(request: Request) -> Optional[User]:
     uid = request.session.get("uid")
     print(f"[AUTH] Session UID: {uid}", flush=True)
     if not uid: return None
-    
+
     # Try using request.state.db if available
     db = getattr(request.state, "db", None)
-    
+
     try:
         if db:
             print(f"[AUTH] Using request.state.db to fetch User({uid})...", flush=True)
@@ -265,12 +265,27 @@ def get_current_user(request: Request) -> Optional[User]:
             return db_session.get(User, uid)
     except Exception as e:
         print(f"[AUTH] ERROR Fetching User: {e}", flush=True)
-        # Retry only if fallback
-        if not db:
-            _reset_session()
-            try: return db_session.get(User, uid)
-            except: return None
-        return None
+        # Retry with a fresh session — handles stale/dropped SSL connections in Render.
+        # The pool_pre_ping validates connections but psycopg2 can still get an SSL
+        # close on the very first use if the pool was idle. A single retry with a new
+        # session is enough to recover without user-visible impact.
+        retry_db = None
+        try:
+            retry_db = SessionLocal()
+            u = retry_db.get(User, uid)
+            print(f"[AUTH] RETRY OK: {u}", flush=True)
+            # Transfer the fresh session to request.state so the rest of the request uses it
+            if db:
+                try: db.close()
+                except Exception: pass
+            request.state.db = retry_db
+            return u
+        except Exception as e2:
+            print(f"[AUTH] RETRY FAILED: {e2}", flush=True)
+            if retry_db:
+                try: retry_db.close()
+                except Exception: pass
+            return None
 
 def user_display(u: Optional[User]) -> str:
     if not u: return ""
