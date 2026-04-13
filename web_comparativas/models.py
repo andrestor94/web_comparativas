@@ -59,26 +59,43 @@ else:
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
-    # Postgres en Render:
-    # 1. Timeout de conexión (TCP): 10s
-    # 2. SSL requerido
-    # 3. Timeout de consulta (statement): 55000ms (55s) como red de seguridad global.
-    #    Las queries críticas setean su propio timeout via SET LOCAL en query_service.py.
-    #    El valor anterior (5000ms) era demasiado bajo y causaba timeouts en el módulo
-    #    Dimensionamiento, cuyas queries sobre 400k+ filas pueden tardar 10-40s.
-    connect_args = {
-        "connect_timeout": 10,
-        "sslmode": "require",
-        "options": "-c statement_timeout=55000",
-        # TCP keepalive: send probe every 60s after 120s idle, 3 retries.
-        # Prevents Render's network from silently closing idle SSL connections
-        # that the pool hasn't recycled yet (pool_recycle=300 is the main guard,
-        # keepalive is a secondary layer for active but paused connections).
-        "keepalives": 1,
-        "keepalives_idle": 120,
-        "keepalives_interval": 60,
-        "keepalives_count": 3,
-    }
+    # Auto-detect Render internal vs external PostgreSQL connection.
+    # External URL contains ".render.com" in the host — requires SSL and is prone to
+    # idle connection drops (~10 min) because it goes through Render's external network.
+    # Internal URL uses a short hostname (e.g. "dpg-xxxxx-a") — same data-center network,
+    # no SSL enforcement needed, and connections don't drop on idle.
+    _db_host = SQLALCHEMY_DATABASE_URL.split("@")[-1].split("/")[0].split(":")[0]
+    _is_internal_render = bool(DATABASE_URL) and ".render.com" not in _db_host
+
+    if _is_internal_render:
+        # Internal Render connection: no SSL enforcement, shorter keepalive probes,
+        # longer recycle window (internal network is stable — no surprise SSL closes).
+        connect_args = {
+            "connect_timeout": 10,
+            "sslmode": "prefer",          # SSL if available, but don't fail without it
+            "options": "-c statement_timeout=55000",
+            "keepalives": 1,
+            "keepalives_idle": 60,        # probe after 60 s idle (was 120 for external)
+            "keepalives_interval": 30,
+            "keepalives_count": 5,
+        }
+        _pool_recycle = 600              # internal connections are stable; 10-min recycle
+        _conn_type = "INTERNAL"
+    else:
+        # External Render connection (or non-Render Postgres): force SSL, aggressive recycle.
+        # Render's external PG proxy closes idle connections after ~10 min, so we recycle
+        # every 5 min to avoid checking out a dead connection from the pool.
+        connect_args = {
+            "connect_timeout": 10,
+            "sslmode": "require",
+            "options": "-c statement_timeout=55000",
+            "keepalives": 1,
+            "keepalives_idle": 120,
+            "keepalives_interval": 60,
+            "keepalives_count": 3,
+        }
+        _pool_recycle = 300              # external: recycle every 5 min
+        _conn_type = "EXTERNAL"
 
 # SQLite (local): StaticPool — una sola conexión compartida, evita pool exhaustion
 # cuando el dashboard dispara 7-8 requests paralelos sobre queries lentas.
@@ -93,10 +110,10 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
 else:
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
-        pool_pre_ping=True,       # Validates connection before use — detects stale SSL
-        pool_size=5,              # Reduced: Render free tier has a 25-connection limit
+        pool_pre_ping=True,       # Validates connection before use — detects stale connections
+        pool_size=5,              # Render free tier: 25-connection limit
         max_overflow=10,
-        pool_recycle=300,         # Recycle every 5 min — Render closes idle PG conns ~10min
+        pool_recycle=_pool_recycle,
         pool_timeout=30,
         connect_args=connect_args,
         future=True,
@@ -107,9 +124,12 @@ IS_SQLITE = engine.url.get_backend_name() == "sqlite"
 IS_POSTGRES = engine.url.get_backend_name().startswith("postgresql")
 
 print(
-    f"[DB DEBUG] Config: SSL=require, Timeout=55s. Backend: {engine.url.get_backend_name()} "
-    f"(database={engine.url.database})",
-    flush=True
+    f"[DB] Connection type={_conn_type if not SQLALCHEMY_DATABASE_URL.startswith('sqlite') else 'SQLITE'} "
+    f"host={_db_host if not SQLALCHEMY_DATABASE_URL.startswith('sqlite') else 'local'} "
+    f"sslmode={connect_args.get('sslmode', 'N/A')} "
+    f"pool_recycle={_pool_recycle if not SQLALCHEMY_DATABASE_URL.startswith('sqlite') else 'N/A'}s "
+    f"backend={engine.url.get_backend_name()} db={engine.url.database}",
+    flush=True,
 )
 
 # Activar foreign keys en SQLite
