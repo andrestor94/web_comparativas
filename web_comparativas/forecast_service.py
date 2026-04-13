@@ -995,10 +995,10 @@ def _pg_get_chart_data_inner(
         if _has_overrides():
             with _overrides_lock:
                 overrides_snapshot = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+            _n_ovr = sum(len(v) for v in overrides_snapshot.values())
             print(
                 f"[FORECAST INNER] ETAPA 7 — applying overrides "
-                f"n_clients={len(overrides_snapshot)} "
-                f"total_overrides={sum(len(v) for v in overrides_snapshot.values())}",
+                f"n_clients={len(overrides_snapshot)} total_overrides={_n_ovr}",
                 flush=True,
             )
             if overrides_snapshot:
@@ -1007,8 +1007,15 @@ def _pg_get_chart_data_inner(
                 # Overrides are stored with art = codigo_serie (set by _pg_get_client_detail).
                 art_col = "codigo_serie"
                 val_col = "monto_yhat" if view_money else "yhat_cliente"
-                conditions = []
+
+                # Build a lookup map and a VALUES list for the CTE.
+                # STRATEGY: instead of (fantasia=X AND codigo_serie=Y AND month=M) OR ...
+                # (which creates a SQL string proportional to n_overrides and causes
+                # "SSL SYSCALL EOF" on large override sets), we use a single CTE with
+                # a VALUES clause and JOIN.  The query size is O(n_overrides rows × ~50 chars)
+                # but the WHERE clause stays constant — PostgreSQL can index-join efficiently.
                 params_map: dict = {}
+                cte_rows: list = []
                 for client_id, store in overrides_snapshot.items():
                     for (articulo, date_str), pct in store.items():
                         try:
@@ -1018,21 +1025,38 @@ def _pg_get_chart_data_inner(
                         safe_cid = str(client_id).replace("'", "''")
                         safe_art = str(articulo).replace("'", "''")
                         safe_dt  = month_ts.strftime("%Y-%m-%d")
-                        conditions.append(
-                            f"({cli_col} = '{safe_cid}' AND {art_col} = '{safe_art}'"
-                            f" AND DATE_TRUNC('month', fecha) = '{safe_dt}')"
-                        )
+                        cte_rows.append(f"('{safe_cid}','{safe_art}','{safe_dt}'::date)")
                         params_map[(str(client_id), str(articulo), date_str)] = pct
-                print(f"[FORECAST INNER] ETAPA 7b — n_conditions={len(conditions)} params_map_keys={list(params_map.keys())[:5]}", flush=True)
-                if conditions:
-                    where_ovr = " OR ".join(conditions)
-                    df_orig = _query_agg(
-                        f"SELECT fecha, {cli_col}, {art_col}, "
-                        f"SUM(COALESCE({val_col}, 0)) AS orig_val "
-                        f"FROM forecast_valorizado WHERE {where_ovr} "
-                        f"GROUP BY fecha, {cli_col}, {art_col}"
+
+                print(
+                    f"[FORECAST INNER] ETAPA 7b — CTE rows={len(cte_rows)} "
+                    f"params_map_sample={list(params_map.keys())[:3]}",
+                    flush=True,
+                )
+                if cte_rows:
+                    _values = ",\n        ".join(cte_rows)
+                    _ovr_sql = f"""
+                        WITH override_keys(fantasia, codigo_serie, mes) AS (
+                            VALUES
+                            {_values}
+                        )
+                        SELECT fv.fecha,
+                               fv.{cli_col},
+                               fv.{art_col},
+                               SUM(COALESCE(fv.{val_col}, 0)) AS orig_val
+                        FROM forecast_valorizado fv
+                        JOIN override_keys ok
+                          ON fv.{cli_col} = ok.fantasia
+                         AND fv.{art_col} = ok.codigo_serie
+                         AND DATE_TRUNC('month', fv.fecha) = ok.mes
+                        GROUP BY fv.fecha, fv.{cli_col}, fv.{art_col}
+                    """
+                    df_orig = _query_agg(_ovr_sql)
+                    print(
+                        f"[FORECAST INNER] ETAPA 7c — df_orig rows={len(df_orig)} "
+                        f"cols={list(df_orig.columns) if not df_orig.empty else []}",
+                        flush=True,
                     )
-                    print(f"[FORECAST INNER] ETAPA 7c — df_orig rows={len(df_orig)} cols={list(df_orig.columns) if not df_orig.empty else []}", flush=True)
                     if not df_orig.empty:
                         df_orig["_ds"] = df_orig["fecha"].dt.strftime("%Y-%m")
                         df_orig["_override_pct"] = df_orig.apply(
