@@ -7,19 +7,23 @@ Routes:
   GET  /api/forecast/chart-data
   GET  /api/forecast/client-table
   POST /api/forecast/reload    → (admin) force re-load CSVs from disk
+  POST /forecast/api/comments  → widget: crea/agrega nota en ticket de Forecast
+  GET  /forecast/api/comments/summary → widget: badge + historial
 """
 from __future__ import annotations
 
+import datetime as dt
+import json as _json
 import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from pydantic import BaseModel
 
-from web_comparativas.models import User
+from web_comparativas.models import User, db_session, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
 
 logger = logging.getLogger("wc.forecast.router")
@@ -267,3 +271,163 @@ def api_clear_client(
     except Exception as exc:
         logger.error("clear-client error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Widget de notas — Mesa de Ayuda integrada con Forecast
+# Mismo patrón que sic_router.py / pliego_widget.js, adaptado al módulo Forecast.
+# ---------------------------------------------------------------------------
+
+class _ForecastCommentSchema(BaseModel):
+    message: str
+    empresa: Optional[str] = None
+    unidad:  Optional[str] = None
+
+
+@router.post("/api/comments", response_class=JSONResponse)
+def forecast_api_comment(
+    request: Request,
+    payload: _ForecastCommentSchema,
+    user: User = Depends(_require_user),
+):
+    """
+    Crea o reutiliza un ticket de Mesa de Ayuda para el módulo Forecast.
+
+    Regla de agrupación: si el usuario ya tiene un ticket ABIERTO o PENDIENTE
+    en Forecast, el mensaje se agrega a ese ticket existente (evita fragmentar
+    la conversación en múltiples tickets). Si no existe ninguno activo, crea uno nuevo.
+    """
+    try:
+        existing = (
+            db_session.query(Ticket)
+            .filter(
+                Ticket.modulo_origen == "forecast",
+                Ticket.user_id == user.id,
+                Ticket.status.in_(["abierto", "pendiente"]),
+            )
+            .order_by(Ticket.updated_at.desc())
+            .first()
+        )
+
+        contexto = {
+            "empresa": payload.empresa or "",
+            "unidad":  payload.unidad  or "",
+        }
+
+        is_new = False
+        if existing:
+            ticket = existing
+            ticket.updated_at = dt.datetime.utcnow()
+        else:
+            title_parts = ["[Forecast]"]
+            if payload.empresa:
+                title_parts.append(payload.empresa)
+            if payload.unidad:
+                title_parts.append(payload.unidad[:60])
+            auto_title = " – ".join(title_parts)[:200]
+
+            ticket = Ticket(
+                user_id=user.id,
+                title=auto_title,
+                category="forecast",
+                priority="media",
+                status="abierto",
+                modulo_origen="forecast",
+                pliego_solicitud_id=None,
+                contexto_extra=_json.dumps(contexto, ensure_ascii=False),
+            )
+            db_session.add(ticket)
+            db_session.flush()
+            is_new = True
+
+        msg = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=user.id,
+            message=payload.message,
+        )
+        db_session.add(msg)
+        db_session.commit()
+
+        # Notificar a admins
+        try:
+            from web_comparativas.notifications_service import notify_admins
+            _nombre = user.name or user.email.split("@")[0]
+            _accion = "nueva consulta" if is_new else "nuevo comentario"
+            notify_admins(
+                db_session,
+                title="Comentario en Forecast",
+                message=f"{_nombre} dejó un {_accion} en Forecast",
+                category="helpdesk",
+                link=f"/sic/helpdesk/{ticket.id}",
+            )
+        except Exception:
+            pass
+
+        return JSONResponse({
+            "ok": True,
+            "ticket_id": ticket.id,
+            "is_new": is_new,
+            "message_count": len(ticket.messages),
+        })
+    except Exception as exc:
+        db_session.rollback()
+        logger.error("forecast-comment error: %s", exc, exc_info=True)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.get("/api/comments/summary", response_class=JSONResponse)
+def forecast_api_summary(
+    _request: Request,
+    user: User = Depends(_require_user),
+):
+    """
+    Retorna el resumen de tickets activos de Forecast para el usuario actual.
+    Usado por el widget para mostrar el badge y el historial resumido.
+    """
+    try:
+        tickets = (
+            db_session.query(Ticket)
+            .filter(
+                Ticket.modulo_origen == "forecast",
+                Ticket.user_id == user.id,
+            )
+            .order_by(Ticket.updated_at.desc())
+            .all()
+        )
+
+        open_count = sum(1 for t in tickets if t.status in ("abierto", "pendiente"))
+        total_msgs = sum(len(t.messages) for t in tickets)
+
+        recent_messages = []
+        if tickets:
+            latest = tickets[0]
+            for m in latest.messages[-10:]:
+                sender_name = (
+                    "Tú" if m.user_id == user.id
+                    else (m.user.name or m.user.email.split("@")[0].capitalize())
+                )
+                is_admin_role = "admin" in (m.user.role or "").lower() or "supervisor" in (m.user.role or "").lower()
+                recent_messages.append({
+                    "id": m.id,
+                    "message": m.message,
+                    "sender": sender_name,
+                    "is_admin": is_admin_role,
+                    "is_me": m.user_id == user.id,
+                    "created_at": m.created_at.strftime("%d/%m %H:%M"),
+                })
+
+        active_ticket = tickets[0] if tickets else None
+
+        return JSONResponse({
+            "ok": True,
+            "open_count": open_count,
+            "total_tickets": len(tickets),
+            "total_messages": total_msgs,
+            "active_ticket_id": active_ticket.id if active_ticket else None,
+            "active_ticket_status": active_ticket.status if active_ticket else None,
+            "recent_messages": recent_messages,
+        })
+    except Exception as exc:
+        db_session.rollback()
+        logger.error("forecast-summary error: %s", exc, exc_info=True)
+        return JSONResponse({"ok": False, "error": str(exc), "open_count": 0}, status_code=500)

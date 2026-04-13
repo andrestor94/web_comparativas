@@ -970,11 +970,81 @@ def _pg_get_chart_data_inner(
             df_fcst["Total_Li"] = df_fcst.get("Total_Forecast", 0)
         if "Total_Ls" not in df_fcst.columns:
             df_fcst["Total_Ls"] = df_fcst.get("Total_Forecast", 0)
+
+        # Line 3 — Proyección estándar comercial: modelo × (1 + growth_pct/100)
         df_fcst["Total_Adj"] = df_fcst["Total_Forecast"]
         if growth_pct != 0:
             g = 1.0 + growth_pct / 100.0
             future = df_fcst["fecha"] > max_hist
             df_fcst.loc[future, "Total_Adj"] = df_fcst.loc[future, "Total_Forecast"] * g
+
+        # Line 4 — Proyección comercial ajustada por usuario.
+        # Parte de Total_Adj (crecimiento estándar) y aplica un delta por producto/mes
+        # donde el usuario editó la tasa: delta = orig × (override_pct − growth_pct) / 100.
+        # Rows sin override contribuyen igual a Total_Adj → solo los editados difieren.
+        df_fcst["Total_User_Adj"] = df_fcst["Total_Adj"].copy()
+        if _has_overrides():
+            with _overrides_lock:
+                overrides_snapshot = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+            if overrides_snapshot:
+                cli_col = "fantasia"
+                # forecast_valorizado has no 'articulo' column — use codigo_serie.
+                # Overrides are stored with art = codigo_serie (set by _pg_get_client_detail).
+                art_col = "codigo_serie"
+                val_col = "monto_yhat" if view_money else "yhat_cliente"
+                conditions = []
+                params_map: dict = {}
+                for client_id, store in overrides_snapshot.items():
+                    for (articulo, date_str), pct in store.items():
+                        try:
+                            month_ts = pd.Timestamp(date_str + "-01")
+                        except Exception:
+                            continue
+                        safe_cid = str(client_id).replace("'", "''")
+                        safe_art = str(articulo).replace("'", "''")
+                        safe_dt  = month_ts.strftime("%Y-%m-%d")
+                        conditions.append(
+                            f"({cli_col} = '{safe_cid}' AND {art_col} = '{safe_art}'"
+                            f" AND DATE_TRUNC('month', fecha) = '{safe_dt}')"
+                        )
+                        params_map[(str(client_id), str(articulo), date_str)] = pct
+                if conditions:
+                    where_ovr = " OR ".join(conditions)
+                    df_orig = _query_agg(
+                        f"SELECT fecha, {cli_col}, {art_col}, "
+                        f"SUM(COALESCE({val_col}, 0)) AS orig_val "
+                        f"FROM forecast_valorizado WHERE {where_ovr} "
+                        f"GROUP BY fecha, {cli_col}, {art_col}"
+                    )
+                    if not df_orig.empty:
+                        df_orig["_ds"] = df_orig["fecha"].dt.strftime("%Y-%m")
+                        df_orig["_override_pct"] = df_orig.apply(
+                            lambda r: params_map.get(
+                                (str(r[cli_col]), str(r[art_col]), str(r["_ds"])), None
+                            ), axis=1,
+                        )
+                        df_orig = df_orig[df_orig["_override_pct"].notna()]
+                        # stored pct is a MONTHLY rate (e.g. 3.4074 for 50% annual).
+                        # Recover annual multiplier: (1 + monthly/100)^12, then compute
+                        # delta vs the standard growth multiplier (1 + growth_pct/100).
+                        # Example: monthly=3.4074 → annual_eff=1.50; growth_pct=25 → std=1.25
+                        #          delta = orig × (1.50 − 1.25) = orig × 0.25  → clearly visible
+                        _std_eff = 1.0 + growth_pct / 100.0
+                        df_orig["_annual_eff"] = (1.0 + df_orig["_override_pct"] / 100.0) ** 12
+                        df_orig["_delta"] = df_orig["orig_val"] * (
+                            df_orig["_annual_eff"] - _std_eff
+                        )
+                        df_delta = df_orig.groupby("fecha")["_delta"].sum().reset_index()
+                        df_delta.rename(columns={"_delta": "User_Delta"}, inplace=True)
+                        df_fcst = df_fcst.merge(df_delta, on="fecha", how="left")
+                        df_fcst["User_Delta"] = df_fcst["User_Delta"].fillna(0)
+                        # Apply delta only to forecast months (bridge point stays at hist value)
+                        future_mask = df_fcst["fecha"] > max_hist
+                        df_fcst.loc[future_mask, "Total_User_Adj"] = (
+                            df_fcst.loc[future_mask, "Total_Adj"]
+                            + df_fcst.loc[future_mask, "User_Delta"]
+                        )
+                        df_fcst.drop(columns=["User_Delta"], inplace=True)
 
     logger.info("[FORECAST chart] step=bridge df_fcst_rows=%s df_hist_rows=%s", len(df_fcst), len(df_hist))
     # Bridge: connect last history point to start of forecast line
@@ -986,6 +1056,7 @@ def _pg_get_chart_data_inner(
             "Total_Li": float(hist_last["Total_Venta"]),
             "Total_Ls": float(hist_last["Total_Venta"]),
             "Total_Adj": float(hist_last["Total_Venta"]),
+            "Total_User_Adj": float(hist_last["Total_Venta"]),
         }])
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
@@ -1070,8 +1141,9 @@ def _pg_get_chart_data_inner(
     logger.info("[FORECAST chart] step=serialize total_adj=%s n_products=%s", round(total_adj, 0), n_products)
     return {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
-        "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj"]) if not df_fcst.empty else [],
+        "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]) if not df_fcst.empty else [],
         "val_2026": val_2026_records,
+        "has_overrides": _has_overrides(),
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             "total_proyeccion_2026":    round(total_adj, 0),
@@ -1469,6 +1541,7 @@ def _pg_get_client_detail(
                         t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
                         rm = (1 + growth_pct / 100.0) ** (1 / 12.0) - 1
                         adj = orig * (1 + rm) ** t
+                        # Guardamos tasa MENSUAL — el gráfico la reconvierte a anual vía (1+rm)^12
                         pct = round(rm * 100, 4)
                     months_data[ds] = {
                         "orig": round(orig, 2), "pct": round(pct, 4),
@@ -1717,7 +1790,9 @@ def get_chart_data(
 
     data = get_data()
     df = data.get("df_main", pd.DataFrame())
-    df_val = _get_patched_df_val()
+    _ovr_active = _has_overrides()
+    # Use unpatched base for all chart lines — overrides are reflected in Total_User_Adj (Line 4)
+    df_val = data.get("df_valorizado", pd.DataFrame())
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
     df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
 
@@ -1821,8 +1896,58 @@ def get_chart_data(
                 Total_Li=(col_li, "sum"),
                 Total_Ls=(col_ls, "sum"),
             ).reset_index()
+
+            # ── Proyección comercial ajustada por usuario (Línea 4) ──────────
+            # Lógica: misma fórmula que la línea "+X%" pero usando la tasa de
+            # crecimiento editada por el usuario (override_pct) en vez de la tasa
+            # global estándar. Para filas sin override, usa la tasa global.
+            # Resultado: SUM(monto_yhat × tasa_efectiva) agrupado por mes.
+            _g_base = 1.0 + growth_pct / 100.0
+            if _ovr_active:
+                _cli_col_v = "fantasia" if "fantasia" in df_val_f.columns else "cliente_id"
+                # Support both 'articulo' (CSV) and 'codigo_serie' (PG fallback) columns
+                _art_col_v = (
+                    "articulo"     if "articulo"     in df_val_f.columns else
+                    "codigo_serie" if "codigo_serie" in df_val_f.columns else None
+                )
+                if _cli_col_v in df_val_f.columns and _art_col_v is not None:
+                    with _overrides_lock:
+                        _ovr_snap = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+                    _ovr_lookup = {
+                        (str(cid), str(art), str(ds)): pct
+                        for cid, store in _ovr_snap.items()
+                        for (art, ds), pct in store.items()
+                    }
+                    _df_u = df_val_f[[_cli_col_v, _art_col_v, "fecha", col_y]].copy()
+                    _df_u["_ds"] = _df_u["fecha"].dt.strftime("%Y-%m")
+                    _keys = list(zip(
+                        _df_u[_cli_col_v].astype(str),
+                        _df_u[_art_col_v].astype(str),
+                        _df_u["_ds"].astype(str),
+                    ))
+                    # Stored pct is a MONTHLY compound rate (e.g. 3.4074 for 50% annual).
+                    # To get the correct annual multiplier, convert: (1 + rm)^12.
+                    # This gives 1.50 for 3.4074% monthly — clearly different from g_base=1.25.
+                    _df_u["_eff"] = [
+                        (1.0 + _ovr_lookup[k] / 100.0) ** 12 if k in _ovr_lookup else _g_base
+                        for k in _keys
+                    ]
+                    _df_u["_ua"] = _df_u[col_y] * _df_u["_eff"]
+                    _ua_agg = (
+                        _df_u.groupby("fecha")["_ua"].sum()
+                        .reset_index()
+                        .rename(columns={"_ua": "Total_User_Adj"})
+                    )
+                    df_fcst = df_fcst.merge(_ua_agg, on="fecha", how="left")
+                    df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj"].fillna(
+                        df_fcst["Total_Forecast"] * _g_base
+                    )
+                else:
+                    df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
+            else:
+                df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
         else:
-            df_fcst = pd.DataFrame(columns=["fecha", "Total_Forecast", "Total_Li", "Total_Ls"])
+            df_fcst = pd.DataFrame(columns=["fecha", "Total_Forecast", "Total_Li", "Total_Ls", "Total_User_Adj"])
     else:
         df_f2 = df_filt[df_filt.get("Etiqueta_Upper", pd.Series()) == "Proyección"].groupby("fecha").agg(
             Total_Forecast=("yhat", "sum"),
@@ -1830,6 +1955,11 @@ def get_chart_data(
             Total_Ls=("ls", "sum"),
         ).reset_index()
         df_fcst = df_f2
+        df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
+
+    # Safety fallback — ensures Total_User_Adj is always present
+    if "Total_User_Adj" not in df_fcst.columns:
+        df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
 
     # Growth adjustment — flat multiplier matching original app.py
     # Original: Total_Forecast_Adj = Total_Forecast * (1 + growth_pct/100) for all projection months
@@ -1859,6 +1989,7 @@ def get_chart_data(
             "Total_Li": hist_last_val,
             "Total_Ls": hist_last_val,
             "Total_Adj": hist_last_val,
+            "Total_User_Adj": hist_last_val,
         }])
         df_fcst = pd.concat([bridge_fcst, df_fcst.sort_values("fecha")], ignore_index=True)
 
@@ -1875,7 +2006,7 @@ def get_chart_data(
     history_records = to_records_safe(df_hist.sort_values("fecha"), ["Total_Venta"])
     forecast_records = to_records_safe(
         df_fcst.sort_values("fecha"),
-        ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj"],
+        ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"],
     )
 
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0
@@ -1979,6 +2110,7 @@ def get_chart_data(
         "history": history_records,
         "forecast": forecast_records,
         "val_2026": val_2026_records,
+        "has_overrides": _ovr_active,
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             # KPI 1 - Monto Total Proyectado Anual 2026
