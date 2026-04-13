@@ -69,7 +69,15 @@ else:
     connect_args = {
         "connect_timeout": 10,
         "sslmode": "require",
-        "options": "-c statement_timeout=55000"
+        "options": "-c statement_timeout=55000",
+        # TCP keepalive: send probe every 60s after 120s idle, 3 retries.
+        # Prevents Render's network from silently closing idle SSL connections
+        # that the pool hasn't recycled yet (pool_recycle=300 is the main guard,
+        # keepalive is a secondary layer for active but paused connections).
+        "keepalives": 1,
+        "keepalives_idle": 120,
+        "keepalives_interval": 60,
+        "keepalives_count": 3,
     }
 
 # SQLite (local): StaticPool — una sola conexión compartida, evita pool exhaustion
