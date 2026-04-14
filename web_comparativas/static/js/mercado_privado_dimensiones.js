@@ -21,6 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentDateRange: { min: null, max: null },
         bootstrapCache: new Map(),
         negocioLabels: { unidades: {}, subunidades: {} },
+        pivotPage: 1,
+        pivotPageSize: 50,
+        pivotTotal: 0,
     };
 
     // AbortController activo para cancelar request /bootstrap en vuelo
@@ -398,9 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         datasetStatusPill: document.getElementById('datasetStatusPill'),
         datasetUpdatedAt:  document.getElementById('datasetUpdatedAt'),
         lastUpdateBadge:   document.getElementById('lastUpdateBadge'),
-        filterIdentified:  document.getElementById('filterIdentified'),
         filterIsClient:    document.getElementById('filterIsClient'),
-        searchGlobal:      document.getElementById('searchGlobal'),
         platformCheckboxes: Array.from(document.querySelectorAll('.platform-checkbox')),
         applyPlatformsBtn:  document.getElementById('applyPlatformsBtn'),
         platformsTodosBtn:  document.getElementById('platformsTodosBtn'),
@@ -409,10 +410,11 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiClients:  document.getElementById('kpiClients'),
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
-        kpiQuantity: document.getElementById('kpiQuantity'),
-        familyListContainer: document.getElementById('familyListContainer'),
-        pivotHeader: document.getElementById('pivotHeader'),
-        pivotBody:   document.getElementById('pivotBody'),
+        familyListContainer:  document.getElementById('familyListContainer'),
+        pivotHeader:          document.getElementById('pivotHeader'),
+        pivotBody:            document.getElementById('pivotBody'),
+        pivotPagination:      document.getElementById('pivotPagination'),
+        pivotTotalLabel:      document.getElementById('pivotTotalLabel'),
     };
 
     const reloadBtnDefaultHtml = elements.reloadBtn ? elements.reloadBtn.innerHTML : '';
@@ -445,18 +447,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // bindEvents
     // ─────────────────────────────────────────────────────────────────────────
     function bindEvents() {
-        // Filtros simples con debounce
-        [elements.filterIdentified, elements.filterIsClient].forEach(el => {
-            if (el) el.addEventListener('change', triggerLoad);
-        });
-
-        // Búsqueda global
-        let searchTimeout;
-        if (elements.searchGlobal) {
-            elements.searchGlobal.addEventListener('input', () => {
-                clearTimeout(searchTimeout);
-                searchTimeout = setTimeout(loadDashboardData, 400);
-            });
+        // Filtro ¿Cliente?
+        if (elements.filterIsClient) {
+            elements.filterIsClient.addEventListener('change', triggerLoad);
         }
 
         // ── Plataformas ────────────────────────────────────────────────────
@@ -592,7 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderFamilyList(bootstrap.top_families || []);
         renderMapChart(bootstrap.geo || []);
         renderBarClientChart(bootstrap.clients_by_result || []);
-        renderPivotTable(bootstrap.family_consumption || { months: [], rows: [] });
+        renderPivotTable(bootstrap.family_consumption || { months: [], rows: [], total: 0 }, true);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -646,9 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
             plataforma:        plataformas, // vacío = todas
             fecha_desde:       fechaDesde,
             fecha_hasta:       fechaHasta,
-            identified:  elements.filterIdentified ? (elements.filterIdentified.value || null) : null,
-            is_client:   elements.filterIsClient   ? (elements.filterIsClient.value   || null) : null,
-            search:      elements.searchGlobal     ? (elements.searchGlobal.value.trim() || null) : null,
+            is_client:   elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
         };
     }
 
@@ -755,7 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderKpisError() {
-        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiQuantity]
+        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies]
             .forEach(el => { if (el) el.textContent = '--'; });
     }
 
@@ -869,7 +860,6 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.kpiClients.textContent  = formatInteger(kpis.clientes || 0);
         elements.kpiRecords.textContent  = formatInteger(kpis.renglones || 0);
         elements.kpiFamilies.textContent = formatInteger(kpis.familias || 0);
-        elements.kpiQuantity.textContent = formatDecimal(kpis.cantidad_demandada || 0);
         try {
             localStorage.setItem('mp_dimensiones_kpis', JSON.stringify({
                 clients: kpis.clientes || 0,
@@ -1014,9 +1004,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderPivotTable(data) {
+    function renderPivotTable(data, resetPage = false) {
+        if (resetPage) {
+            state.pivotPage = 1;
+        }
+        const total = (data.total != null) ? data.total : (data.rows || []).length;
+        state.pivotTotal = total;
+
+        // Actualizar label de total
+        if (elements.pivotTotalLabel) {
+            elements.pivotTotalLabel.textContent = `${formatInteger(total)} familias`;
+            elements.pivotTotalLabel.style.display = total > 0 ? 'inline-block' : 'none';
+        }
+
         elements.pivotHeader.innerHTML = '';
         elements.pivotBody.innerHTML = '';
+
         const headerRow = document.createElement('tr');
         const familyHeader = document.createElement('th');
         familyHeader.textContent = 'Familia';
@@ -1028,6 +1031,7 @@ document.addEventListener('DOMContentLoaded', () => {
             headerRow.appendChild(th);
         });
         elements.pivotHeader.appendChild(headerRow);
+
         (data.rows || []).forEach(row => {
             const tr = document.createElement('tr');
             const familyCell = document.createElement('td');
@@ -1043,6 +1047,66 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             elements.pivotBody.appendChild(tr);
         });
+
+        renderPivotPagination(total, state.pivotPage, state.pivotPageSize);
+    }
+
+    function renderPivotPagination(total, page, pageSize) {
+        if (!elements.pivotPagination) return;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        if (totalPages <= 1) {
+            elements.pivotPagination.style.display = 'none';
+            return;
+        }
+        elements.pivotPagination.style.display = 'flex';
+        elements.pivotPagination.innerHTML = '';
+
+        const nav = document.createElement('div');
+        nav.className = 'dim-pivot-nav';
+
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'btn btn-sm btn-outline-secondary dim-pivot-page-btn';
+        prevBtn.textContent = '← Anterior';
+        prevBtn.disabled = page <= 1;
+        prevBtn.addEventListener('click', () => loadPivotPage(page - 1));
+
+        const pageInfo = document.createElement('span');
+        pageInfo.className = 'dim-pivot-page-info small text-muted';
+        const startRow = (page - 1) * pageSize + 1;
+        const endRow = Math.min(page * pageSize, total);
+        pageInfo.textContent = `${formatInteger(startRow)}–${formatInteger(endRow)} de ${formatInteger(total)} familias`;
+
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn btn-sm btn-outline-secondary dim-pivot-page-btn';
+        nextBtn.textContent = 'Siguiente →';
+        nextBtn.disabled = page >= totalPages;
+        nextBtn.addEventListener('click', () => loadPivotPage(page + 1));
+
+        nav.appendChild(prevBtn);
+        nav.appendChild(pageInfo);
+        nav.appendChild(nextBtn);
+        elements.pivotPagination.appendChild(nav);
+    }
+
+    async function loadPivotPage(page) {
+        if (page < 1) return;
+        state.pivotPage = page;
+        if (elements.pivotBody) {
+            elements.pivotBody.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3 small"><span class="spinner-border spinner-border-sm me-1"></span>Cargando...</td></tr>';
+        }
+        try {
+            const query = buildQueryParams();
+            const response = await apiGet('/family-consumption', {
+                ...query,
+                page: page,
+                page_size: state.pivotPageSize,
+            });
+            const data = (response && response.data) || { months: [], rows: [], total: 0 };
+            renderPivotTable(data, false);
+        } catch (err) {
+            console.error('[DIM] loadPivotPage error:', err);
+            showPivotError('Error al cargar la página');
+        }
     }
 
     function renderMapChart(rows) {
