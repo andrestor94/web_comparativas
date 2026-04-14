@@ -1940,7 +1940,11 @@ async function saveModalChanges() {
     const resp = await fetch('/forecast/api/save-client', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: data.client_id, overrides }),
+      body: JSON.stringify({
+        client_id: data.client_id,
+        growth_pct: Number(data.growth_pct ?? STATE.growthPct ?? 0),
+        overrides,
+      }),
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     _setModalDirty(false);

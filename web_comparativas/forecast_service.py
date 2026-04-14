@@ -77,6 +77,7 @@ _resp_cache: dict[str, tuple[float, Any]] = {}
 _resp_cache_lock = threading.Lock()
 _RESP_TTL_DATA   = 300   # 5 min — chart, table, treemap, product-list
 _RESP_TTL_STATIC = 900   # 15 min — filter-options
+_OVERRIDE_PCT_TOL = 5e-4
 
 
 def _resp_key(fn_name: str, *args, **kwargs) -> str:
@@ -130,15 +131,63 @@ def _with_resp_cache(ttl: float):
     return decorator
 
 
-def save_client_overrides(client_id: str, overrides: list[dict]) -> None:
+def _monthly_pct_from_annual_growth(growth_pct: float) -> float:
+    """Translate an annual growth percentage to the compounded monthly % stored in overrides."""
+    growth_pct = float(growth_pct or 0.0)
+    if abs(growth_pct) <= 1e-12:
+        return 0.0
+    return ((1.0 + growth_pct / 100.0) ** (1.0 / 12.0) - 1.0) * 100.0
+
+
+def _is_effective_override_pct(pct: float, growth_pct: float, tol: float = _OVERRIDE_PCT_TOL) -> bool:
+    """Return True only when an override differs materially from the current default growth."""
+    pct = float(pct)
+    default_pct = _monthly_pct_from_annual_growth(growth_pct)
+    return bool(np.isfinite(pct)) and abs(pct - default_pct) > tol
+
+
+def _cleanup_override_store_locked() -> None:
+    empty_clients = [cid for cid, store in _client_overrides.items() if not store]
+    for cid in empty_clients:
+        _client_overrides.pop(cid, None)
+
+
+def _build_overrides_snapshot_locked(growth_pct: float | None = None) -> dict[str, dict[tuple[str, str], float]]:
+    _cleanup_override_store_locked()
+    snapshot: dict[str, dict[tuple[str, str], float]] = {}
+    for cid, store in _client_overrides.items():
+        clean_store = {
+            (str(art), str(ds)): float(pct)
+            for (art, ds), pct in store.items()
+            if growth_pct is None or _is_effective_override_pct(float(pct), growth_pct)
+        }
+        if clean_store:
+            snapshot[str(cid)] = clean_store
+    return snapshot
+
+
+def save_client_overrides(client_id: str, overrides: list[dict], growth_pct: float = 0.0) -> None:
     """Persist per-product % adjustments for a client.
     Each override: {articulo: str, date: 'YYYY-MM', pct: float}
     """
     with _overrides_lock:
-        store = _client_overrides.setdefault(client_id, {})
+        store = dict(_client_overrides.get(client_id, {}))
         for ov in overrides:
-            key = (str(ov["articulo"]), str(ov["date"]))
-            store[key] = float(ov["pct"])
+            try:
+                key = (str(ov["articulo"]), str(ov["date"]))
+                pct = float(ov["pct"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            # Replace the current visible value for this cell. If the user brought it
+            # back to the standard scenario, we remove the stored override entirely.
+            store.pop(key, None)
+            if _is_effective_override_pct(pct, growth_pct):
+                store[key] = pct
+        if store:
+            _client_overrides[str(client_id)] = store
+        else:
+            _client_overrides.pop(str(client_id), None)
+        _cleanup_override_store_locked()
     # Overrides alter the projected data — flush cached responses so the next
     # request reflects the change rather than serving stale aggregates.
     clear_response_cache()
@@ -151,10 +200,10 @@ def clear_client_overrides(client_id: str) -> None:
     clear_response_cache()
 
 
-def _get_client_overrides_snapshot(client_id: str) -> dict:
+def _get_client_overrides_snapshot(client_id: str, growth_pct: float | None = None) -> dict:
     """Return the stored pct overrides for a specific client (read-only copy)."""
     with _overrides_lock:
-        return dict(_client_overrides.get(client_id, {}))
+        return dict(_build_overrides_snapshot_locked(growth_pct).get(str(client_id), {}))
 
 
 def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
@@ -167,7 +216,8 @@ def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
     if df is None or df.empty:
         return df if df is not None else __import__("pandas").DataFrame()
     with _overrides_lock:
-        has_overrides = bool(_client_overrides)
+        overrides_snapshot = _build_overrides_snapshot_locked()
+        has_overrides = bool(overrides_snapshot)
     if not has_overrides:
         return df  # No copy needed — all callers only read or filter/copy filtered subsets
 
@@ -177,9 +227,6 @@ def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
         return df
 
     df["_ds"] = df["fecha"].dt.strftime("%Y-%m")
-    with _overrides_lock:
-        overrides_snapshot = {cid: dict(ov) for cid, ov in _client_overrides.items()}
-
     for client_id, store in overrides_snapshot.items():
         if not store:
             continue
@@ -650,9 +697,9 @@ def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=Non
 # PostgreSQL aggregation helpers — avoid loading full tables into RAM
 # ---------------------------------------------------------------------------
 
-def _has_overrides() -> bool:
+def _has_overrides(growth_pct: float | None = None) -> bool:
     with _overrides_lock:
-        return bool(_client_overrides)
+        return bool(_build_overrides_snapshot_locked(growth_pct))
 
 
 def _build_filter_sql(
@@ -858,12 +905,13 @@ def _pg_get_chart_data_inner(
 ) -> dict:
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
+    _ovr_active = _has_overrides(growth_pct)
 
     print(
         f"[FORECAST INNER] ETAPA 1 — resolve_prod_codes "
         f"start={start_date} end={end_date} growth_pct={growth_pct} "
         f"view_money={view_money} profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"has_overrides={_has_overrides()}",
+        f"has_overrides={_ovr_active}",
         flush=True,
     )
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
@@ -992,9 +1040,9 @@ def _pg_get_chart_data_inner(
             flush=True,
         )
         df_fcst["Total_User_Adj"] = df_fcst["Total_Adj"].copy()
-        if _has_overrides():
+        if _ovr_active:
             with _overrides_lock:
-                overrides_snapshot = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+                overrides_snapshot = _build_overrides_snapshot_locked(growth_pct)
             _n_ovr = sum(len(v) for v in overrides_snapshot.values())
             print(
                 f"[FORECAST INNER] ETAPA 7 — applying overrides "
@@ -1202,7 +1250,7 @@ def _pg_get_chart_data_inner(
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
         "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]) if not df_fcst.empty else [],
         "val_2026": val_2026_records,
-        "has_overrides": _has_overrides(),
+        "has_overrides": _ovr_active,
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             "total_proyeccion_2026":    round(total_adj, 0),
@@ -1579,7 +1627,7 @@ def _pg_get_client_detail(
     if not df_price.empty:
         price_map = df_price.set_index("codigo_serie")["precio"].to_dict()
 
-    saved_overrides = _get_client_overrides_snapshot(client_id)
+    saved_overrides = _get_client_overrides_snapshot(client_id, growth_pct)
 
     # Ensure required columns — articulo and unidad_medida absent from forecast_valorizado
     if "articulo" not in df_c.columns:
@@ -1885,7 +1933,7 @@ def get_chart_data(
 
     data = get_data()
     df = data.get("df_main", pd.DataFrame())
-    _ovr_active = _has_overrides()
+    _ovr_active = _has_overrides(growth_pct)
     # Use unpatched base for all chart lines — overrides are reflected in Total_User_Adj (Line 4)
     df_val = data.get("df_valorizado", pd.DataFrame())
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
@@ -2007,7 +2055,7 @@ def get_chart_data(
                 )
                 if _cli_col_v in df_val_f.columns and _art_col_v is not None:
                     with _overrides_lock:
-                        _ovr_snap = {cid: dict(ov) for cid, ov in _client_overrides.items()}
+                        _ovr_snap = _build_overrides_snapshot_locked(growth_pct)
                     _ovr_lookup = {
                         (str(cid), str(art), str(ds)): pct
                         for cid, store in _ovr_snap.items()
@@ -2630,7 +2678,7 @@ def get_client_detail(
     df_main = data.get("df_main", pd.DataFrame())
     price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
-    saved_overrides = _get_client_overrides_snapshot(client_id)
+    saved_overrides = _get_client_overrides_snapshot(client_id, growth_pct)
 
     if df_val.empty:
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
