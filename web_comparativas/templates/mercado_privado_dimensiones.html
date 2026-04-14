@@ -8,15 +8,20 @@
 {% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v12">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v14">
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
+    <!-- ── Header ── -->
     <div class="tech-header">
         <div class="tech-title">
             <h2>Dimensionamiento</h2>
             <p>Análisis de competencia sobre datos persistidos (Bionexo, Medox y Portada)</p>
         </div>
         <div class="dim-header-actions">
+            <span id="lastUpdateBadge" class="dim-update-badge" style="display:none;">
+                <i class="bi bi-clock-history"></i>
+                <span id="datasetUpdatedAt">-</span>
+            </span>
             <span id="datasetStatusPill" class="badge text-bg-light">Sincronizando</span>
             <button id="reloadDashboardBtn" class="btn btn-outline-secondary btn-sm rounded-pill dim-refresh-btn">
                 <i class="bi bi-arrow-repeat me-1"></i> Actualizar vista
@@ -24,129 +29,215 @@
         </div>
     </div>
 
-    <div class="tech-card dim-status-card">
-        <div class="dim-section-kicker">Contexto de datos</div>
-        <div class="dim-status-grid">
-            <div class="dim-status-block dim-status-block-wide">
-                <div class="dim-status-label">Fuente</div>
-                <div id="datasetSource" class="dim-status-value dim-status-path">Esperando estado de ingesta...</div>
-            </div>
-            <div class="dim-status-block">
-                <div class="dim-status-label">Última actualización</div>
-                <div id="datasetUpdatedAt" class="dim-status-value">-</div>
-            </div>
-            <div class="dim-status-block">
-                <div class="dim-status-label">Registros persistidos</div>
-                <div id="datasetTotalRows" class="dim-status-value">-</div>
-            </div>
-        </div>
-    </div>
-
+    <!-- ── Loading overlay ── -->
     <div id="loadingOverlay"
-        style="display:none; position: fixed; top:0; left:0; width:100%; height:100%; background: var(--bg-glass); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(5px);">
+        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg-glass); z-index:9999; flex-direction:column; align-items:center; justify-content:center; backdrop-filter:blur(5px);">
         <div class="spinner-border text-primary spinner-border-sm" role="status"></div>
         <h6 class="mt-2 text-primary fw-bold" id="loadingText">Consultando base de datos...</h6>
     </div>
 
+    <!-- ── Empty state ── -->
     <div id="emptyState" class="tech-card dim-empty-state" style="display:none;">
-        <h3 class="h5 fw-bold mb-2" style="color: var(--tech-blue-dark);">No hay datos cargados</h3>
+        <h3 class="h5 fw-bold mb-2" style="color:var(--tech-blue-dark);">No hay datos cargados</h3>
         <p class="text-muted mb-0">
             Los datos de Dimensionamiento aún no han sido cargados en la base de datos.
             El sistema los cargará automáticamente en el próximo inicio si el dataset está configurado.
         </p>
     </div>
 
+    <!-- ── Dashboard content ── -->
     <div id="dashboardContent" style="display:none;">
+
+        <!-- ╔══ Barra de filtros ══╗ -->
         <div class="tech-toolbar dim-filter-panel">
             <div class="dim-filter-grid">
+
+                <!-- PLATAFORMAS -->
                 <div class="filter-group dim-filter-platforms">
                     <label>Plataformas</label>
                     <div class="dropdown">
-                        <button class="tech-select dropdown-toggle text-start w-100 d-flex align-items-center justify-content-between"
+                        <button class="dim-ms-trigger dropdown-toggle d-flex align-items-center justify-content-between w-100"
                                 type="button" id="platformsDropdownBtn"
                                 data-bs-toggle="dropdown" data-bs-auto-close="outside"
-                                aria-expanded="false"
-                                style="background:white;border:none;box-shadow:0 1px 3px rgba(0,0,0,.08);font-size:.82rem;padding:.35rem .65rem;">
+                                aria-expanded="false">
                             <span id="platformsLabel">Todas</span>
                         </button>
-                        <div class="dropdown-menu p-3" aria-labelledby="platformsDropdownBtn" style="min-width:190px;">
-                            <div class="form-check mb-2">
-                                <input class="form-check-input platform-checkbox" type="checkbox" value="BIONEXO" id="cbBionexo" checked>
+                        <div class="dropdown-menu p-2" aria-labelledby="platformsDropdownBtn" style="min-width:200px; z-index:1200;">
+                            <div class="form-check mb-1 px-1">
+                                <input class="form-check-input platform-checkbox" type="checkbox" value="BIONEXO" id="cbBionexo">
                                 <label class="form-check-label small" for="cbBionexo">Bionexo</label>
                             </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input platform-checkbox" type="checkbox" value="MEDOX" id="cbMedox" checked>
+                            <div class="form-check mb-1 px-1">
+                                <input class="form-check-input platform-checkbox" type="checkbox" value="MEDOX" id="cbMedox">
                                 <label class="form-check-label small" for="cbMedox">Medox</label>
                             </div>
-                            <div class="form-check mb-3">
-                                <input class="form-check-input platform-checkbox" type="checkbox" value="PORTADA" id="cbPortada" checked>
+                            <div class="form-check mb-2 px-1">
+                                <input class="form-check-input platform-checkbox" type="checkbox" value="PORTADA" id="cbPortada">
                                 <label class="form-check-label small" for="cbPortada">Portada</label>
                             </div>
-                            <hr class="my-2">
-                            <button type="button" id="applyPlatformsBtn"
-                                    class="btn btn-primary btn-sm w-100">
-                                Aplicar
-                            </button>
+                            <hr class="my-1">
+                            <div class="dim-ms-actions">
+                                <button type="button" id="platformsTodosBtn" class="btn btn-link btn-sm dim-ms-btn-link">Todos</button>
+                                <button type="button" id="platformsLimpiarBtn" class="btn btn-link btn-sm dim-ms-btn-link">Limpiar</button>
+                                <button type="button" id="applyPlatformsBtn" class="btn btn-primary btn-sm dim-ms-btn-apply">Aplicar</button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
+                <!-- CLIENTE (multi-select) -->
                 <div class="filter-group">
                     <label>Cliente</label>
-                    <select id="filterClient" class="tech-select">
-                        <option value="">Todos</option>
-                    </select>
+                    <div class="dim-multiselect" id="msClientWrap">
+                        <button class="dim-ms-trigger" type="button">
+                            <span class="dim-ms-label">Todos</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel" style="display:none;">
+                            <input type="text" class="dim-ms-search" placeholder="Buscar cliente...">
+                            <div class="dim-ms-list"></div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-todos dim-ms-btn-link">Todos</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-limpiar dim-ms-btn-link">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-aplicar dim-ms-btn-apply">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- PROVINCIA (multi-select) -->
                 <div class="filter-group">
                     <label>Provincia</label>
-                    <select id="filterProvince" class="tech-select">
-                        <option value="">Todas</option>
-                    </select>
+                    <div class="dim-multiselect" id="msProvinceWrap">
+                        <button class="dim-ms-trigger" type="button">
+                            <span class="dim-ms-label">Todas</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel" style="display:none;">
+                            <input type="text" class="dim-ms-search" placeholder="Buscar provincia...">
+                            <div class="dim-ms-list"></div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-todos dim-ms-btn-link">Todos</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-limpiar dim-ms-btn-link">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-aplicar dim-ms-btn-apply">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- BUSCAR global -->
                 <div class="filter-group">
                     <label>Buscar</label>
                     <div class="input-group input-group-sm dim-search-shell">
                         <span class="input-group-text bg-white border-0 ps-3 pe-1">
-                            <i class="bi bi-search text-muted" style="font-size: 0.8rem;"></i>
+                            <i class="bi bi-search text-muted" style="font-size:0.8rem;"></i>
                         </span>
                         <input type="text" id="searchGlobal" class="form-control border-0 shadow-none ps-1"
                             placeholder="cliente, familia, código">
                     </div>
                 </div>
 
+                <!-- FAMILIA (multi-select) -->
                 <div class="filter-group dim-filter-family">
                     <label>Familia</label>
-                    <select id="filterFamily" class="tech-select">
-                        <option value="">Todas</option>
-                    </select>
+                    <div class="dim-multiselect" id="msFamilyWrap">
+                        <button class="dim-ms-trigger" type="button">
+                            <span class="dim-ms-label">Todas</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel" style="display:none;">
+                            <input type="text" class="dim-ms-search" placeholder="Buscar familia...">
+                            <div class="dim-ms-list"></div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-todos dim-ms-btn-link">Todos</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-limpiar dim-ms-btn-link">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-aplicar dim-ms-btn-apply">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- UNIDAD DE NEGOCIO (multi-select) -->
                 <div class="filter-group">
                     <label>Unidad negocio</label>
-                    <select id="filterUnit" class="tech-select">
-                        <option value="">Todas</option>
-                    </select>
+                    <div class="dim-multiselect" id="msUnitWrap">
+                        <button class="dim-ms-trigger" type="button">
+                            <span class="dim-ms-label">Todas</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel" style="display:none;">
+                            <input type="text" class="dim-ms-search" placeholder="Buscar unidad...">
+                            <div class="dim-ms-list"></div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-todos dim-ms-btn-link">Todos</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-limpiar dim-ms-btn-link">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-aplicar dim-ms-btn-apply">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- SUBUNIDAD (multi-select) -->
                 <div class="filter-group">
                     <label>Subunidad</label>
-                    <select id="filterSubunit" class="tech-select">
-                        <option value="">Todas</option>
-                    </select>
+                    <div class="dim-multiselect" id="msSubunitWrap">
+                        <button class="dim-ms-trigger" type="button">
+                            <span class="dim-ms-label">Todas</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel" style="display:none;">
+                            <input type="text" class="dim-ms-search" placeholder="Buscar subunidad...">
+                            <div class="dim-ms-list"></div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-todos dim-ms-btn-link">Todos</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-limpiar dim-ms-btn-link">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-aplicar dim-ms-btn-apply">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="filter-group">
-                    <label>Fecha desde</label>
-                    <input type="date" id="dateStart" class="form-control form-control-sm border-0 shadow-sm">
+                <!-- RANGO DE FECHAS (slider unificado) -->
+                <div class="filter-group dim-filter-daterange">
+                    <label>Rango de fechas</label>
+                    <div class="dim-multiselect" id="msDateRangeWrap">
+                        <button class="dim-ms-trigger" type="button" id="dateRangeTrigger">
+                            <span id="dateRangeLabel">Todas las fechas</span>
+                            <i class="bi bi-chevron-down dim-ms-caret"></i>
+                        </button>
+                        <div class="dim-ms-panel dim-daterange-panel" id="dateRangePanel" style="display:none;">
+                            <!-- Slider de rango -->
+                            <div class="dim-daterange-slider-section">
+                                <div class="dim-slider-wrap">
+                                    <div class="dim-slider-track">
+                                        <div class="dim-slider-fill" id="dateSliderFill"></div>
+                                    </div>
+                                    <input type="range" class="dim-range-input dim-range-lower"
+                                           id="dateRangeMinSlider" min="0" max="0" value="0" step="1">
+                                    <input type="range" class="dim-range-input dim-range-upper"
+                                           id="dateRangeMaxSlider" min="0" max="0" value="0" step="1">
+                                </div>
+                                <div class="dim-slider-date-labels">
+                                    <span id="dateRangeStartDisp">-</span>
+                                    <span id="dateRangeEndDisp">-</span>
+                                </div>
+                            </div>
+                            <!-- Inputs manuales de fecha -->
+                            <div class="dim-daterange-manual-row">
+                                <input type="date" id="dateStart" class="form-control form-control-sm">
+                                <span class="dim-date-sep">—</span>
+                                <input type="date" id="dateEnd" class="form-control form-control-sm">
+                            </div>
+                            <div class="dim-ms-actions">
+                                <button type="button" class="btn btn-link btn-sm dim-ms-btn-link" id="dateRangeTodosBtn">Todas</button>
+                                <button type="button" class="btn btn-link btn-sm dim-ms-btn-link" id="dateRangeLimpiarBtn">Limpiar</button>
+                                <button type="button" class="btn btn-primary btn-sm dim-ms-btn-apply" id="dateRangeAplicarBtn">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="filter-group">
-                    <label>Fecha hasta</label>
-                    <input type="date" id="dateEnd" class="form-control form-control-sm border-0 shadow-sm">
-                </div>
-
+                <!-- IDENTIFICADO -->
                 <div class="filter-group">
                     <label>¿Identificado?</label>
                     <select id="filterIdentified" class="tech-select">
@@ -156,6 +247,7 @@
                     </select>
                 </div>
 
+                <!-- ¿CLIENTE? -->
                 <div class="filter-group">
                     <label>¿Cliente?</label>
                     <select id="filterIsClient" class="tech-select">
@@ -164,9 +256,11 @@
                         <option value="false">No</option>
                     </select>
                 </div>
-            </div>
-        </div>
 
+            </div><!-- /dim-filter-grid -->
+        </div><!-- /tech-toolbar -->
+
+        <!-- ── KPIs ── -->
         <div class="tech-kpi-area dim-kpi-grid">
             <div class="tech-card kpi-modern dim-kpi-card">
                 <div class="kpi-icon dim-kpi-icon"><i class="bi bi-people"></i></div>
@@ -176,7 +270,7 @@
                 </div>
             </div>
             <div class="tech-card kpi-modern dim-kpi-card">
-                <div class="kpi-icon dim-kpi-icon" style="color: var(--tech-blue-mid); background: rgba(30, 92, 138, 0.1);">
+                <div class="kpi-icon dim-kpi-icon" style="color:var(--tech-blue-mid);background:rgba(30,92,138,0.1);">
                     <i class="bi bi-card-list"></i>
                 </div>
                 <div class="kpi-content">
@@ -185,7 +279,7 @@
                 </div>
             </div>
             <div class="tech-card kpi-modern dim-kpi-card">
-                <div class="kpi-icon dim-kpi-icon" style="color: var(--tech-blue-bright); background: rgba(82, 116, 206, 0.1);">
+                <div class="kpi-icon dim-kpi-icon" style="color:var(--tech-blue-bright);background:rgba(82,116,206,0.1);">
                     <i class="bi bi-tag"></i>
                 </div>
                 <div class="kpi-content">
@@ -194,7 +288,7 @@
                 </div>
             </div>
             <div class="tech-card kpi-modern dim-kpi-card">
-                <div class="kpi-icon dim-kpi-icon" style="color: var(--tech-cyan); background: rgba(56, 189, 248, 0.1);">
+                <div class="kpi-icon dim-kpi-icon" style="color:var(--tech-cyan);background:rgba(56,189,248,0.1);">
                     <i class="bi bi-box-seam"></i>
                 </div>
                 <div class="kpi-content">
@@ -204,6 +298,7 @@
             </div>
         </div>
 
+        <!-- ── Gráfico evolución mensual ── -->
         <div class="tech-card area-full dim-card-chart dim-card-chart-primary">
             <div class="tech-card-title">
                 <span><i class="bi bi-graph-up me-2"></i>Evolución mensual por negocio</span>
@@ -213,6 +308,7 @@
             </div>
         </div>
 
+        <!-- ── Pie + Top familias + Mapa ── -->
         <div class="tech-card area-third dim-card-chart dim-card-chart-compact">
             <div class="tech-card-title">
                 <span><i class="bi bi-pie-chart me-2"></i>Resultado por participación</span>
@@ -234,10 +330,11 @@
                 <span><i class="bi bi-geo-alt me-2"></i>Distribución geográfica</span>
             </div>
             <div class="chart-container dim-map-shell">
-                <div id="mapContainer" style="width: 100%; height: 100%;"></div>
+                <div id="mapContainer" style="width:100%;height:100%;"></div>
             </div>
         </div>
 
+        <!-- ── Clientes por resultado ── -->
         <div class="tech-card area-third dim-card-chart dim-card-chart-compact dim-card-clients">
             <div class="tech-card-title">
                 <span><i class="bi bi-bar-chart me-2"></i>Clientes por resultado</span>
@@ -249,6 +346,7 @@
             </div>
         </div>
 
+        <!-- ── Tabla consumo promedio ── -->
         <div class="tech-card dim-card-table-wide">
             <div class="tech-card-title">
                 <span><i class="bi bi-table me-2"></i>Consumo promedio de familia por mes</span>
@@ -260,10 +358,11 @@
                 </table>
             </div>
         </div>
-    </div>
-</div>
+
+    </div><!-- /dashboardContent -->
+</div><!-- /tech-dashboard-grid -->
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v12"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v14"></script>
 {% endblock %}
