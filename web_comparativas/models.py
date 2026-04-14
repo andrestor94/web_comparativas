@@ -111,12 +111,13 @@ else:
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
         pool_pre_ping=True,       # Validates connection before use — detects stale connections
-        # pool_size=10: uvicorn runs a single process; Forecast fires 3-4 parallel requests
-        # each holding 1 middleware session + 1 brief query connection.  The old pool_size=5
-        # + max_overflow=10 = 15 was exhausted when notifications/heartbeats ran concurrently.
-        # Render free-tier PostgreSQL allows 25 connections; 10 + 5 = 15 leaves 10 for backups.
-        pool_size=10,
-        max_overflow=5,
+        # pool_size=15: Dimensionamiento con filtros usaba 8 requests paralelas que agotaban
+        # el pool anterior (10+5=15). Con la consolidación a 1 request /bootstrap el pico
+        # baja a 1–3 conexiones simultáneas, pero aumentamos el pool a 15+10=25 como colchón
+        # para múltiples usuarios concurrentes + auth + heartbeat + background tasks.
+        # Render free-tier PostgreSQL permite 97 conexiones; 15+10=25 deja margen amplio.
+        pool_size=15,
+        max_overflow=10,
         pool_recycle=_pool_recycle,
         pool_timeout=30,
         connect_args=connect_args,

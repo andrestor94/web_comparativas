@@ -18,6 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
         negocioLabels: { unidades: {}, subunidades: {} },
     };
 
+    // AbortController activo para cancelar el request /bootstrap en vuelo
+    // cuando el usuario cambia un filtro antes de que termine la carga anterior.
+    // Esto evita que requests "zombie" mantengan sesiones DB abiertas en el pool.
+    let _loadAbortController = null;
+
     const elements = {
         loadingOverlay: document.getElementById('loadingOverlay'),
         loadingText: document.getElementById('loadingText'),
@@ -298,72 +303,54 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadDashboardData() {
+        // ── Cancelar request anterior si aún está en vuelo ─────────────────
+        // CRÍTICO: cada request abre 1 sesión DB. Si el usuario cambia filtros
+        // rápido y los requests anteriores siguen corriendo, el pool (max 15) se
+        // agota y provoca QueuePool timeout + carga infinita del dashboard.
+        // AbortController cancela la fetch del navegador y libera la sesión DB
+        // en el servidor (la conexión se cierra al cortar el stream HTTP).
+        if (_loadAbortController) {
+            _loadAbortController.abort();
+        }
+        _loadAbortController = new AbortController();
+        const signal = _loadAbortController.signal;
+
         setLoading(true, 'Consultando métricas agregadas...');
         const query = buildQueryParams();
 
-        // ── Lote 1 (crítico): widgets principales ───────────────────────────
-        // NO incluye /filters para no bloquear la ruta crítica con una query
-        // de ~30s. Los filtros se actualizan en el lote secundario.
-        const [
-            kpisResult,
-            seriesResult,
-            resultsResult,
-            familiesResult,
-        ] = await Promise.allSettled([
-            apiGet('/kpis', query),
-            apiGet('/series', query),
-            apiGet('/results', query),
-            apiGet('/top-families', { ...query, limit: 10 }),
-        ]);
+        try {
+            // ── UNA sola request a /bootstrap (1 sesión DB, todas las queries) ─
+            // En lugar de 8 requests paralelas que agotan el pool con 8 sesiones
+            // simultáneas, usamos /bootstrap que consolida todo en 1 sesión DB.
+            // El backend usa el caché TTL interno, por lo que las mismas combinaciones
+            // de filtros devuelven resultados en ~0ms tras la primera carga.
+            const response = await apiGet('/bootstrap', query, signal);
 
-        // ── Lote 2 (secundario): geo, clientes, consumo + filtros ───────────
-        // Se disparan en paralelo mientras se renderizan los widgets críticos.
-        // /filters queda aquí para no bloquear la visualización principal.
-        const secondaryPromise = Promise.allSettled([
-            apiGet('/geo', query),
-            apiGet('/clients-by-result', { ...query, limit: 10 }),
-            apiGet('/family-consumption', { ...query, limit: 20 }),
-            apiGet('/filters', query),
-        ]);
+            // Si fue cancelado mientras esperábamos, ignorar la respuesta
+            if (signal.aborted) return;
 
-        // Renderizar widgets críticos (el overlay desaparece aquí)
-        _widgetRender(kpisResult,
-            (data) => renderKpis(data),
-            () => renderKpisError()
-        );
-        _widgetRender(seriesResult,
-            (data) => renderAreaChart(data),
-            (msg) => showCanvasError('areaChart', 'areaChart', msg)
-        );
-        _widgetRender(resultsResult,
-            (data) => renderPieChart(data),
-            (msg) => showCanvasError('pieChart', 'pieChart', msg)
-        );
-        _widgetRender(familiesResult,
-            (data) => renderFamilyList(data),
-            (msg) => showContainerError(elements.familyListContainer, msg)
-        );
+            const bootstrap = (response && response.data) || {};
 
-        // El overlay se quita en cuanto los widgets críticos están listos
-        setLoading(false);
+            // renderBootstrapPayload ya maneja todos los widgets + filter options
+            // (cascading filters incluidos: /bootstrap siempre devuelve "filters").
+            renderBootstrapPayload(bootstrap);
 
-        // Renderizar widgets secundarios cuando lleguen (no bloqueantes)
-        const [geoResult, clientsResult, consumptionResult, filtersResult] = await secondaryPromise;
-        _widgetRender(geoResult,
-            (data) => renderMapChart(data),
-            () => { /* el mapa muestra lo último que tenía; no se fuerza error visual */ }
-        );
-        _widgetRender(clientsResult,
-            (data) => renderBarClientChart(data),
-            (msg) => showCanvasError('barClientChart', 'barClientChart', msg)
-        );
-        _widgetRender(consumptionResult,
-            (data) => renderPivotTable(data),
-            (msg) => showPivotError(msg)
-        );
-        // Actualizar opciones de filtros cuando estén disponibles (cascading filters)
-        if (filtersResult.status === 'fulfilled' && filtersResult.value.ok !== false) {
-            applyFilterOptions(filtersResult.value.data);
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                // Request cancelado intencionalmente (usuario cambió filtro)
+                // No tocar el overlay — el nuevo request ya está en vuelo
+                return;
+            }
+            console.error('[DIM] loadDashboardData error:', err);
+            renderKpisError();
+            showCanvasError('areaChart', 'areaChart', 'Error al cargar');
+            showCanvasError('pieChart', 'pieChart', '');
+            showContainerError(elements.familyListContainer, '');
+        } finally {
+            // Solo quitar el overlay si este request no fue cancelado
+            if (!signal.aborted) {
+                setLoading(false);
+            }
         }
     }
 
@@ -428,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function apiGet(path, params = {}) {
+    async function apiGet(path, params = {}, signal = undefined) {
         const query = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
             if (value === undefined || value === null || value === '') return;
@@ -444,7 +431,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const url = `/api/mercado-privado/dimensiones${path}${query.toString() ? `?${query}` : ''}`;
-        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const fetchOptions = { headers: { 'Accept': 'application/json' } };
+        if (signal) fetchOptions.signal = signal;
+        const response = await fetch(url, fetchOptions);
         const payload = await response.json().catch(() => ({}));
 
         // Error HTTP real (4xx, 5xx): lanzar excepción para que el caller sepa
