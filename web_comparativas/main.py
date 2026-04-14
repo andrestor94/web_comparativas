@@ -67,6 +67,7 @@ from web_comparativas.migrations import (
     ensure_dimensionamiento_summary_populated,
     ensure_dimensionamiento_text_columns,
     ensure_ticket_pliego_columns,
+    ensure_forecast_perf_indexes,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -201,6 +202,12 @@ def _background_dimensionamiento_maintenance() -> None:
         print("[BACKGROUND] Dimensionamiento functional indexes checked.", flush=True)
     except Exception as e:
         print(f"[BACKGROUND] Warning dimensionamiento indexes: {e}", flush=True)
+
+    try:
+        ensure_forecast_perf_indexes()
+        print("[BACKGROUND] Forecast performance indexes checked.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning forecast perf indexes: {e}", flush=True)
 
     try:
         with SessionLocal() as session:
