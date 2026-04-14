@@ -1,7 +1,7 @@
 import datetime as dt
 from pathlib import Path
 from sqlalchemy import text
-from web_comparativas.models import engine, IS_SQLITE
+from web_comparativas.models import engine, IS_SQLITE, ForecastUserOverride
 
 
 def _add_column_safe(conn, ddl: str, description: str):
@@ -146,6 +146,52 @@ def ensure_normalized_storage_columns():
             "uploads.dashboard_json",
         )
     print("[MIGRATION] Columnas de persistencia de archivos verificadas/creadas.", flush=True)
+
+
+def ensure_forecast_override_storage():
+    """
+    Crea la tabla persistente de overrides de Forecast y sus índices de lookup.
+
+    Esta tabla es la fuente de verdad del escenario ajustado por usuario.
+    La base forecast original permanece intacta.
+    """
+    try:
+        ForecastUserOverride.__table__.create(bind=engine, checkfirst=True)
+        print("[MIGRATION] Tabla 'forecast_user_overrides' verificada/creada.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Tabla 'forecast_user_overrides': advertencia – {e}", flush=True)
+
+    indexes = [
+        (
+            "ix_fc_override_user_client_active",
+            "forecast_user_overrides",
+            "(user_id, source_module, client_selector, is_active)",
+        ),
+        (
+            "ix_fc_override_scope_lookup",
+            "forecast_user_overrides",
+            "(user_id, source_module, override_scope, client_selector, subneg, codigo_serie, forecast_month, is_active)",
+        ),
+        (
+            "ix_fc_override_context_lookup",
+            "forecast_user_overrides",
+            "(source_module, context_key, user_id, updated_at)",
+        ),
+    ]
+
+    for idx_name, table_name, expr in indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} {expr}")
+                )
+            print(f"[MIGRATION] Índice '{idx_name}' verificado/creado.", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                print(f"[MIGRATION] Índice '{idx_name}': ya existe. (OK)", flush=True)
+            else:
+                print(f"[MIGRATION] Índice '{idx_name}': advertencia – {e}", flush=True)
 
 
 def ensure_dimensionamiento_indexes():

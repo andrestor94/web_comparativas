@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from web_comparativas.models import User, db_session, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
@@ -115,6 +115,7 @@ def api_chart_data(
     )
     try:
         result = svc.get_chart_data(
+            user_id=_user.id,
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -198,6 +199,7 @@ def api_client_table(
     )
     try:
         result = svc.get_client_table(
+            user_id=_user.id,
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -239,6 +241,7 @@ def api_treemap_data(
     )
     try:
         result = svc.get_treemap_data(
+            user_id=_user.id,
             start_date=start_date,
             end_date=end_date,
             profiles=profiles,
@@ -272,6 +275,7 @@ def api_client_detail(
 ):
     try:
         return svc.get_client_detail(
+            user_id=_user.id,
             client_id=client_id,
             start_date=start_date,
             end_date=end_date,
@@ -314,14 +318,21 @@ def api_reload(request: Request, _user: User = Depends(_require_user)):
 
 class _Override(BaseModel):
     articulo: str
+    subneg: str | None = None
     date: str      # "YYYY-MM"
     pct: float     # percentage adjustment: nuevo = orig * (1 + pct/100)
+
+
+class _SubnegOverride(BaseModel):
+    subneg: str
+    growth_pct: float
 
 
 class _SavePayload(BaseModel):
     client_id: str
     growth_pct: float = 0.0
-    overrides: List[_Override]   # List from typing — required for Pydantic v1 compatibility
+    overrides: List[_Override] = Field(default_factory=list)
+    subneg_overrides: List[_SubnegOverride] = Field(default_factory=list)
 
 
 @router.post("/api/save-client")
@@ -333,11 +344,30 @@ def api_save_client(
     """Persist per-product overrides for a client and reflect changes in the whole dashboard."""
     try:
         svc.save_client_overrides(
-            payload.client_id,
-            [{"articulo": o.articulo, "date": o.date, "pct": o.pct} for o in payload.overrides],
+            user_id=_user.id,
+            client_id=payload.client_id,
             growth_pct=payload.growth_pct,
+            user_email=_user.email,
+            cell_overrides=[
+                {
+                    "articulo": o.articulo,
+                    "subneg": o.subneg,
+                    "date": o.date,
+                    "pct": o.pct,
+                }
+                for o in payload.overrides
+            ],
+            subneg_overrides=[
+                {"subneg": o.subneg, "growth_pct": o.growth_pct}
+                for o in payload.subneg_overrides
+            ],
         )
-        return {"ok": True, "client_id": payload.client_id, "saved": len(payload.overrides)}
+        return {
+            "ok": True,
+            "client_id": payload.client_id,
+            "saved_cells": len(payload.overrides),
+            "saved_subnegs": len(payload.subneg_overrides),
+        }
     except Exception as exc:
         logger.error("save-client error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -351,7 +381,7 @@ def api_clear_client(
 ):
     """Remove all saved overrides for a client, restoring the CSV baseline."""
     try:
-        svc.clear_client_overrides(client_id)
+        svc.clear_client_overrides(user_id=_user.id, client_id=client_id, user_email=_user.email)
         return {"ok": True, "client_id": client_id}
     except Exception as exc:
         logger.error("clear-client error: %s", exc, exc_info=True)

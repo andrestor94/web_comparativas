@@ -1920,7 +1920,12 @@ function _collectOverrides() {
         if (pct != null) {
           // Always send all future-date pct values (including 0) so the backend
           // can store the user's explicit choice (even "no adjustment").
-          overrides.push({ articulo: String(row.articulo), date: ds, pct: Number(pct) });
+          overrides.push({
+            articulo: String(row.articulo),
+            subneg: String(row.subneg || ''),
+            date: ds,
+            pct: Number(pct),
+          });
         }
       });
     });
@@ -1928,11 +1933,25 @@ function _collectOverrides() {
   return overrides;
 }
 
+function _collectSubnegOverrides() {
+  const data = STATE.modalClientData;
+  if (!data) return [];
+  const visible = new Set();
+  (data.negocios || []).forEach(neg => {
+    (neg.subnegs || []).forEach(sub => visible.add(String(sub.subneg || '')));
+  });
+  return Array.from(visible).map(subneg => ({
+    subneg,
+    growth_pct: Number(STATE.modalSubnegGrowths[subneg] ?? data.growth_pct ?? STATE.growthPct ?? 0),
+  }));
+}
+
 /* ── Save: POST overrides → backend, then refresh whole dashboard ───────── */
 async function saveModalChanges() {
   const data = STATE.modalClientData;
   if (!data) return;
   const overrides = _collectOverrides();
+  const subnegOverrides = _collectSubnegOverrides();
   const btnSave = document.getElementById('fcBtnSave');
   if (btnSave) { btnSave.disabled = true; btnSave.innerHTML = '<span class="fc-spinner" style="width:14px;height:14px;border-width:2px;"></span>'; }
 
@@ -1944,6 +1963,7 @@ async function saveModalChanges() {
         client_id: data.client_id,
         growth_pct: Number(data.growth_pct ?? STATE.growthPct ?? 0),
         overrides,
+        subneg_overrides: subnegOverrides,
       }),
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -1976,6 +1996,7 @@ function renderModalBody(data) {
   const growthPct = data.growth_pct || 0;
   const dates = data.dates || [];
   const maxHistDate = data.max_hist_date || null;
+  const apiSubnegGrowths = data.subneg_growths || {};
 
   // ── Pre-poblar STATE.modalSubnegGrowths ANTES de construir el HTML ──
   // Esto garantiza que renderSubnegContent lea el valor correcto (guardado o global)
@@ -1986,10 +2007,11 @@ function renderModalBody(data) {
     neg.subnegs.forEach(sub => {
       // Solo inferir si aún no fue establecido (ej: usuario ya cambió el % en esta sesión)
       if (STATE.modalSubnegGrowths[sub.subneg] == null) {
-        let inferred = growthPct;
+        let inferred = apiSubnegGrowths[sub.subneg];
+        if (inferred == null) inferred = growthPct;
         // Buscar el pct del primer mes futuro del primer producto del subneg.
         // pct almacenado = tasa mensual compuesta (ej: 3.4074 para 50% anual).
-        if (_futureDates.length > 0 && sub.products && sub.products.length > 0) {
+        if (apiSubnegGrowths[sub.subneg] == null && _futureDates.length > 0 && sub.products && sub.products.length > 0) {
           const firstProd = sub.products[0];
           const m = (firstProd.months || {})[_futureDates[0]];
           if (m && m.pct != null && m.pct > 0) {
@@ -2038,7 +2060,7 @@ function renderModalBody(data) {
   // Build grids for each subneg
   (data.negocios || []).forEach((negSection, ni) => {
     negSection.subnegs.forEach((subSection, si) => {
-      buildModalGrid(`modal-grid-${ni}-${si}`, subSection.products, dates, maxHistDate, data.growth_pct || 0);
+      buildModalGrid(`modal-grid-${ni}-${si}`, subSection.subneg, subSection.products, dates, maxHistDate, data.growth_pct || 0);
     });
   });
 
@@ -2118,7 +2140,7 @@ function onSubnegGrowthChange(subKey, val, ni, si) {
   if (!negSection) return;
   const sub = negSection.subnegs[si];
   if (!sub) return;
-  buildModalGrid(`modal-grid-${ni}-${si}`, sub.products, data.dates, data.max_hist_date, v, false);
+  buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false);
 }
 
 let _modalGridApis = {};
@@ -2127,13 +2149,14 @@ let _modalGridApis = {};
  * useApiValues=true  → usa m.pct / m.nuevo de la API (carga inicial, muestra overrides guardados)
  * useApiValues=false → recalcula desde growthPct (cuando el usuario cambia el % del subneg)
  */
-function buildModalGrid(gridId, products, dates, maxHistDate, growthPct, useApiValues = true) {
+function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growthPct, useApiValues = true) {
   const el = document.getElementById(gridId);
   if (!el) return;
 
   const rows = products.map(prod => {
     const row = {
       articulo: prod.articulo,
+      subneg: subnegName,
       descripcion: prod.descripcion,
       unidad_medida: prod.unidad_medida,
       nivel_agregacion: prod.nivel_agregacion,
