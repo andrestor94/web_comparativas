@@ -224,12 +224,19 @@ def dimensionamiento_bootstrap(
     request: Request,
     _: AllowedUser,
     filters=Depends(_filters_from_query),
+    include_status: bool = Query(default=True),
+    bypass_snapshot: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     return _safe_dashboard_response(
         request,
         "bootstrap",
-        lambda: get_dashboard_bootstrap(db, filters),
+        lambda: get_dashboard_bootstrap(
+            db,
+            filters,
+            include_status=include_status,
+            bypass_snapshot=bypass_snapshot,
+        ),
         {
             "status": {"has_data": False, "total_rows": 0, "platforms": [], "last_import": None},
             "filters": {

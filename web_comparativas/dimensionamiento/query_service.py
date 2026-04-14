@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -158,6 +159,23 @@ def _empty_filter_options() -> dict[str, Any]:
     }
 
 
+def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
+    return DimensionamientoFilters(
+        clientes=list(filters.clientes),
+        provincias=list(filters.provincias),
+        familias=list(filters.familias),
+        plataformas=list(filters.plataformas),
+        unidades_negocio=list(filters.unidades_negocio),
+        subunidades_negocio=list(filters.subunidades_negocio),
+        resultados=list(filters.resultados),
+        fecha_desde=filters.fecha_desde,
+        fecha_hasta=filters.fecha_hasta,
+        identified=filters.identified,
+        is_client=filters.is_client,
+        search=filters.search,
+    )
+
+
 def _has_active_filters(filters: DimensionamientoFilters) -> bool:
     return any(
         [
@@ -249,6 +267,65 @@ def _summary_health_snapshot_cached(session: Session) -> dict[str, Any]:
     _SUMMARY_HEALTH_CACHE["ts"] = time.perf_counter()
     _SUMMARY_HEALTH_CACHE["val"] = val
     return val
+
+
+def _global_date_bounds(session: Session) -> tuple[dt.date | None, dt.date | None]:
+    summary_state = _summary_health_snapshot_cached(session)
+    if summary_state["usable"]:
+        return summary_state["min_month"], summary_state["max_month"]
+
+    min_date, max_date = session.execute(
+        select(
+            func.min(DimensionamientoRecord.fecha),
+            func.max(DimensionamientoRecord.fecha),
+        )
+    ).one()
+    return _coerce_date_value(min_date), _coerce_date_value(max_date)
+
+
+def _default_platform_values(session: Session) -> list[str]:
+    cache_key = "dimensionamiento.default_platform_values"
+    cached = _cache_get(cache_key, _TTL_FILTER_OPTIONS_DFLT)
+    if cached is not _CACHE_MISS:
+        return list(cached)
+
+    summary_state = _summary_health_snapshot_cached(session)
+    model = DimensionamientoFamilyMonthlySummary if summary_state["usable"] else DimensionamientoRecord
+    stmt = (
+        select(distinct(model.plataforma))
+        .where(model.plataforma.is_not(None))
+        .order_by(model.plataforma)
+    )
+    payload = [value for value in session.execute(stmt).scalars().all() if value not in (None, "")]
+    _cache_set(cache_key, payload)
+    return payload
+
+
+def _normalize_dashboard_filters(
+    session: Session,
+    filters: DimensionamientoFilters,
+) -> DimensionamientoFilters:
+    normalized = _clone_filters(filters)
+    if (
+        not normalized.plataformas
+        and normalized.fecha_desde is None
+        and normalized.fecha_hasta is None
+    ):
+        return normalized
+
+    default_platforms = _default_platform_values(session)
+    if normalized.plataformas and default_platforms:
+        requested_platforms = {value.strip().upper() for value in normalized.plataformas if value}
+        all_platforms = {value.strip().upper() for value in default_platforms if value}
+        if requested_platforms == all_platforms:
+            normalized.plataformas = []
+
+    min_date, max_date = _global_date_bounds(session)
+    if min_date is not None and normalized.fecha_desde == min_date:
+        normalized.fecha_desde = None
+    if max_date is not None and normalized.fecha_hasta == max_date:
+        normalized.fecha_hasta = None
+    return normalized
 
 
 def _resolve_aggregate_model(
@@ -1479,19 +1556,288 @@ def get_family_consumption_table(
         raise
 
 
+def _real_client_name(value: str | None, is_client: bool) -> str | None:
+    text_value = str(value or "").strip()
+    if not is_client or not text_value:
+        return None
+    if text_value.upper().replace("_", " ") in _SUMMARY_CLIENT_EXCLUDE:
+        return None
+    return text_value
+
+
+def _fetch_summary_rows_for_bootstrap(
+    session: Session,
+    filters: DimensionamientoFilters,
+) -> list[tuple[Any, ...]]:
+    model = DimensionamientoFamilyMonthlySummary
+    applied_conditions: list[str] = []
+    stmt = _apply_common_filters(
+        select(
+            model.month,
+            model.plataforma,
+            model.cliente_nombre_homologado,
+            model.provincia,
+            model.familia,
+            model.unidad_negocio,
+            model.subunidad_negocio,
+            model.resultado_participacion,
+            model.is_identified,
+            model.is_client,
+            model.total_cantidad,
+            model.total_registros,
+        ),
+        model,
+        filters,
+        applied_conditions,
+    )
+    _log_query_statement(session, "get_dashboard_bootstrap.summary_rows", model, stmt, filters, applied_conditions)
+    return session.execute(stmt).all()
+
+
+def _aggregate_bootstrap_from_summary_rows(
+    rows: list[tuple[Any, ...]],
+    *,
+    series_limit: int = 5,
+    top_families_limit: int = 10,
+    clients_limit: int = 10,
+    family_consumption_limit: int = 20,
+) -> dict[str, Any]:
+    distinct_clients: set[str] = set()
+    distinct_provincias: set[str] = set()
+    distinct_familias: set[str] = set()
+    distinct_plataformas: set[str] = set()
+    distinct_unidades: set[str] = set()
+    distinct_subunidades: set[str] = set()
+    distinct_resultados: set[str] = set()
+
+    total_rows = 0
+    total_quantity = 0.0
+    min_month: dt.date | None = None
+    max_month: dt.date | None = None
+
+    business_totals: dict[str, int] = defaultdict(int)
+    business_by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    result_totals: dict[str, int] = defaultdict(int)
+    family_rows: dict[str, int] = defaultdict(int)
+    family_quantities: dict[str, float] = defaultdict(float)
+    geo_totals: dict[str, int] = defaultdict(int)
+    client_totals: dict[str, int] = defaultdict(int)
+    client_result_totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    family_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for (
+        month_value,
+        plataforma,
+        cliente,
+        provincia,
+        familia,
+        unidad_negocio,
+        subunidad_negocio,
+        resultado,
+        _is_identified,
+        is_client,
+        total_cantidad,
+        total_registros,
+    ) in rows:
+        month_date = _coerce_date_value(month_value)
+        if month_date is not None:
+            min_month = month_date if min_month is None or month_date < min_month else min_month
+            max_month = month_date if max_month is None or month_date > max_month else max_month
+        month_iso = _month_value_to_iso(month_value)
+
+        row_count = int(total_registros or 0)
+        quantity = float(total_cantidad or 0)
+        total_rows += row_count
+        total_quantity += quantity
+
+        if plataforma not in (None, ""):
+            distinct_plataformas.add(plataforma)
+        if provincia not in (None, ""):
+            distinct_provincias.add(provincia)
+        if familia not in (None, ""):
+            distinct_familias.add(familia)
+        if unidad_negocio not in (None, ""):
+            distinct_unidades.add(unidad_negocio)
+        if subunidad_negocio not in (None, ""):
+            distinct_subunidades.add(subunidad_negocio)
+        if resultado not in (None, ""):
+            distinct_resultados.add(resultado)
+
+        family_name = familia or "Sin familia"
+        business_name = unidad_negocio or "Sin negocio"
+        province_name = provincia or "Sin provincia"
+        result_name = resultado or "Sin resultado"
+
+        family_rows[family_name] += row_count
+        family_quantities[family_name] += quantity
+        business_totals[business_name] += row_count
+        business_by_month[month_iso][business_name] += row_count
+        result_totals[result_name] += row_count
+        geo_totals[province_name] += row_count
+        family_month_totals[family_name][month_iso] += quantity
+
+        client_name = _real_client_name(cliente, bool(is_client))
+        if client_name:
+            distinct_clients.add(client_name)
+            client_totals[client_name] += row_count
+            client_result_totals[client_name][result_name] += row_count
+
+    top_businesses = [
+        name
+        for name, _ in sorted(business_totals.items(), key=lambda item: (-item[1], item[0]))[:series_limit]
+    ]
+    months = sorted(business_by_month.keys())
+    series = {
+        "months": months,
+        "datasets": [
+            {
+                "label": business_name,
+                "values": [business_by_month.get(month, {}).get(business_name, 0) for month in months],
+            }
+            for business_name in top_businesses
+        ],
+    }
+
+    results_payload = [
+        {"resultado": result_name, "renglones": rows_count}
+        for result_name, rows_count in sorted(result_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    top_families_payload = [
+        {
+            "familia": family_name,
+            "renglones": rows_count,
+            "cantidad": float(family_quantities.get(family_name, 0)),
+        }
+        for family_name, rows_count in sorted(family_rows.items(), key=lambda item: (-item[1], item[0]))[:top_families_limit]
+    ]
+
+    geo_payload = [
+        {"provincia": province_name, "renglones": rows_count}
+        for province_name, rows_count in sorted(geo_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+    top_clients = [
+        client_name
+        for client_name, _ in sorted(client_totals.items(), key=lambda item: (-item[1], item[0]))[:clients_limit]
+    ]
+    clients_payload = [
+        {
+            "cliente": client_name,
+            "resultados": {
+                result_name: rows_count
+                for result_name, rows_count in sorted(client_result_totals.get(client_name, {}).items(), key=lambda item: item[0])
+            },
+        }
+        for client_name in top_clients
+    ]
+
+    month_keys = [f"{index:02d}" for index in range(1, 13)]
+    family_consumption_payload = []
+    top_family_consumption = [
+        family_name
+        for family_name, _ in sorted(family_quantities.items(), key=lambda item: (-item[1], item[0]))[:family_consumption_limit]
+    ]
+    for family_name in top_family_consumption:
+        month_lists: dict[str, list[float]] = defaultdict(list)
+        for month_iso, quantity in family_month_totals.get(family_name, {}).items():
+            month_key = month_iso[5:7] if len(month_iso) >= 7 else "01"
+            month_lists[month_key].append(quantity)
+        family_consumption_payload.append(
+            {
+                "familia": family_name,
+                "values": [
+                    (
+                        sum(month_lists.get(month_key, [])) / len(month_lists.get(month_key, []))
+                        if month_lists.get(month_key)
+                        else 0
+                    )
+                    for month_key in month_keys
+                ],
+            }
+        )
+
+    return {
+        "filters": {
+            "clientes": sorted(distinct_clients),
+            "provincias": sorted(distinct_provincias),
+            "familias": sorted(distinct_familias),
+            "plataformas": sorted(distinct_plataformas),
+            "unidades_negocio": sorted(distinct_unidades),
+            "subunidades_negocio": sorted(distinct_subunidades),
+            "resultados": sorted(distinct_resultados),
+            "date_range": _date_range_payload(min_month, max_month),
+        },
+        "kpis": {
+            "total_rows": int(total_rows or 0),
+            "clientes": len(distinct_clients),
+            "renglones": int(total_rows or 0),
+            "familias": len(distinct_familias),
+            "cantidad_demandada": float(total_quantity or 0),
+        },
+        "series": series,
+        "results": results_payload,
+        "top_families": top_families_payload,
+        "geo": geo_payload,
+        "clients_by_result": clients_payload,
+        "family_consumption": {
+            "months": month_keys,
+            "rows": family_consumption_payload,
+        },
+    }
+
+
+def _get_aggregated_dashboard_bootstrap(
+    session: Session,
+    filters: DimensionamientoFilters,
+    *,
+    include_status: bool,
+) -> dict[str, Any]:
+    cache_key = _make_cache_key("get_dashboard_bootstrap.aggregated", filters, include_status=include_status)
+    cached = _cache_get(cache_key, _TTL_QUERY_RESULT)
+    if cached is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_dashboard_bootstrap.aggregated hit key=%s", cache_key)
+        return cached
+
+    rows = _fetch_summary_rows_for_bootstrap(session, filters)
+    payload = _aggregate_bootstrap_from_summary_rows(rows)
+    if include_status:
+        payload["status"] = get_status(session)
+    payload["meta"] = {
+        "source": "live",
+        "stale": False,
+        "snapshot_key": DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+        "snapshot_version": DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+        "strategy": "summary_single_pass",
+        "rows_scanned": len(rows),
+    }
+    _cache_set(cache_key, payload)
+    return payload
+
+
 def get_dashboard_bootstrap(
     session: Session,
     filters: DimensionamientoFilters | None = None,
+    *,
+    include_status: bool = True,
+    bypass_snapshot: bool = False,
 ) -> dict[str, Any]:
-    filters = filters or build_filters()
-    started_at = _log_query_start("get_dashboard_bootstrap", filters)
+    filters = _normalize_dashboard_filters(session, filters or build_filters())
+    started_at = _log_query_start(
+        "get_dashboard_bootstrap",
+        filters,
+        include_status=include_status,
+        bypass_snapshot=bypass_snapshot,
+    )
     try:
         _apply_local_statement_timeout(session, 50000)
-        if not _has_active_filters(filters):
+        if not bypass_snapshot and not _has_active_filters(filters):
             snapshot = _get_dashboard_snapshot(session)
             latest = _latest_success_import_run(session)
             if snapshot and (latest is None or snapshot.import_run_id == latest.id):
                 payload = dict(snapshot.payload or {})
+                if not include_status:
+                    payload.pop("status", None)
                 payload["meta"] = {
                     **dict(payload.get("meta") or {}),
                     **_snapshot_meta_payload(snapshot),
@@ -1508,6 +1854,8 @@ def get_dashboard_bootstrap(
 
             if snapshot:
                 payload = dict(snapshot.payload or {})
+                if not include_status:
+                    payload.pop("status", None)
                 payload["meta"] = {
                     **dict(payload.get("meta") or {}),
                     **_snapshot_meta_payload(snapshot),
@@ -1523,28 +1871,38 @@ def get_dashboard_bootstrap(
                 )
                 return payload
 
-        payload = {
-            "status": get_status(session),
-            "filters": get_filter_options(session, filters),
-            "kpis": get_kpis(session, filters),
-            "series": get_series(session, filters),
-            "results": get_results_breakdown(session, filters),
-            "top_families": get_top_families(session, filters, limit=10),
-            "geo": get_geography_distribution(session, filters),
-            "clients_by_result": get_clients_by_result(session, filters, limit=10),
-            "family_consumption": get_family_consumption_table(session, filters, limit=20),
-            "meta": {
-                "source": "live",
-                "stale": False,
-                "snapshot_key": DEFAULT_DASHBOARD_SNAPSHOT_KEY,
-                "snapshot_version": DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
-            },
-        }
+        summary_state = _summary_health_snapshot_cached(session)
+        if not filters.search and summary_state["usable"]:
+            payload = _get_aggregated_dashboard_bootstrap(
+                session,
+                filters,
+                include_status=include_status,
+            )
+        else:
+            payload = {
+                "filters": get_filter_options(session, filters),
+                "kpis": get_kpis(session, filters),
+                "series": get_series(session, filters),
+                "results": get_results_breakdown(session, filters),
+                "top_families": get_top_families(session, filters, limit=10),
+                "geo": get_geography_distribution(session, filters),
+                "clients_by_result": get_clients_by_result(session, filters, limit=10),
+                "family_consumption": get_family_consumption_table(session, filters, limit=20),
+                "meta": {
+                    "source": "live",
+                    "stale": False,
+                    "snapshot_key": DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+                    "snapshot_version": DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+                    "strategy": "composed_queries",
+                },
+            }
+            if include_status:
+                payload["status"] = get_status(session)
         _log_query_success(
             "get_dashboard_bootstrap",
             started_at,
             source=payload["meta"]["source"],
-            has_data=payload["status"].get("has_data"),
+            has_data=(payload.get("status") or {}).get("has_data"),
         )
         return payload
     except Exception:
