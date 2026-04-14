@@ -29,7 +29,7 @@ from .models import (
     DimensionamientoImportRun,
     DimensionamientoRecord,
 )
-from .query_service import refresh_default_dashboard_snapshot
+from .query_service import invalidate_query_cache, refresh_default_dashboard_snapshot
 
 logger = logging.getLogger("wc.dimensionamiento.ingestion")
 
@@ -1122,6 +1122,8 @@ def _ingest_dimensionamiento_csv_legacy(
                 snapshot_exc,
             )
         session.commit()
+        # Invalidar caché de queries para que todos los filtros lean datos frescos
+        invalidate_query_cache()
 
         _dim_log("info", "[DIM] CSV loaded with %s rows", total_processed)
         _dim_log(
@@ -1285,6 +1287,8 @@ def ingest_dimensionamiento_csv(
                 snapshot_exc,
             )
         session.commit()
+        # Invalidar caché de queries para que todos los filtros lean datos frescos
+        invalidate_query_cache()
 
         _dim_log("info", "[DIM] CSV loaded with %s rows", total_processed)
         _dim_log(

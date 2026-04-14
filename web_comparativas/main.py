@@ -65,6 +65,7 @@ from web_comparativas.migrations import (
     backfill_original_content,
     ensure_dimensionamiento_indexes,
     ensure_dimensionamiento_summary_populated,
+    ensure_dimensionamiento_summary_perf_indexes,
     ensure_dimensionamiento_text_columns,
     ensure_ticket_pliego_columns,
     ensure_forecast_perf_indexes,
@@ -142,6 +143,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: dimensionamiento text columns ensured.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning dimensionamiento text columns: {e}", flush=True)
+
+    try:
+        ensure_dimensionamiento_summary_perf_indexes()
+        print("[MIGRATION] SUCCESS: dimensionamiento summary perf indexes ensured.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning dimensionamiento summary perf indexes: {e}", flush=True)
 
     # Crear tablas nuevas del módulo Lectura de Pliegos (y cualquier tabla pendiente)
     try:

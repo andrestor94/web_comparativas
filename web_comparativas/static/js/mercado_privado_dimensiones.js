@@ -84,6 +84,17 @@ document.addEventListener('DOMContentLoaded', () => {
     initDashboard();
 
     function bindEvents() {
+        // ── Debounce centralizado para todos los filtros ────────────────────
+        // Evita disparar 8 requests por cada cambio rápido de selector.
+        // El refresh real ocurre 350 ms después del ÚLTIMO evento de cambio.
+        let _filterDebounceTimer = null;
+        const FILTER_DEBOUNCE_MS = 350;
+
+        function _scheduleRefresh() {
+            clearTimeout(_filterDebounceTimer);
+            _filterDebounceTimer = setTimeout(loadDashboardData, FILTER_DEBOUNCE_MS);
+        }
+
         const changeTargets = [
             elements.filterClient,
             elements.filterProvince,
@@ -95,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.filterIdentified,
             elements.filterIsClient,
         ];
-        changeTargets.forEach((target) => target.addEventListener('change', loadDashboardData));
+        changeTargets.forEach((target) => target.addEventListener('change', _scheduleRefresh));
 
         // Plataformas: no recargar en cada click individual, solo al presionar "Aplicar"
         elements.applyPlatformsBtn.addEventListener('click', () => {
@@ -111,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? window.bootstrap.Dropdown.getInstance(dropdownEl)
                 : null;
             if (bsDropdown) bsDropdown.hide();
+            clearTimeout(_filterDebounceTimer);
             loadDashboardData();
         });
 
@@ -289,32 +301,32 @@ document.addEventListener('DOMContentLoaded', () => {
         setLoading(true, 'Consultando métricas agregadas...');
         const query = buildQueryParams();
 
+        // ── Lote 1 (crítico): widgets principales ───────────────────────────
+        // NO incluye /filters para no bloquear la ruta crítica con una query
+        // de ~30s. Los filtros se actualizan en el lote secundario.
         const [
-            filtersResult,
             kpisResult,
             seriesResult,
             resultsResult,
             familiesResult,
         ] = await Promise.allSettled([
-            apiGet('/filters', query),
             apiGet('/kpis', query),
             apiGet('/series', query),
             apiGet('/results', query),
             apiGet('/top-families', { ...query, limit: 10 }),
         ]);
 
+        // ── Lote 2 (secundario): geo, clientes, consumo + filtros ───────────
+        // Se disparan en paralelo mientras se renderizan los widgets críticos.
+        // /filters queda aquí para no bloquear la visualización principal.
         const secondaryPromise = Promise.allSettled([
             apiGet('/geo', query),
             apiGet('/clients-by-result', { ...query, limit: 10 }),
             apiGet('/family-consumption', { ...query, limit: 20 }),
+            apiGet('/filters', query),
         ]);
 
-        // Filtros: sincronizar si están disponibles
-        if (filtersResult.status === 'fulfilled' && filtersResult.value.ok !== false) {
-            applyFilterOptions(filtersResult.value.data);
-        }
-
-        // Cada widget: éxito → renderizar, error → mostrar estado de error
+        // Renderizar widgets críticos (el overlay desaparece aquí)
         _widgetRender(kpisResult,
             (data) => renderKpis(data),
             () => renderKpisError()
@@ -332,9 +344,11 @@ document.addEventListener('DOMContentLoaded', () => {
             (msg) => showContainerError(elements.familyListContainer, msg)
         );
 
+        // El overlay se quita en cuanto los widgets críticos están listos
         setLoading(false);
 
-        const [geoResult, clientsResult, consumptionResult] = await secondaryPromise;
+        // Renderizar widgets secundarios cuando lleguen (no bloqueantes)
+        const [geoResult, clientsResult, consumptionResult, filtersResult] = await secondaryPromise;
         _widgetRender(geoResult,
             (data) => renderMapChart(data),
             () => { /* el mapa muestra lo último que tenía; no se fuerza error visual */ }
@@ -347,6 +361,10 @@ document.addEventListener('DOMContentLoaded', () => {
             (data) => renderPivotTable(data),
             (msg) => showPivotError(msg)
         );
+        // Actualizar opciones de filtros cuando estén disponibles (cascading filters)
+        if (filtersResult.status === 'fulfilled' && filtersResult.value.ok !== false) {
+            applyFilterOptions(filtersResult.value.data);
+        }
     }
 
     /**

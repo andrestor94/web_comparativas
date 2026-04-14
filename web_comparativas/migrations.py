@@ -723,3 +723,71 @@ def ensure_dimensionamiento_text_columns():
         print("[MIGRATION] ensure_dimensionamiento_text_columns: columnas convertidas.", flush=True)
     else:
         print("[MIGRATION] ensure_dimensionamiento_text_columns: todo ya era TEXT. (OK)", flush=True)
+
+
+def ensure_dimensionamiento_summary_perf_indexes():
+    """
+    Crea índices compuestos en dimensionamiento_family_monthly_summary para
+    acelerar las consultas de agregación generadas por cada widget del dashboard.
+
+    La tabla resumen ya tiene índices en columnas individuales, pero cuando
+    hay filtros activos + agregación, PostgreSQL necesita índices compuestos
+    que cubran las columnas del WHERE y del SELECT simultáneamente.
+
+    Índices creados:
+      - ix_dim_sum_is_client_cliente  : speeds KPIs client count + clients_by_result
+      - ix_dim_sum_resultado_plat     : speeds results_breakdown con filtro plataforma
+      - ix_dim_sum_provincia_month    : speeds geo_distribution con filtro fecha
+      - ix_dim_sum_unidad_month_total : speeds series por unidad de negocio
+      - ix_dim_sum_familia_qty        : speeds top_families / family_consumption
+
+    Solo aplica en PostgreSQL. CREATE INDEX CONCURRENTLY no puede ejecutarse
+    dentro de una transacción explícita.
+    """
+    if IS_SQLITE:
+        print("[MIGRATION] ensure_dimensionamiento_summary_perf_indexes: SQLite, saltando.", flush=True)
+        return
+
+    indexes = [
+        (
+            "ix_dim_sum_is_client_cliente",
+            "dimensionamiento_family_monthly_summary",
+            "(is_client, cliente_nombre_homologado)",
+        ),
+        (
+            "ix_dim_sum_resultado_plat",
+            "dimensionamiento_family_monthly_summary",
+            "(resultado_participacion, plataforma)",
+        ),
+        (
+            "ix_dim_sum_provincia_month",
+            "dimensionamiento_family_monthly_summary",
+            "(provincia, month)",
+        ),
+        (
+            "ix_dim_sum_unidad_month_total",
+            "dimensionamiento_family_monthly_summary",
+            "(unidad_negocio, month, total_registros)",
+        ),
+        (
+            "ix_dim_sum_familia_qty",
+            "dimensionamiento_family_monthly_summary",
+            "(familia, total_cantidad)",
+        ),
+    ]
+
+    for idx_name, table_name, expr in indexes:
+        ddl = (
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {idx_name} "
+            f"ON {table_name} {expr}"
+        )
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text(ddl))
+            print(f"[MIGRATION] Índice summary '{idx_name}' verificado/creado.", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                print(f"[MIGRATION] Índice summary '{idx_name}': ya existe. (OK)", flush=True)
+            else:
+                print(f"[MIGRATION] Índice summary '{idx_name}': advertencia – {e}", flush=True)
