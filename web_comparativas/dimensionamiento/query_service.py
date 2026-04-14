@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -23,6 +26,75 @@ logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
 DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v1"
+
+# ── In-memory query result cache ─────────────────────────────────────────────
+# Evita recalcular resultados idénticos cuando el usuario cambia y revierte
+# filtros en rápida sucesión. Invalidado después de cada importación exitosa.
+# Thread-safe: las asignaciones de dict en CPython son atómicas bajo el GIL,
+# pero usamos un lock explícito al limpiar para garantizar consistencia.
+#
+# TTLs (segundos):
+#   _TTL_SUMMARY_HEALTH        : snapshot de salud de la tabla resumen (muy barato)
+#   _TTL_FILTER_OPTIONS_DFLT   : opciones de filtro sin filtros activos (estable)
+#   _TTL_FILTER_OPTIONS_FILT   : opciones de filtro con filtros activos
+#   _TTL_QUERY_RESULT          : todos los demás widgets
+_TTL_SUMMARY_HEALTH = 10.0
+_TTL_FILTER_OPTIONS_DFLT = 300.0
+_TTL_FILTER_OPTIONS_FILT = 60.0
+_TTL_QUERY_RESULT = 120.0
+_QUERY_CACHE_MAX = 100          # Entradas máximas antes de limpiar completo
+
+_QUERY_CACHE: dict[str, dict] = {}
+_QUERY_CACHE_LOCK = threading.Lock()
+_CACHE_MISS = object()          # Sentinel para distinguir cache miss de None
+
+# Micro-cache dedicado al health snapshot (no necesita clave por filtros)
+_SUMMARY_HEALTH_CACHE: dict = {"ts": 0.0, "val": None}
+
+
+def _make_cache_key(fn_name: str, filters: "DimensionamientoFilters", **extra: Any) -> str:
+    """Clave MD5 determinista a partir del nombre de función + filtros + params extra."""
+    d = _filters_debug_dict(filters)
+    # Normalizar listas para que el orden no genere keys distintas
+    for k in ("clientes", "provincias", "familias", "plataformas",
+              "unidades_negocio", "subunidades_negocio", "resultados"):
+        if isinstance(d.get(k), list):
+            d[k] = sorted(d[k])
+    if extra:
+        d["_x"] = {k: str(v) for k, v in sorted(extra.items())}
+    raw = f"{fn_name}:{json.dumps(d, sort_keys=True, default=str)}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str, ttl: float) -> Any:
+    """Retorna el valor cacheado o _CACHE_MISS si no existe o expiró."""
+    entry = _QUERY_CACHE.get(key)
+    if entry is None:
+        return _CACHE_MISS
+    if time.perf_counter() - entry["ts"] > ttl:
+        with _QUERY_CACHE_LOCK:
+            _QUERY_CACHE.pop(key, None)
+        return _CACHE_MISS
+    return entry["val"]
+
+
+def _cache_set(key: str, val: Any) -> None:
+    """Almacena un valor. Limpia el caché completo si supera el tamaño máximo."""
+    with _QUERY_CACHE_LOCK:
+        if len(_QUERY_CACHE) >= _QUERY_CACHE_MAX:
+            _QUERY_CACHE.clear()
+        _QUERY_CACHE[key] = {"ts": time.perf_counter(), "val": val}
+
+
+def invalidate_query_cache() -> None:
+    """Limpia todos los resultados cacheados. Llamar después de cada importación."""
+    with _QUERY_CACHE_LOCK:
+        count = len(_QUERY_CACHE)
+        _QUERY_CACHE.clear()
+    # Resetear también el micro-cache de salud de la tabla resumen
+    _SUMMARY_HEALTH_CACHE["val"] = None
+    _SUMMARY_HEALTH_CACHE["ts"] = 0.0
+    logger.info("[DIM][CACHE] Caché invalidado. %d entradas eliminadas.", count)
 
 
 def _get_date_column(model):
@@ -162,6 +234,23 @@ def _summary_health_snapshot(session: Session) -> dict[str, Any]:
     }
 
 
+def _summary_health_snapshot_cached(session: Session) -> dict[str, Any]:
+    """Versión cacheada de _summary_health_snapshot con TTL de 10 segundos.
+
+    Evita ejecutar SELECT COUNT/MIN/MAX en la tabla resumen 7+ veces por cada
+    cambio de filtro (una vez por cada función de widget que llama a
+    _resolve_aggregate_model). Con caché, solo se ejecuta una vez cada 10s.
+    """
+    now = time.perf_counter()
+    cached_val = _SUMMARY_HEALTH_CACHE["val"]
+    if cached_val is not None and now - _SUMMARY_HEALTH_CACHE["ts"] < _TTL_SUMMARY_HEALTH:
+        return cached_val
+    val = _summary_health_snapshot(session)
+    _SUMMARY_HEALTH_CACHE["ts"] = time.perf_counter()
+    _SUMMARY_HEALTH_CACHE["val"] = val
+    return val
+
+
 def _resolve_aggregate_model(
     session: Session,
     filters: DimensionamientoFilters,
@@ -174,7 +263,7 @@ def _resolve_aggregate_model(
         logger.info("[DIM][%s] %s reason=search", endpoint_tag, base_message)
         return DimensionamientoRecord
 
-    summary_state = _summary_health_snapshot(session)
+    summary_state = _summary_health_snapshot_cached(session)
     if summary_state["usable"]:
         logger.info(
             "[DIM][%s] %s rows=%s min_month=%s max_month=%s",
@@ -804,12 +893,20 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
 
 
 def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
+    # ── Caché: hit frecuente al limpiar/reutilizar un mismo set de filtros ──
+    _ttl = _TTL_FILTER_OPTIONS_DFLT if not _has_active_filters(filters) else _TTL_FILTER_OPTIONS_FILT
+    _ck = _make_cache_key("get_filter_options", filters)
+    _hit = _cache_get(_ck, _ttl)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_filter_options hit key=%s", _ck)
+        return _hit
+
     started_at = time.perf_counter()
     logger.info("[DIM][QUERY] get_filter_options start filters=%s", _filters_debug_dict(filters))
     _apply_local_statement_timeout(session, 50000)
 
     try:
-        summary_state = _summary_health_snapshot(session)
+        summary_state = _summary_health_snapshot_cached(session)
         has_active_filters = _has_active_filters(filters)
         if (
             not has_active_filters
@@ -900,6 +997,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
             subunidades_negocio=len(payload["subunidades_negocio"]),
             resultados=len(payload["resultados"]),
         )
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_filter_options failed filters=%s", _filters_debug_dict(filters))
@@ -907,6 +1005,12 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
 
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
+    _ck = _make_cache_key("get_kpis", filters)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_kpis hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_kpis", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -967,6 +1071,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             "cantidad_demandada": float(total_quantity or 0),
         }
         _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_kpis failed filters=%s", _filters_debug_dict(filters))
@@ -974,6 +1079,12 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
 
 
 def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 5) -> dict[str, Any]:
+    _ck = _make_cache_key("get_series", filters, limit=limit)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_series hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_series", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1033,6 +1144,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
             )
         payload = {"months": months, "datasets": datasets}
         _log_query_success("get_series", started_at, months=len(months), datasets=len(datasets))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_series failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
@@ -1040,6 +1152,12 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
 
 
 def get_results_breakdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    _ck = _make_cache_key("get_results_breakdown", filters)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_results_breakdown hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_results_breakdown", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1066,6 +1184,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
             for resultado, rows in session.execute(stmt).all()
         ]
         _log_query_success("get_results_breakdown", started_at, rows=len(payload))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_results_breakdown failed filters=%s", _filters_debug_dict(filters))
@@ -1073,6 +1192,12 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
 
 
 def get_top_families(session: Session, filters: DimensionamientoFilters, limit: int = 10) -> list[dict[str, Any]]:
+    _ck = _make_cache_key("get_top_families", filters, limit=limit)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_top_families hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_top_families", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1107,6 +1232,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
             for familia, rows, quantity in session.execute(stmt).all()
         ]
         _log_query_success("get_top_families", started_at, rows=len(payload))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_top_families failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
@@ -1114,6 +1240,12 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
 
 
 def get_geography_distribution(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    _ck = _make_cache_key("get_geography_distribution", filters)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_geography_distribution hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_geography_distribution", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1140,6 +1272,7 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
             for provincia, rows in session.execute(stmt).all()
         ]
         _log_query_success("get_geography_distribution", started_at, rows=len(payload))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_geography_distribution failed filters=%s", _filters_debug_dict(filters))
@@ -1151,6 +1284,12 @@ def get_clients_by_result(
     filters: DimensionamientoFilters,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
+    _ck = _make_cache_key("get_clients_by_result", filters, limit=limit)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_clients_by_result hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_clients_by_result", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1230,6 +1369,7 @@ def get_clients_by_result(
             for cliente in top_clients
         ]
         _log_query_success("get_clients_by_result", started_at, rows=len(payload))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_clients_by_result failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
@@ -1241,6 +1381,12 @@ def get_family_consumption_table(
     filters: DimensionamientoFilters,
     limit: int = 20,
 ) -> dict[str, Any]:
+    _ck = _make_cache_key("get_family_consumption_table", filters, limit=limit)
+    _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
+    if _hit is not _CACHE_MISS:
+        logger.debug("[DIM][CACHE] get_family_consumption_table hit key=%s", _ck)
+        return _hit
+
     started_at = _log_query_start("get_family_consumption_table", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
@@ -1326,6 +1472,7 @@ def get_family_consumption_table(
             )
         payload = {"months": month_keys, "rows": data}
         _log_query_success("get_family_consumption_table", started_at, months=len(payload["months"]), rows=len(payload["rows"]))
+        _cache_set(_ck, payload)
         return payload
     except Exception:
         logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
