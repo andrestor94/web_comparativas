@@ -320,6 +320,7 @@ class _Override(BaseModel):
 
 class _SavePayload(BaseModel):
     client_id: str
+    growth_pct: float = 0.0
     overrides: List[_Override]   # List from typing — required for Pydantic v1 compatibility
 
 
@@ -334,6 +335,7 @@ def api_save_client(
         svc.save_client_overrides(
             payload.client_id,
             [{"articulo": o.articulo, "date": o.date, "pct": o.pct} for o in payload.overrides],
+            growth_pct=payload.growth_pct,
         )
         return {"ok": True, "client_id": payload.client_id, "saved": len(payload.overrides)}
     except Exception as exc:
