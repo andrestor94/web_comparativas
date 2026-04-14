@@ -1005,8 +1005,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderPivotTable(data, resetPage = false) {
+        const backendPageSize = Number(data.page_size) > 0 ? Number(data.page_size) : state.pivotPageSize;
+        state.pivotPageSize = backendPageSize;
+
         if (resetPage) {
-            state.pivotPage = 1;
+            state.pivotPage = Number(data.page) > 0 ? Number(data.page) : 1;
+        } else if (Number(data.page) > 0) {
+            state.pivotPage = Number(data.page);
         }
         const total = (data.total != null) ? data.total : (data.rows || []).length;
         state.pivotTotal = total;

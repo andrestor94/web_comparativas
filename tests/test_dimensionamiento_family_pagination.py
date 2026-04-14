@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import os
+import sys
+from types import SimpleNamespace
+
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from web_comparativas.dimensionamiento import query_service as qs
+
+
+def test_legacy_family_consumption_payload_needs_refresh():
+    legacy_payload = {
+        "family_consumption": {
+            "months": ["01", "02"],
+            "rows": [{"familia": "A", "values": [10, 20]}],
+        }
+    }
+
+    assert qs._family_consumption_payload_needs_refresh(legacy_payload) is True
+
+
+def test_current_family_consumption_payload_does_not_need_refresh():
+    current_payload = {
+        "family_consumption": {
+            "months": ["01", "02"],
+            "rows": [{"familia": "A", "values": [10, 20]}],
+            "total": 120,
+            "page": 1,
+            "page_size": qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+        }
+    }
+
+    assert qs._family_consumption_payload_needs_refresh(current_payload) is False
+
+
+def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
+    legacy_snapshot = SimpleNamespace(
+        import_run_id=77,
+        generated_at=None,
+        payload={
+            "family_consumption": {
+                "months": ["01"],
+                "rows": [{"familia": "A", "values": [10]}],
+            }
+        },
+    )
+    refreshed_payload = {
+        "family_consumption": {
+            "months": ["01"],
+            "rows": [{"familia": "A", "values": [10]}],
+            "total": 345,
+            "page": 1,
+            "page_size": qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+        }
+    }
+    refresh_calls: list[tuple[object, dict, qs.DimensionamientoFilters]] = []
+
+    monkeypatch.setattr(qs, "_normalize_dashboard_filters", lambda session, filters: filters)
+    monkeypatch.setattr(qs, "_apply_local_statement_timeout", lambda session, milliseconds: None)
+    monkeypatch.setattr(qs, "_has_active_filters", lambda filters: False)
+    monkeypatch.setattr(qs, "_get_dashboard_snapshot", lambda session: legacy_snapshot)
+    monkeypatch.setattr(qs, "_latest_success_import_run", lambda session: SimpleNamespace(id=77))
+
+    def _refresh(session, payload, filters):
+        refresh_calls.append((session, payload, filters))
+        return refreshed_payload
+
+    monkeypatch.setattr(qs, "_refresh_bootstrap_family_consumption", _refresh)
+
+    result = qs.get_dashboard_bootstrap(object(), filters=qs.build_filters(), include_status=False)
+
+    assert refresh_calls
+    assert result["family_consumption"]["total"] == 345
+    assert result["family_consumption"]["page_size"] == qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE

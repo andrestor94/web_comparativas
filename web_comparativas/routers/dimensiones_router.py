@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from web_comparativas.auth import require_roles
 from web_comparativas.dimensionamiento.query_service import (
+    DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
     build_filters,
     get_clients_by_result,
     get_dashboard_bootstrap,
@@ -256,7 +257,13 @@ def dimensionamiento_bootstrap(
             "top_families": [],
             "geo": [],
             "clients_by_result": [],
-            "family_consumption": {"months": [], "rows": []},
+            "family_consumption": {
+                "months": [],
+                "rows": [],
+                "total": 0,
+                "page": 1,
+                "page_size": DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+            },
             "meta": {"source": "fallback", "stale": False},
         },
     )
@@ -441,7 +448,7 @@ def dimensionamiento_family_consumption(
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE, ge=1, le=200),
 ):
     offset = (page - 1) * page_size
     return _safe_dashboard_response(

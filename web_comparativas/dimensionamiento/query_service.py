@@ -26,7 +26,8 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v1"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v2"
+DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE = 50
 
 # ── In-memory query result cache ─────────────────────────────────────────────
 # Evita recalcular resultados idénticos cuando el usuario cambia y revierte
@@ -773,8 +774,42 @@ def _build_dashboard_bootstrap_payload(session: Session) -> dict[str, Any]:
         "top_families": get_top_families(session, base_filters, limit=10),
         "geo": get_geography_distribution(session, base_filters),
         "clients_by_result": get_clients_by_result(session, base_filters, limit=10),
-        "family_consumption": get_family_consumption_table(session, base_filters, limit=20),
+        "family_consumption": get_family_consumption_table(
+            session,
+            base_filters,
+            limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+        ),
     }
+
+
+def _family_consumption_payload_needs_refresh(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    family_consumption = payload.get("family_consumption")
+    if not isinstance(family_consumption, dict):
+        return True
+    if family_consumption.get("total") is None:
+        return True
+    if family_consumption.get("page_size") != DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE:
+        return True
+    if family_consumption.get("page") != 1:
+        return True
+    return False
+
+
+def _refresh_bootstrap_family_consumption(
+    session: Session,
+    payload: dict[str, Any],
+    filters: DimensionamientoFilters,
+) -> dict[str, Any]:
+    refreshed = dict(payload)
+    refreshed["family_consumption"] = get_family_consumption_table(
+        session,
+        filters,
+        limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+        offset=0,
+    )
+    return refreshed
 
 
 def refresh_default_dashboard_snapshot(
@@ -1419,7 +1454,7 @@ def get_clients_by_result(
 def get_family_consumption_table(
     session: Session,
     filters: DimensionamientoFilters,
-    limit: int = 50,
+    limit: int = DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
     offset: int = 0,
 ) -> dict[str, Any]:
     _ck = _make_cache_key("get_family_consumption_table", filters, limit=limit, offset=offset)
@@ -1466,7 +1501,15 @@ def get_family_consumption_table(
         _log_query_statement(session, "get_family_consumption_table.top_families", model, top_families_stmt, filters, applied_conditions)
         top_families_rows = session.execute(top_families_stmt).all()
         if not top_families_rows:
-            payload = {"months": [], "rows": [], "total": total_families, "page_size": limit, "offset": offset}
+            page = (offset // limit) + 1 if limit else 1
+            payload = {
+                "months": [],
+                "rows": [],
+                "total": total_families,
+                "page": page,
+                "page_size": limit,
+                "offset": offset,
+            }
             _log_query_success("get_family_consumption_table", started_at, months=0, rows=0, total=total_families)
             return payload
 
@@ -1523,6 +1566,7 @@ def get_family_consumption_table(
             "months": month_keys,
             "rows": data,
             "total": total_families,
+            "page": (offset // limit) + 1 if limit else 1,
             "page_size": limit,
             "offset": offset,
         }
@@ -1580,7 +1624,7 @@ def _aggregate_bootstrap_from_summary_rows(
     series_limit: int = 5,
     top_families_limit: int = 10,
     clients_limit: int = 10,
-    family_consumption_limit: int = 50,
+    family_consumption_limit: int = DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
 ) -> dict[str, Any]:
     distinct_clients: set[str] = set()
     distinct_provincias: set[str] = set()
@@ -1818,6 +1862,8 @@ def get_dashboard_bootstrap(
             latest = _latest_success_import_run(session)
             if snapshot and (latest is None or snapshot.import_run_id == latest.id):
                 payload = dict(snapshot.payload or {})
+                if _family_consumption_payload_needs_refresh(payload):
+                    payload = _refresh_bootstrap_family_consumption(session, payload, filters)
                 if not include_status:
                     payload.pop("status", None)
                 payload["meta"] = {
@@ -1836,6 +1882,8 @@ def get_dashboard_bootstrap(
 
             if snapshot:
                 payload = dict(snapshot.payload or {})
+                if _family_consumption_payload_needs_refresh(payload):
+                    payload = _refresh_bootstrap_family_consumption(session, payload, filters)
                 if not include_status:
                     payload.pop("status", None)
                 payload["meta"] = {
@@ -1869,7 +1917,11 @@ def get_dashboard_bootstrap(
                 "top_families": get_top_families(session, filters, limit=10),
                 "geo": get_geography_distribution(session, filters),
                 "clients_by_result": get_clients_by_result(session, filters, limit=10),
-                "family_consumption": get_family_consumption_table(session, filters, limit=20),
+                "family_consumption": get_family_consumption_table(
+                    session,
+                    filters,
+                    limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+                ),
                 "meta": {
                     "source": "live",
                     "stale": False,
