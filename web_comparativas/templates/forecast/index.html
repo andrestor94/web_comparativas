@@ -1970,7 +1970,7 @@ async function saveModalChanges() {
     _setModalDirty(false);
     closeModal();
     _fcClear();   // Overrides altered the dataset — force fresh data on next render
-    await refreshAll();
+    await _refreshAfterSave();  // sequential — avoids parallel 502 on Render
   } catch (err) {
     console.error('Save error', err);
     alert('Error al guardar los cambios. Por favor intente nuevamente.');
@@ -2469,6 +2469,23 @@ async function refreshAll() {
     _tableIsStale = true;
   }
   await Promise.all(tasks);
+}
+
+async function _refreshAfterSave() {
+  // Sequential refresh — prevents thundering herd after save.
+  //
+  // After save: sessionStorage is wiped (_fcClear) and the backend cache
+  // is cold for this user (clear_user_cache).  Firing chart + treemap +
+  // table in parallel via refreshAll() causes all three to hit the backend
+  // simultaneously with no cache.  On Render's single-CPU free tier each
+  // request then takes ~3× longer, exceeding the 30 s upstream timeout → 502.
+  //
+  // Solution: serialize the two heavy calls.  Table is deferred to on-demand
+  // (loads when the user navigates to the detalle tab).
+  await loadProducts();   // lightweight — early-exit if filters unchanged
+  await loadChart();      // most visible; do first so screen updates quickly
+  _tableIsStale = true;   // deferred: reloads when user opens detalle tab
+  await loadTreemap();    // after chart completes — never in parallel with it
 }
 
 /* ===================================================================
