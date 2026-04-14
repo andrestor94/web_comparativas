@@ -124,9 +124,7 @@ class DimensionamientoFilters:
     resultados: list[str] = field(default_factory=list)
     fecha_desde: dt.date | None = None
     fecha_hasta: dt.date | None = None
-    identified: bool | None = None
     is_client: bool | None = None
-    search: str | None = None
 
 
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
@@ -140,9 +138,7 @@ def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
         "resultados": filters.resultados,
         "fecha_desde": filters.fecha_desde.isoformat() if filters.fecha_desde else None,
         "fecha_hasta": filters.fecha_hasta.isoformat() if filters.fecha_hasta else None,
-        "identified": filters.identified,
         "is_client": filters.is_client,
-        "search": filters.search,
     }
 
 
@@ -170,9 +166,7 @@ def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
         resultados=list(filters.resultados),
         fecha_desde=filters.fecha_desde,
         fecha_hasta=filters.fecha_hasta,
-        identified=filters.identified,
         is_client=filters.is_client,
-        search=filters.search,
     )
 
 
@@ -188,9 +182,7 @@ def _has_active_filters(filters: DimensionamientoFilters) -> bool:
             filters.resultados,
             filters.fecha_desde is not None,
             filters.fecha_hasta is not None,
-            filters.identified is not None,
             filters.is_client is not None,
-            filters.search,
         ]
     )
 
@@ -330,16 +322,11 @@ def _normalize_dashboard_filters(
 
 def _resolve_aggregate_model(
     session: Session,
-    filters: DimensionamientoFilters,
     endpoint_tag: str,
     *,
     summary_message: str = "using summary table",
     base_message: str = "using base table",
 ):
-    if filters.search:
-        logger.info("[DIM][%s] %s reason=search", endpoint_tag, base_message)
-        return DimensionamientoRecord
-
     summary_state = _summary_health_snapshot_cached(session)
     if summary_state["usable"]:
         logger.info(
@@ -558,9 +545,7 @@ def build_filters(
     resultados: Iterable[str] | None = None,
     fecha_desde: dt.date | None = None,
     fecha_hasta: dt.date | None = None,
-    identified: bool | None = None,
     is_client: bool | None = None,
-    search: str | None = None,
 ) -> DimensionamientoFilters:
     return DimensionamientoFilters(
         clientes=_normalize_list(clientes),
@@ -572,9 +557,7 @@ def build_filters(
         resultados=_normalize_list(resultados),
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
-        identified=identified,
         is_client=is_client,
-        search=(search or "").strip() or None,
     )
 
 
@@ -658,10 +641,6 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
                 stmt = stmt.where(_sql_normalized_text(model.resultado_participacion).in_(normalized_resultados))
                 if applied_conditions is not None:
                     applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
-    if filters.identified is not None:
-        stmt = stmt.where(model.is_identified.is_(filters.identified))
-        if applied_conditions is not None:
-            applied_conditions.append(f"is_identified IS {filters.identified}")
     if filters.is_client is not None:
         stmt = stmt.where(model.is_client.is_(filters.is_client))
         if applied_conditions is not None:
@@ -677,20 +656,6 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
         if applied_conditions is not None:
             applied_conditions.append(f"{date_column.key} <= {filters.fecha_hasta.isoformat()}")
 
-    if filters.search:
-        token = f"%{filters.search.lower()}%"
-        cliente_original_column = _model_column_or_literal(model, "cliente_nombre_original")
-        codigo_articulo_column = _model_column_or_literal(model, "codigo_articulo")
-        producto_original_column = _model_column_or_literal(model, "producto_nombre_original")
-        stmt = stmt.where(
-            func.lower(func.coalesce(model.cliente_nombre_homologado, "")).like(token)
-            | func.lower(func.coalesce(cliente_original_column, "")).like(token)
-            | func.lower(func.coalesce(model.familia, "")).like(token)
-            | func.lower(func.coalesce(codigo_articulo_column, "")).like(token)
-            | func.lower(func.coalesce(producto_original_column, "")).like(token)
-        )
-        if applied_conditions is not None:
-            applied_conditions.append(f"search LIKE {token}")
     return stmt
 
 
@@ -1010,7 +975,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
             }
         else:
             applied_conditions: list[str] = []
-            use_summary = not filters.search and summary_state["usable"]
+            use_summary = summary_state["usable"]
             filt_model = DimensionamientoFamilyMonthlySummary if use_summary else DimensionamientoRecord
             if use_summary:
                 logger.info(
@@ -1020,10 +985,8 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     summary_state["max_month"].isoformat(),
                 )
             else:
-                reason = "search" if filters.search else "summary_unavailable"
                 logger.info(
-                    "[DIM][FILTERS] using distinct_visible_clients base path reason=%s summary_rows=%s raw_min_month=%r raw_max_month=%r",
-                    reason,
+                    "[DIM][FILTERS] using distinct_visible_clients base path reason=summary_unavailable summary_rows=%s raw_min_month=%r raw_max_month=%r",
                     summary_state["rows"],
                     summary_state["raw_min_month"],
                     summary_state["raw_max_month"],
@@ -1091,7 +1054,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
     started_at = _log_query_start("get_kpis", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "KPIS")
+        model = _resolve_aggregate_model(session, "KPIS")
         applied_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
@@ -1103,40 +1066,42 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                     func.count(distinct(_visible)),
                     func.count(model.id),
                     func.count(distinct(model.familia)),
-                    func.coalesce(func.sum(model.cantidad_demandada), 0),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
-            total_rows, total_clients, total_records, total_families, total_quantity = session.execute(stmt).one()
+            total_rows, total_clients, total_records, total_families = session.execute(stmt).one()
         else:
             # Tabla resumen: 2 queries rápidas evitan full scan de 400k+ filas
-            # Query 1: totales, familias, cantidad
+            # Query 1: totales y familias
             main_stmt = _apply_common_filters(
                 select(
                     func.coalesce(func.sum(model.total_registros), 0),
                     func.count(distinct(model.familia)),
-                    func.coalesce(func.sum(model.total_cantidad), 0),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
-            total_rows, total_families, total_quantity = session.execute(main_stmt).one()
-            # Query 2: clientes únicos reales (is_client=True excluye SIN DATO)
+            total_rows, total_families = session.execute(main_stmt).one()
+            # Query 2: nombres únicos respetando el filtro activo de is_client.
+            # Si no hay filtro explícito, contar solo filas con is_client=True
+            # (comportamiento por defecto que excluye "SIN DATO" y no-clientes).
+            # Con filtro is_client=False, _apply_common_filters ya restringe las
+            # filas, y contamos los nombres disponibles en esa selección.
             normalized_client = _sql_normalized_text(model.cliente_nombre_homologado)
-            client_stmt = _apply_common_filters(
+            base_client_stmt = (
                 select(func.count(distinct(model.cliente_nombre_homologado)))
-                .where(model.is_client == True)  # noqa: E712
                 .where(model.cliente_nombre_homologado.isnot(None))
                 .where(model.cliente_nombre_homologado != "")
-                .where(~normalized_client.in_(list(_SIN_DATO_SQL))),
-                model,
-                filters,
+                .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
             )
+            if filters.is_client is None:
+                base_client_stmt = base_client_stmt.where(model.is_client == True)  # noqa: E712
+            client_stmt = _apply_common_filters(base_client_stmt, model, filters)
             total_clients = session.execute(client_stmt).scalar_one()
             total_records = total_rows
 
@@ -1145,7 +1110,6 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             "clientes": int(total_clients or 0),
             "renglones": int(total_records or 0),
             "familias": int(total_families or 0),
-            "cantidad_demandada": float(total_quantity or 0),
         }
         _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
         _cache_set(_ck, payload)
@@ -1165,7 +1129,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
     started_at = _log_query_start("get_series", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "SERIES")
+        model = _resolve_aggregate_model(session, "SERIES")
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         top_business_conditions: list[str] = []
@@ -1238,7 +1202,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
     started_at = _log_query_start("get_results_breakdown", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "RESULTS")
+        model = _resolve_aggregate_model(session, "RESULTS")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
@@ -1278,7 +1242,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
     started_at = _log_query_start("get_top_families", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "TOP_FAMILIES")
+        model = _resolve_aggregate_model(session, "TOP_FAMILIES")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         quantity_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
@@ -1326,7 +1290,7 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
     started_at = _log_query_start("get_geography_distribution", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "GEO")
+        model = _resolve_aggregate_model(session, "GEO")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
@@ -1372,7 +1336,6 @@ def get_clients_by_result(
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(
             session,
-            filters,
             "CLIENTS_BY_RESULT",
             summary_message="using summary path",
             base_message="using base path",
@@ -1456,25 +1419,35 @@ def get_clients_by_result(
 def get_family_consumption_table(
     session: Session,
     filters: DimensionamientoFilters,
-    limit: int = 20,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict[str, Any]:
-    _ck = _make_cache_key("get_family_consumption_table", filters, limit=limit)
+    _ck = _make_cache_key("get_family_consumption_table", filters, limit=limit, offset=offset)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
         logger.debug("[DIM][CACHE] get_family_consumption_table hit key=%s", _ck)
         return _hit
 
-    started_at = _log_query_start("get_family_consumption_table", filters, limit=limit)
+    started_at = _log_query_start("get_family_consumption_table", filters, limit=limit, offset=offset)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, filters, "FAMILY_CONSUMPTION")
+        model = _resolve_aggregate_model(session, "FAMILY_CONSUMPTION")
         total_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
         )
 
-        # Paso 1: identificar las top N familias por cantidad total (query liviana con GROUP BY familia).
-        # Esto limita el scan principal a solo esas familias, evitando traer todos los datos.
+        # Paso 0: contar el total de familias distintas para paginación.
+        count_conditions: list[str] = []
+        count_stmt = _apply_common_filters(
+            select(func.count(distinct(model.familia))).where(model.familia.is_not(None)),
+            model,
+            filters,
+            count_conditions,
+        )
+        total_families: int = session.execute(count_stmt).scalar_one() or 0
+
+        # Paso 1: familias ordenadas por cantidad total, con paginación LIMIT/OFFSET.
         applied_conditions: list[str] = []
         top_families_stmt = _apply_common_filters(
             select(
@@ -1484,7 +1457,8 @@ def get_family_consumption_table(
             .where(model.familia.is_not(None))
             .group_by(model.familia)
             .order_by(total_expr.desc())
-            .limit(limit),
+            .limit(limit)
+            .offset(offset),
             model,
             filters,
             applied_conditions,
@@ -1492,15 +1466,13 @@ def get_family_consumption_table(
         _log_query_statement(session, "get_family_consumption_table.top_families", model, top_families_stmt, filters, applied_conditions)
         top_families_rows = session.execute(top_families_stmt).all()
         if not top_families_rows:
-            payload = {"months": [], "rows": []}
-            _log_query_success("get_family_consumption_table", started_at, months=0, rows=0)
+            payload = {"months": [], "rows": [], "total": total_families, "page_size": limit, "offset": offset}
+            _log_query_success("get_family_consumption_table", started_at, months=0, rows=0, total=total_families)
             return payload
 
         top_families = [f for f, _ in top_families_rows]
 
-        # Paso 2: query mensual solo para las familias seleccionadas.
-        # Usamos date_trunc('month', fecha) en lugar de to_char(fecha, 'MM') para que el
-        # planificador pueda usar el índice en 'fecha'. Extraemos el número de mes en Python.
+        # Paso 2: query mensual solo para las familias de esta página.
         if model is DimensionamientoRecord:
             month_bucket = cast(_month_expr(model.fecha), Date) if not IS_SQLITE else func.date(model.fecha, "start of month")
         else:
@@ -1547,18 +1519,26 @@ def get_family_consumption_table(
                     ],
                 }
             )
-        payload = {"months": month_keys, "rows": data}
-        _log_query_success("get_family_consumption_table", started_at, months=len(payload["months"]), rows=len(payload["rows"]))
+        payload = {
+            "months": month_keys,
+            "rows": data,
+            "total": total_families,
+            "page_size": limit,
+            "offset": offset,
+        }
+        _log_query_success("get_family_consumption_table", started_at, months=len(month_keys), rows=len(data), total=total_families)
         _cache_set(_ck, payload)
         return payload
     except Exception:
-        logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s offset=%s", _filters_debug_dict(filters), limit, offset)
         raise
 
 
-def _real_client_name(value: str | None, is_client: bool) -> str | None:
+def _real_client_name(value: str | None) -> str | None:
+    # Retorna el nombre visible para cualquier fila, sin importar is_client.
+    # Solo excluimos vacíos y variantes de "SIN DATO".
     text_value = str(value or "").strip()
-    if not is_client or not text_value:
+    if not text_value:
         return None
     if text_value.upper().replace("_", " ") in _SUMMARY_CLIENT_EXCLUDE:
         return None
@@ -1600,7 +1580,7 @@ def _aggregate_bootstrap_from_summary_rows(
     series_limit: int = 5,
     top_families_limit: int = 10,
     clients_limit: int = 10,
-    family_consumption_limit: int = 20,
+    family_consumption_limit: int = 50,
 ) -> dict[str, Any]:
     distinct_clients: set[str] = set()
     distinct_provincias: set[str] = set()
@@ -1676,7 +1656,7 @@ def _aggregate_bootstrap_from_summary_rows(
         geo_totals[province_name] += row_count
         family_month_totals[family_name][month_iso] += quantity
 
-        client_name = _real_client_name(cliente, bool(is_client))
+        client_name = _real_client_name(cliente)
         if client_name:
             distinct_clients.add(client_name)
             client_totals[client_name] += row_count
@@ -1773,7 +1753,6 @@ def _aggregate_bootstrap_from_summary_rows(
             "clientes": len(distinct_clients),
             "renglones": int(total_rows or 0),
             "familias": len(distinct_familias),
-            "cantidad_demandada": float(total_quantity or 0),
         },
         "series": series,
         "results": results_payload,
@@ -1783,6 +1762,9 @@ def _aggregate_bootstrap_from_summary_rows(
         "family_consumption": {
             "months": month_keys,
             "rows": family_consumption_payload,
+            "total": len(distinct_familias),
+            "page": 1,
+            "page_size": family_consumption_limit,
         },
     }
 
@@ -1872,7 +1854,7 @@ def get_dashboard_bootstrap(
                 return payload
 
         summary_state = _summary_health_snapshot_cached(session)
-        if not filters.search and summary_state["usable"]:
+        if summary_state["usable"]:
             payload = _get_aggregated_dashboard_bootstrap(
                 session,
                 filters,

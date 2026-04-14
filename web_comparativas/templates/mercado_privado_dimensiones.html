@@ -125,18 +125,6 @@
                     </div>
                 </div>
 
-                <!-- BUSCAR global -->
-                <div class="filter-group">
-                    <label>Buscar</label>
-                    <div class="input-group input-group-sm dim-search-shell">
-                        <span class="input-group-text bg-white border-0 ps-3 pe-1">
-                            <i class="bi bi-search text-muted" style="font-size:0.8rem;"></i>
-                        </span>
-                        <input type="text" id="searchGlobal" class="form-control border-0 shadow-none ps-1"
-                            placeholder="cliente, familia, código">
-                    </div>
-                </div>
-
                 <!-- FAMILIA (multi-select) -->
                 <div class="filter-group dim-filter-family">
                     <label>Familia</label>
@@ -237,16 +225,6 @@
                     </div>
                 </div>
 
-                <!-- IDENTIFICADO -->
-                <div class="filter-group">
-                    <label>¿Identificado?</label>
-                    <select id="filterIdentified" class="tech-select">
-                        <option value="">Todos</option>
-                        <option value="true">Sí</option>
-                        <option value="false">No</option>
-                    </select>
-                </div>
-
                 <!-- ¿CLIENTE? -->
                 <div class="filter-group">
                     <label>¿Cliente?</label>
@@ -285,15 +263,6 @@
                 <div class="kpi-content">
                     <div class="kpi-value" id="kpiFamilies">-</div>
                     <div class="kpi-label">Familias</div>
-                </div>
-            </div>
-            <div class="tech-card kpi-modern dim-kpi-card">
-                <div class="kpi-icon dim-kpi-icon" style="color:var(--tech-cyan);background:rgba(56,189,248,0.1);">
-                    <i class="bi bi-box-seam"></i>
-                </div>
-                <div class="kpi-content">
-                    <div class="kpi-value" id="kpiQuantity">-</div>
-                    <div class="kpi-label">Cantidad demandada</div>
                 </div>
             </div>
         </div>
@@ -348,8 +317,9 @@
 
         <!-- ── Tabla consumo promedio ── -->
         <div class="tech-card dim-card-table-wide">
-            <div class="tech-card-title">
+            <div class="tech-card-title d-flex align-items-center justify-content-between">
                 <span><i class="bi bi-table me-2"></i>Consumo promedio de familia por mes</span>
+                <span id="pivotTotalLabel" class="badge text-bg-light small" style="display:none;"></span>
             </div>
             <div class="table-responsive dim-table-wrap">
                 <table class="tech-table" id="pivotTable">
@@ -357,6 +327,7 @@
                     <tbody id="pivotBody"></tbody>
                 </table>
             </div>
+            <div id="pivotPagination" class="dim-pivot-pagination" style="display:none;"></div>
         </div>
 
     </div><!-- /dashboardContent -->

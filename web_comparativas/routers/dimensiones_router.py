@@ -180,9 +180,7 @@ def _filters_from_query(
     resultado: list[str] | None = Query(default=None),
     fecha_desde: dt.date | None = Query(default=None),
     fecha_hasta: dt.date | None = Query(default=None),
-    identified: bool | None = Query(default=None),
     is_client: bool | None = Query(default=None),
-    search: str | None = Query(default=None),
 ):
     return build_filters(
         clientes=cliente,
@@ -194,9 +192,7 @@ def _filters_from_query(
         resultados=resultado,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
-        identified=identified,
         is_client=is_client,
-        search=search,
     )
 
 
@@ -254,7 +250,6 @@ def dimensionamiento_bootstrap(
                 "clientes": 0,
                 "renglones": 0,
                 "familias": 0,
-                "cantidad_demandada": 0.0,
             },
             "series": {"months": [], "datasets": []},
             "results": [],
@@ -358,7 +353,6 @@ def dimensionamiento_kpis(
             "clientes": 0,
             "renglones": 0,
             "familias": 0,
-            "cantidad_demandada": 0.0,
         },
     )
 
@@ -446,13 +440,15 @@ def dimensionamiento_family_consumption(
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
-    limit: int = Query(default=20, ge=1, le=50),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
 ):
+    offset = (page - 1) * page_size
     return _safe_dashboard_response(
         request,
         "family_consumption",
-        lambda: get_family_consumption_table(db, filters, limit=limit),
-        {"months": [], "rows": []},
+        lambda: get_family_consumption_table(db, filters, limit=page_size, offset=offset),
+        {"months": [], "rows": [], "total": 0, "page": page, "page_size": page_size},
     )
 
 
