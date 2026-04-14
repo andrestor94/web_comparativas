@@ -60,6 +60,7 @@ from web_comparativas.migrations import (
     ensure_password_reset_columns,
     ensure_original_content_column,
     ensure_normalized_storage_columns,
+    ensure_forecast_override_storage,
     backfill_normalized_content,
     backfill_original_content,
     ensure_dimensionamiento_indexes,
@@ -170,6 +171,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: normalized storage columns checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning normalized storage: {e}", flush=True)
+
+    try:
+        ensure_forecast_override_storage()
+        print("[MIGRATION] SUCCESS: forecast override storage checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning forecast override storage: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup

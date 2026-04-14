@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+import datetime as dt
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,11 @@ import numpy as np
 import pandas as pd
 
 try:
-    from web_comparativas.models import engine
+    from web_comparativas.models import engine, SessionLocal, ForecastUserOverride
 except ImportError:
     engine = None
+    SessionLocal = None
+    ForecastUserOverride = None
 
 try:
     from sqlalchemy import text as _sa_text
@@ -56,6 +59,13 @@ FACT_2026_FILE  = FORECAST_DIR / "facturacion_real_2026.csv"
 
 _cache_lock = threading.Lock()
 _data_cache: dict[str, Any] = {}
+FORECAST_OVERRIDE_SOURCE = "forecast"
+FORECAST_OVERRIDE_CONTEXT = "default"
+FORECAST_SCOPE_SUBNEG = "subnegocio"
+FORECAST_SCOPE_PRODUCT = "producto"
+FORECAST_SCOPE_CELL = "celda"
+_overrides_lock = threading.Lock()
+_client_overrides: dict[str, dict[tuple, float]] = {}
 
 # ---------------------------------------------------------------------------
 # Client override store (in-memory persistence of modal edits)
@@ -63,8 +73,6 @@ _data_cache: dict[str, Any] = {}
 # factor = 1 + pct/100  →  nuevo_yhat = orig_yhat * factor
 # Key: client_id → {(articulo, date_str): pct_float}
 # ---------------------------------------------------------------------------
-_overrides_lock = threading.Lock()
-_client_overrides: dict[str, dict[tuple, float]] = {}
 
 # ---------------------------------------------------------------------------
 # Service-level TTL response cache
@@ -139,6 +147,13 @@ def _monthly_pct_from_annual_growth(growth_pct: float) -> float:
     return ((1.0 + growth_pct / 100.0) ** (1.0 / 12.0) - 1.0) * 100.0
 
 
+def _annual_growth_from_monthly_pct(monthly_pct: float) -> float:
+    monthly_pct = float(monthly_pct or 0.0)
+    if abs(monthly_pct) <= 1e-12:
+        return 0.0
+    return (((1.0 + monthly_pct / 100.0) ** 12) - 1.0) * 100.0
+
+
 def _is_effective_override_pct(pct: float, growth_pct: float, tol: float = _OVERRIDE_PCT_TOL) -> bool:
     """Return True only when an override differs materially from the current default growth."""
     pct = float(pct)
@@ -146,24 +161,21 @@ def _is_effective_override_pct(pct: float, growth_pct: float, tol: float = _OVER
     return bool(np.isfinite(pct)) and abs(pct - default_pct) > tol
 
 
-def _cleanup_override_store_locked() -> None:
-    empty_clients = [cid for cid, store in _client_overrides.items() if not store]
-    for cid in empty_clients:
-        _client_overrides.pop(cid, None)
+def _clean_override_text(value: Any) -> str:
+    return str(value or "").strip()
 
 
-def _build_overrides_snapshot_locked(growth_pct: float | None = None) -> dict[str, dict[tuple[str, str], float]]:
-    _cleanup_override_store_locked()
-    snapshot: dict[str, dict[tuple[str, str], float]] = {}
-    for cid, store in _client_overrides.items():
-        clean_store = {
-            (str(art), str(ds)): float(pct)
-            for (art, ds), pct in store.items()
-            if growth_pct is None or _is_effective_override_pct(float(pct), growth_pct)
-        }
-        if clean_store:
-            snapshot[str(cid)] = clean_store
-    return snapshot
+def _normalize_scope(scope: str | None) -> str:
+    raw = _clean_override_text(scope).lower()
+    aliases = {
+        "subneg": FORECAST_SCOPE_SUBNEG,
+        "subnegocio": FORECAST_SCOPE_SUBNEG,
+        "product": FORECAST_SCOPE_PRODUCT,
+        "producto": FORECAST_SCOPE_PRODUCT,
+        "cell": FORECAST_SCOPE_CELL,
+        "celda": FORECAST_SCOPE_CELL,
+    }
+    return aliases.get(raw, raw or FORECAST_SCOPE_CELL)
 
 
 def save_client_overrides(client_id: str, overrides: list[dict], growth_pct: float = 0.0) -> None:
@@ -242,6 +254,486 @@ def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
 
     df.drop(columns=["_ds"], inplace=True, errors="ignore")
     return df
+
+
+# ---------------------------------------------------------------------------
+# SQL override helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_month_key(value: str | None) -> str:
+    raw = _clean_override_text(value)
+    if not raw:
+        return ""
+    if len(raw) >= 7 and raw[4] == "-":
+        return raw[:7]
+    try:
+        return pd.to_datetime(raw).strftime("%Y-%m")
+    except Exception:
+        return raw[:7]
+
+
+def _override_identity(scope: str | None, subneg: str = "", codigo_serie: str = "", forecast_month: str = "") -> tuple[str, str, str, str]:
+    return (
+        _normalize_scope(scope),
+        _clean_override_text(subneg),
+        _clean_override_text(codigo_serie),
+        _normalize_month_key(forecast_month),
+    )
+
+
+def _fetch_override_records(
+    user_id: int | None,
+    client_selector: str | None = None,
+    client_selectors: list[str] | None = None,
+) -> list[Any]:
+    if not user_id or SessionLocal is None or ForecastUserOverride is None:
+        return []
+    with SessionLocal() as session:
+        q = (
+            session.query(ForecastUserOverride)
+            .filter(ForecastUserOverride.user_id == int(user_id))
+            .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
+            .filter(ForecastUserOverride.is_active.is_(True))
+        )
+        if client_selector is not None:
+            q = q.filter(ForecastUserOverride.client_selector == _clean_override_text(client_selector))
+        elif client_selectors:
+            q = q.filter(
+                ForecastUserOverride.client_selector.in_(
+                    [_clean_override_text(v) for v in client_selectors if _clean_override_text(v)]
+                )
+            )
+        return list(q.all())
+
+
+def _build_override_maps(records: list[Any]) -> dict[str, Any]:
+    subneg_map: dict[tuple[str, str], dict[str, float]] = {}
+    product_map: dict[tuple[str, str], dict[str, float]] = {}
+    cell_map: dict[tuple[str, str, str], dict[str, float]] = {}
+    subneg_growths: dict[str, dict[str, float]] = {}
+
+    for rec in records:
+        selector = _clean_override_text(getattr(rec, "client_selector", ""))
+        if not selector:
+            continue
+        scope = _normalize_scope(getattr(rec, "override_scope", None))
+        subneg = _clean_override_text(getattr(rec, "subneg", ""))
+        codigo = _clean_override_text(getattr(rec, "codigo_serie", ""))
+        month = _normalize_month_key(getattr(rec, "forecast_month", ""))
+        monthly = getattr(rec, "effective_monthly_pct", None)
+        annual = getattr(rec, "override_growth_pct", None)
+        if monthly is None and annual is not None:
+            monthly = _monthly_pct_from_annual_growth(float(annual))
+        if annual is None and monthly is not None:
+            annual = _annual_growth_from_monthly_pct(float(monthly))
+        monthly = float(monthly or 0.0)
+        annual = float(annual or 0.0)
+        payload = {"monthly_pct": monthly, "annual_pct": annual}
+
+        if scope == FORECAST_SCOPE_SUBNEG:
+            subneg_map[(selector, subneg)] = payload
+            subneg_growths.setdefault(selector, {})[subneg] = annual
+        elif scope == FORECAST_SCOPE_PRODUCT:
+            product_map[(selector, codigo)] = payload
+        elif scope == FORECAST_SCOPE_CELL and month:
+            cell_map[(selector, codigo, month)] = payload
+
+    selectors = sorted(
+        {selector for selector, _ in subneg_map.keys()}
+        | {selector for selector, _ in product_map.keys()}
+        | {selector for selector, _, _ in cell_map.keys()}
+    )
+    return {
+        "subneg": subneg_map,
+        "product": product_map,
+        "cell": cell_map,
+        "subneg_growths": subneg_growths,
+        "selectors": selectors,
+    }
+
+
+def _build_overrides_snapshot_locked(
+    growth_pct: float | None = None,
+    *,
+    user_id: int | None = None,
+    client_selector: str | None = None,
+) -> dict[str, dict[tuple[str, str], float]]:
+    records = _fetch_override_records(user_id, client_selector=client_selector)
+    maps = _build_override_maps(records)
+    snapshot: dict[str, dict[tuple[str, str], float]] = {}
+    for (selector, codigo, month), payload in maps["cell"].items():
+        snapshot.setdefault(selector, {})[(codigo, month)] = float(payload["monthly_pct"])
+    return snapshot
+
+
+def _resolve_override_for_row(
+    selector_candidates: list[str],
+    subneg: str,
+    codigo_serie: str,
+    forecast_month: str,
+    maps: dict[str, Any],
+    base_growth_pct: float,
+) -> dict[str, float | str]:
+    month_key = _normalize_month_key(forecast_month)
+    code_key = _clean_override_text(codigo_serie)
+    subneg_key = _clean_override_text(subneg)
+    for selector in selector_candidates:
+        payload = maps["cell"].get((selector, code_key, month_key))
+        if payload is not None:
+            return {"scope": FORECAST_SCOPE_CELL, **payload}
+    for selector in selector_candidates:
+        payload = maps["product"].get((selector, code_key))
+        if payload is not None:
+            return {"scope": FORECAST_SCOPE_PRODUCT, **payload}
+    for selector in selector_candidates:
+        payload = maps["subneg"].get((selector, subneg_key))
+        if payload is not None:
+            return {"scope": FORECAST_SCOPE_SUBNEG, **payload}
+    return {
+        "scope": "base",
+        "monthly_pct": _monthly_pct_from_annual_growth(base_growth_pct),
+        "annual_pct": float(base_growth_pct or 0.0),
+    }
+
+
+def _selector_candidates_for_df(df: pd.DataFrame) -> list[str]:
+    selectors: set[str] = set()
+    for col in ("fantasia", "cliente_id", "_cliente", "Cliente"):
+        if col in df.columns:
+            selectors.update(
+                _clean_override_text(v)
+                for v in df[col].dropna().astype(str).tolist()
+                if _clean_override_text(v)
+            )
+    return sorted(selectors)
+
+
+def _apply_override_effects_to_dataframe(
+    df: pd.DataFrame,
+    user_id: int | None,
+    base_growth_pct: float = 0.0,
+    max_hist_date: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame(), {"subneg_growths": {}, "selectors": []}
+
+    selectors = _selector_candidates_for_df(df)
+    records = _fetch_override_records(user_id, client_selectors=selectors if selectors else None)
+    maps = _build_override_maps(records)
+
+    out = df.copy()
+    if "fecha" in out.columns:
+        out["_month_key"] = out["fecha"].dt.strftime("%Y-%m")
+    else:
+        out["_month_key"] = ""
+
+    if not records:
+        out["_override_scope"] = "base"
+        out["_monthly_pct"] = _monthly_pct_from_annual_growth(base_growth_pct)
+        out["_annual_eff"] = 1.0 + float(base_growth_pct or 0.0) / 100.0
+        out["_has_override"] = False
+        return out, maps
+
+    scopes: list[str] = []
+    monthlies: list[float] = []
+    annual_effects: list[float] = []
+    flags: list[bool] = []
+
+    for row in out.itertuples(index=False):
+        row_date = getattr(row, "fecha", None)
+        if max_hist_date is not None and pd.notna(row_date) and row_date <= max_hist_date:
+            scopes.append("base")
+            monthlies.append(0.0)
+            annual_effects.append(1.0)
+            flags.append(False)
+            continue
+
+        selector_candidates = []
+        for raw in (
+            getattr(row, "fantasia", None),
+            getattr(row, "cliente_id", None),
+            getattr(row, "_cliente", None),
+            getattr(row, "Cliente", None),
+        ):
+            val = _clean_override_text(raw)
+            if val and val not in selector_candidates:
+                selector_candidates.append(val)
+
+        resolved = _resolve_override_for_row(
+            selector_candidates=selector_candidates,
+            subneg=getattr(row, "subneg", ""),
+            codigo_serie=(
+                getattr(row, "codigo_serie", None)
+                or getattr(row, "articulo", None)
+                or getattr(row, "descripcion", None)
+                or ""
+            ),
+            forecast_month=getattr(row, "_month_key", ""),
+            maps=maps,
+            base_growth_pct=base_growth_pct,
+        )
+        scopes.append(str(resolved["scope"]))
+        monthlies.append(float(resolved["monthly_pct"]))
+        annual_effects.append(1.0 + float(resolved["annual_pct"]) / 100.0)
+        flags.append(str(resolved["scope"]) != "base")
+
+    out["_override_scope"] = scopes
+    out["_monthly_pct"] = monthlies
+    out["_annual_eff"] = annual_effects
+    out["_has_override"] = flags
+    return out, maps
+
+
+def _upsert_override_record(
+    session,
+    existing_map: dict[tuple[str, str, str, str], Any],
+    *,
+    user_id: int,
+    client_id: str,
+    scope: str,
+    base_growth_pct: float,
+    override_growth_pct: float,
+    effective_monthly_pct: float,
+    user_email: str | None,
+    subneg: str = "",
+    codigo_serie: str = "",
+    forecast_month: str = "",
+    perfil: str | None = None,
+    neg: str | None = None,
+) -> None:
+    identity = _override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month)
+    rec = existing_map.get(identity)
+    if rec is None:
+        rec = ForecastUserOverride(
+            user_id=int(user_id),
+            source_module=FORECAST_OVERRIDE_SOURCE,
+            context_key=FORECAST_OVERRIDE_CONTEXT,
+            client_selector=_clean_override_text(client_id),
+            client_display=_clean_override_text(client_id),
+            override_scope=identity[0],
+            subneg=identity[1],
+            codigo_serie=identity[2],
+            forecast_month=identity[3],
+            created_by=user_email,
+        )
+        session.add(rec)
+        existing_map[identity] = rec
+    rec.perfil = perfil
+    rec.neg = neg
+    rec.base_growth_pct = float(base_growth_pct or 0.0)
+    rec.override_growth_pct = float(override_growth_pct or 0.0)
+    rec.effective_monthly_pct = float(effective_monthly_pct or 0.0)
+    rec.client_display = _clean_override_text(client_id)
+    rec.is_active = True
+    rec.updated_by = user_email
+    rec.updated_at = dt.datetime.utcnow()
+
+
+def _deactivate_override(
+    existing_map: dict[tuple[str, str, str, str], Any],
+    *,
+    scope: str,
+    user_email: str | None,
+    subneg: str = "",
+    codigo_serie: str = "",
+    forecast_month: str = "",
+) -> None:
+    rec = existing_map.get(_override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month))
+    if rec is None:
+        return
+    rec.is_active = False
+    rec.updated_by = user_email
+    rec.updated_at = dt.datetime.utcnow()
+
+
+def save_client_overrides(
+    *,
+    user_id: int,
+    client_id: str,
+    growth_pct: float = 0.0,
+    user_email: str | None = None,
+    cell_overrides: list[dict] | None = None,
+    subneg_overrides: list[dict] | None = None,
+) -> None:
+    """Persist Forecast overrides in SQL without mutating forecast_main / forecast_valorizado."""
+    if SessionLocal is None or ForecastUserOverride is None:
+        raise RuntimeError("Forecast override storage is not available")
+
+    cell_overrides = cell_overrides or []
+    subneg_overrides = subneg_overrides or []
+    client_key = _clean_override_text(client_id)
+
+    with SessionLocal() as session:
+        existing = (
+            session.query(ForecastUserOverride)
+            .filter(ForecastUserOverride.user_id == int(user_id))
+            .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
+            .filter(ForecastUserOverride.client_selector == client_key)
+            .all()
+        )
+        existing_map = {
+            _override_identity(
+                getattr(rec, "override_scope", None),
+                subneg=getattr(rec, "subneg", ""),
+                codigo_serie=getattr(rec, "codigo_serie", ""),
+                forecast_month=getattr(rec, "forecast_month", ""),
+            ): rec
+            for rec in existing
+        }
+
+        subneg_monthly_lookup: dict[str, float] = {}
+        for item in subneg_overrides:
+            subneg = _clean_override_text(item.get("subneg"))
+            if not subneg:
+                continue
+            annual_growth = float(item.get("growth_pct") or 0.0)
+            monthly_growth = _monthly_pct_from_annual_growth(annual_growth)
+            if _is_effective_override_pct(monthly_growth, growth_pct):
+                _upsert_override_record(
+                    session,
+                    existing_map,
+                    user_id=user_id,
+                    client_id=client_key,
+                    scope=FORECAST_SCOPE_SUBNEG,
+                    subneg=subneg,
+                    base_growth_pct=growth_pct,
+                    override_growth_pct=annual_growth,
+                    effective_monthly_pct=monthly_growth,
+                    user_email=user_email,
+                )
+                subneg_monthly_lookup[subneg] = monthly_growth
+            else:
+                _deactivate_override(
+                    existing_map,
+                    scope=FORECAST_SCOPE_SUBNEG,
+                    subneg=subneg,
+                    user_email=user_email,
+                )
+
+        current_client_maps = _build_override_maps(
+            [rec for rec in existing_map.values() if getattr(rec, "is_active", False)]
+        )
+        for item in cell_overrides:
+            codigo = _clean_override_text(item.get("articulo"))
+            subneg = _clean_override_text(item.get("subneg"))
+            month = _normalize_month_key(item.get("date"))
+            if not codigo or not month:
+                continue
+            monthly_pct = float(item.get("pct") or 0.0)
+            reference_maps = {
+                "subneg": current_client_maps.get("subneg", {}),
+                "product": current_client_maps.get("product", {}),
+                "cell": dict(current_client_maps.get("cell", {})),
+                "subneg_growths": current_client_maps.get("subneg_growths", {}),
+                "selectors": current_client_maps.get("selectors", []),
+            }
+            reference_maps["cell"].pop((client_key, codigo, month), None)
+            resolved = _resolve_override_for_row(
+                selector_candidates=[client_key],
+                subneg=subneg,
+                codigo_serie=codigo,
+                forecast_month=month,
+                maps=reference_maps,
+                base_growth_pct=growth_pct,
+            )
+            reference_monthly = float(subneg_monthly_lookup.get(subneg, resolved.get("monthly_pct", 0.0)))
+            if abs(monthly_pct - reference_monthly) <= _OVERRIDE_PCT_TOL:
+                _deactivate_override(
+                    existing_map,
+                    scope=FORECAST_SCOPE_CELL,
+                    subneg=subneg,
+                    codigo_serie=codigo,
+                    forecast_month=month,
+                    user_email=user_email,
+                )
+                continue
+
+            _upsert_override_record(
+                session,
+                existing_map,
+                user_id=user_id,
+                client_id=client_key,
+                scope=FORECAST_SCOPE_CELL,
+                subneg=subneg,
+                codigo_serie=codigo,
+                forecast_month=month,
+                base_growth_pct=growth_pct,
+                override_growth_pct=_annual_growth_from_monthly_pct(monthly_pct),
+                effective_monthly_pct=monthly_pct,
+                user_email=user_email,
+            )
+
+        session.commit()
+
+    clear_response_cache()
+
+
+def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | None = None) -> None:
+    if SessionLocal is None or ForecastUserOverride is None:
+        return
+    client_key = _clean_override_text(client_id)
+    with SessionLocal() as session:
+        rows = (
+            session.query(ForecastUserOverride)
+            .filter(ForecastUserOverride.user_id == int(user_id))
+            .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
+            .filter(ForecastUserOverride.client_selector == client_key)
+            .filter(ForecastUserOverride.is_active.is_(True))
+            .all()
+        )
+        for rec in rows:
+            rec.is_active = False
+            rec.updated_by = user_email
+            rec.updated_at = dt.datetime.utcnow()
+        session.commit()
+    clear_response_cache()
+
+
+def _get_client_overrides_snapshot(*, user_id: int | None, client_id: str, growth_pct: float | None = None) -> dict[tuple[str, str], float]:
+    records = _fetch_override_records(user_id, client_selector=client_id)
+    maps = _build_override_maps(records)
+    snapshot: dict[tuple[str, str], float] = {}
+    for (selector, codigo, month), payload in maps["cell"].items():
+        if selector == _clean_override_text(client_id):
+            snapshot[(codigo, month)] = float(payload["monthly_pct"])
+    return snapshot
+
+
+def _get_client_subneg_growths(user_id: int | None, client_id: str) -> dict[str, float]:
+    records = _fetch_override_records(user_id, client_selector=client_id)
+    maps = _build_override_maps(records)
+    return dict(maps["subneg_growths"].get(_clean_override_text(client_id), {}))
+
+
+def _get_patched_df_val(user_id: int | None = None, df_source=None) -> "pd.DataFrame":
+    """Return df_valorizado with SQL overrides applied (copy — never mutates cache)."""
+    if df_source is not None:
+        df = df_source
+    else:
+        data = get_data()
+        df = data.get("df_valorizado", None)
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame()
+
+    data = get_data()
+    df_main = data.get("df_main", pd.DataFrame())
+    max_hist_date = None
+    if not df_main.empty and "tipo" in df_main.columns and "fecha" in df_main.columns:
+        max_hist_date = df_main[df_main["tipo"] == "hist"]["fecha"].max()
+
+    patched, _maps = _apply_override_effects_to_dataframe(
+        df,
+        user_id=user_id,
+        base_growth_pct=0.0,
+        max_hist_date=max_hist_date,
+    )
+    if not patched.empty:
+        future_mask = patched["_has_override"]
+        for col in ("yhat_cliente", "monto_yhat", "li_cliente", "ls_cliente", "monto_li", "monto_ls"):
+            if col in patched.columns:
+                patched.loc[future_mask, col] = patched.loc[future_mask, col] * patched.loc[future_mask, "_annual_eff"]
+    patched.drop(columns=["_month_key"], inplace=True, errors="ignore")
+    return patched
 
 
 # ---------------------------------------------------------------------------
@@ -697,9 +1189,8 @@ def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=Non
 # PostgreSQL aggregation helpers — avoid loading full tables into RAM
 # ---------------------------------------------------------------------------
 
-def _has_overrides(growth_pct: float | None = None) -> bool:
-    with _overrides_lock:
-        return bool(_build_overrides_snapshot_locked(growth_pct))
+def _has_overrides(user_id: int | None = None, growth_pct: float | None = None) -> bool:
+    return bool(_fetch_override_records(user_id))
 
 
 def _build_filter_sql(
@@ -883,14 +1374,14 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
 
 
 def _pg_get_chart_data(
-    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
 ) -> dict:
     """Memory-safe PostgreSQL chart data: all heavy aggregation runs in SQL."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
     _step = "init"
     try:
         return _pg_get_chart_data_inner(
-            start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
         )
     except Exception as exc:
         import traceback
@@ -901,11 +1392,11 @@ def _pg_get_chart_data(
 
 
 def _pg_get_chart_data_inner(
-    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
 ) -> dict:
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
-    _ovr_active = _has_overrides(growth_pct)
+    _ovr_active = _has_overrides(user_id, growth_pct)
 
     print(
         f"[FORECAST INNER] ETAPA 1 — resolve_prod_codes "
@@ -1148,6 +1639,31 @@ def _pg_get_chart_data_inner(
                         )
 
     print(f"[FORECAST INNER] ETAPA 8 — bridge df_fcst_rows={len(df_fcst)} df_hist_rows={len(df_hist)}", flush=True)
+    if _ovr_active:
+        _override_rows = _query_agg(
+            f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
+            f"COALESCE({val_col}, 0) AS base_val "
+            f"FROM forecast_valorizado WHERE {val_where}"
+        )
+        if not _override_rows.empty:
+            _override_rows, _ovr_maps = _apply_override_effects_to_dataframe(
+                _override_rows,
+                user_id=user_id,
+                base_growth_pct=growth_pct,
+                max_hist_date=max_hist,
+            )
+            _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
+            _ua_sql = (
+                _override_rows.groupby("fecha")["_ua_sql"].sum()
+                .reset_index()
+                .rename(columns={"_ua_sql": "Total_User_Adj_SQL"})
+            )
+            df_fcst = df_fcst.merge(_ua_sql, on="fecha", how="left")
+            df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj_SQL"].fillna(
+                df_fcst["Total_User_Adj"]
+            )
+            df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
+
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
         hist_last = df_hist.sort_values("fecha").iloc[-1]
@@ -1272,13 +1788,13 @@ def _pg_get_chart_data_inner(
 
 
 def _pg_get_client_table(
-    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
     try:
         return _pg_get_client_table_inner(
-            start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
         )
     except Exception as exc:
         import traceback as _tb
@@ -1290,7 +1806,7 @@ def _pg_get_client_table(
 
 
 def _pg_get_client_table_inner(
-    start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
 ) -> dict:
     """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha).
 
@@ -1369,8 +1885,58 @@ def _pg_get_client_table_inner(
     if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
         max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
 
-    # Growth adjustment on future months
-    if growth_pct != 0 and max_hist_date is not None:
+    overrides_active = _has_overrides(user_id, growth_pct)
+    if overrides_active:
+        if view_money:
+            df_rows = _query_agg(
+                f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                f"COALESCE(monto_yhat, 0) AS base_val "
+                f"FROM forecast_valorizado WHERE {val_where}"
+            )
+            if not df_rows.empty and df_rows["base_val"].sum() == 0:
+                logger.warning(
+                    "[FORECAST client-table] monto_yhat is all-zero while applying overrides; "
+                    "falling back to yhat_cliente × avg(precio)."
+                )
+                df_rows = _query_agg(
+                    f"SELECT v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
+                    f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
+                    f"FROM (SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
+                    f"      FROM forecast_valorizado WHERE {val_where}) v "
+                    f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                    f"           FROM forecast_main GROUP BY codigo_serie) m "
+                    f"  ON v.codigo_serie = m.codigo_serie "
+                    f"GROUP BY v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
+                )
+        else:
+            df_rows = _query_agg(
+                f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                f"COALESCE(yhat_cliente, 0) AS base_val "
+                f"FROM forecast_valorizado WHERE {val_where}"
+            )
+
+        if not df_rows.empty:
+            df_rows, _override_maps = _apply_override_effects_to_dataframe(
+                df_rows,
+                user_id=user_id,
+                base_growth_pct=growth_pct,
+                max_hist_date=max_hist_date,
+            )
+            df_rows["val"] = df_rows["base_val"]
+            if max_hist_date is not None and "fecha" in df_rows.columns:
+                future_mask = df_rows["fecha"] > max_hist_date
+                df_rows.loc[future_mask, "val"] = (
+                    df_rows.loc[future_mask, "base_val"] * df_rows.loc[future_mask, "_annual_eff"]
+                )
+            else:
+                df_rows["val"] = df_rows["base_val"] * df_rows["_annual_eff"]
+            df_agg = (
+                df_rows.groupby(["fantasia", "nombre_grupo", "fecha"], dropna=False)["val"]
+                .sum()
+                .reset_index()
+                .sort_values("fecha")
+            )
+    elif growth_pct != 0 and max_hist_date is not None:
         future_mask = df_agg["fecha"] > max_hist_date
         df_agg.loc[future_mask, "val"] = df_agg.loc[future_mask, "val"] * (1.0 + growth_pct / 100.0)
 
@@ -1440,13 +2006,13 @@ def _pg_get_client_table_inner(
 
 
 def _pg_get_treemap_data(
-    start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
     try:
         return _pg_get_treemap_data_inner(
-            start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
         )
     except Exception as exc:
         import traceback as _tb
@@ -1458,7 +2024,7 @@ def _pg_get_treemap_data(
 
 
 def _pg_get_treemap_data_inner(
-    start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
 ) -> dict:
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
@@ -1492,6 +2058,61 @@ def _pg_get_treemap_data_inner(
     )
     if df_tree.empty:
         return {**_EMPTY, "periods": periods}
+
+    max_hist_date = None
+    df_mhd = _query_agg("SELECT MAX(fecha) AS max_hist_date FROM forecast_main WHERE tipo = 'hist'")
+    if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
+        max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
+
+    if _has_overrides(user_id):
+        if view_money:
+            df_rows = _query_agg(
+                f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
+                f"COALESCE(monto_yhat, 0) AS base_val "
+                f"FROM forecast_valorizado WHERE {val_where}"
+            )
+            if not df_rows.empty and df_rows["base_val"].sum() == 0:
+                logger.warning(
+                    "[FORECAST treemap] monto_yhat is all-zero while applying overrides; "
+                    "falling back to yhat_cliente × avg(precio)."
+                )
+                df_rows = _query_agg(
+                    f"SELECT v.perfil, v.nombre_grupo, v.fantasia, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
+                    f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
+                    f"FROM (SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
+                    f"      FROM forecast_valorizado WHERE {val_where}) v "
+                    f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                    f"           FROM forecast_main GROUP BY codigo_serie) m "
+                    f"  ON v.codigo_serie = m.codigo_serie "
+                    f"GROUP BY v.perfil, v.nombre_grupo, v.fantasia, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
+                )
+        else:
+            df_rows = _query_agg(
+                f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
+                f"COALESCE(yhat_cliente, 0) AS base_val "
+                f"FROM forecast_valorizado WHERE {val_where}"
+            )
+
+        if not df_rows.empty:
+            df_rows, _override_maps = _apply_override_effects_to_dataframe(
+                df_rows,
+                user_id=user_id,
+                base_growth_pct=0.0,
+                max_hist_date=max_hist_date,
+            )
+            df_rows["monto"] = df_rows["base_val"]
+            if max_hist_date is not None and "fecha" in df_rows.columns:
+                future_mask = df_rows["fecha"] > max_hist_date
+                df_rows.loc[future_mask, "monto"] = (
+                    df_rows.loc[future_mask, "base_val"] * df_rows.loc[future_mask, "_annual_eff"]
+                )
+            else:
+                df_rows["monto"] = df_rows["base_val"] * df_rows["_annual_eff"]
+            df_tree = (
+                df_rows.groupby(["perfil", "nombre_grupo", "fantasia", "cliente_id"], dropna=False)["monto"]
+                .sum()
+                .reset_index()
+            )
 
     # Normalise column name — PostgreSQL always returns lowercase aliases
     if "monto" not in df_tree.columns and "Monto" in df_tree.columns:
@@ -1585,7 +2206,7 @@ def _pg_get_treemap_data_inner(
 
 
 def _pg_get_client_detail(
-    client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct
+    user_id, client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct
 ) -> dict:
     """Memory-safe PostgreSQL client detail: loads only single client's rows."""
     _EMPTY = {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
@@ -1627,7 +2248,9 @@ def _pg_get_client_detail(
     if not df_price.empty:
         price_map = df_price.set_index("codigo_serie")["precio"].to_dict()
 
-    saved_overrides = _get_client_overrides_snapshot(client_id, growth_pct)
+    saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
+    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
+    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
 
     # Ensure required columns — articulo and unidad_medida absent from forecast_valorizado
     if "articulo" not in df_c.columns:
@@ -1686,6 +2309,18 @@ def _pg_get_client_detail(
                         adj = orig * (1 + rm) ** t
                         # Guardamos tasa MENSUAL — el gráfico la reconvierte a anual vía (1+rm)^12
                         pct = round(rm * 100, 4)
+                    if (
+                        saved_pct is None
+                        and max_hist_date
+                        and d > max_hist_date
+                        and str(subneg_name) in saved_subneg_growths
+                    ):
+                        scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
+                        if scoped_growth_pct != 0:
+                            t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
+                            rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
+                            adj = orig * (1 + rm) ** t
+                            pct = round(rm * 100, 4)
                     months_data[ds] = {
                         "orig": round(orig, 2), "pct": round(pct, 4),
                         "nuevo": round(adj, 2), "money": round(adj * precio, 0),
@@ -1709,6 +2344,7 @@ def _pg_get_client_detail(
         "negocios": negocios_out, "dates": date_strs,
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
+        "subneg_growths": saved_subneg_growths,
     }
 
 
@@ -1914,6 +2550,7 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_chart_data(
+    user_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     profiles: list | None = None,
@@ -1926,6 +2563,7 @@ def get_chart_data(
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_chart_data(
+            user_id=user_id,
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, growth_pct=growth_pct,
@@ -1933,7 +2571,7 @@ def get_chart_data(
 
     data = get_data()
     df = data.get("df_main", pd.DataFrame())
-    _ovr_active = _has_overrides(growth_pct)
+    _ovr_active = _has_overrides(user_id, growth_pct)
     # Use unpatched base for all chart lines — overrides are reflected in Total_User_Adj (Line 4)
     df_val = data.get("df_valorizado", pd.DataFrame())
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
@@ -2089,6 +2727,24 @@ def get_chart_data(
                     df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
             else:
                 df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
+            if _ovr_active and not df_val_f.empty:
+                _df_u_sql, _ovr_maps_sql = _apply_override_effects_to_dataframe(
+                    df_val_f,
+                    user_id=user_id,
+                    base_growth_pct=growth_pct,
+                )
+                if not _df_u_sql.empty:
+                    _df_u_sql["_ua_sql"] = _df_u_sql[col_y] * _df_u_sql["_annual_eff"]
+                    _ua_sql = (
+                        _df_u_sql.groupby("fecha")["_ua_sql"].sum()
+                        .reset_index()
+                        .rename(columns={"_ua_sql": "Total_User_Adj_SQL"})
+                    )
+                    df_fcst = df_fcst.merge(_ua_sql, on="fecha", how="left")
+                    df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj_SQL"].fillna(
+                        df_fcst["Total_User_Adj"]
+                    )
+                    df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
         else:
             df_fcst = pd.DataFrame(columns=["fecha", "Total_Forecast", "Total_Li", "Total_Ls", "Total_User_Adj"])
     else:
@@ -2284,6 +2940,7 @@ def get_chart_data(
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_client_table(
+    user_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     profiles: list | None = None,
@@ -2297,6 +2954,7 @@ def get_client_table(
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_client_table(
+            user_id=user_id,
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money,
@@ -2304,7 +2962,7 @@ def get_client_table(
         )
 
     data = get_data()
-    df_val = _get_patched_df_val()
+    df_val = _get_patched_df_val(user_id=user_id)
     df_main = data.get("df_main", pd.DataFrame())
 
     if df_val.empty:
@@ -2453,6 +3111,7 @@ def _blend_with_white(hex_color: str, weight: float) -> str:
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_treemap_data(
+    user_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     profiles: list | None = None,
@@ -2476,12 +3135,13 @@ def get_treemap_data(
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_treemap_data(
+            user_id=user_id,
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, period_date=period_date,
         )
 
-    df_val = _get_patched_df_val()
+    df_val = _get_patched_df_val(user_id=user_id)
     if df_val.empty:
         return _EMPTY
 
@@ -2650,7 +3310,8 @@ def get_treemap_data(
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
 def get_client_detail(
-    client_id: str,
+    user_id: int | None = None,
+    client_id: str = "",
     start_date: str | None = None,
     end_date: str | None = None,
     profiles: list | None = None,
@@ -2667,6 +3328,7 @@ def get_client_detail(
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_client_detail(
+            user_id=user_id,
             client_id=client_id,
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
@@ -2678,7 +3340,7 @@ def get_client_detail(
     df_main = data.get("df_main", pd.DataFrame())
     price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
-    saved_overrides = _get_client_overrides_snapshot(client_id, growth_pct)
+    saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
 
     if df_val.empty:
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
@@ -2803,6 +3465,19 @@ def get_client_detail(
                         factor = (1 + rm) ** t if growth_pct != 0 else 1.0
                         adj = orig * factor
                         pct = round(rm * 100, 4)
+                    if (
+                        saved_pct is None
+                        and max_hist_date
+                        and d > max_hist_date
+                        and str(subneg_name) in saved_subneg_growths
+                    ):
+                        scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
+                        if scoped_growth_pct != 0:
+                            months_diff = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
+                            rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
+                            factor = (1 + rm) ** months_diff
+                            adj = orig * factor
+                            pct = round(rm * 100, 4)
                     months_data[ds] = {
                         "orig": round(orig, 2),
                         "pct": round(pct, 4),
@@ -2838,4 +3513,5 @@ def get_client_detail(
         "dates": date_strs,
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
+        "subneg_growths": saved_subneg_growths,
     }

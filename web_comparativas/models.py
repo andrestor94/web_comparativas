@@ -256,6 +256,75 @@ class User(Base):
 User.BUSINESS_UNITS = BUSINESS_UNITS
 
 
+# ---------- Forecast overrides persistentes ----------
+class ForecastUserOverride(Base):
+    """
+    Override persistente del módulo Forecast.
+
+    La tabla guarda únicamente las modificaciones del usuario sobre la base
+    original; nunca sobrescribe forecast_main / forecast_valorizado.
+    """
+    __tablename__ = "forecast_user_overrides"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "source_module",
+            "context_key",
+            "client_selector",
+            "override_scope",
+            "subneg",
+            "codigo_serie",
+            "forecast_month",
+            name="uq_forecast_user_override_scope",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    source_module = Column(String(50), nullable=False, default="forecast", index=True)
+    context_key = Column(String(120), nullable=False, default="default", index=True)
+    client_selector = Column(String(255), nullable=False, index=True)
+
+    # Snapshot contextual para auditoría y futuras segmentaciones.
+    client_display = Column(String(255), nullable=True)
+    perfil = Column(String(120), nullable=True)
+    neg = Column(String(120), nullable=True)
+    subneg = Column(String(255), nullable=False, default="")
+    codigo_serie = Column(String(120), nullable=False, default="")
+    forecast_month = Column(String(7), nullable=False, default="")
+
+    # Alcances soportados: subnegocio / producto / celda
+    override_scope = Column(String(20), nullable=False, index=True)
+
+    # Audit trail del cálculo guardado.
+    base_growth_pct = Column(Float, nullable=True)
+    override_growth_pct = Column(Float, nullable=True)
+    effective_monthly_pct = Column(Float, nullable=True)
+
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(
+        DateTime,
+        default=dt.datetime.utcnow,
+        onupdate=dt.datetime.utcnow,
+        nullable=False,
+        index=True,
+    )
+    created_by = Column(String(255), nullable=True)
+    updated_by = Column(String(255), nullable=True)
+
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ForecastUserOverride id={self.id} user_id={self.user_id} "
+            f"client={self.client_selector!r} scope={self.override_scope!r} "
+            f"subneg={self.subneg!r} codigo={self.codigo_serie!r} "
+            f"month={self.forecast_month!r} active={self.is_active}>"
+        )
+
+
 # ---------- Solicitudes de restablecimiento de contraseña ----------
 class PasswordResetRequest(Base):
     """
