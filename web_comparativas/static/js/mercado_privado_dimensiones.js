@@ -9,11 +9,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const state = {
         filtersLoaded: false,
+        dashboardReady: false,
         areaChart: null,
         pieChart: null,
         barClientChart: null,
         mapInstance: null,
         mapMarkers: [],
+        currentDateRange: { min: null, max: null },
+        bootstrapCache: new Map(),
         // Mapeo de códigos numéricos de negocio a nombres descriptivos (Negocios.xlsx)
         negocioLabels: { unidades: {}, subunidades: {} },
     };
@@ -54,6 +57,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pivotHeader: document.getElementById('pivotHeader'),
         pivotBody: document.getElementById('pivotBody'),
     };
+
+    const reloadBtnDefaultHtml = elements.reloadBtn ? elements.reloadBtn.innerHTML : '';
 
     const provinceCoords = {
         'Buenos Aires': [-36.6769, -60.5588],
@@ -131,7 +136,14 @@ document.addEventListener('DOMContentLoaded', () => {
             loadDashboardData();
         });
 
-        elements.reloadBtn.addEventListener('click', initDashboard);
+        elements.reloadBtn.addEventListener('click', () => {
+            state.bootstrapCache.clear();
+            if (state.dashboardReady) {
+                loadDashboardData({ blocking: true, bypassSnapshot: true, force: true });
+                return;
+            }
+            initDashboard(true);
+        });
 
         let searchTimeout;
         elements.searchGlobal.addEventListener('input', () => {
@@ -152,11 +164,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function initDashboard() {
+    async function initDashboard(forceLive = false) {
         setLoading(true, 'Leyendo snapshot persistido...');
         try {
             const [bootstrapResponse, labelsResponse] = await Promise.all([
-                apiGet('/bootstrap'),
+                apiGet('/bootstrap', forceLive ? { bypass_snapshot: true } : {}),
                 apiGet('/negocio-labels').catch(() => ({ data: { unidades: {}, subunidades: {} } })),
             ]);
             const bootstrap = bootstrapResponse.data || {};
@@ -176,9 +188,11 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.emptyState.style.display = 'none';
             elements.dashboardContent.style.display = 'contents';
             renderBootstrapPayload(bootstrap);
+            cacheBootstrapPayload(buildCacheKey(buildQueryParams()), bootstrap);
+            state.dashboardReady = true;
 
             if (bootstrap.meta?.stale) {
-                window.setTimeout(loadDashboardData, 0);
+                window.setTimeout(() => loadDashboardData({ bypassSnapshot: true, force: true }), 0);
             }
         } catch (error) {
             console.error(error);
@@ -220,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             resultados: [],
             date_range: { min: null, max: null },
         };
+        state.currentDateRange = filterData.date_range || { min: null, max: null };
         applyFilterOptions(filterData);
         if (!state.filtersLoaded && filterData.date_range) {
             elements.dateStart.value = filterData.date_range.min || '';
@@ -302,7 +317,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return Number.isFinite(n) ? String(Math.round(n)) : s;
     }
 
-    async function loadDashboardData() {
+    function buildCacheKey(params) {
+        const normalized = {};
+        Object.keys(params)
+            .sort()
+            .forEach((key) => {
+                const value = params[key];
+                normalized[key] = Array.isArray(value) ? [...value].sort() : value;
+            });
+        return JSON.stringify(normalized);
+    }
+
+    function cacheBootstrapPayload(key, payload) {
+        if (!key) return;
+        if (state.bootstrapCache.has(key)) {
+            state.bootstrapCache.delete(key);
+        }
+        state.bootstrapCache.set(key, payload);
+        while (state.bootstrapCache.size > 12) {
+            const oldestKey = state.bootstrapCache.keys().next().value;
+            state.bootstrapCache.delete(oldestKey);
+        }
+    }
+
+    function setRefreshing(active) {
+        if (!elements.reloadBtn) return;
+        elements.reloadBtn.disabled = active;
+        elements.reloadBtn.innerHTML = active
+            ? '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> Actualizando'
+            : reloadBtnDefaultHtml;
+    }
+
+    async function loadDashboardData(options = {}) {
+        const { blocking = false, bypassSnapshot = false, force = false } = options;
         // ── Cancelar request anterior si aún está en vuelo ─────────────────
         // CRÍTICO: cada request abre 1 sesión DB. Si el usuario cambia filtros
         // rápido y los requests anteriores siguen corriendo, el pool (max 15) se
@@ -315,8 +362,20 @@ document.addEventListener('DOMContentLoaded', () => {
         _loadAbortController = new AbortController();
         const signal = _loadAbortController.signal;
 
-        setLoading(true, 'Consultando métricas agregadas...');
         const query = buildQueryParams();
+        const cacheKey = buildCacheKey(query);
+        const cachedPayload = !force ? state.bootstrapCache.get(cacheKey) : null;
+
+        if (blocking) {
+            setLoading(true, 'Consultando metricas agregadas...');
+        } else {
+            setLoading(false);
+            setRefreshing(true);
+        }
+
+        if (cachedPayload) {
+            renderBootstrapPayload(cachedPayload);
+        }
 
         try {
             // ── UNA sola request a /bootstrap (1 sesión DB, todas las queries) ─
@@ -324,16 +383,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // simultáneas, usamos /bootstrap que consolida todo en 1 sesión DB.
             // El backend usa el caché TTL interno, por lo que las mismas combinaciones
             // de filtros devuelven resultados en ~0ms tras la primera carga.
-            const response = await apiGet('/bootstrap', query, signal);
+            const response = await apiGet('/bootstrap', {
+                ...query,
+                include_status: false,
+                bypass_snapshot: bypassSnapshot,
+            }, signal);
 
             // Si fue cancelado mientras esperábamos, ignorar la respuesta
             if (signal.aborted) return;
 
             const bootstrap = (response && response.data) || {};
 
-            // renderBootstrapPayload ya maneja todos los widgets + filter options
-            // (cascading filters incluidos: /bootstrap siempre devuelve "filters").
             renderBootstrapPayload(bootstrap);
+            cacheBootstrapPayload(cacheKey, bootstrap);
 
         } catch (err) {
             if (err.name === 'AbortError') {
@@ -342,14 +404,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             console.error('[DIM] loadDashboardData error:', err);
-            renderKpisError();
-            showCanvasError('areaChart', 'areaChart', 'Error al cargar');
-            showCanvasError('pieChart', 'pieChart', '');
-            showContainerError(elements.familyListContainer, '');
+            if (!cachedPayload) {
+                renderKpisError();
+                showCanvasError('areaChart', 'areaChart', 'Error al cargar');
+                showCanvasError('pieChart', 'pieChart', '');
+                showContainerError(elements.familyListContainer, '');
+            }
         } finally {
             // Solo quitar el overlay si este request no fue cancelado
             if (!signal.aborted) {
-                setLoading(false);
+                if (blocking) {
+                    setLoading(false);
+                }
+                setRefreshing(false);
             }
         }
     }
@@ -449,6 +516,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const plataformas = elements.platformCheckboxes
             .filter((checkbox) => checkbox.checked)
             .map((checkbox) => checkbox.value);
+        const allPlatformsSelected = plataformas.length === elements.platformCheckboxes.length;
+        const rawFechaDesde = elements.dateStart.value || null;
+        const rawFechaHasta = elements.dateEnd.value || null;
+        const fechaDesde = rawFechaDesde && rawFechaDesde !== state.currentDateRange.min
+            ? rawFechaDesde
+            : null;
+        const fechaHasta = rawFechaHasta && rawFechaHasta !== state.currentDateRange.max
+            ? rawFechaHasta
+            : null;
 
         return {
             cliente: elements.filterClient.value ? [elements.filterClient.value] : [],
@@ -456,9 +532,9 @@ document.addEventListener('DOMContentLoaded', () => {
             familia: elements.filterFamily.value ? [elements.filterFamily.value] : [],
             unidad_negocio: elements.filterUnit.value ? [elements.filterUnit.value] : [],
             subunidad_negocio: elements.filterSubunit.value ? [elements.filterSubunit.value] : [],
-            plataforma: plataformas,
-            fecha_desde: elements.dateStart.value || null,
-            fecha_hasta: elements.dateEnd.value || null,
+            plataforma: allPlatformsSelected ? [] : plataformas,
+            fecha_desde: fechaDesde,
+            fecha_hasta: fechaHasta,
             identified: elements.filterIdentified.value || null,
             is_client: elements.filterIsClient.value || null,
             search: elements.searchGlobal.value.trim() || null,
