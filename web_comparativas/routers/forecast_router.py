@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from web_comparativas.models import User, db_session, Ticket, TicketMessage
+from web_comparativas.models import User, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
 
 logger = logging.getLogger("wc.forecast.router")
@@ -412,9 +412,14 @@ def forecast_api_comment(
     en Forecast, el mensaje se agrega a ese ticket existente (evita fragmentar
     la conversación en múltiples tickets). Si no existe ninguno activo, crea uno nuevo.
     """
+    # Use request.state.db (middleware session) — avoids holding a separate global
+    # scoped_session connection that can exhaust the pool under concurrent load.
+    db = request.state.db
+    if db is None:
+        return JSONResponse({"ok": False, "error": "DB no disponible"}, status_code=503)
     try:
         existing = (
-            db_session.query(Ticket)
+            db.query(Ticket)
             .filter(
                 Ticket.modulo_origen == "forecast",
                 Ticket.user_id == user.id,
@@ -451,8 +456,8 @@ def forecast_api_comment(
                 pliego_solicitud_id=None,
                 contexto_extra=_json.dumps(contexto, ensure_ascii=False),
             )
-            db_session.add(ticket)
-            db_session.flush()
+            db.add(ticket)
+            db.flush()
             is_new = True
 
         msg = TicketMessage(
@@ -460,8 +465,8 @@ def forecast_api_comment(
             user_id=user.id,
             message=payload.message,
         )
-        db_session.add(msg)
-        db_session.commit()
+        db.add(msg)
+        db.flush()  # flush so ticket.id is available; middleware commits at end of request
 
         # Notificar a admins
         try:
@@ -469,7 +474,7 @@ def forecast_api_comment(
             _nombre = user.name or user.email.split("@")[0]
             _accion = "nueva consulta" if is_new else "nuevo comentario"
             notify_admins(
-                db_session,
+                db,
                 title="Comentario en Forecast",
                 message=f"{_nombre} dejó un {_accion} en Forecast",
                 category="helpdesk",
@@ -485,23 +490,29 @@ def forecast_api_comment(
             "message_count": len(ticket.messages),
         })
     except Exception as exc:
-        db_session.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
         logger.error("forecast-comment error: %s", exc, exc_info=True)
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @router.get("/api/comments/summary", response_class=JSONResponse)
 def forecast_api_summary(
-    _request: Request,
+    request: Request,
     user: User = Depends(_require_user),
 ):
     """
     Retorna el resumen de tickets activos de Forecast para el usuario actual.
     Usado por el widget para mostrar el badge y el historial resumido.
     """
+    db = request.state.db
+    if db is None:
+        return JSONResponse({"ok": False, "error": "DB no disponible", "open_count": 0}, status_code=503)
     try:
         tickets = (
-            db_session.query(Ticket)
+            db.query(Ticket)
             .filter(
                 Ticket.modulo_origen == "forecast",
                 Ticket.user_id == user.id,
@@ -543,6 +554,9 @@ def forecast_api_summary(
             "recent_messages": recent_messages,
         })
     except Exception as exc:
-        db_session.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
         logger.error("forecast-summary error: %s", exc, exc_info=True)
         return JSONResponse({"ok": False, "error": str(exc), "open_count": 0}, status_code=500)

@@ -413,12 +413,23 @@ def _apply_override_effects_to_dataframe(
     user_id: int | None,
     base_growth_pct: float = 0.0,
     max_hist_date: pd.Timestamp | None = None,
+    *,
+    _records=None,  # pre-fetched override records — avoids extra DB roundtrip
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     if df is None or df.empty:
         return df if df is not None else pd.DataFrame(), {"subneg_growths": {}, "selectors": []}
 
-    selectors = _selector_candidates_for_df(df)
-    records = _fetch_override_records(user_id, client_selectors=selectors if selectors else None)
+    if _records is not None:
+        # Caller already fetched records; filter to relevant selectors in Python
+        selectors = _selector_candidates_for_df(df)
+        selector_set = {_clean_override_text(s) for s in selectors}
+        records = [
+            r for r in _records
+            if _clean_override_text(getattr(r, "client_selector", "")) in selector_set
+        ] if selector_set else list(_records)
+    else:
+        selectors = _selector_candidates_for_df(df)
+        records = _fetch_override_records(user_id, client_selectors=selectors if selectors else None)
     maps = _build_override_maps(records)
 
     out = df.copy()
@@ -1236,21 +1247,28 @@ def _build_filter_sql(
     return " AND ".join(parts)
 
 
-def _query_agg(sql: str) -> "pd.DataFrame":
+def _query_agg(sql: str, _conn=None) -> "pd.DataFrame":
     """Execute a read-only SQL query on PostgreSQL; returns empty DataFrame on any error.
 
     Uses conn.execute(text(sql)).mappings() instead of pd.read_sql(raw_string, conn)
     to avoid the SQLAlchemy 2.x + pandas incompatibility where Row objects backed by
     immutabledict raise "immutabledict is not a sequence" when pandas tries to treat
     each row as a plain sequence/tuple.
+
+    Pass _conn to reuse an existing engine connection (avoids pool exhaustion when
+    multiple queries are needed in the same request).
     """
     try:
         if engine is None or "sqlite" in str(engine.url):
             return pd.DataFrame()
         stmt = _sa_text(sql) if _sa_text is not None else sql
-        with engine.connect() as conn:
-            result = conn.execute(stmt)
+        if _conn is not None:
+            result = _conn.execute(stmt)
             df = pd.DataFrame(result.mappings().all())
+        else:
+            with engine.connect() as conn:
+                result = conn.execute(stmt)
+                df = pd.DataFrame(result.mappings().all())
         if not df.empty and "fecha" in df.columns:
             df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         return df
@@ -1259,13 +1277,13 @@ def _query_agg(sql: str) -> "pd.DataFrame":
         return pd.DataFrame()
 
 
-def _pg_resolve_prod_codes(products: list) -> "list | None":
+def _pg_resolve_prod_codes(products: list, _conn=None) -> "list | None":
     """Return codigo_serie list for given product names/codes, or None if no product filter.
     Uses only codigo_serie filter — forecast_main has no descripcion column."""
     if not products:
         return None
     where = _safe_in("codigo_serie", products)
-    df = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}")
+    df = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}", _conn)
     return df["codigo_serie"].tolist() if not df.empty else []
 
 
@@ -1396,7 +1414,9 @@ def _pg_get_chart_data_inner(
 ) -> dict:
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
-    _ovr_active = _has_overrides(user_id, growth_pct)
+    # Single override fetch — reused throughout this function to avoid multiple DB roundtrips
+    _ovr_records = _fetch_override_records(user_id)
+    _ovr_active = bool(_ovr_records)
 
     print(
         f"[FORECAST INNER] ETAPA 1 — resolve_prod_codes "
@@ -1651,6 +1671,7 @@ def _pg_get_chart_data_inner(
                 user_id=user_id,
                 base_growth_pct=growth_pct,
                 max_hist_date=max_hist,
+                _records=_ovr_records,
             )
             _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
             _ua_sql = (
@@ -1885,7 +1906,8 @@ def _pg_get_client_table_inner(
     if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
         max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
 
-    overrides_active = _has_overrides(user_id, growth_pct)
+    _ovr_records_ct = _fetch_override_records(user_id)
+    overrides_active = bool(_ovr_records_ct)
     if overrides_active:
         if view_money:
             df_rows = _query_agg(
@@ -1921,6 +1943,7 @@ def _pg_get_client_table_inner(
                 user_id=user_id,
                 base_growth_pct=growth_pct,
                 max_hist_date=max_hist_date,
+                _records=_ovr_records_ct,
             )
             df_rows["val"] = df_rows["base_val"]
             if max_hist_date is not None and "fecha" in df_rows.columns:
@@ -2064,7 +2087,8 @@ def _pg_get_treemap_data_inner(
     if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
         max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
 
-    if _has_overrides(user_id):
+    _ovr_records_tm = _fetch_override_records(user_id)
+    if bool(_ovr_records_tm):
         if view_money:
             df_rows = _query_agg(
                 f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
@@ -2099,6 +2123,7 @@ def _pg_get_treemap_data_inner(
                 user_id=user_id,
                 base_growth_pct=0.0,
                 max_hist_date=max_hist_date,
+                _records=_ovr_records_tm,
             )
             df_rows["monto"] = df_rows["base_val"]
             if max_hist_date is not None and "fecha" in df_rows.columns:
@@ -2248,9 +2273,17 @@ def _pg_get_client_detail(
     if not df_price.empty:
         price_map = df_price.set_index("codigo_serie")["precio"].to_dict()
 
-    saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
-    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
-    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
+    # Single override fetch — replaces 3 separate DB calls (_get_client_overrides_snapshot
+    # + 2× _get_client_subneg_growths, the second of which was a duplicate bug)
+    _cd_records = _fetch_override_records(user_id, client_selector=client_id)
+    _cd_maps = _build_override_maps(_cd_records)
+    _cd_client_key = _clean_override_text(client_id)
+    saved_overrides = {
+        (codigo, month): float(payload["monthly_pct"])
+        for (selector, codigo, month), payload in _cd_maps["cell"].items()
+        if selector == _cd_client_key
+    }
+    saved_subneg_growths = dict(_cd_maps["subneg_growths"].get(_cd_client_key, {}))
 
     # Ensure required columns — articulo and unidad_medida absent from forecast_valorizado
     if "articulo" not in df_c.columns:

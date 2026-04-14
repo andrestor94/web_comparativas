@@ -384,6 +384,11 @@ async def db_session_lifecycle(request: Request, call_next):
     finally:
         if hasattr(request.state, "db") and request.state.db is not None:
             request.state.db.close()
+        # Clean up scoped session for THIS thread — prevents connection leaks when
+        # db_session is used directly (notifications, comments, dimensiones, etc.)
+        # The scoped_session is thread-local; without this, threads in the pool
+        # retain their session (and DB connection) until the next request on that thread.
+        _reset_session()
         print(f"[MW] DB Closed", flush=True)
 
 # Tracking — re-habilitado con diseño robusto (solo pasa primitivos al background task)
