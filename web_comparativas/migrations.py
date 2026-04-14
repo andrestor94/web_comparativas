@@ -590,6 +590,84 @@ def _col_type(table: str, column: str) -> str:
         return ""
 
 
+def ensure_forecast_perf_indexes():
+    """
+    Crea índices en forecast_main y forecast_valorizado para acelerar las
+    queries de agregación del módulo Forecast.
+
+    Sin estos índices, cada request hace seq scan completo sobre las tablas
+    de 700k+ filas.  Con ellos, PostgreSQL puede usar index scan para los
+    WHERE tipo='hist', perfil, neg, subneg más frecuentes.
+
+    CREATE INDEX CONCURRENTLY no puede ejecutarse dentro de una transacción
+    explícita — se usa autocommit=True via raw connection.
+
+    Solo aplica en PostgreSQL.  En SQLite se omite.
+    """
+    if IS_SQLITE:
+        print("[MIGRATION] ensure_forecast_perf_indexes: SQLite, saltando.", flush=True)
+        return
+
+    indexes = [
+        (
+            "ix_fc_main_tipo",
+            "forecast_main",
+            "(tipo)",
+        ),
+        (
+            "ix_fc_main_fecha",
+            "forecast_main",
+            "(fecha)",
+        ),
+        (
+            "ix_fc_main_tipo_fecha",
+            "forecast_main",
+            "(tipo, fecha)",
+        ),
+        (
+            "ix_fc_main_perfil",
+            "forecast_main",
+            "(perfil)",
+        ),
+        (
+            "ix_fc_main_codigo_serie",
+            "forecast_main",
+            "(codigo_serie)",
+        ),
+        (
+            "ix_fc_val_fecha",
+            "forecast_valorizado",
+            "(fecha)",
+        ),
+        (
+            "ix_fc_val_perfil_neg_subneg",
+            "forecast_valorizado",
+            "(perfil, neg, subneg)",
+        ),
+        (
+            "ix_fc_val_cliente_id",
+            "forecast_valorizado",
+            "(cliente_id)",
+        ),
+    ]
+
+    for idx_name, table_name, expr in indexes:
+        ddl = (
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {idx_name} "
+            f"ON {table_name} {expr}"
+        )
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text(ddl))
+            print(f"[MIGRATION] Índice Forecast '{idx_name}' verificado/creado.", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                print(f"[MIGRATION] Índice Forecast '{idx_name}': ya existe. (OK)", flush=True)
+            else:
+                print(f"[MIGRATION] Índice Forecast '{idx_name}': advertencia – {e}", flush=True)
+
+
 def ensure_dimensionamiento_text_columns():
     """
     Convierte de VARCHAR(255) a TEXT las columnas descriptivas largas de las

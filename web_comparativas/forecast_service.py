@@ -121,6 +121,99 @@ def clear_response_cache() -> None:
     logger.info("[FORECAST cache] Response cache cleared.")
 
 
+def clear_user_cache(user_id: int) -> None:
+    """Flush only the cache entries that belong to a specific user.
+
+    Uses the fact that user_id is embedded as a string in the JSON key produced
+    by _resp_key().  Only entries whose key string contains str(user_id) are
+    removed, so other users' results remain warm.
+    """
+    uid_str = str(user_id)
+    with _resp_cache_lock:
+        to_delete = [k for k in _resp_cache if uid_str in k]
+        for k in to_delete:
+            del _resp_cache[k]
+    logger.info("[FORECAST cache] User %s cache cleared (%d keys).", user_id, len(to_delete))
+
+
+# ---------------------------------------------------------------------------
+# Module-level short-lived caches for repeated read-only SQL queries
+# These queries are identical across users and requests within a session window.
+# ---------------------------------------------------------------------------
+
+_MAX_HIST_DATE_CACHE: "tuple[float, pd.Timestamp | None] | None" = None
+_MAX_HIST_DATE_TTL = 600  # 10 min
+_MAX_HIST_DATE_LOCK = threading.Lock()
+
+
+def _get_max_hist_date_cached() -> "pd.Timestamp | None":
+    """Return MAX(fecha) WHERE tipo='hist' from forecast_main, cached for 10 min."""
+    global _MAX_HIST_DATE_CACHE
+    with _MAX_HIST_DATE_LOCK:
+        if _MAX_HIST_DATE_CACHE is not None:
+            ts, val = _MAX_HIST_DATE_CACHE
+            if time.monotonic() - ts < _MAX_HIST_DATE_TTL:
+                return val
+        df = _query_agg("SELECT MAX(fecha) AS mhd FROM forecast_main WHERE tipo = 'hist'")
+        result: "pd.Timestamp | None" = None
+        if not df.empty and pd.notna(df["mhd"].iloc[0]):
+            result = pd.to_datetime(df["mhd"].iloc[0])
+        _MAX_HIST_DATE_CACHE = (time.monotonic(), result)
+        logger.debug("[FORECAST cache] _get_max_hist_date_cached refreshed → %s", result)
+        return result
+
+
+_PRECIO_MAP_CACHE: "tuple[float, dict] | None" = None
+_PRECIO_MAP_TTL = 3600  # 1 hour — precio barely changes during a session
+_PRECIO_MAP_LOCK = threading.Lock()
+
+
+def _get_precio_map_cached() -> dict:
+    """Return {codigo_serie: avg_precio} from forecast_main, cached for 1 hour."""
+    global _PRECIO_MAP_CACHE
+    with _PRECIO_MAP_LOCK:
+        if _PRECIO_MAP_CACHE is not None:
+            ts, val = _PRECIO_MAP_CACHE
+            if time.monotonic() - ts < _PRECIO_MAP_TTL:
+                return val
+        df = _query_agg(
+            "SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS precio "
+            "FROM forecast_main GROUP BY codigo_serie"
+        )
+        result: dict = {}
+        if not df.empty:
+            result = df.set_index("codigo_serie")["precio"].to_dict()
+        _PRECIO_MAP_CACHE = (time.monotonic(), result)
+        logger.debug("[FORECAST cache] _get_precio_map_cached refreshed — %d series.", len(result))
+        return result
+
+
+_FORECAST_PERIODS_CACHE: "tuple[float, list] | None" = None
+_FORECAST_PERIODS_TTL = 600  # 10 min
+_FORECAST_PERIODS_LOCK = threading.Lock()
+
+
+def _get_forecast_periods_cached() -> list:
+    """Return sorted list of fecha strings from forecast_valorizado, cached for 10 min."""
+    global _FORECAST_PERIODS_CACHE
+    with _FORECAST_PERIODS_LOCK:
+        if _FORECAST_PERIODS_CACHE is not None:
+            ts, val = _FORECAST_PERIODS_CACHE
+            if time.monotonic() - ts < _FORECAST_PERIODS_TTL:
+                return val
+        periods_df = _query_agg(
+            "SELECT DISTINCT fecha FROM forecast_valorizado ORDER BY fecha"
+        )
+        result = [
+            str(r["fecha"])[:10]
+            for _, r in periods_df.iterrows()
+            if pd.notna(r["fecha"])
+        ]
+        _FORECAST_PERIODS_CACHE = (time.monotonic(), result)
+        logger.debug("[FORECAST cache] _get_forecast_periods_cached refreshed — %d periods.", len(result))
+        return result
+
+
 def _with_resp_cache(ttl: float):
     """Decorator: transparently cache the return value of a public get_* function."""
     def decorator(fn):
@@ -676,7 +769,7 @@ def save_client_overrides(
 
         session.commit()
 
-    clear_response_cache()
+    clear_user_cache(user_id)
 
 
 def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | None = None) -> None:
@@ -697,7 +790,7 @@ def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | No
             rec.updated_by = user_email
             rec.updated_at = dt.datetime.utcnow()
         session.commit()
-    clear_response_cache()
+    clear_user_cache(user_id)
 
 
 def _get_client_overrides_snapshot(*, user_id: int | None, client_id: str, growth_pct: float | None = None) -> dict[tuple[str, str], float]:
@@ -1439,19 +1532,18 @@ def _pg_get_chart_data_inner(
         products=None if prod_codes is not None else products,
     )
     print(f"[FORECAST INNER] ETAPA 3 — query_meta main_where_len={len(main_where)}", flush=True)
-    # Lightweight metadata: n_products + max history date
+    # Lightweight metadata: only n_products varies by filter; max_hist_date is global
     # forecast_main has no descripcion — count by codigo_serie
     df_meta = _query_agg(
-        f"SELECT COUNT(DISTINCT codigo_serie) AS n_products, "
-        f"MAX(CASE WHEN tipo = 'hist' THEN fecha END) AS max_hist_date "
+        f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
         f"FROM forecast_main WHERE {main_where}"
     )
     if df_meta.empty:
         print(f"[FORECAST INNER] df_meta empty — returning _EMPTY", flush=True)
         return _EMPTY
     n_products = int(df_meta["n_products"].iloc[0] or 0)
-    _mhd = df_meta["max_hist_date"].iloc[0] if not df_meta.empty else None
-    max_hist = pd.to_datetime(_mhd) if pd.notna(_mhd) else pd.Timestamp("2000-01-01")
+    _cached_mhd = _get_max_hist_date_cached()
+    max_hist = _cached_mhd if _cached_mhd is not None else pd.Timestamp("2000-01-01")
     print(f"[FORECAST INNER] meta OK — n_products={n_products} max_hist={max_hist}", flush=True)
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
@@ -1897,14 +1989,8 @@ def _pg_get_client_table_inner(
         if df_agg.empty:
             return _EMPTY
 
-    # Max hist date for growth adjustment
-    df_mhd = _query_agg(
-        f"SELECT MAX(fecha) AS max_hist_date FROM forecast_main "
-        f"WHERE {_build_filter_sql(profiles=profiles, neg=neg, subneg=subneg)} AND tipo = 'hist'"
-    )
-    max_hist_date = None
-    if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
-        max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
+    # Max hist date for growth adjustment — shared across all filter combinations
+    max_hist_date = _get_max_hist_date_cached()
 
     _ovr_records_ct = _fetch_override_records(user_id)
     overrides_active = bool(_ovr_records_ct)
@@ -2052,9 +2138,8 @@ def _pg_get_treemap_data_inner(
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
 
-    # All available periods (unfiltered)
-    periods_df = _query_agg("SELECT DISTINCT fecha FROM forecast_valorizado ORDER BY fecha")
-    periods = [str(r["fecha"])[:10] for _, r in periods_df.iterrows() if pd.notna(r["fecha"])]
+    # All available periods (unfiltered) — cached to avoid repeated full-scan
+    periods = _get_forecast_periods_cached()
 
     prod_codes = _pg_resolve_prod_codes(products)
     val_prod   = _val_prod_filter(prod_codes)
@@ -2082,10 +2167,7 @@ def _pg_get_treemap_data_inner(
     if df_tree.empty:
         return {**_EMPTY, "periods": periods}
 
-    max_hist_date = None
-    df_mhd = _query_agg("SELECT MAX(fecha) AS max_hist_date FROM forecast_main WHERE tipo = 'hist'")
-    if not df_mhd.empty and pd.notna(df_mhd["max_hist_date"].iloc[0]):
-        max_hist_date = pd.to_datetime(df_mhd["max_hist_date"].iloc[0])
+    max_hist_date = _get_max_hist_date_cached()
 
     _ovr_records_tm = _fetch_override_records(user_id)
     if bool(_ovr_records_tm):
@@ -2259,19 +2341,9 @@ def _pg_get_client_detail(
     if df_c.empty:
         return _EMPTY
 
-    # max hist date
-    df_mhd = _query_agg("SELECT MAX(fecha) AS mhd FROM forecast_main WHERE tipo = 'hist'")
-    max_hist_date = None
-    if not df_mhd.empty and pd.notna(df_mhd["mhd"].iloc[0]):
-        max_hist_date = pd.to_datetime(df_mhd["mhd"].iloc[0])
-
-    # Price map from forecast_main (avg precio per codigo_serie)
-    df_price = _query_agg(
-        "SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS precio FROM forecast_main GROUP BY codigo_serie"
-    )
-    price_map: dict = {}
-    if not df_price.empty:
-        price_map = df_price.set_index("codigo_serie")["precio"].to_dict()
+    # max hist date and price map — both cached to avoid repeated full-table scans
+    max_hist_date = _get_max_hist_date_cached()
+    price_map: dict = _get_precio_map_cached()
 
     # Single override fetch — replaces 3 separate DB calls (_get_client_overrides_snapshot
     # + 2× _get_client_subneg_growths, the second of which was a duplicate bug)
