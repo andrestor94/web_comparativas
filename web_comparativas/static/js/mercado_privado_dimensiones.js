@@ -30,6 +30,16 @@ document.addEventListener('DOMContentLoaded', () => {
         pivotSearchTerm: '',
         pivotRenderRaf: null,
         pivotLastRenderKey: '',
+        // Estado global de series excluidas: códigos de unidad_negocio que el usuario
+        // desactivó desde la leyenda del gráfico. Se propagan como filtro al backend
+        // para KPIs/tablas/donut/mapa, pero NO para el propio gráfico de series
+        // (que siempre recibe todos los datos para que se puedan reactivar desde la leyenda).
+        hiddenSeriesCodes: new Set(),
+        // Códigos originales (sin resolver a label) de los datasets actuales del gráfico.
+        chartSeriesCodes: [],
+        // Estado global de resultado activo: cuando tiene un valor, filtra TODO el dashboard
+        // al resultado seleccionado desde el donut "Resultado por participación".
+        activeResultados: new Set(),
     };
 
     const FAMILY_LIST_ROW_HEIGHT = 42;
@@ -421,6 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiClients:  document.getElementById('kpiClients'),
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
+        kpiProvinces: document.getElementById('kpiProvinces'),
         familyListContainer:  document.getElementById('familyListContainer'),
         pivotTableWrap:       document.getElementById('pivotTableWrap'),
         pivotHeader:          document.getElementById('pivotHeader'),
@@ -501,6 +512,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.reloadBtn) {
             elements.reloadBtn.addEventListener('click', () => {
                 state.bootstrapCache.clear();
+                // Limpiar todos los filtros interactivos derivados de gráficos
+                state.hiddenSeriesCodes.clear();
+                state.chartSeriesCodes = [];
+                state.activeResultados.clear();
                 if (state.dashboardReady) {
                     loadDashboardData({ blocking: true, bypassSnapshot: true, force: true });
                 } else {
@@ -667,15 +682,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ? rawFechaHasta : null;
 
         return {
-            cliente:           msClient   ? msClient.getApplied()   : [],
-            provincia:         msProvince ? msProvince.getApplied()  : [],
-            familia:           msFamily   ? msFamily.getApplied()    : [],
-            unidad_negocio:    msUnit     ? msUnit.getApplied()      : [],
-            subunidad_negocio: msSubunit  ? msSubunit.getApplied()   : [],
-            plataforma:        plataformas, // vacío = todas
-            fecha_desde:       fechaDesde,
-            fecha_hasta:       fechaHasta,
-            is_client:   elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
+            cliente:                msClient   ? msClient.getApplied()   : [],
+            provincia:              msProvince ? msProvince.getApplied()  : [],
+            familia:                msFamily   ? msFamily.getApplied()    : [],
+            unidad_negocio:         msUnit     ? msUnit.getApplied()      : [],
+            unidad_negocio_excluir: state.hiddenSeriesCodes.size > 0 ? [...state.hiddenSeriesCodes] : [],
+            resultado:              state.activeResultados.size  > 0 ? [...state.activeResultados]  : [],
+            subunidad_negocio:      msSubunit  ? msSubunit.getApplied()   : [],
+            plataforma:             plataformas,
+            fecha_desde:            fechaDesde,
+            fecha_hasta:            fechaHasta,
+            is_client:  elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
         };
     }
 
@@ -782,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderKpisError() {
-        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies]
+        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiProvinces]
             .forEach(el => { if (el) el.textContent = '--'; });
     }
 
@@ -902,11 +919,15 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.kpiClients.textContent  = formatInteger(kpis.clientes || 0);
         elements.kpiRecords.textContent  = formatInteger(kpis.renglones || 0);
         elements.kpiFamilies.textContent = formatInteger(kpis.familias || 0);
+        if (elements.kpiProvinces) {
+            elements.kpiProvinces.textContent = formatInteger(kpis.provincias || 0);
+        }
         try {
             localStorage.setItem('mp_dimensiones_kpis', JSON.stringify({
                 clients: kpis.clientes || 0,
                 processes: kpis.renglones || 0,
                 families: kpis.familias || 0,
+                provinces: kpis.provincias || 0,
                 lastUpdated: new Date().toISOString(),
             }));
         } catch {}
@@ -915,6 +936,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderAreaChart(series) {
         const ctx = document.getElementById('areaChart').getContext('2d');
         if (state.areaChart) state.areaChart.destroy();
+
+        // Guardar los códigos originales (pre-resolución) de cada dataset.
+        // El backend siempre devuelve TODOS los negocios al gráfico de series (sin aplicar
+        // la exclusión), por lo que el array siempre contiene todos los top-N series
+        // incluso cuando algunas están excluidas del resto del dashboard.
+        state.chartSeriesCodes = (series.datasets || []).map(d => String(d.label));
+
         state.areaChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -929,6 +957,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     tension: 0.35,
                     pointRadius: 2,
                     pointHoverRadius: 5,
+                    // Las series excluidas se ocultan visualmente; el backend ya las descartó
+                    // de KPIs/tablas/donut/mapa pero las mantiene aquí para poder reactivarlas.
+                    hidden: state.hiddenSeriesCodes.has(String(dataset.label)),
                 })),
             },
             options: buildLineChartOptions(),
@@ -938,15 +969,29 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderPieChart(results) {
         const ctx = document.getElementById('pieChart').getContext('2d');
         if (state.pieChart) state.pieChart.destroy();
+
+        const hasFilter = state.activeResultados.size > 0;
+
         state.pieChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: results.map(item => item.resultado),
                 datasets: [{
                     data: results.map(item => item.renglones),
-                    backgroundColor: results.map((_, i) => resultPalette[i % resultPalette.length]),
+                    // Segmentos inactivos se dimean para mostrar cuál está seleccionado
+                    backgroundColor: results.map((item, i) => {
+                        const base = resultPalette[i % resultPalette.length];
+                        if (hasFilter && !state.activeResultados.has(item.resultado)) {
+                            return base + '38'; // ~22% opacidad: inactivo
+                        }
+                        return base;
+                    }),
                     borderWidth: 0,
                     hoverOffset: 8,
+                    // Segmento activo aparece ligeramente separado
+                    offset: results.map(item =>
+                        hasFilter && state.activeResultados.has(item.resultado) ? 8 : 0
+                    ),
                 }],
             },
             options: {
@@ -958,6 +1003,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: { label: ctx => `${ctx.label}: ${formatInteger(ctx.parsed)} renglones` },
                     },
+                },
+                onClick(event, elements) {
+                    if (!elements.length) {
+                        // Clic en área vacía: quitar filtro de resultado
+                        if (state.activeResultados.size > 0) {
+                            state.activeResultados.clear();
+                            triggerLoad();
+                        }
+                        return;
+                    }
+                    const index = elements[0].index;
+                    const resultado = results[index]?.resultado;
+                    if (!resultado) return;
+
+                    // Toggle: seleccionar este resultado o quitarlo si ya estaba activo
+                    if (state.activeResultados.has(resultado)) {
+                        state.activeResultados.delete(resultado);
+                    } else {
+                        state.activeResultados.clear();
+                        state.activeResultados.add(resultado);
+                    }
+                    // Propagar como filtro global a todo el dashboard
+                    triggerLoad();
                 },
             },
         });
@@ -1322,7 +1390,32 @@ document.addEventListener('DOMContentLoaded', () => {
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { position: 'top', align: 'end', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } } },
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } },
+                    onClick(e, legendItem, legend) {
+                        const idx = legendItem.datasetIndex;
+                        const code = state.chartSeriesCodes[idx];
+                        if (code === undefined) return;
+
+                        // Actualizar estado global de exclusión (fuente de verdad compartida)
+                        if (state.hiddenSeriesCodes.has(code)) {
+                            state.hiddenSeriesCodes.delete(code);
+                        } else {
+                            state.hiddenSeriesCodes.add(code);
+                        }
+
+                        // Visibilidad inmediata en el chart (sin esperar el debounce)
+                        const chart = legend.chart;
+                        const meta = chart.getDatasetMeta(idx);
+                        meta.hidden = state.hiddenSeriesCodes.has(code);
+                        chart.update();
+
+                        // Propagar como filtro global: KPIs, donut, mapa, tablas se recalculan
+                        triggerLoad();
+                    },
+                },
                 tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones` } },
             },
             scales: {

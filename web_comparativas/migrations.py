@@ -326,8 +326,22 @@ def ensure_dimensionamiento_summary_populated():
                     and "-" in max_month_text
                 )
             )
+            latest_run = session.execute(
+                select(DimensionamientoImportRun)
+                .order_by(
+                    DimensionamientoImportRun.status.desc(),
+                    DimensionamientoImportRun.id.desc(),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            summary_strategy = ((latest_run.summary or {}) if latest_run else {}).get("client_name_strategy")
+            summary_has_current_client_strategy = (
+                summary_count == 0 or summary_strategy == "visible_fallback_v1"
+            )
             needs_rebuild = records_count > 0 and (
-                summary_count == 0 or not summary_has_valid_months
+                summary_count == 0
+                or not summary_has_valid_months
+                or not summary_has_current_client_strategy
             )
 
             if needs_rebuild:
@@ -338,15 +352,6 @@ def ensure_dimensionamiento_summary_populated():
                     flush=True,
                 )
                 # Buscar el último import_run exitoso o el más reciente
-                latest_run = session.execute(
-                    select(DimensionamientoImportRun)
-                    .order_by(
-                        DimensionamientoImportRun.status.desc(),
-                        DimensionamientoImportRun.id.desc(),
-                    )
-                    .limit(1)
-                ).scalar_one_or_none()
-
                 if latest_run is None:
                     print(
                         "[MIGRATION] No se encontró import_run. "
@@ -369,6 +374,7 @@ def ensure_dimensionamiento_summary_populated():
                         expected_columns=None,
                         observed_columns=None,
                         summary={
+                            "client_name_strategy": "visible_fallback_v1",
                             "reason": "summary_rebuild_without_import_run",
                             "records_count": records_count,
                         },
@@ -382,13 +388,20 @@ def ensure_dimensionamiento_summary_populated():
                         flush=True,
                     )
 
-                from web_comparativas.dimensionamiento.ingestion import _rebuild_summary_table
+                from web_comparativas.dimensionamiento.ingestion import (
+                    SUMMARY_CLIENT_NAME_STRATEGY,
+                    _rebuild_summary_table,
+                )
 
                 # Desactivar timeout local para esta operación batch
                 if not IS_SQLITE:
                     session.execute(text("SET LOCAL statement_timeout = 0"))
 
                 _rebuild_summary_table(session, latest_run.id)
+                summary_meta = dict(latest_run.summary or {})
+                summary_meta["client_name_strategy"] = SUMMARY_CLIENT_NAME_STRATEGY
+                latest_run.summary = summary_meta
+                session.add(latest_run)
                 session.commit()
                 print(
                     f"[MIGRATION] Tabla resumen reconstruida para import_run_id={latest_run.id}.",
