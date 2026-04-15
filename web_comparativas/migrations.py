@@ -812,6 +812,17 @@ def ensure_cliente_visible_columns():
     tabla resumen para incluir las nuevas columnas y restricciones.
     """
     print("[MIGRATION] Verificando columna cliente_visible en dimensionamiento_records...", flush=True)
+    
+    # IMPORTANTE: En Render PostgreSQL, los UPDATES sobre 1M+ de registros superan los 55s 
+    # de timeout por defecto. Desactivamos el timeout para esta sesión de migración.
+    if not IS_SQLITE:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("SET statement_timeout = 0"))
+                print("[MIGRATION] statement_timeout = 0 (OK)", flush=True)
+        except Exception as e:
+            print(f"[MIGRATION] Warning disable timeout: {e}", flush=True)
+
     with engine.begin() as conn:
         _add_column_safe(
             conn,
@@ -822,6 +833,10 @@ def ensure_cliente_visible_columns():
     # Backfill para dimensionamiento_records
     print("[MIGRATION] Ejecutando backfill data para cliente_visible e is_client en records...", flush=True)
     with engine.begin() as conn:
+        # Desactivar timeout también para esta transacción si engine.begin() abre una nueva conexión
+        if not IS_SQLITE:
+            conn.execute(text("SET statement_timeout = 0"))
+
         # 1. Corregir is_client: 0 si homologado es invalido o SIN DATO
         conn.execute(
             text("""
@@ -832,7 +847,7 @@ def ensure_cliente_visible_columns():
             """)
         )
 
-        # 2. Corregir cliente_visible
+        # 2. Corregir cliente_visible (solo si es NULL o vacío para evitar retrabajo innecesario)
         conn.execute(
             text("""
             UPDATE dimensionamiento_records
@@ -842,6 +857,7 @@ def ensure_cliente_visible_columns():
                 THEN cliente_nombre_original
                 ELSE cliente_nombre_homologado
             END
+            WHERE cliente_visible IS NULL OR cliente_visible = ''
             """)
         )
 
