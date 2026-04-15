@@ -91,19 +91,6 @@ STARTUP_MODE_INGEST_IF_EMPTY = "ingest-if-empty"
 SUMMARY_CLIENT_NAME_STRATEGY = "visible_fallback_v1"
 
 
-def _summary_visible_client_expr():
-    homologado = func.trim(func.coalesce(DimensionamientoRecord.cliente_nombre_homologado, ""))
-    homologado_upper = func.upper(homologado)
-    return case(
-        (
-            or_(
-                homologado == "",
-                homologado_upper.in_(("SIN DATO", "SIN_DATO")),
-            ),
-            DimensionamientoRecord.cliente_nombre_original,
-        ),
-        else_=DimensionamientoRecord.cliente_nombre_homologado,
-    )
 STARTUP_MODE_FORCE_INGEST = "force-ingest"
 
 _STARTUP_RUN_LOCK = Lock()
@@ -253,6 +240,7 @@ TARGET_RECORD_COLUMNS = [
     "plataforma",
     "cliente_nombre_homologado",
     "cliente_nombre_original",
+    "cliente_visible",
     "cuit",
     "provincia",
     "cuenta_interna",
@@ -429,12 +417,19 @@ def _looks_like_html(content_type: str, preview: bytes) -> bool:
 
 
 def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
+    homologado = _clean_text(row.get("cliente_nombre_homologado"))
+    original = _clean_text(row.get("cliente_nombre_original"))
+    cliente_visible = homologado
+    if not homologado or _is_sin_dato(homologado):
+        cliente_visible = original if original else homologado
+
     record = {
         "id_registro_unico": _clean_text(row.get("id_registro_unico")),
         "fecha": _parse_date(row.get("fecha")),
         "plataforma": _normalize_platform(row.get("plataforma")),
-        "cliente_nombre_homologado": _clean_text(row.get("cliente_nombre_homologado")),
-        "cliente_nombre_original": _clean_text(row.get("cliente_nombre_original")),
+        "cliente_nombre_homologado": homologado,
+        "cliente_nombre_original": original,
+        "cliente_visible": cliente_visible,
         "cuit": _clean_text(row.get("cuit")),
         "provincia": _normalize_province(row.get("provincia")),
         "cuenta_interna": _clean_text(row.get("cuenta_interna")),
@@ -505,6 +500,7 @@ def _postgres_stage_columns_ddl() -> str:
         plataforma VARCHAR(40) NOT NULL,
         cliente_nombre_homologado TEXT,
         cliente_nombre_original TEXT,
+        cliente_visible TEXT,
         cuit VARCHAR(32),
         provincia VARCHAR(120),
         cuenta_interna VARCHAR(120),
@@ -754,13 +750,12 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     else:
         month_bucket = cast(func.date_trunc("month", DimensionamientoRecord.fecha), Date)
 
-    visible_client = _summary_visible_client_expr()
-
     summary_select = (
         select(
             month_bucket.label("month"),
             DimensionamientoRecord.plataforma,
-            visible_client.label("cliente_nombre_homologado"),
+            DimensionamientoRecord.cliente_nombre_homologado,
+            DimensionamientoRecord.cliente_visible,
             DimensionamientoRecord.provincia,
             DimensionamientoRecord.familia,
             DimensionamientoRecord.unidad_negocio,
@@ -770,13 +765,14 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             DimensionamientoRecord.is_client,
             func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0).label("total_cantidad"),
             func.count(DimensionamientoRecord.id).label("total_registros"),
-            func.count(func.distinct(visible_client)).label("clientes_unicos"),
+            func.count(func.distinct(DimensionamientoRecord.cliente_visible)).label("clientes_unicos"),
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
         )
         .group_by(
             month_bucket,
             DimensionamientoRecord.plataforma,
-            visible_client,
+            DimensionamientoRecord.cliente_nombre_homologado,
+            DimensionamientoRecord.cliente_visible,
             DimensionamientoRecord.provincia,
             DimensionamientoRecord.familia,
             DimensionamientoRecord.unidad_negocio,
@@ -792,6 +788,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             "month",
             "plataforma",
             "cliente_nombre_homologado",
+            "cliente_visible",
             "provincia",
             "familia",
             "unidad_negocio",

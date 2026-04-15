@@ -16,16 +16,16 @@ def _add_column_safe(conn, ddl: str, description: str):
         if "already exists" in msg or "duplicate column" in msg or "duplicate object" in msg:
             print(f"[MIGRATION] {description}: ya existe. (OK)", flush=True)
         elif "no such table" in msg or "undefined table" in msg or "does not exist" in msg:
-            print(f"[MIGRATION] {description}: tabla no existe aún. (Saltando)", flush=True)
+            print(f"[MIGRATION] {description}: tabla no existe aÃºn. (Saltando)", flush=True)
         else:
-            print(f"[MIGRATION] {description}: advertencia – {e}", flush=True)
+            print(f"[MIGRATION] {description}: advertencia â€“ {e}", flush=True)
 
 
 def ensure_access_scope_column():
     """
     Verifica si la tabla 'users' tiene la columna 'access_scope'.
     Si no la tiene, la agrega (ALTER TABLE).
-    Esto es para soportar la migración en Render (PostgreSQL) y local (SQLite).
+    Esto es para soportar la migraciÃ³n en Render (PostgreSQL) y local (SQLite).
     """
     try:
         print("[MIGRATION] Intentando agregar columna 'access_scope' a 'users'...", flush=True)
@@ -47,14 +47,14 @@ def ensure_access_scope_column():
 
 def ensure_password_reset_columns():
     """
-    Migración para el flujo de restablecimiento de contraseña corporativo.
+    MigraciÃ³n para el flujo de restablecimiento de contraseÃ±a corporativo.
     Agrega 'must_change_password' a users y crea la tabla password_reset_requests.
 
-    IMPORTANTE: cada operación usa su PROPIA transacción para que un fallo en una
-    no revierta las demás (en PostgreSQL, un error dentro de una transacción marca
-    toda la conexión como abortada, deshaciendo cambios previos del mismo bloque).
+    IMPORTANTE: cada operaciÃ³n usa su PROPIA transacciÃ³n para que un fallo en una
+    no revierta las demÃ¡s (en PostgreSQL, un error dentro de una transacciÃ³n marca
+    toda la conexiÃ³n como abortada, deshaciendo cambios previos del mismo bloque).
     """
-    # 1. Columna must_change_password en users — transacción separada
+    # 1. Columna must_change_password en users â€” transacciÃ³n separada
     with engine.begin() as conn:
         _add_column_safe(
             conn,
@@ -62,9 +62,9 @@ def ensure_password_reset_columns():
             "users.must_change_password",
         )
 
-    # 2. Tabla password_reset_requests — transacción separada con sintaxis compatible
+    # 2. Tabla password_reset_requests â€” transacciÃ³n separada con sintaxis compatible
     # SQLite usa AUTOINCREMENT; PostgreSQL usa SERIAL. Ramificamos para evitar
-    # errores de sintaxis que abortan la transacción y revierten columnas ya agregadas.
+    # errores de sintaxis que abortan la transacciÃ³n y revierten columnas ya agregadas.
     if IS_SQLITE:
         pk_col = "id INTEGER PRIMARY KEY AUTOINCREMENT"
         ts_type = "DATETIME"
@@ -97,7 +97,7 @@ def ensure_password_reset_columns():
         if "already exists" in msg:
             print("[MIGRATION] Tabla 'password_reset_requests': ya existe. (OK)", flush=True)
         else:
-            print(f"[MIGRATION] Tabla 'password_reset_requests': advertencia – {e}", flush=True)
+            print(f"[MIGRATION] Tabla 'password_reset_requests': advertencia â€“ {e}", flush=True)
 
 
 def ensure_original_content_column():
@@ -105,7 +105,7 @@ def ensure_original_content_column():
     Agrega la columna original_content a la tabla uploads.
     Almacena los bytes del archivo original subido por el usuario.
     Esto permite que el archivo sobreviva redespliegues en Render
-    (filesystem efímero), sirviendo como fallback cuando el archivo
+    (filesystem efÃ­mero), sirviendo como fallback cuando el archivo
     en disco ya no existe.
     """
     blob_type = "BYTEA" if not IS_SQLITE else "BLOB"
@@ -125,7 +125,7 @@ def ensure_normalized_storage_columns():
     - dashboard_json: almacena el JSON del dashboard como texto
 
     Esto permite que los datos sobrevivan redespliegues en Render
-    (el filesystem de Render es efímero; PostgreSQL sí es persistente).
+    (el filesystem de Render es efÃ­mero; PostgreSQL sÃ­ es persistente).
 
     Compatible con SQLite (local) y PostgreSQL (Render).
     """
@@ -150,7 +150,7 @@ def ensure_normalized_storage_columns():
 
 def ensure_forecast_override_storage():
     """
-    Crea la tabla persistente de overrides de Forecast y sus índices de lookup.
+    Crea la tabla persistente de overrides de Forecast y sus Ã­ndices de lookup.
 
     Esta tabla es la fuente de verdad del escenario ajustado por usuario.
     La base forecast original permanece intacta.
@@ -159,7 +159,7 @@ def ensure_forecast_override_storage():
         ForecastUserOverride.__table__.create(bind=engine, checkfirst=True)
         print("[MIGRATION] Tabla 'forecast_user_overrides' verificada/creada.", flush=True)
     except Exception as e:
-        print(f"[MIGRATION] Tabla 'forecast_user_overrides': advertencia – {e}", flush=True)
+        print(f"[MIGRATION] Tabla 'forecast_user_overrides': advertencia â€“ {e}", flush=True)
 
     indexes = [
         (
@@ -185,28 +185,28 @@ def ensure_forecast_override_storage():
                 conn.execute(
                     text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} {expr}")
                 )
-            print(f"[MIGRATION] Índice '{idx_name}' verificado/creado.", flush=True)
+            print(f"[MIGRATION] Ã�ndice '{idx_name}' verificado/creado.", flush=True)
         except Exception as e:
             msg = str(e).lower()
             if "already exists" in msg or "duplicate" in msg:
-                print(f"[MIGRATION] Índice '{idx_name}': ya existe. (OK)", flush=True)
+                print(f"[MIGRATION] Ã�ndice '{idx_name}': ya existe. (OK)", flush=True)
             else:
-                print(f"[MIGRATION] Índice '{idx_name}': advertencia – {e}", flush=True)
+                print(f"[MIGRATION] Ã�ndice '{idx_name}': advertencia â€“ {e}", flush=True)
 
 
 def ensure_dimensionamiento_indexes():
     """
-    Crea índices funcionales en dimensionamiento_records para las expresiones
+    Crea Ã­ndices funcionales en dimensionamiento_records para las expresiones
     UPPER(TRIM(CAST(COALESCE(col, '') AS TEXT))) usadas en _apply_common_filters.
 
-    Sin estos índices, los WHERE con funciones en la columna hacen seq scan completo
+    Sin estos Ã­ndices, los WHERE con funciones en la columna hacen seq scan completo
     sobre 400k+ filas. Con ellos, PostgreSQL puede usar index scan.
 
-    Solo aplica en PostgreSQL. En SQLite se omite (no soporta índices funcionales
+    Solo aplica en PostgreSQL. En SQLite se omite (no soporta Ã­ndices funcionales
     con las mismas funciones).
 
-    También agrega el índice funcional sobre el CASE WHEN de cliente_visible para
-    acelerar las búsquedas de clientes en _distinct_visible_clients.
+    TambiÃ©n agrega el Ã­ndice funcional sobre el CASE WHEN de cliente_visible para
+    acelerar las bÃºsquedas de clientes en _distinct_visible_clients.
     """
     if IS_SQLITE:
         print("[MIGRATION] ensure_dimensionamiento_indexes: SQLite, saltando.", flush=True)
@@ -256,31 +256,31 @@ def ensure_dimensionamiento_indexes():
             f"ON {table_name} ({expr})"
         )
         try:
-            # CONCURRENTLY no puede ejecutarse dentro de una transacción explícita.
+            # CONCURRENTLY no puede ejecutarse dentro de una transacciÃ³n explÃ­cita.
             # Usamos autocommit=True via raw connection.
             with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 conn.execute(text(ddl))
-            print(f"[MIGRATION] Índice funcional '{idx_name}' verificado/creado.", flush=True)
+            print(f"[MIGRATION] Ã�ndice funcional '{idx_name}' verificado/creado.", flush=True)
         except Exception as e:
             msg = str(e).lower()
             if "already exists" in msg or "duplicate" in msg:
-                print(f"[MIGRATION] Índice '{idx_name}': ya existe. (OK)", flush=True)
+                print(f"[MIGRATION] Ã�ndice '{idx_name}': ya existe. (OK)", flush=True)
             else:
-                print(f"[MIGRATION] Índice '{idx_name}': advertencia – {e}", flush=True)
+                print(f"[MIGRATION] Ã�ndice '{idx_name}': advertencia â€“ {e}", flush=True)
 
 
 def ensure_dimensionamiento_summary_populated():
     """
     Detecta si dimensionamiento_records tiene datos pero la tabla de resumen mensual
-    (dimensionamiento_family_monthly_summary) está vacía. Esto ocurre cuando la
-    ingesta de datos cargó los registros correctamente pero la reconstrucción de la
-    tabla resumen falló (por ejemplo, por timeout en la primera carga en Render).
+    (dimensionamiento_family_monthly_summary) estÃ¡ vacÃ­a. Esto ocurre cuando la
+    ingesta de datos cargÃ³ los registros correctamente pero la reconstrucciÃ³n de la
+    tabla resumen fallÃ³ (por ejemplo, por timeout en la primera carga en Render).
 
     Si se detecta el problema, intenta reconstruir la tabla resumen con los datos
     existentes. Si falla, loguea la advertencia sin interrumpir el inicio de la app.
 
     Impacto si no se ejecuta:
-    - get_filter_options fast-path devuelve listas vacías de provincias, familias, etc.
+    - get_filter_options fast-path devuelve listas vacÃ­as de provincias, familias, etc.
     - El dashboard parece no tener datos aunque haya 300k+ registros en DB.
     """
     from sqlalchemy import select, func as sa_func
@@ -347,15 +347,15 @@ def ensure_dimensionamiento_summary_populated():
             if needs_rebuild:
                 print(
                     "[MIGRATION] ALERTA: dimensionamiento_records tiene datos pero "
-                    "dimensionamiento_family_monthly_summary está vacía o inválida. "
+                    "dimensionamiento_family_monthly_summary estÃ¡ vacÃ­a o invÃ¡lida. "
                     "Reconstruyendo tabla resumen...",
                     flush=True,
                 )
-                # Buscar el último import_run exitoso o el más reciente
+                # Buscar el Ãºltimo import_run exitoso o el mÃ¡s reciente
                 if latest_run is None:
                     print(
-                        "[MIGRATION] No se encontró import_run. "
-                        "Creando import_run sintético para poder reconstruir la summary.",
+                        "[MIGRATION] No se encontrÃ³ import_run. "
+                        "Creando import_run sintÃ©tico para poder reconstruir la summary.",
                         flush=True,
                     )
                     latest_run = DimensionamientoImportRun(
@@ -384,7 +384,7 @@ def ensure_dimensionamiento_summary_populated():
                     session.commit()
                     session.refresh(latest_run)
                     print(
-                        f"[MIGRATION] Import_run sintético creado id={latest_run.id}.",
+                        f"[MIGRATION] Import_run sintÃ©tico creado id={latest_run.id}.",
                         flush=True,
                     )
 
@@ -393,7 +393,7 @@ def ensure_dimensionamiento_summary_populated():
                     _rebuild_summary_table,
                 )
 
-                # Desactivar timeout local para esta operación batch
+                # Desactivar timeout local para esta operaciÃ³n batch
                 if not IS_SQLITE:
                     session.execute(text("SET LOCAL statement_timeout = 0"))
 
@@ -408,18 +408,18 @@ def ensure_dimensionamiento_summary_populated():
                     flush=True,
                 )
             else:
-                print("[MIGRATION] Tabla resumen OK, no requiere reconstrucción.", flush=True)
+                print("[MIGRATION] Tabla resumen OK, no requiere reconstrucciÃ³n.", flush=True)
         except Exception as e:
             session.rollback()
             print(
-                f"[MIGRATION] ensure_dimensionamiento_summary_populated: advertencia – {e}",
+                f"[MIGRATION] ensure_dimensionamiento_summary_populated: advertencia â€“ {e}",
                 flush=True,
             )
         finally:
             session.close()
     except ImportError as e:
         print(
-            f"[MIGRATION] ensure_dimensionamiento_summary_populated: import error – {e}",
+            f"[MIGRATION] ensure_dimensionamiento_summary_populated: import error â€“ {e}",
             flush=True,
         )
 
@@ -427,15 +427,15 @@ def ensure_dimensionamiento_summary_populated():
 def ensure_ticket_pliego_columns():
     """
     Agrega columnas de contexto de origen al modelo Ticket para soporte
-    del widget de comentarios rápidos en Lectura de Pliegos.
+    del widget de comentarios rÃ¡pidos en Lectura de Pliegos.
 
     Columnas nuevas:
-      - modulo_origen      VARCHAR(50)  – identifica la sección de origen (e.g. "lectura_pliegos")
-      - pliego_solicitud_id INTEGER FK  – vínculo al caso PliegoSolicitud
-      - contexto_extra      TEXT        – JSON con datos contextuales del pliego al momento del envío
+      - modulo_origen      VARCHAR(50)  â€“ identifica la secciÃ³n de origen (e.g. "lectura_pliegos")
+      - pliego_solicitud_id INTEGER FK  â€“ vÃ­nculo al caso PliegoSolicitud
+      - contexto_extra      TEXT        â€“ JSON con datos contextuales del pliego al momento del envÃ­o
 
-    Cada ALTER TABLE corre en su propia transacción para que el fallo de
-    una columna ya existente no revierta las demás.
+    Cada ALTER TABLE corre en su propia transacciÃ³n para que el fallo de
+    una columna ya existente no revierta las demÃ¡s.
     """
     with engine.begin() as conn:
         _add_column_safe(
@@ -460,9 +460,9 @@ def ensure_ticket_pliego_columns():
 
 def backfill_normalized_content():
     """
-    Recorre uploads procesados que aún no tienen normalized_content en DB,
+    Recorre uploads procesados que aÃºn no tienen normalized_content en DB,
     y si el archivo existe en disco lo guarda. Procesa en lotes de 5 para
-    evitar OOM en Render (512MB límite).
+    evitar OOM en Render (512MB lÃ­mite).
     """
     import gc
     from web_comparativas.models import SessionLocal, Upload as UploadModel
@@ -477,7 +477,7 @@ def backfill_normalized_content():
 
     session = SessionLocal()
     try:
-        # Solo obtener IDs — no cargar objetos completos todavía
+        # Solo obtener IDs â€” no cargar objetos completos todavÃ­a
         upload_ids = [
             row[0] for row in session.query(UploadModel.id)
             .filter(
@@ -515,7 +515,7 @@ def backfill_normalized_content():
                         session.add(up)
                         backed_up += 1
                 except Exception as e:
-                    print(f"[BACKFILL] Upload {up.id}: error – {e}", flush=True)
+                    print(f"[BACKFILL] Upload {up.id}: error â€“ {e}", flush=True)
 
             session.commit()
             # Liberar referencias para no acumular en RAM
@@ -573,7 +573,7 @@ def backfill_original_content():
                         session.add(up)
                         backed_up += 1
                 except Exception as e:
-                    print(f"[BACKFILL_ORIG] Upload {up.id}: error – {e}", flush=True)
+                    print(f"[BACKFILL_ORIG] Upload {up.id}: error â€“ {e}", flush=True)
 
             session.commit()
             session.expire_all()
@@ -605,15 +605,15 @@ def _col_type(table: str, column: str) -> str:
 
 def ensure_forecast_perf_indexes():
     """
-    Crea índices en forecast_main y forecast_valorizado para acelerar las
-    queries de agregación del módulo Forecast.
+    Crea Ã­ndices en forecast_main y forecast_valorizado para acelerar las
+    queries de agregaciÃ³n del mÃ³dulo Forecast.
 
-    Sin estos índices, cada request hace seq scan completo sobre las tablas
+    Sin estos Ã­ndices, cada request hace seq scan completo sobre las tablas
     de 700k+ filas.  Con ellos, PostgreSQL puede usar index scan para los
-    WHERE tipo='hist', perfil, neg, subneg más frecuentes.
+    WHERE tipo='hist', perfil, neg, subneg mÃ¡s frecuentes.
 
-    CREATE INDEX CONCURRENTLY no puede ejecutarse dentro de una transacción
-    explícita — se usa autocommit=True via raw connection.
+    CREATE INDEX CONCURRENTLY no puede ejecutarse dentro de una transacciÃ³n
+    explÃ­cita â€” se usa autocommit=True via raw connection.
 
     Solo aplica en PostgreSQL.  En SQLite se omite.
     """
@@ -672,13 +672,13 @@ def ensure_forecast_perf_indexes():
         try:
             with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 conn.execute(text(ddl))
-            print(f"[MIGRATION] Índice Forecast '{idx_name}' verificado/creado.", flush=True)
+            print(f"[MIGRATION] Ã�ndice Forecast '{idx_name}' verificado/creado.", flush=True)
         except Exception as e:
             msg = str(e).lower()
             if "already exists" in msg or "duplicate" in msg:
-                print(f"[MIGRATION] Índice Forecast '{idx_name}': ya existe. (OK)", flush=True)
+                print(f"[MIGRATION] Ã�ndice Forecast '{idx_name}': ya existe. (OK)", flush=True)
             else:
-                print(f"[MIGRATION] Índice Forecast '{idx_name}': advertencia – {e}", flush=True)
+                print(f"[MIGRATION] Ã�ndice Forecast '{idx_name}': advertencia â€“ {e}", flush=True)
 
 
 def ensure_dimensionamiento_text_columns():
@@ -687,8 +687,8 @@ def ensure_dimensionamiento_text_columns():
     tablas de dimensionamiento en PostgreSQL.
 
     IDEMPOTENTE: verifica information_schema antes de cada ALTER. Si la columna
-    ya es TEXT (deploys posteriores), la operación no se ejecuta y el impacto
-    en memoria es prácticamente nulo.
+    ya es TEXT (deploys posteriores), la operaciÃ³n no se ejecuta y el impacto
+    en memoria es prÃ¡cticamente nulo.
     """
     if IS_SQLITE:
         print("[MIGRATION] ensure_dimensionamiento_text_columns: SQLite, saltando.", flush=True)
@@ -720,7 +720,7 @@ def ensure_dimensionamiento_text_columns():
                 print(f"[MIGRATION] {table}.{col}: ya es TEXT. (OK)", flush=True)
                 continue
             if not current_type:
-                # Tabla o columna no existe aún — se creará con el tipo correcto
+                # Tabla o columna no existe aÃºn â€” se crearÃ¡ con el tipo correcto
                 print(f"[MIGRATION] {table}.{col}: columna no encontrada, saltando.", flush=True)
                 continue
             # Needs conversion
@@ -730,7 +730,7 @@ def ensure_dimensionamiento_text_columns():
                 print(f"[MIGRATION] {table}.{col}: convertida a TEXT.", flush=True)
                 any_altered = True
             except Exception as e:
-                print(f"[MIGRATION] {table}.{col}: advertencia ALTER TYPE – {e}", flush=True)
+                print(f"[MIGRATION] {table}.{col}: advertencia ALTER TYPE â€“ {e}", flush=True)
 
     if any_altered:
         print("[MIGRATION] ensure_dimensionamiento_text_columns: columnas convertidas.", flush=True)
@@ -740,14 +740,14 @@ def ensure_dimensionamiento_text_columns():
 
 def ensure_dimensionamiento_summary_perf_indexes():
     """
-    Crea índices compuestos en dimensionamiento_family_monthly_summary para
-    acelerar las consultas de agregación generadas por cada widget del dashboard.
+    Crea Ã­ndices compuestos en dimensionamiento_family_monthly_summary para
+    acelerar las consultas de agregaciÃ³n generadas por cada widget del dashboard.
 
-    La tabla resumen ya tiene índices en columnas individuales, pero cuando
-    hay filtros activos + agregación, PostgreSQL necesita índices compuestos
-    que cubran las columnas del WHERE y del SELECT simultáneamente.
+    La tabla resumen ya tiene Ã­ndices en columnas individuales, pero cuando
+    hay filtros activos + agregaciÃ³n, PostgreSQL necesita Ã­ndices compuestos
+    que cubran las columnas del WHERE y del SELECT simultÃ¡neamente.
 
-    Índices creados:
+    Ã�ndices creados:
       - ix_dim_sum_is_client_cliente  : speeds KPIs client count + clients_by_result
       - ix_dim_sum_resultado_plat     : speeds results_breakdown con filtro plataforma
       - ix_dim_sum_provincia_month    : speeds geo_distribution con filtro fecha
@@ -755,7 +755,7 @@ def ensure_dimensionamiento_summary_perf_indexes():
       - ix_dim_sum_familia_qty        : speeds top_families / family_consumption
 
     Solo aplica en PostgreSQL. CREATE INDEX CONCURRENTLY no puede ejecutarse
-    dentro de una transacción explícita.
+    dentro de una transacciÃ³n explÃ­cita.
     """
     if IS_SQLITE:
         print("[MIGRATION] ensure_dimensionamiento_summary_perf_indexes: SQLite, saltando.", flush=True)
@@ -797,10 +797,64 @@ def ensure_dimensionamiento_summary_perf_indexes():
         try:
             with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 conn.execute(text(ddl))
-            print(f"[MIGRATION] Índice summary '{idx_name}' verificado/creado.", flush=True)
+            print(f"[MIGRATION] Ã�ndice summary '{idx_name}' verificado/creado.", flush=True)
         except Exception as e:
             msg = str(e).lower()
             if "already exists" in msg or "duplicate" in msg:
-                print(f"[MIGRATION] Índice summary '{idx_name}': ya existe. (OK)", flush=True)
+                print(f"[MIGRATION] Ã�ndice summary '{idx_name}': ya existe. (OK)", flush=True)
             else:
-                print(f"[MIGRATION] Índice summary '{idx_name}': advertencia – {e}", flush=True)
+                print(f"[MIGRATION] Ã�ndice summary '{idx_name}': advertencia â€“ {e}", flush=True)
+
+def ensure_cliente_visible_columns():
+    """
+    Agrega la columna cliente_visible a dimensionamiento_records, 
+    corrige is_client para registros no homologados, y recrea la 
+    tabla resumen para incluir las nuevas columnas y restricciones.
+    """
+    print("[MIGRATION] Verificando columna cliente_visible en dimensionamiento_records...", flush=True)
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_records ADD COLUMN cliente_visible TEXT",
+            "dimensionamiento_records.cliente_visible"
+        )
+    
+    # Backfill para dimensionamiento_records
+    print("[MIGRATION] Ejecutando backfill data para cliente_visible e is_client en records...", flush=True)
+    with engine.begin() as conn:
+        # 1. Corregir is_client: 0 si homologado es invalido o SIN DATO
+        conn.execute(
+            text("""
+            UPDATE dimensionamiento_records
+            SET is_client = 0
+            WHERE TRIM(COALESCE(cliente_nombre_homologado, '')) = '' 
+               OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
+            """)
+        )
+
+        # 2. Corregir cliente_visible
+        conn.execute(
+            text("""
+            UPDATE dimensionamiento_records
+            SET cliente_visible = CASE 
+                WHEN TRIM(COALESCE(cliente_nombre_homologado, '')) = '' 
+                     OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
+                THEN cliente_nombre_original
+                ELSE cliente_nombre_homologado
+            END
+            """)
+        )
+
+    # Recreamos la tabla summary para asegurar que tiene todas las columnas y el UniqueConstraint actualizado.
+    # Simplemente vaciarla no actualiza las restricciones si la columna se agregó via ALTER.
+    print("[MIGRATION] Recreando tabla dimensionamiento_family_monthly_summary...", flush=True)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS dimensionamiento_family_monthly_summary"))
+        from web_comparativas.models import Base
+        Base.metadata.create_all(bind=engine)
+        print("[MIGRATION] Tabla summary recreada exitosamente.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
+
+    print("[MIGRATION] SUCCESS: cliente_visible and is_client fixes applied.", flush=True)
