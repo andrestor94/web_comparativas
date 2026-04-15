@@ -910,21 +910,14 @@ def ensure_dimensionamiento_summary_perf_indexes():
 
 def ensure_cliente_visible_columns():
     """
-    Agrega la columna cliente_visible a dimensionamiento_records, 
-    corrige is_client para registros no homologados, y recrea la 
-    tabla resumen para incluir las nuevas columnas y restricciones.
+    SOLO hace cambios de schema mínimos: agrega cliente_visible a records y verifica
+    que la summary tenga la columna.
+
+    El backfill masivo (UPDATE sobre 1M+ rows) fue separado a ensure_cliente_visible_backfill()
+    que se ejecuta en background para no bloquear el startup del servidor web y evitar
+    que Render mate el deploy por port-bind timeout.
     """
     print("[MIGRATION] Verificando columna cliente_visible en dimensionamiento_records...", flush=True)
-    
-    # IMPORTANTE: En Render PostgreSQL, los UPDATES sobre 1M+ de registros superan los 55s 
-    # de timeout por defecto. Desactivamos el timeout para esta sesión de migración.
-    if not IS_SQLITE:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("SET statement_timeout = 0"))
-                print("[MIGRATION] statement_timeout = 0 (OK)", flush=True)
-        except Exception as e:
-            print(f"[MIGRATION] Warning disable timeout: {e}", flush=True)
 
     with engine.begin() as conn:
         _add_column_safe(
@@ -932,30 +925,81 @@ def ensure_cliente_visible_columns():
             "ALTER TABLE dimensionamiento_records ADD COLUMN cliente_visible TEXT",
             "dimensionamiento_records.cliente_visible"
         )
-    
-    # Backfill para dimensionamiento_records
-    print("[MIGRATION] Ejecutando backfill data para cliente_visible e is_client en records...", flush=True)
-    with engine.begin() as conn:
-        # Desactivar timeout también para esta transacción si engine.begin() abre una nueva conexión
-        if not IS_SQLITE:
-            conn.execute(text("SET statement_timeout = 0"))
 
-        # 1. Corregir is_client: 0 si homologado es invalido o SIN DATO
+    # Guard de idempotencia en summary: solo recrea si la columna todavía no existe.
+    print("[MIGRATION] Verificando columna cliente_visible en summary...", flush=True)
+    if not _column_exists("dimensionamiento_family_monthly_summary", "cliente_visible"):
+        print(
+            "[MIGRATION] Summary sin cliente_visible: recreando tabla con schema actualizado...",
+            flush=True,
+        )
+        try:
+            _recreate_dimensionamiento_summary_table()
+            print("[MIGRATION] Tabla summary recreada exitosamente con nueva schema.", flush=True)
+        except Exception as e:
+            print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
+    else:
+        print("[MIGRATION] Summary ya tiene cliente_visible (OK). No se requiere recreación.", flush=True)
+
+    print(
+        "[MIGRATION] SUCCESS: cliente_visible schema checks done. "
+        "Backfill pesado diferido a background (ensure_cliente_visible_backfill).",
+        flush=True,
+    )
+
+
+def ensure_cliente_visible_backfill():
+    """
+    Backfill de cliente_visible e is_client en dimensionamiento_records.
+
+    DEBE correrse en background, NUNCA en startup bloqueante.
+
+    Pre-check rápido con EXISTS: si no hay filas con cliente_visible NULL/vacío,
+    es un no-op instantáneo (no hace ningún UPDATE). Cuando los records ya están
+    poblados (el caso normal tras primer deploy) el costo es ~1-2s de index scan.
+    """
+    if IS_SQLITE:
+        return
+
+    print("[MIGRATION] Backfill cliente_visible: verificando si hay NULLs...", flush=True)
+    with engine.connect() as conn:
+        needs_backfill = conn.execute(
+            text(
+                "SELECT EXISTS("
+                "  SELECT 1 FROM dimensionamiento_records"
+                "  WHERE cliente_visible IS NULL OR cliente_visible = ''"
+                "  LIMIT 1"
+                ")"
+            )
+        ).scalar()
+
+    if not needs_backfill:
+        print("[MIGRATION] Backfill cliente_visible: sin NULLs, skip. (OK)", flush=True)
+        return
+
+    print("[MIGRATION] Backfill cliente_visible: hay NULLs, ejecutando UPDATEs...", flush=True)
+    with engine.begin() as conn:
+        conn.execute(text("SET statement_timeout = 0"))
+
+        # 1. Corregir is_client para registros sin homologado válido
         conn.execute(
             text("""
             UPDATE dimensionamiento_records
             SET is_client = FALSE
-            WHERE TRIM(COALESCE(cliente_nombre_homologado, '')) = '' 
-               OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
+            WHERE (cliente_visible IS NULL OR cliente_visible = '')
+              AND (
+                TRIM(COALESCE(cliente_nombre_homologado, '')) = ''
+                OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
+              )
             """)
         )
 
-        # 2. Corregir cliente_visible (solo si es NULL o vacío para evitar retrabajo innecesario)
+        # 2. Poblar cliente_visible donde falta
         conn.execute(
             text("""
             UPDATE dimensionamiento_records
-            SET cliente_visible = CASE 
-                WHEN TRIM(COALESCE(cliente_nombre_homologado, '')) = '' 
+            SET cliente_visible = CASE
+                WHEN TRIM(COALESCE(cliente_nombre_homologado, '')) = ''
                      OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
                 THEN cliente_nombre_original
                 ELSE cliente_nombre_homologado
@@ -964,23 +1008,4 @@ def ensure_cliente_visible_columns():
             """)
         )
 
-    # Actualizar dimensionamiento_family_monthly_summary para incluir cliente_visible.
-    # Guard de idempotencia: solo recrea si la columna todavía no existe.
-    # Esto evita que la summary sea destruida en cada restart (bug anterior).
-    print("[MIGRATION] Verificando columna cliente_visible en summary...", flush=True)
-    if not _column_exists("dimensionamiento_family_monthly_summary", "cliente_visible"):
-        print(
-            "[MIGRATION] Summary sin cliente_visible: recreando tabla con schema actualizado...",
-            flush=True,
-        )
-        try:
-            # _recreate_dimensionamiento_summary_table usa tables=[...] en lugar de create_all
-            # sin filtro, lo que es más seguro y ya está probado en ensure_dimensionamiento_summary_populated.
-            _recreate_dimensionamiento_summary_table()
-            print("[MIGRATION] Tabla summary recreada exitosamente con nueva schema.", flush=True)
-        except Exception as e:
-            print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
-    else:
-        print("[MIGRATION] Summary ya tiene cliente_visible (OK). No se requiere recreación.", flush=True)
-
-    print("[MIGRATION] SUCCESS: cliente_visible and is_client fixes applied.", flush=True)
+    print("[MIGRATION] Backfill cliente_visible: UPDATEs completados.", flush=True)
