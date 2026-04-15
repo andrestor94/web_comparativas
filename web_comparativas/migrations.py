@@ -1,6 +1,6 @@
 import datetime as dt
 from pathlib import Path
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from web_comparativas.models import engine, IS_SQLITE, ForecastUserOverride
 
 
@@ -295,6 +295,14 @@ def ensure_dimensionamiento_summary_populated():
 
         session = SessionLocal()
         try:
+            raw_has_visible = _column_exists(
+                "dimensionamiento_records",
+                "cliente_visible",
+            )
+            summary_has_visible = _column_exists(
+                "dimensionamiento_family_monthly_summary",
+                "cliente_visible",
+            )
             records_count = session.execute(
                 select(sa_func.count()).select_from(DimensionamientoRecord)
             ).scalar_one()
@@ -311,7 +319,9 @@ def ensure_dimensionamiento_summary_populated():
             print(
                 "[MIGRATION] Dimensionamiento: "
                 f"records={records_count} summary_rows={summary_count} "
-                f"min_month={raw_min_month!r} max_month={raw_max_month!r}",
+                f"min_month={raw_min_month!r} max_month={raw_max_month!r} "
+                f"raw_has_cliente_visible={raw_has_visible} "
+                f"summary_has_cliente_visible={summary_has_visible}",
                 flush=True,
             )
 
@@ -326,20 +336,19 @@ def ensure_dimensionamiento_summary_populated():
                     and "-" in max_month_text
                 )
             )
-            latest_run = session.execute(
-                select(DimensionamientoImportRun)
-                .order_by(
-                    DimensionamientoImportRun.status.desc(),
-                    DimensionamientoImportRun.id.desc(),
-                )
-                .limit(1)
-            ).scalar_one_or_none()
+            latest_run = _ensure_dimensionamiento_summary_import_run(
+                session,
+                records_count,
+                "summary_check_bootstrap",
+            )
             summary_strategy = ((latest_run.summary or {}) if latest_run else {}).get("client_name_strategy")
             summary_has_current_client_strategy = (
                 summary_count == 0 or summary_strategy == "visible_fallback_v1"
             )
             needs_rebuild = records_count > 0 and (
                 summary_count == 0
+                or not raw_has_visible
+                or not summary_has_visible
                 or not summary_has_valid_months
                 or not summary_has_current_client_strategy
             )
@@ -397,16 +406,33 @@ def ensure_dimensionamiento_summary_populated():
                 if not IS_SQLITE:
                     session.execute(text("SET LOCAL statement_timeout = 0"))
 
+                if not summary_has_visible:
+                    print(
+                        "[MIGRATION] Summary sin cliente_visible: recreando tabla antes del rebuild.",
+                        flush=True,
+                    )
+                    _recreate_dimensionamiento_summary_table()
+
                 _rebuild_summary_table(session, latest_run.id)
                 summary_meta = dict(latest_run.summary or {})
                 summary_meta["client_name_strategy"] = SUMMARY_CLIENT_NAME_STRATEGY
                 latest_run.summary = summary_meta
                 session.add(latest_run)
                 session.commit()
+                summary_has_visible_after = _column_exists(
+                    "dimensionamiento_family_monthly_summary",
+                    "cliente_visible",
+                )
                 print(
-                    f"[MIGRATION] Tabla resumen reconstruida para import_run_id={latest_run.id}.",
+                    "[MIGRATION] Tabla resumen reconstruida para "
+                    f"import_run_id={latest_run.id} "
+                    f"summary_has_cliente_visible={summary_has_visible_after}.",
                     flush=True,
                 )
+                if not summary_has_visible_after:
+                    raise RuntimeError(
+                        "dimensionamiento_family_monthly_summary siguio sin cliente_visible"
+                    )
             else:
                 print("[MIGRATION] Tabla resumen OK, no requiere reconstrucciÃ³n.", flush=True)
         except Exception as e:
@@ -601,6 +627,83 @@ def _col_type(table: str, column: str) -> str:
         return (row[0] or "").lower() if row else ""
     except Exception:
         return ""
+
+
+def _table_columns(table: str) -> set[str]:
+    try:
+        inspector = inspect(engine)
+        return {column["name"] for column in inspector.get_columns(table)}
+    except Exception:
+        return set()
+
+
+def _column_exists(table: str, column: str) -> bool:
+    return column in _table_columns(table)
+
+
+def _recreate_dimensionamiento_summary_table() -> None:
+    from web_comparativas.dimensionamiento.models import DimensionamientoFamilyMonthlySummary
+    from web_comparativas.models import Base
+
+    drop_stmt = "DROP TABLE IF EXISTS dimensionamiento_family_monthly_summary"
+    if not IS_SQLITE:
+        drop_stmt += " CASCADE"
+
+    with engine.begin() as conn:
+        conn.execute(text(drop_stmt))
+
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[DimensionamientoFamilyMonthlySummary.__table__],
+    )
+
+
+def _ensure_dimensionamiento_summary_import_run(session, records_count: int, reason: str):
+    from sqlalchemy import select
+    from web_comparativas.dimensionamiento.models import DimensionamientoImportRun
+
+    latest_run = session.execute(
+        select(DimensionamientoImportRun)
+        .where(DimensionamientoImportRun.status == "success")
+        .order_by(
+            DimensionamientoImportRun.finished_at.desc(),
+            DimensionamientoImportRun.id.desc(),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest_run is not None:
+        return latest_run
+
+    latest_run = DimensionamientoImportRun(
+        source_path="reconstructed://dimensionamiento_records",
+        source_hash=None,
+        source_mtime=None,
+        mode="rebuild-summary",
+        status="success",
+        chunk_size=0,
+        started_at=dt.datetime.utcnow(),
+        finished_at=dt.datetime.utcnow(),
+        rows_processed=records_count,
+        rows_inserted=0,
+        rows_updated=records_count,
+        rows_rejected=0,
+        expected_columns=None,
+        observed_columns=None,
+        summary={
+            "client_name_strategy": "visible_fallback_v1",
+            "reason": reason,
+            "records_count": records_count,
+        },
+        error_message=None,
+    )
+    session.add(latest_run)
+    session.commit()
+    session.refresh(latest_run)
+    print(
+        f"[MIGRATION] Import_run sintético creado id={latest_run.id} reason={reason}.",
+        flush=True,
+    )
+    return latest_run
 
 
 def ensure_forecast_perf_indexes():
@@ -841,7 +944,7 @@ def ensure_cliente_visible_columns():
         conn.execute(
             text("""
             UPDATE dimensionamiento_records
-            SET is_client = 0
+            SET is_client = FALSE
             WHERE TRIM(COALESCE(cliente_nombre_homologado, '')) = '' 
                OR UPPER(TRIM(COALESCE(cliente_nombre_homologado, ''))) IN ('SIN DATO', 'SIN_DATO')
             """)
@@ -861,25 +964,23 @@ def ensure_cliente_visible_columns():
             """)
         )
 
-    # Recreamos la tabla summary para asegurar que tiene todas las columnas y el UniqueConstraint actualizado.
-    # Simplemente vaciarla no actualiza las restricciones si la columna se agregó via ALTER.
-    print("[MIGRATION] Recreando tabla dimensionamiento_family_monthly_summary...", flush=True)
-    try:
-        with engine.begin() as conn:
-            # En PostgreSQL, CASCADE asegura que se borren índices o vistas dependientes si existen.
-            drop_stmt = "DROP TABLE IF EXISTS dimensionamiento_family_monthly_summary CASCADE"
-            conn.execute(text(drop_stmt))
-        
-        # IMPORTANTE: Importar modelos antes de create_all para que se registren en Base.metadata
-        from web_comparativas.dimensionamiento.models import (
-            DimensionamientoRecord,
-            DimensionamientoFamilyMonthlySummary,
-            DimensionamientoImportRun
+    # Actualizar dimensionamiento_family_monthly_summary para incluir cliente_visible.
+    # Guard de idempotencia: solo recrea si la columna todavía no existe.
+    # Esto evita que la summary sea destruida en cada restart (bug anterior).
+    print("[MIGRATION] Verificando columna cliente_visible en summary...", flush=True)
+    if not _column_exists("dimensionamiento_family_monthly_summary", "cliente_visible"):
+        print(
+            "[MIGRATION] Summary sin cliente_visible: recreando tabla con schema actualizado...",
+            flush=True,
         )
-        from web_comparativas.models import Base
-        Base.metadata.create_all(bind=engine)
-        print("[MIGRATION] Tabla summary recreada exitosamente.", flush=True)
-    except Exception as e:
-        print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
+        try:
+            # _recreate_dimensionamiento_summary_table usa tables=[...] en lugar de create_all
+            # sin filtro, lo que es más seguro y ya está probado en ensure_dimensionamiento_summary_populated.
+            _recreate_dimensionamiento_summary_table()
+            print("[MIGRATION] Tabla summary recreada exitosamente con nueva schema.", flush=True)
+        except Exception as e:
+            print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
+    else:
+        print("[MIGRATION] Summary ya tiene cliente_visible (OK). No se requiere recreación.", flush=True)
 
     print("[MIGRATION] SUCCESS: cliente_visible and is_client fixes applied.", flush=True)
