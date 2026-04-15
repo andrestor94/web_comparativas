@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
 import sys
 from types import SimpleNamespace
@@ -26,13 +27,23 @@ def test_current_family_consumption_payload_does_not_need_refresh():
         "family_consumption": {
             "months": ["01", "02"],
             "rows": [{"familia": "A", "values": [10, 20]}],
-            "total": 120,
-            "page": 1,
-            "page_size": qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+            "total": 1,
         }
     }
 
     assert qs._family_consumption_payload_needs_refresh(current_payload) is False
+
+
+def test_truncated_family_consumption_payload_needs_refresh():
+    truncated_payload = {
+        "family_consumption": {
+            "months": ["01"],
+            "rows": [{"familia": "A", "values": [10]}],
+            "total": 2,
+        }
+    }
+
+    assert qs._family_consumption_payload_needs_refresh(truncated_payload) is True
 
 
 def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
@@ -50,9 +61,7 @@ def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
         "family_consumption": {
             "months": ["01"],
             "rows": [{"familia": "A", "values": [10]}],
-            "total": 345,
-            "page": 1,
-            "page_size": qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
+            "total": 1,
         }
     }
     refresh_calls: list[tuple[object, dict, qs.DimensionamientoFilters]] = []
@@ -72,5 +81,34 @@ def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
     result = qs.get_dashboard_bootstrap(object(), filters=qs.build_filters(), include_status=False)
 
     assert refresh_calls
-    assert result["family_consumption"]["total"] == 345
-    assert result["family_consumption"]["page_size"] == qs.DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE
+    assert result["family_consumption"]["total"] == 1
+    assert "page_size" not in result["family_consumption"]
+
+
+def test_aggregate_bootstrap_family_consumption_keeps_full_universe():
+    rows = [
+        (
+            dt.date(2024, 1, 1),
+            "BIONEXO",
+            f"Cliente {index}",
+            "Buenos Aires",
+            f"Familia {index:02d}",
+            "4",
+            "1",
+            "Ganada",
+            True,
+            True,
+            float(500 - index),
+            1,
+        )
+        for index in range(55)
+    ]
+
+    payload = qs._aggregate_bootstrap_from_summary_rows(rows)
+
+    assert payload["family_consumption"]["total"] == 55
+    assert len(payload["family_consumption"]["rows"]) == 55
+    assert payload["family_consumption"]["rows"][0]["familia"] == "Familia 00"
+    assert "page_size" not in payload["family_consumption"]
+    assert len(payload["top_families"]) == 55
+    assert payload["top_families"][0]["familia"] == "Familia 00"

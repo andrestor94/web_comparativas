@@ -26,8 +26,7 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v2"
-DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE = 50
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v4"
 
 # ── In-memory query result cache ─────────────────────────────────────────────
 # Evita recalcular resultados idénticos cuando el usuario cambia y revierte
@@ -771,14 +770,10 @@ def _build_dashboard_bootstrap_payload(session: Session) -> dict[str, Any]:
         "kpis": get_kpis(session, base_filters),
         "series": get_series(session, base_filters),
         "results": get_results_breakdown(session, base_filters),
-        "top_families": get_top_families(session, base_filters, limit=10),
+        "top_families": get_top_families(session, base_filters),
         "geo": get_geography_distribution(session, base_filters),
         "clients_by_result": get_clients_by_result(session, base_filters, limit=10),
-        "family_consumption": get_family_consumption_table(
-            session,
-            base_filters,
-            limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
-        ),
+        "family_consumption": get_family_consumption_table(session, base_filters),
     }
 
 
@@ -788,11 +783,18 @@ def _family_consumption_payload_needs_refresh(payload: dict[str, Any] | None) ->
     family_consumption = payload.get("family_consumption")
     if not isinstance(family_consumption, dict):
         return True
-    if family_consumption.get("total") is None:
+    rows = family_consumption.get("rows")
+    if not isinstance(rows, list):
         return True
-    if family_consumption.get("page_size") != DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE:
+    if not isinstance(family_consumption.get("months"), list):
         return True
-    if family_consumption.get("page") != 1:
+    total = family_consumption.get("total")
+    if total is None:
+        return True
+    try:
+        if int(total) != len(rows):
+            return True
+    except (TypeError, ValueError):
         return True
     return False
 
@@ -803,12 +805,7 @@ def _refresh_bootstrap_family_consumption(
     filters: DimensionamientoFilters,
 ) -> dict[str, Any]:
     refreshed = dict(payload)
-    refreshed["family_consumption"] = get_family_consumption_table(
-        session,
-        filters,
-        limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
-        offset=0,
-    )
+    refreshed["family_consumption"] = get_family_consumption_table(session, filters)
     return refreshed
 
 
@@ -1267,14 +1264,14 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
         raise
 
 
-def get_top_families(session: Session, filters: DimensionamientoFilters, limit: int = 10) -> list[dict[str, Any]]:
-    _ck = _make_cache_key("get_top_families", filters, limit=limit)
+def get_top_families(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    _ck = _make_cache_key("get_top_families", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
         logger.debug("[DIM][CACHE] get_top_families hit key=%s", _ck)
         return _hit
 
-    started_at = _log_query_start("get_top_families", filters, limit=limit)
+    started_at = _log_query_start("get_top_families", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(session, "TOP_FAMILIES")
@@ -1292,8 +1289,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
             )
             .where(model.familia.is_not(None))
             .group_by(model.familia)
-            .order_by(count_expr.desc(), model.familia.asc())
-            .limit(limit),
+            .order_by(count_expr.desc(), model.familia.asc()),
             model,
             filters,
             applied_conditions,
@@ -1311,7 +1307,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters, limit: 
         _cache_set(_ck, payload)
         return payload
     except Exception:
-        logger.exception("[DIM][QUERY] get_top_families failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        logger.exception("[DIM][QUERY] get_top_families failed filters=%s", _filters_debug_dict(filters))
         raise
 
 
@@ -1454,16 +1450,14 @@ def get_clients_by_result(
 def get_family_consumption_table(
     session: Session,
     filters: DimensionamientoFilters,
-    limit: int = DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
-    offset: int = 0,
 ) -> dict[str, Any]:
-    _ck = _make_cache_key("get_family_consumption_table", filters, limit=limit, offset=offset)
+    _ck = _make_cache_key("get_family_consumption_table", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
         logger.debug("[DIM][CACHE] get_family_consumption_table hit key=%s", _ck)
         return _hit
 
-    started_at = _log_query_start("get_family_consumption_table", filters, limit=limit, offset=offset)
+    started_at = _log_query_start("get_family_consumption_table", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(session, "FAMILY_CONSUMPTION")
@@ -1472,50 +1466,34 @@ def get_family_consumption_table(
             0,
         )
 
-        # Paso 0: contar el total de familias distintas para paginación.
-        count_conditions: list[str] = []
-        count_stmt = _apply_common_filters(
-            select(func.count(distinct(model.familia))).where(model.familia.is_not(None)),
-            model,
-            filters,
-            count_conditions,
-        )
-        total_families: int = session.execute(count_stmt).scalar_one() or 0
-
-        # Paso 1: familias ordenadas por cantidad total, con paginación LIMIT/OFFSET.
+        # Paso 1: obtener el universo completo de familias ordenado por cantidad total.
         applied_conditions: list[str] = []
-        top_families_stmt = _apply_common_filters(
+        family_totals_stmt = _apply_common_filters(
             select(
                 model.familia,
                 total_expr.label("grand_total"),
             )
             .where(model.familia.is_not(None))
             .group_by(model.familia)
-            .order_by(total_expr.desc())
-            .limit(limit)
-            .offset(offset),
+            .order_by(total_expr.desc(), model.familia.asc()),
             model,
             filters,
             applied_conditions,
         )
-        _log_query_statement(session, "get_family_consumption_table.top_families", model, top_families_stmt, filters, applied_conditions)
-        top_families_rows = session.execute(top_families_stmt).all()
-        if not top_families_rows:
-            page = (offset // limit) + 1 if limit else 1
+        _log_query_statement(session, "get_family_consumption_table.family_totals", model, family_totals_stmt, filters, applied_conditions)
+        family_totals_rows = session.execute(family_totals_stmt).all()
+        if not family_totals_rows:
             payload = {
                 "months": [],
                 "rows": [],
-                "total": total_families,
-                "page": page,
-                "page_size": limit,
-                "offset": offset,
+                "total": 0,
             }
-            _log_query_success("get_family_consumption_table", started_at, months=0, rows=0, total=total_families)
+            _log_query_success("get_family_consumption_table", started_at, months=0, rows=0, total=0)
             return payload
 
-        top_families = [f for f, _ in top_families_rows]
+        ordered_families = [family or "Sin familia" for family, _ in family_totals_rows]
 
-        # Paso 2: query mensual solo para las familias de esta página.
+        # Paso 2: consumir el detalle mensual completo y calcular el promedio real por mes entre años.
         if model is DimensionamientoRecord:
             month_bucket = cast(_month_expr(model.fecha), Date) if not IS_SQLITE else func.date(model.fecha, "start of month")
         else:
@@ -1527,14 +1505,13 @@ def get_family_consumption_table(
                 model.familia,
                 total_expr.label("total"),
             )
-            .where(model.familia.in_(top_families))
+            .where(model.familia.is_not(None))
             .group_by(month_bucket, model.familia)
             .order_by(month_bucket.asc(), model.familia.asc()),
             model,
             filters,
             monthly_conditions,
         )
-        monthly_conditions.append(f"familia IN {top_families}")
         _log_query_statement(session, "get_family_consumption_table.monthly", model, monthly_stmt, filters, monthly_conditions)
         rows = session.execute(monthly_stmt).all()
 
@@ -1547,7 +1524,7 @@ def get_family_consumption_table(
             monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
 
         data = []
-        for family in top_families:
+        for family in ordered_families:
             family_months = monthly_values.get(family, {})
             data.append(
                 {
@@ -1565,16 +1542,13 @@ def get_family_consumption_table(
         payload = {
             "months": month_keys,
             "rows": data,
-            "total": total_families,
-            "page": (offset // limit) + 1 if limit else 1,
-            "page_size": limit,
-            "offset": offset,
+            "total": len(data),
         }
-        _log_query_success("get_family_consumption_table", started_at, months=len(month_keys), rows=len(data), total=total_families)
+        _log_query_success("get_family_consumption_table", started_at, months=len(month_keys), rows=len(data), total=len(data))
         _cache_set(_ck, payload)
         return payload
     except Exception:
-        logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s limit=%s offset=%s", _filters_debug_dict(filters), limit, offset)
+        logger.exception("[DIM][QUERY] get_family_consumption_table failed filters=%s", _filters_debug_dict(filters))
         raise
 
 
@@ -1622,9 +1596,7 @@ def _aggregate_bootstrap_from_summary_rows(
     rows: list[tuple[Any, ...]],
     *,
     series_limit: int = 5,
-    top_families_limit: int = 10,
     clients_limit: int = 10,
-    family_consumption_limit: int = DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
 ) -> dict[str, Any]:
     distinct_clients: set[str] = set()
     distinct_provincias: set[str] = set()
@@ -1644,10 +1616,12 @@ def _aggregate_bootstrap_from_summary_rows(
     result_totals: dict[str, int] = defaultdict(int)
     family_rows: dict[str, int] = defaultdict(int)
     family_quantities: dict[str, float] = defaultdict(float)
+    family_consumption_quantities: dict[str, float] = defaultdict(float)
     geo_totals: dict[str, int] = defaultdict(int)
     client_totals: dict[str, int] = defaultdict(int)
     client_result_totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     family_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    family_consumption_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     for (
         month_value,
@@ -1699,6 +1673,9 @@ def _aggregate_bootstrap_from_summary_rows(
         result_totals[result_name] += row_count
         geo_totals[province_name] += row_count
         family_month_totals[family_name][month_iso] += quantity
+        if familia not in (None, ""):
+            family_consumption_quantities[family_name] += quantity
+            family_consumption_month_totals[family_name][month_iso] += quantity
 
         client_name = _real_client_name(cliente)
         if client_name:
@@ -1733,7 +1710,7 @@ def _aggregate_bootstrap_from_summary_rows(
             "renglones": rows_count,
             "cantidad": float(family_quantities.get(family_name, 0)),
         }
-        for family_name, rows_count in sorted(family_rows.items(), key=lambda item: (-item[1], item[0]))[:top_families_limit]
+        for family_name, rows_count in sorted(family_rows.items(), key=lambda item: (-item[1], item[0]))
     ]
 
     geo_payload = [
@@ -1758,13 +1735,13 @@ def _aggregate_bootstrap_from_summary_rows(
 
     month_keys = [f"{index:02d}" for index in range(1, 13)]
     family_consumption_payload = []
-    top_family_consumption = [
+    ordered_family_consumption = [
         family_name
-        for family_name, _ in sorted(family_quantities.items(), key=lambda item: (-item[1], item[0]))[:family_consumption_limit]
+        for family_name, _ in sorted(family_consumption_quantities.items(), key=lambda item: (-item[1], item[0]))
     ]
-    for family_name in top_family_consumption:
+    for family_name in ordered_family_consumption:
         month_lists: dict[str, list[float]] = defaultdict(list)
-        for month_iso, quantity in family_month_totals.get(family_name, {}).items():
+        for month_iso, quantity in family_consumption_month_totals.get(family_name, {}).items():
             month_key = month_iso[5:7] if len(month_iso) >= 7 else "01"
             month_lists[month_key].append(quantity)
         family_consumption_payload.append(
@@ -1806,9 +1783,7 @@ def _aggregate_bootstrap_from_summary_rows(
         "family_consumption": {
             "months": month_keys,
             "rows": family_consumption_payload,
-            "total": len(distinct_familias),
-            "page": 1,
-            "page_size": family_consumption_limit,
+            "total": len(family_consumption_payload),
         },
     }
 
@@ -1914,14 +1889,10 @@ def get_dashboard_bootstrap(
                 "kpis": get_kpis(session, filters),
                 "series": get_series(session, filters),
                 "results": get_results_breakdown(session, filters),
-                "top_families": get_top_families(session, filters, limit=10),
+                "top_families": get_top_families(session, filters),
                 "geo": get_geography_distribution(session, filters),
                 "clients_by_result": get_clients_by_result(session, filters, limit=10),
-                "family_consumption": get_family_consumption_table(
-                    session,
-                    filters,
-                    limit=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
-                ),
+                "family_consumption": get_family_consumption_table(session, filters),
                 "meta": {
                     "source": "live",
                     "stale": False,

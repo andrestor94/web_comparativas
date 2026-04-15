@@ -21,10 +21,21 @@ document.addEventListener('DOMContentLoaded', () => {
         currentDateRange: { min: null, max: null },
         bootstrapCache: new Map(),
         negocioLabels: { unidades: {}, subunidades: {} },
-        pivotPage: 1,
-        pivotPageSize: 50,
-        pivotTotal: 0,
+        familyListData: [],
+        familyListRenderRaf: null,
+        familyListLastRenderKey: '',
+        familyListBody: null,
+        pivotData: { months: [], rows: [], total: 0 },
+        pivotFilteredRows: [],
+        pivotSearchTerm: '',
+        pivotRenderRaf: null,
+        pivotLastRenderKey: '',
     };
+
+    const FAMILY_LIST_ROW_HEIGHT = 42;
+    const FAMILY_LIST_OVERSCAN = 8;
+    const PIVOT_ROW_HEIGHT = 42;
+    const PIVOT_OVERSCAN = 10;
 
     // AbortController activo para cancelar request /bootstrap en vuelo
     let _loadAbortController = null;
@@ -411,10 +422,12 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
         familyListContainer:  document.getElementById('familyListContainer'),
+        pivotTableWrap:       document.getElementById('pivotTableWrap'),
         pivotHeader:          document.getElementById('pivotHeader'),
         pivotBody:            document.getElementById('pivotBody'),
-        pivotPagination:      document.getElementById('pivotPagination'),
         pivotTotalLabel:      document.getElementById('pivotTotalLabel'),
+        pivotFamilySearch:    document.getElementById('pivotFamilySearch'),
+        pivotSearchCount:     document.getElementById('pivotSearchCount'),
     };
 
     const reloadBtnDefaultHtml = elements.reloadBtn ? elements.reloadBtn.innerHTML : '';
@@ -495,6 +508,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
+
+        if (elements.familyListContainer) {
+            elements.familyListContainer.addEventListener('scroll', () => {
+                scheduleFamilyListRender();
+            }, { passive: true });
+        }
+
+        if (elements.pivotFamilySearch) {
+            elements.pivotFamilySearch.addEventListener('input', event => {
+                applyPivotSearch(event.target.value, { resetScroll: true });
+            });
+        }
+
+        if (elements.pivotTableWrap) {
+            elements.pivotTableWrap.addEventListener('scroll', () => {
+                schedulePivotBodyRender();
+            }, { passive: true });
+        }
+
+        window.addEventListener('resize', () => {
+            scheduleFamilyListRender(true);
+            schedulePivotBodyRender(true);
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -585,7 +621,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderFamilyList(bootstrap.top_families || []);
         renderMapChart(bootstrap.geo || []);
         renderBarClientChart(bootstrap.clients_by_result || []);
-        renderPivotTable(bootstrap.family_consumption || { months: [], rows: [], total: 0 }, true);
+        renderPivotTable(bootstrap.family_consumption || { months: [], rows: [], total: 0 });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -772,8 +808,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showPivotError(msg) {
         if (elements.pivotHeader) elements.pivotHeader.innerHTML = '';
+        state.pivotLastRenderKey = '';
+        const colspan = Math.max((state.pivotData?.months?.length || 0) + 1, 1);
         if (elements.pivotBody) {
-            elements.pivotBody.innerHTML = `<tr><td colspan="13" class="text-center text-muted py-3 small">${msg || 'No disponible temporalmente'}</td></tr>`;
+            elements.pivotBody.innerHTML = `<tr><td colspan="${colspan}" class="text-center text-muted py-3 small">${msg || 'No disponible temporalmente'}</td></tr>`;
+        }
+        if (elements.pivotSearchCount) {
+            elements.pivotSearchCount.style.display = 'none';
+            elements.pivotSearchCount.textContent = '';
         }
     }
 
@@ -922,6 +964,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderFamilyList(families) {
+        state.familyListData = Array.isArray(families) ? families : [];
+        state.familyListLastRenderKey = '';
+
+        if (!elements.familyListContainer) return;
+        if (!state.familyListData.length) {
+            state.familyListBody = null;
+            elements.familyListContainer.innerHTML = '<div class="text-center text-muted py-4 small">No hay datos para mostrar.</div>';
+            return;
+        }
+
         const table = document.createElement('table');
         table.className = 'tech-table w-100 dim-family-table';
         table.innerHTML = `
@@ -939,20 +991,89 @@ document.addEventListener('DOMContentLoaded', () => {
             </thead>
         `;
         const tbody = document.createElement('tbody');
-        families.forEach(item => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="dim-family-name-cell" title="${item.familia}">
-                    <div class="dim-family-name-text">${item.familia}</div>
-                </td>
-                <td class="text-end small text-muted dim-family-number">${formatInteger(item.renglones)}</td>
-                <td class="text-end fw-bold dim-family-number" style="color:var(--tech-blue-mid);">${formatDecimal(item.cantidad)}</td>
-            `;
-            tbody.appendChild(tr);
-        });
         table.appendChild(tbody);
+        state.familyListBody = tbody;
         elements.familyListContainer.innerHTML = '';
         elements.familyListContainer.appendChild(table);
+        scheduleFamilyListRender(true);
+    }
+
+    function scheduleFamilyListRender(force = false) {
+        if (!state.familyListBody) return;
+
+        if (force) {
+            if (state.familyListRenderRaf) {
+                window.cancelAnimationFrame(state.familyListRenderRaf);
+                state.familyListRenderRaf = null;
+            }
+            renderVisibleFamilyRows();
+            return;
+        }
+
+        if (state.familyListRenderRaf) return;
+        state.familyListRenderRaf = window.requestAnimationFrame(() => {
+            state.familyListRenderRaf = null;
+            renderVisibleFamilyRows();
+        });
+    }
+
+    function renderVisibleFamilyRows() {
+        if (!state.familyListBody || !elements.familyListContainer) return;
+
+        const rows = state.familyListData || [];
+        if (!rows.length) {
+            state.familyListLastRenderKey = 'empty';
+            state.familyListBody.innerHTML = '';
+            return;
+        }
+
+        const viewportHeight = Math.max(elements.familyListContainer.clientHeight || 0, FAMILY_LIST_ROW_HEIGHT);
+        const visibleCount = Math.max(1, Math.ceil(viewportHeight / FAMILY_LIST_ROW_HEIGHT));
+        const scrollTop = elements.familyListContainer.scrollTop || 0;
+        const start = Math.max(0, Math.floor(scrollTop / FAMILY_LIST_ROW_HEIGHT) - FAMILY_LIST_OVERSCAN);
+        const end = Math.min(rows.length, start + visibleCount + (FAMILY_LIST_OVERSCAN * 2));
+        const renderKey = `${start}:${end}:${rows.length}`;
+
+        if (renderKey === state.familyListLastRenderKey) return;
+        state.familyListLastRenderKey = renderKey;
+
+        const fragment = document.createDocumentFragment();
+        const topSpacerHeight = start * FAMILY_LIST_ROW_HEIGHT;
+        const bottomSpacerHeight = Math.max(0, (rows.length - end) * FAMILY_LIST_ROW_HEIGHT);
+
+        if (topSpacerHeight > 0) {
+            fragment.appendChild(createFamilyListSpacerRow(topSpacerHeight));
+        }
+
+        rows.slice(start, end).forEach(item => {
+            const tr = document.createElement('tr');
+            tr.className = 'dim-family-row';
+            tr.innerHTML = `
+                <td class="dim-family-name-cell" title="${item.familia || ''}">
+                    <div class="dim-family-name-text">${item.familia || 'Sin familia'}</div>
+                </td>
+                <td class="text-end small text-muted dim-family-number">${formatInteger(item.renglones)}</td>
+                <td class="text-end fw-bold dim-family-number dim-family-number-qty">${formatDecimal(item.cantidad)}</td>
+            `;
+            fragment.appendChild(tr);
+        });
+
+        if (bottomSpacerHeight > 0) {
+            fragment.appendChild(createFamilyListSpacerRow(bottomSpacerHeight));
+        }
+
+        state.familyListBody.replaceChildren(fragment);
+    }
+
+    function createFamilyListSpacerRow(height) {
+        const tr = document.createElement('tr');
+        tr.className = 'dim-family-spacer-row';
+        const td = document.createElement('td');
+        td.className = 'dim-family-spacer-cell';
+        td.colSpan = 3;
+        td.style.height = `${height}px`;
+        tr.appendChild(td);
+        return tr;
     }
 
     function renderBarClientChart(rows) {
@@ -1004,114 +1125,170 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderPivotTable(data, resetPage = false) {
-        const backendPageSize = Number(data.page_size) > 0 ? Number(data.page_size) : state.pivotPageSize;
-        state.pivotPageSize = backendPageSize;
+    function renderPivotTable(data) {
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
+        const months = Array.isArray(data?.months) ? data.months : [];
+        state.pivotData = {
+            months,
+            rows,
+            total: Number.isFinite(Number(data?.total)) ? Number(data.total) : rows.length,
+        };
+        state.pivotLastRenderKey = '';
 
-        if (resetPage) {
-            state.pivotPage = Number(data.page) > 0 ? Number(data.page) : 1;
-        } else if (Number(data.page) > 0) {
-            state.pivotPage = Number(data.page);
-        }
-        const total = (data.total != null) ? data.total : (data.rows || []).length;
-        state.pivotTotal = total;
-
-        // Actualizar label de total
         if (elements.pivotTotalLabel) {
-            elements.pivotTotalLabel.textContent = `${formatInteger(total)} familias`;
-            elements.pivotTotalLabel.style.display = total > 0 ? 'inline-block' : 'none';
+            elements.pivotTotalLabel.textContent = `${formatInteger(state.pivotData.total)} familias`;
+            elements.pivotTotalLabel.style.display = state.pivotData.total > 0 ? 'inline-block' : 'none';
         }
 
+        renderPivotHeader(months);
+        applyPivotSearch(elements.pivotFamilySearch ? elements.pivotFamilySearch.value : '', { resetScroll: true, force: true });
+    }
+
+    function renderPivotHeader(months) {
+        if (!elements.pivotHeader) return;
         elements.pivotHeader.innerHTML = '';
-        elements.pivotBody.innerHTML = '';
 
         const headerRow = document.createElement('tr');
         const familyHeader = document.createElement('th');
         familyHeader.textContent = 'Familia';
         headerRow.appendChild(familyHeader);
-        (data.months || []).forEach(month => {
+        months.forEach(month => {
             const th = document.createElement('th');
             th.className = 'text-end';
             th.textContent = formatMonthLabel(month);
             headerRow.appendChild(th);
         });
         elements.pivotHeader.appendChild(headerRow);
+    }
 
-        (data.rows || []).forEach(row => {
+    function applyPivotSearch(rawTerm = '', options = {}) {
+        const { resetScroll = false, force = false } = options;
+        const normalizedTerm = normalizePivotSearch(rawTerm);
+        const rows = state.pivotData.rows || [];
+
+        state.pivotSearchTerm = normalizedTerm;
+        state.pivotFilteredRows = normalizedTerm
+            ? rows.filter(row => normalizePivotSearch(row.familia).includes(normalizedTerm))
+            : rows.slice();
+
+        if (elements.pivotTableWrap && resetScroll) {
+            elements.pivotTableWrap.scrollTop = 0;
+        }
+
+        updatePivotSearchMeta();
+        schedulePivotBodyRender(force);
+    }
+
+    function updatePivotSearchMeta() {
+        if (!elements.pivotSearchCount) return;
+
+        const filteredTotal = state.pivotFilteredRows.length;
+        const fullTotal = state.pivotData.total || 0;
+        if (!state.pivotSearchTerm) {
+            elements.pivotSearchCount.style.display = filteredTotal > 0 ? 'inline-flex' : 'none';
+            elements.pivotSearchCount.textContent = filteredTotal > 0
+                ? `${formatInteger(filteredTotal)} familias visibles`
+                : '';
+            return;
+        }
+
+        elements.pivotSearchCount.style.display = 'inline-flex';
+        elements.pivotSearchCount.textContent = `${formatInteger(filteredTotal)} de ${formatInteger(fullTotal)} familias`;
+    }
+
+    function schedulePivotBodyRender(force = false) {
+        if (force) {
+            if (state.pivotRenderRaf) {
+                window.cancelAnimationFrame(state.pivotRenderRaf);
+                state.pivotRenderRaf = null;
+            }
+            renderVisiblePivotRows();
+            return;
+        }
+
+        if (state.pivotRenderRaf) return;
+        state.pivotRenderRaf = window.requestAnimationFrame(() => {
+            state.pivotRenderRaf = null;
+            renderVisiblePivotRows();
+        });
+    }
+
+    function renderVisiblePivotRows() {
+        if (!elements.pivotBody) return;
+
+        const rows = state.pivotFilteredRows || [];
+        const months = state.pivotData.months || [];
+        const totalColumns = months.length + 1;
+
+        if (rows.length === 0) {
+            state.pivotLastRenderKey = `empty:${state.pivotSearchTerm}`;
+            elements.pivotBody.innerHTML = `
+                <tr>
+                    <td colspan="${Math.max(totalColumns, 1)}" class="text-center text-muted py-3 small">
+                        ${state.pivotSearchTerm ? 'No hay familias que coincidan con la búsqueda.' : 'No hay datos para mostrar.'}
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const viewportHeight = Math.max(elements.pivotTableWrap?.clientHeight || 0, PIVOT_ROW_HEIGHT);
+        const visibleCount = Math.max(1, Math.ceil(viewportHeight / PIVOT_ROW_HEIGHT));
+        const scrollTop = elements.pivotTableWrap?.scrollTop || 0;
+        const start = Math.max(0, Math.floor(scrollTop / PIVOT_ROW_HEIGHT) - PIVOT_OVERSCAN);
+        const end = Math.min(rows.length, start + visibleCount + (PIVOT_OVERSCAN * 2));
+        const renderKey = `${start}:${end}:${rows.length}:${months.join('|')}:${state.pivotSearchTerm}`;
+
+        if (renderKey === state.pivotLastRenderKey) return;
+        state.pivotLastRenderKey = renderKey;
+
+        const fragment = document.createDocumentFragment();
+        const topSpacerHeight = start * PIVOT_ROW_HEIGHT;
+        const bottomSpacerHeight = Math.max(0, (rows.length - end) * PIVOT_ROW_HEIGHT);
+
+        if (topSpacerHeight > 0) {
+            fragment.appendChild(createPivotSpacerRow(topSpacerHeight, totalColumns));
+        }
+
+        rows.slice(start, end).forEach(row => {
             const tr = document.createElement('tr');
+            tr.className = 'dim-pivot-row';
+
             const familyCell = document.createElement('td');
-            familyCell.className = 'fw-bold text-secondary';
-            familyCell.style.fontSize = '0.75rem';
-            familyCell.textContent = row.familia;
+            familyCell.className = 'dim-pivot-family-cell';
+            familyCell.title = row.familia || '';
+            const familyText = document.createElement('span');
+            familyText.className = 'dim-pivot-family-text';
+            familyText.textContent = row.familia || 'Sin familia';
+            familyCell.appendChild(familyText);
             tr.appendChild(familyCell);
-            row.values.forEach(value => {
+
+            (row.values || []).forEach(value => {
                 const td = document.createElement('td');
-                td.className = 'text-end text-muted';
+                td.className = 'text-end text-muted dim-pivot-value-cell';
                 td.textContent = value > 0 ? formatDecimal(value) : '-';
                 tr.appendChild(td);
             });
-            elements.pivotBody.appendChild(tr);
+
+            fragment.appendChild(tr);
         });
 
-        renderPivotPagination(total, state.pivotPage, state.pivotPageSize);
+        if (bottomSpacerHeight > 0) {
+            fragment.appendChild(createPivotSpacerRow(bottomSpacerHeight, totalColumns));
+        }
+
+        elements.pivotBody.replaceChildren(fragment);
     }
 
-    function renderPivotPagination(total, page, pageSize) {
-        if (!elements.pivotPagination) return;
-        const totalPages = Math.max(1, Math.ceil(total / pageSize));
-        if (totalPages <= 1) {
-            elements.pivotPagination.style.display = 'none';
-            return;
-        }
-        elements.pivotPagination.style.display = 'flex';
-        elements.pivotPagination.innerHTML = '';
-
-        const nav = document.createElement('div');
-        nav.className = 'dim-pivot-nav';
-
-        const prevBtn = document.createElement('button');
-        prevBtn.className = 'btn btn-sm btn-outline-secondary dim-pivot-page-btn';
-        prevBtn.textContent = '← Anterior';
-        prevBtn.disabled = page <= 1;
-        prevBtn.addEventListener('click', () => loadPivotPage(page - 1));
-
-        const pageInfo = document.createElement('span');
-        pageInfo.className = 'dim-pivot-page-info small text-muted';
-        const startRow = (page - 1) * pageSize + 1;
-        const endRow = Math.min(page * pageSize, total);
-        pageInfo.textContent = `${formatInteger(startRow)}–${formatInteger(endRow)} de ${formatInteger(total)} familias`;
-
-        const nextBtn = document.createElement('button');
-        nextBtn.className = 'btn btn-sm btn-outline-secondary dim-pivot-page-btn';
-        nextBtn.textContent = 'Siguiente →';
-        nextBtn.disabled = page >= totalPages;
-        nextBtn.addEventListener('click', () => loadPivotPage(page + 1));
-
-        nav.appendChild(prevBtn);
-        nav.appendChild(pageInfo);
-        nav.appendChild(nextBtn);
-        elements.pivotPagination.appendChild(nav);
-    }
-
-    async function loadPivotPage(page) {
-        if (page < 1) return;
-        state.pivotPage = page;
-        if (elements.pivotBody) {
-            elements.pivotBody.innerHTML = '<tr><td colspan="13" class="text-center text-muted py-3 small"><span class="spinner-border spinner-border-sm me-1"></span>Cargando...</td></tr>';
-        }
-        try {
-            const query = buildQueryParams();
-            const response = await apiGet('/family-consumption', {
-                ...query,
-                page: page,
-                page_size: state.pivotPageSize,
-            });
-            const data = (response && response.data) || { months: [], rows: [], total: 0 };
-            renderPivotTable(data, false);
-        } catch (err) {
-            console.error('[DIM] loadPivotPage error:', err);
-            showPivotError('Error al cargar la página');
-        }
+    function createPivotSpacerRow(height, colspan) {
+        const tr = document.createElement('tr');
+        tr.className = 'dim-pivot-spacer-row';
+        const td = document.createElement('td');
+        td.className = 'dim-pivot-spacer-cell';
+        td.colSpan = colspan;
+        td.style.height = `${height}px`;
+        tr.appendChild(td);
+        return tr;
     }
 
     function renderMapChart(rows) {
@@ -1177,6 +1354,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const date = new Date(`${monthIso}-01T00:00:00`);
         if (Number.isNaN(date.getTime())) return monthIso;
         return new Intl.DateTimeFormat('es-AR', { month: 'short', year: '2-digit' }).format(date);
+    }
+    function normalizePivotSearch(value) {
+        return String(value || '').trim().toLocaleLowerCase('es-AR');
     }
     function formatDatasetName(sourcePath) {
         return String(sourcePath).split(/[/\\]/).pop() || sourcePath;

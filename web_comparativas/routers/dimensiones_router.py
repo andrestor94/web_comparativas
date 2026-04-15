@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from web_comparativas.auth import require_roles
 from web_comparativas.dimensionamiento.query_service import (
-    DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
     build_filters,
     get_clients_by_result,
     get_dashboard_bootstrap,
@@ -261,8 +260,6 @@ def dimensionamiento_bootstrap(
                 "months": [],
                 "rows": [],
                 "total": 0,
-                "page": 1,
-                "page_size": DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE,
             },
             "meta": {"source": "fallback", "stale": False},
         },
@@ -400,12 +397,11 @@ def dimensionamiento_top_families(
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
-    limit: int = Query(default=10, ge=1, le=50),
 ):
     return _safe_dashboard_response(
         request,
         "top_families",
-        lambda: get_top_families(db, filters, limit=limit),
+        lambda: get_top_families(db, filters),
         [],
     )
 
@@ -447,15 +443,12 @@ def dimensionamiento_family_consumption(
     _: AllowedUser,
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=DEFAULT_FAMILY_CONSUMPTION_PAGE_SIZE, ge=1, le=200),
 ):
-    offset = (page - 1) * page_size
     return _safe_dashboard_response(
         request,
         "family_consumption",
-        lambda: get_family_consumption_table(db, filters, limit=page_size, offset=offset),
-        {"months": [], "rows": [], "total": 0, "page": page, "page_size": page_size},
+        lambda: get_family_consumption_table(db, filters),
+        {"months": [], "rows": [], "total": 0},
     )
 
 
