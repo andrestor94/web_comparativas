@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v15">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v17">
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
     <!-- ── Header ── -->
@@ -321,13 +321,19 @@
                 <span><i class="bi bi-table me-2"></i>Consumo promedio de familia por mes</span>
                 <span id="pivotTotalLabel" class="badge text-bg-light small" style="display:none;"></span>
             </div>
-            <div class="table-responsive dim-table-wrap">
-                <table class="tech-table" id="pivotTable">
+            <div class="dim-pivot-toolbar">
+                <label class="dim-pivot-search" for="pivotFamilySearch">
+                    <i class="bi bi-search"></i>
+                    <input id="pivotFamilySearch" type="search" placeholder="Buscar familia..." autocomplete="off" spellcheck="false">
+                </label>
+                <span id="pivotSearchCount" class="dim-pivot-search-count small text-muted" style="display:none;"></span>
+            </div>
+            <div class="dim-table-wrap" id="pivotTableWrap">
+                <table class="tech-table dim-pivot-table" id="pivotTable">
                     <thead id="pivotHeader"></thead>
                     <tbody id="pivotBody"></tbody>
                 </table>
             </div>
-            <div id="pivotPagination" class="dim-pivot-pagination" style="display:none;"></div>
         </div>
 
     </div><!-- /dashboardContent -->
@@ -335,5 +341,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v15"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v17"></script>
 {% endblock %}
