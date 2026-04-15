@@ -850,7 +850,16 @@ def ensure_cliente_visible_columns():
     print("[MIGRATION] Recreando tabla dimensionamiento_family_monthly_summary...", flush=True)
     try:
         with engine.begin() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS dimensionamiento_family_monthly_summary"))
+            # En PostgreSQL, CASCADE asegura que se borren índices o vistas dependientes si existen.
+            drop_stmt = "DROP TABLE IF EXISTS dimensionamiento_family_monthly_summary CASCADE"
+            conn.execute(text(drop_stmt))
+        
+        # IMPORTANTE: Importar modelos antes de create_all para que se registren en Base.metadata
+        from web_comparativas.dimensionamiento.models import (
+            DimensionamientoRecord,
+            DimensionamientoFamilyMonthlySummary,
+            DimensionamientoImportRun
+        )
         from web_comparativas.models import Base
         Base.metadata.create_all(bind=engine)
         print("[MIGRATION] Tabla summary recreada exitosamente.", flush=True)
