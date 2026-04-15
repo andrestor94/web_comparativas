@@ -65,6 +65,7 @@ class DimensionamientoRecord(Base):
 
     cliente_nombre_homologado = Column(Text, nullable=True, index=True)
     cliente_nombre_original = Column(Text, nullable=True)
+    cliente_visible = Column(Text, nullable=True, index=True)
     cuit = Column(String(32), nullable=True)
     provincia = Column(String(120), nullable=True, index=True)
     cuenta_interna = Column(String(120), nullable=True)
@@ -102,6 +103,7 @@ class DimensionamientoRecord(Base):
     __table_args__ = (
         Index("ix_dim_records_platform_date", "plataforma", "fecha"),
         Index("ix_dim_records_client_date", "cliente_nombre_homologado", "fecha"),
+        Index("ix_dim_records_visible_date", "cliente_visible", "fecha"),
         Index("ix_dim_records_family_date", "familia", "fecha"),
         Index("ix_dim_records_province_date", "provincia", "fecha"),
         Index("ix_dim_records_result_date", "resultado_participacion", "fecha"),
@@ -121,6 +123,7 @@ class DimensionamientoFamilyMonthlySummary(Base):
     month = Column(Date, nullable=False, index=True)
     plataforma = Column(String(40), nullable=False, index=True)
     cliente_nombre_homologado = Column(Text, nullable=True, index=True)
+    cliente_visible = Column(Text, nullable=True, index=True)
     provincia = Column(String(120), nullable=True, index=True)
     familia = Column(Text, nullable=True, index=True)
     unidad_negocio = Column(Text, nullable=True, index=True)
@@ -145,6 +148,7 @@ class DimensionamientoFamilyMonthlySummary(Base):
             "month",
             "plataforma",
             "cliente_nombre_homologado",
+            "cliente_visible",
             "provincia",
             "familia",
             "unidad_negocio",
@@ -157,6 +161,7 @@ class DimensionamientoFamilyMonthlySummary(Base):
         Index("ix_dim_summary_platform_month", "plataforma", "month"),
         Index("ix_dim_summary_family_month", "familia", "month"),
         Index("ix_dim_summary_client_month", "cliente_nombre_homologado", "month"),
+        Index("ix_dim_summary_visible_month", "cliente_visible", "month"),
     )
 
 

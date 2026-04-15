@@ -455,7 +455,6 @@ def _log_query_statement(
     )
 
 
-_SIN_DATO_SQL = ("SIN DATO", "SIN_DATO")
 _SUMMARY_CLIENT_EXCLUDE: frozenset[str] = frozenset({"SIN DATO", "SIN_DATO"})
 
 
@@ -467,10 +466,10 @@ def _distinct_summary_clients(session: Session) -> list[str]:
     Excluye variantes de 'SIN DATO' y valores vacíos.
     """
     stmt = (
-        select(distinct(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado))
-        .where(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado.isnot(None))
-        .where(func.coalesce(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado, "") != "")
-        .order_by(DimensionamientoFamilyMonthlySummary.cliente_nombre_homologado)
+        select(distinct(DimensionamientoFamilyMonthlySummary.cliente_visible))
+        .where(DimensionamientoFamilyMonthlySummary.cliente_visible.isnot(None))
+        .where(func.coalesce(DimensionamientoFamilyMonthlySummary.cliente_visible, "") != "")
+        .order_by(DimensionamientoFamilyMonthlySummary.cliente_visible)
     )
     all_clients = [c for c in session.execute(stmt).scalars().all() if c]
     return [
@@ -479,45 +478,13 @@ def _distinct_summary_clients(session: Session) -> list[str]:
     ]
 
 
-def _cliente_visible_expr(model):
-    """
-    Expresión SQL para el nombre visible del cliente.
-
-    Para la tabla resumen (DimensionamientoFamilyMonthlySummary):
-      - Retorna cliente_nombre_homologado directamente. No hay CASE WHEN ni
-        funciones de cadena, lo que permite que el planificador use índices.
-
-    Para la tabla de detalle (DimensionamientoRecord):
-      - CASE WHEN: usa homologado si es válido, fallback a cliente_nombre_original,
-        NULL si ambos son inválidos o SIN DATO.
-    """
-    mapper = sa_inspect(model)
-    mapped_cols = {attr.key for attr in mapper.mapper.column_attrs}
-
-    # Tabla resumen: no tiene cliente_nombre_original.
-    # Retornar la columna directo elimina el CASE WHEN más costoso del módulo.
-    if "cliente_nombre_original" not in mapped_cols:
-        return model.cliente_nombre_homologado
-
-    original_column = model.cliente_nombre_original
-    _homologado_upper = func.upper(func.trim(func.coalesce(model.cliente_nombre_homologado, "")))
-    _homologado_is_invalid = or_(
-        func.trim(func.coalesce(model.cliente_nombre_homologado, "")) == "",
-        _homologado_upper.in_(list(_SIN_DATO_SQL)),
-    )
-    return case(
-        (_homologado_is_invalid, original_column),
-        else_=model.cliente_nombre_homologado,
-    )
-
-
 def _distinct_visible_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
     """Retorna nombres visibles únicos de clientes, sin 'SIN DATO' ni vacíos.
 
     Usa subquery con label para evitar sqlalchemy.exc.NoSuchColumnError al aplicar
-    filtros dinámicos sobre la expresión CASE compleja con distinct().
+    filtros dinámicos sobre la expresión compleja con distinct().
     """
-    visible_expr = _cliente_visible_expr(DimensionamientoRecord)
+    visible_expr = DimensionamientoRecord.cliente_visible
     # Usamos .label() para que SQLAlchemy pueda localizar la columna en el resultado.
     # Luego aplicamos distinct() en un subquery separado para evitar el error de
     # indexación al combinar SELECT DISTINCT CASE WHEN... con WHERE dinámicos.
@@ -571,7 +538,7 @@ def build_filters(
 def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
     use_direct_match = model is DimensionamientoFamilyMonthlySummary
     if filters.clientes:
-        _visible = _cliente_visible_expr(model)
+        _visible = model.cliente_visible
         if use_direct_match:
             stmt = stmt.where(_visible.in_(filters.clientes))
             if applied_conditions is not None:
@@ -715,8 +682,8 @@ def _distinct_filtered_summary_clients(session: Session, filters: Dimensionamien
     """
     model = DimensionamientoFamilyMonthlySummary
     inner_stmt = _apply_common_filters(
-        select(model.cliente_nombre_homologado.label("_val"))
-        .where(model.cliente_nombre_homologado.isnot(None)),
+        select(model.cliente_visible.label("_val"))
+        .where(model.cliente_visible.isnot(None)),
         model,
         filters,
     )
@@ -929,7 +896,7 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.plataforma))))
     ).scalar_one()
     distinct_clients = session.execute(
-        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.cliente_nombre_homologado))))
+        select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.cliente_visible))))
     ).scalar_one()
     distinct_families = session.execute(
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.familia))))
@@ -966,7 +933,7 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
         "columns": [column.name for column in DimensionamientoRecord.__table__.columns],
         "total_registros": total_rows or 0,
         "count_distinct_plataforma": distinct_platforms or 0,
-        "count_distinct_cliente_nombre_homologado": distinct_clients or 0,
+        "count_distinct_cliente_visible": distinct_clients or 0,
         "count_distinct_familia": distinct_families or 0,
         "count_distinct_provincia": distinct_provinces or 0,
         "min_fecha": min_date.isoformat() if min_date else None,
@@ -1108,7 +1075,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
 
         if model is DimensionamientoRecord:
             # Tabla de detalle: query única con CASE WHEN para cliente visible
-            _visible = _cliente_visible_expr(model)
+            _visible = model.cliente_visible
             stmt = _apply_common_filters(
                 select(
                     func.count(model.id),
@@ -1143,13 +1110,12 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             # (comportamiento por defecto que excluye "SIN DATO" y no-clientes).
             # Con filtro is_client=False, _apply_common_filters ya restringe las
             # filas, y contamos los nombres disponibles en esa selección.
-            visible_client = _cliente_visible_expr(model)
+            visible_client = model.cliente_visible
             normalized_client = _sql_normalized_text(visible_client)
             base_client_stmt = (
                 select(func.count(distinct(visible_client)))
                 .where(visible_client.isnot(None))
                 .where(visible_client != "")
-                .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
             )
             if filters.is_client is None:
                 base_client_stmt = base_client_stmt.where(model.is_client == True)  # noqa: E712
@@ -1395,8 +1361,8 @@ def get_clients_by_result(
         subquery_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
-            # Tabla de detalle: CASE WHEN necesario para resolver cliente_nombre_original
-            _visible_raw = _cliente_visible_expr(model)
+            # Tabla de detalle
+            _visible_raw = model.cliente_visible
             total_expr = func.count(model.id)
             subquery = _apply_common_filters(
                 select(
@@ -1413,7 +1379,7 @@ def get_clients_by_result(
             ).subquery()
         else:
             total_expr = func.coalesce(func.sum(model.total_registros), 0)
-            visible_client = _cliente_visible_expr(model)
+            visible_client = model.cliente_visible
             normalized_client = _sql_normalized_text(visible_client)
             summary_stmt = (
                 select(
@@ -1423,7 +1389,6 @@ def get_clients_by_result(
                 )
                 .where(visible_client.isnot(None))
                 .where(visible_client != "")
-                .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
                 .group_by(visible_client, model.resultado_participacion)
             )
             if filters.is_client is None:
@@ -1597,7 +1562,7 @@ def _fetch_summary_rows_for_bootstrap(
         select(
             model.month,
             model.plataforma,
-            model.cliente_nombre_homologado,
+            model.cliente_visible,
             model.provincia,
             model.familia,
             model.unidad_negocio,

@@ -69,6 +69,7 @@ from web_comparativas.migrations import (
     ensure_dimensionamiento_text_columns,
     ensure_ticket_pliego_columns,
     ensure_forecast_perf_indexes,
+    ensure_cliente_visible_columns,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -143,6 +144,11 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: dimensionamiento text columns ensured.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning dimensionamiento text columns: {e}", flush=True)
+
+    try:
+        ensure_cliente_visible_columns()
+    except Exception as e:
+        print(f"[MIGRATION] Warning cliente_visible columns: {e}", flush=True)
 
     try:
         ensure_dimensionamiento_summary_perf_indexes()
