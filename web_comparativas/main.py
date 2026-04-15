@@ -70,6 +70,7 @@ from web_comparativas.migrations import (
     ensure_ticket_pliego_columns,
     ensure_forecast_perf_indexes,
     ensure_cliente_visible_columns,
+    ensure_cliente_visible_backfill,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -204,6 +205,15 @@ def _background_dimensionamiento_maintenance() -> None:
     """
     import time
     time.sleep(5)  # Espera a que el servidor esté listo y acepte health checks
+
+    # Backfill pesado ANTES de rebuild de summary: el summary rebuild lee cliente_visible
+    # de records, así que primero aseguramos que esté completo.
+    try:
+        ensure_cliente_visible_backfill()
+        print("[BACKGROUND] cliente_visible backfill checked.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning cliente_visible backfill: {e}", flush=True)
+
     try:
         ensure_dimensionamiento_summary_populated()
         print("[BACKGROUND] Dimensionamiento summary checked.", flush=True)
