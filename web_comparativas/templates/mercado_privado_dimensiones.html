@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v17">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v18">
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
     <!-- ── Header ── -->
@@ -265,6 +265,15 @@
                     <div class="kpi-label">Familias</div>
                 </div>
             </div>
+            <div class="tech-card kpi-modern dim-kpi-card">
+                <div class="kpi-icon dim-kpi-icon" style="color:#10b981;background:rgba(16,185,129,0.12);">
+                    <i class="bi bi-geo-alt"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiProvinces">-</div>
+                    <div class="kpi-label">Cantidad de provincias</div>
+                </div>
+            </div>
         </div>
 
         <!-- ── Gráfico evolución mensual ── -->
@@ -341,5 +350,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v17"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v18"></script>
 {% endblock %}

@@ -112,3 +112,44 @@ def test_aggregate_bootstrap_family_consumption_keeps_full_universe():
     assert "page_size" not in payload["family_consumption"]
     assert len(payload["top_families"]) == 55
     assert payload["top_families"][0]["familia"] == "Familia 00"
+    assert payload["kpis"]["provincias"] == 1
+
+
+def test_aggregate_bootstrap_uses_visible_client_name_and_counts_provinces():
+    rows = [
+        (
+            dt.date(2024, 1, 1),
+            "BIONEXO",
+            "Cliente Visible",
+            "Buenos Aires",
+            "Familia A",
+            "4",
+            "1",
+            "Ganada",
+            True,
+            False,
+            15.0,
+            2,
+        ),
+        (
+            dt.date(2024, 2, 1),
+            "BIONEXO",
+            "Cliente Homologado",
+            "Cordoba",
+            "Familia B",
+            "4",
+            "1",
+            "Perdida",
+            True,
+            True,
+            5.0,
+            1,
+        ),
+    ]
+
+    payload = qs._aggregate_bootstrap_from_summary_rows(rows)
+
+    assert payload["filters"]["clientes"] == ["Cliente Homologado", "Cliente Visible"]
+    assert payload["kpis"]["clientes"] == 2
+    assert payload["kpis"]["provincias"] == 2
+    assert {item["provincia"] for item in payload["geo"]} == {"Buenos Aires", "Cordoba"}

@@ -18,7 +18,7 @@ from threading import Lock
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import Date, cast, delete, func, insert, or_, select, text
+from sqlalchemy import Date, case, cast, delete, func, insert, or_, select, text
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal, engine
@@ -88,6 +88,22 @@ SQLITE_SAFE_BATCH_SIZE = 200
 POSTGRES_STAGE_TABLE_PREFIX = "dimensionamiento_stage_"
 STARTUP_MODE_VALIDATE = "validate"
 STARTUP_MODE_INGEST_IF_EMPTY = "ingest-if-empty"
+SUMMARY_CLIENT_NAME_STRATEGY = "visible_fallback_v1"
+
+
+def _summary_visible_client_expr():
+    homologado = func.trim(func.coalesce(DimensionamientoRecord.cliente_nombre_homologado, ""))
+    homologado_upper = func.upper(homologado)
+    return case(
+        (
+            or_(
+                homologado == "",
+                homologado_upper.in_(("SIN DATO", "SIN_DATO")),
+            ),
+            DimensionamientoRecord.cliente_nombre_original,
+        ),
+        else_=DimensionamientoRecord.cliente_nombre_homologado,
+    )
 STARTUP_MODE_FORCE_INGEST = "force-ingest"
 
 _STARTUP_RUN_LOCK = Lock()
@@ -738,11 +754,13 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     else:
         month_bucket = cast(func.date_trunc("month", DimensionamientoRecord.fecha), Date)
 
+    visible_client = _summary_visible_client_expr()
+
     summary_select = (
         select(
             month_bucket.label("month"),
             DimensionamientoRecord.plataforma,
-            DimensionamientoRecord.cliente_nombre_homologado,
+            visible_client.label("cliente_nombre_homologado"),
             DimensionamientoRecord.provincia,
             DimensionamientoRecord.familia,
             DimensionamientoRecord.unidad_negocio,
@@ -752,13 +770,13 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             DimensionamientoRecord.is_client,
             func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0).label("total_cantidad"),
             func.count(DimensionamientoRecord.id).label("total_registros"),
-            func.count(func.distinct(DimensionamientoRecord.cliente_nombre_homologado)).label("clientes_unicos"),
+            func.count(func.distinct(visible_client)).label("clientes_unicos"),
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
         )
         .group_by(
             month_bucket,
             DimensionamientoRecord.plataforma,
-            DimensionamientoRecord.cliente_nombre_homologado,
+            visible_client,
             DimensionamientoRecord.provincia,
             DimensionamientoRecord.familia,
             DimensionamientoRecord.unidad_negocio,
@@ -1101,6 +1119,7 @@ def _ingest_dimensionamiento_csv_legacy(
         run.rows_rejected = total_rejected
         run.summary = {
             "mode": mode,
+            "client_name_strategy": SUMMARY_CLIENT_NAME_STRATEGY,
             "platforms": sorted(
                 {
                     platform
@@ -1266,6 +1285,7 @@ def ingest_dimensionamiento_csv(
         run.rows_rejected = total_rejected
         run.summary = {
             "mode": mode,
+            "client_name_strategy": SUMMARY_CLIENT_NAME_STRATEGY,
             "platforms": sorted(
                 {
                     platform

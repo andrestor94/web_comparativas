@@ -176,6 +176,7 @@ def _filters_from_query(
     familia: list[str] | None = Query(default=None),
     plataforma: list[str] | None = Query(default=None),
     unidad_negocio: list[str] | None = Query(default=None),
+    unidad_negocio_excluir: list[str] | None = Query(default=None),
     subunidad_negocio: list[str] | None = Query(default=None),
     resultado: list[str] | None = Query(default=None),
     fecha_desde: dt.date | None = Query(default=None),
@@ -188,6 +189,7 @@ def _filters_from_query(
         familias=familia,
         plataformas=plataforma,
         unidades_negocio=unidad_negocio,
+        unidades_negocio_excluir=unidad_negocio_excluir,
         subunidades_negocio=subunidad_negocio,
         resultados=resultado,
         fecha_desde=fecha_desde,
@@ -250,6 +252,7 @@ def dimensionamiento_bootstrap(
                 "clientes": 0,
                 "renglones": 0,
                 "familias": 0,
+                "provincias": 0,
             },
             "series": {"months": [], "datasets": []},
             "results": [],
@@ -357,6 +360,7 @@ def dimensionamiento_kpis(
             "clientes": 0,
             "renglones": 0,
             "familias": 0,
+            "provincias": 0,
         },
     )
 

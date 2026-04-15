@@ -26,7 +26,7 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v4"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v5"
 
 # ── In-memory query result cache ─────────────────────────────────────────────
 # Evita recalcular resultados idénticos cuando el usuario cambia y revierte
@@ -58,7 +58,7 @@ def _make_cache_key(fn_name: str, filters: "DimensionamientoFilters", **extra: A
     d = _filters_debug_dict(filters)
     # Normalizar listas para que el orden no genere keys distintas
     for k in ("clientes", "provincias", "familias", "plataformas",
-              "unidades_negocio", "subunidades_negocio", "resultados"):
+              "unidades_negocio", "unidades_negocio_excluir", "subunidades_negocio", "resultados"):
         if isinstance(d.get(k), list):
             d[k] = sorted(d[k])
     if extra:
@@ -125,6 +125,8 @@ class DimensionamientoFilters:
     fecha_desde: dt.date | None = None
     fecha_hasta: dt.date | None = None
     is_client: bool | None = None
+    # Exclusión de unidades de negocio: proviene de la interacción con la leyenda del gráfico
+    unidades_negocio_excluir: list[str] = field(default_factory=list)
 
 
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
@@ -134,6 +136,7 @@ def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
         "familias": filters.familias,
         "plataformas": filters.plataformas,
         "unidades_negocio": filters.unidades_negocio,
+        "unidades_negocio_excluir": filters.unidades_negocio_excluir,
         "subunidades_negocio": filters.subunidades_negocio,
         "resultados": filters.resultados,
         "fecha_desde": filters.fecha_desde.isoformat() if filters.fecha_desde else None,
@@ -162,6 +165,7 @@ def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
         familias=list(filters.familias),
         plataformas=list(filters.plataformas),
         unidades_negocio=list(filters.unidades_negocio),
+        unidades_negocio_excluir=list(filters.unidades_negocio_excluir),
         subunidades_negocio=list(filters.subunidades_negocio),
         resultados=list(filters.resultados),
         fecha_desde=filters.fecha_desde,
@@ -178,6 +182,7 @@ def _has_active_filters(filters: DimensionamientoFilters) -> bool:
             filters.familias,
             filters.plataformas,
             filters.unidades_negocio,
+            filters.unidades_negocio_excluir,
             filters.subunidades_negocio,
             filters.resultados,
             filters.fecha_desde is not None,
@@ -541,6 +546,7 @@ def build_filters(
     familias: Iterable[str] | None = None,
     plataformas: Iterable[str] | None = None,
     unidades_negocio: Iterable[str] | None = None,
+    unidades_negocio_excluir: Iterable[str] | None = None,
     subunidades_negocio: Iterable[str] | None = None,
     resultados: Iterable[str] | None = None,
     fecha_desde: dt.date | None = None,
@@ -553,6 +559,7 @@ def build_filters(
         familias=_normalize_list(familias),
         plataformas=_normalize_list(plataformas),
         unidades_negocio=_normalize_list(unidades_negocio),
+        unidades_negocio_excluir=_normalize_list(unidades_negocio_excluir),
         subunidades_negocio=_normalize_list(subunidades_negocio),
         resultados=_normalize_list(resultados),
         fecha_desde=fecha_desde,
@@ -619,6 +626,17 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
                 stmt = stmt.where(_sql_normalized_text(model.unidad_negocio).in_(normalized_unidades))
                 if applied_conditions is not None:
                     applied_conditions.append(f"unidad_negocio IN {normalized_unidades}")
+    if filters.unidades_negocio_excluir:
+        if use_direct_match:
+            stmt = stmt.where(model.unidad_negocio.notin_(filters.unidades_negocio_excluir))
+            if applied_conditions is not None:
+                applied_conditions.append(f"unidad_negocio NOT IN {filters.unidades_negocio_excluir}")
+        else:
+            normalized_excluir = _normalized_filter_values(filters.unidades_negocio_excluir)
+            if normalized_excluir:
+                stmt = stmt.where(_sql_normalized_text(model.unidad_negocio).notin_(normalized_excluir))
+                if applied_conditions is not None:
+                    applied_conditions.append(f"unidad_negocio NOT IN {normalized_excluir}")
     if filters.subunidades_negocio:
         if use_direct_match:
             stmt = stmt.where(model.subunidad_negocio.in_(filters.subunidades_negocio))
@@ -698,8 +716,7 @@ def _distinct_filtered_summary_clients(session: Session, filters: Dimensionamien
     model = DimensionamientoFamilyMonthlySummary
     inner_stmt = _apply_common_filters(
         select(model.cliente_nombre_homologado.label("_val"))
-        .where(model.cliente_nombre_homologado.isnot(None))
-        .where(model.is_client == True),  # noqa: E712
+        .where(model.cliente_nombre_homologado.isnot(None)),
         model,
         filters,
     )
@@ -1098,13 +1115,14 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                     func.count(distinct(_visible)),
                     func.count(model.id),
                     func.count(distinct(model.familia)),
+                    func.count(distinct(model.provincia)),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
-            total_rows, total_clients, total_records, total_families = session.execute(stmt).one()
+            total_rows, total_clients, total_records, total_families, total_provincias = session.execute(stmt).one()
         else:
             # Tabla resumen: 2 queries rápidas evitan full scan de 400k+ filas
             # Query 1: totales y familias
@@ -1112,23 +1130,25 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                 select(
                     func.coalesce(func.sum(model.total_registros), 0),
                     func.count(distinct(model.familia)),
+                    func.count(distinct(model.provincia)),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
-            total_rows, total_families = session.execute(main_stmt).one()
+            total_rows, total_families, total_provincias = session.execute(main_stmt).one()
             # Query 2: nombres únicos respetando el filtro activo de is_client.
             # Si no hay filtro explícito, contar solo filas con is_client=True
             # (comportamiento por defecto que excluye "SIN DATO" y no-clientes).
             # Con filtro is_client=False, _apply_common_filters ya restringe las
             # filas, y contamos los nombres disponibles en esa selección.
-            normalized_client = _sql_normalized_text(model.cliente_nombre_homologado)
+            visible_client = _cliente_visible_expr(model)
+            normalized_client = _sql_normalized_text(visible_client)
             base_client_stmt = (
-                select(func.count(distinct(model.cliente_nombre_homologado)))
-                .where(model.cliente_nombre_homologado.isnot(None))
-                .where(model.cliente_nombre_homologado != "")
+                select(func.count(distinct(visible_client)))
+                .where(visible_client.isnot(None))
+                .where(visible_client != "")
                 .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
             )
             if filters.is_client is None:
@@ -1142,6 +1162,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             "clientes": int(total_clients or 0),
             "renglones": int(total_records or 0),
             "familias": int(total_families or 0),
+            "provincias": int(total_provincias or 0),
         }
         _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
         _cache_set(_ck, payload)
@@ -1391,21 +1412,24 @@ def get_clients_by_result(
                 subquery_conditions,
             ).subquery()
         else:
-            # Tabla resumen: sin CASE WHEN, columna directa + is_client=True
-            # es_client=True garantiza que son clientes reales (no SIN DATO)
             total_expr = func.coalesce(func.sum(model.total_registros), 0)
-            normalized_client = _sql_normalized_text(model.cliente_nombre_homologado)
-            subquery = _apply_common_filters(
+            visible_client = _cliente_visible_expr(model)
+            normalized_client = _sql_normalized_text(visible_client)
+            summary_stmt = (
                 select(
-                    model.cliente_nombre_homologado.label("cliente"),
+                    visible_client.label("cliente"),
                     model.resultado_participacion.label("resultado"),
                     total_expr.label("total"),
                 )
-                .where(model.is_client == True)  # noqa: E712
-                .where(model.cliente_nombre_homologado.isnot(None))
-                .where(model.cliente_nombre_homologado != "")
+                .where(visible_client.isnot(None))
+                .where(visible_client != "")
                 .where(~normalized_client.in_(list(_SIN_DATO_SQL)))
-                .group_by(model.cliente_nombre_homologado, model.resultado_participacion),
+                .group_by(visible_client, model.resultado_participacion)
+            )
+            if filters.is_client is None:
+                summary_stmt = summary_stmt.where(model.is_client == True)  # noqa: E712
+            subquery = _apply_common_filters(
+                summary_stmt,
                 model,
                 filters,
                 subquery_conditions,
@@ -1592,11 +1616,50 @@ def _fetch_summary_rows_for_bootstrap(
     return session.execute(stmt).all()
 
 
+def _compute_series_from_rows(rows: list[tuple[Any, ...]], series_limit: int = 5) -> dict[str, Any]:
+    """Calcula solo el widget 'series' (evolución mensual por negocio) desde un listado de rows.
+
+    Se usa cuando hay negocios excluidos: el gráfico de series siempre recibe los rows
+    SIN la exclusión, para que el usuario pueda ver y re-activar las series excluidas
+    desde la leyenda. El resto del dashboard usa los rows CON exclusión.
+
+    Posiciones en la tupla según la SELECT en _fetch_summary_rows_for_bootstrap:
+        0: month, 5: unidad_negocio, 11: total_registros
+    """
+    business_totals: dict[str, int] = defaultdict(int)
+    business_by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for row in rows:
+        month_value = row[0]
+        unidad_negocio = row[5]
+        total_registros = row[11]
+        row_count = int(total_registros or 0)
+        month_iso = _month_value_to_iso(month_value)
+        business_name = unidad_negocio or "Sin negocio"
+        business_totals[business_name] += row_count
+        business_by_month[month_iso][business_name] += row_count
+    top_businesses = [
+        name
+        for name, _ in sorted(business_totals.items(), key=lambda item: (-item[1], item[0]))[:series_limit]
+    ]
+    months = sorted(business_by_month.keys())
+    return {
+        "months": months,
+        "datasets": [
+            {
+                "label": business_name,
+                "values": [business_by_month.get(month, {}).get(business_name, 0) for month in months],
+            }
+            for business_name in top_businesses
+        ],
+    }
+
+
 def _aggregate_bootstrap_from_summary_rows(
     rows: list[tuple[Any, ...]],
     *,
     series_limit: int = 5,
     clients_limit: int = 10,
+    series_rows: list[tuple[Any, ...]] | None = None,
 ) -> dict[str, Any]:
     distinct_clients: set[str] = set()
     distinct_provincias: set[str] = set()
@@ -1699,6 +1762,11 @@ def _aggregate_bootstrap_from_summary_rows(
         ],
     }
 
+    # Si se proveyeron rows sin exclusión de negocios para el gráfico de series,
+    # sobrescribir con esos datos para que el usuario vea y pueda reactivar todas las series.
+    if series_rows is not None:
+        series = _compute_series_from_rows(series_rows, series_limit)
+
     results_payload = [
         {"resultado": result_name, "renglones": rows_count}
         for result_name, rows_count in sorted(result_totals.items(), key=lambda item: (-item[1], item[0]))
@@ -1774,6 +1842,7 @@ def _aggregate_bootstrap_from_summary_rows(
             "clientes": len(distinct_clients),
             "renglones": int(total_rows or 0),
             "familias": len(distinct_familias),
+            "provincias": len(distinct_provincias),
         },
         "series": series,
         "results": results_payload,
@@ -1800,8 +1869,17 @@ def _get_aggregated_dashboard_bootstrap(
         logger.debug("[DIM][CACHE] get_dashboard_bootstrap.aggregated hit key=%s", cache_key)
         return cached
 
+    # Cuando hay negocios excluidos, el gráfico de series debe recibir los datos SIN esa
+    # exclusión para que el usuario pueda ver y reactivar las series desde la leyenda.
+    # Todo lo demás (KPIs, donut, mapa, tablas) usa los rows filtrados con exclusión.
+    series_rows = None
+    if filters.unidades_negocio_excluir:
+        filters_for_series = _clone_filters(filters)
+        filters_for_series.unidades_negocio_excluir = []
+        series_rows = _fetch_summary_rows_for_bootstrap(session, filters_for_series)
+
     rows = _fetch_summary_rows_for_bootstrap(session, filters)
-    payload = _aggregate_bootstrap_from_summary_rows(rows)
+    payload = _aggregate_bootstrap_from_summary_rows(rows, series_rows=series_rows)
     if include_status:
         payload["status"] = get_status(session)
     payload["meta"] = {
@@ -1884,10 +1962,14 @@ def get_dashboard_bootstrap(
                 include_status=include_status,
             )
         else:
+            # El gráfico de series siempre recibe datos SIN la exclusión de negocios,
+            # para que las series excluidas sigan visibles y el usuario pueda reactivarlas.
+            filters_for_series = _clone_filters(filters)
+            filters_for_series.unidades_negocio_excluir = []
             payload = {
                 "filters": get_filter_options(session, filters),
                 "kpis": get_kpis(session, filters),
-                "series": get_series(session, filters),
+                "series": get_series(session, filters_for_series),
                 "results": get_results_breakdown(session, filters),
                 "top_families": get_top_families(session, filters),
                 "geo": get_geography_distribution(session, filters),
