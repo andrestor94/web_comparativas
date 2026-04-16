@@ -725,11 +725,19 @@ def _build_upsert_statement(rows: list[dict[str, Any]]):
     else:
         dialect_insert = insert
 
-    stmt = dialect_insert(DimensionamientoRecord).values(rows)
+    # Filtrar campos que no son columnas del modelo antes de construir el stmt.
+    # source_row_number es metadata de staging/tracking y nunca va al modelo.
+    _NON_MODEL_KEYS = {"id", "created_at", "id_registro_unico", "source_row_number"}
+    model_columns = {c.key for c in DimensionamientoRecord.__table__.columns}
+    clean_rows = [
+        {k: v for k, v in row.items() if k in model_columns}
+        for row in rows
+    ]
+    stmt = dialect_insert(DimensionamientoRecord).values(clean_rows)
     update_columns = {
         key: stmt.excluded[key]
-        for key in rows[0].keys()
-        if key not in {"id", "created_at", "id_registro_unico"}
+        for key in clean_rows[0].keys()
+        if key not in _NON_MODEL_KEYS
     }
     if hasattr(stmt, "on_conflict_do_update"):
         return stmt.on_conflict_do_update(
