@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.plugins.tooltip.titleFont = { size: 12, weight: 700, family: "'Outfit', sans-serif" };
     Chart.defaults.plugins.tooltip.bodyFont = { size: 11, family: "'Outfit', sans-serif" };
     Chart.defaults.plugins.tooltip.cornerRadius = 8;
+    const DEFAULT_DATE_FILTER = Object.freeze({ min: '2024-01-01', max: '2026-02-28' });
 
     // ─────────────────────────────────────────────────────────────────────────
     // Estado global del dashboard
@@ -217,8 +218,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!wrap) return { setMonths() {}, getAppliedMin() { return null; }, getAppliedMax() { return null; } };
 
         let months = [];       // ['2024-01', '2024-02', ...]
-        let appliedMin = null; // null = sin filtro (usar todo el rango)
-        let appliedMax = null;
+        let appliedMin = DEFAULT_DATE_FILTER.min;
+        let appliedMax = DEFAULT_DATE_FILTER.max;
         let isOpen = false;
 
         function open() {
@@ -273,13 +274,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function updateTriggerLabel() {
-            if (appliedMin === null && appliedMax === null) {
-                labelEl.textContent = 'Todas las fechas';
-            } else {
-                const startM = appliedMin ? appliedMin.slice(0, 7) : months[0];
-                const endM   = appliedMax ? appliedMax.slice(0, 7) : months[months.length - 1];
-                labelEl.textContent = `${formatMonthLabel(startM)} — ${formatMonthLabel(endM)}`;
-            }
+            const startM = appliedMin ? appliedMin.slice(0, 7) : months[0];
+            const endM   = appliedMax ? appliedMax.slice(0, 7) : months[months.length - 1];
+            labelEl.textContent = `${formatMonthLabel(startM)} — ${formatMonthLabel(endM)}`;
         }
 
         // Slider min: no puede superar max
@@ -346,14 +343,8 @@ document.addEventListener('DOMContentLoaded', () => {
         aplicarBtn.addEventListener('click', () => {
             const minIdx = parseInt(sliderMin.value);
             const maxIdx = parseInt(sliderMax.value);
-            // Si cubre todo el rango → sin filtro (null)
-            if (minIdx === 0 && maxIdx === months.length - 1) {
-                appliedMin = null;
-                appliedMax = null;
-            } else {
-                appliedMin = sliderToDate(minIdx, false);
-                appliedMax = sliderToDate(maxIdx, true);
-            }
+            appliedMin = sliderToDate(minIdx, false);
+            appliedMax = sliderToDate(maxIdx, true);
             updateTriggerLabel();
             close();
             if (typeof onApply === 'function') onApply();
@@ -363,28 +354,35 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isOpen && !wrap.contains(e.target)) close();
         });
 
+        updateTriggerLabel();
+
         return {
             setMonths(monthsList) {
                 months = monthsList;
                 const max = Math.max(0, months.length - 1);
-                sliderMin.min = 0; sliderMin.max = max; sliderMin.value = 0;
-                sliderMax.min = 0; sliderMax.max = max; sliderMax.value = max;
-                dateStart.value = sliderToDate(0, false);
-                dateEnd.value   = sliderToDate(max, true);
+                const minIdx = dateToSliderIdx(appliedMin || DEFAULT_DATE_FILTER.min, false);
+                const maxIdx = dateToSliderIdx(appliedMax || DEFAULT_DATE_FILTER.max, true);
+                sliderMin.min = 0; sliderMin.max = max; sliderMin.value = minIdx;
+                sliderMax.min = 0; sliderMax.max = max; sliderMax.value = Math.max(minIdx, maxIdx);
+                dateStart.value = sliderToDate(parseInt(sliderMin.value), false);
+                dateEnd.value   = sliderToDate(parseInt(sliderMax.value), true);
+                appliedMin = dateStart.value || appliedMin;
+                appliedMax = dateEnd.value || appliedMax;
                 syncFill();
                 updateTriggerLabel();
             },
             getAppliedMin() { return appliedMin; },
             getAppliedMax() { return appliedMax; },
             resetApplied() {
-                appliedMin = null;
-                appliedMax = null;
+                appliedMin = DEFAULT_DATE_FILTER.min;
+                appliedMax = DEFAULT_DATE_FILTER.max;
                 if (months.length) {
-                    const max = months.length - 1;
-                    sliderMin.value = 0;
-                    sliderMax.value = max;
-                    dateStart.value = sliderToDate(0, false);
-                    dateEnd.value   = sliderToDate(max, true);
+                    const minIdx = dateToSliderIdx(appliedMin, false);
+                    const maxIdx = dateToSliderIdx(appliedMax, true);
+                    sliderMin.value = minIdx;
+                    sliderMax.value = Math.max(minIdx, maxIdx);
+                    dateStart.value = sliderToDate(parseInt(sliderMin.value), false);
+                    dateEnd.value   = sliderToDate(parseInt(sliderMax.value), true);
                     syncFill();
                 }
                 updateTriggerLabel();
@@ -569,8 +567,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function initDashboard(forceLive = false) {
         setLoading(true, 'Leyendo snapshot persistido...');
         try {
+            const initialQuery = buildQueryParams();
             const [bootstrapResponse, labelsResponse] = await Promise.all([
-                apiGet('/bootstrap', forceLive ? { bypass_snapshot: true } : {}),
+                apiGet('/bootstrap', forceLive ? { ...initialQuery, bypass_snapshot: true } : initialQuery),
                 apiGet('/negocio-labels').catch(() => ({ data: { unidades: {}, subunidades: {} } })),
             ]);
             const bootstrap = bootstrapResponse.data || {};
@@ -673,13 +672,8 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(cb => cb.checked)
             .map(cb => cb.value);
 
-        // Fechas: el controlador devuelve null cuando cubre el rango completo
         const rawFechaDesde = dateRangeCtrl.getAppliedMin();
         const rawFechaHasta = dateRangeCtrl.getAppliedMax();
-        const fechaDesde = rawFechaDesde && rawFechaDesde !== state.currentDateRange.min
-            ? rawFechaDesde : null;
-        const fechaHasta = rawFechaHasta && rawFechaHasta !== state.currentDateRange.max
-            ? rawFechaHasta : null;
 
         return {
             cliente:                msClient   ? msClient.getApplied()   : [],
@@ -690,8 +684,8 @@ document.addEventListener('DOMContentLoaded', () => {
             resultado:              state.activeResultados.size  > 0 ? [...state.activeResultados]  : [],
             subunidad_negocio:      msSubunit  ? msSubunit.getApplied()   : [],
             plataforma:             plataformas,
-            fecha_desde:            fechaDesde,
-            fecha_hasta:            fechaHasta,
+            fecha_desde:            rawFechaDesde,
+            fecha_hasta:            rawFechaHasta,
             is_client:  elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
         };
     }
