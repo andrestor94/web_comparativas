@@ -4048,6 +4048,39 @@ def historial_cargas(
 
 
 # ======================================================================
+# ELIMINAR COMPARATIVA (solo Admin)
+# ======================================================================
+@router.post("/api/cargas/{upload_id}/eliminar")
+def eliminar_carga(
+    upload_id: int,
+    user: User = Depends(require_roles("admin")),
+):
+    """
+    Elimina permanentemente una comparativa del historial.
+    Exclusivo para el rol Admin — cualquier otro rol recibe 403 automáticamente
+    por require_roles antes de entrar al cuerpo de la función.
+    """
+    upload = db_session.get(UploadModel, upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Comparativa no encontrada")
+
+    try:
+        # Eliminar registros relacionados que no tienen cascade definido en Upload
+        db_session.query(Run).filter(Run.upload_id == upload_id).delete(synchronize_session=False)
+        db_session.query(NormalizedFile).filter(NormalizedFile.upload_id == upload_id).delete(synchronize_session=False)
+        db_session.query(Dashboard).filter(Dashboard.upload_id == upload_id).delete(synchronize_session=False)
+        # Upload tiene cascade="all, delete-orphan" sobre Comment, se elimina automáticamente
+        db_session.delete(upload)
+        db_session.commit()
+        logger.info("[ELIMINAR] Admin uid=%s eliminó carga id=%s", user.id, upload_id)
+        return JSONResponse({"ok": True, "msg": "Comparativa eliminada correctamente"})
+    except Exception as e:
+        db_session.rollback()
+        logger.error("[ELIMINAR] Error eliminando carga %s: %s", upload_id, e)
+        raise HTTPException(status_code=500, detail="Error al eliminar la comparativa")
+
+
+# ======================================================================
 # SEGUIMIENTO: VISTA DE DETALLE
 # ======================================================================
 @router.get("/cargas/{upload_id}", response_class=HTMLResponse)

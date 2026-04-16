@@ -523,6 +523,7 @@
           </tr>
         </thead>
         <tbody>
+          {% set is_admin = user and (user.role or '')|lower == 'admin' %}
           {% for r in rows %}
           {% set owner = users_by_id.get(r.user_id) if users_by_id else None %}
           {% set st_canon = canonical_status(r.status) %}
@@ -533,7 +534,7 @@
           {% elif st_canon == 'reviewing' %}{% set badge_cls = 'h-badge--reviewing' %}
           {% elif st_canon == 'classifying' %}{% set badge_cls = 'h-badge--classifying' %}
           {% else %}{% set badge_cls = 'h-badge--pending' %}{% endif %}
-          <tr>
+          <tr id="upload-row-{{ r.id }}">
             <td class="history-muted history-table__id">#{{ r.id }}</td>
             <td class="history-table__process">
               <div class="history-process">{{ r.proceso_nro or '-' }}</div>
@@ -563,6 +564,14 @@
                   title="{{ 'Abrir tablero' if tablero_ready else 'Disponible al finalizar' }}">
                   Tablero
                 </a>
+                {% if is_admin %}
+                <button class="btn btn-sm btn-outline-danger btn-eliminar-carga"
+                  data-upload-id="{{ r.id }}"
+                  data-proceso="{{ r.proceso_nro or '-' }}"
+                  title="Eliminar comparativa">
+                  <i class="bi bi-trash"></i>
+                </button>
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -614,6 +623,34 @@
   </div>
 </div>
 
+{% if user and (user.role or '')|lower == 'admin' %}
+<!-- Modal de confirmación: Eliminar comparativa -->
+<div class="modal fade" id="modalEliminarCarga" tabindex="-1"
+  aria-labelledby="modalEliminarCargaLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalEliminarCargaLabel">Eliminar comparativa</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">Esta acción eliminará permanentemente la comparativa seleccionada. ¿Deseás continuar?</p>
+        <p class="text-muted small mb-0" id="modal-carga-info"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="btn-confirmar-eliminar">
+          <span id="btn-eliminar-spinner"
+            class="spinner-border spinner-border-sm d-none me-1"
+            role="status" aria-hidden="true"></span>
+          Eliminar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <script>
 (function () {
   // Toggle filtros avanzados
@@ -651,3 +688,118 @@
 </script>
 
 {% endblock %}
+
+{% if user and (user.role or '')|lower == 'admin' %}
+{% block extra_js %}
+<script>
+// ── Eliminar comparativa (solo Admin) — corre después de bootstrap.bundle.min.js ──
+(function () {
+  var modalEl = document.getElementById('modalEliminarCarga');
+  // Obtener instancia de forma segura: window.bootstrap debe existir aquí
+  // porque extra_js se inyecta DESPUÉS de bootstrap.bundle.min.js en base.html
+  function getModal() {
+    if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) return null;
+    return window.bootstrap.Modal.getOrCreateInstance(modalEl);
+  }
+
+  var currentUploadId = null;
+  var currentRowId = null;
+
+  // Delegación de clicks: captura cualquier botón eliminar en la tabla
+  document.addEventListener('click', function (e) {
+    var triggerBtn = e.target.closest('.btn-eliminar-carga');
+    if (!triggerBtn) return;
+
+    currentUploadId = triggerBtn.dataset.uploadId;
+    currentRowId = 'upload-row-' + currentUploadId;
+    var proceso = triggerBtn.dataset.proceso || '-';
+
+    var infoEl = document.getElementById('modal-carga-info');
+    if (infoEl) {
+      infoEl.textContent = 'Proceso: ' + proceso + ' · ID: #' + currentUploadId;
+    }
+
+    var m = getModal();
+    if (m) {
+      m.show();
+    } else {
+      // Fallback defensivo: si Bootstrap no está disponible por algún motivo
+      if (window.confirm('Esta acción eliminará permanentemente la comparativa #' + currentUploadId + '. ¿Deseás continuar?')) {
+        ejecutarEliminacion();
+      }
+    }
+  });
+
+  var btnConfirmar = document.getElementById('btn-confirmar-eliminar');
+  if (btnConfirmar) {
+    btnConfirmar.addEventListener('click', function () {
+      ejecutarEliminacion();
+    });
+  }
+
+  function ejecutarEliminacion() {
+    if (!currentUploadId) return;
+
+    var spinner = document.getElementById('btn-eliminar-spinner');
+    if (btnConfirmar) btnConfirmar.disabled = true;
+    if (spinner) spinner.classList.remove('d-none');
+
+    fetch('/api/cargas/' + currentUploadId + '/eliminar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+    })
+    .then(function (resp) {
+      return resp.json().then(function (data) {
+        return { ok: resp.ok, data: data };
+      });
+    })
+    .then(function (result) {
+      var m = getModal();
+      if (m) m.hide();
+
+      if (result.ok && result.data.ok) {
+        var row = document.getElementById(currentRowId);
+        if (row) row.remove();
+
+        if (window.Notify) {
+          window.Notify.toast({
+            title: 'Comparativa eliminada',
+            message: 'La comparativa fue eliminada correctamente.',
+            type: 'success',
+          });
+        }
+      } else {
+        var errMsg = (result.data && (result.data.error || result.data.msg))
+          || 'No se pudo eliminar la comparativa.';
+        if (window.Notify) {
+          window.Notify.toast({
+            title: 'Error al eliminar',
+            message: errMsg,
+            type: 'error',
+          });
+        }
+      }
+    })
+    .catch(function () {
+      var m = getModal();
+      if (m) m.hide();
+      if (window.Notify) {
+        window.Notify.toast({
+          title: 'Error de conexión',
+          message: 'No se pudo completar la operación. Reintentá en unos segundos.',
+          type: 'error',
+        });
+      }
+    })
+    .finally(function () {
+      if (btnConfirmar) btnConfirmar.disabled = false;
+      if (spinner) spinner.classList.add('d-none');
+      currentUploadId = null;
+      currentRowId = null;
+    });
+  }
+})();
+</script>
+{% endblock %}
+{% endif %}
