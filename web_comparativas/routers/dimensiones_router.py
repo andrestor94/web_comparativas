@@ -1,11 +1,11 @@
 import datetime as dt
 import logging
+import os
+import shutil
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
-
-import shutil
-import tempfile
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy.orm import Session
@@ -488,6 +488,31 @@ def _run_ingestion_background(tmp_path: str) -> None:
             pass
 
 
+def _run_local_reload_background(
+    csv_path: str,
+    chunk_size: int,
+    mode: str,
+    force: bool,
+) -> None:
+    """Dispara la ingestión desde el CSV local del servidor en background."""
+    from web_comparativas.dimensionamiento.ingestion import ingest_dimensionamiento_csv
+    try:
+        result = ingest_dimensionamiento_csv(
+            csv_path=csv_path,
+            chunk_size=chunk_size,
+            mode=mode,
+            force=force,
+        )
+        rows = result.get("rows_processed", 0)
+        status = result.get("status")
+        print(
+            f"[DIMENSIONAMIENTO] reload-local completado: status={status} rows={rows:,}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[DIMENSIONAMIENTO] reload-local ERROR: {exc}", flush=True)
+
+
 @router.post("/upload-csv", status_code=202)
 async def upload_dimensionamiento_csv(
     background_tasks: BackgroundTasks,
@@ -517,5 +542,74 @@ async def upload_dimensionamiento_csv(
     return {
         "ok": True,
         "message": "Archivo recibido. La ingesta está corriendo en background.",
+        "hint": "Consultá GET /api/mercado-privado/dimensiones/status para ver el progreso.",
+    }
+
+
+@router.post("/admin/reload-local", status_code=202)
+def reload_local_csv(
+    background_tasks: BackgroundTasks,
+    _: AdminUser,
+    chunk_size: int = Query(default=10000, ge=1000, le=50000, description="Filas por batch"),
+    mode: str = Query(default="replace", pattern="^(replace|upsert)$"),
+    force: bool = Query(default=True, description="Forzar aunque el hash no haya cambiado"),
+):
+    """
+    (Solo admin) Dispara la reingestión del dataset_unificado.csv que ya está
+    presente en el servidor, procesando por chunks sin cargar todo en memoria.
+
+    Estrategia:
+    - Lee el CSV local en batches de `chunk_size` filas (default 10 000)
+    - PostgreSQL: staging table UNLOGGED + COPY FROM STDIN por chunk
+    - mode=replace: carga nueva corrida, luego borra la anterior
+    - Reconstruye dimensionamiento_family_monthly_summary al final
+    - Invalida caché en memoria y refresca dashboard snapshot
+    - No toca datos productivos hasta que la carga está 100% completa
+
+    Devuelve 202 inmediatamente. Consultá GET /status para ver el progreso.
+    """
+    from web_comparativas.dimensionamiento.ingestion import DEFAULT_CSV_PATH
+
+    csv_path = Path(
+        os.getenv("DIMENSIONAMIENTO_CSV_PATH") or DEFAULT_CSV_PATH
+    ).resolve()
+
+    if not csv_path.exists():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"CSV no encontrado en el servidor: {csv_path}. "
+                "Asegurate de que DIMENSIONAMIENTO_CSV_PATH apunte al archivo correcto "
+                "o subilo vía POST /upload-csv."
+            ),
+        )
+
+    size_mb = csv_path.stat().st_size / (1024 ** 2)
+    logger.info(
+        "[DIMENSIONAMIENTO] reload-local enqueued: path=%s size=%.1fMB "
+        "chunk_size=%s mode=%s force=%s",
+        csv_path,
+        size_mb,
+        chunk_size,
+        mode,
+        force,
+    )
+
+    background_tasks.add_task(
+        _run_local_reload_background,
+        str(csv_path),
+        chunk_size,
+        mode,
+        force,
+    )
+
+    return {
+        "ok": True,
+        "message": "Recarga iniciada en background.",
+        "csv_path": str(csv_path),
+        "csv_size_mb": round(size_mb, 2),
+        "chunk_size": chunk_size,
+        "mode": mode,
+        "force": force,
         "hint": "Consultá GET /api/mercado-privado/dimensiones/status para ver el progreso.",
     }

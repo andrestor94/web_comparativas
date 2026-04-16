@@ -727,11 +727,13 @@ def _latest_success_import_run(session: Session) -> DimensionamientoImportRun | 
 
 
 def _get_dashboard_snapshot(session: Session) -> DimensionamientoDashboardSnapshot | None:
+    # Busca solo por snapshot_key (no filtra por version) para poder actualizar
+    # el snapshot existente aunque tenga una version anterior, evitando el error
+    # de UNIQUE constraint al intentar INSERT de una clave que ya existe.
     return session.execute(
         select(DimensionamientoDashboardSnapshot)
         .where(
             DimensionamientoDashboardSnapshot.snapshot_key == DEFAULT_DASHBOARD_SNAPSHOT_KEY,
-            DimensionamientoDashboardSnapshot.version == DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
         )
         .limit(1)
     ).scalar_one_or_none()
