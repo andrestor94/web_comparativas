@@ -388,6 +388,30 @@
       color: #fff !important;
     }
 
+    .sidebar-nav-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 18px;
+      padding: 0 0.5rem;
+      border-radius: 999px;
+      margin-left: 0.5rem;
+      font-size: 0.58rem;
+      line-height: 1;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 800;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    .sidebar-nav-pill--new {
+      color: #8a5a09;
+      border: 1px solid rgba(245, 158, 11, 0.26);
+      background: linear-gradient(180deg, rgba(255, 247, 223, 0.98), rgba(255, 239, 196, 0.94));
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.12);
+    }
+
     .sidebar .submenu-section-title {
       display: block !important;
       font-size: 0.58rem !important;
@@ -742,7 +766,7 @@
         {% if user and r in ['admin','supervisor','auditor'] %}
         <a href="/mercado-publico/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
-          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles</div>
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
         </a>
         {% endif %}
 
