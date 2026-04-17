@@ -9,7 +9,7 @@ import logging
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey, Float, event, text,
-    UniqueConstraint, select, Boolean, JSON, Text, func, LargeBinary
+    UniqueConstraint, select, Boolean, JSON, Text, func, LargeBinary, Date, Index
 )
 from sqlalchemy.orm import (
     declarative_base, relationship, sessionmaker, scoped_session
@@ -1661,3 +1661,48 @@ class PliegoTrazabilidad(Base):
 
     solicitud = relationship("PliegoSolicitud", back_populates="trazabilidad")
 
+
+class ComparativaRow(Base):
+    """
+    Fila individual de una comparativa normalizada de Mercado Público.
+    Se popula parseando los BLOBs normalized_content de la tabla uploads.
+    Es la fuente de verdad para el dashboard de Reporte de Perfiles.
+    """
+    __tablename__ = "comparativa_rows"
+    __table_args__ = (
+        Index("ix_comp_rows_fecha_apertura", "fecha_apertura"),
+        Index("ix_comp_rows_upload_proveedor", "upload_id", "proveedor"),
+        Index("ix_comp_rows_descripcion_fecha", "descripcion", "fecha_apertura"),
+        Index("ix_comp_rows_proveedor_fecha", "proveedor", "fecha_apertura"),
+        Index("ix_comp_rows_marca_fecha", "marca", "fecha_apertura"),
+        Index("ix_comp_rows_comprador_fecha", "comprador", "fecha_apertura"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    upload_id = Column(Integer, ForeignKey("uploads.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Metadata heredada del proceso padre (denormalizada para analytics eficiente)
+    fecha_apertura = Column(Date, nullable=True)
+    nro_proceso = Column(String(255), nullable=True, index=True)
+    comprador = Column(Text, nullable=True)
+    plataforma = Column(String(60), nullable=True)
+    cuenta = Column(String(60), nullable=True)
+    provincia = Column(String(120), nullable=True)
+
+    # Columnas del Excel normalizado (orden estándar de los adapters)
+    proveedor = Column(Text, nullable=True)
+    renglon = Column(String(60), nullable=True)
+    alternativa = Column(String(60), nullable=True)
+    codigo = Column(String(120), nullable=True)
+    descripcion = Column(Text, nullable=True)
+    cantidad_solicitada = Column(Float, nullable=True)
+    unidad_medida = Column(String(60), nullable=True)
+    precio_unitario = Column(Float, nullable=True)
+    cantidad_ofertada = Column(Float, nullable=True)
+    total_por_renglon = Column(Float, nullable=True)
+    especificacion_tecnica = Column(Text, nullable=True)
+    marca = Column(String(255), nullable=True)
+    posicion = Column(Integer, nullable=True)
+    rubro = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime, default=dt.datetime.utcnow)

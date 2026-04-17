@@ -948,6 +948,166 @@ def ensure_cliente_visible_columns():
     )
 
 
+def ensure_comparativa_rows_table():
+    """
+    Crea la tabla comparativa_rows y sus índices si no existen.
+    Esta tabla almacena las filas individuales de comparativas de Mercado Público
+    parseadas desde los BLOBs normalized_content, y sirve como fuente de verdad
+    para el dashboard de Reporte de Perfiles.
+    """
+    from web_comparativas.models import ComparativaRow, Base
+
+    try:
+        ComparativaRow.__table__.create(bind=engine, checkfirst=True)
+        print("[MIGRATION] Tabla 'comparativa_rows' verificada/creada.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Tabla 'comparativa_rows': advertencia — {e}", flush=True)
+
+    indexes = [
+        ("ix_comp_rows_fecha_apertura", "comparativa_rows", "(fecha_apertura)"),
+        ("ix_comp_rows_upload_proveedor", "comparativa_rows", "(upload_id, proveedor)"),
+        ("ix_comp_rows_descripcion_fecha", "comparativa_rows", "(descripcion, fecha_apertura)"),
+        ("ix_comp_rows_proveedor_fecha", "comparativa_rows", "(proveedor, fecha_apertura)"),
+        ("ix_comp_rows_marca_fecha", "comparativa_rows", "(marca, fecha_apertura)"),
+        ("ix_comp_rows_comprador_fecha", "comparativa_rows", "(comprador, fecha_apertura)"),
+    ]
+    for idx_name, table_name, expr in indexes:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name} {expr}"))
+            print(f"[MIGRATION] Índice '{idx_name}' verificado/creado.", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                print(f"[MIGRATION] Índice '{idx_name}': ya existe. (OK)", flush=True)
+            else:
+                print(f"[MIGRATION] Índice '{idx_name}': advertencia — {e}", flush=True)
+
+
+def backfill_comparativa_rows():
+    """
+    Parsea los normalized_content de uploads procesados e inserta filas
+    en comparativa_rows. Salta uploads que ya tienen filas. Procesa en
+    lotes de 5 para evitar OOM en Render (512MB límite).
+    """
+    import gc
+    import io
+    import datetime as _dt
+    import pandas as pd
+    from web_comparativas.models import SessionLocal, Upload as UploadModel, ComparativaRow
+
+    BATCH_SIZE = 5
+    EXCEL_COL_MAP = {
+        "Proveedor": "proveedor",
+        "Renglón": "renglon",
+        "Alternativa": "alternativa",
+        "Código": "codigo",
+        "Descripción": "descripcion",
+        "Cantidad solicitada": "cantidad_solicitada",
+        "Unidad de medida": "unidad_medida",
+        "Precio unitario": "precio_unitario",
+        "Cantidad ofertada": "cantidad_ofertada",
+        "Total por renglón": "total_por_renglon",
+        "Especificación técnica": "especificacion_tecnica",
+        "Marca": "marca",
+        "Posicion": "posicion",
+        "Rubro": "rubro",
+    }
+
+    session = SessionLocal()
+    inserted_total = 0
+    try:
+        # IDs de uploads procesados sin filas en comparativa_rows
+        from sqlalchemy import select as sa_select, func as sa_func, exists, literal
+        already_synced = {
+            row[0] for row in session.execute(
+                sa_select(ComparativaRow.upload_id).distinct()
+            ).all()
+        }
+
+        upload_ids = [
+            row[0] for row in session.query(UploadModel.id)
+            .filter(
+                UploadModel.status.in_(["done", "reviewing", "dashboard"]),
+                UploadModel.normalized_content.isnot(None),
+            )
+            .order_by(UploadModel.id.asc())
+            .all()
+            if row[0] not in already_synced
+        ]
+
+        print(f"[BACKFILL_COMP] {len(upload_ids)} uploads pendientes de sync.", flush=True)
+
+        for i in range(0, len(upload_ids), BATCH_SIZE):
+            batch_ids = upload_ids[i:i + BATCH_SIZE]
+            batch = session.query(UploadModel).filter(UploadModel.id.in_(batch_ids)).all()
+
+            for up in batch:
+                try:
+                    norm_bytes = bytes(up.normalized_content)
+                    df = pd.read_excel(io.BytesIO(norm_bytes), engine="openpyxl")
+                    df.columns = [str(c).strip() for c in df.columns]
+
+                    fecha_apertura = None
+                    if up.apertura_fecha:
+                        try:
+                            fecha_apertura = _dt.date.fromisoformat(up.apertura_fecha.strip()[:10])
+                        except Exception:
+                            pass
+
+                    rows_to_insert = []
+                    for _, row in df.iterrows():
+                        rec = {
+                            "upload_id": up.id,
+                            "fecha_apertura": fecha_apertura,
+                            "nro_proceso": up.proceso_nro,
+                            "comprador": up.buyer_hint,
+                            "plataforma": up.platform_hint,
+                            "cuenta": up.cuenta_nro,
+                            "provincia": up.province_hint,
+                        }
+                        for excel_col, model_col in EXCEL_COL_MAP.items():
+                            val = row.get(excel_col)
+                            if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                                if model_col == "posicion":
+                                    try:
+                                        val = int(val)
+                                    except Exception:
+                                        val = None
+                                elif model_col in ("cantidad_solicitada", "precio_unitario",
+                                                   "cantidad_ofertada", "total_por_renglon"):
+                                    try:
+                                        val = float(val)
+                                    except Exception:
+                                        val = None
+                                else:
+                                    val = str(val).strip() if val else None
+                                rec[model_col] = val
+
+                        rows_to_insert.append(rec)
+
+                    if rows_to_insert:
+                        session.bulk_insert_mappings(ComparativaRow, rows_to_insert)
+                        inserted_total += len(rows_to_insert)
+
+                except Exception as e:
+                    print(f"[BACKFILL_COMP] Upload {up.id}: error — {e}", flush=True)
+
+            session.commit()
+            session.expire_all()
+            del batch
+            gc.collect()
+
+        print(f"[BACKFILL_COMP] Completado: {inserted_total} filas insertadas.", flush=True)
+    except Exception as e:
+        session.rollback()
+        print(f"[BACKFILL_COMP] Error general: {e}", flush=True)
+    finally:
+        session.close()
+
+    return inserted_total
+
+
 def ensure_cliente_visible_backfill():
     """
     Backfill de cliente_visible e is_client en dimensionamiento_records.
