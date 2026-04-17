@@ -75,7 +75,26 @@ def _apply_multi(q, column, values: Optional[str]):
     """Filtra por una lista de valores separados por coma."""
     if not values:
         return q
-    vals = [v.strip() for v in values.split(",") if v.strip()]
+    vals = _split_filter_values(values)
+    if vals:
+        q = q.where(column.in_(vals))
+    return q
+
+def _split_filter_values(values: Optional[str]) -> list[str]:
+    if not values:
+        return []
+    seen = set()
+    parsed: list[str] = []
+    for raw in values.split(","):
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        parsed.append(value)
+    return parsed
+
+def _apply_exact_text(q, column, values: Optional[str]):
+    vals = _split_filter_values(values)
     if vals:
         q = q.where(column.in_(vals))
     return q
@@ -177,6 +196,7 @@ def search_filtro(
     request: Request,
     campo: str = Query(..., description="descripcion | proveedor | marca | comprador"),
     q: str = Query("", description="Término de búsqueda"),
+    limit: int = Query(50, ge=1, le=5000),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
     CAMPO_MAP = {
@@ -193,7 +213,7 @@ def search_filtro(
     term = f"%{q.strip()}%" if q.strip() else "%"
     rows = session.execute(
         select(col).where(col.isnot(None)).where(col.ilike(term))
-        .distinct().order_by(col).limit(50)
+        .distinct().order_by(col).limit(limit)
     ).scalars().all()
     return {"ok": True, "data": [r for r in rows if r]}
 
@@ -205,13 +225,12 @@ def search_filtro(
 def _articulos_base(session, descripcion, fecha_desde, fecha_hasta, marca, proveedor, rubro, plataforma=""):
     q = select(ComparativaRow).where(ComparativaRow.fecha_apertura.isnot(None))
     if descripcion:
-        q = q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+        q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.marca, marca)
     q = _apply_multi(q, ComparativaRow.proveedor, proveedor)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
     return q
 
 
@@ -245,14 +264,12 @@ def articulos_kpis(
     )
     .where(ComparativaRow.fecha_apertura.isnot(None)))
 
-    if descripcion:
-        base = base.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+    base = _apply_exact_text(base, ComparativaRow.descripcion, descripcion)
     base = _apply_date_filters(base, fecha_desde, fecha_hasta)
     base = _apply_multi(base, ComparativaRow.marca, marca)
     base = _apply_multi(base, ComparativaRow.proveedor, proveedor)
     base = _apply_multi(base, ComparativaRow.rubro, rubro)
-    if plataforma:
-        base = base.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    base = _apply_exact_text(base, ComparativaRow.plataforma, plataforma)
 
     row = session.execute(base).one_or_none()
 
@@ -261,14 +278,12 @@ def articulos_kpis(
         ComparativaRow.precio_unitario.isnot(None),
         ComparativaRow.fecha_apertura.isnot(None),
     )
-    if descripcion:
-        precios_q = precios_q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+    precios_q = _apply_exact_text(precios_q, ComparativaRow.descripcion, descripcion)
     precios_q = _apply_date_filters(precios_q, fecha_desde, fecha_hasta)
     precios_q = _apply_multi(precios_q, ComparativaRow.marca, marca)
     precios_q = _apply_multi(precios_q, ComparativaRow.proveedor, proveedor)
     precios_q = _apply_multi(precios_q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        precios_q = precios_q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    precios_q = _apply_exact_text(precios_q, ComparativaRow.plataforma, plataforma)
     prices = [r[0] for r in session.execute(precios_q).all() if r[0] is not None]
     mediana = round(statistics.median(prices), 2) if prices else None
 
@@ -328,14 +343,12 @@ def articulos_evolucion(
         .group_by(_year, _quarter, _month)
         .order_by(_year, _quarter, _month)
     )
-    if descripcion:
-        q = q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.marca, marca)
     q = _apply_multi(q, ComparativaRow.proveedor, proveedor)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -367,7 +380,7 @@ def articulos_por_marca(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("art_marca", descripcion, fecha_desde, fecha_hasta, proveedor, rubro, plataforma)
+    ck = _cache_key("art_marca_ganador", descripcion, fecha_desde, fecha_hasta, proveedor, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -375,32 +388,29 @@ def articulos_por_marca(
     session = _get_session(request)
     q = (
         select(
+            ComparativaRow.fecha_apertura,
             ComparativaRow.marca,
-            func.avg(ComparativaRow.precio_unitario).label("avg_precio"),
-            func.sum(ComparativaRow.total_por_renglon).label("total_ofertado"),
-            func.count().label("count_filas"),
+            ComparativaRow.precio_unitario.label("precio_ganador")
         )
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .where(ComparativaRow.marca.isnot(None))
-        .group_by(ComparativaRow.marca)
-        .order_by(func.avg(ComparativaRow.precio_unitario).desc())
-        .limit(20)
+        .where(ComparativaRow.posicion == 1)
+        .where(ComparativaRow.precio_unitario.isnot(None))
+        .order_by(ComparativaRow.fecha_apertura.asc())
+        .limit(100)
     )
-    if descripcion:
-        q = q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.proveedor, proveedor)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
         {
+            "fecha": r.fecha_apertura.isoformat() if hasattr(r.fecha_apertura, 'isoformat') else str(r.fecha_apertura),
             "marca": r.marca,
-            "avg_precio": round(r.avg_precio or 0, 2),
-            "total_ofertado": round(r.total_ofertado or 0, 2),
-            "count": r.count_filas,
+            "precio_ganador": round(r.precio_ganador or 0, 2),
         }
         for r in rows
     ]
@@ -425,40 +435,123 @@ def articulos_por_proveedor(
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
+    _adj_expr = func.sum(
+        case((ComparativaRow.posicion == 1, ComparativaRow.total_por_renglon))
+    )
     q = (
         select(
             ComparativaRow.proveedor,
             func.avg(ComparativaRow.precio_unitario).label("avg_precio"),
-            func.avg(ComparativaRow.posicion).label("posicion_promedio"),
+            func.count(case((ComparativaRow.posicion == 1, 1))).label("veces_ganado"),
             func.min(ComparativaRow.posicion).label("mejor_posicion"),
             func.sum(ComparativaRow.total_por_renglon).label("total_ofertado"),
+            _adj_expr.label("total_adjudicado"),
             func.count().label("count_filas"),
             func.count(distinct(ComparativaRow.upload_id)).label("procesos"),
         )
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .where(ComparativaRow.proveedor.isnot(None))
         .group_by(ComparativaRow.proveedor)
-        .order_by(func.sum(ComparativaRow.total_por_renglon).desc())
+        .order_by(_adj_expr.desc())
         .limit(30)
     )
-    if descripcion:
-        q = q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.marca, marca)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
+
+    # Mediana de precio_unitario del último año por proveedor (cálculo Python-side)
+    one_year_ago = dt.date.today() - dt.timedelta(days=365)
+    prov_names = [r.proveedor for r in rows]
+    prices_by_prov: dict = {}
+    if prov_names:
+        hist_q = (
+            select(ComparativaRow.proveedor, ComparativaRow.precio_unitario)
+            .where(ComparativaRow.fecha_apertura >= one_year_ago)
+            .where(ComparativaRow.proveedor.in_(prov_names))
+            .where(ComparativaRow.precio_unitario.isnot(None))
+        )
+        hist_q = _apply_exact_text(hist_q, ComparativaRow.descripcion, descripcion)
+        hist_q = _apply_multi(hist_q, ComparativaRow.marca, marca)
+        hist_q = _apply_multi(hist_q, ComparativaRow.rubro, rubro)
+        hist_q = _apply_exact_text(hist_q, ComparativaRow.plataforma, plataforma)
+        for hr in session.execute(hist_q).all():
+            prices_by_prov.setdefault(hr.proveedor, []).append(hr.precio_unitario)
+
+    def _median(vals: list) -> float:
+        if not vals:
+            return 0.0
+        s = sorted(vals)
+        n = len(s)
+        mid = n // 2
+        return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
     data = [
         {
             "proveedor": r.proveedor,
             "avg_precio": round(r.avg_precio or 0, 2),
-            "posicion_promedio": round(r.posicion_promedio or 0, 1),
+            "veces_ganado": int(r.veces_ganado or 0),
             "mejor_posicion": r.mejor_posicion,
             "total_ofertado": round(r.total_ofertado or 0, 2),
+            "total_adjudicado": round(r.total_adjudicado or 0, 2),
+            "precio_mediana_12m": round(_median(prices_by_prov.get(r.proveedor, [])), 2),
             "count": r.count_filas,
             "procesos": r.procesos,
+        }
+        for r in rows
+    ]
+    _cache_set(ck, data)
+    return {"ok": True, "data": data}
+
+
+@router.get("/articulos/proveedor-historico")
+def articulos_proveedor_historico(
+    request: Request,
+    proveedor: str = Query(""),
+    descripcion: str = Query(""),
+    marca: str = Query(""),
+    rubro: str = Query(""),
+    plataforma: str = Query(""),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+):
+    if not proveedor.strip():
+        return {"ok": True, "data": []}
+
+    ck = _cache_key("art_prov_hist", proveedor, descripcion, marca, rubro, plataforma)
+    cached = _cache_get(ck, _TTL_ANALYTICS)
+    if cached is not None:
+        return {"ok": True, "data": cached}
+
+    one_year_ago = dt.date.today() - dt.timedelta(days=365)
+    session = _get_session(request)
+    q = (
+        select(
+            ComparativaRow.fecha_apertura,
+            ComparativaRow.precio_unitario,
+            ComparativaRow.marca,
+            ComparativaRow.posicion,
+        )
+        .where(ComparativaRow.fecha_apertura >= one_year_ago)
+        .where(ComparativaRow.proveedor == proveedor)
+        .where(ComparativaRow.fecha_apertura.isnot(None))
+        .order_by(ComparativaRow.fecha_apertura.desc())
+        .limit(120)
+    )
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_multi(q, ComparativaRow.marca, marca)
+    q = _apply_multi(q, ComparativaRow.rubro, rubro)
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
+
+    rows = session.execute(q).all()
+    data = [
+        {
+            "fecha": r.fecha_apertura.isoformat() if r.fecha_apertura else None,
+            "precio": round(r.precio_unitario or 0, 2),
+            "marca": r.marca or "-",
+            "posicion": r.posicion,
         }
         for r in rows
     ]
@@ -500,15 +593,12 @@ def competidor_kpis(
         )
         .where(ComparativaRow.fecha_apertura.isnot(None))
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
     q = _apply_multi(q, ComparativaRow.marca, marca)
-    if descripcion:
-        q = q.where(ComparativaRow.descripcion.ilike(f"%{descripcion}%"))
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     row = session.execute(q).one_or_none()
     data = {
@@ -559,12 +649,10 @@ def competidor_evolucion(
         .group_by(_year, _quarter, _month)
         .order_by(_year, _quarter, _month)
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -610,11 +698,9 @@ def competidor_rubros(
         .order_by(func.sum(ComparativaRow.total_por_renglon).desc())
         .limit(15)
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     total = sum(r.monto_total or 0 for r in rows)
@@ -661,12 +747,10 @@ def competidor_posiciones(
         .order_by(func.avg(ComparativaRow.posicion).asc())
         .limit(30)
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -710,11 +794,9 @@ def competidor_top_marcas(
         .order_by(func.sum(ComparativaRow.total_por_renglon).desc())
         .limit(15)
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -755,12 +837,10 @@ def competidor_top_articulos(
         .order_by(func.sum(ComparativaRow.total_por_renglon).desc())
         .limit(25)
     )
-    if proveedor:
-        q = q.where(ComparativaRow.proveedor.ilike(f"%{proveedor}%"))
+    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -831,14 +911,11 @@ def cliente_kpis(
 
 
 def _apply_cliente_filters(q, comprador, nro_proceso, plataforma, provincia):
-    if comprador:
-        q = q.where(ComparativaRow.comprador.ilike(f"%{comprador}%"))
+    q = _apply_exact_text(q, ComparativaRow.comprador, comprador)
     if nro_proceso:
         q = q.where(ComparativaRow.nro_proceso.ilike(f"%{nro_proceso}%"))
-    if plataforma:
-        q = q.where(ComparativaRow.plataforma.ilike(f"%{plataforma}%"))
-    if provincia:
-        q = q.where(ComparativaRow.provincia.ilike(f"%{provincia}%"))
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
+    q = _apply_exact_text(q, ComparativaRow.provincia, provincia)
     return q
 
 

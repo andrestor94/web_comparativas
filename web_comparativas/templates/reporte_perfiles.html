@@ -3,7 +3,7 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=perfiles-v1">
-<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v4">
+<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v5">
 {% endblock %}
 
 {% block content %}
@@ -124,37 +124,21 @@
       </div>
 
       <section class="pf-filter-card">
+        <div class="pf-filter-card__intro">
+          <div>
+            <span class="pf-filter-card__eyebrow">Filtro principal</span>
+            <p class="pf-filter-card__hint">Seleccioná primero uno o varios articulos para habilitar KPIs, graficos y detalle.</p>
+          </div>
+          <span class="pf-filter-card__required">
+            <i class="bi bi-stars"></i>
+            Articulo requerido
+          </span>
+        </div>
         <div class="pf-filter-grid">
-          <div class="pf-sf-group pf-sf-group--wide">
-            <label for="artDescInput">Descripcion</label>
-            <div class="pf-typeahead">
-              <input type="text" id="artDescInput" placeholder="Buscar articulo" oninput="pfTypeahead(this,'descripcion','artDescDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="artDescDrop"><ul></ul></div>
-            </div>
-          </div>
-
-          <div class="pf-sf-group">
-            <label for="artMarcaInput">Marca</label>
-            <div class="pf-typeahead">
-              <input type="text" id="artMarcaInput" placeholder="Todas" oninput="pfTypeahead(this,'marca','artMarcaDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="artMarcaDrop"><ul></ul></div>
-            </div>
-          </div>
-
-          <div class="pf-sf-group">
-            <label for="artProvInput">Proveedor</label>
-            <div class="pf-typeahead">
-              <input type="text" id="artProvInput" placeholder="Todos" oninput="pfTypeahead(this,'proveedor','artProvDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="artProvDrop"><ul></ul></div>
-            </div>
-          </div>
-
-          <div class="pf-sf-group pf-sf-group--compact">
-            <label for="artRubroSel">Rubro</label>
-            <select class="pf-select" id="artRubroSel">
-              <option value="">Todos</option>
-            </select>
-          </div>
+          <div class="pf-sf-group pf-sf-group--wide" id="artDescMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="artMarcaMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="artProvMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="artRubroMount"></div>
 
           <div class="pf-filter-actions">
             <button type="button" class="pf-btn-apply" onclick="pfLoadArticulos()">
@@ -165,83 +149,99 @@
         </div>
       </section>
 
-      <div class="pf-kpi-row" id="artKpiRow">
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
-      </div>
-
-      <div class="pf-grid-2">
-        <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Serie temporal</span>
-            <h3 class="pf-card__title">Evolucion de Precio Unitario</h3>
-          </div>
-          <div class="pf-chart-box" id="artPrecioChart"></div>
-        </article>
-
-        <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Volumen</span>
-            <h3 class="pf-card__title">Cantidad Solicitada vs. Ofertada</h3>
-          </div>
-          <div class="pf-chart-box" id="artCantidadChart"></div>
-        </article>
-      </div>
-
-      <div class="pf-grid-2">
-        <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Benchmark</span>
-            <h3 class="pf-card__title">Precio Promedio por Marca</h3>
-          </div>
-          <div class="pf-chart-box" id="artMarcaChart"></div>
-        </article>
-
-        <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Ranking</span>
-            <h3 class="pf-card__title">Proveedores por Monto Ofertado</h3>
-          </div>
-          <div class="pf-chart-box" id="artProvChart"></div>
-        </article>
-      </div>
-
-      <article class="pf-card pf-card--table">
-        <div class="pf-card__head">
-          <span class="pf-card__eyebrow">Detalle</span>
-          <h3 class="pf-card__title">Proveedores Participantes</h3>
+      <section class="pf-card pf-required-state" id="artEmptySelection">
+        <div class="pf-required-state__icon">
+          <i class="bi bi-binoculars"></i>
         </div>
-        <div class="pf-tscroll">
-          <table class="pf-table">
-            <thead>
-              <tr>
-                <th>Proveedor</th>
-                <th class="num">Precio prom.</th>
-                <th class="num">Pos. prom.</th>
-                <th class="num">Mejor pos.</th>
-                <th class="num">Monto ofertado</th>
-                <th class="num">Procesos</th>
-                <th class="num">Apariciones</th>
-              </tr>
-            </thead>
-            <tbody id="artProvTbody">
-              <tr>
-                <td colspan="7">
-                  <div class="pf-empty-state">
-                    <i class="bi bi-search"></i>
-                    <p>Busca un articulo para ver su detalle de proveedores.</p>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="pf-required-state__body">
+          <span class="pf-required-state__eyebrow">Esperando contexto</span>
+          <h3>Seleccioná al menos un articulo para visualizar el reporte.</h3>
+          <p>Una vez definido el articulo, vas a poder combinar marcas, proveedores, rubros y fechas para profundizar el analisis.</p>
+          <div class="pf-required-state__tips">
+            <span><i class="bi bi-check2-circle"></i> Usá el filtro principal con multiseleccion</span>
+            <span><i class="bi bi-check2-circle"></i> Aplicá la seleccion dentro del filtro o desde Consultar</span>
+          </div>
         </div>
-      </article>
+      </section>
+
+      <div id="artDashboard" class="pf-dashboard-stack" hidden>
+        <div class="pf-kpi-row" id="artKpiRow">
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        </div>
+
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Serie temporal</span>
+              <h3 class="pf-card__title">Evolucion de Precio Unitario</h3>
+            </div>
+            <div class="pf-chart-box" id="artPrecioChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Volumen</span>
+              <h3 class="pf-card__title">Cantidad Solicitada</h3>
+            </div>
+            <div class="pf-chart-box" id="artCantidadChart"></div>
+          </article>
+        </div>
+
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Historico adjudicado</span>
+              <h3 class="pf-card__title">Precio Ganador por Fecha</h3>
+            </div>
+            <div class="pf-chart-box" id="artMarcaChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Ranking adjudicado</span>
+              <h3 class="pf-card__title">Proveedor por Monto Adjudicado</h3>
+            </div>
+            <div class="pf-chart-box" id="artProvChart"></div>
+          </article>
+        </div>
+
+        <article class="pf-card pf-card--table">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Detalle</span>
+            <h3 class="pf-card__title">Proveedores Participantes</h3>
+          </div>
+          <div class="pf-tscroll">
+            <table class="pf-table">
+              <thead>
+                <tr>
+                  <th>Proveedor</th>
+                  <th class="num">Precio prom.</th>
+                  <th class="num">Veces ganado</th>
+                  <th class="num">Mejor pos.</th>
+                  <th class="num">Monto adjudicado</th>
+                  <th class="num">Procesos</th>
+                  <th class="num">Apariciones</th>
+                  <th class="num">Historial 12m</th>
+                </tr>
+              </thead>
+              <tbody id="artProvTbody">
+                <tr>
+                  <td colspan="8">
+                    <div class="pf-empty-state">
+                      <i class="bi bi-search"></i>
+                      <p>Seleccioná un articulo para ver su detalle de proveedores.</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
     </div>
 
     <!-- ── TAB: COMPETIDOR ────────────────────────────────────── -->
@@ -253,28 +253,9 @@
 
       <section class="pf-filter-card">
         <div class="pf-filter-grid">
-          <div class="pf-sf-group pf-sf-group--wide">
-            <label for="compProvInput">Proveedor / Competidor</label>
-            <div class="pf-typeahead">
-              <input type="text" id="compProvInput" placeholder="Buscar proveedor" oninput="pfTypeahead(this,'proveedor','compProvDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="compProvDrop"><ul></ul></div>
-            </div>
-          </div>
-
-          <div class="pf-sf-group pf-sf-group--compact">
-            <label for="compRubroSel">Rubro</label>
-            <select class="pf-select" id="compRubroSel">
-              <option value="">Todos</option>
-            </select>
-          </div>
-
-          <div class="pf-sf-group">
-            <label for="compDescInput">Articulo</label>
-            <div class="pf-typeahead">
-              <input type="text" id="compDescInput" placeholder="Filtrar por articulo" oninput="pfTypeahead(this,'descripcion','compDescDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="compDescDrop"><ul></ul></div>
-            </div>
-          </div>
+          <div class="pf-sf-group pf-sf-group--wide" id="compProvMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="compRubroMount"></div>
+          <div class="pf-sf-group" id="compDescMount"></div>
 
           <div class="pf-filter-actions">
             <button type="button" class="pf-btn-apply" onclick="pfLoadCompetidor()">
@@ -371,29 +352,11 @@
 
       <section class="pf-filter-card">
         <div class="pf-filter-grid">
-          <div class="pf-sf-group pf-sf-group--wide">
-            <label for="cliCompInput">Comprador / Organismo</label>
-            <div class="pf-typeahead">
-              <input type="text" id="cliCompInput" placeholder="Buscar comprador" oninput="pfTypeahead(this,'comprador','cliCompDrop')" autocomplete="off">
-              <div class="pf-dropdown" id="cliCompDrop"><ul></ul></div>
-            </div>
-          </div>
+          <div class="pf-sf-group pf-sf-group--wide" id="cliCompMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="cliPlatMount"></div>
+          <div class="pf-sf-group pf-sf-group--compact" id="cliProvMount"></div>
 
           <div class="pf-sf-group pf-sf-group--compact">
-            <label for="cliPlatSel">Plataforma</label>
-            <select class="pf-select" id="cliPlatSel">
-              <option value="">Todas</option>
-            </select>
-          </div>
-
-          <div class="pf-sf-group pf-sf-group--compact">
-            <label for="cliProvSel">Provincia</label>
-            <select class="pf-select" id="cliProvSel">
-              <option value="">Todas</option>
-            </select>
-          </div>
-
-          <div class="pf-sf-group">
             <label for="cliProcesoInput">Nro. Proceso</label>
             <input type="text" class="pf-select" id="cliProcesoInput" placeholder="Ej: 2024/0001">
           </div>
@@ -487,5 +450,5 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=4"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=5"></script>
 {% endblock %}

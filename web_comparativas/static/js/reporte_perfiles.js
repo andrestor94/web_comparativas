@@ -7,8 +7,8 @@ const PF = {
   globalFechaHasta: "",
   globalPlataforma: "SIPROSA",
   charts: {},
-  typeaheadTimers: {},
   filterOptions: {},
+  multiFilters: {},
 };
 
 const BASE = "/api/mercado-publico/perfiles";
@@ -23,6 +23,124 @@ const COLORS = {
   neutral: "#94a3b8",
   slate: "#64748b",
   palette: ["#06486f", "#1e5c8a", "#5770b0", "#38bdf8", "#10b981", "#f59e0b", "#94a3b8", "#cbd5e1"],
+};
+
+const FILTER_CONFIG = {
+  artDesc: {
+    mountId: "artDescMount",
+    tab: "articulos",
+    label: "Descripcion",
+    param: "descripcion",
+    source: "remote",
+    field: "descripcion",
+    allLabel: "Todos los articulos",
+    allMeta: "Filtro principal del reporte",
+    searchPlaceholder: "Buscar articulo",
+    required: true,
+    defaultAll: false,
+    emptyLabel: "Selecciona articulos",
+    emptyMeta: "Elegi uno o varios para habilitar el reporte",
+  },
+  artMarca: {
+    mountId: "artMarcaMount",
+    tab: "articulos",
+    label: "Marca",
+    param: "marca",
+    source: "remote",
+    field: "marca",
+    allLabel: "Todas las marcas",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar marca",
+  },
+  artProv: {
+    mountId: "artProvMount",
+    tab: "articulos",
+    label: "Proveedor",
+    param: "proveedor",
+    source: "remote",
+    field: "proveedor",
+    allLabel: "Todos los proveedores",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar proveedor",
+  },
+  artRubro: {
+    mountId: "artRubroMount",
+    tab: "articulos",
+    label: "Rubro",
+    param: "rubro",
+    source: "static",
+    optionsKey: "rubros",
+    allLabel: "Todos los rubros",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar rubro",
+  },
+  compProv: {
+    mountId: "compProvMount",
+    tab: "competidor",
+    label: "Proveedor / Competidor",
+    param: "proveedor",
+    source: "remote",
+    field: "proveedor",
+    allLabel: "Todos los proveedores",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar proveedor",
+  },
+  compRubro: {
+    mountId: "compRubroMount",
+    tab: "competidor",
+    label: "Rubro",
+    param: "rubro",
+    source: "static",
+    optionsKey: "rubros",
+    allLabel: "Todos los rubros",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar rubro",
+  },
+  compDesc: {
+    mountId: "compDescMount",
+    tab: "competidor",
+    label: "Articulo",
+    param: "descripcion",
+    source: "remote",
+    field: "descripcion",
+    allLabel: "Todos los articulos",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar articulo",
+  },
+  cliComp: {
+    mountId: "cliCompMount",
+    tab: "cliente",
+    label: "Comprador / Organismo",
+    param: "comprador",
+    source: "remote",
+    field: "comprador",
+    allLabel: "Todos los organismos",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar organismo",
+  },
+  cliPlat: {
+    mountId: "cliPlatMount",
+    tab: "cliente",
+    label: "Plataforma",
+    param: "plataforma",
+    source: "static",
+    optionsKey: "plataformas",
+    allLabel: "Todas las plataformas",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar plataforma",
+    lockedByGlobal: true,
+  },
+  cliProv: {
+    mountId: "cliProvMount",
+    tab: "cliente",
+    label: "Provincia",
+    param: "provincia",
+    source: "static",
+    optionsKey: "provincias",
+    allLabel: "Todas las provincias",
+    allMeta: "Sin restriccion",
+    searchPlaceholder: "Buscar provincia",
+  },
 };
 
 async function pfFetch(url) {
@@ -53,13 +171,6 @@ function pfPeso(n) {
   });
 }
 
-/* ── FORMATTERS ABREVIADOS ────────────────────────────────────
-   Regla unificada para todo el modulo:
-   - pfFmtShort / pfFmtNumShort  → ejes y labels de graficos
-   - pfKpiPeso / pfKpiNum        → valores dentro de KPI cards
-   Sufijo con espacio (ej: "$ 5 M") para mejor legibilidad.
-   Los tooltips usan pfPeso() para mostrar el valor completo.
-──────────────────────────────────────────────────────────── */
 function pfFmtShort(n) {
   if (n == null) return "-";
   const num = parseFloat(n);
@@ -82,7 +193,6 @@ function pfFmtNumShort(n) {
   return pfFmt(num, 0);
 }
 
-/* Formatter monetario para KPI cards: abrevia para evitar saltos de linea */
 function pfKpiPeso(n) {
   if (n == null) return "-";
   const num = parseFloat(n);
@@ -94,7 +204,6 @@ function pfKpiPeso(n) {
   return "$ " + pfFmt(num, 2);
 }
 
-/* Formatter numerico para KPI cards: abrevia cantidades grandes */
 function pfKpiNum(n) {
   if (n == null) return "-";
   const num = parseFloat(n);
@@ -133,12 +242,426 @@ function pfTableEmpty(icon, message, colspan) {
   return `<tr><td colspan="${colspan}"><div class="pf-empty-state"><i class="bi ${icon}"></i><p>${message}</p></div></td></tr>`;
 }
 
+function pfUnique(values) {
+  const seen = new Set();
+  const out = [];
+  values.forEach((value) => {
+    const normalized = (value || "").trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  return out;
+}
+
+function pfFilterMatches(value, query) {
+  if (!query) return true;
+  return String(value || "").toLowerCase().includes(query.toLowerCase());
+}
+
+function pfCreateFilterState(filterId, config) {
+  const defaultAll = config.defaultAll !== false;
+  PF.multiFilters[filterId] = {
+    id: filterId,
+    config,
+    applied: [],
+    appliedAll: defaultAll,
+    draft: [],
+    draftAll: defaultAll,
+    options: [],
+    allOptions: [],
+    loading: false,
+    loaded: false,
+    query: "",
+    cache: new Map(),
+    requestSeq: 0,
+    searchTimer: null,
+  };
+}
+
+function pfRenderFilterControls() {
+  Object.entries(FILTER_CONFIG).forEach(([filterId, config]) => {
+    pfCreateFilterState(filterId, config);
+    const mount = document.getElementById(config.mountId);
+    if (!mount) return;
+
+    const requiredBadge = config.required
+      ? '<span class="pf-multi__label-badge">Obligatorio</span>'
+      : "";
+
+    mount.innerHTML = `
+      <div class="pf-multi" data-filter-id="${filterId}">
+        <label class="pf-multi__label" for="${filterId}Trigger">${pfEsc(config.label)} ${requiredBadge}</label>
+        <button type="button" class="pf-multi__trigger" id="${filterId}Trigger" onclick="pfToggleFilterPanel('${filterId}')">
+          <span class="pf-multi__summary">
+            <span class="pf-multi__value is-placeholder" id="${filterId}Value">${pfEsc(config.allLabel)}</span>
+            <span class="pf-multi__meta" id="${filterId}Meta">${pfEsc(config.allMeta)}</span>
+          </span>
+          <i class="bi bi-chevron-down"></i>
+        </button>
+        <div class="pf-multi__panel" id="${filterId}Panel">
+          <div class="pf-multi__panel-head">
+            <input
+              type="text"
+              class="pf-multi__search"
+              id="${filterId}Search"
+              data-filter-id="${filterId}"
+              placeholder="${pfEscAttr(config.searchPlaceholder)}"
+              autocomplete="off">
+          </div>
+          <div class="pf-multi__panel-body">
+            <label class="pf-multi__all">
+              <input type="checkbox" class="pf-multi__all-check" data-filter-id="${filterId}">
+              <span>Todos</span>
+            </label>
+            <div class="pf-multi__list" id="${filterId}Options"></div>
+          </div>
+          <div class="pf-multi__panel-actions">
+            <button type="button" class="pf-btn-clear" onclick="pfClearFilterDraft('${filterId}')">
+              <i class="bi bi-arrow-counterclockwise"></i>
+              Limpiar
+            </button>
+            <button type="button" class="pf-btn-apply" onclick="pfApplyFilterSelection('${filterId}')">
+              <i class="bi bi-check2"></i>
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </div>`;
+
+    pfUpdateFilterTrigger(filterId);
+  });
+}
+
+function pfIsFilterLocked(filterId) {
+  const state = PF.multiFilters[filterId];
+  return Boolean(state?.config.lockedByGlobal && PF.globalPlataforma);
+}
+
+function pfGetFilterAppliedValues(filterId) {
+  if (pfIsFilterLocked(filterId)) {
+    return PF.globalPlataforma ? [PF.globalPlataforma] : [];
+  }
+  const state = PF.multiFilters[filterId];
+  if (!state || state.appliedAll) return [];
+  return state.applied || [];
+}
+
+function pfGetFilterUniverseValues(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state) return [];
+  if (state.config.source === "static") {
+    return PF.filterOptions[state.config.optionsKey] || [];
+  }
+  return state.allOptions.length ? state.allOptions : state.options;
+}
+
+function pfNormalizeFilterSelection(filterId, scope = "draft") {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  const valuesKey = scope === "draft" ? "draft" : "applied";
+  const allKey = scope === "draft" ? "draftAll" : "appliedAll";
+
+  if (state[allKey]) {
+    state[valuesKey] = [];
+    return;
+  }
+
+  state[valuesKey] = pfUnique(state[valuesKey] || []);
+  const universe = pfGetFilterUniverseValues(filterId);
+  if (!universe.length) return;
+
+  const allSelected = universe.every((value) => state[valuesKey].includes(value));
+  if (allSelected) {
+    state[allKey] = true;
+    state[valuesKey] = [];
+  }
+}
+
+function pfUpdateFilterTrigger(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  const trigger = document.getElementById(`${filterId}Trigger`);
+  const valueEl = document.getElementById(`${filterId}Value`);
+  const metaEl = document.getElementById(`${filterId}Meta`);
+  if (!trigger || !valueEl || !metaEl) return;
+
+  const locked = pfIsFilterLocked(filterId);
+  const values = pfGetFilterAppliedValues(filterId);
+  const allSelected = !locked && state.appliedAll;
+  let valueText = state.config.emptyLabel || state.config.allLabel;
+  let metaText = state.config.emptyMeta || state.config.allMeta;
+  let isPlaceholder = true;
+
+  if (locked && values.length) {
+    valueText = values[0];
+    metaText = "Fijada por el alcance actual";
+    isPlaceholder = false;
+  } else if (allSelected) {
+    valueText = state.config.allLabel;
+    metaText = "Se aplican todas las opciones";
+    isPlaceholder = false;
+  } else if (values.length === 1) {
+    valueText = values[0];
+    metaText = "1 seleccionado";
+    isPlaceholder = false;
+  } else if (values.length > 1) {
+    valueText = `${pfTrunc(values[0], 34)} +${values.length - 1}`;
+    metaText = `${values.length} seleccionados`;
+    isPlaceholder = false;
+  }
+
+  valueEl.textContent = valueText;
+  metaEl.textContent = metaText;
+  valueEl.classList.toggle("is-placeholder", isPlaceholder);
+  trigger.disabled = locked;
+  trigger.classList.toggle("is-locked", locked);
+}
+
+async function pfToggleFilterPanel(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state || pfIsFilterLocked(filterId)) return;
+
+  const panel = document.getElementById(`${filterId}Panel`);
+  const trigger = document.getElementById(`${filterId}Trigger`);
+  const isOpen = panel?.classList.contains("is-open");
+
+  pfCloseAllFilterPanels(filterId);
+  if (isOpen) {
+    pfCloseFilterPanel(filterId);
+    return;
+  }
+
+  state.draft = [...state.applied];
+  state.draftAll = state.appliedAll;
+  state.query = "";
+
+  if (panel) panel.classList.add("is-open");
+  if (trigger) trigger.classList.add("is-open");
+
+  const search = document.getElementById(`${filterId}Search`);
+  if (search) search.value = "";
+
+  await pfEnsureFilterOptions(filterId, "");
+  if (search) search.focus();
+}
+
+function pfCloseFilterPanel(filterId) {
+  const panel = document.getElementById(`${filterId}Panel`);
+  const trigger = document.getElementById(`${filterId}Trigger`);
+  if (panel) panel.classList.remove("is-open");
+  if (trigger) trigger.classList.remove("is-open");
+}
+
+function pfCloseAllFilterPanels(exceptId = "") {
+  Object.keys(PF.multiFilters).forEach((filterId) => {
+    if (filterId === exceptId) return;
+    pfCloseFilterPanel(filterId);
+  });
+}
+
+async function pfEnsureFilterOptions(filterId, query = "") {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  state.query = query;
+  state.loading = true;
+  pfRenderFilterOptions(filterId);
+
+  if (state.config.source === "static") {
+    const source = PF.filterOptions[state.config.optionsKey] || [];
+    state.allOptions = source;
+    state.options = source.filter((value) => pfFilterMatches(value, query));
+    state.loading = false;
+    state.loaded = true;
+    pfRenderFilterOptions(filterId);
+    return;
+  }
+
+  const cacheKey = query.trim().toLowerCase();
+  if (state.cache.has(cacheKey)) {
+    state.options = state.cache.get(cacheKey) || [];
+    state.loading = false;
+    state.loaded = true;
+    pfRenderFilterOptions(filterId);
+    return;
+  }
+
+  const requestSeq = ++state.requestSeq;
+  try {
+    const params = new URLSearchParams({
+      campo: state.config.field,
+      q: query.trim(),
+      limit: query.trim() ? "250" : "5000",
+    });
+    const data = await pfFetch(`${BASE}/filtros/search?${params}`);
+    if (requestSeq !== state.requestSeq) return;
+    state.cache.set(cacheKey, data);
+    state.options = data;
+    if (!query.trim()) state.allOptions = data;
+    state.loaded = true;
+  } catch (err) {
+    if (requestSeq !== state.requestSeq) return;
+    state.options = [];
+    state.loaded = true;
+  } finally {
+    if (requestSeq === state.requestSeq) {
+      state.loading = false;
+      pfRenderFilterOptions(filterId);
+    }
+  }
+}
+
+function pfRenderFilterOptions(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  const allCheck = document.querySelector(`.pf-multi__all-check[data-filter-id="${filterId}"]`);
+  const list = document.getElementById(`${filterId}Options`);
+  if (!list) return;
+
+  const values = pfUnique([...state.draft, ...state.options]);
+  const visibleSelected = state.draftAll
+    ? values.length
+    : values.filter((value) => state.draft.includes(value)).length;
+  if (allCheck) {
+    allCheck.checked = state.draftAll;
+    allCheck.indeterminate = !state.draftAll && visibleSelected > 0;
+  }
+
+  if (state.loading) {
+    list.innerHTML = '<div class="pf-multi__empty">Buscando opciones...</div>';
+    return;
+  }
+
+  if (!values.length) {
+    list.innerHTML = '<div class="pf-multi__empty">No hay opciones disponibles para esta busqueda.</div>';
+    return;
+  }
+
+  list.innerHTML = values.map((value) => {
+    const checked = state.draftAll || state.draft.includes(value) ? "checked" : "";
+    return `
+      <label class="pf-multi__option">
+        <input
+          type="checkbox"
+          class="pf-multi__option-check"
+          data-filter-id="${filterId}"
+          value="${pfEscAttr(value)}"
+          ${checked}>
+        <span class="pf-multi__option-text" title="${pfEscAttr(value)}">${pfEsc(value)}</span>
+      </label>`;
+  }).join("");
+}
+
+function pfHandleFilterSearchInput(filterId, query) {
+  const state = PF.multiFilters[filterId];
+  if (!state || pfIsFilterLocked(filterId)) return;
+
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(() => {
+    pfEnsureFilterOptions(filterId, query);
+  }, 220);
+}
+
+function pfHandleFilterOptionChange(filterId, value, checked) {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  if (checked) {
+    if (!state.draftAll) {
+      state.draft = pfUnique([...state.draft, value]);
+    }
+  } else {
+    if (state.draftAll) {
+      const universe = pfGetFilterUniverseValues(filterId);
+      state.draftAll = false;
+      state.draft = universe.filter((item) => item !== value);
+    } else {
+      state.draft = state.draft.filter((item) => item !== value);
+    }
+  }
+  pfNormalizeFilterSelection(filterId, "draft");
+  pfRenderFilterOptions(filterId);
+}
+
+function pfClearFilterDraft(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state || pfIsFilterLocked(filterId)) return;
+
+  state.draft = [];
+  state.draftAll = state.config.defaultAll !== false;
+  state.query = "";
+  const search = document.getElementById(`${filterId}Search`);
+  if (search) search.value = "";
+  pfEnsureFilterOptions(filterId, "");
+}
+
+function pfApplyFilterSelection(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state) return;
+
+  if (!pfIsFilterLocked(filterId)) {
+    state.applied = [...state.draft];
+    state.appliedAll = state.draftAll || (!state.draft.length && state.config.defaultAll !== false);
+    pfNormalizeFilterSelection(filterId, "applied");
+  }
+
+  pfCloseFilterPanel(filterId);
+  pfUpdateFilterTrigger(filterId);
+
+  if (state.config.tab === PF.activeTab) {
+    pfLoadCurrentTab();
+  } else if (state.config.tab === "articulos") {
+    pfSetArtSelectionGate();
+  }
+}
+
+document.addEventListener("input", (event) => {
+  const search = event.target.closest(".pf-multi__search");
+  if (!search) return;
+  pfHandleFilterSearchInput(search.dataset.filterId || "", search.value || "");
+});
+
+document.addEventListener("change", (event) => {
+  const option = event.target.closest(".pf-multi__option-check");
+  if (option) {
+    pfHandleFilterOptionChange(option.dataset.filterId || "", option.value || "", option.checked);
+    return;
+  }
+
+  const allCheck = event.target.closest(".pf-multi__all-check");
+  if (allCheck) {
+    const filterId = allCheck.dataset.filterId || "";
+    const state = PF.multiFilters[filterId];
+    if (!state) return;
+    state.draftAll = allCheck.checked;
+    state.draft = [];
+    pfRenderFilterOptions(filterId);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".pf-multi")) return;
+  pfCloseAllFilterPanels();
+});
+
 function pfGlobalParams() {
   const params = new URLSearchParams();
   if (PF.globalFechaDesde) params.set("fecha_desde", PF.globalFechaDesde);
   if (PF.globalFechaHasta) params.set("fecha_hasta", PF.globalFechaHasta);
   if (PF.globalPlataforma) params.set("plataforma", PF.globalPlataforma);
   return params;
+}
+
+function pfSetMultiParam(params, filterId, paramName = FILTER_CONFIG[filterId]?.param) {
+  if (!paramName) return;
+  const state = PF.multiFilters[filterId];
+  if (state?.appliedAll) return;
+  const values = pfGetFilterAppliedValues(filterId);
+  if (values.length) params.set(paramName, values.join(","));
 }
 
 function pfDestroyChart(id) {
@@ -151,10 +674,6 @@ function pfDestroyChart(id) {
   delete PF.charts[id];
 }
 
-/*
-  Merge 2 niveles para eje: preserva labels.style + labels.formatter juntos.
-  El spread shallow de pfChartBase perdería uno al pasar el otro.
-*/
 function pfMergeAxis(base, override) {
   if (!override) return { ...base };
   return {
@@ -164,11 +683,6 @@ function pfMergeAxis(base, override) {
   };
 }
 
-/*
-  Formatter seguro para ejes que pueden recibir tanto strings (categorias)
-  como numeros (escala de valores). Lo usan los charts de barras horizontales
-  donde ApexCharts puede llamar al mismo formatter para ambos tipos.
-*/
 function pfAxisFmtMoney(val) {
   if (typeof val === "number") return pfFmtShort(val);
   const n = parseFloat(val);
@@ -302,7 +816,6 @@ function pfUpdateDateSummary() {
   label.textContent = "Todas las fechas";
 }
 
-/* rawValue: valor completo para title/hover cuando value es abreviado */
 function pfKpiCard({ tone = "neutral", label, value, rawValue = null, sub = "", icon = "bi-graph-up" }) {
   const titleAttr = rawValue != null
     ? pfEscAttr(String(rawValue))
@@ -331,27 +844,53 @@ function pfKpiError(message) {
   });
 }
 
+function pfHasArticleSelection() {
+  const state = PF.multiFilters.artDesc;
+  if (!state) return false;
+  return state.appliedAll || state.applied.length > 0;
+}
+
+function pfResetArtOutputs() {
+  ["artPrecioChart", "artCantidadChart", "artMarcaChart", "artProvChart"].forEach(pfDestroyChart);
+  const row = document.getElementById("artKpiRow");
+  const tbody = document.getElementById("artProvTbody");
+  if (row) row.innerHTML = "";
+  if (tbody) {
+    tbody.innerHTML = pfTableEmpty(
+      "bi-info-circle",
+      "Selecciona primero un articulo para habilitar el detalle del reporte.",
+      7
+    );
+  }
+}
+
+function pfSetArtSelectionGate() {
+  const empty = document.getElementById("artEmptySelection");
+  const dashboard = document.getElementById("artDashboard");
+  const hasArticle = pfHasArticleSelection();
+
+  if (empty) empty.hidden = hasArticle;
+  if (dashboard) dashboard.hidden = !hasArticle;
+  if (!hasArticle) pfResetArtOutputs();
+}
+
 function pfSyncLockedPlatformUI() {
-  const platSel = document.getElementById("cliPlatSel");
-  if (!platSel) return;
+  const state = PF.multiFilters.cliPlat;
+  if (!state) return;
 
-  if (!PF.globalPlataforma) {
-    platSel.disabled = false;
-    platSel.title = "";
-    return;
+  if (PF.globalPlataforma) {
+    state.applied = [PF.globalPlataforma];
+    state.appliedAll = false;
+    state.draft = [PF.globalPlataforma];
+    state.draftAll = false;
   }
+  pfUpdateFilterTrigger("cliPlat");
+}
 
-  const options = Array.from(platSel.options);
-  const hasLocked = options.some((option) => option.value === PF.globalPlataforma);
-  if (!hasLocked) {
-    const opt = document.createElement("option");
-    opt.value = PF.globalPlataforma;
-    opt.textContent = PF.globalPlataforma;
-    platSel.insertBefore(opt, platSel.firstChild);
-  }
-  platSel.value = PF.globalPlataforma;
-  platSel.disabled = true;
-  platSel.title = "La vista mantiene bloqueado el alcance actual en SIPROSA.";
+function pfLoadCurrentTab() {
+  if (PF.activeTab === "articulos") return pfLoadArticulos();
+  if (PF.activeTab === "competidor") return pfLoadCompetidor();
+  return pfLoadCliente();
 }
 
 function pfSwitchTab(name, el) {
@@ -361,20 +900,14 @@ function pfSwitchTab(name, el) {
   if (el) el.classList.add("active");
   const content = document.getElementById(`tab-${name}`);
   if (content) content.classList.add("active");
-
-  if (name === "articulos") pfLoadArticulos();
-  else if (name === "competidor") pfLoadCompetidor();
-  else if (name === "cliente") pfLoadCliente();
+  pfLoadCurrentTab();
 }
 
 function pfApplyGlobalFilters() {
   PF.globalFechaDesde = document.getElementById("gFechaDesde")?.value || "";
   PF.globalFechaHasta = document.getElementById("gFechaHasta")?.value || "";
   pfUpdateDateSummary();
-
-  if (PF.activeTab === "articulos") pfLoadArticulos();
-  else if (PF.activeTab === "competidor") pfLoadCompetidor();
-  else if (PF.activeTab === "cliente") pfLoadCliente();
+  pfLoadCurrentTab();
 }
 
 function pfClearAll() {
@@ -386,75 +919,30 @@ function pfClearAll() {
   PF.globalFechaDesde = "";
   PF.globalFechaHasta = "";
 
-  [
-    "artDescInput",
-    "artMarcaInput",
-    "artProvInput",
-    "artRubroSel",
-    "compProvInput",
-    "compRubroSel",
-    "compDescInput",
-    "cliCompInput",
-    "cliPlatSel",
-    "cliProvSel",
-    "cliProcesoInput",
-  ].forEach((id) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.value = "";
+  Object.keys(PF.multiFilters).forEach((filterId) => {
+    const state = PF.multiFilters[filterId];
+    if (!state) return;
+    if (!pfIsFilterLocked(filterId)) {
+      state.applied = [];
+      state.appliedAll = state.config.defaultAll !== false;
+      state.draft = [];
+      state.draftAll = state.config.defaultAll !== false;
+    }
+    state.query = "";
+    const search = document.getElementById(`${filterId}Search`);
+    if (search) search.value = "";
+    pfUpdateFilterTrigger(filterId);
   });
+
+  const proceso = document.getElementById("cliProcesoInput");
+  if (proceso) proceso.value = "";
 
   pfSyncLockedPlatformUI();
+  pfCloseAllFilterPanels();
   pfUpdateDateSummary();
-
-  if (PF.activeTab === "articulos") pfLoadArticulos();
-  else if (PF.activeTab === "competidor") pfLoadCompetidor();
-  else if (PF.activeTab === "cliente") pfLoadCliente();
+  pfSetArtSelectionGate();
+  pfLoadCurrentTab();
 }
-
-function pfTypeahead(inputEl, campo, dropId) {
-  const q = inputEl.value.trim();
-  clearTimeout(PF.typeaheadTimers[dropId]);
-
-  const drop = document.getElementById(dropId);
-  if (!drop) return;
-
-  if (q.length < 2) {
-    drop.style.display = "none";
-    return;
-  }
-
-  PF.typeaheadTimers[dropId] = setTimeout(async () => {
-    try {
-      const params = new URLSearchParams({ campo, q });
-      const data = await pfFetch(`${BASE}/filtros/search?${params}`);
-      const list = drop.querySelector("ul");
-      if (!list) return;
-
-      list.innerHTML = data.slice(0, 40).map((value) => {
-        return `<li onclick="pfSelectTypeahead('${inputEl.id}','${dropId}',this)" data-val="${pfEscAttr(value)}">${pfEsc(value)}</li>`;
-      }).join("");
-
-      drop.style.display = data.length ? "block" : "none";
-    } catch (err) {
-      drop.style.display = "none";
-    }
-  }, 240);
-}
-
-function pfSelectTypeahead(inputId, dropId, li) {
-  const input = document.getElementById(inputId);
-  const drop = document.getElementById(dropId);
-  if (input) input.value = li.getAttribute("data-val") || "";
-  if (drop) drop.style.display = "none";
-}
-
-document.addEventListener("click", (event) => {
-  if (event.target.closest(".pf-typeahead")) return;
-  document.querySelectorAll(".pf-dropdown").forEach((dropdown) => {
-    dropdown.style.display = "none";
-  });
-});
 
 async function pfCheckSync() {
   const warn = document.getElementById("syncWarnBanner");
@@ -495,32 +983,14 @@ async function pfLoadFilterOptions() {
   try {
     const data = await pfFetch(`${BASE}/filtros`);
     PF.filterOptions = data;
-
-    ["artRubroSel", "compRubroSel"].forEach((id) => {
-      const sel = document.getElementById(id);
-      if (!sel) return;
-      const values = data.rubros || [];
-      sel.innerHTML = ['<option value="">Todos</option>']
-        .concat(values.map((value) => `<option value="${pfEscAttr(value)}">${pfEsc(value)}</option>`))
-        .join("");
+    Object.keys(PF.multiFilters).forEach((filterId) => {
+      const state = PF.multiFilters[filterId];
+      if (!state || state.config.source !== "static") return;
+      if (document.getElementById(`${filterId}Panel`)?.classList.contains("is-open")) {
+        pfEnsureFilterOptions(filterId, state.query || "");
+      }
+      pfUpdateFilterTrigger(filterId);
     });
-
-    const platSel = document.getElementById("cliPlatSel");
-    if (platSel) {
-      const values = data.plataformas || [];
-      platSel.innerHTML = ['<option value="">Todas</option>']
-        .concat(values.map((value) => `<option value="${pfEscAttr(value)}">${pfEsc(value)}</option>`))
-        .join("");
-    }
-
-    const provSel = document.getElementById("cliProvSel");
-    if (provSel) {
-      const values = data.provincias || [];
-      provSel.innerHTML = ['<option value="">Todas</option>']
-        .concat(values.map((value) => `<option value="${pfEscAttr(value)}">${pfEsc(value)}</option>`))
-        .join("");
-    }
-
     pfSyncLockedPlatformUI();
   } catch (err) {
     console.warn("[PF] No se pudieron cargar opciones de filtros:", err.message);
@@ -529,25 +999,22 @@ async function pfLoadFilterOptions() {
 
 function pfGetArtParams() {
   const params = pfGlobalParams();
-  const desc = document.getElementById("artDescInput")?.value.trim() || "";
-  const marca = document.getElementById("artMarcaInput")?.value.trim() || "";
-  const proveedor = document.getElementById("artProvInput")?.value.trim() || "";
-  const rubro = document.getElementById("artRubroSel")?.value || "";
-
-  if (desc) params.set("descripcion", desc);
-  if (marca) params.set("marca", marca);
-  if (proveedor) params.set("proveedor", proveedor);
-  if (rubro) params.set("rubro", rubro);
+  pfSetMultiParam(params, "artDesc");
+  pfSetMultiParam(params, "artMarca");
+  pfSetMultiParam(params, "artProv");
+  pfSetMultiParam(params, "artRubro");
   return params;
 }
 
 async function pfLoadArticulos() {
-  const params = pfGetArtParams();
+  pfSetArtSelectionGate();
+  if (!pfHasArticleSelection()) return;
+
   await Promise.all([
-    pfLoadArtKpis(params),
-    pfLoadArtEvolucion(params),
-    pfLoadArtPorMarca(params),
-    pfLoadArtPorProveedor(params),
+    pfLoadArtKpis(pfGetArtParams()),
+    pfLoadArtEvolucion(pfGetArtParams()),
+    pfLoadArtPorMarca(pfGetArtParams()),
+    pfLoadArtPorProveedor(pfGetArtParams()),
   ]);
 }
 
@@ -591,26 +1058,11 @@ async function pfLoadArtKpis(params) {
         icon: "bi-box-seam",
       }),
       pfKpiCard({
-        tone: "success",
-        label: "Cant. ofertada",
-        value: pfKpiNum(data.cantidad_ofertada),
-        rawValue: pfFmt(data.cantidad_ofertada),
-        sub: "Cotizado en el periodo",
-        icon: "bi-box2-heart",
-      }),
-      pfKpiCard({
         tone: "warning",
         label: "Marcas distintas",
         value: pfFmt(data.marcas_distintas),
-        sub: "Diversidad de marca",
+        sub: `${pfFmt(data.procesos)} procesos analizados`,
         icon: "bi-tags",
-      }),
-      pfKpiCard({
-        tone: "neutral",
-        label: "Mejor posicion",
-        value: data.mejor_posicion != null ? String(data.mejor_posicion) : "-",
-        sub: `${pfFmt(data.procesos)} procesos`,
-        icon: "bi-trophy",
       }),
     ].join("");
   } catch (err) {
@@ -636,7 +1088,7 @@ async function pfLoadArtEvolucion(params) {
       document.getElementById("artPrecioChart"),
       pfChartBase({
         chart: { type: "line", height: 256 },
-        series: [{ name: "Precio prom. unitario", data: data.map((d) => d.avg_precio) }],
+        series: [{ name: "Marca", data: data.map((d) => d.avg_precio) }],
         xaxis: { categories: labels, labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         stroke: { width: 3, curve: "smooth" },
@@ -659,7 +1111,6 @@ async function pfLoadArtEvolucion(params) {
         chart: { type: "bar", height: 256 },
         series: [
           { name: "Cant. solicitada", data: data.map((d) => d.cantidad_solicitada) },
-          { name: "Cant. ofertada", data: data.map((d) => d.cantidad_ofertada) },
         ],
         xaxis: { categories: labels, labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtNumShort(value) } },
@@ -669,7 +1120,7 @@ async function pfLoadArtEvolucion(params) {
             columnWidth: "52%",
           },
         },
-        colors: [COLORS.brand500, COLORS.success],
+        colors: [COLORS.brand500],
       })
     );
     PF.charts.artCantidadChart.render();
@@ -689,20 +1140,31 @@ async function pfLoadArtPorMarca(params) {
       return;
     }
 
+    const labelsRaw = Array.from(new Set(data.map((d) => d.fecha))).sort();
+    const categories = labelsRaw.map(l => pfShortDate(l));
+    const marcasUnicas = Array.from(new Set(data.map((d) => d.marca)));
+
+    const seriesData = marcasUnicas.map(marca => ({
+      name: pfTrunc(marca, 20),
+      data: labelsRaw.map(l => {
+        const match = data.find(d => d.fecha === l && d.marca === marca);
+        return match ? match.precio_ganador : null;
+      })
+    }));
+
     PF.charts.artMarcaChart = new ApexCharts(
       document.getElementById("artMarcaChart"),
       pfChartBase({
         chart: { type: "bar", height: 256 },
-        series: [{ name: "Precio prom. unitario", data: data.map((d) => d.avg_precio) }],
-        xaxis: { categories: data.map((d) => pfTrunc(d.marca, 20)) },
+        series: seriesData,
+        xaxis: { categories: categories },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         plotOptions: {
           bar: {
-            borderRadius: 6,
-            columnWidth: "48%",
+            borderRadius: 4,
+            columnWidth: "55%",
           },
         },
-        colors: [COLORS.cyan],
         tooltip: {
           y: { formatter: (value) => pfPeso(value) },
         },
@@ -722,31 +1184,42 @@ async function pfLoadArtPorProveedor(params) {
     const data = await pfFetch(`${BASE}/articulos/por-proveedor?${params}`);
     if (!data.length) {
       pfRenderEmpty("artProvChart", "Sin proveedores para este articulo.", "bi-buildings");
-      if (tbody) tbody.innerHTML = pfTableEmpty("bi-search", "Sin proveedores para este articulo.", 7);
+      if (tbody) tbody.innerHTML = pfTableEmpty("bi-search", "Sin proveedores para este articulo.", 8);
       return;
     }
 
-    const top = data.slice(0, 10);
+    const top = data.slice(0, 15);
+    const treemapData = top.map((d) => ({ x: pfTrunc(d.proveedor, 28), y: d.total_adjudicado }));
     PF.charts.artProvChart = new ApexCharts(
       document.getElementById("artProvChart"),
       pfChartBase({
-        chart: { type: "bar", height: 256 },
-        series: [{ name: "Monto ofertado total", data: top.map((d) => d.total_ofertado) }],
-        xaxis: {
-          categories: top.map((d) => pfTrunc(d.proveedor, 22)),
-          labels: { maxHeight: 72, formatter: pfAxisFmtMoney },
-        },
-        yaxis: { labels: { formatter: pfAxisFmtMoney } },
+        chart: { type: "treemap", height: 310 },
+        series: [{ name: "Monto adjudicado (pos. 1)", data: treemapData }],
         plotOptions: {
-          bar: {
-            horizontal: true,
-            borderRadius: 7,
-            barHeight: "70%",
+          treemap: {
+            enableShades: true,
+            shadeIntensity: 0.65,
+            distributed: false,
           },
         },
-        colors: [COLORS.brand500],
+        colors: [COLORS.brand700],
+        dataLabels: {
+          enabled: true,
+          style: { fontSize: "12px", fontWeight: 600 },
+          formatter: (text) => text,
+        },
         tooltip: {
-          y: { formatter: (value) => pfPeso(value) },
+          custom({ dataPointIndex }) {
+            const d = top[dataPointIndex];
+            if (!d) return "";
+            return (
+              `<div class="apexcharts-tooltip-box" style="padding:10px 14px;line-height:1.6">` +
+              `<strong>${d.proveedor}</strong><br>` +
+              `Monto adjudicado: <strong>${pfPeso(d.total_adjudicado)}</strong><br>` +
+              `<span style="font-size:11px;opacity:.75">Ganador (posición 1)</span>` +
+              `</div>`
+            );
+          },
         },
       })
     );
@@ -755,33 +1228,97 @@ async function pfLoadArtPorProveedor(params) {
     if (tbody) {
       tbody.innerHTML = data.map((d) => {
         const posClass = d.mejor_posicion === 1 ? "pos1" : d.mejor_posicion === 2 ? "pos2" : "posn";
+        const provId = encodeURIComponent(d.proveedor);
+        const hasMediana = d.precio_mediana_12m > 0;
         return `
-          <tr>
+          <tr class="pf-prov-row" data-proveedor="${provId}">
             <td>${pfCellText(d.proveedor, 48)}</td>
             <td class="num">${pfPeso(d.avg_precio)}</td>
-            <td class="num">${pfFmt(d.posicion_promedio, 1)}</td>
+            <td class="num">${pfFmt(d.veces_ganado)}</td>
             <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
-            <td class="num">${pfPeso(d.total_ofertado)}</td>
+            <td class="num">${pfPeso(d.total_adjudicado)}</td>
             <td class="num">${pfFmt(d.procesos)}</td>
             <td class="num">${pfFmt(d.count)}</td>
+            <td class="num pf-hist-cell">
+              ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana_12m)}</span><small>mediana</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
+              <button class="pf-hist-btn" title="Ver historial del último año"
+                onclick="pfToggleHistorico(this, decodeURIComponent('${provId}'))">
+                <i class="bi bi-chevron-down"></i>
+              </button>
+            </td>
           </tr>`;
       }).join("");
     }
   } catch (err) {
     pfRenderEmpty("artProvChart", "Error al cargar proveedores.", "bi-buildings");
-    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle de proveedores.", 7);
+    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle de proveedores.", 8);
+  }
+}
+
+async function pfToggleHistorico(btn, proveedor) {
+  const row = btn.closest("tr");
+  const histId = "pf-hist-" + btoa(encodeURIComponent(proveedor)).replace(/[^a-zA-Z0-9]/g, "_");
+  const existing = document.getElementById(histId);
+
+  if (existing) {
+    existing.remove();
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
+    return;
+  }
+
+  btn.classList.add("open");
+  btn.innerHTML = `<i class="bi bi-arrow-clockwise pf-spin"></i>`;
+
+  try {
+    const params = pfGetArtParams();
+    params.set("proveedor", proveedor);
+    const data = await pfFetch(`${BASE}/articulos/proveedor-historico?${params}`);
+
+    const bodyRows = data.length
+      ? data.map((r) => {
+          const posC = r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
+          return `<tr>
+            <td>${r.fecha ?? "-"}</td>
+            <td class="num">${pfPeso(r.precio)}</td>
+            <td>${r.marca}</td>
+            <td class="num"><span class="pf-badge ${posC}">#${r.posicion ?? "-"}</span></td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="4" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el último año para los filtros actuales</td></tr>`;
+
+    const detailRow = document.createElement("tr");
+    detailRow.id = histId;
+    detailRow.className = "pf-hist-row";
+    detailRow.innerHTML = `
+      <td colspan="8">
+        <div class="pf-hist-detail">
+          <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial último año — ${pfTrunc(proveedor, 60)}</div>
+          <table class="pf-hist-table">
+            <thead><tr>
+              <th>Fecha</th>
+              <th class="num">Precio unit.</th>
+              <th>Marca</th>
+              <th class="num">Pos.</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </td>`;
+
+    row.insertAdjacentElement("afterend", detailRow);
+    btn.innerHTML = `<i class="bi bi-chevron-up"></i>`;
+  } catch {
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
   }
 }
 
 function pfGetCompParams() {
   const params = pfGlobalParams();
-  const proveedor = document.getElementById("compProvInput")?.value.trim() || "";
-  const rubro = document.getElementById("compRubroSel")?.value || "";
-  const descripcion = document.getElementById("compDescInput")?.value.trim() || "";
-
-  if (proveedor) params.set("proveedor", proveedor);
-  if (rubro) params.set("rubro", rubro);
-  if (descripcion) params.set("descripcion", descripcion);
+  pfSetMultiParam(params, "compProv");
+  pfSetMultiParam(params, "compRubro");
+  pfSetMultiParam(params, "compDesc");
   return params;
 }
 
@@ -1047,14 +1584,11 @@ async function pfLoadCompPosiciones(params) {
 
 function pfGetCliParams() {
   const params = pfGlobalParams();
-  const comprador = document.getElementById("cliCompInput")?.value.trim() || "";
-  const plataforma = document.getElementById("cliPlatSel")?.value || "";
-  const provincia = document.getElementById("cliProvSel")?.value || "";
-  const proceso = document.getElementById("cliProcesoInput")?.value.trim() || "";
+  pfSetMultiParam(params, "cliComp");
+  if (!PF.globalPlataforma) pfSetMultiParam(params, "cliPlat");
+  pfSetMultiParam(params, "cliProv");
 
-  if (comprador) params.set("comprador", comprador);
-  if (plataforma && !PF.globalPlataforma) params.set("plataforma", plataforma);
-  if (provincia) params.set("provincia", provincia);
+  const proceso = document.getElementById("cliProcesoInput")?.value.trim() || "";
   if (proceso) params.set("nro_proceso", proceso);
   return params;
 }
@@ -1301,8 +1835,10 @@ async function pfLoadCliArticulos(params) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  pfRenderFilterControls();
   pfUpdateDateSummary();
   await pfLoadFilterOptions();
+  pfSyncLockedPlatformUI();
+  pfSetArtSelectionGate();
   await pfCheckSync();
-  pfLoadArticulos();
 });
