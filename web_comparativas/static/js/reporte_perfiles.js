@@ -1165,6 +1165,7 @@ async function pfLoadArtPorMarca(params) {
             columnWidth: "55%",
           },
         },
+        legend: { show: false },
         tooltip: {
           y: { formatter: (value) => pfPeso(value) },
         },
