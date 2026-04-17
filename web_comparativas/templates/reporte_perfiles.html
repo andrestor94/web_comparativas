@@ -127,26 +127,15 @@
         <div class="pf-filter-card__intro">
           <div>
             <span class="pf-filter-card__eyebrow">Filtro principal</span>
-            <p class="pf-filter-card__hint">Seleccioná primero uno o varios articulos para habilitar KPIs, graficos y detalle.</p>
+            <p class="pf-filter-card__hint">Seleccioná un articulo para habilitar KPIs, graficos y detalle. Luego podras combinar marca y proveedor.</p>
           </div>
-          <span class="pf-filter-card__required">
-            <i class="bi bi-stars"></i>
-            Articulo requerido
-          </span>
         </div>
         <div class="pf-filter-grid">
           <div class="pf-sf-group pf-sf-group--wide" id="artDescMount"></div>
           <div class="pf-sf-group pf-sf-group--compact" id="artMarcaMount"></div>
           <div class="pf-sf-group pf-sf-group--compact" id="artProvMount"></div>
-          <div class="pf-sf-group pf-sf-group--compact" id="artRubroMount"></div>
-
-          <div class="pf-filter-actions">
-            <button type="button" class="pf-btn-apply" onclick="pfLoadArticulos()">
-              <i class="bi bi-search"></i>
-              Consultar
-            </button>
-          </div>
         </div>
+        <div id="artRubroChip" hidden></div>
       </section>
 
       <section class="pf-card pf-required-state" id="artEmptySelection">
@@ -159,7 +148,7 @@
           <p>Una vez definido el articulo, vas a poder combinar marcas, proveedores, rubros y fechas para profundizar el analisis.</p>
           <div class="pf-required-state__tips">
             <span><i class="bi bi-check2-circle"></i> Usá el filtro principal con multiseleccion</span>
-            <span><i class="bi bi-check2-circle"></i> Aplicá la seleccion dentro del filtro o desde Consultar</span>
+            <span><i class="bi bi-check2-circle"></i> La cascada actualiza marca y proveedor automaticamente</span>
           </div>
         </div>
       </section>
@@ -195,7 +184,7 @@
           <article class="pf-card pf-card--chart">
             <div class="pf-card__head">
               <span class="pf-card__eyebrow">Historico adjudicado</span>
-              <h3 class="pf-card__title">Precio Ganador por Fecha</h3>
+              <h3 class="pf-card__title">Precio Ganador por Marca</h3>
             </div>
             <div class="pf-chart-box" id="artMarcaChart"></div>
           </article>
@@ -450,5 +439,5 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=5"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=6"></script>
 {% endblock %}

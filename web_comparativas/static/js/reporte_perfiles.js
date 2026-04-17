@@ -33,13 +33,16 @@ const FILTER_CONFIG = {
     param: "descripcion",
     source: "remote",
     field: "descripcion",
-    allLabel: "Todos los articulos",
+    allLabel: "Articulo",
     allMeta: "Filtro principal del reporte",
     searchPlaceholder: "Buscar articulo",
     required: true,
+    selectionMode: "single",
+    showSelectAll: false,
+    autoApply: true,
     defaultAll: false,
-    emptyLabel: "Selecciona articulos",
-    emptyMeta: "Elegi uno o varios para habilitar el reporte",
+    emptyLabel: "Seleccione un articulo",
+    emptyMeta: "Elegi un articulo para habilitar el reporte",
   },
   artMarca: {
     mountId: "artMarcaMount",
@@ -62,17 +65,6 @@ const FILTER_CONFIG = {
     allLabel: "Todos los proveedores",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar proveedor",
-  },
-  artRubro: {
-    mountId: "artRubroMount",
-    tab: "articulos",
-    label: "Rubro",
-    param: "rubro",
-    source: "static",
-    optionsKey: "rubros",
-    allLabel: "Todos los rubros",
-    allMeta: "Sin restriccion",
-    searchPlaceholder: "Buscar rubro",
   },
   compProv: {
     mountId: "compProvMount",
@@ -143,6 +135,13 @@ const FILTER_CONFIG = {
   },
 };
 
+const ARTICLE_FILTER_IDS = ["artDesc", "artMarca", "artProv"];
+const ARTICLE_DEPENDENT_FILTER_IDS = ["artMarca", "artProv"];
+
+function pfDefaultFilterAllState(config) {
+  return config.selectionMode === "single" ? false : config.defaultAll !== false;
+}
+
 async function pfFetch(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -204,6 +203,14 @@ function pfKpiPeso(n) {
   return "$ " + pfFmt(num, 2);
 }
 
+function pfKpiMedianaPeso(n) {
+  if (n == null) return "-";
+  const num = parseFloat(n);
+  if (Number.isNaN(num)) return "-";
+  if (Math.abs(num) < 100000) return "$ " + pfFmt(num, 0);
+  return pfKpiPeso(num);
+}
+
 function pfKpiNum(n) {
   if (n == null) return "-";
   const num = parseFloat(n);
@@ -260,7 +267,7 @@ function pfFilterMatches(value, query) {
 }
 
 function pfCreateFilterState(filterId, config) {
-  const defaultAll = config.defaultAll !== false;
+  const defaultAll = pfDefaultFilterAllState(config);
   PF.multiFilters[filterId] = {
     id: filterId,
     config,
@@ -276,7 +283,16 @@ function pfCreateFilterState(filterId, config) {
     cache: new Map(),
     requestSeq: 0,
     searchTimer: null,
+    lastLoadFailed: false,
   };
+}
+
+function pfIsSingleSelectFilter(filterId) {
+  return PF.multiFilters[filterId]?.config.selectionMode === "single";
+}
+
+function pfShouldShowFilterAllOption(config) {
+  return config.showSelectAll !== false && config.selectionMode !== "single";
 }
 
 function pfRenderFilterControls() {
@@ -285,13 +301,17 @@ function pfRenderFilterControls() {
     const mount = document.getElementById(config.mountId);
     if (!mount) return;
 
-    const requiredBadge = config.required
-      ? '<span class="pf-multi__label-badge">Obligatorio</span>'
+    const allOptionHtml = pfShouldShowFilterAllOption(config)
+      ? `
+            <label class="pf-multi__all">
+              <input type="checkbox" class="pf-multi__all-check" data-filter-id="${filterId}">
+              <span>Todos</span>
+            </label>`
       : "";
 
     mount.innerHTML = `
       <div class="pf-multi" data-filter-id="${filterId}">
-        <label class="pf-multi__label" for="${filterId}Trigger">${pfEsc(config.label)} ${requiredBadge}</label>
+        <label class="pf-multi__label" for="${filterId}Trigger">${pfEsc(config.label)}</label>
         <button type="button" class="pf-multi__trigger" id="${filterId}Trigger" onclick="pfToggleFilterPanel('${filterId}')">
           <span class="pf-multi__summary">
             <span class="pf-multi__value is-placeholder" id="${filterId}Value">${pfEsc(config.allLabel)}</span>
@@ -310,10 +330,7 @@ function pfRenderFilterControls() {
               autocomplete="off">
           </div>
           <div class="pf-multi__panel-body">
-            <label class="pf-multi__all">
-              <input type="checkbox" class="pf-multi__all-check" data-filter-id="${filterId}">
-              <span>Todos</span>
-            </label>
+            ${allOptionHtml}
             <div class="pf-multi__list" id="${filterId}Options"></div>
           </div>
           <div class="pf-multi__panel-actions">
@@ -363,12 +380,19 @@ function pfNormalizeFilterSelection(filterId, scope = "draft") {
   const valuesKey = scope === "draft" ? "draft" : "applied";
   const allKey = scope === "draft" ? "draftAll" : "appliedAll";
 
+  state[valuesKey] = pfUnique(state[valuesKey] || []);
+
+  if (state.config.selectionMode === "single") {
+    state[allKey] = false;
+    state[valuesKey] = state[valuesKey].length ? [state[valuesKey][state[valuesKey].length - 1]] : [];
+    return;
+  }
+
   if (state[allKey]) {
     state[valuesKey] = [];
     return;
   }
 
-  state[valuesKey] = pfUnique(state[valuesKey] || []);
   const universe = pfGetFilterUniverseValues(filterId);
   if (!universe.length) return;
 
@@ -390,7 +414,7 @@ function pfUpdateFilterTrigger(filterId) {
 
   const locked = pfIsFilterLocked(filterId);
   const values = pfGetFilterAppliedValues(filterId);
-  const allSelected = !locked && state.appliedAll;
+  const allSelected = !locked && !pfIsSingleSelectFilter(filterId) && state.appliedAll;
   let valueText = state.config.emptyLabel || state.config.allLabel;
   let metaText = state.config.emptyMeta || state.config.allMeta;
   let isPlaceholder = true;
@@ -405,7 +429,7 @@ function pfUpdateFilterTrigger(filterId) {
     isPlaceholder = false;
   } else if (values.length === 1) {
     valueText = values[0];
-    metaText = "1 seleccionado";
+    metaText = state.config.selectionMode === "single" ? "Seleccion unica" : "1 seleccionado";
     isPlaceholder = false;
   } else if (values.length > 1) {
     valueText = `${pfTrunc(values[0], 34)} +${values.length - 1}`;
@@ -462,13 +486,65 @@ function pfCloseAllFilterPanels(exceptId = "") {
   });
 }
 
-async function pfEnsureFilterOptions(filterId, query = "") {
+function pfBuildFilterContextParams(filterId, mode = "facet") {
+  const state = PF.multiFilters[filterId];
+  const params = pfGlobalParams();
+  if (!state || state.config.tab !== "articulos") return params;
+
+  const includeIds = mode === "article-base"
+    ? ["artDesc"]
+    : ARTICLE_FILTER_IDS.filter((candidateId) => candidateId !== filterId);
+
+  includeIds.forEach((candidateId) => {
+    pfSetMultiParam(params, candidateId);
+  });
+  return params;
+}
+
+function pfClampFilterSelectionToUniverse(filterId) {
+  const state = PF.multiFilters[filterId];
+  if (!state || state.lastLoadFailed) return false;
+
+  const universe = pfGetFilterUniverseValues(filterId);
+  const validValues = new Set(universe);
+  const nextApplied = (state.applied || []).filter((value) => validValues.has(value));
+  const nextDraft = (state.draft || []).filter((value) => validValues.has(value));
+  const nextAppliedAll = pfIsSingleSelectFilter(filterId)
+    ? false
+    : (nextApplied.length ? false : pfDefaultFilterAllState(state.config));
+  const nextDraftAll = pfIsSingleSelectFilter(filterId)
+    ? false
+    : (nextDraft.length ? false : pfDefaultFilterAllState(state.config));
+
+  const changed = nextApplied.length !== (state.applied || []).length
+    || nextDraft.length !== (state.draft || []).length
+    || nextAppliedAll !== state.appliedAll
+    || nextDraftAll !== state.draftAll;
+
+  state.applied = nextApplied;
+  state.draft = nextDraft;
+  state.appliedAll = nextAppliedAll;
+  state.draftAll = nextDraftAll;
+  pfNormalizeFilterSelection(filterId, "applied");
+  pfNormalizeFilterSelection(filterId, "draft");
+  pfUpdateFilterTrigger(filterId);
+
+  if (document.getElementById(`${filterId}Panel`)?.classList.contains("is-open")) {
+    pfRenderFilterOptions(filterId);
+  }
+
+  return changed;
+}
+
+async function pfEnsureFilterOptions(filterId, query = "", options = {}) {
   const state = PF.multiFilters[filterId];
   if (!state) return;
 
+  const contextMode = options.contextMode || "facet";
+  const showLoading = options.showLoading !== false;
   state.query = query;
-  state.loading = true;
-  pfRenderFilterOptions(filterId);
+  state.loading = showLoading;
+  if (showLoading) pfRenderFilterOptions(filterId);
 
   if (state.config.source === "static") {
     const source = PF.filterOptions[state.config.optionsKey] || [];
@@ -476,42 +552,53 @@ async function pfEnsureFilterOptions(filterId, query = "") {
     state.options = source.filter((value) => pfFilterMatches(value, query));
     state.loading = false;
     state.loaded = true;
+    state.lastLoadFailed = false;
     pfRenderFilterOptions(filterId);
-    return;
+    return state.options;
   }
 
-  const cacheKey = query.trim().toLowerCase();
+  const params = new URLSearchParams({
+    campo: state.config.field,
+    q: query.trim(),
+    limit: query.trim() ? "250" : "5000",
+  });
+  const contextParams = pfBuildFilterContextParams(filterId, contextMode);
+  contextParams.forEach((value, key) => params.set(key, value));
+
+  const cacheKey = params.toString();
   if (state.cache.has(cacheKey)) {
     state.options = state.cache.get(cacheKey) || [];
+    if (!query.trim()) state.allOptions = [...state.options];
     state.loading = false;
     state.loaded = true;
+    state.lastLoadFailed = false;
     pfRenderFilterOptions(filterId);
-    return;
+    return state.options;
   }
 
   const requestSeq = ++state.requestSeq;
   try {
-    const params = new URLSearchParams({
-      campo: state.config.field,
-      q: query.trim(),
-      limit: query.trim() ? "250" : "5000",
-    });
     const data = await pfFetch(`${BASE}/filtros/search?${params}`);
     if (requestSeq !== state.requestSeq) return;
     state.cache.set(cacheKey, data);
     state.options = data;
-    if (!query.trim()) state.allOptions = data;
+    if (!query.trim()) state.allOptions = [...data];
     state.loaded = true;
+    state.lastLoadFailed = false;
   } catch (err) {
     if (requestSeq !== state.requestSeq) return;
     state.options = [];
+    if (!query.trim()) state.allOptions = [];
     state.loaded = true;
+    state.lastLoadFailed = true;
   } finally {
     if (requestSeq === state.requestSeq) {
       state.loading = false;
       pfRenderFilterOptions(filterId);
     }
   }
+
+  return state.options;
 }
 
 function pfRenderFilterOptions(filterId) {
@@ -520,6 +607,7 @@ function pfRenderFilterOptions(filterId) {
 
   const allCheck = document.querySelector(`.pf-multi__all-check[data-filter-id="${filterId}"]`);
   const list = document.getElementById(`${filterId}Options`);
+  const inputType = state.config.selectionMode === "single" ? "radio" : "checkbox";
   if (!list) return;
 
   const values = pfUnique([...state.draft, ...state.options]);
@@ -546,9 +634,10 @@ function pfRenderFilterOptions(filterId) {
     return `
       <label class="pf-multi__option">
         <input
-          type="checkbox"
+          type="${inputType}"
           class="pf-multi__option-check"
           data-filter-id="${filterId}"
+          name="${filterId}Choice"
           value="${pfEscAttr(value)}"
           ${checked}>
         <span class="pf-multi__option-text" title="${pfEscAttr(value)}">${pfEsc(value)}</span>
@@ -569,6 +658,17 @@ function pfHandleFilterSearchInput(filterId, query) {
 function pfHandleFilterOptionChange(filterId, value, checked) {
   const state = PF.multiFilters[filterId];
   if (!state) return;
+
+  if (state.config.selectionMode === "single") {
+    state.draftAll = false;
+    state.draft = checked ? [value] : [];
+    pfNormalizeFilterSelection(filterId, "draft");
+    pfRenderFilterOptions(filterId);
+    if (state.config.autoApply && checked) {
+      pfApplyFilterSelection(filterId);
+    }
+    return;
+  }
 
   if (checked) {
     if (!state.draftAll) {
@@ -592,28 +692,42 @@ function pfClearFilterDraft(filterId) {
   if (!state || pfIsFilterLocked(filterId)) return;
 
   state.draft = [];
-  state.draftAll = state.config.defaultAll !== false;
+  state.draftAll = pfDefaultFilterAllState(state.config);
   state.query = "";
   const search = document.getElementById(`${filterId}Search`);
   if (search) search.value = "";
   pfEnsureFilterOptions(filterId, "");
 }
 
-function pfApplyFilterSelection(filterId) {
+async function pfApplyFilterSelection(filterId) {
   const state = PF.multiFilters[filterId];
   if (!state) return;
 
   if (!pfIsFilterLocked(filterId)) {
     state.applied = [...state.draft];
-    state.appliedAll = state.draftAll || (!state.draft.length && state.config.defaultAll !== false);
+    state.appliedAll = state.draftAll || (!state.draft.length && pfDefaultFilterAllState(state.config));
     pfNormalizeFilterSelection(filterId, "applied");
   }
 
   pfCloseFilterPanel(filterId);
   pfUpdateFilterTrigger(filterId);
 
+  if (state.config.tab === "articulos") {
+    const contextMode = filterId === "artDesc" ? "article-base" : "facet";
+    const targets = filterId === "artDesc"
+      ? ARTICLE_DEPENDENT_FILTER_IDS
+      : ARTICLE_DEPENDENT_FILTER_IDS.filter((candidateId) => candidateId !== filterId);
+    const changes = await Promise.all(targets.map(async (targetId) => {
+      await pfEnsureFilterOptions(targetId, "", { contextMode, showLoading: false });
+      return pfClampFilterSelectionToUniverse(targetId);
+    }));
+    if (changes.some(Boolean)) {
+      pfSetArtSelectionGate();
+    }
+  }
+
   if (state.config.tab === PF.activeTab) {
-    pfLoadCurrentTab();
+    await pfLoadCurrentTab();
   } else if (state.config.tab === "articulos") {
     pfSetArtSelectionGate();
   }
@@ -847,21 +961,23 @@ function pfKpiError(message) {
 function pfHasArticleSelection() {
   const state = PF.multiFilters.artDesc;
   if (!state) return false;
-  return state.appliedAll || state.applied.length > 0;
+  return state.applied.length > 0;
 }
 
 function pfResetArtOutputs() {
   ["artPrecioChart", "artCantidadChart", "artMarcaChart", "artProvChart"].forEach(pfDestroyChart);
   const row = document.getElementById("artKpiRow");
   const tbody = document.getElementById("artProvTbody");
+  const chip = document.getElementById("artRubroChip");
   if (row) row.innerHTML = "";
   if (tbody) {
     tbody.innerHTML = pfTableEmpty(
       "bi-info-circle",
       "Selecciona primero un articulo para habilitar el detalle del reporte.",
-      7
+      8
     );
   }
+  if (chip) { chip.hidden = true; chip.innerHTML = ""; }
 }
 
 function pfSetArtSelectionGate() {
@@ -872,6 +988,23 @@ function pfSetArtSelectionGate() {
   if (empty) empty.hidden = hasArticle;
   if (dashboard) dashboard.hidden = !hasArticle;
   if (!hasArticle) pfResetArtOutputs();
+}
+
+function pfSyncArticulosCopy() {
+  const emptyEyebrow = document.querySelector("#artEmptySelection .pf-required-state__eyebrow");
+  if (emptyEyebrow) emptyEyebrow.textContent = "Esperando contexto";
+
+  const emptyTitle = document.querySelector("#artEmptySelection h3");
+  if (emptyTitle) emptyTitle.textContent = "Selecciona un articulo para visualizar el reporte.";
+
+  const emptyText = document.querySelector("#artEmptySelection p");
+  if (emptyText) {
+    emptyText.textContent = "Una vez definido el articulo, vas a poder combinar marcas, proveedores y fechas para profundizar el analisis.";
+  }
+
+  const tipItems = document.querySelectorAll("#artEmptySelection .pf-required-state__tips span");
+  if (tipItems[0]) tipItems[0].innerHTML = '<i class="bi bi-check2-circle"></i> Usa el filtro principal con seleccion unica';
+  if (tipItems[1]) tipItems[1].innerHTML = '<i class="bi bi-check2-circle"></i> La cascada actualiza marca y proveedor automaticamente';
 }
 
 function pfSyncLockedPlatformUI() {
@@ -924,9 +1057,9 @@ function pfClearAll() {
     if (!state) return;
     if (!pfIsFilterLocked(filterId)) {
       state.applied = [];
-      state.appliedAll = state.config.defaultAll !== false;
+      state.appliedAll = pfDefaultFilterAllState(state.config);
       state.draft = [];
-      state.draftAll = state.config.defaultAll !== false;
+      state.draftAll = pfDefaultFilterAllState(state.config);
     }
     state.query = "";
     const search = document.getElementById(`${filterId}Search`);
@@ -1002,7 +1135,6 @@ function pfGetArtParams() {
   pfSetMultiParam(params, "artDesc");
   pfSetMultiParam(params, "artMarca");
   pfSetMultiParam(params, "artProv");
-  pfSetMultiParam(params, "artRubro");
   return params;
 }
 
@@ -1018,25 +1150,43 @@ async function pfLoadArticulos() {
   ]);
 }
 
+function pfUpdateArtRubroChip(rubroPrincipal, data) {
+  const chip = document.getElementById("artRubroChip");
+  if (!chip) return;
+  if (!rubroPrincipal) {
+    chip.hidden = true;
+    chip.innerHTML = "";
+    return;
+  }
+  const tooltip = (data.rubros_lista || []).join(" | ") || rubroPrincipal;
+  const multiLabel = data.rubros_multiples
+    ? ` <span class="pf-rubro-chip__multi">(${pfFmt(data.rubros_detectados)} rubros)</span>`
+    : "";
+  chip.hidden = false;
+  chip.innerHTML = `<span class="pf-rubro-chip" title="${pfEscAttr(tooltip)}"><i class="bi bi-diagram-3"></i> ${pfEsc(pfTrunc(rubroPrincipal, 40))}${multiLabel}</span>`;
+}
+
 async function pfLoadArtKpis(params) {
   const row = document.getElementById("artKpiRow");
   if (!row) return;
 
   try {
     const data = await pfFetch(`${BASE}/articulos/kpis?${params}`);
+    pfUpdateArtRubroChip(data.rubro_principal || "", data);
+
     row.innerHTML = [
       pfKpiCard({
         tone: "primary",
-        label: "Monto ofertado",
-        value: pfKpiPeso(data.total_ofertado),
-        rawValue: pfPeso(data.total_ofertado),
-        sub: "Total del periodo",
+        label: "Monto adjudicado",
+        value: pfKpiPeso(data.total_adjudicado),
+        rawValue: pfPeso(data.total_adjudicado),
+        sub: "Total adjudicado (pos. 1)",
         icon: "bi-cash-stack",
       }),
       pfKpiCard({
         tone: "primary",
         label: "Mediana precio",
-        value: pfKpiPeso(data.mediana_precio),
+        value: pfKpiMedianaPeso(data.mediana_precio),
         rawValue: pfPeso(data.mediana_precio),
         sub: "Precio de referencia",
         icon: "bi-coin",
@@ -1075,36 +1225,61 @@ async function pfLoadArtEvolucion(params) {
   pfDestroyChart("artCantidadChart");
 
   try {
-    const data = await pfFetch(`${BASE}/articulos/evolucion?${params}`);
+    const [data, dataMarca] = await Promise.all([
+      pfFetch(`${BASE}/articulos/evolucion?${params}`),
+      pfFetch(`${BASE}/articulos/evolucion-marca?${params}`),
+    ]);
+
     if (!data.length) {
       pfRenderEmpty("artPrecioChart", "Sin datos para el periodo seleccionado.", "bi-graph-up");
       pfRenderEmpty("artCantidadChart", "Sin datos para el periodo seleccionado.", "bi-bar-chart");
       return;
     }
 
+    // artPrecioChart: una línea por marca
+    if (dataMarca.length) {
+      const labelsOrdered = [];
+      const seenLabels = new Set();
+      dataMarca.forEach((d) => {
+        if (!seenLabels.has(d.month_label)) {
+          seenLabels.add(d.month_label);
+          labelsOrdered.push(d.month_label);
+        }
+      });
+
+      const marcasUnicas = Array.from(new Set(dataMarca.map((d) => d.marca))).sort();
+      const seriesPrecio = marcasUnicas.map((marca) => ({
+        name: pfTrunc(marca, 20),
+        data: labelsOrdered.map((label) => {
+          const match = dataMarca.find((d) => d.month_label === label && d.marca === marca);
+          return match ? match.avg_precio : null;
+        }),
+      }));
+
+      PF.charts.artPrecioChart = new ApexCharts(
+        document.getElementById("artPrecioChart"),
+        pfChartBase({
+          chart: { type: "line", height: 256 },
+          series: seriesPrecio,
+          xaxis: { categories: labelsOrdered, labels: { rotate: -28 } },
+          yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
+          stroke: { width: 2, curve: "smooth" },
+          markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
+          legend: { show: marcasUnicas.length > 1 },
+          tooltip: {
+            shared: true,
+            intersect: false,
+            y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
+          },
+        })
+      );
+      PF.charts.artPrecioChart.render();
+    } else {
+      pfRenderEmpty("artPrecioChart", "Sin datos para el periodo seleccionado.", "bi-graph-up");
+    }
+
+    // artCantidadChart: sin cambios
     const labels = data.map((d) => d.month_label);
-
-    PF.charts.artPrecioChart = new ApexCharts(
-      document.getElementById("artPrecioChart"),
-      pfChartBase({
-        chart: { type: "line", height: 256 },
-        series: [{ name: "Marca", data: data.map((d) => d.avg_precio) }],
-        xaxis: { categories: labels, labels: { rotate: -28 } },
-        yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
-        stroke: { width: 3, curve: "smooth" },
-        markers: {
-          size: 4,
-          strokeWidth: 0,
-          hover: { sizeOffset: 2 },
-        },
-        colors: [COLORS.brand700],
-        tooltip: {
-          y: { formatter: (value) => pfPeso(value) },
-        },
-      })
-    );
-    PF.charts.artPrecioChart.render();
-
     PF.charts.artCantidadChart = new ApexCharts(
       document.getElementById("artCantidadChart"),
       pfChartBase({
@@ -1155,19 +1330,18 @@ async function pfLoadArtPorMarca(params) {
     PF.charts.artMarcaChart = new ApexCharts(
       document.getElementById("artMarcaChart"),
       pfChartBase({
-        chart: { type: "bar", height: 256 },
+        chart: { type: "bar", height: 256, stacked: true },
         series: seriesData,
         xaxis: { categories: categories },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         plotOptions: {
-          bar: {
-            borderRadius: 4,
-            columnWidth: "55%",
-          },
+          bar: { columnWidth: "60%" },
         },
-        legend: { show: false },
+        legend: { show: true },
         tooltip: {
-          y: { formatter: (value) => pfPeso(value) },
+          shared: true,
+          intersect: false,
+          y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
         },
       })
     );
@@ -1195,7 +1369,7 @@ async function pfLoadArtPorProveedor(params) {
       document.getElementById("artProvChart"),
       pfChartBase({
         chart: { type: "treemap", height: 310 },
-        series: [{ name: "Monto adjudicado (pos. 1)", data: treemapData }],
+        series: [{ name: "Monto adjudicado", data: treemapData }],
         plotOptions: {
           treemap: {
             enableShades: true,
@@ -1215,9 +1389,11 @@ async function pfLoadArtPorProveedor(params) {
             if (!d) return "";
             return (
               `<div class="apexcharts-tooltip-box" style="padding:10px 14px;line-height:1.6">` +
-              `<strong>${d.proveedor}</strong><br>` +
+              `<strong>${pfEsc(d.proveedor)}</strong><br>` +
               `Monto adjudicado: <strong>${pfPeso(d.total_adjudicado)}</strong><br>` +
-              `<span style="font-size:11px;opacity:.75">Ganador (posición 1)</span>` +
+              `<span style="font-size:11px;opacity:.75">` +
+              `${pfFmt(d.veces_ganado)} adjudicacion${d.veces_ganado !== 1 ? "es" : ""} · ${pfFmt(d.procesos)} proceso${d.procesos !== 1 ? "s" : ""}` +
+              `</span>` +
               `</div>`
             );
           },
@@ -1836,6 +2012,7 @@ async function pfLoadCliArticulos(params) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  pfSyncArticulosCopy();
   pfRenderFilterControls();
   pfUpdateDateSummary();
   await pfLoadFilterOptions();
