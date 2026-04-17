@@ -71,6 +71,8 @@ from web_comparativas.migrations import (
     ensure_forecast_perf_indexes,
     ensure_cliente_visible_columns,
     ensure_cliente_visible_backfill,
+    ensure_comparativa_rows_table,
+    backfill_comparativa_rows,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -193,6 +195,12 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[MIGRATION] Warning forecast override storage: {e}", flush=True)
 
+    try:
+        ensure_comparativa_rows_table()
+        print("[MIGRATION] SUCCESS: comparativa_rows table checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning comparativa_rows table: {e}", flush=True)
+
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup
 
@@ -253,6 +261,12 @@ def _background_dimensionamiento_maintenance() -> None:
         print(f"[BACKGROUND] Backfill original: {orig_backed} uploads respaldados.", flush=True)
     except Exception as e:
         print(f"[BACKGROUND] Warning backfill original: {e}", flush=True)
+
+    try:
+        comp_rows = backfill_comparativa_rows()
+        print(f"[BACKGROUND] Backfill comparativa_rows: {comp_rows} filas insertadas.", flush=True)
+    except Exception as e:
+        print(f"[BACKGROUND] Warning backfill comparativa_rows: {e}", flush=True)
 
 
 @asynccontextmanager
@@ -452,6 +466,7 @@ from web_comparativas.routers.notifications_router import router as notification
 from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
 from web_comparativas.routers.forecast_router import router as forecast_router
+from web_comparativas.routers.mercado_publico_perfiles_router import router as perfiles_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
@@ -459,6 +474,7 @@ app.include_router(notifications_router)
 app.include_router(pliegos_router)
 app.include_router(comments_router)
 app.include_router(forecast_router)
+app.include_router(perfiles_router)
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router

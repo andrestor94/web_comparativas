@@ -1,8 +1,491 @@
 {% extends "base.html" %}
+{% block title %}Reporte de Perfiles - Mercado Publico{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=perfiles-v1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v4">
+{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Reporte de Perfiles</h1>
-    <p>Este módulo del Mercado Público está en construcción. Aquí vas a poder analizar perfiles y comportamiento de compra.</p>
+<div class="pf-page">
+  <div class="pf-shell">
+
+    <section class="pf-hero">
+      <div class="pf-hero__main">
+        <span class="pf-hero__eyebrow">Mercado Publico</span>
+        <h1 class="pf-hero__title">Reporte de Perfiles</h1>
+        <p class="pf-hero__subtitle">
+          Analisis de comportamiento de compra por articulo, proveedor y organismo.
+        </p>
+        <div class="pf-hero__meta">
+          <span class="pf-meta-pill pf-meta-pill--brand">
+            <i class="bi bi-shield-check"></i>
+            SIPROSA
+          </span>
+          <span class="pf-meta-pill">
+            <i class="bi bi-columns-gap"></i>
+            3 vistas analiticas
+          </span>
+        </div>
+      </div>
+
+      <div class="pf-hero__aside">
+        <div class="pf-hero__status-card">
+          <div class="pf-hero__status-top">
+            <span class="pf-mini-panel__label">Estado</span>
+            <button id="syncStatusBadge" type="button" class="pf-status-pill" onclick="pfCheckSync()">
+              <i class="bi bi-arrow-repeat"></i>
+              <span id="syncStatusText">Verificando</span>
+            </button>
+          </div>
+
+          <div class="pf-hero__facts">
+            <div class="pf-hero__fact">
+              <span>Filas listas</span>
+              <strong id="pfRowsLabel">—</strong>
+            </div>
+            <div class="pf-hero__fact">
+              <span>Periodo</span>
+              <strong id="pfDateSummaryLabel">Todas las fechas</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="pf-toolbar">
+      <span class="pf-toolbar__label">
+        <i class="bi bi-calendar3"></i>
+        Marco temporal
+      </span>
+
+      <div class="pf-toolbar__controls">
+        <div class="pf-toolbar__group">
+          <label for="gFechaDesde">Desde</label>
+          <input type="date" id="gFechaDesde">
+        </div>
+        <div class="pf-toolbar__group">
+          <label for="gFechaHasta">Hasta</label>
+          <input type="date" id="gFechaHasta">
+        </div>
+      </div>
+
+      <div class="pf-toolbar__actions">
+        <button type="button" class="pf-btn-apply" onclick="pfApplyGlobalFilters()">
+          <i class="bi bi-funnel-fill"></i>
+          Aplicar
+        </button>
+        <button type="button" class="pf-btn-clear" onclick="pfClearAll()">
+          <i class="bi bi-x-lg"></i>
+          Limpiar
+        </button>
+      </div>
+    </section>
+
+    <div id="syncWarnBanner" class="pf-inline-alert" style="display:none;">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <span>
+        Hay comparativas sin sincronizar.
+        <a href="#" onclick="pfTriggerSync(event)">Sincronizar ahora</a>
+      </span>
+    </div>
+
+    <section class="pf-tabs-panel">
+      <div class="pf-tabs">
+        <button type="button" class="pf-tab active" data-tab="articulos" onclick="pfSwitchTab('articulos', this)">
+          <span class="pf-tab__icon"><i class="bi bi-capsule"></i></span>
+          <span class="pf-tab__copy">
+            <strong>Articulos</strong>
+            <small>Precio y proveedor</small>
+          </span>
+        </button>
+        <button type="button" class="pf-tab" data-tab="competidor" onclick="pfSwitchTab('competidor', this)">
+          <span class="pf-tab__icon"><i class="bi bi-building"></i></span>
+          <span class="pf-tab__copy">
+            <strong>Competidor</strong>
+            <small>Mix y posicion</small>
+          </span>
+        </button>
+        <button type="button" class="pf-tab" data-tab="cliente" onclick="pfSwitchTab('cliente', this)">
+          <span class="pf-tab__icon"><i class="bi bi-hospital"></i></span>
+          <span class="pf-tab__copy">
+            <strong>Cliente</strong>
+            <small>Demanda y rubros</small>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── TAB: ARTICULOS ─────────────────────────────────────── -->
+    <div id="tab-articulos" class="pf-tab-content active">
+      <div class="pf-section-head">
+        <h2 class="pf-section-title">Articulos</h2>
+        <span class="pf-section-pill">Descripcion · Marca · Proveedor</span>
+      </div>
+
+      <section class="pf-filter-card">
+        <div class="pf-filter-grid">
+          <div class="pf-sf-group pf-sf-group--wide">
+            <label for="artDescInput">Descripcion</label>
+            <div class="pf-typeahead">
+              <input type="text" id="artDescInput" placeholder="Buscar articulo" oninput="pfTypeahead(this,'descripcion','artDescDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="artDescDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-sf-group">
+            <label for="artMarcaInput">Marca</label>
+            <div class="pf-typeahead">
+              <input type="text" id="artMarcaInput" placeholder="Todas" oninput="pfTypeahead(this,'marca','artMarcaDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="artMarcaDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-sf-group">
+            <label for="artProvInput">Proveedor</label>
+            <div class="pf-typeahead">
+              <input type="text" id="artProvInput" placeholder="Todos" oninput="pfTypeahead(this,'proveedor','artProvDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="artProvDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-sf-group pf-sf-group--compact">
+            <label for="artRubroSel">Rubro</label>
+            <select class="pf-select" id="artRubroSel">
+              <option value="">Todos</option>
+            </select>
+          </div>
+
+          <div class="pf-filter-actions">
+            <button type="button" class="pf-btn-apply" onclick="pfLoadArticulos()">
+              <i class="bi bi-search"></i>
+              Consultar
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="pf-kpi-row" id="artKpiRow">
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Serie temporal</span>
+            <h3 class="pf-card__title">Evolucion de Precio Unitario</h3>
+          </div>
+          <div class="pf-chart-box" id="artPrecioChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Volumen</span>
+            <h3 class="pf-card__title">Cantidad Solicitada vs. Ofertada</h3>
+          </div>
+          <div class="pf-chart-box" id="artCantidadChart"></div>
+        </article>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Benchmark</span>
+            <h3 class="pf-card__title">Precio Promedio por Marca</h3>
+          </div>
+          <div class="pf-chart-box" id="artMarcaChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Ranking</span>
+            <h3 class="pf-card__title">Proveedores por Monto Ofertado</h3>
+          </div>
+          <div class="pf-chart-box" id="artProvChart"></div>
+        </article>
+      </div>
+
+      <article class="pf-card pf-card--table">
+        <div class="pf-card__head">
+          <span class="pf-card__eyebrow">Detalle</span>
+          <h3 class="pf-card__title">Proveedores Participantes</h3>
+        </div>
+        <div class="pf-tscroll">
+          <table class="pf-table">
+            <thead>
+              <tr>
+                <th>Proveedor</th>
+                <th class="num">Precio prom.</th>
+                <th class="num">Pos. prom.</th>
+                <th class="num">Mejor pos.</th>
+                <th class="num">Monto ofertado</th>
+                <th class="num">Procesos</th>
+                <th class="num">Apariciones</th>
+              </tr>
+            </thead>
+            <tbody id="artProvTbody">
+              <tr>
+                <td colspan="7">
+                  <div class="pf-empty-state">
+                    <i class="bi bi-search"></i>
+                    <p>Busca un articulo para ver su detalle de proveedores.</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
+    <!-- ── TAB: COMPETIDOR ────────────────────────────────────── -->
+    <div id="tab-competidor" class="pf-tab-content">
+      <div class="pf-section-head">
+        <h2 class="pf-section-title">Competidor</h2>
+        <span class="pf-section-pill">Proveedor · Rubro · Articulo</span>
+      </div>
+
+      <section class="pf-filter-card">
+        <div class="pf-filter-grid">
+          <div class="pf-sf-group pf-sf-group--wide">
+            <label for="compProvInput">Proveedor / Competidor</label>
+            <div class="pf-typeahead">
+              <input type="text" id="compProvInput" placeholder="Buscar proveedor" oninput="pfTypeahead(this,'proveedor','compProvDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="compProvDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-sf-group pf-sf-group--compact">
+            <label for="compRubroSel">Rubro</label>
+            <select class="pf-select" id="compRubroSel">
+              <option value="">Todos</option>
+            </select>
+          </div>
+
+          <div class="pf-sf-group">
+            <label for="compDescInput">Articulo</label>
+            <div class="pf-typeahead">
+              <input type="text" id="compDescInput" placeholder="Filtrar por articulo" oninput="pfTypeahead(this,'descripcion','compDescDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="compDescDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-filter-actions">
+            <button type="button" class="pf-btn-apply" onclick="pfLoadCompetidor()">
+              <i class="bi bi-search"></i>
+              Consultar
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="pf-kpi-row" id="compKpiRow">
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Serie temporal</span>
+            <h3 class="pf-card__title">Evolucion del Monto Ofertado</h3>
+          </div>
+          <div class="pf-chart-box" id="compEvolChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Mix</span>
+            <h3 class="pf-card__title">Participacion por Rubro</h3>
+          </div>
+          <div class="pf-chart-box" id="compRubroChart"></div>
+        </article>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Top items</span>
+            <h3 class="pf-card__title">Articulos Cotizados</h3>
+          </div>
+          <div class="pf-chart-box" id="compArtChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Top marcas</span>
+            <h3 class="pf-card__title">Marcas Utilizadas</h3>
+          </div>
+          <div class="pf-chart-box" id="compMarcaChart"></div>
+        </article>
+      </div>
+
+      <article class="pf-card pf-card--table">
+        <div class="pf-card__head">
+          <span class="pf-card__eyebrow">Detalle</span>
+          <h3 class="pf-card__title">Posicionamiento por Articulo</h3>
+        </div>
+        <div class="pf-tscroll">
+          <table class="pf-table">
+            <thead>
+              <tr>
+                <th>Descripcion</th>
+                <th class="num">Pos. prom.</th>
+                <th class="num">Mejor pos.</th>
+                <th class="num">Monto ofertado</th>
+                <th class="num">Apariciones</th>
+              </tr>
+            </thead>
+            <tbody id="compPosTbody">
+              <tr>
+                <td colspan="5">
+                  <div class="pf-empty-state">
+                    <i class="bi bi-building"></i>
+                    <p>Busca un proveedor para ver su posicionamiento por articulo.</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
+    <!-- ── TAB: CLIENTE ───────────────────────────────────────── -->
+    <div id="tab-cliente" class="pf-tab-content">
+      <div class="pf-section-head">
+        <h2 class="pf-section-title">Cliente</h2>
+        <span class="pf-section-pill">Organismo · Provincia · Proceso</span>
+      </div>
+
+      <section class="pf-filter-card">
+        <div class="pf-filter-grid">
+          <div class="pf-sf-group pf-sf-group--wide">
+            <label for="cliCompInput">Comprador / Organismo</label>
+            <div class="pf-typeahead">
+              <input type="text" id="cliCompInput" placeholder="Buscar comprador" oninput="pfTypeahead(this,'comprador','cliCompDrop')" autocomplete="off">
+              <div class="pf-dropdown" id="cliCompDrop"><ul></ul></div>
+            </div>
+          </div>
+
+          <div class="pf-sf-group pf-sf-group--compact">
+            <label for="cliPlatSel">Plataforma</label>
+            <select class="pf-select" id="cliPlatSel">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="pf-sf-group pf-sf-group--compact">
+            <label for="cliProvSel">Provincia</label>
+            <select class="pf-select" id="cliProvSel">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="pf-sf-group">
+            <label for="cliProcesoInput">Nro. Proceso</label>
+            <input type="text" class="pf-select" id="cliProcesoInput" placeholder="Ej: 2024/0001">
+          </div>
+
+          <div class="pf-filter-actions">
+            <button type="button" class="pf-btn-apply" onclick="pfLoadCliente()">
+              <i class="bi bi-search"></i>
+              Consultar
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="pf-kpi-row" id="cliKpiRow">
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Serie temporal</span>
+            <h3 class="pf-card__title">Evolucion del Monto Cotizado</h3>
+          </div>
+          <div class="pf-chart-box" id="cliEvolChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Mix</span>
+            <h3 class="pf-card__title">Composicion por Rubro</h3>
+          </div>
+          <div class="pf-chart-box" id="cliRubroChart"></div>
+        </article>
+      </div>
+
+      <div class="pf-grid-2">
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Top proveedores</span>
+            <h3 class="pf-card__title">Ranking de Participantes</h3>
+          </div>
+          <div class="pf-chart-box" id="cliProvChart"></div>
+        </article>
+
+        <article class="pf-card pf-card--chart">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Top demanda</span>
+            <h3 class="pf-card__title">Articulos Mas Demandados</h3>
+          </div>
+          <div class="pf-chart-box" id="cliArtChart"></div>
+        </article>
+      </div>
+
+      <article class="pf-card pf-card--table">
+        <div class="pf-card__head">
+          <span class="pf-card__eyebrow">Detalle</span>
+          <h3 class="pf-card__title">Articulos Solicitados</h3>
+        </div>
+        <div class="pf-tscroll">
+          <table class="pf-table">
+            <thead>
+              <tr>
+                <th>Descripcion</th>
+                <th class="num">Cant. solicitada</th>
+                <th class="num">Frecuencia</th>
+                <th class="num">Monto total</th>
+                <th class="num">Precio prom.</th>
+              </tr>
+            </thead>
+            <tbody id="cliArtTbody">
+              <tr>
+                <td colspan="5">
+                  <div class="pf-empty-state">
+                    <i class="bi bi-hospital"></i>
+                    <p>Aplica filtros para ver los articulos del perfil de compra.</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+
+  </div>
 </div>
+
+<script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=4"></script>
 {% endblock %}

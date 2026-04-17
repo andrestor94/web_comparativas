@@ -602,6 +602,70 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         db_session.add(up)
         _commit_safe()
 
+        # Sincronizar filas de esta comparativa al dashboard de Reporte de Perfiles
+        try:
+            from web_comparativas.migrations import backfill_comparativa_rows as _bf_comp
+            import io as _io
+            import datetime as _dt2
+            import pandas as _pd
+            from web_comparativas.models import ComparativaRow as _CompRow
+
+            _EXCEL_COL_MAP = {
+                "Proveedor": "proveedor", "Renglón": "renglon", "Alternativa": "alternativa",
+                "Código": "codigo", "Descripción": "descripcion",
+                "Cantidad solicitada": "cantidad_solicitada", "Unidad de medida": "unidad_medida",
+                "Precio unitario": "precio_unitario", "Cantidad ofertada": "cantidad_ofertada",
+                "Total por renglón": "total_por_renglon", "Especificación técnica": "especificacion_tecnica",
+                "Marca": "marca", "Posicion": "posicion", "Rubro": "rubro",
+            }
+            norm_bytes_sync = normalized_path.read_bytes()
+            df_sync = _pd.read_excel(_io.BytesIO(norm_bytes_sync), engine="openpyxl")
+            df_sync.columns = [str(c).strip() for c in df_sync.columns]
+
+            _fecha_ap = None
+            _ap_str = getattr(up, "apertura_fecha", None)
+            if _ap_str:
+                try:
+                    _fecha_ap = _dt2.date.fromisoformat(str(_ap_str).strip()[:10])
+                except Exception:
+                    pass
+
+            db_session.query(_CompRow).filter(_CompRow.upload_id == upload_id).delete()
+            _rows_sync = []
+            for _, _row in df_sync.iterrows():
+                _rec = {
+                    "upload_id": upload_id,
+                    "fecha_apertura": _fecha_ap,
+                    "nro_proceso": up.proceso_nro,
+                    "comprador": up.buyer_hint,
+                    "plataforma": up.platform_hint,
+                    "cuenta": up.cuenta_nro,
+                    "provincia": up.province_hint,
+                }
+                for _ec, _mc in _EXCEL_COL_MAP.items():
+                    _v = _row.get(_ec)
+                    if _v is not None and not (isinstance(_v, float) and _pd.isna(_v)):
+                        if _mc == "posicion":
+                            try: _v = int(_v)
+                            except: _v = None
+                        elif _mc in ("cantidad_solicitada","precio_unitario","cantidad_ofertada","total_por_renglon"):
+                            try: _v = float(_v)
+                            except: _v = None
+                        else:
+                            _v = str(_v).strip() if _v else None
+                        _rec[_mc] = _v
+                _rows_sync.append(_rec)
+
+            if _rows_sync:
+                db_session.bulk_insert_mappings(_CompRow, _rows_sync)
+                _commit_safe()
+                logger.info(f"Upload {upload_id}: {len(_rows_sync)} filas sincronizadas a comparativa_rows.")
+
+            from web_comparativas.routers.mercado_publico_perfiles_router import invalidate_perfiles_cache
+            invalidate_perfiles_cache()
+        except Exception as _sync_err:
+            logger.warning(f"Upload {upload_id}: sync comparativa_rows falló (no bloqueante) — {_sync_err}")
+
         if touch_status:
             _set_status_by_id(upload_id, "reviewing")
             # REMOVED: Auto-advance to dashboard/done
