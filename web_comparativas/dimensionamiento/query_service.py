@@ -52,6 +52,11 @@ _CACHE_MISS = object()          # Sentinel para distinguir cache miss de None
 # Micro-cache dedicado al health snapshot (no necesita clave por filtros)
 _SUMMARY_HEALTH_CACHE: dict = {"ts": 0.0, "val": None}
 
+# Micro-cache para get_status: los conteos globales raramente cambian; 30s evita
+# 3 queries extras en cada carga inicial y cada reload sin invalidar datos útiles.
+_STATUS_CACHE: dict = {"ts": 0.0, "val": None}
+_TTL_STATUS = 30.0
+
 
 def _make_cache_key(fn_name: str, filters: "DimensionamientoFilters", **extra: Any) -> str:
     """Clave MD5 determinista a partir del nombre de función + filtros + params extra."""
@@ -92,9 +97,11 @@ def invalidate_query_cache() -> None:
     with _QUERY_CACHE_LOCK:
         count = len(_QUERY_CACHE)
         _QUERY_CACHE.clear()
-    # Resetear también el micro-cache de salud de la tabla resumen
+    # Resetear también los micro-caches de salud y status
     _SUMMARY_HEALTH_CACHE["val"] = None
     _SUMMARY_HEALTH_CACHE["ts"] = 0.0
+    _STATUS_CACHE["val"] = None
+    _STATUS_CACHE["ts"] = 0.0
     logger.info("[DIM][CACHE] Caché invalidado. %d entradas eliminadas.", count)
 
 
@@ -458,18 +465,34 @@ def _log_query_statement(
 _SUMMARY_CLIENT_EXCLUDE: frozenset[str] = frozenset({"SIN DATO", "SIN_DATO"})
 
 
-def _distinct_summary_clients(session: Session) -> list[str]:
-    """Fast path: nombres únicos de clientes desde la tabla de resumen mensual.
+def _is_sin_dato_sql(column):
+    """Expresión SQL que devuelve True si el valor de la columna equivale a SIN DATO.
 
-    Evita un full scan sobre dimensionamiento_records (400k–500k filas) cuando no hay
-    filtros activos. La tabla resumen ya tiene los datos pre-agregados y normalizados.
-    Excluye variantes de 'SIN DATO' y valores vacíos.
+    Cubre: NULL, vacío, 'SIN DATO', 'SIN_DATO' (case-insensitive, trim).
+    Usada para separar correctamente el universo cliente vs no-cliente en las queries.
     """
+    normalized = func.upper(func.trim(func.replace(func.coalesce(column, ""), "_", " ")))
+    return or_(
+        column.is_(None),
+        func.coalesce(column, "") == "",
+        normalized == "SIN DATO",
+    )
+
+
+def _distinct_summary_clients(session: Session) -> list[str]:
+    """Fast path (sin filtros activos): nombres homologados únicos de clientes reales.
+
+    Universo 'Sí': registros con is_client=True.
+    Fuente: cliente_nombre_homologado (no cliente_visible, que puede contener originales).
+    Excluye variantes de SIN DATO, nulos y vacíos.
+    """
+    model = DimensionamientoFamilyMonthlySummary
     stmt = (
-        select(distinct(DimensionamientoFamilyMonthlySummary.cliente_visible))
-        .where(DimensionamientoFamilyMonthlySummary.cliente_visible.isnot(None))
-        .where(func.coalesce(DimensionamientoFamilyMonthlySummary.cliente_visible, "") != "")
-        .order_by(DimensionamientoFamilyMonthlySummary.cliente_visible)
+        select(distinct(model.cliente_nombre_homologado))
+        .where(model.is_client.is_(True))
+        .where(model.cliente_nombre_homologado.isnot(None))
+        .where(func.coalesce(model.cliente_nombre_homologado, "") != "")
+        .order_by(model.cliente_nombre_homologado)
     )
     all_clients = [c for c in session.execute(stmt).scalars().all() if c]
     return [
@@ -478,23 +501,77 @@ def _distinct_summary_clients(session: Session) -> list[str]:
     ]
 
 
-def _distinct_visible_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
-    """Retorna nombres visibles únicos de clientes, sin 'SIN DATO' ni vacíos.
+def _distinct_summary_non_clients(session: Session) -> list[str]:
+    """Fast path (sin filtros activos): nombres originales únicos de no-clientes.
 
-    Usa subquery con label para evitar sqlalchemy.exc.NoSuchColumnError al aplicar
-    filtros dinámicos sobre la expresión compleja con distinct().
+    Universo 'No': registros donde is_client=False (homologado ausente o SIN DATO).
+    Fuente: cliente_nombre_original — NUNCA cliente_visible ni homologado.
+    Excluye nulos y vacíos.
     """
-    visible_expr = DimensionamientoRecord.cliente_visible
-    # Usamos .label() para que SQLAlchemy pueda localizar la columna en el resultado.
-    # Luego aplicamos distinct() en un subquery separado para evitar el error de
-    # indexación al combinar SELECT DISTINCT CASE WHEN... con WHERE dinámicos.
+    model = DimensionamientoFamilyMonthlySummary
+    # cliente_nombre_original no existe en la summary table; usamos cliente_visible
+    # de filas con is_client=False (que en ingesta ya fue asignado desde original).
+    # Excluimos adicionalmente cualquier residual de SIN DATO proveniente del original.
+    stmt = (
+        select(distinct(model.cliente_visible))
+        .where(model.is_client.is_(False))
+        .where(model.cliente_visible.isnot(None))
+        .where(func.coalesce(model.cliente_visible, "") != "")
+        .order_by(model.cliente_visible)
+    )
+    all_names = [c for c in session.execute(stmt).scalars().all() if c]
+    return [
+        c for c in all_names
+        if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE
+    ]
+
+
+def _distinct_visible_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
+    """Universo Sí (is_client=True): nombres homologados únicos desde dimensionamiento_records.
+
+    Usa cliente_nombre_homologado como fuente exclusiva (no cliente_visible).
+    Excluye SIN DATO, nulos y vacíos.
+    """
+    col = DimensionamientoRecord.cliente_nombre_homologado
     inner_stmt = _apply_common_filters(
-        select(visible_expr.label("nombre_visible")),
+        select(col.label("nombre_visible")),
         DimensionamientoRecord,
         filters,
     )
-    inner_stmt = inner_stmt.where(visible_expr.isnot(None))
-    inner_stmt = inner_stmt.where(func.coalesce(visible_expr, "") != "")
+    inner_stmt = inner_stmt.where(col.isnot(None))
+    inner_stmt = inner_stmt.where(func.coalesce(col, "") != "")
+    inner_stmt = inner_stmt.where(~_is_sin_dato_sql(col))
+    subq = inner_stmt.subquery()
+
+    outer_stmt = (
+        select(distinct(subq.c.nombre_visible))
+        .where(subq.c.nombre_visible.isnot(None))
+        .where(subq.c.nombre_visible != "")
+        .order_by(subq.c.nombre_visible)
+    )
+    all_clients = [v for v in session.execute(outer_stmt).scalars().all() if v not in (None, "")]
+    return [c for c in all_clients if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE]
+
+
+def _distinct_visible_non_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
+    """Universo No (is_client=False): nombres originales únicos desde dimensionamiento_records.
+
+    Fuente: cliente_visible de registros con is_client=False.
+    En ingesta, para estos registros cliente_visible = cliente_nombre_original.
+    Excluye SIN DATO, nulos y vacíos.
+    """
+    col = DimensionamientoRecord.cliente_visible
+    inner_stmt = _apply_common_filters(
+        select(col.label("nombre_visible")),
+        DimensionamientoRecord,
+        filters,
+    )
+    # _apply_common_filters ya aplica is_client=False si está en filters.
+    # Garantizamos que solo incluimos filas con is_client=False explícitamente.
+    inner_stmt = inner_stmt.where(DimensionamientoRecord.is_client.is_(False))
+    inner_stmt = inner_stmt.where(col.isnot(None))
+    inner_stmt = inner_stmt.where(func.coalesce(col, "") != "")
+    inner_stmt = inner_stmt.where(~_is_sin_dato_sql(col))
     subq = inner_stmt.subquery()
 
     outer_stmt = (
@@ -538,17 +615,28 @@ def build_filters(
 def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
     use_direct_match = model is DimensionamientoFamilyMonthlySummary
     if filters.clientes:
-        _visible = model.cliente_visible
         if use_direct_match:
+            # Tabla resumen: cliente_visible ya contiene el valor correcto para ambos
+            # universos (homologado para is_client=True, original para is_client=False).
+            _visible = model.cliente_visible
             stmt = stmt.where(_visible.in_(filters.clientes))
             if applied_conditions is not None:
                 applied_conditions.append(f"cliente_visible IN {filters.clientes}")
         else:
+            # Tabla base: seleccionar la columna correcta según el universo.
+            # Universo "Sí" (is_client=True o None): cliente_nombre_homologado.
+            # Universo "No" (is_client=False):        cliente_visible (=nombre_original).
+            if filters.is_client is False:
+                _filter_col = model.cliente_visible
+                col_label = "cliente_visible"
+            else:
+                _filter_col = model.cliente_nombre_homologado
+                col_label = "cliente_nombre_homologado"
             normalized_clients = _normalized_filter_values(filters.clientes)
             if normalized_clients:
-                stmt = stmt.where(_sql_normalized_text(_visible).in_(normalized_clients))
+                stmt = stmt.where(_sql_normalized_text(_filter_col).in_(normalized_clients))
                 if applied_conditions is not None:
-                    applied_conditions.append(f"cliente_visible IN {normalized_clients}")
+                    applied_conditions.append(f"{col_label} IN {normalized_clients}")
     if filters.provincias:
         if use_direct_match:
             stmt = stmt.where(model.provincia.in_(filters.provincias))
@@ -674,19 +762,20 @@ def _distinct_summary_values(session: Session, column, order_by=None) -> list[st
 
 
 def _distinct_filtered_summary_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
-    """Clientes únicos desde la tabla resumen aplicando filtros activos.
+    """Universo Sí (is_client=True): nombres homologados únicos desde summary con filtros activos.
 
-    Más rápido que _distinct_visible_clients: no hace CASE WHEN ni full scan sobre
-    dimensionamiento_records. Filtra is_client=True para excluir variantes de SIN DATO.
-    Usa el mismo criterio de exclusión que _distinct_summary_clients.
+    Fuente: cliente_nombre_homologado de filas con is_client=True.
+    No usa cliente_visible para evitar contaminación con nombres originales de no-clientes.
     """
     model = DimensionamientoFamilyMonthlySummary
-    inner_stmt = _apply_common_filters(
-        select(model.cliente_visible.label("_val"))
-        .where(model.cliente_visible.isnot(None)),
-        model,
-        filters,
+    col = model.cliente_nombre_homologado
+    base_stmt = (
+        select(col.label("_val"))
+        .where(model.is_client.is_(True))
+        .where(col.isnot(None))
+        .where(func.coalesce(col, "") != "")
     )
+    inner_stmt = _apply_common_filters(base_stmt, model, filters)
     subq = inner_stmt.subquery()
     outer_stmt = (
         select(distinct(subq.c._val))
@@ -696,6 +785,33 @@ def _distinct_filtered_summary_clients(session: Session, filters: Dimensionamien
     )
     all_clients = [v for v in session.execute(outer_stmt).scalars().all() if v]
     return [c for c in all_clients if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE]
+
+
+def _distinct_filtered_summary_non_clients(session: Session, filters: DimensionamientoFilters) -> list[str]:
+    """Universo No (is_client=False): nombres originales únicos desde summary con filtros activos.
+
+    Fuente: cliente_visible de filas con is_client=False.
+    En la summary table, cliente_visible para no-clientes es igual a cliente_nombre_original.
+    Excluye SIN DATO, nulos y vacíos.
+    """
+    model = DimensionamientoFamilyMonthlySummary
+    col = model.cliente_visible
+    base_stmt = (
+        select(col.label("_val"))
+        .where(model.is_client.is_(False))
+        .where(col.isnot(None))
+        .where(func.coalesce(col, "") != "")
+    )
+    inner_stmt = _apply_common_filters(base_stmt, model, filters)
+    subq = inner_stmt.subquery()
+    outer_stmt = (
+        select(distinct(subq.c._val))
+        .where(subq.c._val.isnot(None))
+        .where(subq.c._val != "")
+        .order_by(subq.c._val)
+    )
+    all_names = [v for v in session.execute(outer_stmt).scalars().all() if v]
+    return [c for c in all_names if c.strip().upper().replace("_", " ") not in _SUMMARY_CLIENT_EXCLUDE]
 
 
 def _distinct_filtered_summary_values(
@@ -844,7 +960,12 @@ def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None
 
 
 def get_status(session: Session) -> dict[str, Any]:
-    started_at = time.perf_counter()
+    now = time.perf_counter()
+    if _STATUS_CACHE["val"] is not None and now - _STATUS_CACHE["ts"] < _TTL_STATUS:
+        logger.debug("[DIM][CACHE] get_status hit")
+        return _STATUS_CACHE["val"]
+
+    started_at = now
     logger.info("[DIM][QUERY] get_status start")
     _apply_local_statement_timeout(session, 50000)
 
@@ -886,6 +1007,8 @@ def get_status(session: Session) -> dict[str, Any]:
         else None,
     }
     _log_query_success("get_status", started_at, total_rows=total_rows, platforms=len(platform_rows))
+    _STATUS_CACHE["ts"] = time.perf_counter()
+    _STATUS_CACHE["val"] = payload
     return payload
 
 
@@ -978,6 +1101,9 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 summary_state["min_month"].isoformat(),
                 summary_state["max_month"].isoformat(),
             )
+            # Sin filtros activos: el dropdown Cliente siempre muestra el universo
+            # de clientes reales (is_client=True / Homologados). El filtro ¿Cliente?
+            # no está activo en este path por definición (has_active_filters=False).
             payload = {
                 "clientes": _distinct_summary_clients(session),
                 "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia),
@@ -1022,8 +1148,20 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
             if use_summary:
                 s = DimensionamientoFamilyMonthlySummary
+                # Despachar al universe correcto según el filtro ¿Cliente? (is_client):
+                # is_client=True  → fuente: cliente_nombre_homologado (clientes reales)
+                # is_client=False → fuente: cliente_visible de filas no homologadas (no-clientes)
+                # is_client=None  → sin filtro de universo: mostrar solo clientes homologados
+                #                   (universo predeterminado más útil para descobrimiento)
+                if filters.is_client is False:
+                    logger.info("[DIM][FILTERS] client dropdown: universo No (is_client=False), using non-client names")
+                    clientes_payload = _distinct_filtered_summary_non_clients(session, filters)
+                else:
+                    # True o None: mostrar clientes homologados
+                    logger.info("[DIM][FILTERS] client dropdown: universo Sí (is_client=%s), using homologated names", filters.is_client)
+                    clientes_payload = _distinct_filtered_summary_clients(session, filters)
                 payload = {
-                    "clientes": _distinct_filtered_summary_clients(session, filters),
+                    "clientes": clientes_payload,
                     "provincias": _distinct_filtered_summary_values(session, s.provincia, filters),
                     "familias": _distinct_filtered_summary_values(session, s.familia, filters),
                     "plataformas": _distinct_filtered_summary_values(session, s.plataforma, filters),
@@ -1033,8 +1171,15 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     "date_range": _date_range_payload(min_date, max_date),
                 }
             else:
+                # Tabla base (summary no disponible)
+                if filters.is_client is False:
+                    logger.info("[DIM][FILTERS] client dropdown (base table): universo No, using non-client names")
+                    clientes_payload = _distinct_visible_non_clients(session, filters)
+                else:
+                    logger.info("[DIM][FILTERS] client dropdown (base table): universo Sí, using homologated names")
+                    clientes_payload = _distinct_visible_clients(session, filters)
                 payload = {
-                    "clientes": _distinct_visible_clients(session, filters),
+                    "clientes": clientes_payload,
                     "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
                     "familias": _distinct_values(session, DimensionamientoRecord.familia, filters),
                     "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, filters),

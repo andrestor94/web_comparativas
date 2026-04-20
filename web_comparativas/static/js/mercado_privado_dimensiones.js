@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mapMarkers: [],
         currentDateRange: { min: null, max: null },
         bootstrapCache: new Map(),
+        bootstrapCacheTs: new Map(),
         negocioLabels: { unidades: {}, subunidades: {} },
         familyListData: [],
         familyListRenderRaf: null,
@@ -187,6 +188,15 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             getApplied() {
                 return Array.from(applied);
+            },
+            setApplied(values) {
+                const vals = Array.isArray(values) ? values : [values];
+                applied = new Set(vals.map(String));
+                pending = new Set(applied);
+                updateTriggerLabel();
+                if (list) {
+                    renderList(search ? search.value : '');
+                }
             },
             clearApplied() {
                 applied = new Set();
@@ -373,6 +383,27 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             getAppliedMin() { return appliedMin; },
             getAppliedMax() { return appliedMax; },
+            setExactMonth(monthIso) {
+                if (!monthIso) return;
+                // Normalizar a YYYY-MM (por si llega YYYY-MM-DD desde chart labels)
+                const monthStr = String(monthIso).slice(0, 7);
+                appliedMin = monthStr + "-01";
+                // max is last day of the month
+                const [y, m] = monthStr.split('-');
+                const maxD = new Date(y, m, 0).getDate();
+                appliedMax = `${monthStr}-${String(maxD).padStart(2, '0')}`;
+
+                if (months.length) {
+                    const minIdx = dateToSliderIdx(appliedMin, false);
+                    const maxIdx = dateToSliderIdx(appliedMax, true);
+                    sliderMin.value = minIdx;
+                    sliderMax.value = Math.max(minIdx, maxIdx);
+                    dateStart.value = sliderToDate(parseInt(sliderMin.value), false);
+                    dateEnd.value   = sliderToDate(parseInt(sliderMax.value), true);
+                    syncFill();
+                }
+                updateTriggerLabel();
+            },
             resetApplied() {
                 appliedMin = DEFAULT_DATE_FILTER.min;
                 appliedMax = DEFAULT_DATE_FILTER.max;
@@ -703,6 +734,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const query = buildQueryParams();
         const cacheKey = buildCacheKey(query);
         const cachedPayload = !force ? state.bootstrapCache.get(cacheKey) : null;
+        const cacheAgeMs = !force ? (Date.now() - (state.bootstrapCacheTs.get(cacheKey) || 0)) : Infinity;
+        // Si el cache tiene menos de 55 segundos no hace falta ir al backend: el
+        // TTL del cache del servidor es 120s, así que los datos siguen siendo frescos.
+        const CACHE_FRESH_TTL_MS = 55_000;
 
         if (blocking) {
             setLoading(true, 'Consultando metricas agregadas...');
@@ -712,6 +747,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (cachedPayload) renderBootstrapPayload(cachedPayload);
+
+        if (!force && cachedPayload && cacheAgeMs < CACHE_FRESH_TTL_MS) {
+            if (blocking) setLoading(false);
+            setRefreshing(false);
+            return;
+        }
 
         try {
             const response = await apiGet('/bootstrap', {
@@ -772,10 +813,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cacheBootstrapPayload(key, payload) {
         if (!key) return;
-        if (state.bootstrapCache.has(key)) state.bootstrapCache.delete(key);
+        if (state.bootstrapCache.has(key)) {
+            state.bootstrapCache.delete(key);
+            state.bootstrapCacheTs.delete(key);
+        }
         state.bootstrapCache.set(key, payload);
+        state.bootstrapCacheTs.set(key, Date.now());
         while (state.bootstrapCache.size > 12) {
-            state.bootstrapCache.delete(state.bootstrapCache.keys().next().value);
+            const oldKey = state.bootstrapCache.keys().next().value;
+            state.bootstrapCache.delete(oldKey);
+            state.bootstrapCacheTs.delete(oldKey);
         }
     }
 
@@ -928,65 +975,70 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderAreaChart(series) {
-        const ctx = document.getElementById('areaChart').getContext('2d');
-        if (state.areaChart) state.areaChart.destroy();
-
         // Guardar los códigos originales (pre-resolución) de cada dataset.
-        // El backend siempre devuelve TODOS los negocios al gráfico de series (sin aplicar
-        // la exclusión), por lo que el array siempre contiene todos los top-N series
-        // incluso cuando algunas están excluidas del resto del dashboard.
         state.chartSeriesCodes = (series.datasets || []).map(d => String(d.label));
 
+        const datasets = (series.datasets || []).map((dataset, index) => ({
+            label: resolveUnitLabel(dataset.label),
+            data: dataset.values || [],
+            backgroundColor: seriesPalette[index % seriesPalette.length],
+            borderColor: seriesPalette[index % seriesPalette.length],
+            borderWidth: 0,
+            borderRadius: 2,
+            stack: 'negocio',
+            hidden: state.hiddenSeriesCodes.has(String(dataset.label)),
+        }));
+
+        if (state.areaChart) {
+            // Chart.js no permite cambiar el type via update(); si ya existe
+            // y es de tipo 'line' (instancia previa), destruir y recrear.
+            if (state.areaChart.config.type !== 'bar') {
+                state.areaChart.destroy();
+                state.areaChart = null;
+            } else {
+                state.areaChart.data.labels = series.months || [];
+                state.areaChart.data.datasets = datasets;
+                state.areaChart.update('none');
+                return;
+            }
+        }
+
+        const ctx = document.getElementById('areaChart').getContext('2d');
         state.areaChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: series.months || [],
-                datasets: (series.datasets || []).map((dataset, index) => ({
-                    label: resolveUnitLabel(dataset.label),
-                    data: dataset.values,
-                    backgroundColor: `${seriesPalette[index % seriesPalette.length]}33`,
-                    borderColor: seriesPalette[index % seriesPalette.length],
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 2,
-                    pointHoverRadius: 5,
-                    // Las series excluidas se ocultan visualmente; el backend ya las descartó
-                    // de KPIs/tablas/donut/mapa pero las mantiene aquí para poder reactivarlas.
-                    hidden: state.hiddenSeriesCodes.has(String(dataset.label)),
-                })),
-            },
-            options: buildLineChartOptions(),
+            type: 'bar',
+            data: { labels: series.months || [], datasets },
+            options: buildStackedBarChartOptions(),
         });
     }
 
+
     function renderPieChart(results) {
-        const ctx = document.getElementById('pieChart').getContext('2d');
-        if (state.pieChart) state.pieChart.destroy();
-
         const hasFilter = state.activeResultados.size > 0;
+        const labels = results.map(item => item.resultado);
+        const data = results.map(item => item.renglones);
+        const backgroundColor = results.map((item, i) => {
+            const base = resultPalette[i % resultPalette.length];
+            return (hasFilter && !state.activeResultados.has(item.resultado)) ? base + '38' : base;
+        });
+        const offset = results.map(item =>
+            hasFilter && state.activeResultados.has(item.resultado) ? 8 : 0
+        );
 
+        if (state.pieChart) {
+            state.pieChart.data.labels = labels;
+            state.pieChart.data.datasets[0].data = data;
+            state.pieChart.data.datasets[0].backgroundColor = backgroundColor;
+            state.pieChart.data.datasets[0].offset = offset;
+            state.pieChart.update('none');
+            return;
+        }
+
+        const ctx = document.getElementById('pieChart').getContext('2d');
         state.pieChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: results.map(item => item.resultado),
-                datasets: [{
-                    data: results.map(item => item.renglones),
-                    // Segmentos inactivos se dimean para mostrar cuál está seleccionado
-                    backgroundColor: results.map((item, i) => {
-                        const base = resultPalette[i % resultPalette.length];
-                        if (hasFilter && !state.activeResultados.has(item.resultado)) {
-                            return base + '38'; // ~22% opacidad: inactivo
-                        }
-                        return base;
-                    }),
-                    borderWidth: 0,
-                    hoverOffset: 8,
-                    // Segmento activo aparece ligeramente separado
-                    offset: results.map(item =>
-                        hasFilter && state.activeResultados.has(item.resultado) ? 8 : 0
-                    ),
-                }],
+                labels,
+                datasets: [{ data, backgroundColor, borderWidth: 0, hoverOffset: 8, offset }],
             },
             options: {
                 responsive: true,
@@ -1000,7 +1052,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 onClick(event, elements) {
                     if (!elements.length) {
-                        // Clic en área vacía: quitar filtro de resultado
                         if (state.activeResultados.size > 0) {
                             state.activeResultados.clear();
                             triggerLoad();
@@ -1008,17 +1059,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     const index = elements[0].index;
-                    const resultado = results[index]?.resultado;
+                    // Leemos el resultado desde chart.data.labels para no depender
+                    // del closure sobre `results` (que queda stale tras la primera creación).
+                    const resultado = state.pieChart.data.labels[index];
                     if (!resultado) return;
-
-                    // Toggle: seleccionar este resultado o quitarlo si ya estaba activo
                     if (state.activeResultados.has(resultado)) {
                         state.activeResultados.delete(resultado);
                     } else {
                         state.activeResultados.clear();
                         state.activeResultados.add(resultado);
                     }
-                    // Propagar como filtro global a todo el dashboard
                     triggerLoad();
                 },
             },
@@ -1139,26 +1189,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderBarClientChart(rows) {
-        const ctx = document.getElementById('barClientChart').getContext('2d');
-        if (state.barClientChart) state.barClientChart.destroy();
-        const dynamicH = Math.max(200, rows.length * 32 + 28);
-        const container = ctx.canvas.closest('.chart-container');
-        if (container) container.style.height = dynamicH + 'px';
         const labels = rows.map(row => row.cliente);
         const resultKeys = Array.from(new Set(rows.flatMap(row => Object.keys(row.resultados || {}))));
+        const datasets = resultKeys.map((key, index) => ({
+            label: key,
+            data: rows.map(row => row.resultados?.[key] || 0),
+            backgroundColor: resultPalette[index % resultPalette.length],
+            borderRadius: 4,
+            barPercentage: 0.7,
+            stack: 'resultados',
+        }));
+        const dynamicH = Math.max(200, rows.length * 32 + 28);
+
+        if (state.barClientChart) {
+            const container = state.barClientChart.canvas.closest('.chart-container');
+            if (container) container.style.height = dynamicH + 'px';
+            state.barClientChart.data.labels = labels;
+            state.barClientChart.data.datasets = datasets;
+            state.barClientChart.update('none');
+            return;
+        }
+
+        const ctx = document.getElementById('barClientChart').getContext('2d');
+        const container = ctx.canvas.closest('.chart-container');
+        if (container) container.style.height = dynamicH + 'px';
         state.barClientChart = new Chart(ctx, {
             type: 'bar',
-            data: {
-                labels,
-                datasets: resultKeys.map((key, index) => ({
-                    label: key,
-                    data: rows.map(row => row.resultados?.[key] || 0),
-                    backgroundColor: resultPalette[index % resultPalette.length],
-                    borderRadius: 4,
-                    barPercentage: 0.7,
-                    stack: 'resultados',
-                })),
-            },
+            data: { labels, datasets },
             options: {
                 indexAxis: 'y',
                 responsive: true,
@@ -1378,7 +1435,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.setTimeout(() => state.mapInstance.invalidateSize(), 150);
     }
 
-    function buildLineChartOptions() {
+    function buildStackedBarChartOptions() {
         return {
             responsive: true,
             maintainAspectRatio: false,
@@ -1387,7 +1444,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 legend: {
                     position: 'top',
                     align: 'end',
-                    labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } },
+                    labels: { boxWidth: 10, usePointStyle: false, font: { size: 10 } },
                     onClick(e, legendItem, legend) {
                         const idx = legendItem.datasetIndex;
                         const code = state.chartSeriesCodes[idx];
@@ -1410,14 +1467,62 @@ document.addEventListener('DOMContentLoaded', () => {
                         triggerLoad();
                     },
                 },
-                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones` } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones`,
+                        footer: items => {
+                            const total = items.reduce((sum, it) => sum + (it.parsed.y || 0), 0);
+                            return `Total: ${formatInteger(total)} renglones`;
+                        },
+                    },
+                },
+            },
+            onClick(event, elements, chart) {
+                if (!elements || !elements.length) return;
+
+                const index = elements[0].index;
+                const datasetIndex = elements[0].datasetIndex;
+                const code = state.chartSeriesCodes[datasetIndex];
+                const monthInfo = chart.data.labels[index];
+
+                let filtersChanged = false;
+
+                // 1. Filtrar por Unidad de Negocio (Negocio) seleccionado
+                if (code !== undefined && msUnit) {
+                    msUnit.setApplied([code]);
+                    filtersChanged = true;
+                }
+
+                // 2. Filtrar por el mes específico clickeado
+                if (monthInfo && dateRangeCtrl) {
+                    dateRangeCtrl.setExactMonth(monthInfo);
+                    filtersChanged = true;
+                }
+
+                if (filtersChanged) {
+                    triggerLoad();
+                    // Ocultar tooltip para evitar artefactos visuales
+                    if (chart.tooltip) {
+                        chart.tooltip.setActiveElements([], {x: 0, y: 0});
+                    }
+                }
             },
             scales: {
-                y: { beginAtZero: true, grid: { borderDash: [4, 4], color: '#e2e8f0' }, ticks: { callback: v => formatCompactInteger(v) } },
-                x: { grid: { display: false } },
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { font: { size: 10 }, maxRotation: 45, minRotation: 0 },
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: { borderDash: [4, 4], color: '#e2e8f0' },
+                    ticks: { callback: v => formatCompactInteger(v) },
+                },
             },
         };
     }
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // Formatters
