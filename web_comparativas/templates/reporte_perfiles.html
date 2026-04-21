@@ -53,35 +53,6 @@
       </div>
     </section>
 
-    <section class="pf-toolbar">
-      <span class="pf-toolbar__label">
-        <i class="bi bi-calendar3"></i>
-        Marco temporal
-      </span>
-
-      <div class="pf-toolbar__controls">
-        <div class="pf-toolbar__group">
-          <label for="gFechaDesde">Desde</label>
-          <input type="date" id="gFechaDesde">
-        </div>
-        <div class="pf-toolbar__group">
-          <label for="gFechaHasta">Hasta</label>
-          <input type="date" id="gFechaHasta">
-        </div>
-      </div>
-
-      <div class="pf-toolbar__actions">
-        <button type="button" class="pf-btn-apply" onclick="pfApplyGlobalFilters()">
-          <i class="bi bi-funnel-fill"></i>
-          Aplicar
-        </button>
-        <button type="button" class="pf-btn-clear" onclick="pfClearAll()">
-          <i class="bi bi-x-lg"></i>
-          Limpiar
-        </button>
-      </div>
-    </section>
-
     <div id="syncWarnBanner" class="pf-inline-alert" style="display:none;">
       <i class="bi bi-exclamation-triangle-fill"></i>
       <span>
@@ -112,6 +83,35 @@
             <strong>Cliente</strong>
             <small>Demanda y rubros</small>
           </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="pf-toolbar">
+      <span class="pf-toolbar__label">
+        <i class="bi bi-calendar3"></i>
+        Marco temporal
+      </span>
+
+      <div class="pf-toolbar__controls">
+        <div class="pf-toolbar__group">
+          <label for="gFechaDesde">Desde</label>
+          <input type="date" id="gFechaDesde">
+        </div>
+        <div class="pf-toolbar__group">
+          <label for="gFechaHasta">Hasta</label>
+          <input type="date" id="gFechaHasta">
+        </div>
+      </div>
+
+      <div class="pf-toolbar__actions">
+        <button type="button" class="pf-btn-apply" onclick="pfApplyGlobalFilters()">
+          <i class="bi bi-funnel-fill"></i>
+          Aplicar
+        </button>
+        <button type="button" class="pf-btn-clear" onclick="pfClearAll()">
+          <i class="bi bi-x-lg"></i>
+          Limpiar
         </button>
       </div>
     </section>
@@ -212,14 +212,13 @@
                   <th class="num">Veces ganado</th>
                   <th class="num">Mejor pos.</th>
                   <th class="num">Monto adjudicado</th>
-                  <th class="num">Procesos</th>
-                  <th class="num">Apariciones</th>
+                  <th class="num">Participación</th>
                   <th class="num">Historial 12m</th>
                 </tr>
               </thead>
               <tbody id="artProvTbody">
                 <tr>
-                  <td colspan="8">
+                  <td colspan="7">
                     <div class="pf-empty-state">
                       <i class="bi bi-search"></i>
                       <p>Seleccioná un articulo para ver su detalle de proveedores.</p>

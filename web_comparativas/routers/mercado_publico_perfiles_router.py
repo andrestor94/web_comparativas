@@ -284,6 +284,48 @@ def search_filtro(
     return {"ok": True, "data": [r for r in rows if r]}
 
 
+@router.get("/filtros/rango-fechas")
+def filtros_rango_fechas(
+    request: Request,
+    descripcion: str = Query(""),
+    proveedor: str = Query(""),
+    marca: str = Query(""),
+    rubro: str = Query(""),
+    comprador: str = Query(""),
+    provincia: str = Query(""),
+    plataforma: str = Query(""),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+):
+    ck = _cache_key("rango_fechas", descripcion, proveedor, marca, rubro, comprador, provincia, plataforma)
+    cached = _cache_get(ck, _TTL_FILTERS)
+    if cached is not None:
+        return {"ok": True, "data": cached}
+
+    session = _get_session(request)
+    q = (
+        select(
+            func.min(ComparativaRow.fecha_apertura).label("fecha_min"),
+            func.max(ComparativaRow.fecha_apertura).label("fecha_max"),
+        )
+        .where(ComparativaRow.fecha_apertura.isnot(None))
+    )
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_multi(q, ComparativaRow.proveedor, proveedor)
+    q = _apply_multi(q, ComparativaRow.marca, marca)
+    q = _apply_multi(q, ComparativaRow.rubro, rubro)
+    q = _apply_exact_text(q, ComparativaRow.comprador, comprador)
+    q = _apply_multi(q, ComparativaRow.provincia, provincia)
+
+    row = session.execute(q).one_or_none()
+    data = {
+        "fecha_min": row.fecha_min.isoformat() if row and row.fecha_min else None,
+        "fecha_max": row.fecha_max.isoformat() if row and row.fecha_max else None,
+    }
+    _cache_set(ck, data)
+    return {"ok": True, "data": data}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — ARTÍCULOS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -664,6 +706,8 @@ def articulos_proveedor_historico(
     request: Request,
     proveedor: str = Query(""),
     descripcion: str = Query(""),
+    fecha_desde: str = Query(""),
+    fecha_hasta: str = Query(""),
     marca: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
@@ -672,12 +716,11 @@ def articulos_proveedor_historico(
     if not proveedor.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("art_prov_hist", proveedor, descripcion, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_hist", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
-    one_year_ago = dt.date.today() - dt.timedelta(days=365)
     session = _get_session(request)
     q = (
         select(
@@ -686,13 +729,13 @@ def articulos_proveedor_historico(
             ComparativaRow.marca,
             ComparativaRow.posicion,
         )
-        .where(ComparativaRow.fecha_apertura >= one_year_ago)
         .where(ComparativaRow.proveedor == proveedor)
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .order_by(ComparativaRow.fecha_apertura.desc())
-        .limit(120)
+        .limit(500)
     )
     q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
     q = _apply_multi(q, ComparativaRow.marca, marca)
     q = _apply_multi(q, ComparativaRow.rubro, rubro)
     q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
