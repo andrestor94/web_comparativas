@@ -62,6 +62,7 @@ _EXCLUDED_PREFIXES = (
     "/favicon.ico",
     "/healthz",
     "/ping",
+    "/notifications/unread-count",  # badge poll; no cuenta como page_view
     "/api/heartbeat",          # tiene su propia lógica de tracking
     "/sic/api/track-event",    # se auto-registra
     "/sic/api/usage",          # APIs internas del módulo de tracking

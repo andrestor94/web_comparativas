@@ -1135,8 +1135,11 @@
     (function () {
       const badge = document.getElementById('nav-notif-badge');
       if (!badge) return;
+      let checkNotifsInFlight = false;
 
       async function checkNotifs() {
+        if (checkNotifsInFlight) return;
+        checkNotifsInFlight = true;
         try {
           const r = await fetch('/notifications/unread-count');
           if (!r.ok) return;
@@ -1150,6 +1153,7 @@
             badge.style.display = 'none';
           }
         } catch (e) { console.error('Error checking notifications', e); }
+        finally { checkNotifsInFlight = false; }
       }
 
       checkNotifs();
@@ -1246,14 +1250,19 @@
       if (p.indexOf("/mercado-publico") !== -1) return "mercado_publico";
       return "otro";
     })();
+    var _hbInFlight = false;
 
     function _sendHeartbeat() {
+      if (_hbInFlight) return;
+      _hbInFlight = true;
       fetch("/api/heartbeat?section=" + encodeURIComponent(_hbSection), {
         method: "POST",
         headers: { "Accept": "application/json" },
         keepalive: true,
       }).catch(function () {
         /* silencioso — no interrumpir la experiencia del usuario */
+      }).finally(function () {
+        _hbInFlight = false;
       });
     }
 
