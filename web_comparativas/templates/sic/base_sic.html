@@ -389,8 +389,11 @@
         (function () {
             const badge = document.getElementById('nav-notif-badge');
             if (!badge) return;
+            let checkNotifsInFlight = false;
 
             async function checkNotifs() {
+                if (checkNotifsInFlight) return;
+                checkNotifsInFlight = true;
                 try {
                     const r = await fetch('/notifications/unread-count');
                     if (!r.ok) return;
@@ -404,6 +407,7 @@
                         badge.style.display = 'none';
                     }
                 } catch (e) { console.error('Error checking notifications', e); }
+                finally { checkNotifsInFlight = false; }
             }
 
             checkNotifs();
@@ -443,7 +447,7 @@
     <script>
         (function() {
             // Helper function to track usage events globally
-            window.trackEvent = async function(actionType, extraData = {}) {
+            window.trackEvent = function(actionType, extraData = {}) {
                 try {
                     let section = window.location.pathname;
                     if (section.startsWith('/sic/tracking')) section = 'sic_tracking';
@@ -460,21 +464,26 @@
                         extra_data: extraData
                     };
                     
-                    fetch('/sic/api/track-event', {
+                    return fetch('/sic/api/track-event', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
                         keepalive: true 
                     }).catch(err => { /* silent fail */ });
                 } catch(e) { /* silent fail */ }
+                return Promise.resolve();
             };
 
             // Heartbeat Logic
             let heartbeatInterval = 45000; // 45 seconds
+            let heartbeatInFlight = false;
             
             function sendHeartbeat() {
+                if (heartbeatInFlight) return;
+                heartbeatInFlight = true;
                 const isActive = !document.hidden;
-                window.trackEvent('heartbeat', { is_active: isActive });
+                Promise.resolve(window.trackEvent('heartbeat', { is_active: isActive }))
+                    .finally(function() { heartbeatInFlight = false; });
             }
 
             // Initial heartbeat

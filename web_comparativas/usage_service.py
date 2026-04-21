@@ -198,10 +198,10 @@ def log_usage_event(
     if user is None:
         return
 
-    try:
-        from .models import SessionLocal
-        s = SessionLocal()
+    s = None
+    owns_session = False
 
+    try:
         ip = None
         ua = None
         if request is not None:
@@ -226,6 +226,19 @@ def log_usage_event(
         ):
             return
 
+        # Para heartbeat reutilizamos la sesión canónica del request cuando existe.
+        # En otros eventos mantenemos la sesión aislada para no mezclar commits.
+        if action_type == "heartbeat" and request is not None:
+            try:
+                s = getattr(request.state, "db", None)
+            except Exception:
+                s = None
+
+        if s is None:
+            from .models import SessionLocal
+            s = SessionLocal()
+            owns_session = True
+
         ev = UsageEvent(
             timestamp=dt.datetime.utcnow(),
             session_id="legacy",
@@ -241,17 +254,20 @@ def log_usage_event(
         )
 
         s.add(ev)
-        s.commit()
+        if owns_session:
+            s.commit()
     except Exception:
-        try:
-            s.rollback()
-        except Exception:
-            pass
+        if owns_session and s is not None:
+            try:
+                s.rollback()
+            except Exception:
+                pass
     finally:
-        try:
-            s.close()
-        except Exception:
-            pass
+        if owns_session and s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
 
 
 # ======================================================================
