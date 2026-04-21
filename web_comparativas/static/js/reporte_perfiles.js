@@ -6,6 +6,7 @@ const PF = {
   globalFechaDesde: "",
   globalFechaHasta: "",
   globalPlataforma: "SIPROSA",
+  dateUserSet: false,
   charts: {},
   filterOptions: {},
   multiFilters: {},
@@ -770,6 +771,69 @@ function pfGlobalParams() {
   return params;
 }
 
+// ── Detección dinámica de rango de fechas real ──────────────────────────────
+
+function pfGetGlobalRangeParams() {
+  const p = new URLSearchParams();
+  if (PF.globalPlataforma) p.set("plataforma", PF.globalPlataforma);
+  return p;
+}
+
+function pfGetArtRangeParams() {
+  const p = new URLSearchParams();
+  if (PF.globalPlataforma) p.set("plataforma", PF.globalPlataforma);
+  pfSetMultiParam(p, "artDesc");
+  pfSetMultiParam(p, "artMarca");
+  pfSetMultiParam(p, "artProv");
+  return p;
+}
+
+function pfGetCompRangeParams() {
+  const p = new URLSearchParams();
+  if (PF.globalPlataforma) p.set("plataforma", PF.globalPlataforma);
+  pfSetMultiParam(p, "compProv");
+  pfSetMultiParam(p, "compRubro");
+  pfSetMultiParam(p, "compDesc");
+  return p;
+}
+
+function pfGetCliRangeParams() {
+  const p = new URLSearchParams();
+  if (PF.globalPlataforma) p.set("plataforma", PF.globalPlataforma);
+  pfSetMultiParam(p, "cliComp");
+  pfSetMultiParam(p, "cliProv");
+  return p;
+}
+
+async function pfLoadDateRange(rangeParams) {
+  const elFrom = document.getElementById("gFechaDesde");
+  const elTo   = document.getElementById("gFechaHasta");
+  if (!elFrom || !elTo) return;
+
+  try {
+    const data = await pfFetch(`${BASE}/filtros/rango-fechas?${rangeParams}`);
+    const { fecha_min, fecha_max } = data;
+    if (!fecha_min || !fecha_max) return;
+
+    // Siempre restringir el datepicker al rango real disponible
+    elFrom.min = fecha_min;
+    elFrom.max = fecha_max;
+    elTo.min   = fecha_min;
+    elTo.max   = fecha_max;
+
+    // Solo auto-poblar si el usuario no fijó un rango personalizado
+    if (!PF.dateUserSet) {
+      elFrom.value = fecha_min;
+      elTo.value   = fecha_max;
+      PF.globalFechaDesde = fecha_min;
+      PF.globalFechaHasta = fecha_max;
+      pfUpdateDateSummary();
+    }
+  } catch {
+    // no-op: la detección de rango es no-crítica
+  }
+}
+
 function pfSetMultiParam(params, filterId, paramName = FILTER_CONFIG[filterId]?.param) {
   if (!paramName) return;
   const state = PF.multiFilters[filterId];
@@ -1039,6 +1103,8 @@ function pfSwitchTab(name, el) {
 function pfApplyGlobalFilters() {
   PF.globalFechaDesde = document.getElementById("gFechaDesde")?.value || "";
   PF.globalFechaHasta = document.getElementById("gFechaHasta")?.value || "";
+  // El usuario fijó un rango explícito; no lo pisar con auto-detección
+  PF.dateUserSet = !!(PF.globalFechaDesde || PF.globalFechaHasta);
   pfUpdateDateSummary();
   pfLoadCurrentTab();
 }
@@ -1051,6 +1117,7 @@ function pfClearAll() {
 
   PF.globalFechaDesde = "";
   PF.globalFechaHasta = "";
+  PF.dateUserSet = false;
 
   Object.keys(PF.multiFilters).forEach((filterId) => {
     const state = PF.multiFilters[filterId];
@@ -1074,7 +1141,8 @@ function pfClearAll() {
   pfCloseAllFilterPanels();
   pfUpdateDateSummary();
   pfSetArtSelectionGate();
-  pfLoadCurrentTab();
+  // Restaurar rango global real y luego recargar
+  pfLoadDateRange(pfGetGlobalRangeParams()).then(() => pfLoadCurrentTab());
 }
 
 async function pfCheckSync() {
@@ -1142,11 +1210,15 @@ async function pfLoadArticulos() {
   pfSetArtSelectionGate();
   if (!pfHasArticleSelection()) return;
 
+  // Detectar rango real antes de renderizar (si el usuario no fijó fechas)
+  if (!PF.dateUserSet) await pfLoadDateRange(pfGetArtRangeParams());
+
+  const params = pfGetArtParams();
   await Promise.all([
-    pfLoadArtKpis(pfGetArtParams()),
-    pfLoadArtEvolucion(pfGetArtParams()),
-    pfLoadArtPorMarca(pfGetArtParams()),
-    pfLoadArtPorProveedor(pfGetArtParams()),
+    pfLoadArtKpis(params),
+    pfLoadArtEvolucion(params),
+    pfLoadArtPorMarca(params),
+    pfLoadArtPorProveedor(params),
   ]);
 }
 
@@ -1238,14 +1310,15 @@ async function pfLoadArtEvolucion(params) {
 
     // artPrecioChart: una línea por marca
     if (dataMarca.length) {
-      const labelsOrdered = [];
-      const seenLabels = new Set();
+      // Construir labels ordenados cronológicamente usando metadatos year+month del backend
+      const labelMeta = new Map();
       dataMarca.forEach((d) => {
-        if (!seenLabels.has(d.month_label)) {
-          seenLabels.add(d.month_label);
-          labelsOrdered.push(d.month_label);
+        if (!labelMeta.has(d.month_label)) {
+          labelMeta.set(d.month_label, d.year * 100 + d.month);
         }
       });
+      const labelsOrdered = Array.from(labelMeta.keys())
+        .sort((a, b) => labelMeta.get(a) - labelMeta.get(b));
 
       const marcasUnicas = Array.from(new Set(dataMarca.map((d) => d.marca))).sort();
       const seriesPrecio = marcasUnicas.map((marca) => ({
@@ -1359,7 +1432,7 @@ async function pfLoadArtPorProveedor(params) {
     const data = await pfFetch(`${BASE}/articulos/por-proveedor?${params}`);
     if (!data.length) {
       pfRenderEmpty("artProvChart", "Sin proveedores para este articulo.", "bi-buildings");
-      if (tbody) tbody.innerHTML = pfTableEmpty("bi-search", "Sin proveedores para este articulo.", 8);
+      if (tbody) tbody.innerHTML = pfTableEmpty("bi-search", "Sin proveedores para este articulo.", 7);
       return;
     }
 
@@ -1415,10 +1488,9 @@ async function pfLoadArtPorProveedor(params) {
             <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
             <td class="num">${pfPeso(d.total_adjudicado)}</td>
             <td class="num">${pfFmt(d.procesos)}</td>
-            <td class="num">${pfFmt(d.count)}</td>
             <td class="num pf-hist-cell">
-              ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana_12m)}</span><small>mediana</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
-              <button class="pf-hist-btn" title="Ver historial del último año"
+              ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana_12m)}</span><small>mediana 12m</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
+              <button class="pf-hist-btn" title="Ver historial del período"
                 onclick="pfToggleHistorico(this, decodeURIComponent('${provId}'))">
                 <i class="bi bi-chevron-down"></i>
               </button>
@@ -1428,7 +1500,7 @@ async function pfLoadArtPorProveedor(params) {
     }
   } catch (err) {
     pfRenderEmpty("artProvChart", "Error al cargar proveedores.", "bi-buildings");
-    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle de proveedores.", 8);
+    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle de proveedores.", 7);
   }
 }
 
@@ -1468,9 +1540,9 @@ async function pfToggleHistorico(btn, proveedor) {
     detailRow.id = histId;
     detailRow.className = "pf-hist-row";
     detailRow.innerHTML = `
-      <td colspan="8">
+      <td colspan="7">
         <div class="pf-hist-detail">
-          <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial último año — ${pfTrunc(proveedor, 60)}</div>
+          <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial del período — ${pfTrunc(proveedor, 60)}</div>
           <table class="pf-hist-table">
             <thead><tr>
               <th>Fecha</th>
@@ -1500,6 +1572,8 @@ function pfGetCompParams() {
 }
 
 async function pfLoadCompetidor() {
+  if (!PF.dateUserSet) await pfLoadDateRange(pfGetCompRangeParams());
+
   const params = pfGetCompParams();
   await Promise.all([
     pfLoadCompKpis(params),
@@ -1771,6 +1845,8 @@ function pfGetCliParams() {
 }
 
 async function pfLoadCliente() {
+  if (!PF.dateUserSet) await pfLoadDateRange(pfGetCliRangeParams());
+
   const params = pfGetCliParams();
   await Promise.all([
     pfLoadCliKpis(params),
@@ -2019,4 +2095,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   pfSyncLockedPlatformUI();
   pfSetArtSelectionGate();
   await pfCheckSync();
+  // Poblar inputs con el rango real de la data disponible al iniciar
+  await pfLoadDateRange(pfGetGlobalRangeParams());
 });
