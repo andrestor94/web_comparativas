@@ -3,7 +3,7 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=perfiles-v1">
-<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v5">
+<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v6">
 {% endblock %}
 
 {% block content %}
@@ -323,12 +323,12 @@
             <thead>
               <tr>
                 <th>Descripcion</th>
-                <th class="num">Pos. prom.</th>
                 <th class="num">Mejor pos.</th>
                 <th class="num">Monto adjudicado</th>
+                <th class="num">Participaciones</th>
                 <th class="num">Veces ganado</th>
                 <th class="num">Efectividad</th>
-                <th class="num">Participaciones</th>
+                <th class="num pf-hist-cell-th"></th>
               </tr>
             </thead>
             <tbody id="compPosTbody">
@@ -414,23 +414,25 @@
 
       <div class="pf-grid-2">
         <article class="pf-card pf-card--chart">
-          <div class="pf-card__head pf-card__head--row">
+          <div class="pf-card__head">
             <div>
               <span class="pf-card__eyebrow">Top proveedores</span>
               <h3 class="pf-card__title">Ranking de Participantes</h3>
-            </div>
-            <div class="pf-metric-toggle" id="cliProvToggle">
-              <button type="button" class="pf-toggle-btn active" data-metric="monto" onclick="pfToggleCliProv('monto')">Presupuesto</button>
-              <button type="button" class="pf-toggle-btn" data-metric="cant" onclick="pfToggleCliProv('cant')">Cantidad</button>
             </div>
           </div>
           <div class="pf-chart-box" id="cliProvChart"></div>
         </article>
 
         <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Top demanda</span>
-            <h3 class="pf-card__title">Articulos Mas Demandados</h3>
+          <div class="pf-card__head pf-card__head--row">
+            <div>
+              <span class="pf-card__eyebrow">Top demanda</span>
+              <h3 class="pf-card__title">Articulos Mas Demandados</h3>
+            </div>
+            <div class="pf-metric-toggle" id="cliArtToggle">
+              <button type="button" class="pf-toggle-btn active" data-metric="monto" onclick="pfToggleCliArtMetric('monto')">Presupuesto</button>
+              <button type="button" class="pf-toggle-btn" data-metric="cant" onclick="pfToggleCliArtMetric('cant')">Cantidad</button>
+            </div>
           </div>
           <div class="pf-chart-box" id="cliArtChart"></div>
         </article>
@@ -473,5 +475,5 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=7"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=8"></script>
 {% endblock %}

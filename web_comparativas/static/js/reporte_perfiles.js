@@ -1901,10 +1901,10 @@ async function pfLoadCompTopArt(params) {
         chart: { type: "bar", height: 256 },
         series: [{ name: "Monto adjudicado", data: top.map((d) => d.monto_total) }],
         xaxis: {
-          categories: top.map((d) => pfTrunc(d.descripcion, 24)),
+          categories: top.map((d) => pfTrunc(d.descripcion, 36)),
           labels: { formatter: pfAxisFmtMoney },
         },
-        yaxis: { labels: { formatter: pfAxisFmtMoney } },
+        yaxis: { labels: { formatter: pfAxisFmtMoney, maxWidth: 160 } },
         plotOptions: {
           bar: {
             horizontal: true,
@@ -1944,10 +1944,10 @@ async function pfLoadCompProductosCompetitivos(params) {
         chart: { type: "bar", height: 256 },
         series: [{ name: "Veces adjudicado", data: top.map((d) => d.veces_adjudicado) }],
         xaxis: {
-          categories: top.map((d) => pfTrunc(d.descripcion, 26)),
+          categories: top.map((d) => pfTrunc(d.descripcion, 36)),
           labels: { formatter: pfAxisFmtNum },
         },
-        yaxis: { labels: { formatter: pfAxisFmtNum } },
+        yaxis: { labels: { formatter: pfAxisFmtNum, maxWidth: 160 } },
         plotOptions: {
           bar: {
             horizontal: true,
@@ -2001,20 +2001,82 @@ async function pfLoadCompPosiciones(params) {
       const posClass = d.mejor_posicion === 1 ? "pos1" : d.mejor_posicion === 2 ? "pos2" : "posn";
       const ef = d.efectividad ?? 0;
       const efClass = ef >= 50 ? "pf-efectividad--high" : ef >= 20 ? "pf-efectividad--mid" : "pf-efectividad--low";
+      const descId = encodeURIComponent(d.descripcion);
+      const hasMediana = d.precio_mediana > 0;
       return `
         <tr>
           <td>${pfCellText(d.descripcion, 56)}</td>
-          <td class="num">${pfFmt(d.posicion_promedio, 1)}</td>
           <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
           <td class="num">${pfPeso(d.monto_total)}</td>
+          <td class="num">${pfFmt(d.count)}</td>
           <td class="num">${pfFmt(d.veces_ganado ?? 0)}</td>
           <td class="num"><span class="pf-efectividad ${efClass}">${ef}%</span></td>
-          <td class="num">${pfFmt(d.count)}</td>
+          <td class="num pf-hist-cell">
+            ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana)}</span><small>mediana</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
+            <button class="pf-hist-btn" title="Ver historial de precios"
+              onclick="pfToggleCompPosHistorico(this, decodeURIComponent('${descId}'))">
+              <i class="bi bi-chevron-down"></i>
+            </button>
+          </td>
         </tr>`;
     }).join("");
   } catch (err) {
     if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
     tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 7);
+  }
+}
+
+async function pfToggleCompPosHistorico(btn, descripcion) {
+  const row = btn.closest("tr");
+  const histId = "pf-cpos-hist-" + btoa(encodeURIComponent(descripcion)).replace(/[^a-zA-Z0-9]/g, "_");
+  const existing = document.getElementById(histId);
+
+  if (existing) {
+    existing.remove();
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
+    return;
+  }
+
+  btn.classList.add("open");
+  btn.innerHTML = `<i class="bi bi-arrow-clockwise pf-spin"></i>`;
+
+  try {
+    const params = pfGetCompParams();
+    params.set("descripcion", descripcion);
+    const data = await pfFetch(`${BASE}/articulos/proveedor-historico?${params}`);
+
+    const bodyRows = data.length
+      ? data.map((r) => `<tr>
+          <td>${r.fecha ?? "-"}</td>
+          <td class="num">${pfPeso(r.precio)}</td>
+          <td>${pfEsc(r.marca ?? "-")}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="3" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el período para los filtros actuales</td></tr>`;
+
+    const detailRow = document.createElement("tr");
+    detailRow.id = histId;
+    detailRow.className = "pf-hist-row";
+    detailRow.innerHTML = `
+      <td colspan="7">
+        <div class="pf-hist-detail">
+          <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial — ${pfEsc(pfTrunc(descripcion, 60))}</div>
+          <table class="pf-hist-table">
+            <thead><tr>
+              <th>Fecha</th>
+              <th class="num">Precio unit.</th>
+              <th>Marca</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </td>`;
+
+    row.insertAdjacentElement("afterend", detailRow);
+    btn.innerHTML = `<i class="bi bi-chevron-up"></i>`;
+  } catch {
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
   }
 }
 
@@ -2176,18 +2238,9 @@ async function pfLoadCliRubros(params) {
   }
 }
 
-// Estado del toggle de proveedores (monto | cant)
-PF._cliProvMetric = "monto";
-PF._cliProvData   = [];
-
-function pfToggleCliProv(metric) {
-  PF._cliProvMetric = metric;
-  // Actualizar botones activos
-  document.querySelectorAll("#cliProvToggle .pf-toggle-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.metric === metric);
-  });
-  pfRenderCliProvChart();
-}
+PF._cliProvData = [];
+PF._cliArtMetric = "monto";
+PF._cliArtData = [];
 
 function pfRenderCliProvChart() {
   const renderToken = pfBeginRequestGuard("cli:prov-chart", () => pfDestroyChart("cliProvChart"));
@@ -2196,12 +2249,11 @@ function pfRenderCliProvChart() {
     pfRenderEmpty("cliProvChart", "Sin proveedores para el perfil filtrado.", "bi-buildings");
     return;
   }
-  const useMonto = PF._cliProvMetric !== "cant";
   const top = data.slice(0, 12);
-  const seriesData = top.map((d) => useMonto ? d.monto_total : d.cant_adjudicada);
-  const seriesName  = useMonto ? "Presupuesto adjudicado" : "Cantidad adjudicada";
-  const fmtAxis     = useMonto ? pfAxisFmtMoney : pfAxisFmtNum;
-  const fmtTooltip  = useMonto ? (v) => pfPeso(v) : (v) => pfFmt(v);
+  const seriesData = top.map((d) => d.monto_total);
+  const seriesName  = "Presupuesto adjudicado";
+  const fmtAxis     = pfAxisFmtMoney;
+  const fmtTooltip  = (v) => pfPeso(v);
 
   if (!pfIsRequestCurrent("cli:prov-chart", renderToken)) return;
   PF.charts.cliProvChart = new ApexCharts(
@@ -2210,10 +2262,10 @@ function pfRenderCliProvChart() {
       chart: { type: "bar", height: 256 },
       series: [{ name: seriesName, data: seriesData }],
       xaxis: {
-        categories: top.map((d) => pfTrunc(d.proveedor, 24)),
+        categories: top.map((d) => pfTrunc(d.proveedor, 36)),
         labels: { formatter: fmtAxis },
       },
-      yaxis: { labels: { formatter: fmtAxis } },
+      yaxis: { labels: { formatter: fmtAxis, maxWidth: 160 } },
       plotOptions: {
         bar: {
           horizontal: true,
@@ -2221,7 +2273,7 @@ function pfRenderCliProvChart() {
           barHeight: "68%",
         },
       },
-      colors: [useMonto ? COLORS.brand900 : COLORS.cyan],
+      colors: [COLORS.brand900],
       tooltip: {
         y: { formatter: fmtTooltip },
       },
@@ -2248,6 +2300,62 @@ async function pfLoadCliProveedores(params) {
   }
 }
 
+function pfToggleCliArtMetric(metric) {
+  PF._cliArtMetric = metric;
+  document.querySelectorAll("#cliArtToggle .pf-toggle-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.metric === metric);
+  });
+  pfRenderCliArtChart();
+}
+
+function pfRenderCliArtChart() {
+  const renderToken = pfBeginRequestGuard("cli:art-chart", () => pfDestroyChart("cliArtChart"));
+  const data = PF._cliArtData;
+  if (!data.length) {
+    pfRenderEmpty("cliArtChart", "Sin articulos para este perfil de cliente.", "bi-list-stars");
+    return;
+  }
+
+  const useMonto = PF._cliArtMetric !== "cant";
+  const metricKey = useMonto ? "monto_total" : "cant_adjudicada";
+  const sorted = [...data].sort((a, b) => {
+    const diff = (parseFloat(b[metricKey]) || 0) - (parseFloat(a[metricKey]) || 0);
+    if (diff !== 0) return diff;
+    return String(a.descripcion || "").localeCompare(String(b.descripcion || ""), "es");
+  });
+  const top = sorted.slice(0, 10);
+  const chartRows = top;
+  const seriesName = useMonto ? "Monto adjudicado" : "Cantidad adjudicada";
+  const fmtAxis = useMonto ? pfAxisFmtMoney : pfAxisFmtNum;
+  const fmtTooltip = useMonto ? (value) => pfPeso(value) : (value) => pfFmt(value, 2);
+
+  if (!pfIsRequestCurrent("cli:art-chart", renderToken)) return;
+  PF.charts.cliArtChart = new ApexCharts(
+    document.getElementById("cliArtChart"),
+    pfChartBase({
+      chart: { type: "bar", height: 256 },
+      series: [{ name: seriesName, data: chartRows.map((d) => d[metricKey]) }],
+      xaxis: {
+        categories: chartRows.map((d) => pfTrunc(d.descripcion, 36)),
+        labels: { formatter: fmtAxis },
+      },
+      yaxis: { labels: { formatter: fmtAxis, maxWidth: 160 } },
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 7,
+          barHeight: "68%",
+        },
+      },
+      colors: [useMonto ? COLORS.warning : COLORS.cyan],
+      tooltip: {
+        y: { formatter: fmtTooltip },
+      },
+    })
+  );
+  PF.charts.cliArtChart.render();
+}
+
 async function pfLoadCliArticulos(params) {
   const requestToken = pfBeginRequestGuard("cli:articulos", () => pfDestroyChart("cliArtChart"));
   const tbody = document.getElementById("cliArtTbody");
@@ -2257,31 +2365,10 @@ async function pfLoadCliArticulos(params) {
   try {
     const data = await pfFetch(`${BASE}/cliente/articulos?${params}`);
     if (!pfIsRequestCurrent("cli:articulos", requestToken)) return;
+    PF._cliArtData = data;
 
     if (data.length) {
-      const top = data.slice(0, 10);
-      if (!pfIsRequestCurrent("cli:articulos", requestToken)) return;
-      PF.charts.cliArtChart = new ApexCharts(
-        document.getElementById("cliArtChart"),
-        pfChartBase({
-          chart: { type: "bar", height: 256 },
-          series: [{ name: "Cant. solicitada total", data: top.map((d) => d.cant_total) }],
-          xaxis: {
-            categories: top.map((d) => pfTrunc(d.descripcion, 24)),
-            labels: { formatter: pfAxisFmtNum },
-          },
-          yaxis: { labels: { formatter: pfAxisFmtNum } },
-          plotOptions: {
-            bar: {
-              horizontal: true,
-              borderRadius: 7,
-              barHeight: "68%",
-            },
-          },
-          colors: [COLORS.warning],
-        })
-      );
-      PF.charts.cliArtChart.render();
+      pfRenderCliArtChart();
     } else {
       pfRenderEmpty("cliArtChart", "Sin articulos para este perfil de cliente.", "bi-list-stars");
     }
@@ -2297,7 +2384,7 @@ async function pfLoadCliArticulos(params) {
         return `
         <tr class="pf-prov-row" data-desc="${descId}">
           <td>${pfCellText(d.descripcion, 56)}</td>
-          <td class="num">${pfFmt(d.cant_total, 1)}</td>
+          <td class="num">${pfFmt(d.cant_adjudicada, 2)}</td>
           <td class="num">${pfFmt(d.frecuencia)}</td>
           <td class="num">${pfPeso(d.monto_total)}</td>
           <td class="num">${pfPeso(d.avg_precio)}</td>
@@ -2336,20 +2423,23 @@ async function pfToggleArtDetalle(btn, descripcion) {
     const params = PF._cliArtParams ? new URLSearchParams(PF._cliArtParams.toString()) : new URLSearchParams();
     params.set("descripcion", descripcion);
     const data = await pfFetch(`${BASE}/cliente/articulo-detalle?${params}`);
+    const minPrecio = data.reduce((min, item) => {
+      const value = Number(item.precio);
+      if (!Number.isFinite(value)) return min;
+      return value < min ? value : min;
+    }, Number.POSITIVE_INFINITY);
 
     const bodyRows = data.length
       ? data.map((r) => {
-          const posC = r.posicion == null ? "posn" : r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
-          const posLabel = r.posicion != null ? `#${r.posicion}` : "-";
+          const isWinner = Number.isFinite(minPrecio) && Number(r.precio) === minPrecio;
           return `<tr>
             <td>${r.fecha ?? "-"}</td>
             <td>${pfEsc(r.marca)}</td>
-            <td class="num">${pfPeso(r.precio)}</td>
+            <td class="num"><span class="${isWinner ? "pf-price-winner" : ""}">${pfPeso(r.precio)}</span></td>
             <td>${pfEsc(pfTrunc(r.proveedor, 42))}</td>
-            <td class="num"><span class="pf-badge ${posC}">${posLabel}</span></td>
           </tr>`;
         }).join("")
-      : `<tr><td colspan="5" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros para los filtros actuales</td></tr>`;
+      : `<tr><td colspan="4" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros para los filtros actuales</td></tr>`;
 
     const detailRow = document.createElement("tr");
     detailRow.id = detId;
@@ -2362,9 +2452,8 @@ async function pfToggleArtDetalle(btn, descripcion) {
             <thead><tr>
               <th>Fecha</th>
               <th>Marca</th>
-              <th class="num">Precio unit.</th>
+              <th class="num">Precio ganador</th>
               <th>Proveedor</th>
-              <th class="num">Pos.</th>
             </tr></thead>
             <tbody>${bodyRows}</tbody>
           </table>

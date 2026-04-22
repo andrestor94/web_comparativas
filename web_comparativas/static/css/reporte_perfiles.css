@@ -1651,6 +1651,19 @@
   color: #fff;
 }
 
+.pf-price-winner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 26px;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.16);
+  color: #166534;
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.18);
+}
+
 /* ── EFECTIVIDAD BADGE ──────────────────────────────────────── */
 
 .pf-efectividad {
