@@ -926,6 +926,18 @@ function pfAxisFmtNum(val) {
   return isNaN(n) ? val : pfFmtNumShort(n);
 }
 
+function pfFilterSeriesByValidPoints(series = [], minPoints = 1) {
+  return (series || []).filter((serie) => {
+    const validPoints = (serie?.data || []).filter((value) => (
+      value !== null
+      && value !== undefined
+      && Number.isFinite(Number(value))
+      && Number(value) > 0
+    ));
+    return validPoints.length >= minPoints;
+  });
+}
+
 function pfChartBase(overrides = {}) {
   const base = {
     chart: {
@@ -1397,7 +1409,7 @@ async function pfLoadArtKpis(params) {
       }),
       pfKpiCard({
         tone: "warning",
-        label: "Marcas distintas",
+        label: "Marcas",
         value: pfFmt(data.marcas_distintas),
         sub: `${pfFmt(data.procesos)} procesos analizados`,
         icon: "bi-tags",
@@ -1461,29 +1473,31 @@ async function pfLoadArtEvolucion(params) {
       }));
 
       // Solo incluir series que tengan al menos un punto válido (> 0 y no nulo)
-      const seriesFiltradas = seriesPrecio.filter((serie) =>
-        serie.data.some((v) => v !== null && v !== undefined && v > 0)
-      );
+      const seriesFiltradas = pfFilterSeriesByValidPoints(seriesPrecio, 2);
 
       if (!pfIsRequestCurrent("art:evol", requestToken)) return;
-      PF.charts.artPrecioChart = new ApexCharts(
-        document.getElementById("artPrecioChart"),
-        pfChartBase({
-          chart: { type: "line", height: 256 },
-          series: seriesFiltradas,
-          xaxis: { categories: labelsOrdered, labels: { rotate: -28 } },
-          yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
-          stroke: { width: 2, curve: "smooth" },
-          markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
-          legend: { show: seriesFiltradas.length > 1 },
-          tooltip: {
-            shared: true,
-            intersect: false,
-            y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
-          },
-        })
-      );
-      PF.charts.artPrecioChart.render();
+      if (!seriesFiltradas.length) {
+        pfRenderEmpty("artPrecioChart", "Sin marcas con precio valido para el periodo seleccionado.", "bi-graph-up");
+      } else {
+        PF.charts.artPrecioChart = new ApexCharts(
+          document.getElementById("artPrecioChart"),
+          pfChartBase({
+            chart: { type: "line", height: 256 },
+            series: seriesFiltradas,
+            xaxis: { categories: labelsOrdered, labels: { rotate: -28 } },
+            yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
+            stroke: { width: 2, curve: "smooth" },
+            markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
+            legend: { show: seriesFiltradas.length > 1 },
+            tooltip: {
+              shared: true,
+              intersect: false,
+              y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
+            },
+          })
+        );
+        PF.charts.artPrecioChart.render();
+      }
     } else {
       pfRenderEmpty("artPrecioChart", "Sin datos para el periodo seleccionado.", "bi-graph-up");
     }
@@ -1539,19 +1553,24 @@ async function pfLoadArtPorMarca(params) {
         return match ? match.precio_ganador : null;
       })
     }));
+    const seriesFiltradas = pfFilterSeriesByValidPoints(seriesData, 1);
 
     if (!pfIsRequestCurrent("art:marca", requestToken)) return;
+    if (!seriesFiltradas.length) {
+      pfRenderEmpty("artMarcaChart", "Sin marcas con precio ganador valido para el filtro actual.", "bi-tags");
+      return;
+    }
     PF.charts.artMarcaChart = new ApexCharts(
       document.getElementById("artMarcaChart"),
       pfChartBase({
         chart: { type: "bar", height: 256, stacked: true },
-        series: seriesData,
+        series: seriesFiltradas,
         xaxis: { categories: categories },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         plotOptions: {
           bar: { columnWidth: "60%" },
         },
-        legend: { show: true },
+        legend: { show: seriesFiltradas.length > 1 },
         tooltip: {
           shared: true,
           intersect: false,
@@ -1762,7 +1781,7 @@ async function pfLoadCompKpis(params) {
       }),
       pfKpiCard({
         tone: "primary",
-        label: "Articulos cotizados",
+        label: "Articulos",
         value: pfKpiNum(data.descripciones_cotizadas),
         rawValue: pfFmt(data.descripciones_cotizadas),
         sub: "Variedad de articulos",
@@ -1770,16 +1789,16 @@ async function pfLoadCompKpis(params) {
       }),
       pfKpiCard({
         tone: "success",
-        label: "Rubros cubiertos",
+        label: "Rubros",
         value: pfFmt(data.rubros_cubiertos),
         sub: "Cobertura del mix",
         icon: "bi-grid-1x2",
       }),
       pfKpiCard({
         tone: "success",
-        label: "Marcas utilizadas",
+        label: "Marcas",
         value: pfFmt(data.marcas_utilizadas),
-        sub: "En sus ofertas",
+        sub: "Con presencia en la muestra",
         icon: "bi-tags",
       }),
       pfKpiCard({
@@ -1811,22 +1830,17 @@ async function pfLoadCompEvolucion(params) {
     PF.charts.compEvolChart = new ApexCharts(
       document.getElementById("compEvolChart"),
       pfChartBase({
-        chart: { type: "area", height: 256 },
+        chart: { type: "line", height: 256 },
         series: [{ name: "Monto adjudicado", data: data.map((d) => d.monto_total) }],
         xaxis: { categories: data.map((d) => d.month_label), labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
-        fill: {
-          type: "gradient",
-          gradient: {
-            shadeIntensity: 1,
-            opacityFrom: 0.32,
-            opacityTo: 0.04,
-            stops: [0, 95, 100],
-          },
-        },
-        stroke: { width: 3, curve: "smooth" },
+        stroke: { width: 2, curve: "smooth" },
+        markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
+        legend: { show: false },
         colors: [COLORS.brand500],
         tooltip: {
+          shared: true,
+          intersect: false,
           y: { formatter: (value) => pfPeso(value) },
         },
       })
@@ -2136,7 +2150,7 @@ async function pfLoadCliKpis(params) {
       }),
       pfKpiCard({
         tone: "success",
-        label: "Articulos distintos",
+        label: "Articulos",
         value: pfKpiNum(data.descripciones_unicas),
         rawValue: pfFmt(data.descripciones_unicas),
         sub: "Variedad de demanda",
@@ -2144,7 +2158,7 @@ async function pfLoadCliKpis(params) {
       }),
       pfKpiCard({
         tone: "success",
-        label: "Rubros distintos",
+        label: "Rubros",
         value: pfFmt(data.rubros_distintos),
         sub: "Mix de compra",
         icon: "bi-grid-1x2",
@@ -2171,22 +2185,17 @@ async function pfLoadCliEvolucion(params) {
     PF.charts.cliEvolChart = new ApexCharts(
       document.getElementById("cliEvolChart"),
       pfChartBase({
-        chart: { type: "area", height: 256 },
+        chart: { type: "line", height: 256 },
         series: [{ name: "Monto adjudicado", data: data.map((d) => d.monto_total) }],
         xaxis: { categories: data.map((d) => d.month_label), labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
-        fill: {
-          type: "gradient",
-          gradient: {
-            shadeIntensity: 1,
-            opacityFrom: 0.3,
-            opacityTo: 0.05,
-            stops: [0, 95, 100],
-          },
-        },
-        stroke: { width: 3, curve: "smooth" },
+        stroke: { width: 2, curve: "smooth" },
+        markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
+        legend: { show: false },
         colors: [COLORS.success],
         tooltip: {
+          shared: true,
+          intersect: false,
           y: { formatter: (value) => pfPeso(value) },
         },
       })
@@ -2251,7 +2260,7 @@ function pfRenderCliProvChart() {
   }
   const top = data.slice(0, 12);
   const seriesData = top.map((d) => d.monto_total);
-  const seriesName  = "Presupuesto adjudicado";
+  const seriesName  = "Monto adjudicado";
   const fmtAxis     = pfAxisFmtMoney;
   const fmtTooltip  = (v) => pfPeso(v);
 

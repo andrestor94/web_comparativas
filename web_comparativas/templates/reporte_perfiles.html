@@ -188,7 +188,7 @@
           <article class="pf-card pf-card--chart">
             <div class="pf-card__head">
               <span class="pf-card__eyebrow">Ranking adjudicado</span>
-              <h3 class="pf-card__title">Proveedor por Monto Adjudicado</h3>
+              <h3 class="pf-card__title">Proveedores por Monto Adjudicado</h3>
             </div>
             <div class="pf-chart-box" id="artProvChart"></div>
           </article>
@@ -289,7 +289,7 @@
         <article class="pf-card pf-card--chart">
           <div class="pf-card__head">
             <span class="pf-card__eyebrow">Mix</span>
-            <h3 class="pf-card__title">Participacion por Rubro</h3>
+            <h3 class="pf-card__title">Composicion por Rubro</h3>
           </div>
           <div class="pf-chart-box" id="compRubroChart"></div>
         </article>
@@ -298,8 +298,8 @@
       <div class="pf-grid-2">
         <article class="pf-card pf-card--chart">
           <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Top items</span>
-            <h3 class="pf-card__title">Articulos Cotizados</h3>
+            <span class="pf-card__eyebrow">Ranking adjudicado</span>
+            <h3 class="pf-card__title">Articulos por Monto Adjudicado</h3>
           </div>
           <div class="pf-chart-box" id="compArtChart"></div>
         </article>
@@ -430,7 +430,7 @@
               <h3 class="pf-card__title">Articulos Mas Demandados</h3>
             </div>
             <div class="pf-metric-toggle" id="cliArtToggle">
-              <button type="button" class="pf-toggle-btn active" data-metric="monto" onclick="pfToggleCliArtMetric('monto')">Presupuesto</button>
+              <button type="button" class="pf-toggle-btn active" data-metric="monto" onclick="pfToggleCliArtMetric('monto')">Monto</button>
               <button type="button" class="pf-toggle-btn" data-metric="cant" onclick="pfToggleCliArtMetric('cant')">Cantidad</button>
             </div>
           </div>
@@ -475,5 +475,5 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=8"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=9"></script>
 {% endblock %}
