@@ -118,10 +118,6 @@
 
     <!-- ── TAB: ARTICULOS ─────────────────────────────────────── -->
     <div id="tab-articulos" class="pf-tab-content active">
-      <div class="pf-section-head">
-        <h2 class="pf-section-title">Articulos</h2>
-        <span class="pf-section-pill">Descripcion · Marca · Proveedor</span>
-      </div>
 
       <section class="pf-filter-card">
         <div class="pf-filter-card__intro">
@@ -234,12 +230,14 @@
 
     <!-- ── TAB: COMPETIDOR ────────────────────────────────────── -->
     <div id="tab-competidor" class="pf-tab-content">
-      <div class="pf-section-head">
-        <h2 class="pf-section-title">Competidor</h2>
-        <span class="pf-section-pill">Proveedor · Rubro · Articulo</span>
-      </div>
 
       <section class="pf-filter-card">
+        <div class="pf-filter-card__intro">
+          <div>
+            <span class="pf-filter-card__eyebrow">Filtro principal</span>
+            <p class="pf-filter-card__hint">Selecciona un competidor para habilitar KPIs, graficos y detalle. Luego podras combinar rubro, articulo y fechas para profundizar el analisis.</p>
+          </div>
+        </div>
         <div class="pf-filter-grid">
           <div class="pf-sf-group pf-sf-group--wide" id="compProvMount"></div>
           <div class="pf-sf-group pf-sf-group--compact" id="compRubroMount"></div>
@@ -254,8 +252,23 @@
         </div>
       </section>
 
+      <section class="pf-card pf-required-state" id="compEmptySelection">
+        <div class="pf-required-state__icon">
+          <i class="bi bi-building"></i>
+        </div>
+        <div class="pf-required-state__body">
+          <span class="pf-required-state__eyebrow">Esperando contexto</span>
+          <h3>Selecciona un competidor para visualizar el reporte.</h3>
+          <p>Una vez definido el proveedor, vas a poder cruzarlo con rubros, articulos y fechas sin cargar datos engañosos al entrar.</p>
+          <div class="pf-required-state__tips">
+            <span><i class="bi bi-check2-circle"></i> Usa el filtro principal con seleccion unica</span>
+            <span><i class="bi bi-check2-circle"></i> Rubro y articulo quedan disponibles como filtros complementarios</span>
+          </div>
+        </div>
+      </section>
+
+      <div id="compDashboard" class="pf-dashboard-stack" hidden>
       <div class="pf-kpi-row" id="compKpiRow">
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
@@ -268,7 +281,7 @@
         <article class="pf-card pf-card--chart">
           <div class="pf-card__head">
             <span class="pf-card__eyebrow">Serie temporal</span>
-            <h3 class="pf-card__title">Evolucion del Monto Ofertado</h3>
+            <h3 class="pf-card__title">Evolucion del Monto Adjudicado</h3>
           </div>
           <div class="pf-chart-box" id="compEvolChart"></div>
         </article>
@@ -293,8 +306,8 @@
 
         <article class="pf-card pf-card--chart">
           <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Top marcas</span>
-            <h3 class="pf-card__title">Marcas Utilizadas</h3>
+            <span class="pf-card__eyebrow">Competitividad</span>
+            <h3 class="pf-card__title">Productos Competitivos</h3>
           </div>
           <div class="pf-chart-box" id="compMarcaChart"></div>
         </article>
@@ -312,13 +325,15 @@
                 <th>Descripcion</th>
                 <th class="num">Pos. prom.</th>
                 <th class="num">Mejor pos.</th>
-                <th class="num">Monto ofertado</th>
-                <th class="num">Apariciones</th>
+                <th class="num">Monto adjudicado</th>
+                <th class="num">Veces ganado</th>
+                <th class="num">Efectividad</th>
+                <th class="num">Participaciones</th>
               </tr>
             </thead>
             <tbody id="compPosTbody">
               <tr>
-                <td colspan="5">
+                <td colspan="7">
                   <div class="pf-empty-state">
                     <i class="bi bi-building"></i>
                     <p>Busca un proveedor para ver su posicionamiento por articulo.</p>
@@ -329,25 +344,22 @@
           </table>
         </div>
       </article>
+      </div>
     </div>
 
     <!-- ── TAB: CLIENTE ───────────────────────────────────────── -->
     <div id="tab-cliente" class="pf-tab-content">
-      <div class="pf-section-head">
-        <h2 class="pf-section-title">Cliente</h2>
-        <span class="pf-section-pill">Organismo · Provincia · Proceso</span>
-      </div>
 
       <section class="pf-filter-card">
+        <div class="pf-filter-card__intro">
+          <div>
+            <span class="pf-filter-card__eyebrow">Filtro principal</span>
+            <p class="pf-filter-card__hint">Selecciona un organismo para habilitar KPIs, graficos y detalle. Luego podras combinar provincia y fechas para profundizar la demanda.</p>
+          </div>
+        </div>
         <div class="pf-filter-grid">
           <div class="pf-sf-group pf-sf-group--wide" id="cliCompMount"></div>
-          <div class="pf-sf-group pf-sf-group--compact" id="cliPlatMount"></div>
           <div class="pf-sf-group pf-sf-group--compact" id="cliProvMount"></div>
-
-          <div class="pf-sf-group pf-sf-group--compact">
-            <label for="cliProcesoInput">Nro. Proceso</label>
-            <input type="text" class="pf-select" id="cliProcesoInput" placeholder="Ej: 2024/0001">
-          </div>
 
           <div class="pf-filter-actions">
             <button type="button" class="pf-btn-apply" onclick="pfLoadCliente()">
@@ -358,8 +370,23 @@
         </div>
       </section>
 
+      <section class="pf-card pf-required-state" id="cliEmptySelection">
+        <div class="pf-required-state__icon">
+          <i class="bi bi-hospital"></i>
+        </div>
+        <div class="pf-required-state__body">
+          <span class="pf-required-state__eyebrow">Esperando contexto</span>
+          <h3>Selecciona un organismo para visualizar el reporte.</h3>
+          <p>Una vez definido el comprador, vas a poder analizar rubros, proveedores y articulos sin que la vista arranque con datos preconsultados.</p>
+          <div class="pf-required-state__tips">
+            <span><i class="bi bi-check2-circle"></i> Usa el filtro principal con seleccion unica</span>
+            <span><i class="bi bi-check2-circle"></i> Provincia funciona como filtro complementario del perfil elegido</span>
+          </div>
+        </div>
+      </section>
+
+      <div id="cliDashboard" class="pf-dashboard-stack" hidden>
       <div class="pf-kpi-row" id="cliKpiRow">
-        <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
         <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
@@ -371,7 +398,7 @@
         <article class="pf-card pf-card--chart">
           <div class="pf-card__head">
             <span class="pf-card__eyebrow">Serie temporal</span>
-            <h3 class="pf-card__title">Evolucion del Monto Cotizado</h3>
+            <h3 class="pf-card__title">Evolucion del Monto Adjudicado</h3>
           </div>
           <div class="pf-chart-box" id="cliEvolChart"></div>
         </article>
@@ -387,9 +414,15 @@
 
       <div class="pf-grid-2">
         <article class="pf-card pf-card--chart">
-          <div class="pf-card__head">
-            <span class="pf-card__eyebrow">Top proveedores</span>
-            <h3 class="pf-card__title">Ranking de Participantes</h3>
+          <div class="pf-card__head pf-card__head--row">
+            <div>
+              <span class="pf-card__eyebrow">Top proveedores</span>
+              <h3 class="pf-card__title">Ranking de Participantes</h3>
+            </div>
+            <div class="pf-metric-toggle" id="cliProvToggle">
+              <button type="button" class="pf-toggle-btn active" data-metric="monto" onclick="pfToggleCliProv('monto')">Presupuesto</button>
+              <button type="button" class="pf-toggle-btn" data-metric="cant" onclick="pfToggleCliProv('cant')">Cantidad</button>
+            </div>
           </div>
           <div class="pf-chart-box" id="cliProvChart"></div>
         </article>
@@ -415,13 +448,14 @@
                 <th>Descripcion</th>
                 <th class="num">Cant. solicitada</th>
                 <th class="num">Frecuencia</th>
-                <th class="num">Monto total</th>
+                <th class="num">Monto adjudicado</th>
                 <th class="num">Precio prom.</th>
+                <th class="num">Detalle</th>
               </tr>
             </thead>
             <tbody id="cliArtTbody">
               <tr>
-                <td colspan="5">
+                <td colspan="6">
                   <div class="pf-empty-state">
                     <i class="bi bi-hospital"></i>
                     <p>Aplica filtros para ver los articulos del perfil de compra.</p>
@@ -432,11 +466,12 @@
           </table>
         </div>
       </article>
+      </div>
     </div>
 
   </div>
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=6"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=7"></script>
 {% endblock %}
