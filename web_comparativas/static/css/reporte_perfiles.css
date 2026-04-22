@@ -1606,6 +1606,94 @@
   background: rgba(219, 234, 254, 0.12);
 }
 
+/* ── CARD HEAD ROW (título + toggle en misma línea) ─────────── */
+
+.pf-card__head--row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ── METRIC TOGGLE (switch presupuesto/cantidad) ────────────── */
+
+.pf-metric-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 8px;
+  border: 1px solid var(--pf-border-strong);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.pf-toggle-btn {
+  padding: 0.26rem 0.72rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--pf-text-soft);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.pf-toggle-btn:hover {
+  background: rgba(30, 92, 138, 0.07);
+  color: var(--pf-brand-700);
+}
+
+.pf-toggle-btn.active {
+  background: var(--pf-brand-700);
+  color: #fff;
+}
+
+/* ── EFECTIVIDAD BADGE ──────────────────────────────────────── */
+
+.pf-efectividad {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pf-efectividad--high { color: #10b981; }
+.pf-efectividad--mid  { color: #f59e0b; }
+.pf-efectividad--low  { color: #94a3b8; }
+
+/* ── DETALLE EXPANDIBLE (Articulos Solicitados) ─────────────── */
+
+.pf-art-det-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--pf-border-strong);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--pf-brand-700);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease, color 0.15s ease;
+}
+
+.pf-art-det-btn:hover {
+  background: rgba(30, 92, 138, 0.09);
+  transform: translateY(-1px);
+}
+
+.pf-art-det-btn.open {
+  background: rgba(30, 92, 138, 0.13);
+  color: var(--pf-brand-900);
+  border-color: rgba(30, 92, 138, 0.35);
+}
+
 /* spin animation para el ícono de carga */
 @keyframes pf-spin {
   to { transform: rotate(360deg); }

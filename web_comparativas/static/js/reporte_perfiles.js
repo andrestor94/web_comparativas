@@ -8,8 +8,11 @@ const PF = {
   globalPlataforma: "SIPROSA",
   dateUserSet: false,
   charts: {},
+  requestGuards: {},
   filterOptions: {},
   multiFilters: {},
+  cliProvData: [],
+  cliProvMetric: "monto_total",
 };
 
 const BASE = "/api/mercado-publico/perfiles";
@@ -52,9 +55,11 @@ const FILTER_CONFIG = {
     param: "marca",
     source: "remote",
     field: "marca",
-    allLabel: "Todas las marcas",
+    allLabel: "Sin filtro de marca",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar marca",
+    emptyLabel: "Seleccionar marca",
+    emptyMeta: "Opcional",
   },
   artProv: {
     mountId: "artProvMount",
@@ -63,9 +68,11 @@ const FILTER_CONFIG = {
     param: "proveedor",
     source: "remote",
     field: "proveedor",
-    allLabel: "Todos los proveedores",
+    allLabel: "Sin filtro de proveedor",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar proveedor",
+    emptyLabel: "Seleccionar proveedor",
+    emptyMeta: "Opcional",
   },
   compProv: {
     mountId: "compProvMount",
@@ -74,9 +81,16 @@ const FILTER_CONFIG = {
     param: "proveedor",
     source: "remote",
     field: "proveedor",
-    allLabel: "Todos los proveedores",
+    allLabel: "Sin filtro de proveedor",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar proveedor",
+    required: true,
+    selectionMode: "single",
+    showSelectAll: false,
+    autoApply: true,
+    defaultAll: false,
+    emptyLabel: "Seleccione un competidor",
+    emptyMeta: "Filtro principal para habilitar el reporte",
   },
   compRubro: {
     mountId: "compRubroMount",
@@ -85,9 +99,11 @@ const FILTER_CONFIG = {
     param: "rubro",
     source: "static",
     optionsKey: "rubros",
-    allLabel: "Todos los rubros",
+    allLabel: "Sin filtro de rubro",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar rubro",
+    emptyLabel: "Seleccionar rubro",
+    emptyMeta: "Opcional",
   },
   compDesc: {
     mountId: "compDescMount",
@@ -96,9 +112,11 @@ const FILTER_CONFIG = {
     param: "descripcion",
     source: "remote",
     field: "descripcion",
-    allLabel: "Todos los articulos",
+    allLabel: "Sin filtro de articulo",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar articulo",
+    emptyLabel: "Seleccionar articulo",
+    emptyMeta: "Opcional",
   },
   cliComp: {
     mountId: "cliCompMount",
@@ -107,9 +125,16 @@ const FILTER_CONFIG = {
     param: "comprador",
     source: "remote",
     field: "comprador",
-    allLabel: "Todos los organismos",
+    allLabel: "Sin filtro de organismo",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar organismo",
+    required: true,
+    selectionMode: "single",
+    showSelectAll: false,
+    autoApply: true,
+    defaultAll: false,
+    emptyLabel: "Seleccione un organismo",
+    emptyMeta: "Filtro principal para habilitar el reporte",
   },
   cliPlat: {
     mountId: "cliPlatMount",
@@ -118,7 +143,7 @@ const FILTER_CONFIG = {
     param: "plataforma",
     source: "static",
     optionsKey: "plataformas",
-    allLabel: "Todas las plataformas",
+    allLabel: "Sin filtro de plataforma",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar plataforma",
     lockedByGlobal: true,
@@ -130,9 +155,11 @@ const FILTER_CONFIG = {
     param: "provincia",
     source: "static",
     optionsKey: "provincias",
-    allLabel: "Todas las provincias",
+    allLabel: "Sin filtro de provincia",
     allMeta: "Sin restriccion",
     searchPlaceholder: "Buscar provincia",
+    emptyLabel: "Seleccionar provincia",
+    emptyMeta: "Opcional",
   },
 };
 
@@ -140,7 +167,7 @@ const ARTICLE_FILTER_IDS = ["artDesc", "artMarca", "artProv"];
 const ARTICLE_DEPENDENT_FILTER_IDS = ["artMarca", "artProv"];
 
 function pfDefaultFilterAllState(config) {
-  return config.selectionMode === "single" ? false : config.defaultAll !== false;
+  return config.selectionMode === "single" ? false : config.defaultAll === true;
 }
 
 async function pfFetch(url) {
@@ -292,8 +319,8 @@ function pfIsSingleSelectFilter(filterId) {
   return PF.multiFilters[filterId]?.config.selectionMode === "single";
 }
 
-function pfShouldShowFilterAllOption(config) {
-  return config.showSelectAll !== false && config.selectionMode !== "single";
+function pfShouldShowFilterAllOption(_config) {
+  return false;
 }
 
 function pfRenderFilterControls() {
@@ -301,6 +328,9 @@ function pfRenderFilterControls() {
     pfCreateFilterState(filterId, config);
     const mount = document.getElementById(config.mountId);
     if (!mount) return;
+    const requiredBadgeHtml = config.required
+      ? '<span class="pf-multi__label-badge">Obligatorio</span>'
+      : "";
 
     const allOptionHtml = pfShouldShowFilterAllOption(config)
       ? `
@@ -312,7 +342,7 @@ function pfRenderFilterControls() {
 
     mount.innerHTML = `
       <div class="pf-multi" data-filter-id="${filterId}">
-        <label class="pf-multi__label" for="${filterId}Trigger">${pfEsc(config.label)}</label>
+        <label class="pf-multi__label" for="${filterId}Trigger">${pfEsc(config.label)}${requiredBadgeHtml}</label>
         <button type="button" class="pf-multi__trigger" id="${filterId}Trigger" onclick="pfToggleFilterPanel('${filterId}')">
           <span class="pf-multi__summary">
             <span class="pf-multi__value is-placeholder" id="${filterId}Value">${pfEsc(config.allLabel)}</span>
@@ -718,6 +748,11 @@ async function pfApplyFilterSelection(filterId) {
     const targets = filterId === "artDesc"
       ? ARTICLE_DEPENDENT_FILTER_IDS
       : ARTICLE_DEPENDENT_FILTER_IDS.filter((candidateId) => candidateId !== filterId);
+    // Limpiar cache de opciones de los filtros dependientes para forzar recarga con el nuevo contexto
+    targets.forEach((targetId) => {
+      const targetState = PF.multiFilters[targetId];
+      if (targetState) targetState.cache.clear();
+    });
     const changes = await Promise.all(targets.map(async (targetId) => {
       await pfEnsureFilterOptions(targetId, "", { contextMode, showLoading: false });
       return pfClampFilterSelectionToUniverse(targetId);
@@ -823,10 +858,14 @@ async function pfLoadDateRange(rangeParams) {
 
     // Solo auto-poblar si el usuario no fijó un rango personalizado
     if (!PF.dateUserSet) {
-      elFrom.value = fecha_min;
-      elTo.value   = fecha_max;
-      PF.globalFechaDesde = fecha_min;
-      PF.globalFechaHasta = fecha_max;
+      if (elFrom.value && (elFrom.value < fecha_min || elFrom.value > fecha_max)) {
+        elFrom.value = "";
+      }
+      if (elTo.value && (elTo.value < fecha_min || elTo.value > fecha_max)) {
+        elTo.value = "";
+      }
+      PF.globalFechaDesde = elFrom.value || "";
+      PF.globalFechaHasta = elTo.value || "";
       pfUpdateDateSummary();
     }
   } catch {
@@ -842,14 +881,28 @@ function pfSetMultiParam(params, filterId, paramName = FILTER_CONFIG[filterId]?.
   if (values.length) params.set(paramName, values.join(","));
 }
 
+function pfBeginRequestGuard(key, cleanup) {
+  const nextToken = (PF.requestGuards[key] || 0) + 1;
+  PF.requestGuards[key] = nextToken;
+  if (typeof cleanup === "function") cleanup();
+  return nextToken;
+}
+
+function pfIsRequestCurrent(key, token) {
+  return PF.requestGuards[key] === token;
+}
+
 function pfDestroyChart(id) {
-  if (!PF.charts[id]) return;
-  try {
-    PF.charts[id].destroy();
-  } catch (err) {
-    console.warn("[PF] No se pudo destruir el chart", id, err);
+  if (PF.charts[id]) {
+    try {
+      PF.charts[id].destroy();
+    } catch (err) {
+      console.warn("[PF] No se pudo destruir el chart", id, err);
+    }
+    delete PF.charts[id];
   }
-  delete PF.charts[id];
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = "";
 }
 
 function pfMergeAxis(base, override) {
@@ -879,7 +932,7 @@ function pfChartBase(overrides = {}) {
       background: "transparent",
       fontFamily: "Outfit, system-ui, sans-serif",
       toolbar: { show: false },
-      animations: { speed: 350 },
+      animations: { enabled: false },
       parentHeightOffset: 0,
     },
     colors: COLORS.palette,
@@ -943,6 +996,7 @@ function pfChartBase(overrides = {}) {
 }
 
 function pfRenderEmpty(elId, msg = "Sin datos", icon = "bi-bar-chart-fill") {
+  if (PF.charts[elId]) pfDestroyChart(elId);
   const el = document.getElementById(elId);
   if (!el) return;
   el.innerHTML = `<div class="pf-empty-state"><i class="bi ${icon}"></i><p>${msg}</p></div>`;
@@ -1022,12 +1076,6 @@ function pfKpiError(message) {
   });
 }
 
-function pfHasArticleSelection() {
-  const state = PF.multiFilters.artDesc;
-  if (!state) return false;
-  return state.applied.length > 0;
-}
-
 function pfResetArtOutputs() {
   ["artPrecioChart", "artCantidadChart", "artMarcaChart", "artProvChart"].forEach(pfDestroyChart);
   const row = document.getElementById("artKpiRow");
@@ -1038,20 +1086,90 @@ function pfResetArtOutputs() {
     tbody.innerHTML = pfTableEmpty(
       "bi-info-circle",
       "Selecciona primero un articulo para habilitar el detalle del reporte.",
-      8
+      7
     );
   }
   if (chip) { chip.hidden = true; chip.innerHTML = ""; }
 }
 
-function pfSetArtSelectionGate() {
-  const empty = document.getElementById("artEmptySelection");
-  const dashboard = document.getElementById("artDashboard");
-  const hasArticle = pfHasArticleSelection();
+function pfResetCompOutputs() {
+  ["compEvolChart", "compRubroChart", "compArtChart", "compMarcaChart"].forEach(pfDestroyChart);
+  const row = document.getElementById("compKpiRow");
+  const tbody = document.getElementById("compPosTbody");
+  if (row) row.innerHTML = "";
+  if (tbody) {
+    tbody.innerHTML = pfTableEmpty(
+      "bi-building",
+      "Selecciona primero un competidor para habilitar su posicionamiento por articulo.",
+      7
+    );
+  }
+}
 
-  if (empty) empty.hidden = hasArticle;
-  if (dashboard) dashboard.hidden = !hasArticle;
-  if (!hasArticle) pfResetArtOutputs();
+function pfResetCliOutputs() {
+  ["cliEvolChart", "cliRubroChart", "cliProvChart", "cliArtChart"].forEach(pfDestroyChart);
+  const row = document.getElementById("cliKpiRow");
+  const tbody = document.getElementById("cliArtTbody");
+  if (row) row.innerHTML = "";
+  if (tbody) {
+    tbody.innerHTML = pfTableEmpty(
+      "bi-hospital",
+      "Selecciona primero un organismo para habilitar el detalle del perfil de compra.",
+      6
+    );
+  }
+}
+
+const TAB_SELECTION_CONFIG = {
+  articulos: {
+    requiredFilters: ["artDesc"],
+    emptyId: "artEmptySelection",
+    dashboardId: "artDashboard",
+    resetOutputs: pfResetArtOutputs,
+  },
+  competidor: {
+    requiredFilters: ["compProv"],
+    emptyId: "compEmptySelection",
+    dashboardId: "compDashboard",
+    resetOutputs: pfResetCompOutputs,
+  },
+  cliente: {
+    requiredFilters: ["cliComp"],
+    emptyId: "cliEmptySelection",
+    dashboardId: "cliDashboard",
+    resetOutputs: pfResetCliOutputs,
+  },
+};
+
+function pfTabHasRequiredSelection(tab) {
+  const config = TAB_SELECTION_CONFIG[tab];
+  if (!config) return true;
+  return config.requiredFilters.every((filterId) => pfGetFilterAppliedValues(filterId).length > 0);
+}
+
+function pfSetTabSelectionGate(tab) {
+  const config = TAB_SELECTION_CONFIG[tab];
+  if (!config) return true;
+
+  const hasSelection = pfTabHasRequiredSelection(tab);
+  const empty = document.getElementById(config.emptyId);
+  const dashboard = document.getElementById(config.dashboardId);
+
+  if (empty) empty.hidden = hasSelection;
+  if (dashboard) dashboard.hidden = !hasSelection;
+  if (!hasSelection && typeof config.resetOutputs === "function") {
+    config.resetOutputs();
+  }
+
+  return hasSelection;
+}
+
+function pfSetAllSelectionGates() {
+  Object.keys(TAB_SELECTION_CONFIG).forEach((tab) => pfSetTabSelectionGate(tab));
+}
+
+function pfSetArtSelectionGate() {
+  return pfSetTabSelectionGate("articulos");
 }
 
 function pfSyncArticulosCopy() {
@@ -1134,13 +1252,10 @@ function pfClearAll() {
     pfUpdateFilterTrigger(filterId);
   });
 
-  const proceso = document.getElementById("cliProcesoInput");
-  if (proceso) proceso.value = "";
-
   pfSyncLockedPlatformUI();
   pfCloseAllFilterPanels();
   pfUpdateDateSummary();
-  pfSetArtSelectionGate();
+  pfSetAllSelectionGates();
   // Restaurar rango global real y luego recargar
   pfLoadDateRange(pfGetGlobalRangeParams()).then(() => pfLoadCurrentTab());
 }
@@ -1207,8 +1322,7 @@ function pfGetArtParams() {
 }
 
 async function pfLoadArticulos() {
-  pfSetArtSelectionGate();
-  if (!pfHasArticleSelection()) return;
+  if (!pfSetTabSelectionGate("articulos")) return;
 
   // Detectar rango real antes de renderizar (si el usuario no fijó fechas)
   if (!PF.dateUserSet) await pfLoadDateRange(pfGetArtRangeParams());
@@ -1241,9 +1355,11 @@ function pfUpdateArtRubroChip(rubroPrincipal, data) {
 async function pfLoadArtKpis(params) {
   const row = document.getElementById("artKpiRow");
   if (!row) return;
+  const requestToken = pfBeginRequestGuard("art:kpis");
 
   try {
     const data = await pfFetch(`${BASE}/articulos/kpis?${params}`);
+    if (!pfIsRequestCurrent("art:kpis", requestToken)) return;
     pfUpdateArtRubroChip(data.rubro_principal || "", data);
 
     row.innerHTML = [
@@ -1288,19 +1404,23 @@ async function pfLoadArtKpis(params) {
       }),
     ].join("");
   } catch (err) {
+    if (!pfIsRequestCurrent("art:kpis", requestToken)) return;
     row.innerHTML = pfKpiError(err.message);
   }
 }
 
 async function pfLoadArtEvolucion(params) {
-  pfDestroyChart("artPrecioChart");
-  pfDestroyChart("artCantidadChart");
+  const requestToken = pfBeginRequestGuard("art:evol", () => {
+    pfDestroyChart("artPrecioChart");
+    pfDestroyChart("artCantidadChart");
+  });
 
   try {
     const [data, dataMarca] = await Promise.all([
       pfFetch(`${BASE}/articulos/evolucion?${params}`),
       pfFetch(`${BASE}/articulos/evolucion-marca?${params}`),
     ]);
+    if (!pfIsRequestCurrent("art:evol", requestToken)) return;
 
     if (!data.length) {
       pfRenderEmpty("artPrecioChart", "Sin datos para el periodo seleccionado.", "bi-graph-up");
@@ -1308,9 +1428,9 @@ async function pfLoadArtEvolucion(params) {
       return;
     }
 
-    // artPrecioChart: una línea por marca
+    // artPrecioChart: una línea por marca consolidada (mediana de precio, sin duplicados por proveedor)
     if (dataMarca.length) {
-      // Construir labels ordenados cronológicamente usando metadatos year+month del backend
+      // Labels ordenados cronológicamente usando metadatos year+month del backend
       const labelMeta = new Map();
       dataMarca.forEach((d) => {
         if (!labelMeta.has(d.month_label)) {
@@ -1320,25 +1440,42 @@ async function pfLoadArtEvolucion(params) {
       const labelsOrdered = Array.from(labelMeta.keys())
         .sort((a, b) => labelMeta.get(a) - labelMeta.get(b));
 
-      const marcasUnicas = Array.from(new Set(dataMarca.map((d) => d.marca))).sort();
+      // Una serie por marca (ya consolidada en backend con mediana).
+      const marcasUnicas = [];
+      const seenMarcas = new Set();
+      dataMarca.forEach((d) => {
+        if (!seenMarcas.has(d.marca)) {
+          seenMarcas.add(d.marca);
+          marcasUnicas.push(d.marca);
+        }
+      });
+      marcasUnicas.sort((a, b) => a.localeCompare(b));
+
+      // Índice por (month_label, marca) para lookup O(1)
+      const idx = new Map();
+      dataMarca.forEach((d) => idx.set(`${d.month_label}|||${d.marca}`, d.mediana_precio));
+
       const seriesPrecio = marcasUnicas.map((marca) => ({
         name: pfTrunc(marca, 20),
-        data: labelsOrdered.map((label) => {
-          const match = dataMarca.find((d) => d.month_label === label && d.marca === marca);
-          return match ? match.avg_precio : null;
-        }),
+        data: labelsOrdered.map((label) => idx.get(`${label}|||${marca}`) ?? null),
       }));
 
+      // Solo incluir series que tengan al menos un punto válido (> 0 y no nulo)
+      const seriesFiltradas = seriesPrecio.filter((serie) =>
+        serie.data.some((v) => v !== null && v !== undefined && v > 0)
+      );
+
+      if (!pfIsRequestCurrent("art:evol", requestToken)) return;
       PF.charts.artPrecioChart = new ApexCharts(
         document.getElementById("artPrecioChart"),
         pfChartBase({
           chart: { type: "line", height: 256 },
-          series: seriesPrecio,
+          series: seriesFiltradas,
           xaxis: { categories: labelsOrdered, labels: { rotate: -28 } },
           yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
           stroke: { width: 2, curve: "smooth" },
           markers: { size: 3, strokeWidth: 0, hover: { sizeOffset: 2 } },
-          legend: { show: marcasUnicas.length > 1 },
+          legend: { show: seriesFiltradas.length > 1 },
           tooltip: {
             shared: true,
             intersect: false,
@@ -1353,6 +1490,7 @@ async function pfLoadArtEvolucion(params) {
 
     // artCantidadChart: sin cambios
     const labels = data.map((d) => d.month_label);
+    if (!pfIsRequestCurrent("art:evol", requestToken)) return;
     PF.charts.artCantidadChart = new ApexCharts(
       document.getElementById("artCantidadChart"),
       pfChartBase({
@@ -1373,16 +1511,18 @@ async function pfLoadArtEvolucion(params) {
     );
     PF.charts.artCantidadChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("art:evol", requestToken)) return;
     pfRenderEmpty("artPrecioChart", "Error al cargar la evolucion.", "bi-graph-up");
     pfRenderEmpty("artCantidadChart", "Error al cargar las cantidades.", "bi-bar-chart");
   }
 }
 
 async function pfLoadArtPorMarca(params) {
-  pfDestroyChart("artMarcaChart");
+  const requestToken = pfBeginRequestGuard("art:marca", () => pfDestroyChart("artMarcaChart"));
 
   try {
     const data = await pfFetch(`${BASE}/articulos/por-marca?${params}`);
+    if (!pfIsRequestCurrent("art:marca", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("artMarcaChart", "Sin datos de marca para el filtro actual.", "bi-tags");
       return;
@@ -1400,6 +1540,7 @@ async function pfLoadArtPorMarca(params) {
       })
     }));
 
+    if (!pfIsRequestCurrent("art:marca", requestToken)) return;
     PF.charts.artMarcaChart = new ApexCharts(
       document.getElementById("artMarcaChart"),
       pfChartBase({
@@ -1420,16 +1561,18 @@ async function pfLoadArtPorMarca(params) {
     );
     PF.charts.artMarcaChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("art:marca", requestToken)) return;
     pfRenderEmpty("artMarcaChart", "Error al cargar el benchmark por marca.", "bi-tags");
   }
 }
 
 async function pfLoadArtPorProveedor(params) {
-  pfDestroyChart("artProvChart");
+  const requestToken = pfBeginRequestGuard("art:proveedor", () => pfDestroyChart("artProvChart"));
   const tbody = document.getElementById("artProvTbody");
 
   try {
     const data = await pfFetch(`${BASE}/articulos/por-proveedor?${params}`);
+    if (!pfIsRequestCurrent("art:proveedor", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("artProvChart", "Sin proveedores para este articulo.", "bi-buildings");
       if (tbody) tbody.innerHTML = pfTableEmpty("bi-search", "Sin proveedores para este articulo.", 7);
@@ -1438,6 +1581,7 @@ async function pfLoadArtPorProveedor(params) {
 
     const top = data.slice(0, 15);
     const treemapData = top.map((d) => ({ x: pfTrunc(d.proveedor, 28), y: d.total_adjudicado }));
+    if (!pfIsRequestCurrent("art:proveedor", requestToken)) return;
     PF.charts.artProvChart = new ApexCharts(
       document.getElementById("artProvChart"),
       pfChartBase({
@@ -1477,7 +1621,10 @@ async function pfLoadArtPorProveedor(params) {
 
     if (tbody) {
       tbody.innerHTML = data.map((d) => {
-        const posClass = d.mejor_posicion === 1 ? "pos1" : d.mejor_posicion === 2 ? "pos2" : "posn";
+        // rank_tabla: ranking ordinal único calculado en backend (sin empates).
+        // posClass basado en rank_tabla para que solo el #1 real tenga badge dorado.
+        const rank = d.rank_tabla ?? d.mejor_posicion ?? null;
+        const posClass = rank === 1 ? "pos1" : rank === 2 ? "pos2" : "posn";
         const provId = encodeURIComponent(d.proveedor);
         const hasMediana = d.precio_mediana_12m > 0;
         return `
@@ -1485,9 +1632,9 @@ async function pfLoadArtPorProveedor(params) {
             <td>${pfCellText(d.proveedor, 48)}</td>
             <td class="num">${pfPeso(d.avg_precio)}</td>
             <td class="num">${pfFmt(d.veces_ganado)}</td>
-            <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
+            <td class="num"><span class="pf-badge ${posClass}">#${rank ?? "-"}</span></td>
             <td class="num">${pfPeso(d.total_adjudicado)}</td>
-            <td class="num">${pfFmt(d.procesos)}</td>
+            <td class="num">${pfFmt(d.count)}</td>
             <td class="num pf-hist-cell">
               ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana_12m)}</span><small>mediana 12m</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
               <button class="pf-hist-btn" title="Ver historial del período"
@@ -1499,6 +1646,7 @@ async function pfLoadArtPorProveedor(params) {
       }).join("");
     }
   } catch (err) {
+    if (!pfIsRequestCurrent("art:proveedor", requestToken)) return;
     pfRenderEmpty("artProvChart", "Error al cargar proveedores.", "bi-buildings");
     if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle de proveedores.", 7);
   }
@@ -1526,12 +1674,13 @@ async function pfToggleHistorico(btn, proveedor) {
 
     const bodyRows = data.length
       ? data.map((r) => {
-          const posC = r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
+          const posC = r.posicion == null ? "posn" : r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
+          const posLabel = r.posicion != null ? `#${r.posicion}` : "-";
           return `<tr>
             <td>${r.fecha ?? "-"}</td>
             <td class="num">${pfPeso(r.precio)}</td>
             <td>${r.marca}</td>
-            <td class="num"><span class="pf-badge ${posC}">#${r.posicion ?? "-"}</span></td>
+            <td class="num"><span class="pf-badge ${posC}">${posLabel}</span></td>
           </tr>`;
         }).join("")
       : `<tr><td colspan="4" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el último año para los filtros actuales</td></tr>`;
@@ -1572,6 +1721,7 @@ function pfGetCompParams() {
 }
 
 async function pfLoadCompetidor() {
+  if (!pfSetTabSelectionGate("competidor")) return;
   if (!PF.dateUserSet) await pfLoadDateRange(pfGetCompRangeParams());
 
   const params = pfGetCompParams();
@@ -1580,7 +1730,7 @@ async function pfLoadCompetidor() {
     pfLoadCompEvolucion(params),
     pfLoadCompRubros(params),
     pfLoadCompTopArt(params),
-    pfLoadCompTopMarcas(params),
+    pfLoadCompProductosCompetitivos(params),
     pfLoadCompPosiciones(params),
   ]);
 }
@@ -1588,16 +1738,18 @@ async function pfLoadCompetidor() {
 async function pfLoadCompKpis(params) {
   const row = document.getElementById("compKpiRow");
   if (!row) return;
+  const requestToken = pfBeginRequestGuard("comp:kpis");
 
   try {
     const data = await pfFetch(`${BASE}/competidor/kpis?${params}`);
+    if (!pfIsRequestCurrent("comp:kpis", requestToken)) return;
     row.innerHTML = [
       pfKpiCard({
         tone: "primary",
-        label: "Monto ofertado",
-        value: pfKpiPeso(data.total_ofertado),
-        rawValue: pfPeso(data.total_ofertado),
-        sub: "Peso economico del competidor",
+        label: "Monto adjudicado",
+        value: pfKpiPeso(data.total_adjudicado),
+        rawValue: pfPeso(data.total_adjudicado),
+        sub: "Adjudicado al competidor (pos. 1)",
         icon: "bi-cash-coin",
       }),
       pfKpiCard({
@@ -1631,13 +1783,6 @@ async function pfLoadCompKpis(params) {
         icon: "bi-tags",
       }),
       pfKpiCard({
-        tone: "warning",
-        label: "Posicion promedio",
-        value: data.posicion_promedio != null ? pfFmt(data.posicion_promedio, 1) : "-",
-        sub: "Lugar medio en competencia",
-        icon: "bi-speedometer2",
-      }),
-      pfKpiCard({
         tone: "neutral",
         label: "Mejor posicion",
         value: data.mejor_posicion != null ? String(data.mejor_posicion) : "-",
@@ -1646,25 +1791,28 @@ async function pfLoadCompKpis(params) {
       }),
     ].join("");
   } catch (err) {
+    if (!pfIsRequestCurrent("comp:kpis", requestToken)) return;
     row.innerHTML = pfKpiError(err.message);
   }
 }
 
 async function pfLoadCompEvolucion(params) {
-  pfDestroyChart("compEvolChart");
+  const requestToken = pfBeginRequestGuard("comp:evol", () => pfDestroyChart("compEvolChart"));
 
   try {
     const data = await pfFetch(`${BASE}/competidor/evolucion?${params}`);
+    if (!pfIsRequestCurrent("comp:evol", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("compEvolChart", "Sin datos para el competidor seleccionado.", "bi-graph-up-arrow");
       return;
     }
 
+    if (!pfIsRequestCurrent("comp:evol", requestToken)) return;
     PF.charts.compEvolChart = new ApexCharts(
       document.getElementById("compEvolChart"),
       pfChartBase({
         chart: { type: "area", height: 256 },
-        series: [{ name: "Monto ofertado", data: data.map((d) => d.monto_total) }],
+        series: [{ name: "Monto adjudicado", data: data.map((d) => d.monto_total) }],
         xaxis: { categories: data.map((d) => d.month_label), labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         fill: {
@@ -1685,20 +1833,23 @@ async function pfLoadCompEvolucion(params) {
     );
     PF.charts.compEvolChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("comp:evol", requestToken)) return;
     pfRenderEmpty("compEvolChart", "Error al cargar la evolucion del competidor.", "bi-graph-up-arrow");
   }
 }
 
 async function pfLoadCompRubros(params) {
-  pfDestroyChart("compRubroChart");
+  const requestToken = pfBeginRequestGuard("comp:rubros", () => pfDestroyChart("compRubroChart"));
 
   try {
     const data = await pfFetch(`${BASE}/competidor/rubros?${params}`);
+    if (!pfIsRequestCurrent("comp:rubros", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("compRubroChart", "Sin datos de rubros.", "bi-pie-chart");
       return;
     }
 
+    if (!pfIsRequestCurrent("comp:rubros", requestToken)) return;
     PF.charts.compRubroChart = new ApexCharts(
       document.getElementById("compRubroChart"),
       pfChartBase({
@@ -1726,26 +1877,29 @@ async function pfLoadCompRubros(params) {
     );
     PF.charts.compRubroChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("comp:rubros", requestToken)) return;
     pfRenderEmpty("compRubroChart", "Error al cargar los rubros.", "bi-pie-chart");
   }
 }
 
 async function pfLoadCompTopArt(params) {
-  pfDestroyChart("compArtChart");
+  const requestToken = pfBeginRequestGuard("comp:top-art", () => pfDestroyChart("compArtChart"));
 
   try {
     const data = await pfFetch(`${BASE}/competidor/top-articulos?${params}`);
+    if (!pfIsRequestCurrent("comp:top-art", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("compArtChart", "Sin articulos para este filtro.", "bi-bar-chart");
       return;
     }
 
     const top = data.slice(0, 10);
+    if (!pfIsRequestCurrent("comp:top-art", requestToken)) return;
     PF.charts.compArtChart = new ApexCharts(
       document.getElementById("compArtChart"),
       pfChartBase({
         chart: { type: "bar", height: 256 },
-        series: [{ name: "Monto ofertado", data: top.map((d) => d.monto_total) }],
+        series: [{ name: "Monto adjudicado", data: top.map((d) => d.monto_total) }],
         xaxis: {
           categories: top.map((d) => pfTrunc(d.descripcion, 24)),
           labels: { formatter: pfAxisFmtMoney },
@@ -1766,70 +1920,101 @@ async function pfLoadCompTopArt(params) {
     );
     PF.charts.compArtChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("comp:top-art", requestToken)) return;
     pfRenderEmpty("compArtChart", "Error al cargar articulos.", "bi-bar-chart");
   }
 }
 
-async function pfLoadCompTopMarcas(params) {
-  pfDestroyChart("compMarcaChart");
+async function pfLoadCompProductosCompetitivos(params) {
+  const requestToken = pfBeginRequestGuard("comp:productos", () => pfDestroyChart("compMarcaChart"));
 
   try {
-    const data = await pfFetch(`${BASE}/competidor/top-marcas?${params}`);
+    const data = await pfFetch(`${BASE}/competidor/productos-competitivos?${params}`);
+    if (!pfIsRequestCurrent("comp:productos", requestToken)) return;
     if (!data.length) {
-      pfRenderEmpty("compMarcaChart", "Sin marcas para este filtro.", "bi-tags");
+      pfRenderEmpty("compMarcaChart", "Sin adjudicaciones para este filtro.", "bi-trophy");
       return;
     }
 
-    const top = data.slice(0, 10);
+    const top = data.slice(0, 12);
+    if (!pfIsRequestCurrent("comp:productos", requestToken)) return;
     PF.charts.compMarcaChart = new ApexCharts(
       document.getElementById("compMarcaChart"),
       pfChartBase({
         chart: { type: "bar", height: 256 },
-        series: [{ name: "Monto ofertado", data: top.map((d) => d.monto_total) }],
-        xaxis: { categories: top.map((d) => pfTrunc(d.marca, 22)) },
-        yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
+        series: [{ name: "Veces adjudicado", data: top.map((d) => d.veces_adjudicado) }],
+        xaxis: {
+          categories: top.map((d) => pfTrunc(d.descripcion, 26)),
+          labels: { formatter: pfAxisFmtNum },
+        },
+        yaxis: { labels: { formatter: pfAxisFmtNum } },
         plotOptions: {
           bar: {
+            horizontal: true,
             borderRadius: 6,
-            columnWidth: "48%",
+            barHeight: "68%",
           },
         },
         colors: [COLORS.warning],
+        dataLabels: {
+          enabled: true,
+          formatter: (val) => val > 0 ? pfFmt(val) : "",
+          style: { fontSize: "11px" },
+        },
         tooltip: {
-          y: { formatter: (value) => pfPeso(value) },
+          custom({ dataPointIndex }) {
+            const d = top[dataPointIndex];
+            if (!d) return "";
+            return (
+              `<div class="apexcharts-tooltip-box" style="padding:10px 14px;line-height:1.6">` +
+              `<strong>${pfEsc(pfTrunc(d.descripcion, 48))}</strong><br>` +
+              `Adjudicaciones: <strong>${pfFmt(d.veces_adjudicado)}</strong><br>` +
+              `Monto adjudicado: <strong>${pfPeso(d.monto_adjudicado)}</strong><br>` +
+              `<span style="font-size:11px;opacity:.75">Sobre ${pfFmt(d.participaciones)} participaciones</span>` +
+              `</div>`
+            );
+          },
         },
       })
     );
     PF.charts.compMarcaChart.render();
   } catch (err) {
-    pfRenderEmpty("compMarcaChart", "Error al cargar marcas.", "bi-tags");
+    if (!pfIsRequestCurrent("comp:productos", requestToken)) return;
+    pfRenderEmpty("compMarcaChart", "Error al cargar productos competitivos.", "bi-trophy");
   }
 }
 
 async function pfLoadCompPosiciones(params) {
   const tbody = document.getElementById("compPosTbody");
   if (!tbody) return;
+  const requestToken = pfBeginRequestGuard("comp:posiciones");
 
   try {
     const data = await pfFetch(`${BASE}/competidor/posiciones?${params}`);
+    if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
     if (!data.length) {
-      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 5);
+      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 7);
       return;
     }
 
     tbody.innerHTML = data.map((d) => {
       const posClass = d.mejor_posicion === 1 ? "pos1" : d.mejor_posicion === 2 ? "pos2" : "posn";
+      const ef = d.efectividad ?? 0;
+      const efClass = ef >= 50 ? "pf-efectividad--high" : ef >= 20 ? "pf-efectividad--mid" : "pf-efectividad--low";
       return `
         <tr>
           <td>${pfCellText(d.descripcion, 56)}</td>
           <td class="num">${pfFmt(d.posicion_promedio, 1)}</td>
           <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
           <td class="num">${pfPeso(d.monto_total)}</td>
+          <td class="num">${pfFmt(d.veces_ganado ?? 0)}</td>
+          <td class="num"><span class="pf-efectividad ${efClass}">${ef}%</span></td>
           <td class="num">${pfFmt(d.count)}</td>
         </tr>`;
     }).join("");
   } catch (err) {
-    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 5);
+    if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
+    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 7);
   }
 }
 
@@ -1838,13 +2023,11 @@ function pfGetCliParams() {
   pfSetMultiParam(params, "cliComp");
   if (!PF.globalPlataforma) pfSetMultiParam(params, "cliPlat");
   pfSetMultiParam(params, "cliProv");
-
-  const proceso = document.getElementById("cliProcesoInput")?.value.trim() || "";
-  if (proceso) params.set("nro_proceso", proceso);
   return params;
 }
 
 async function pfLoadCliente() {
+  if (!pfSetTabSelectionGate("cliente")) return;
   if (!PF.dateUserSet) await pfLoadDateRange(pfGetCliRangeParams());
 
   const params = pfGetCliParams();
@@ -1860,16 +2043,18 @@ async function pfLoadCliente() {
 async function pfLoadCliKpis(params) {
   const row = document.getElementById("cliKpiRow");
   if (!row) return;
+  const requestToken = pfBeginRequestGuard("cli:kpis");
 
   try {
     const data = await pfFetch(`${BASE}/cliente/kpis?${params}`);
+    if (!pfIsRequestCurrent("cli:kpis", requestToken)) return;
     row.innerHTML = [
       pfKpiCard({
         tone: "primary",
-        label: "Monto cotizado",
+        label: "Monto adjudicado",
         value: pfKpiPeso(data.monto_total_cotizado),
         rawValue: pfPeso(data.monto_total_cotizado),
-        sub: "Total ofertado al organismo",
+        sub: "Total adjudicado al organismo (pos. 1)",
         icon: "bi-cash-stack",
       }),
       pfKpiCard({
@@ -1902,35 +2087,30 @@ async function pfLoadCliKpis(params) {
         sub: "Mix de compra",
         icon: "bi-grid-1x2",
       }),
-      pfKpiCard({
-        tone: "warning",
-        label: "Ticket promedio",
-        value: pfKpiPeso(data.ticket_promedio),
-        rawValue: pfPeso(data.ticket_promedio),
-        sub: "Por proceso",
-        icon: "bi-graph-up-arrow",
-      }),
     ].join("");
   } catch (err) {
+    if (!pfIsRequestCurrent("cli:kpis", requestToken)) return;
     row.innerHTML = pfKpiError(err.message);
   }
 }
 
 async function pfLoadCliEvolucion(params) {
-  pfDestroyChart("cliEvolChart");
+  const requestToken = pfBeginRequestGuard("cli:evol", () => pfDestroyChart("cliEvolChart"));
 
   try {
     const data = await pfFetch(`${BASE}/cliente/evolucion?${params}`);
+    if (!pfIsRequestCurrent("cli:evol", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("cliEvolChart", "Sin datos para este perfil de cliente.", "bi-graph-up-arrow");
       return;
     }
 
+    if (!pfIsRequestCurrent("cli:evol", requestToken)) return;
     PF.charts.cliEvolChart = new ApexCharts(
       document.getElementById("cliEvolChart"),
       pfChartBase({
         chart: { type: "area", height: 256 },
-        series: [{ name: "Monto cotizado", data: data.map((d) => d.monto_total) }],
+        series: [{ name: "Monto adjudicado", data: data.map((d) => d.monto_total) }],
         xaxis: { categories: data.map((d) => d.month_label), labels: { rotate: -28 } },
         yaxis: { labels: { formatter: (value) => pfFmtShort(value) } },
         fill: {
@@ -1951,20 +2131,23 @@ async function pfLoadCliEvolucion(params) {
     );
     PF.charts.cliEvolChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("cli:evol", requestToken)) return;
     pfRenderEmpty("cliEvolChart", "Error al cargar la evolucion del cliente.", "bi-graph-up-arrow");
   }
 }
 
 async function pfLoadCliRubros(params) {
-  pfDestroyChart("cliRubroChart");
+  const requestToken = pfBeginRequestGuard("cli:rubros", () => pfDestroyChart("cliRubroChart"));
 
   try {
     const data = await pfFetch(`${BASE}/cliente/rubros?${params}`);
+    if (!pfIsRequestCurrent("cli:rubros", requestToken)) return;
     if (!data.length) {
       pfRenderEmpty("cliRubroChart", "Sin datos de rubros.", "bi-pie-chart-fill");
       return;
     }
 
+    if (!pfIsRequestCurrent("cli:rubros", requestToken)) return;
     PF.charts.cliRubroChart = new ApexCharts(
       document.getElementById("cliRubroChart"),
       pfChartBase({
@@ -1988,59 +2171,96 @@ async function pfLoadCliRubros(params) {
     );
     PF.charts.cliRubroChart.render();
   } catch (err) {
+    if (!pfIsRequestCurrent("cli:rubros", requestToken)) return;
     pfRenderEmpty("cliRubroChart", "Error al cargar los rubros.", "bi-pie-chart-fill");
   }
 }
 
+// Estado del toggle de proveedores (monto | cant)
+PF._cliProvMetric = "monto";
+PF._cliProvData   = [];
+
+function pfToggleCliProv(metric) {
+  PF._cliProvMetric = metric;
+  // Actualizar botones activos
+  document.querySelectorAll("#cliProvToggle .pf-toggle-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.metric === metric);
+  });
+  pfRenderCliProvChart();
+}
+
+function pfRenderCliProvChart() {
+  const renderToken = pfBeginRequestGuard("cli:prov-chart", () => pfDestroyChart("cliProvChart"));
+  const data = PF._cliProvData;
+  if (!data.length) {
+    pfRenderEmpty("cliProvChart", "Sin proveedores para el perfil filtrado.", "bi-buildings");
+    return;
+  }
+  const useMonto = PF._cliProvMetric !== "cant";
+  const top = data.slice(0, 12);
+  const seriesData = top.map((d) => useMonto ? d.monto_total : d.cant_adjudicada);
+  const seriesName  = useMonto ? "Presupuesto adjudicado" : "Cantidad adjudicada";
+  const fmtAxis     = useMonto ? pfAxisFmtMoney : pfAxisFmtNum;
+  const fmtTooltip  = useMonto ? (v) => pfPeso(v) : (v) => pfFmt(v);
+
+  if (!pfIsRequestCurrent("cli:prov-chart", renderToken)) return;
+  PF.charts.cliProvChart = new ApexCharts(
+    document.getElementById("cliProvChart"),
+    pfChartBase({
+      chart: { type: "bar", height: 256 },
+      series: [{ name: seriesName, data: seriesData }],
+      xaxis: {
+        categories: top.map((d) => pfTrunc(d.proveedor, 24)),
+        labels: { formatter: fmtAxis },
+      },
+      yaxis: { labels: { formatter: fmtAxis } },
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 7,
+          barHeight: "68%",
+        },
+      },
+      colors: [useMonto ? COLORS.brand900 : COLORS.cyan],
+      tooltip: {
+        y: { formatter: fmtTooltip },
+      },
+    })
+  );
+  PF.charts.cliProvChart.render();
+}
+
 async function pfLoadCliProveedores(params) {
-  pfDestroyChart("cliProvChart");
+  const requestToken = pfBeginRequestGuard("cli:proveedores", () => pfDestroyChart("cliProvChart"));
 
   try {
     const data = await pfFetch(`${BASE}/cliente/proveedores?${params}`);
+    if (!pfIsRequestCurrent("cli:proveedores", requestToken)) return;
+    PF._cliProvData = data;
     if (!data.length) {
       pfRenderEmpty("cliProvChart", "Sin proveedores para el perfil filtrado.", "bi-buildings");
       return;
     }
-
-    const top = data.slice(0, 12);
-    PF.charts.cliProvChart = new ApexCharts(
-      document.getElementById("cliProvChart"),
-      pfChartBase({
-        chart: { type: "bar", height: 256 },
-        series: [{ name: "Monto ofertado", data: top.map((d) => d.monto_total) }],
-        xaxis: {
-          categories: top.map((d) => pfTrunc(d.proveedor, 24)),
-          labels: { formatter: pfAxisFmtMoney },
-        },
-        yaxis: { labels: { formatter: pfAxisFmtMoney } },
-        plotOptions: {
-          bar: {
-            horizontal: true,
-            borderRadius: 7,
-            barHeight: "68%",
-          },
-        },
-        colors: [COLORS.brand900],
-        tooltip: {
-          y: { formatter: (value) => pfPeso(value) },
-        },
-      })
-    );
-    PF.charts.cliProvChart.render();
+    pfRenderCliProvChart();
   } catch (err) {
+    if (!pfIsRequestCurrent("cli:proveedores", requestToken)) return;
     pfRenderEmpty("cliProvChart", "Error al cargar proveedores.", "bi-buildings");
   }
 }
 
 async function pfLoadCliArticulos(params) {
-  pfDestroyChart("cliArtChart");
+  const requestToken = pfBeginRequestGuard("cli:articulos", () => pfDestroyChart("cliArtChart"));
   const tbody = document.getElementById("cliArtTbody");
+  // Guardar params activos para el desplegable
+  PF._cliArtParams = params;
 
   try {
     const data = await pfFetch(`${BASE}/cliente/articulos?${params}`);
+    if (!pfIsRequestCurrent("cli:articulos", requestToken)) return;
 
     if (data.length) {
       const top = data.slice(0, 10);
+      if (!pfIsRequestCurrent("cli:articulos", requestToken)) return;
       PF.charts.cliArtChart = new ApexCharts(
         document.getElementById("cliArtChart"),
         pfChartBase({
@@ -2068,22 +2288,94 @@ async function pfLoadCliArticulos(params) {
 
     if (tbody) {
       if (!data.length) {
-        tbody.innerHTML = pfTableEmpty("bi-hospital", "Sin articulos para este perfil de cliente.", 5);
+        tbody.innerHTML = pfTableEmpty("bi-hospital", "Sin articulos para este perfil de cliente.", 6);
         return;
       }
 
-      tbody.innerHTML = data.map((d) => `
-        <tr>
-          <td>${pfCellText(d.descripcion, 58)}</td>
+      tbody.innerHTML = data.map((d) => {
+        const descId = encodeURIComponent(d.descripcion);
+        return `
+        <tr class="pf-prov-row" data-desc="${descId}">
+          <td>${pfCellText(d.descripcion, 56)}</td>
           <td class="num">${pfFmt(d.cant_total, 1)}</td>
           <td class="num">${pfFmt(d.frecuencia)}</td>
           <td class="num">${pfPeso(d.monto_total)}</td>
           <td class="num">${pfPeso(d.avg_precio)}</td>
-        </tr>`).join("");
+          <td class="num pf-hist-cell">
+            <button class="pf-hist-btn" title="Ver detalle del articulo"
+              onclick="pfToggleArtDetalle(this, decodeURIComponent('${descId}'))">
+              <i class="bi bi-chevron-down"></i>
+            </button>
+          </td>
+        </tr>`;
+      }).join("");
     }
   } catch (err) {
+    if (!pfIsRequestCurrent("cli:articulos", requestToken)) return;
     pfRenderEmpty("cliArtChart", "Error al cargar articulos.", "bi-list-stars");
-    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle del cliente.", 5);
+    if (tbody) tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar el detalle del cliente.", 6);
+  }
+}
+
+async function pfToggleArtDetalle(btn, descripcion) {
+  const row = btn.closest("tr");
+  const detId = "pf-artdet-" + btoa(encodeURIComponent(descripcion)).replace(/[^a-zA-Z0-9]/g, "_");
+  const existing = document.getElementById(detId);
+
+  if (existing) {
+    existing.remove();
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
+    return;
+  }
+
+  btn.classList.add("open");
+  btn.innerHTML = `<i class="bi bi-arrow-clockwise pf-spin"></i>`;
+
+  try {
+    const params = PF._cliArtParams ? new URLSearchParams(PF._cliArtParams.toString()) : new URLSearchParams();
+    params.set("descripcion", descripcion);
+    const data = await pfFetch(`${BASE}/cliente/articulo-detalle?${params}`);
+
+    const bodyRows = data.length
+      ? data.map((r) => {
+          const posC = r.posicion == null ? "posn" : r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
+          const posLabel = r.posicion != null ? `#${r.posicion}` : "-";
+          return `<tr>
+            <td>${r.fecha ?? "-"}</td>
+            <td>${pfEsc(r.marca)}</td>
+            <td class="num">${pfPeso(r.precio)}</td>
+            <td>${pfEsc(pfTrunc(r.proveedor, 42))}</td>
+            <td class="num"><span class="pf-badge ${posC}">${posLabel}</span></td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="5" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros para los filtros actuales</td></tr>`;
+
+    const detailRow = document.createElement("tr");
+    detailRow.id = detId;
+    detailRow.className = "pf-hist-row";
+    detailRow.innerHTML = `
+      <td colspan="6">
+        <div class="pf-hist-detail">
+          <div class="pf-hist-header"><i class="bi bi-list-ul"></i> Detalle — ${pfTrunc(descripcion, 60)}</div>
+          <table class="pf-hist-table">
+            <thead><tr>
+              <th>Fecha</th>
+              <th>Marca</th>
+              <th class="num">Precio unit.</th>
+              <th>Proveedor</th>
+              <th class="num">Pos.</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </td>`;
+
+    row.insertAdjacentElement("afterend", detailRow);
+    btn.innerHTML = `<i class="bi bi-chevron-up"></i>`;
+  } catch {
+    btn.classList.remove("open");
+    btn.innerHTML = `<i class="bi bi-chevron-down"></i>`;
   }
 }
 
@@ -2093,7 +2385,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   pfUpdateDateSummary();
   await pfLoadFilterOptions();
   pfSyncLockedPlatformUI();
-  pfSetArtSelectionGate();
+  pfSetAllSelectionGates();
   await pfCheckSync();
   // Poblar inputs con el rango real de la data disponible al iniciar
   await pfLoadDateRange(pfGetGlobalRangeParams());
