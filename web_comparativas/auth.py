@@ -57,11 +57,16 @@ def get_current_user(request: Request) -> Optional[User]:
 def require_roles(*roles: str):
     """
     Dependencia que exige uno de los roles indicados.
+    Usa request.state.user (ya resuelto por attach_user_to_state) para evitar
+    una segunda consulta a la DB por cada endpoint, lo que duplicaba el consumo
+    del pool de conexiones.
     """
     roles_norm = {r.lower() for r in roles} if roles else set()
 
     def _dep(request: Request) -> User:
-        user = get_current_user(request)
+        # El middleware attach_user_to_state ya cargó el usuario; no abrir
+        # una sesión adicional repitiendo db_session.get(User, uid).
+        user = getattr(request.state, "user", None)
         if user is None:
             raise HTTPException(status_code=401, detail="Inicie sesión")
 

@@ -77,6 +77,7 @@ class DimensionamientoRecord(Base):
     unidad_negocio = Column(Text, nullable=True, index=True)
     subunidad_negocio = Column(Text, nullable=True, index=True)
     cantidad_demandada = Column(Float, nullable=False, default=0)
+    valorizacion_estimada = Column(Float, nullable=True, default=0)
     resultado_participacion = Column(String(120), nullable=True, index=True)
     producto_nombre_original = Column(Text, nullable=True)
     fecha_procesamiento = Column(DateTime, nullable=True, index=True)
@@ -132,6 +133,7 @@ class DimensionamientoFamilyMonthlySummary(Base):
     is_identified = Column(Boolean, nullable=False, default=False, index=True)
     is_client = Column(Boolean, nullable=False, default=False, index=True)
     total_cantidad = Column(Float, nullable=False, default=0)
+    total_valorizacion = Column(Float, nullable=False, default=0)
     total_registros = Column(Integer, nullable=False, default=0)
     clientes_unicos = Column(Integer, nullable=False, default=0)
     import_run_id = Column(

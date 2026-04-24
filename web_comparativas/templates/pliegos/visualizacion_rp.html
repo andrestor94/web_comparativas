@@ -325,6 +325,38 @@
           </div>
           {% endif %}
         </div>
+        
+        <!-- Control Carga -->
+        {% if control_carga %}
+        <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:.85rem;padding-top:.85rem;">
+          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;opacity:.74;font-weight:800;margin-bottom:.45rem;">Control de Integración</div>
+          <div style="display:grid;gap:.4rem;">
+            {% if control_carga.get('listo_para_fusion') %}
+              <div style="font-size:.85rem; display:flex; gap:.5rem;">
+                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('listo_para_fusion')|lower in ['sí','si','true','yes','1'] %}#34d399{% else %}#fca5a5{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
+                <span>Listo para Fusion: <strong>{{ control_carga.get('listo_para_fusion') }}</strong></span>
+              </div>
+            {% endif %}
+            {% if control_carga.get('listo_para_visualizacion') %}
+              <div style="font-size:.85rem; display:flex; gap:.5rem;">
+                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('listo_para_visualizacion')|lower in ['sí','si','true','yes','1'] %}#34d399{% else %}#fca5a5{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
+                <span>Listo para SIEM: <strong>{{ control_carga.get('listo_para_visualizacion') }}</strong></span>
+              </div>
+            {% endif %}
+            {% if control_carga.get('requiere_revision_analista') %}
+              <div style="font-size:.85rem; display:flex; gap:.5rem;">
+                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('requiere_revision_analista')|lower in ['sí','si','true','yes','1'] %}#fbbf24{% else %}#34d399{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
+                <span>Revisión Analista: <strong>{{ control_carga.get('requiere_revision_analista') }}</strong></span>
+              </div>
+            {% endif %}
+            {% if control_carga.get('observaciones_integracion') and control_carga.get('observaciones_integracion')|string|lower not in ['-','--','n/a','na','none','no','sin observaciones',''] %}
+              <div style="font-size:.8rem; opacity:.9; background:rgba(0,0,0,.15); padding:.45rem .6rem; border-radius:.45rem; margin-top:.25rem;">
+                <i class="bi bi-info-circle me-1"></i> {{ control_carga.get('observaciones_integracion') }}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>

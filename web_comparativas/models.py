@@ -1431,6 +1431,14 @@ class PliegoSolicitud(Base):
                              cascade="all, delete-orphan")
     trazabilidad = relationship("PliegoTrazabilidad", back_populates="solicitud",
                                 cascade="all, delete-orphan")
+    fusion_cabecera = relationship("PliegoFusionCabecera", back_populates="solicitud",
+                                   uselist=False, cascade="all, delete-orphan")
+    fusion_renglones = relationship("PliegoFusionRenglon", back_populates="solicitud",
+                                    cascade="all, delete-orphan")
+    analitica = relationship("PliegoAnalitica", back_populates="solicitud",
+                             uselist=False, cascade="all, delete-orphan")
+    control_carga = relationship("PliegoControlCarga", back_populates="solicitud",
+                                 uselist=False, cascade="all, delete-orphan")
 
 
 class PliegoArchivo(Base):
@@ -1660,6 +1668,60 @@ class PliegoTrazabilidad(Base):
     observacion = Column(Text, nullable=True)
 
     solicitud = relationship("PliegoSolicitud", back_populates="trazabilidad")
+
+
+class PliegoFusionCabecera(Base):
+    """Datos de la hoja 'Fusion_Cabecera' del Excel."""
+    __tablename__ = "pliego_fusion_cabecera"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, unique=True, index=True)
+    datos = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="fusion_cabecera")
+
+
+class PliegoFusionRenglon(Base):
+    """Datos de la hoja 'Fusion_Renglones' del Excel."""
+    __tablename__ = "pliego_fusion_renglones"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+    numero_renglon = Column(String, nullable=True)
+    codigo_item = Column(String, nullable=True)
+    descripcion = Column(Text, nullable=True)
+    cantidad = Column(String, nullable=True)
+    unidad = Column(String, nullable=True)
+    precio_unitario_estimado = Column(String, nullable=True)
+    datos_extra = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="fusion_renglones")
+
+
+class PliegoAnalitica(Base):
+    """Datos de la hoja 'SIEM_Analitica' del Excel."""
+    __tablename__ = "pliego_analitica"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, unique=True, index=True)
+    datos = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="analitica")
+
+
+class PliegoControlCarga(Base):
+    """Datos de la hoja 'Control_Carga' del Excel."""
+    __tablename__ = "pliego_control_carga"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, unique=True, index=True)
+    datos = Column(JSON, nullable=True)
+
+    solicitud = relationship("PliegoSolicitud", back_populates="control_carga")
 
 
 class ComparativaRow(Base):

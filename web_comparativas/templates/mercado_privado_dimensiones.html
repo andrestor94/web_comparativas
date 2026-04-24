@@ -8,7 +8,16 @@
 {% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v19">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v23">
+<style>
+#dimensionamientoApp .dim-filter-vista-row{width:100%;display:flex;justify-content:flex-end;align-items:flex-start;padding-top:0.2rem;}
+#dimensionamientoApp .dim-filter-vista{width:fit-content;display:flex;flex-direction:column;align-items:flex-end;}
+#dimensionamientoApp .dim-filter-vista .dim-metric-switch{display:inline-flex;align-items:center;width:fit-content;max-width:100%;padding:3px;border:1px solid var(--tech-border,#d1d5db);border-radius:12px;overflow:hidden;height:auto;background:rgba(255,255,255,.92);box-shadow:0 1px 2px rgba(6,72,111,.04);}
+#dimensionamientoApp .dim-filter-vista .dim-metric-btn{min-height:28px;padding:0 13px;font-size:.76rem;font-weight:700;border:none;border-radius:9px;background:transparent;color:var(--tech-text-muted,#6b7280);cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s;}
+#dimensionamientoApp .dim-filter-vista .dim-metric-btn+.dim-metric-btn{margin-left:2px;}
+#dimensionamientoApp .dim-filter-vista .dim-metric-btn.active{background:var(--tech-blue-mid,#1e5c8a);color:#fff;box-shadow:0 4px 10px rgba(30,92,138,.18);}
+#dimensionamientoApp .dim-filter-vista .dim-metric-btn:hover:not(.active){background:rgba(30,92,138,.08);}
+</style>
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
     <!-- ── Header ── -->
@@ -235,7 +244,17 @@
                     </select>
                 </div>
 
+                <!-- MÉTRICA -->
             </div><!-- /dim-filter-grid -->
+            <div class="dim-filter-vista-row">
+                <div class="filter-group dim-filter-vista">
+                    <label>Vista</label>
+                    <div class="dim-metric-switch" id="swMetric">
+                        <button type="button" class="dim-metric-btn active" data-metric="renglones">Renglones</button>
+                        <button type="button" class="dim-metric-btn" data-metric="valorizacion">Valorización</button>
+                    </div>
+                </div>
+            </div>
         </div><!-- /tech-toolbar -->
 
         <!-- ── KPIs ── -->
@@ -272,6 +291,15 @@
                 <div class="kpi-content">
                     <div class="kpi-value" id="kpiProvinces">-</div>
                     <div class="kpi-label">Cantidad de provincias</div>
+                </div>
+            </div>
+            <div class="tech-card kpi-modern dim-kpi-card dim-kpi-valorizacion" style="display:none;">
+                <div class="kpi-icon dim-kpi-icon" style="color:#f59e0b;background:rgba(245,158,11,0.12);">
+                    <i class="bi bi-currency-dollar"></i>
+                </div>
+                <div class="kpi-content">
+                    <div class="kpi-value" id="kpiValorizacion">-</div>
+                    <div class="kpi-label">Valorización</div>
                 </div>
             </div>
         </div>
@@ -350,5 +378,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v19"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v22"></script>
 {% endblock %}

@@ -36,13 +36,17 @@ from web_comparativas.models import (
     PliegoHallazgo,
     PliegoFaltante,
     PliegoTrazabilidad,
+    PliegoFusionCabecera,
+    PliegoFusionRenglon,
+    PliegoAnalitica,
+    PliegoControlCarga,
     PLIEGO_ESTADOS,
     PLIEGO_ESTADO_LABELS,
 )
 from web_comparativas.pliegos_rp import (
     build_rp_output,
     build_canonical_output,
-    export_canonical_excel_bytes,
+    export_dual_excel_bytes,
 )
 from web_comparativas.pliegos_summary import build_debug_matrix, build_resumen_licitacion
 
@@ -69,6 +73,14 @@ REQUIRED_SHEETS = [
     "Hallazgos_Extra",
     "Faltantes_y_Dudas",
     "Trazabilidad",
+]
+
+# Hojas opcionales en el Excel del GPT (soporte dual v2)
+OPTIONAL_SHEETS = [
+    "Fusion_Cabecera",
+    "Fusion_Renglones",
+    "SIEM_Analitica",
+    "Control_Carga",
 ]
 
 # Estados que habilitan la carga de Excel
@@ -1006,6 +1018,7 @@ def lectura_pliegos_validacion(
         "advertencias": adv_list,
         "pendiente": pendiente == "1",
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
+        "control_carga": caso.control_carga.datos if caso.control_carga else {},
     })
 
 
@@ -1107,6 +1120,7 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
         "proceso_extras": proceso_extras,
         "es_admin": es_admin,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
+        "control_carga": caso.control_carga.datos if caso.control_carga else {},
     })
 
 
@@ -1150,6 +1164,8 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
         "completitud_tecnica": completitud_tecnica,
         "es_admin": es_admin,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
+        "control_carga": caso.control_carga.datos if caso.control_carga else {},
+        "analitica": caso.analitica.datos if caso.analitica else {},
         **contexto_ampliado,
     })
 
@@ -1174,8 +1190,7 @@ def lectura_pliegos_exportar_rp(request: Request, caso_id: int):
     if caso.estado != "listo" and not es_admin:
         return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}", 302)
 
-    canonical_output = build_canonical_output(caso)
-    payload = export_canonical_excel_bytes(canonical_output)
+    payload = export_dual_excel_bytes(caso)
     safe_name = _slugify(caso.titulo or caso.nombre_licitacion or f"caso_{caso.id}")
     filename = f"pliego_{safe_name or caso.id}.xlsx"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -1198,7 +1213,9 @@ def _build_sheet_map(xl) -> dict:
     """
     actual_names = xl.sheet_names
     result = {}
-    for canonical in REQUIRED_SHEETS:
+    
+    all_sheets = REQUIRED_SHEETS + OPTIONAL_SHEETS
+    for canonical in all_sheets:
         c_low = canonical.lower()
         # 1. Coincidencia exacta
         if canonical in actual_names:
@@ -1331,9 +1348,14 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     # Limpiar datos anteriores
     for Model in [PliegoCronograma, PliegoRequisito, PliegoGarantia, PliegoRenglon,
                   PliegoDocumento, PliegoActoAdmin, PliegoHallazgo, PliegoFaltante,
-                  PliegoTrazabilidad]:
+                  PliegoTrazabilidad, PliegoFusionRenglon]:
         db.query(Model).filter(
             getattr(Model, "solicitud_id") == solicitud_id
+        ).delete()
+    
+    for ModelSingle in [PliegoFusionCabecera, PliegoAnalitica, PliegoControlCarga]:
+        db.query(ModelSingle).filter(
+            getattr(ModelSingle, "solicitud_id") == solicitud_id
         ).delete()
 
     proc_existente = db.query(PliegoProceso).filter(
@@ -1624,6 +1646,59 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
                 tipo_evidencia=_safe_str(row.get(col_map.get("tipo_evidencia", ""), "")),
                 observacion="\n".join(part for part in observaciones if part),
             ))
+
+    # ── Fusion_Cabecera ───────────────────────────────────────────────────────
+    if "Fusion_Cabecera" in sheet_map:
+        df = xl.parse(sheet_map["Fusion_Cabecera"], dtype=str).fillna("")
+        datos = _extract_proceso_data(df)
+        db.add(PliegoFusionCabecera(solicitud_id=solicitud_id, datos=datos))
+
+    # ── Fusion_Renglones ──────────────────────────────────────────────────────
+    if "Fusion_Renglones" in sheet_map:
+        df = xl.parse(sheet_map["Fusion_Renglones"], dtype=str).fillna("")
+        col_map = _col_map(df.columns, {
+            "numero_renglon": ["renglón", "renglon", "nro_renglon", "numero_renglon", "n°"],
+            "codigo_item": ["codigo", "código", "item"],
+            "descripcion": ["descripcion", "descripción", "detalle"],
+            "cantidad": ["cantidad", "cant"],
+            "unidad": ["unidad_medida", "unidad", "ud"],
+            "precio_unitario_estimado": ["precio", "precio_unitario", "estimado", "monto"],
+        })
+        for row in _iter_data_rows(df):
+            desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
+            num_ren = _safe_str(row.get(col_map.get("numero_renglon", ""), ""))
+            if not desc and not num_ren:
+                continue
+            
+            extra_data = {}
+            for col in df.columns:
+                if col not in col_map.values():
+                    val = _safe_str(row.get(col, ""))
+                    if val:
+                        extra_data[str(col)] = val
+            
+            db.add(PliegoFusionRenglon(
+                solicitud_id=solicitud_id,
+                numero_renglon=num_ren,
+                codigo_item=_safe_str(row.get(col_map.get("codigo_item", ""), "")),
+                descripcion=desc,
+                cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
+                unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
+                precio_unitario_estimado=_safe_str(row.get(col_map.get("precio_unitario_estimado", ""), "")),
+                datos_extra=extra_data if extra_data else None,
+            ))
+
+    # ── SIEM_Analitica ────────────────────────────────────────────────────────
+    if "SIEM_Analitica" in sheet_map:
+        df = xl.parse(sheet_map["SIEM_Analitica"], dtype=str).fillna("")
+        datos = _extract_proceso_data(df)
+        db.add(PliegoAnalitica(solicitud_id=solicitud_id, datos=datos))
+
+    # ── Control_Carga ─────────────────────────────────────────────────────────
+    if "Control_Carga" in sheet_map:
+        df = xl.parse(sheet_map["Control_Carga"], dtype=str).fillna("")
+        datos = _extract_proceso_data(df)
+        db.add(PliegoControlCarga(solicitud_id=solicitud_id, datos=datos))
 
 
 def _col_map(columns, mapping: dict) -> dict:

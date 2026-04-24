@@ -814,12 +814,15 @@ def _sheet_rows(records: dict[str, list[dict[str, str]]], *sheet_names: str) -> 
 
 def _build_process_data(caso: PliegoSolicitud, records: dict[str, list[dict[str, str]]]) -> dict[str, str]:
     data = dict(caso.datos_proceso.datos) if (caso.datos_proceso and caso.datos_proceso.datos) else {}
-    process_rows = _sheet_rows(records, "01_Proceso", "Proceso")
-    if process_rows:
-        first = process_rows[0]
-        for key, value in first.items():
-            if key not in data or _is_missing_value(data.get(key)):
-                data[key] = value
+    
+    # Si el DB está vacío, intentar con el Excel
+    if not data or all(_is_missing_value(v) for v in data.values()):
+        process_rows = _sheet_rows(records, "01_Proceso", "Proceso")
+        if process_rows:
+            first = process_rows[0]
+            for key, value in first.items():
+                if key not in data or _is_missing_value(data.get(key)):
+                    data[key] = value
     return data
 
 
@@ -1353,9 +1356,68 @@ def _resolve_samples_yes_no(spec: dict[str, Any], records: dict[str, list[dict[s
 
 
 def _build_detail_rows(records: dict[str, list[dict[str, str]]], caso: PliegoSolicitud) -> list[dict[str, Any]]:
-    excel_rows = _sheet_rows(records, "05_Renglones", "Renglones")
     rows: list[dict[str, Any]] = []
     hallazgo_ampliacion = _resolve_detail_ampliacion(caso, records)
+    
+    # Prioridad 1: Base de Datos (si hay renglones registrados)
+    if caso.renglones:
+        for index, renglon in enumerate(caso.renglones, start=1):
+            rows.append(
+                {
+                    "Item": _finalize_field(
+                        "Item",
+                        {
+                            "value": _safe_str(renglon.numero_renglon) or str(renglon.orden or index),
+                            "mapping_status": "REGLA NUEVA" if not _safe_str(renglon.numero_renglon) else "RENOMBRAR",
+                            "source_current": "PliegoRenglon.numero_renglon | PliegoRenglon.orden",
+                            "transformation": "Usar número de renglón o posición persistida",
+                            "requires_manual": not bool(_safe_str(renglon.numero_renglon)),
+                        },
+                    ),
+                    "Obj. Gas.": _finalize_field("Obj. Gas.", {}),
+                    "Cod. Item": _finalize_field(
+                        "Cod. Item",
+                        {
+                            "value": renglon.codigo_item or "",
+                            "mapping_status": "RENOMBRAR",
+                            "source_current": "PliegoRenglon.codigo_item",
+                            "transformation": "Renombrar código de ítem al nombre RP",
+                        },
+                    ),
+                    "Descripción": _finalize_field(
+                        "Descripción",
+                        {
+                            "value": renglon.descripcion or "",
+                            "mapping_status": "OK",
+                            "source_current": "PliegoRenglon.descripcion",
+                            "transformation": "Sin transformación semántica",
+                        },
+                    ),
+                    "Cant": _finalize_field(
+                        "Cant",
+                        {
+                            "value": renglon.cantidad or "",
+                            "mapping_status": "RENOMBRAR",
+                            "source_current": "PliegoRenglon.cantidad",
+                            "transformation": "Renombrar cantidad a Cant",
+                        },
+                    ),
+                    "Ampliación": _finalize_field(
+                        "Ampliación",
+                        {
+                            "value": hallazgo_ampliacion.get("value", ""),
+                            "mapping_status": "REGLA NUEVA",
+                            "source_current": "08_Hallazgos_extra modificación de cantidades",
+                            "transformation": "Propagar regla general de ampliación/reducción al detalle RP",
+                            "requires_manual": hallazgo_ampliacion.get("requires_manual", False),
+                        },
+                    ),
+                }
+            )
+        return rows
+
+    # Prioridad 2: Excel en disco (legacy fallback)
+    excel_rows = _sheet_rows(records, "05_Renglones", "Renglones")
     if excel_rows:
         for index, row in enumerate(excel_rows, start=1):
             item_value = _record_value(row, "renglon_nro", "numero_renglon")
@@ -1603,7 +1665,206 @@ def build_rp_output(caso: PliegoSolicitud) -> dict[str, Any]:
         "matrix_export": {field["label"]: field["export_value"] for field in matrix_fields},
         "process_extra_fields": process_extra_fields,
         "active_excel_sheets": list(records.keys()),
+        "dual_data": _get_raw_dual_data(caso),
     }
+
+
+def _get_raw_dual_data(caso: PliegoSolicitud) -> dict[str, list[dict[str, Any]]]:
+    """Obtiene los datos crudos de las 14 hojas para el export dual."""
+    data = {}
+
+    # 1. Proceso
+    proceso_data = {}
+    if caso.datos_proceso and caso.datos_proceso.datos:
+        proceso_data = dict(caso.datos_proceso.datos)
+    data["Proceso"] = [proceso_data] if proceso_data else []
+
+    # 2. Cronograma
+    data["Cronograma"] = [
+        {
+            "hito": c.hito,
+            "fecha": c.fecha,
+            "hora": c.hora,
+            "lugar_medio": c.lugar_medio,
+            "estado_dato": c.estado_dato,
+            "fuente": c.fuente,
+        }
+        for c in (caso.cronograma or [])
+    ]
+
+    # 3. Requisitos
+    data["Requisitos"] = [
+        {
+            "categoria": r.categoria,
+            "descripcion": r.descripcion,
+            "obligatorio": r.obligatorio,
+            "momento_presentacion": r.momento_presentacion,
+            "medio_presentacion": r.medio_presentacion,
+            "vigencia": r.vigencia,
+            "estado_dato": r.estado_dato,
+            "fuente": r.fuente,
+        }
+        for r in (caso.requisitos or [])
+    ]
+
+    # 4. Garantias
+    data["Garantias"] = [
+        {
+            "tipo": g.tipo,
+            "requerida": g.requerida,
+            "porcentaje": g.porcentaje,
+            "base_calculo": g.base_calculo,
+            "plazo": g.plazo,
+            "formas_admitidas": g.formas_admitidas,
+            "estado_dato": g.estado_dato,
+            "fuente": g.fuente,
+        }
+        for g in (caso.garantias or [])
+    ]
+
+    # 5. Renglones
+    data["Renglones"] = [
+        {
+            "orden": r.orden,
+            "numero_renglon": r.numero_renglon,
+            "codigo_item": r.codigo_item,
+            "descripcion": r.descripcion,
+            "cantidad": r.cantidad,
+            "unidad": r.unidad,
+            "destino_efector": r.destino_efector,
+            "entrega_parcial": r.entrega_parcial,
+            "obs_tecnicas": r.obs_tecnicas,
+            "estado": r.estado,
+        }
+        for r in (caso.renglones or [])
+    ]
+
+    # 6. Documentos
+    data["Documentos"] = [
+        {
+            "nombre": d.nombre,
+            "tipo": d.tipo,
+            "rol": d.rol,
+            "obligatorio": d.obligatorio,
+            "estado_lectura": d.estado_lectura,
+            "fecha": d.fecha,
+        }
+        for d in (caso.documentos_pliego or [])
+    ]
+
+    # 7. Actos_Administrativos
+    data["Actos_Administrativos"] = [
+        {
+            "tipo_acto": a.tipo_acto,
+            "numero": a.numero,
+            "numero_especial": a.numero_especial,
+            "fecha": a.fecha,
+            "organismo_emisor": a.organismo_emisor,
+            "descripcion": a.descripcion,
+        }
+        for a in (caso.actos_admin or [])
+    ]
+
+    # 8. Hallazgos_Extra
+    data["Hallazgos_Extra"] = [
+        {
+            "categoria": h.categoria,
+            "hallazgo": h.hallazgo,
+            "impacto": h.impacto,
+            "accion_sugerida": h.accion_sugerida,
+            "fuente": h.fuente,
+        }
+        for h in (caso.hallazgos or [])
+    ]
+
+    # 9. Faltantes_y_Dudas
+    data["Faltantes_y_Dudas"] = [
+        {
+            "campo_objetivo": f.campo_objetivo,
+            "motivo": f.motivo,
+            "detalle": f.detalle,
+            "criticidad": f.criticidad,
+            "accion_recomendada": f.accion_recomendada,
+            "estado": f.estado,
+        }
+        for f in (caso.faltantes or [])
+    ]
+
+    # 10. Trazabilidad
+    data["Trazabilidad"] = [
+        {
+            "campo": t.campo,
+            "valor_extraido": t.valor_extraido,
+            "documento_fuente": t.documento_fuente,
+            "pagina_seccion": t.pagina_seccion,
+            "tipo_evidencia": t.tipo_evidencia,
+            "observacion": t.observacion,
+        }
+        for t in (caso.trazabilidad or [])
+    ]
+
+    # 11. Fusion_Cabecera
+    # Si hay registro propio, usarlo. Si no, usar datos_proceso como fallback
+    # (datos_proceso contiene toda la metadata del proceso y es la fuente
+    #  natural de cabecera para la fusión con SIEM).
+    if caso.fusion_cabecera and caso.fusion_cabecera.datos:
+        data["Fusion_Cabecera"] = [dict(caso.fusion_cabecera.datos)]
+    elif caso.datos_proceso and caso.datos_proceso.datos:
+        data["Fusion_Cabecera"] = [dict(caso.datos_proceso.datos)]
+    else:
+        data["Fusion_Cabecera"] = []
+
+    # 12. Fusion_Renglones
+    data["Fusion_Renglones"] = [
+        {
+            "numero_renglon": r.numero_renglon,
+            "codigo_item": r.codigo_item,
+            "descripcion": r.descripcion,
+            "cantidad": r.cantidad,
+            "unidad": r.unidad,
+            "precio_unitario_estimado": r.precio_unitario_estimado,
+            **(dict(r.datos_extra) if r.datos_extra else {}),
+        }
+        for r in (caso.fusion_renglones or [])
+    ]
+
+    # 13. SIEM_Analitica
+    # Solo se puebla si existe un registro pliego_analitica generado externamente.
+    # Si está vacía, indica que la analítica SIEM no fue generada aún para este caso.
+    data["SIEM_Analitica"] = [dict(caso.analitica.datos)] if (caso.analitica and caso.analitica.datos) else []
+
+    # 14. Control_Carga
+    # Si hay registro propio, usarlo. Si no, generar fila de control desde el
+    # estado actual del caso para que la hoja nunca quede completamente vacía.
+    if caso.control_carga and caso.control_carga.datos:
+        data["Control_Carga"] = [dict(caso.control_carga.datos)]
+    else:
+        n_renglones = len(data["Renglones"])
+        n_fusion_ren = len(data["Fusion_Renglones"])
+        tiene_cabecera = bool(data["Fusion_Cabecera"])
+        tiene_analitica = bool(data["SIEM_Analitica"])
+        if n_renglones == 0:
+            listo = "NO"
+            motivo = "Sin renglones registrados"
+        elif not tiene_analitica:
+            listo = "PARCIAL"
+            motivo = "Sin analitica SIEM generada"
+        else:
+            listo = "SI"
+            motivo = ""
+        data["Control_Carga"] = [{
+            "caso_id": caso.id,
+            "titulo": caso.titulo or caso.nombre_licitacion or "",
+            "estado_caso": caso.estado or "",
+            "renglones_registrados": n_renglones,
+            "fusion_renglones_listos": n_fusion_ren,
+            "fusion_cabecera_lista": "SI" if tiene_cabecera else "NO",
+            "siem_analitica_lista": "SI" if tiene_analitica else "NO",
+            "listo_para_fusion": listo,
+            "motivo_bloqueo": motivo,
+        }]
+
+    return data
 
 
 def export_rp_excel_bytes(rp_output: dict[str, Any]) -> bytes:
@@ -2091,28 +2352,93 @@ def build_canonical_output(caso: PliegoSolicitud) -> dict[str, Any]:
     }
 
 
+_DUAL_SHEET_ORDER = [
+    "Proceso", "Cronograma", "Requisitos", "Garantias", "Renglones",
+    "Documentos", "Actos_Administrativos", "Hallazgos_Extra",
+    "Faltantes_y_Dudas", "Trazabilidad",
+    "Fusion_Cabecera", "Fusion_Renglones", "SIEM_Analitica", "Control_Carga",
+]
+
+
+def export_dual_excel_bytes(caso: "PliegoSolicitud") -> bytes:
+    """
+    Exporta el workbook dual completo con exactamente 14 hojas en orden fijo.
+    Itera sobre _DUAL_SHEET_ORDER — no sobre dual_data.keys() — para garantizar
+    que ninguna hoja se omita aunque _get_raw_dual_data no la incluya.
+    """
+    dual_data = _get_raw_dual_data(caso)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for sheet_name in _DUAL_SHEET_ORDER:
+            rows = dual_data.get(sheet_name, [])
+            if rows:
+                df = pd.DataFrame(rows)
+            else:
+                df = pd.DataFrame(columns=_get_default_columns_for_sheet(sheet_name))
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def export_canonical_excel_bytes(canonical_output: dict[str, Any]) -> bytes:
     """
-    Exporta a Excel solo los campos de la pantalla principal.
-    3 hojas: Datos del proceso | Detalle | Complementarios
+    Exporta a Excel. Si detecta datos duales, genera las 14 hojas.
+    Si no, genera las 3 hojas canónicas.
     """
-    gen_export = {f["label"]: f["export_value"] for f in canonical_output["general_fields"]}
-    detail_export = [
-        {lbl: row[lbl]["export_value"] for lbl in MAIN_DETAIL_FIELDS if lbl in row}
-        for row in canonical_output["detail_rows"]
-    ]
-    comp_export = {f["label"]: f["export_value"] for f in canonical_output["complementary_fields"]}
+    dual_data = canonical_output.get("_base", {}).get("dual_data")
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        pd.DataFrame([gen_export], columns=MAIN_GENERAL_FIELDS).to_excel(
-            writer, index=False, sheet_name="Datos del proceso"
-        )
-        pd.DataFrame(detail_export or [{}], columns=MAIN_DETAIL_FIELDS).to_excel(
-            writer, index=False, sheet_name="Detalle"
-        )
-        pd.DataFrame([comp_export], columns=MAIN_COMPLEMENTARY_FIELDS).to_excel(
-            writer, index=False, sheet_name="Complementarios"
-        )
+        if dual_data:
+            # Export Dual (14 sheets)
+            for sheet_name, rows in dual_data.items():
+                df = pd.DataFrame(rows)
+                # Si la hoja está vacía, al menos crearla con columnas si es posible
+                if df.empty:
+                    # Definir columnas mínimas por sheet si fuera necesario, 
+                    # por ahora permitimos vacías o con los campos definidos en _get_raw_dual_data
+                    df = pd.DataFrame(columns=_get_default_columns_for_sheet(sheet_name))
+                
+                df.to_excel(writer, index=False, sheet_name=sheet_name)
+        else:
+            # Export Canonical (3 sheets)
+            gen_export = {f["label"]: f["export_value"] for f in canonical_output["general_fields"]}
+            detail_export = [
+                {lbl: row[lbl]["export_value"] for lbl in MAIN_DETAIL_FIELDS if lbl in row}
+                for row in canonical_output["detail_rows"]
+            ]
+            comp_export = {f["label"]: f["export_value"] for f in canonical_output["complementary_fields"]}
+
+            pd.DataFrame([gen_export], columns=MAIN_GENERAL_FIELDS).to_excel(
+                writer, index=False, sheet_name="Datos del proceso"
+            )
+            pd.DataFrame(detail_export or [{}], columns=MAIN_DETAIL_FIELDS).to_excel(
+                writer, index=False, sheet_name="Detalle"
+            )
+            pd.DataFrame([comp_export], columns=MAIN_COMPLEMENTARY_FIELDS).to_excel(
+                writer, index=False, sheet_name="Complementarios"
+            )
+            
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _get_default_columns_for_sheet(sheet_name: str) -> list[str]:
+    """Retorna las columnas por defecto para una hoja si está vacía."""
+    cols = {
+        "Proceso": ["numero_proceso", "objeto", "organismo"],
+        "Cronograma": ["hito", "fecha", "hora", "lugar_medio", "estado_dato", "fuente"],
+        "Requisitos": ["categoria", "descripcion", "obligatorio", "momento_presentacion", "medio_presentacion", "vigencia", "estado_dato", "fuente"],
+        "Garantias": ["tipo", "requerida", "porcentaje", "base_calculo", "plazo", "formas_admitidas", "estado_dato", "fuente"],
+        "Renglones": ["orden", "numero_renglon", "codigo_item", "descripcion", "cantidad", "unidad", "destino_efector", "entrega_parcial", "obs_tecnicas", "estado"],
+        "Documentos": ["nombre", "tipo", "rol", "obligatorio", "estado_lectura", "fecha"],
+        "Actos_Administrativos": ["tipo_acto", "numero", "numero_especial", "fecha", "organismo_emisor", "descripcion"],
+        "Hallazgos_Extra": ["categoria", "hallazgo", "impacto", "accion_sugerida", "fuente"],
+        "Faltantes_y_Dudas": ["campo_objetivo", "motivo", "detalle", "criticidad", "accion_recomendada", "estado"],
+        "Trazabilidad": ["campo", "valor_extraido", "documento_fuente", "pagina_seccion", "tipo_evidencia", "observacion"],
+        "Fusion_Cabecera": ["tipo_proceso", "numero_proceso", "expediente", "nombre_proceso", "objeto_contratacion", "organismo_contratante"],
+        "Fusion_Renglones": ["numero_renglon", "codigo_item", "descripcion", "cantidad", "unidad", "precio_unitario_estimado"],
+        "SIEM_Analitica": ["campo", "valor", "fuente", "observacion"],
+        "Control_Carga": ["caso_id", "titulo", "estado_caso", "renglones_registrados", "fusion_renglones_listos", "fusion_cabecera_lista", "siem_analitica_lista", "listo_para_fusion", "motivo_bloqueo"],
+    }
+    return cols.get(sheet_name, [])

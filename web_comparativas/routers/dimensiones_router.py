@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from web_comparativas.auth import require_roles
@@ -160,14 +161,20 @@ def _safe_dashboard_response(request: Request, endpoint_name: str, fn, fallback_
             error_code = "backend_error"
             log_msg = "[DIM][API] %s BACKEND_ERROR path=%s exc=%s"
         logger.exception(log_msg, endpoint_name, request.url.path, exc)
-        return {
+        status_code = 503 if error_code == "timeout" else 500
+        return JSONResponse(status_code=status_code, content={
             "ok": False,
             "has_data": False,
-            "data": fallback_data,
+            "data": fallback_data if error_code == "timeout" else None,
             "error": True,
             "error_code": error_code,
             "message": f"Widget '{endpoint_name}' no disponible temporalmente.",
-        }
+            "detail": (
+                f"Widget '{endpoint_name}' excedió el tiempo de respuesta."
+                if error_code == "timeout"
+                else f"Error interno en el backend de Dimensionamiento ({endpoint_name})."
+            ),
+        })
 
 
 def _filters_from_query(
@@ -253,6 +260,7 @@ def dimensionamiento_bootstrap(
                 "renglones": 0,
                 "familias": 0,
                 "provincias": 0,
+                "valorizacion": 0,
             },
             "series": {"months": [], "datasets": []},
             "results": [],
@@ -361,6 +369,7 @@ def dimensionamiento_kpis(
             "renglones": 0,
             "familias": 0,
             "provincias": 0,
+            "valorizacion": 0,
         },
     )
 

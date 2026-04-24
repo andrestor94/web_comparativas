@@ -412,6 +412,12 @@
       <span class="amp-nav-badge">{{ proceso|length }}</span>
     </button>
     {% endif %}
+    {% if analitica %}
+    <button class="amp-nav-btn" data-target="analitica">
+      <span><i class="bi bi-graph-up-arrow"></i> SIEM Analítica</span>
+      <span class="amp-nav-badge">{{ analitica|length }}</span>
+    </button>
+    {% endif %}
 
     <!-- CTA volver -->
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="nav-cta-resumida">
@@ -1040,6 +1046,28 @@
         </div><!-- /amp-card-body -->
       </div><!-- /amp-card -->
     </div><!-- /amp-panel-depuracion -->
+    {% endif %}
+
+    <!-- PANEL: SIEM ANALÍTICA -->
+    {% if analitica %}
+    <div class="amp-panel" id="amp-panel-analitica">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-graph-up-arrow"></i> SIEM Analítica</h2>
+          <span class="amp-badge">{{ analitica|length }} campos</span>
+        </div>
+        <div class="amp-card-body">
+          <div class="amp-grid">
+            {% for k, v in analitica.items() %}
+            <div class="amp-item">
+              <div class="amp-label">{{ k }}</div>
+              <div class="amp-value">{{ txt(v) }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
     {% endif %}
 
   </main>

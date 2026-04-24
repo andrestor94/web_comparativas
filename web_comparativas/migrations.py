@@ -303,12 +303,32 @@ def ensure_dimensionamiento_summary_populated():
                 "dimensionamiento_family_monthly_summary",
                 "cliente_visible",
             )
+            raw_has_valorizacion = _column_exists(
+                "dimensionamiento_records",
+                "valorizacion_estimada",
+            )
+            summary_has_valorizacion = _column_exists(
+                "dimensionamiento_family_monthly_summary",
+                "total_valorizacion",
+            )
             records_count = session.execute(
                 select(sa_func.count()).select_from(DimensionamientoRecord)
             ).scalar_one()
             summary_count = session.execute(
                 select(sa_func.count()).select_from(DimensionamientoFamilyMonthlySummary)
             ).scalar_one()
+            records_total_valorizacion = session.execute(
+                text(
+                    "SELECT COALESCE(SUM(valorizacion_estimada), 0) "
+                    "FROM dimensionamiento_records"
+                )
+            ).scalar_one() if raw_has_valorizacion else 0
+            summary_total_valorizacion = session.execute(
+                text(
+                    "SELECT COALESCE(SUM(total_valorizacion), 0) "
+                    "FROM dimensionamiento_family_monthly_summary"
+                )
+            ).scalar_one() if summary_has_valorizacion else 0
             raw_min_month, raw_max_month = session.execute(
                 text(
                     "SELECT MIN(month), MAX(month) "
@@ -321,7 +341,11 @@ def ensure_dimensionamiento_summary_populated():
                 f"records={records_count} summary_rows={summary_count} "
                 f"min_month={raw_min_month!r} max_month={raw_max_month!r} "
                 f"raw_has_cliente_visible={raw_has_visible} "
-                f"summary_has_cliente_visible={summary_has_visible}",
+                f"summary_has_cliente_visible={summary_has_visible} "
+                f"raw_has_valorizacion={raw_has_valorizacion} "
+                f"summary_has_valorizacion={summary_has_valorizacion} "
+                f"records_total_valorizacion={float(records_total_valorizacion or 0):.2f} "
+                f"summary_total_valorizacion={float(summary_total_valorizacion or 0):.2f}",
                 flush=True,
             )
 
@@ -345,12 +369,19 @@ def ensure_dimensionamiento_summary_populated():
             summary_has_current_client_strategy = (
                 summary_count == 0 or summary_strategy == "visible_fallback_v1"
             )
+            summary_has_current_valorizacion = (
+                not raw_has_valorizacion
+                or not summary_has_valorizacion
+                or abs(float(records_total_valorizacion or 0) - float(summary_total_valorizacion or 0)) < 0.01
+            )
             needs_rebuild = records_count > 0 and (
                 summary_count == 0
                 or not raw_has_visible
                 or not summary_has_visible
+                or not summary_has_valorizacion
                 or not summary_has_valid_months
                 or not summary_has_current_client_strategy
+                or not summary_has_current_valorizacion
             )
 
             if needs_rebuild:
@@ -406,9 +437,9 @@ def ensure_dimensionamiento_summary_populated():
                 if not IS_SQLITE:
                     session.execute(text("SET LOCAL statement_timeout = 0"))
 
-                if not summary_has_visible:
+                if not summary_has_visible or not summary_has_valorizacion:
                     print(
-                        "[MIGRATION] Summary sin cliente_visible: recreando tabla antes del rebuild.",
+                        "[MIGRATION] Summary desalineada con schema actual: recreando tabla antes del rebuild.",
                         flush=True,
                     )
                     _recreate_dimensionamiento_summary_table()
@@ -423,15 +454,20 @@ def ensure_dimensionamiento_summary_populated():
                     "dimensionamiento_family_monthly_summary",
                     "cliente_visible",
                 )
+                summary_has_valorizacion_after = _column_exists(
+                    "dimensionamiento_family_monthly_summary",
+                    "total_valorizacion",
+                )
                 print(
                     "[MIGRATION] Tabla resumen reconstruida para "
                     f"import_run_id={latest_run.id} "
-                    f"summary_has_cliente_visible={summary_has_visible_after}.",
+                    f"summary_has_cliente_visible={summary_has_visible_after} "
+                    f"summary_has_total_valorizacion={summary_has_valorizacion_after}.",
                     flush=True,
                 )
-                if not summary_has_visible_after:
+                if not summary_has_visible_after or not summary_has_valorizacion_after:
                     raise RuntimeError(
-                        "dimensionamiento_family_monthly_summary siguio sin cliente_visible"
+                        "dimensionamiento_family_monthly_summary siguio desalineada"
                     )
             else:
                 print("[MIGRATION] Tabla resumen OK, no requiere reconstrucciÃ³n.", flush=True)
@@ -656,6 +692,33 @@ def _recreate_dimensionamiento_summary_table() -> None:
         bind=engine,
         tables=[DimensionamientoFamilyMonthlySummary.__table__],
     )
+
+
+def _ensure_dimensionamiento_summary_columns(required_columns: set[str], *, reason: str) -> None:
+    summary_columns = _table_columns("dimensionamiento_family_monthly_summary")
+    missing_columns = sorted(required_columns - summary_columns)
+    if not missing_columns:
+        print(
+            f"[MIGRATION] Summary schema OK for {reason}. required_columns={sorted(required_columns)}",
+            flush=True,
+        )
+        return
+
+    print(
+        "[MIGRATION] Summary schema desalineada: "
+        f"reason={reason} missing_columns={missing_columns}. "
+        "Recreando tabla con schema actualizado...",
+        flush=True,
+    )
+    _recreate_dimensionamiento_summary_table()
+    refreshed_columns = _table_columns("dimensionamiento_family_monthly_summary")
+    still_missing = sorted(required_columns - refreshed_columns)
+    if still_missing:
+        raise RuntimeError(
+            "dimensionamiento_family_monthly_summary sigue desalineada "
+            f"después de recrear. missing_columns={still_missing}"
+        )
+    print(f"[MIGRATION] Summary recreada correctamente para {reason}.", flush=True)
 
 
 def _ensure_dimensionamiento_summary_import_run(session, records_count: int, reason: str):
@@ -926,20 +989,8 @@ def ensure_cliente_visible_columns():
             "dimensionamiento_records.cliente_visible"
         )
 
-    # Guard de idempotencia en summary: solo recrea si la columna todavía no existe.
     print("[MIGRATION] Verificando columna cliente_visible en summary...", flush=True)
-    if not _column_exists("dimensionamiento_family_monthly_summary", "cliente_visible"):
-        print(
-            "[MIGRATION] Summary sin cliente_visible: recreando tabla con schema actualizado...",
-            flush=True,
-        )
-        try:
-            _recreate_dimensionamiento_summary_table()
-            print("[MIGRATION] Tabla summary recreada exitosamente con nueva schema.", flush=True)
-        except Exception as e:
-            print(f"[MIGRATION] Error al recrear summary: {e}", flush=True)
-    else:
-        print("[MIGRATION] Summary ya tiene cliente_visible (OK). No se requiere recreación.", flush=True)
+    _ensure_dimensionamiento_summary_columns({"cliente_visible"}, reason="cliente_visible")
 
     print(
         "[MIGRATION] SUCCESS: cliente_visible schema checks done. "
@@ -1169,3 +1220,26 @@ def ensure_cliente_visible_backfill():
         )
 
     print("[MIGRATION] Backfill cliente_visible: UPDATEs completados.", flush=True)
+
+
+def ensure_dimensionamiento_valorizacion_columns():
+    """
+    Agrega valorizacion_estimada a dimensionamiento_records y
+    total_valorizacion a dimensionamiento_family_monthly_summary.
+    Idempotente: ignora si las columnas ya existen.
+    """
+    print("[MIGRATION] Verificando columna valorizacion_estimada en dimensionamiento_records...", flush=True)
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_records ADD COLUMN valorizacion_estimada DOUBLE PRECISION DEFAULT 0",
+            "dimensionamiento_records.valorizacion_estimada",
+        )
+
+    print("[MIGRATION] Verificando columna total_valorizacion en dimensionamiento_family_monthly_summary...", flush=True)
+    _ensure_dimensionamiento_summary_columns(
+        {"cliente_visible", "total_valorizacion"},
+        reason="valorizacion",
+    )
+
+    print("[MIGRATION] SUCCESS: valorizacion columns schema checks done.", flush=True)

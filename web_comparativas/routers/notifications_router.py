@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import User, db_session
+from web_comparativas.models import User
 from web_comparativas.notifications_service import (
     get_unread_count,
     get_user_notifications,
@@ -25,17 +25,18 @@ def login_required(request: Request):
         raise HTTPException(status_code=401, detail="Login required")
     return user
 
+def _db(request: Request):
+    """Devuelve la sesión canónica creada por db_session_lifecycle."""
+    return request.state.db
+
 @router.get("/unread-count")
-def api_unread_count(user: User = Depends(login_required)):
-    count = get_unread_count(db_session, user.id)
+def api_unread_count(request: Request, user: User = Depends(login_required)):
+    count = get_unread_count(_db(request), user.id)
     return {"count": count}
 
 @router.get("/", response_class=HTMLResponse)
 def page_notifications(request: Request, user: User = Depends(login_required)):
-    # Renderizamos la página de notificaciones
-    # Obtenemos las primeras 50 (o paginamos)
-    notifs = get_user_notifications(db_session, user.id, limit=50)
-    
+    notifs = get_user_notifications(_db(request), user.id, limit=50)
     ctx = {
         "request": request,
         "user": user,
@@ -47,20 +48,20 @@ def page_notifications(request: Request, user: User = Depends(login_required)):
     return templates.TemplateResponse("notifications.html", ctx)
 
 @router.post("/{notif_id}/read")
-def api_mark_read(notif_id: int, user: User = Depends(login_required)):
-    success = mark_as_read(db_session, notif_id, user.id)
+def api_mark_read(request: Request, notif_id: int, user: User = Depends(login_required)):
+    success = mark_as_read(_db(request), notif_id, user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"ok": True}
 
 @router.post("/read-all")
-def api_mark_all_read(user: User = Depends(login_required)):
-    mark_all_as_read(db_session, user.id)
+def api_mark_all_read(request: Request, user: User = Depends(login_required)):
+    mark_all_as_read(_db(request), user.id)
     return {"ok": True}
 
 @router.delete("/{notif_id}")
-def api_delete_notif(notif_id: int, user: User = Depends(login_required)):
-    success = delete_notification(db_session, notif_id, user.id)
+def api_delete_notif(request: Request, notif_id: int, user: User = Depends(login_required)):
+    success = delete_notification(_db(request), notif_id, user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"ok": True}
