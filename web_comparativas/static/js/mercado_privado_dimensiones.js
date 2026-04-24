@@ -618,7 +618,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // initDashboard
     // ─────────────────────────────────────────────────────────────────────────
     async function initDashboard(forceLive = false) {
-        setLoading(true, 'Leyendo snapshot persistido...');
+        // Mostrar la estructura del dashboard inmediatamente — sin pantalla bloqueante.
+        // El botón "Actualizar vista" muestra el spinner mientras los datos llegan.
+        elements.emptyState.style.display = 'none';
+        elements.dashboardContent.style.display = 'contents';
+        setRefreshing(true);
         try {
             const initialQuery = buildQueryParams();
             const [bootstrapResponse, labelsResponse] = await Promise.all([
@@ -659,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.emptyState.querySelector('p').textContent =
                 `No se pudo cargar Dimensionamiento: ${error.message}`;
         } finally {
-            setLoading(false);
+            setRefreshing(false);
         }
     }
 
