@@ -62,6 +62,7 @@ OPTIONAL_FLAG_COLUMNS = [
     "cliente",
     "is_client",
     "cliente_flag",
+    "valorizacion_estimada",
 ]
 
 CSV_COLUMNS_TO_READ = tuple(dict.fromkeys([*EXPECTED_COLUMNS, *OPTIONAL_FLAG_COLUMNS]))
@@ -252,6 +253,7 @@ TARGET_RECORD_COLUMNS = [
     "unidad_negocio",
     "subunidad_negocio",
     "cantidad_demandada",
+    "valorizacion_estimada",
     "resultado_participacion",
     "producto_nombre_original",
     "fecha_procesamiento",
@@ -288,16 +290,20 @@ def _compute_sha256(path: Path) -> str:
 
 def _detect_delimiter(path: Path) -> str:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        sample = handle.read(4096)
+        sample = handle.read(16384)
+    first_line = sample.splitlines()[0] if sample else ""
+    fallback_delimiter = max(
+        (",", ";", "|", "\t"),
+        key=lambda candidate: first_line.count(candidate),
+    )
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",;|\t")
         return dialect.delimiter
     except csv.Error:
-        return ","
+        return fallback_delimiter if first_line.count(fallback_delimiter) > 0 else ","
 
 
-def _resolve_csv_read_config(path: Path) -> tuple[str, list[str], list[str], dict[str, str]]:
-    delimiter = _detect_delimiter(path)
+def _read_csv_header(path: Path, delimiter: str) -> tuple[list[str], list[str]]:
     header_frame = pd.read_csv(
         path,
         sep=delimiter,
@@ -306,7 +312,36 @@ def _resolve_csv_read_config(path: Path) -> tuple[str, list[str], list[str], dic
     )
     original_columns = list(header_frame.columns)
     observed_columns = [_clean_header(column) for column in original_columns]
-    _validate_required_columns(observed_columns)
+    return original_columns, observed_columns
+
+
+def _resolve_csv_read_config(path: Path) -> tuple[str, list[str], list[str], dict[str, str]]:
+    detected_delimiter = _detect_delimiter(path)
+    delimiter_candidates = list(dict.fromkeys([detected_delimiter, ";", ",", "|", "\t"]))
+
+    delimiter = detected_delimiter
+    original_columns: list[str] = []
+    observed_columns: list[str] = []
+    last_missing: list[str] = []
+
+    for candidate in delimiter_candidates:
+        original_columns, observed_columns = _read_csv_header(path, candidate)
+        missing = [column for column in EXPECTED_COLUMNS if column not in observed_columns]
+        if not missing:
+            delimiter = candidate
+            break
+        last_missing = missing
+    else:
+        raise ValueError(f"Faltan columnas obligatorias: {', '.join(last_missing)}")
+
+    if delimiter != detected_delimiter:
+        _dim_log(
+            "warning",
+            "[DIM] CSV delimiter auto-corrected detected=%r resolved=%r path=%s",
+            detected_delimiter,
+            delimiter,
+            path,
+        )
 
     selected_original_columns = [
         original
@@ -441,6 +476,7 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
         "unidad_negocio": _clean_text(row.get("unidad_negocio")) or "Sin unidad",
         "subunidad_negocio": _clean_text(row.get("subunidad_negocio")) or "Sin subunidad",
         "cantidad_demandada": _parse_float(row.get("cantidad_demandada")),
+        "valorizacion_estimada": _parse_float(row.get("valorizacion_estimada")),
         "resultado_participacion": _clean_text(row.get("resultado_participacion")) or "Sin resultado",
         "producto_nombre_original": _clean_text(row.get("producto_nombre_original")),
         "fecha_procesamiento": _parse_datetime(row.get("fecha_procesamiento")),
@@ -512,6 +548,7 @@ def _postgres_stage_columns_ddl() -> str:
         unidad_negocio TEXT,
         subunidad_negocio TEXT,
         cantidad_demandada DOUBLE PRECISION NOT NULL,
+        valorizacion_estimada DOUBLE PRECISION NOT NULL DEFAULT 0,
         resultado_participacion VARCHAR(120),
         producto_nombre_original TEXT,
         fecha_procesamiento TIMESTAMP NULL,
@@ -754,9 +791,66 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     session.execute(delete(DimensionamientoFamilyMonthlySummary))
 
     if IS_SQLITE:
-        month_bucket = func.strftime("%Y-%m-01", DimensionamientoRecord.fecha)
-    else:
-        month_bucket = cast(func.date_trunc("month", DimensionamientoRecord.fecha), Date)
+        # En SQLite, insert().from_select() sobre esta tabla deja filas visibles
+        # dentro de la transaccion pero no las persiste de forma confiable al commit.
+        session.execute(
+            text(
+                """
+                INSERT INTO dimensionamiento_family_monthly_summary (
+                    month,
+                    plataforma,
+                    cliente_nombre_homologado,
+                    cliente_visible,
+                    provincia,
+                    familia,
+                    unidad_negocio,
+                    subunidad_negocio,
+                    resultado_participacion,
+                    is_identified,
+                    is_client,
+                    total_cantidad,
+                    total_valorizacion,
+                    total_registros,
+                    clientes_unicos,
+                    import_run_id
+                )
+                SELECT
+                    date(fecha, 'start of month') AS month,
+                    plataforma,
+                    cliente_nombre_homologado,
+                    cliente_visible,
+                    provincia,
+                    familia,
+                    unidad_negocio,
+                    subunidad_negocio,
+                    resultado_participacion,
+                    is_identified,
+                    is_client,
+                    COALESCE(SUM(cantidad_demandada), 0) AS total_cantidad,
+                    COALESCE(SUM(valorizacion_estimada), 0) AS total_valorizacion,
+                    COUNT(id) AS total_registros,
+                    COUNT(DISTINCT cliente_visible) AS clientes_unicos,
+                    :run_id AS import_run_id
+                FROM dimensionamiento_records
+                GROUP BY
+                    date(fecha, 'start of month'),
+                    plataforma,
+                    cliente_nombre_homologado,
+                    cliente_visible,
+                    provincia,
+                    familia,
+                    unidad_negocio,
+                    subunidad_negocio,
+                    resultado_participacion,
+                    is_identified,
+                    is_client
+                """
+            ),
+            {"run_id": run_id},
+        )
+        return
+
+    month_bucket = cast(func.date_trunc("month", DimensionamientoRecord.fecha), Date)
 
     summary_select = (
         select(
@@ -772,6 +866,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             DimensionamientoRecord.is_identified,
             DimensionamientoRecord.is_client,
             func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0).label("total_cantidad"),
+            func.coalesce(func.sum(DimensionamientoRecord.valorizacion_estimada), 0).label("total_valorizacion"),
             func.count(DimensionamientoRecord.id).label("total_registros"),
             func.count(func.distinct(DimensionamientoRecord.cliente_visible)).label("clientes_unicos"),
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
@@ -805,6 +900,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             "is_identified",
             "is_client",
             "total_cantidad",
+            "total_valorizacion",
             "total_registros",
             "clientes_unicos",
             "import_run_id",
@@ -1135,6 +1231,7 @@ def _ingest_dimensionamiento_csv_legacy(
                 }
             ),
         }
+        invalidate_query_cache()
         try:
             refresh_default_dashboard_snapshot(session, import_run_id=run.id, commit=False)
             _dim_log("info", "[DIM] Dashboard snapshot refreshed for run_id=%s", run.id)

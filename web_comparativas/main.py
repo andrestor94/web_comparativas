@@ -73,6 +73,7 @@ from web_comparativas.migrations import (
     ensure_cliente_visible_backfill,
     ensure_comparativa_rows_table,
     backfill_comparativa_rows,
+    ensure_dimensionamiento_valorizacion_columns,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -152,6 +153,11 @@ def run_startup_migrations_once() -> None:
         ensure_cliente_visible_columns()
     except Exception as e:
         print(f"[MIGRATION] Warning cliente_visible columns: {e}", flush=True)
+
+    try:
+        ensure_dimensionamiento_valorizacion_columns()
+    except Exception as e:
+        print(f"[MIGRATION] Warning dimensionamiento valorizacion columns: {e}", flush=True)
 
     try:
         ensure_dimensionamiento_summary_perf_indexes()

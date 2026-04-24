@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import Date, Text, case, cast, distinct, func, literal, or_, select, text
+from sqlalchemy import Date, Text, case, cast, distinct, func, inspect as sa_db_inspect, literal, or_, select, text
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,27 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v5"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v7"
+_SUMMARY_REQUIRED_COLUMNS = frozenset(
+    {
+        "month",
+        "plataforma",
+        "cliente_nombre_homologado",
+        "cliente_visible",
+        "provincia",
+        "familia",
+        "unidad_negocio",
+        "subunidad_negocio",
+        "resultado_participacion",
+        "is_identified",
+        "is_client",
+        "total_cantidad",
+        "total_valorizacion",
+        "total_registros",
+        "clientes_unicos",
+        "import_run_id",
+    }
+)
 
 # ── In-memory query result cache ─────────────────────────────────────────────
 # Evita recalcular resultados idénticos cuando el usuario cambia y revierte
@@ -237,22 +257,84 @@ def _date_range_payload(min_value: Any, max_value: Any) -> dict[str, str | None]
     }
 
 
+def _table_columns(session: Session, table_name: str) -> set[str]:
+    try:
+        inspector = sa_db_inspect(session.get_bind())
+        return {column["name"] for column in inspector.get_columns(table_name)}
+    except Exception:
+        logger.exception("[DIM][SUMMARY] Could not inspect table=%s", table_name)
+        return set()
+
+
 def _summary_health_snapshot(session: Session) -> dict[str, Any]:
-    summary_rows, raw_min_month, raw_max_month = session.execute(
-        text(
-            "SELECT COUNT(*), MIN(month), MAX(month) "
-            "FROM dimensionamiento_family_monthly_summary"
-        )
-    ).one()
+    summary_columns = _table_columns(session, "dimensionamiento_family_monthly_summary")
+    missing_columns = sorted(_SUMMARY_REQUIRED_COLUMNS - summary_columns)
+    try:
+        summary_rows, raw_min_month, raw_max_month, summary_total_valorizacion = session.execute(
+            text(
+                "SELECT COUNT(*), MIN(month), MAX(month), COALESCE(SUM(total_valorizacion), 0) "
+                "FROM dimensionamiento_family_monthly_summary"
+            )
+        ).one()
+    except Exception:
+        logger.exception("[DIM][SUMMARY] Could not read dimensionamiento_family_monthly_summary health snapshot")
+        summary_rows, raw_min_month, raw_max_month, summary_total_valorizacion = 0, None, None, 0
     min_month = _coerce_date_value(raw_min_month)
     max_month = _coerce_date_value(raw_max_month)
+    valorizacion_mismatch = False
+    records_total_valorizacion = None
+
+    # Proteccion contra una summary desalineada: si el agregado monetario quedo en 0
+    # pero la tabla base tiene valorizacion real, la summary no debe seguir usandose.
+    if (
+        not missing_columns
+        and summary_rows
+        and "total_valorizacion" in summary_columns
+        and abs(float(summary_total_valorizacion or 0)) < 0.01
+    ):
+        try:
+            records_total_valorizacion = float(
+                session.execute(
+                    text(
+                        "SELECT COALESCE(SUM(valorizacion_estimada), 0) "
+                        "FROM dimensionamiento_records"
+                    )
+                ).scalar_one()
+                or 0
+            )
+            valorizacion_mismatch = abs(records_total_valorizacion) >= 0.01
+        except Exception:
+            logger.exception("[DIM][SUMMARY] Could not compare summary vs base valorizacion totals")
+
+    if missing_columns:
+        logger.warning(
+            "[DIM][SUMMARY] Summary schema mismatch missing_columns=%s rows=%s",
+            missing_columns,
+            summary_rows,
+        )
+    if valorizacion_mismatch:
+        logger.warning(
+            "[DIM][SUMMARY] Summary valorizacion mismatch summary_total=%s records_total=%s",
+            float(summary_total_valorizacion or 0),
+            records_total_valorizacion,
+        )
     return {
         "rows": int(summary_rows or 0),
         "raw_min_month": raw_min_month,
         "raw_max_month": raw_max_month,
         "min_month": min_month,
         "max_month": max_month,
-        "usable": bool(summary_rows) and min_month is not None and max_month is not None,
+        "missing_columns": missing_columns,
+        "summary_total_valorizacion": float(summary_total_valorizacion or 0),
+        "records_total_valorizacion": records_total_valorizacion,
+        "valorizacion_mismatch": valorizacion_mismatch,
+        "usable": (
+            bool(summary_rows)
+            and min_month is not None
+            and max_month is not None
+            and not missing_columns
+            and not valorizacion_mismatch
+        ),
     }
 
 
@@ -901,6 +983,55 @@ def _family_consumption_payload_needs_refresh(payload: dict[str, Any] | None) ->
     return False
 
 
+def _bootstrap_payload_supports_valorizacion(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    kpis = payload.get("kpis")
+    if not isinstance(kpis, dict) or "valorizacion" not in kpis:
+        return False
+
+    series = payload.get("series")
+    datasets = series.get("datasets") if isinstance(series, dict) else None
+    if not isinstance(datasets, list):
+        return False
+    if datasets and "valorizacion" not in datasets[0]:
+        return False
+
+    for key in ("results", "top_families", "geo"):
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            return False
+        if rows and "valorizacion" not in rows[0]:
+            return False
+
+    clients = payload.get("clients_by_result")
+    if not isinstance(clients, list):
+        return False
+    if clients and "resultados_val" not in clients[0]:
+        return False
+
+    family_consumption = payload.get("family_consumption")
+    fc_rows = family_consumption.get("rows") if isinstance(family_consumption, dict) else None
+    if not isinstance(fc_rows, list):
+        return False
+    if fc_rows and "valorizacion" not in fc_rows[0]:
+        return False
+
+    return True
+
+
+def _snapshot_payload_needs_refresh(snapshot: DimensionamientoDashboardSnapshot | None) -> bool:
+    if snapshot is None:
+        return True
+    if snapshot.version != DEFAULT_DASHBOARD_SNAPSHOT_VERSION:
+        return True
+    payload = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+    if _family_consumption_payload_needs_refresh(payload):
+        return True
+    return not _bootstrap_payload_supports_valorizacion(payload)
+
+
 def _refresh_bootstrap_family_consumption(
     session: Session,
     payload: dict[str, Any],
@@ -918,7 +1049,12 @@ def refresh_default_dashboard_snapshot(
     commit: bool = True,
 ) -> dict[str, Any]:
     started_at = _log_query_start("refresh_default_dashboard_snapshot", import_run_id=import_run_id)
-    payload = _build_dashboard_bootstrap_payload(session)
+    payload = get_dashboard_bootstrap(
+        session,
+        build_filters(),
+        include_status=True,
+        bypass_snapshot=True,
+    )
     snapshot = _get_dashboard_snapshot(session)
     latest = _latest_success_import_run(session)
     if snapshot is None:
@@ -954,7 +1090,7 @@ def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None
     snapshot = _get_dashboard_snapshot(session)
     if latest is None:
         return snapshot.payload if snapshot else None
-    if snapshot and snapshot.import_run_id == latest.id:
+    if snapshot and snapshot.import_run_id == latest.id and not _snapshot_payload_needs_refresh(snapshot):
         return snapshot.payload
     return refresh_default_dashboard_snapshot(session, import_run_id=latest.id, commit=True)
 
@@ -1230,13 +1366,14 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                     func.count(model.id),
                     func.count(distinct(model.familia)),
                     func.count(distinct(model.provincia)),
+                    func.coalesce(func.sum(model.valorizacion_estimada), 0),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
-            total_rows, total_clients, total_records, total_families, total_provincias = session.execute(stmt).one()
+            total_rows, total_clients, total_records, total_families, total_provincias, total_valorizacion = session.execute(stmt).one()
         else:
             # Tabla resumen: 2 queries rápidas evitan full scan de 400k+ filas
             # Query 1: totales y familias
@@ -1245,20 +1382,20 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                     func.coalesce(func.sum(model.total_registros), 0),
                     func.count(distinct(model.familia)),
                     func.count(distinct(model.provincia)),
+                    func.coalesce(func.sum(model.total_valorizacion), 0),
                 ),
                 model,
                 filters,
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
-            total_rows, total_families, total_provincias = session.execute(main_stmt).one()
+            total_rows, total_families, total_provincias, total_valorizacion = session.execute(main_stmt).one()
             # Query 2: nombres únicos respetando el filtro activo de is_client.
             # Si no hay filtro explícito, contar solo filas con is_client=True
             # (comportamiento por defecto que excluye "SIN DATO" y no-clientes).
             # Con filtro is_client=False, _apply_common_filters ya restringe las
             # filas, y contamos los nombres disponibles en esa selección.
             visible_client = model.cliente_visible
-            normalized_client = _sql_normalized_text(visible_client)
             base_client_stmt = (
                 select(func.count(distinct(visible_client)))
                 .where(visible_client.isnot(None))
@@ -1276,6 +1413,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             "renglones": int(total_records or 0),
             "familias": int(total_families or 0),
             "provincias": int(total_provincias or 0),
+            "valorizacion": float(total_valorizacion or 0),
         }
         _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
         _cache_set(_ck, payload)
@@ -1298,6 +1436,9 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
         model = _resolve_aggregate_model(session, "SERIES")
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        val_expr = func.coalesce(
+            func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
+        )
         top_business_conditions: list[str] = []
         top_business_stmt = _apply_common_filters(
             select(
@@ -1324,6 +1465,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
                 month_expr.label("month"),
                 negocio_expr.label("negocio"),
                 count_expr.label("renglones"),
+                val_expr.label("valorizacion"),
             )
             .where(negocio_expr.in_(top_businesses) if top_businesses else False)
             .group_by(month_expr, negocio_expr)
@@ -1336,9 +1478,11 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
             series_conditions.append(f"negocio IN {top_businesses}")
         _log_query_statement(session, "get_series", model, stmt, filters, series_conditions)
         series_map: dict[str, dict[str, float]] = {}
-        for month, negocio, total in session.execute(stmt).all():
+        series_val_map: dict[str, dict[str, float]] = {}
+        for month, negocio, total, val in session.execute(stmt).all():
             month_key = _month_value_to_iso(month)
             series_map.setdefault(month_key, {})[negocio] = float(total or 0)
+            series_val_map.setdefault(month_key, {})[negocio] = float(val or 0)
 
         months = sorted(series_map.keys())
         datasets = []
@@ -1347,6 +1491,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
                 {
                     "label": negocio,
                     "values": [series_map.get(month, {}).get(negocio, 0) for month in months],
+                    "valorizacion": [series_val_map.get(month, {}).get(negocio, 0.0) for month in months],
                 }
             )
         payload = {"months": months, "datasets": datasets}
@@ -1370,11 +1515,15 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(session, "RESULTS")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        val_expr = func.coalesce(
+            func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
+        )
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.resultado_participacion,
                 count_expr.label("rows"),
+                val_expr.label("valorizacion"),
             )
             .group_by(model.resultado_participacion)
             .order_by(count_expr.desc()),
@@ -1387,8 +1536,9 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
             {
                 "resultado": resultado or "Sin resultado",
                 "renglones": rows or 0,
+                "valorizacion": float(val or 0),
             }
-            for resultado, rows in session.execute(stmt).all()
+            for resultado, rows, val in session.execute(stmt).all()
         ]
         _log_query_success("get_results_breakdown", started_at, rows=len(payload))
         _cache_set(_ck, payload)
@@ -1414,12 +1564,16 @@ def get_top_families(session: Session, filters: DimensionamientoFilters) -> list
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
         )
+        val_expr = func.coalesce(
+            func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
+        )
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.familia,
                 count_expr.label("rows"),
                 quantity_expr.label("quantity"),
+                val_expr.label("valorizacion"),
             )
             .where(model.familia.is_not(None))
             .group_by(model.familia)
@@ -1434,8 +1588,9 @@ def get_top_families(session: Session, filters: DimensionamientoFilters) -> list
                 "familia": familia or "Sin familia",
                 "renglones": rows or 0,
                 "cantidad": float(quantity or 0),
+                "valorizacion": float(val or 0),
             }
-            for familia, rows, quantity in session.execute(stmt).all()
+            for familia, rows, quantity, val in session.execute(stmt).all()
         ]
         _log_query_success("get_top_families", started_at, rows=len(payload))
         _cache_set(_ck, payload)
@@ -1457,11 +1612,15 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(session, "GEO")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
+        val_expr = func.coalesce(
+            func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
+        )
         applied_conditions: list[str] = []
         stmt = _apply_common_filters(
             select(
                 model.provincia,
                 count_expr.label("rows"),
+                val_expr.label("valorizacion"),
             )
             .group_by(model.provincia)
             .order_by(count_expr.desc()),
@@ -1474,8 +1633,9 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
             {
                 "provincia": provincia or "Sin provincia",
                 "renglones": rows or 0,
+                "valorizacion": float(val or 0),
             }
-            for provincia, rows in session.execute(stmt).all()
+            for provincia, rows, val in session.execute(stmt).all()
         ]
         _log_query_success("get_geography_distribution", started_at, rows=len(payload))
         _cache_set(_ck, payload)
@@ -1511,11 +1671,13 @@ def get_clients_by_result(
             # Tabla de detalle
             _visible_raw = model.cliente_visible
             total_expr = func.count(model.id)
+            val_sub_expr = func.coalesce(func.sum(model.valorizacion_estimada), 0)
             subquery = _apply_common_filters(
                 select(
                     _visible_raw.label("cliente"),
                     model.resultado_participacion.label("resultado"),
                     total_expr.label("total"),
+                    val_sub_expr.label("val_total"),
                 )
                 .where(_visible_raw.isnot(None))
                 .where(func.coalesce(_visible_raw, "") != "")
@@ -1526,13 +1688,14 @@ def get_clients_by_result(
             ).subquery()
         else:
             total_expr = func.coalesce(func.sum(model.total_registros), 0)
+            val_sub_expr = func.coalesce(func.sum(model.total_valorizacion), 0)
             visible_client = model.cliente_visible
-            normalized_client = _sql_normalized_text(visible_client)
             summary_stmt = (
                 select(
                     visible_client.label("cliente"),
                     model.resultado_participacion.label("resultado"),
                     total_expr.label("total"),
+                    val_sub_expr.label("val_total"),
                 )
                 .where(visible_client.isnot(None))
                 .where(visible_client != "")
@@ -1559,7 +1722,7 @@ def get_clients_by_result(
             return []
 
         detail_stmt = (
-            select(subquery.c.cliente, subquery.c.resultado, subquery.c.total)
+            select(subquery.c.cliente, subquery.c.resultado, subquery.c.total, subquery.c.val_total)
             .where(subquery.c.cliente.in_(top_clients))
             .order_by(subquery.c.cliente.asc(), subquery.c.resultado.asc())
         )
@@ -1568,11 +1731,18 @@ def get_clients_by_result(
         _log_query_statement(session, "get_clients_by_result.detail", model, detail_stmt, filters, detail_conditions)
 
         client_map: dict[str, dict[str, float]] = {}
-        for cliente, resultado, total in session.execute(detail_stmt).all():
-            client_map.setdefault(cliente, {})[resultado or "Sin resultado"] = float(total or 0)
+        client_val_map: dict[str, dict[str, float]] = {}
+        for cliente, resultado, total, val_total in session.execute(detail_stmt).all():
+            result_key = resultado or "Sin resultado"
+            client_map.setdefault(cliente, {})[result_key] = float(total or 0)
+            client_val_map.setdefault(cliente, {})[result_key] = float(val_total or 0)
 
         payload = [
-            {"cliente": cliente, "resultados": client_map.get(cliente, {})}
+            {
+                "cliente": cliente,
+                "resultados": client_map.get(cliente, {}),
+                "resultados_val": client_val_map.get(cliente, {}),
+            }
             for cliente in top_clients
         ]
         _log_query_success("get_clients_by_result", started_at, rows=len(payload))
@@ -1600,6 +1770,9 @@ def get_family_consumption_table(
         total_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
+        )
+        val_expr = func.coalesce(
+            func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
         )
 
         # Paso 1: obtener el universo completo de familias ordenado por cantidad total.
@@ -1640,6 +1813,7 @@ def get_family_consumption_table(
                 month_bucket.label("month_bucket"),
                 model.familia,
                 total_expr.label("total"),
+                val_expr.label("valorizacion"),
             )
             .where(model.familia.is_not(None))
             .group_by(month_bucket, model.familia)
@@ -1653,15 +1827,18 @@ def get_family_consumption_table(
 
         month_keys = [f"{index:02d}" for index in range(1, 13)]
         monthly_values: dict[str, dict[str, list[float]]] = {}
-        for month_date, family, total in rows:
+        monthly_val_values: dict[str, dict[str, list[float]]] = {}
+        for month_date, family, total, val in rows:
             month_iso = _month_value_to_iso(month_date)
             month_key = month_iso[5:7] if len(month_iso) >= 7 else "01"
             family_name = family or "Sin familia"
             monthly_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(total or 0))
+            monthly_val_values.setdefault(family_name, {}).setdefault(month_key, []).append(float(val or 0))
 
         data = []
         for family in ordered_families:
             family_months = monthly_values.get(family, {})
+            family_val_months = monthly_val_values.get(family, {})
             data.append(
                 {
                     "familia": family,
@@ -1669,6 +1846,14 @@ def get_family_consumption_table(
                         (
                             sum(family_months.get(month, [])) / len(family_months.get(month, []))
                             if family_months.get(month)
+                            else 0
+                        )
+                        for month in month_keys
+                    ],
+                    "valorizacion": [
+                        (
+                            sum(family_val_months.get(month, [])) / len(family_val_months.get(month, []))
+                            if family_val_months.get(month)
                             else 0
                         )
                         for month in month_keys
@@ -1718,6 +1903,7 @@ def _fetch_summary_rows_for_bootstrap(
             model.is_identified,
             model.is_client,
             model.total_cantidad,
+            model.total_valorizacion,
             model.total_registros,
         ),
         model,
@@ -1736,19 +1922,23 @@ def _compute_series_from_rows(rows: list[tuple[Any, ...]], series_limit: int = 5
     desde la leyenda. El resto del dashboard usa los rows CON exclusión.
 
     Posiciones en la tupla según la SELECT en _fetch_summary_rows_for_bootstrap:
-        0: month, 5: unidad_negocio, 11: total_registros
+        0: month, 5: unidad_negocio, 11: total_valorizacion, 12: total_registros
     """
     business_totals: dict[str, int] = defaultdict(int)
     business_by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    business_val_by_month: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in rows:
         month_value = row[0]
         unidad_negocio = row[5]
-        total_registros = row[11]
+        total_valorizacion = row[11]
+        total_registros = row[12]
         row_count = int(total_registros or 0)
+        val_amount = float(total_valorizacion or 0)
         month_iso = _month_value_to_iso(month_value)
         business_name = unidad_negocio or "Sin negocio"
         business_totals[business_name] += row_count
         business_by_month[month_iso][business_name] += row_count
+        business_val_by_month[month_iso][business_name] += val_amount
     top_businesses = [
         name
         for name, _ in sorted(business_totals.items(), key=lambda item: (-item[1], item[0]))[:series_limit]
@@ -1760,6 +1950,7 @@ def _compute_series_from_rows(rows: list[tuple[Any, ...]], series_limit: int = 5
             {
                 "label": business_name,
                 "values": [business_by_month.get(month, {}).get(business_name, 0) for month in months],
+                "valorizacion": [business_val_by_month.get(month, {}).get(business_name, 0.0) for month in months],
             }
             for business_name in top_businesses
         ],
@@ -1783,20 +1974,30 @@ def _aggregate_bootstrap_from_summary_rows(
 
     total_rows = 0
     total_quantity = 0.0
+    total_valorizacion_kpi = 0.0
     min_month: dt.date | None = None
     max_month: dt.date | None = None
 
     business_totals: dict[str, int] = defaultdict(int)
     business_by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    business_val_by_month: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     result_totals: dict[str, int] = defaultdict(int)
+    result_val_totals: dict[str, float] = defaultdict(float)
     family_rows: dict[str, int] = defaultdict(int)
     family_quantities: dict[str, float] = defaultdict(float)
+    family_val_totals: dict[str, float] = defaultdict(float)
     family_consumption_quantities: dict[str, float] = defaultdict(float)
+    family_consumption_val: dict[str, float] = defaultdict(float)
     geo_totals: dict[str, int] = defaultdict(int)
+    geo_val_totals: dict[str, float] = defaultdict(float)
     client_totals: dict[str, int] = defaultdict(int)
+    client_val_totals: dict[str, float] = defaultdict(float)
     client_result_totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    client_result_val_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     family_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     family_consumption_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    family_val_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    family_consumption_val_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     for (
         month_value,
@@ -1810,6 +2011,7 @@ def _aggregate_bootstrap_from_summary_rows(
         _is_identified,
         is_client,
         total_cantidad,
+        total_valorizacion,
         total_registros,
     ) in rows:
         month_date = _coerce_date_value(month_value)
@@ -1820,8 +2022,10 @@ def _aggregate_bootstrap_from_summary_rows(
 
         row_count = int(total_registros or 0)
         quantity = float(total_cantidad or 0)
+        val_amount = float(total_valorizacion or 0)
         total_rows += row_count
         total_quantity += quantity
+        total_valorizacion_kpi += val_amount
 
         if plataforma not in (None, ""):
             distinct_plataformas.add(plataforma)
@@ -1843,20 +2047,29 @@ def _aggregate_bootstrap_from_summary_rows(
 
         family_rows[family_name] += row_count
         family_quantities[family_name] += quantity
+        family_val_totals[family_name] += val_amount
         business_totals[business_name] += row_count
         business_by_month[month_iso][business_name] += row_count
+        business_val_by_month[month_iso][business_name] += val_amount
         result_totals[result_name] += row_count
+        result_val_totals[result_name] += val_amount
         geo_totals[province_name] += row_count
+        geo_val_totals[province_name] += val_amount
         family_month_totals[family_name][month_iso] += quantity
+        family_val_month_totals[family_name][month_iso] += val_amount
         if familia not in (None, ""):
             family_consumption_quantities[family_name] += quantity
+            family_consumption_val[family_name] += val_amount
             family_consumption_month_totals[family_name][month_iso] += quantity
+            family_consumption_val_month_totals[family_name][month_iso] += val_amount
 
         client_name = _real_client_name(cliente)
         if client_name:
             distinct_clients.add(client_name)
             client_totals[client_name] += row_count
+            client_val_totals[client_name] += val_amount
             client_result_totals[client_name][result_name] += row_count
+            client_result_val_totals[client_name][result_name] += val_amount
 
     top_businesses = [
         name
@@ -1869,6 +2082,7 @@ def _aggregate_bootstrap_from_summary_rows(
             {
                 "label": business_name,
                 "values": [business_by_month.get(month, {}).get(business_name, 0) for month in months],
+                "valorizacion": [business_val_by_month.get(month, {}).get(business_name, 0.0) for month in months],
             }
             for business_name in top_businesses
         ],
@@ -1880,7 +2094,7 @@ def _aggregate_bootstrap_from_summary_rows(
         series = _compute_series_from_rows(series_rows, series_limit)
 
     results_payload = [
-        {"resultado": result_name, "renglones": rows_count}
+        {"resultado": result_name, "renglones": rows_count, "valorizacion": float(result_val_totals.get(result_name, 0))}
         for result_name, rows_count in sorted(result_totals.items(), key=lambda item: (-item[1], item[0]))
     ]
 
@@ -1889,12 +2103,13 @@ def _aggregate_bootstrap_from_summary_rows(
             "familia": family_name,
             "renglones": rows_count,
             "cantidad": float(family_quantities.get(family_name, 0)),
+            "valorizacion": float(family_val_totals.get(family_name, 0)),
         }
         for family_name, rows_count in sorted(family_rows.items(), key=lambda item: (-item[1], item[0]))
     ]
 
     geo_payload = [
-        {"provincia": province_name, "renglones": rows_count}
+        {"provincia": province_name, "renglones": rows_count, "valorizacion": float(geo_val_totals.get(province_name, 0))}
         for province_name, rows_count in sorted(geo_totals.items(), key=lambda item: (-item[1], item[0]))
     ]
 
@@ -1909,6 +2124,10 @@ def _aggregate_bootstrap_from_summary_rows(
                 result_name: rows_count
                 for result_name, rows_count in sorted(client_result_totals.get(client_name, {}).items(), key=lambda item: item[0])
             },
+            "resultados_val": {
+                result_name: float(val)
+                for result_name, val in sorted(client_result_val_totals.get(client_name, {}).items(), key=lambda item: item[0])
+            },
         }
         for client_name in top_clients
     ]
@@ -1921,9 +2140,13 @@ def _aggregate_bootstrap_from_summary_rows(
     ]
     for family_name in ordered_family_consumption:
         month_lists: dict[str, list[float]] = defaultdict(list)
-        for month_iso, quantity in family_consumption_month_totals.get(family_name, {}).items():
-            month_key = month_iso[5:7] if len(month_iso) >= 7 else "01"
+        val_month_lists: dict[str, list[float]] = defaultdict(list)
+        for month_iso_key, quantity in family_consumption_month_totals.get(family_name, {}).items():
+            month_key = month_iso_key[5:7] if len(month_iso_key) >= 7 else "01"
             month_lists[month_key].append(quantity)
+        for month_iso_key, val in family_consumption_val_month_totals.get(family_name, {}).items():
+            month_key = month_iso_key[5:7] if len(month_iso_key) >= 7 else "01"
+            val_month_lists[month_key].append(val)
         family_consumption_payload.append(
             {
                 "familia": family_name,
@@ -1931,6 +2154,14 @@ def _aggregate_bootstrap_from_summary_rows(
                     (
                         sum(month_lists.get(month_key, [])) / len(month_lists.get(month_key, []))
                         if month_lists.get(month_key)
+                        else 0
+                    )
+                    for month_key in month_keys
+                ],
+                "valorizacion": [
+                    (
+                        sum(val_month_lists.get(month_key, [])) / len(val_month_lists.get(month_key, []))
+                        if val_month_lists.get(month_key)
                         else 0
                     )
                     for month_key in month_keys
@@ -1955,6 +2186,7 @@ def _aggregate_bootstrap_from_summary_rows(
             "renglones": int(total_rows or 0),
             "familias": len(distinct_familias),
             "provincias": len(distinct_provincias),
+            "valorizacion": total_valorizacion_kpi,
         },
         "series": series,
         "results": results_payload,
@@ -2022,10 +2254,13 @@ def get_dashboard_bootstrap(
     )
     try:
         _apply_local_statement_timeout(session, 50000)
+        summary_state = _summary_health_snapshot_cached(session)
         if not bypass_snapshot and not _has_active_filters(filters):
             snapshot = _get_dashboard_snapshot(session)
             latest = _latest_success_import_run(session)
-            if snapshot and (latest is None or snapshot.import_run_id == latest.id):
+            snapshot_compatible = snapshot is not None and not _snapshot_payload_needs_refresh(snapshot)
+            skip_snapshot_due_to_summary = summary_state.get("valorizacion_mismatch", False)
+            if snapshot_compatible and not skip_snapshot_due_to_summary and (latest is None or snapshot.import_run_id == latest.id):
                 payload = dict(snapshot.payload or {})
                 if _family_consumption_payload_needs_refresh(payload):
                     payload = _refresh_bootstrap_family_consumption(session, payload, filters)
@@ -2045,7 +2280,7 @@ def get_dashboard_bootstrap(
                 )
                 return payload
 
-            if snapshot:
+            if snapshot_compatible and snapshot and not skip_snapshot_due_to_summary:
                 payload = dict(snapshot.payload or {})
                 if _family_consumption_payload_needs_refresh(payload):
                     payload = _refresh_bootstrap_family_consumption(session, payload, filters)
@@ -2066,7 +2301,6 @@ def get_dashboard_bootstrap(
                 )
                 return payload
 
-        summary_state = _summary_health_snapshot_cached(session)
         if summary_state["usable"]:
             payload = _get_aggregated_dashboard_bootstrap(
                 session,

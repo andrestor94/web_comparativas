@@ -42,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Estado global de resultado activo: cuando tiene un valor, filtra TODO el dashboard
         // al resultado seleccionado desde el donut "Resultado por participación".
         activeResultados: new Set(),
+        // 'renglones' | 'valorizacion'
+        activeMetric: 'renglones',
+        lastBootstrap: null,
     };
 
     const FAMILY_LIST_ROW_HEIGHT = 42;
@@ -461,6 +464,9 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
         kpiProvinces: document.getElementById('kpiProvinces'),
+        kpiValorizacion: document.getElementById('kpiValorizacion'),
+        kpiValorizacionCard: document.querySelector('.dim-kpi-valorizacion'),
+        swMetric: document.getElementById('swMetric'),
         familyListContainer:  document.getElementById('familyListContainer'),
         pivotTableWrap:       document.getElementById('pivotTableWrap'),
         pivotHeader:          document.getElementById('pivotHeader'),
@@ -500,6 +506,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // bindEvents
     // ─────────────────────────────────────────────────────────────────────────
     function bindEvents() {
+        // Switch Renglones / Valorización
+        if (elements.swMetric) {
+            elements.swMetric.addEventListener('click', e => {
+                const btn = e.target.closest('.dim-metric-btn');
+                if (!btn) return;
+                const metric = btn.dataset.metric;
+                if (metric === state.activeMetric) return;
+                state.activeMetric = metric;
+                elements.swMetric.querySelectorAll('.dim-metric-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.metric === metric);
+                });
+                // No re-fetches — just re-render with cached data
+                _reRenderWithCurrentMetric();
+            });
+        }
+
         // Filtro ¿Cliente?
         if (elements.filterIsClient) {
             elements.filterIsClient.addEventListener('change', triggerLoad);
@@ -617,6 +639,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            assertBootstrapSupportsValorizacion(bootstrap);
+
             elements.emptyState.style.display = 'none';
             elements.dashboardContent.style.display = 'contents';
             renderBootstrapPayload(bootstrap);
@@ -660,6 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.filtersLoaded = true;
         }
 
+        state.lastBootstrap = bootstrap;
         renderKpis(bootstrap.kpis || {});
         renderAreaChart(bootstrap.series || { months: [], datasets: [] });
         renderPieChart(bootstrap.results || []);
@@ -667,6 +692,18 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMapChart(bootstrap.geo || []);
         renderBarClientChart(bootstrap.clients_by_result || []);
         renderPivotTable(bootstrap.family_consumption || { months: [], rows: [], total: 0 });
+    }
+
+    function _reRenderWithCurrentMetric() {
+        const b = state.lastBootstrap;
+        if (!b) return;
+        renderKpis(b.kpis || {});
+        renderAreaChart(b.series || { months: [], datasets: [] });
+        renderPieChart(b.results || []);
+        renderFamilyList(b.top_families || []);
+        renderMapChart(b.geo || []);
+        renderBarClientChart(b.clients_by_result || []);
+        renderPivotTable(b.family_consumption || { months: [], rows: [], total: 0 });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -746,7 +783,16 @@ document.addEventListener('DOMContentLoaded', () => {
             setRefreshing(true);
         }
 
-        if (cachedPayload) renderBootstrapPayload(cachedPayload);
+        if (cachedPayload) {
+            try {
+                assertBootstrapSupportsValorizacion(cachedPayload);
+                renderBootstrapPayload(cachedPayload);
+            } catch (cacheError) {
+                state.bootstrapCache.delete(cacheKey);
+                state.bootstrapCacheTs.delete(cacheKey);
+                console.warn('[DIM] bootstrap cache descartado:', cacheError);
+            }
+        }
 
         if (!force && cachedPayload && cacheAgeMs < CACHE_FRESH_TTL_MS) {
             if (blocking) setLoading(false);
@@ -764,6 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (signal.aborted) return;
 
             const bootstrap = (response && response.data) || {};
+            assertBootstrapSupportsValorizacion(bootstrap);
             renderBootstrapPayload(bootstrap);
             cacheBootstrapPayload(cacheKey, bootstrap);
         } catch (err) {
@@ -840,7 +887,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderKpisError() {
-        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiProvinces]
+        [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiProvinces, elements.kpiValorizacion]
             .forEach(el => { if (el) el.textContent = '--'; });
     }
 
@@ -898,8 +945,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (signal) fetchOptions.signal = signal;
         const response = await fetch(url, fetchOptions);
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
+        if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
         return payload;
+    }
+
+    function assertBootstrapSupportsValorizacion(bootstrap) {
+        if (!bootstrap || typeof bootstrap !== 'object') {
+            throw new Error('El bootstrap de Dimensionamiento es invalido.');
+        }
+
+        const kpis = bootstrap.kpis || {};
+        const seriesDatasets = (bootstrap.series && bootstrap.series.datasets) || [];
+        const results = bootstrap.results || [];
+        const topFamilies = bootstrap.top_families || [];
+        const geo = bootstrap.geo || [];
+        const clients = bootstrap.clients_by_result || [];
+        const familyConsumptionRows = ((bootstrap.family_consumption || {}).rows) || [];
+
+        const supportsValorizacion =
+            Object.prototype.hasOwnProperty.call(kpis, 'valorizacion') &&
+            (seriesDatasets.length === 0 || Object.prototype.hasOwnProperty.call(seriesDatasets[0], 'valorizacion')) &&
+            (results.length === 0 || Object.prototype.hasOwnProperty.call(results[0], 'valorizacion')) &&
+            (topFamilies.length === 0 || Object.prototype.hasOwnProperty.call(topFamilies[0], 'valorizacion')) &&
+            (geo.length === 0 || Object.prototype.hasOwnProperty.call(geo[0], 'valorizacion')) &&
+            (clients.length === 0 || Object.prototype.hasOwnProperty.call(clients[0], 'resultados_val')) &&
+            (familyConsumptionRows.length === 0 || Object.prototype.hasOwnProperty.call(familyConsumptionRows[0], 'valorizacion'));
+
+        if (!supportsValorizacion) {
+            throw new Error('El bootstrap recibido no incluye soporte consistente para valorizacion.');
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -963,6 +1037,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.kpiProvinces) {
             elements.kpiProvinces.textContent = formatInteger(kpis.provincias || 0);
         }
+        if (elements.kpiValorizacion) {
+            elements.kpiValorizacion.textContent = formatAbbreviated(kpis.valorizacion || 0);
+        }
+        if (elements.kpiValorizacionCard) {
+            elements.kpiValorizacionCard.style.display = state.activeMetric === 'valorizacion' ? '' : 'none';
+        }
         try {
             localStorage.setItem('mp_dimensiones_kpis', JSON.stringify({
                 clients: kpis.clientes || 0,
@@ -978,9 +1058,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Guardar los códigos originales (pre-resolución) de cada dataset.
         state.chartSeriesCodes = (series.datasets || []).map(d => String(d.label));
 
+        const useVal = state.activeMetric === 'valorizacion';
         const datasets = (series.datasets || []).map((dataset, index) => ({
             label: resolveUnitLabel(dataset.label),
-            data: dataset.values || [],
+            data: useVal ? (dataset.valorizacion || dataset.values || []) : (dataset.values || []),
             backgroundColor: seriesPalette[index % seriesPalette.length],
             borderColor: seriesPalette[index % seriesPalette.length],
             borderWidth: 0,
@@ -1014,8 +1095,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderPieChart(results) {
         const hasFilter = state.activeResultados.size > 0;
+        const useVal = state.activeMetric === 'valorizacion';
         const labels = results.map(item => item.resultado);
-        const data = results.map(item => item.renglones);
+        const data = results.map(item => useVal ? (item.valorizacion || 0) : (item.renglones || 0));
         const backgroundColor = results.map((item, i) => {
             const base = resultPalette[i % resultPalette.length];
             return (hasFilter && !state.activeResultados.has(item.resultado)) ? base + '38' : base;
@@ -1047,7 +1129,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 plugins: {
                     legend: { position: 'bottom', labels: { boxWidth: 8, usePointStyle: true, font: { size: 10 } } },
                     tooltip: {
-                        callbacks: { label: ctx => `${ctx.label}: ${formatInteger(ctx.parsed)} renglones` },
+                        callbacks: {
+                            label: ctx => state.activeMetric === 'valorizacion'
+                                ? `${ctx.label}: ${formatAbbreviated(ctx.parsed)}`
+                                : `${ctx.label}: ${formatInteger(ctx.parsed)} renglones`,
+                        },
                     },
                 },
                 onClick(event, elements) {
@@ -1098,7 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr>
                     <th class="dim-family-head dim-family-head-name">Familia</th>
                     <th class="dim-family-head dim-family-head-count text-end">Renglones</th>
-                    <th class="dim-family-head dim-family-head-qty text-end">Cantidad</th>
+                    <th class="dim-family-head dim-family-head-qty text-end">${state.activeMetric === 'valorizacion' ? 'Valorización' : 'Cantidad'}</th>
                 </tr>
             </thead>
         `;
@@ -1157,15 +1243,19 @@ document.addEventListener('DOMContentLoaded', () => {
             fragment.appendChild(createFamilyListSpacerRow(topSpacerHeight));
         }
 
+        const useVal = state.activeMetric === 'valorizacion';
         rows.slice(start, end).forEach(item => {
             const tr = document.createElement('tr');
             tr.className = 'dim-family-row';
+            const qtyDisplay = useVal
+                ? formatAbbreviated(item.valorizacion || 0)
+                : formatDecimal(item.cantidad || 0);
             tr.innerHTML = `
                 <td class="dim-family-name-cell" title="${item.familia || ''}">
                     <div class="dim-family-name-text">${item.familia || 'Sin familia'}</div>
                 </td>
                 <td class="text-end small text-muted dim-family-number">${formatInteger(item.renglones)}</td>
-                <td class="text-end fw-bold dim-family-number dim-family-number-qty">${formatDecimal(item.cantidad)}</td>
+                <td class="text-end fw-bold dim-family-number dim-family-number-qty">${qtyDisplay}</td>
             `;
             fragment.appendChild(tr);
         });
@@ -1189,11 +1279,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderBarClientChart(rows) {
+        const useVal = state.activeMetric === 'valorizacion';
         const labels = rows.map(row => row.cliente);
-        const resultKeys = Array.from(new Set(rows.flatMap(row => Object.keys(row.resultados || {}))));
+        const resultKeySource = useVal ? 'resultados_val' : 'resultados';
+        const resultKeys = Array.from(new Set(rows.flatMap(row => Object.keys(row[resultKeySource] || row.resultados || {}))));
         const datasets = resultKeys.map((key, index) => ({
             label: key,
-            data: rows.map(row => row.resultados?.[key] || 0),
+            data: rows.map(row => (row[resultKeySource] || row.resultados)?.[key] || 0),
             backgroundColor: resultPalette[index % resultPalette.length],
             borderRadius: 4,
             barPercentage: 0.7,
@@ -1223,7 +1315,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        callbacks: { label: ctx => `${ctx.dataset.label}: ${formatInteger(ctx.parsed.x)} renglones` },
+                        callbacks: {
+                            label: ctx => state.activeMetric === 'valorizacion'
+                                ? `${ctx.dataset.label}: ${formatAbbreviated(ctx.parsed.x)}`
+                                : `${ctx.dataset.label}: ${formatInteger(ctx.parsed.x)} renglones`,
+                        },
                     },
                 },
                 scales: {
@@ -1382,10 +1478,12 @@ document.addEventListener('DOMContentLoaded', () => {
             familyCell.appendChild(familyText);
             tr.appendChild(familyCell);
 
-            (row.values || []).forEach(value => {
+            const useVal = state.activeMetric === 'valorizacion';
+            const valArr = useVal ? (row.valorizacion || row.values || []) : (row.values || []);
+            valArr.forEach(value => {
                 const td = document.createElement('td');
                 td.className = 'text-end text-muted dim-pivot-value-cell';
-                td.textContent = value > 0 ? formatDecimal(value) : '-';
+                td.textContent = value > 0 ? (useVal ? formatAbbreviated(value) : formatDecimal(value)) : '-';
                 tr.appendChild(td);
             });
 
@@ -1413,7 +1511,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMapChart(rows) {
         const container = document.getElementById('mapContainer');
         if (!state.mapInstance) {
-            state.mapInstance = L.map(container).setView([-38.4161, -63.6167], 3);
+            state.mapInstance = L.map(container, { attributionControl: false }).setView([-38.4161, -63.6167], 3);
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
                 subdomains: 'abcd', maxZoom: 19,
@@ -1421,15 +1519,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         state.mapMarkers.forEach(m => state.mapInstance.removeLayer(m));
         state.mapMarkers = [];
+        const useVal = state.activeMetric === 'valorizacion';
         rows.forEach(item => {
             const key = Object.keys(provinceCoords).find(p => p.toLowerCase() === String(item.provincia).toLowerCase());
             if (!key) return;
+            const metricValue = useVal ? (item.valorizacion || 0) : (item.renglones || 0);
             const marker = L.circle(provinceCoords[key], {
                 color: '#5274ce', fillColor: '#5274ce', fillOpacity: 0.45,
-                radius: Math.min(Math.max(Math.log((item.renglones || 0) + 1) * 22000, 30000), 300000),
+                radius: Math.min(Math.max(Math.log(metricValue + 1) * 22000, 30000), 300000),
                 weight: 1,
             }).addTo(state.mapInstance);
-            marker.bindTooltip(`<b>${item.provincia}</b><br>Renglones: ${formatInteger(item.renglones)}`);
+            const tooltip = useVal
+                ? `<b>${item.provincia}</b><br>Valorización: ${formatAbbreviated(item.valorizacion || 0)}`
+                : `<b>${item.provincia}</b><br>Renglones: ${formatInteger(item.renglones || 0)}`;
+            marker.bindTooltip(tooltip);
             state.mapMarkers.push(marker);
         });
         window.setTimeout(() => state.mapInstance.invalidateSize(), 150);
@@ -1469,10 +1572,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
                 tooltip: {
                     callbacks: {
-                        label: ctx => `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones`,
+                        label: ctx => state.activeMetric === 'valorizacion'
+                            ? `${ctx.dataset.label}: ${formatAbbreviated(ctx.parsed.y)}`
+                            : `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones`,
                         footer: items => {
                             const total = items.reduce((sum, it) => sum + (it.parsed.y || 0), 0);
-                            return `Total: ${formatInteger(total)} renglones`;
+                            return state.activeMetric === 'valorizacion'
+                                ? `Total: ${formatAbbreviated(total)}`
+                                : `Total: ${formatInteger(total)} renglones`;
                         },
                     },
                 },
@@ -1517,7 +1624,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     stacked: true,
                     beginAtZero: true,
                     grid: { borderDash: [4, 4], color: '#e2e8f0' },
-                    ticks: { callback: v => formatCompactInteger(v) },
+                    ticks: { callback: v => state.activeMetric === 'valorizacion' ? formatAbbreviated(v) : formatCompactInteger(v) },
                 },
             },
         };
@@ -1535,6 +1642,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function formatCompactInteger(value) {
         return new Intl.NumberFormat('es-AR', { notation: 'compact', maximumFractionDigits: 0 }).format(value || 0);
+    }
+    function formatAbbreviated(value) {
+        const n = Number(value) || 0;
+        if (Math.abs(n) >= 1e9) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e9)}B`;
+        if (Math.abs(n) >= 1e6) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e6)}M`;
+        if (Math.abs(n) >= 1e3) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e3)}K`;
+        return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);
     }
     function formatMonthLabel(monthIso) {
         if (!monthIso) return '-';
