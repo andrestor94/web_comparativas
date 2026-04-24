@@ -19,6 +19,7 @@ from typing import Any
 
 import pandas as pd
 from sqlalchemy import Date, case, cast, delete, func, insert, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal, engine
@@ -886,7 +887,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
         )
     )
 
-    insert_stmt = insert(DimensionamientoFamilyMonthlySummary).from_select(
+    insert_stmt = pg_insert(DimensionamientoFamilyMonthlySummary).from_select(
         [
             "month",
             "plataforma",
@@ -906,6 +907,12 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             "import_run_id",
         ],
         summary_select,
+    ).on_conflict_do_nothing(
+        index_elements=[
+            "month", "plataforma", "cliente_nombre_homologado", "cliente_visible",
+            "provincia", "familia", "unidad_negocio", "subunidad_negocio",
+            "resultado_participacion", "is_identified", "is_client",
+        ]
     )
     session.execute(insert_stmt)
 
