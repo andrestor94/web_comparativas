@@ -31,169 +31,235 @@
 {% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Lectura de Pliegos · Vista Completa — Premium v4
+  ═══════════════════════════════════════════════════════════ */
   :root {
-    --bg-app: #f8fafc;
-    --bg-surface: #ffffff;
-    --text-primary: #0f172a;
-    --text-secondary: #64748b;
+    --bg-app:      #f3f5f8;
+    --bg-surface:  #ffffff;
+    --text-primary:#0f172a;
+    --text-second: #334155;
+    --text-muted:  #64748b;
+    --text-faint:  #94a3b8;
     --border-soft: #e2e8f0;
+    --border-mid:  #cbd5e1;
     --accent-blue: #2563eb;
-    --sidebar-w: 240px;
-    --radius-lg: 16px;
-    --radius-md: 10px;
-    --shadow-sm: 0 4px 6px -1px rgba(0,0,0,0.05);
+    --accent-lt:   #eff6ff;
+    --ok:          #059669;
+    --ok-lt:       #ecfdf5;
+    --warn:        #d97706;
+    --warn-lt:     #fffbeb;
+    --err:         #dc2626;
+    --err-lt:      #fef2f2;
+    --sidebar-w:   248px;
+    --radius-lg:   14px;
+    --radius-md:   10px;
+    --radius-sm:   7px;
+    --shadow-sm:   0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(15,23,42,.05);
+    --shadow-md:   0 2px 6px rgba(0,0,0,.05),0 8px 24px rgba(15,23,42,.07);
   }
 
-  body { background-color: var(--bg-app) !important; font-family: 'Outfit', sans-serif !important; color: var(--text-primary); }
+  body { background-color:var(--bg-app) !important;font-family:'Outfit',sans-serif !important;color:var(--text-primary); }
 
+  /* ── Layout ───────────────────────────────────────────────── */
   .amp-layout {
-    display: flex;
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 1.5rem;
-    gap: 1.5rem;
-    min-height: calc(100vh - 80px);
+    display:flex;max-width:1440px;margin:0 auto;
+    padding:1.4rem 1.5rem;gap:1.5rem;min-height:calc(100vh - 80px);
   }
 
-  /* Sidebar */
+  /* ── Sidebar ──────────────────────────────────────────────── */
   .amp-nav {
-    width: var(--sidebar-w);
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-    position: sticky;
-    top: 2rem;
-    height: max-content;
-    background: transparent !important;
+    width:var(--sidebar-w);flex-shrink:0;display:flex;flex-direction:column;
+    gap:2px;position:sticky;top:1.5rem;height:max-content;
+  }
+  .amp-nav-group {
+    display:flex;align-items:center;gap:.5rem;
+    margin:1.1rem 0 .3rem .5rem;
+  }
+  .amp-nav-group-line {
+    flex:1;height:1px;background:var(--border-soft);
   }
   .amp-nav-title {
-    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.09em;
-    color: var(--text-secondary); font-weight: 700; margin: 1.25rem 0 0.4rem 0.5rem;
+    font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--text-faint);font-weight:800;white-space:nowrap;
   }
   .amp-nav-btn {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.7rem 1rem; background: transparent; border: none;
-    border-radius: var(--radius-md); color: var(--text-secondary);
-    font-weight: 500; font-size: 0.92rem; text-align: left;
-    cursor: pointer; transition: all 0.2s; width: 100%; text-decoration: none;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:.6rem .9rem;background:transparent;border:none;
+    border-radius:var(--radius-sm);color:var(--text-muted);
+    font-weight:500;font-size:.88rem;text-align:left;
+    cursor:pointer;transition:all .18s;width:100%;text-decoration:none;
+    gap:.5rem;
   }
-  .amp-nav-btn i { font-size: 1rem; margin-right: 0.5rem; }
-  .amp-nav-btn:hover { background: #f1f5f9; color: var(--text-primary); }
+  .amp-nav-btn-inner { display:flex;align-items:center;gap:.5rem;min-width:0; }
+  .amp-nav-btn i { font-size:.95rem;flex-shrink:0;width:1.1rem;text-align:center; }
+  .amp-nav-btn:hover { background:#eef1f6;color:var(--text-primary); }
   .amp-nav-btn.active {
-    background: var(--bg-surface); color: var(--accent-blue); font-weight: 600;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.04); border: 1px solid var(--border-soft);
+    background:var(--bg-surface);color:var(--accent-blue);font-weight:700;
+    box-shadow:var(--shadow-sm);border:1px solid var(--border-soft);
+    border-left:3px solid var(--accent-blue);padding-left:calc(.9rem - 2px);
   }
   .amp-nav-badge {
-    background: #f1f5f9; color: var(--text-secondary);
-    padding: 0.1rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+    background:#eef1f6;color:var(--text-muted);
+    padding:.08rem .48rem;border-radius:999px;font-size:.68rem;font-weight:700;
+    flex-shrink:0;min-width:1.6rem;text-align:center;
   }
-  .amp-nav-btn.active .amp-nav-badge { background: #dce7f5; color: var(--accent-blue); }
+  .amp-nav-btn.active .amp-nav-badge { background:var(--accent-lt);color:var(--accent-blue); }
 
   /* CTA volver a resumida */
   .nav-cta-resumida {
-    margin-top: 1.5rem; padding: 0.85rem 1rem;
-    background: #f8fafc; border: 1px solid var(--border-soft);
-    border-radius: var(--radius-md); text-decoration: none;
-    display: block; transition: all 0.2s;
+    margin-top:1.2rem;padding:.8rem .9rem;
+    background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);
+    border:1px solid var(--border-soft);border-radius:var(--radius-md);
+    text-decoration:none;display:block;transition:all .18s;
   }
-  .nav-cta-resumida:hover { background: #f1f5f9; }
-  .nav-cta-resumida .cta-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--text-secondary); margin-bottom: 0.2rem; }
-  .nav-cta-resumida .cta-title { font-size: 0.88rem; font-weight: 700; color: var(--text-primary); }
+  .nav-cta-resumida:hover { background:#eef1f6;border-color:var(--border-mid); }
+  .nav-cta-resumida .cta-label { font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-faint);margin-bottom:.15rem; }
+  .nav-cta-resumida .cta-title { font-size:.86rem;font-weight:700;color:var(--text-second); }
 
-  /* Main */
-  .amp-main { flex-grow: 1; min-width: 0; }
-  .amp-panel { display: none; margin-top: 1.5rem; animation: fadeIn 0.25s ease; }
-  .amp-panel.active { display: block; }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  /* ── Main ────────────────────────────────────────────────── */
+  .amp-main { flex-grow:1;min-width:0; }
+  .amp-panel { display:none;margin-top:1.4rem;animation:fadeIn .22s ease; }
+  .amp-panel.active { display:block; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
 
-  /* Hero */
+  /* ── Hero ────────────────────────────────────────────────── */
   .amp-hero {
-    background: var(--bg-surface); border-radius: var(--radius-lg);
-    padding: 1.75rem 2rem; border: 1px solid var(--border-soft);
-    box-shadow: var(--shadow-sm); margin-bottom: 1.5rem;
+    background:var(--bg-surface);border-radius:var(--radius-lg);
+    padding:1.5rem 1.65rem;border:1px solid var(--border-soft);
+    box-shadow:var(--shadow-sm);margin-bottom:1.4rem;
+    position:relative;overflow:hidden;
   }
-  .amp-hero h1 { font-size: 1.5rem; font-weight: 800; color: var(--text-primary); margin: 0 0 0.3rem; }
-  .amp-hero p { font-size: 0.9rem; color: var(--text-secondary); margin: 0; }
+  .amp-hero::before {
+    content:'';position:absolute;top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,#2563eb 0%,#7c3aed 50%,#059669 100%);
+  }
+  .amp-hero h1 { font-size:1.35rem;font-weight:800;color:var(--text-primary);margin:0 0 .28rem;letter-spacing:-.01em; }
+  .amp-hero p  { font-size:.87rem;color:var(--text-muted);margin:0; }
 
-  /* Cards */
+  /* Métrica strip */
+  .amp-hero-metrics {
+    display:grid;grid-template-columns:1fr 1fr auto;gap:.85rem;
+    margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border-soft);
+  }
+  .amp-metric-col { display:flex;flex-direction:column;gap:.16rem; }
+  .amp-metric-kicker {
+    font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;
+  }
+  .amp-metric-num { font-size:1.6rem;font-weight:800;line-height:1;color:var(--text-primary); }
+  .amp-metric-bar {
+    height:5px;background:var(--border-soft);border-radius:999px;overflow:hidden;
+  }
+  .amp-metric-fill { height:100%;border-radius:999px;transition:width .4s; }
+  .amp-metric-sub { font-size:.7rem;color:var(--text-muted); }
+  .amp-metric-faltantes {
+    display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;
+    gap:.16rem;padding-left:.85rem;border-left:1px solid var(--border-soft);
+  }
+
+  /* ── Cards ───────────────────────────────────────────────── */
   .amp-card {
-    background: var(--bg-surface); border-radius: var(--radius-lg);
-    border: 1px solid var(--border-soft); box-shadow: var(--shadow-sm);
-    margin-bottom: 1.25rem; overflow: hidden;
+    background:var(--bg-surface);border-radius:var(--radius-lg);
+    border:1px solid var(--border-soft);box-shadow:var(--shadow-sm);
+    margin-bottom:1.2rem;overflow:hidden;
   }
   .amp-card-header {
-    padding: 1.1rem 1.4rem; border-bottom: 1px solid var(--border-soft);
-    background: #fbfcfd; display: flex; align-items: center;
-    justify-content: space-between; gap: 1rem;
+    padding:1rem 1.35rem;border-bottom:1px solid var(--border-soft);
+    background:#fafbfc;display:flex;align-items:center;
+    justify-content:space-between;gap:1rem;
   }
-  .amp-card-header h2 { font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; }
-  .amp-card-body { padding: 1.25rem 1.4rem; }
+  .amp-card-header h2 {
+    font-size:.97rem;font-weight:800;margin:0;color:var(--text-primary);
+    display:flex;align-items:center;gap:.5rem;
+  }
+  .amp-card-header h2 i { color:var(--accent-blue); }
+  .amp-card-body { padding:1.2rem 1.35rem; }
   .amp-badge {
-    background: #f1f5f9; color: var(--text-secondary);
-    padding: 0.15rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+    background:#eef1f6;color:var(--text-muted);
+    padding:.12rem .55rem;border-radius:999px;font-size:.72rem;font-weight:700;
+    flex-shrink:0;
   }
 
-  /* Grid de items */
-  .amp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; }
-  .amp-item { border: 1px solid var(--border-soft); border-radius: 10px; padding: 0.85rem 0.95rem; background: #f8fafc; }
-  .amp-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--text-secondary); }
-  .amp-value { margin-top: 0.3rem; color: var(--text-primary); font-weight: 600; line-height: 1.4; word-break: break-word; font-size: 0.92rem; }
+  /* ── Grid items ──────────────────────────────────────────── */
+  .amp-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.82rem; }
+  .amp-item {
+    border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+    padding:.82rem .95rem;background:var(--bg-app);
+    transition:box-shadow .15s;
+  }
+  .amp-item:hover { box-shadow:var(--shadow-sm); }
+  .amp-label { font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-muted); }
+  .amp-value { margin-top:.3rem;color:var(--text-primary);font-weight:600;line-height:1.4;word-break:break-word;font-size:.9rem; }
 
-  /* Tablas */
-  .amp-table { width: 100%; font-size: 0.88rem; border-collapse: collapse; }
-  .amp-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 800; background: #f8fafc; padding: 0.85rem 1rem; text-align: left; border-bottom: 1px solid var(--border-soft); }
-  .amp-table td { padding: 0.85rem 1rem; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
-  .amp-table tr:last-child td { border-bottom: none; }
-  .amp-table tr:hover td { background: #f8fafc; }
+  /* ── Tablas ───────────────────────────────────────────────── */
+  .amp-table { width:100%;font-size:.86rem;border-collapse:collapse; }
+  .amp-table th {
+    font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text-muted);font-weight:800;background:#f8fafc;
+    padding:.8rem 1rem;text-align:left;border-bottom:2px solid var(--border-soft);
+    white-space:nowrap;
+  }
+  .amp-table td { padding:.8rem 1rem;border-bottom:1px solid var(--border-soft);vertical-align:top; }
+  .amp-table tbody tr:last-child td { border-bottom:none; }
+  .amp-table tbody tr:hover td { background:#f8fafc;transition:background .12s; }
 
-  /* Badges estado */
-  .status-badge { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.55rem; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
-  .status-found { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
-  .status-infer { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
-  .status-miss { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-  .status-neutral { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+  /* ── Badges estado ───────────────────────────────────────── */
+  .status-badge {
+    display:inline-flex;align-items:center;gap:.22rem;
+    padding:.14rem .52rem;border-radius:999px;font-size:.69rem;font-weight:700;
+    white-space:nowrap;
+  }
+  .status-found   { background:var(--ok-lt);  color:var(--ok);   border:1px solid #a7f3d0; }
+  .status-infer   { background:var(--warn-lt);color:var(--warn); border:1px solid #fde68a; }
+  .status-miss    { background:var(--err-lt); color:var(--err);  border:1px solid #fecaca; }
+  .status-neutral { background:#f1f5f9;color:#475569;border:1px solid var(--border-mid); }
 
-  /* Accordion renglones */
-  .renglon-master { cursor: pointer; transition: background 0.15s; }
-  .renglon-master:hover td { background: #f1f5f9; }
-  .renglon-detail-row { display: none; background: #fbfcfd; }
-  .renglon-detail-row.open { display: table-row; }
-  .renglon-detail-box { padding: 1.25rem 1.4rem; border-left: 3px solid var(--accent-blue); }
+  /* ── Accordion renglones ─────────────────────────────────── */
+  .renglon-master { cursor:pointer;transition:background .12s; }
+  .renglon-master:hover td { background:#f1f5f9; }
+  .renglon-detail-row { display:none;background:#fafbfc; }
+  .renglon-detail-row.open { display:table-row; }
+  .renglon-detail-box { padding:1.15rem 1.35rem;border-left:3px solid var(--accent-blue); }
 
-  /* Timeline cronograma */
-  .timeline { padding: 1.4rem; display: flex; flex-direction: column; gap: 0.85rem; }
-  .tl-item { display: flex; gap: 1.1rem; }
-  .tl-date { width: 110px; flex-shrink: 0; text-align: right; padding-top: 0.2rem; }
-  .tl-date-val { font-weight: 700; color: var(--text-primary); font-size: 0.9rem; }
-  .tl-date-time { font-size: 0.77rem; color: var(--text-secondary); }
-  .tl-divider { width: 2px; background: #e2e8f0; position: relative; display: flex; flex-direction: column; align-items: center; }
-  .tl-dot { width: 12px; height: 12px; background: var(--accent-blue); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px var(--accent-blue); position: absolute; top: 0.3rem; }
-  .tl-content { padding-bottom: 1.25rem; flex-grow: 1; }
-  .tl-title { font-weight: 700; color: var(--text-primary); font-size: 1rem; }
-  .tl-desc { color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.2rem; }
+  /* ── Timeline cronograma ─────────────────────────────────── */
+  .timeline { padding:1.35rem 1.4rem;display:flex;flex-direction:column;gap:.8rem; }
+  .tl-item { display:flex;gap:1rem; }
+  .tl-date { width:105px;flex-shrink:0;text-align:right;padding-top:.18rem; }
+  .tl-date-val { font-weight:700;color:var(--text-primary);font-size:.88rem; }
+  .tl-date-time { font-size:.74rem;color:var(--text-muted); }
+  .tl-divider { width:2px;background:var(--border-soft);position:relative;display:flex;flex-direction:column;align-items:center; }
+  .tl-dot {
+    width:11px;height:11px;background:var(--accent-blue);
+    border:2.5px solid #fff;border-radius:50%;
+    box-shadow:0 0 0 1.5px var(--accent-blue);
+    position:absolute;top:.3rem;
+  }
+  .tl-content { padding-bottom:1.15rem;flex-grow:1; }
+  .tl-title { font-weight:700;color:var(--text-primary);font-size:.95rem; }
+  .tl-desc { color:var(--text-muted);font-size:.82rem;margin-top:.18rem; }
 
-  /* Toggle view mode */
+  /* ── Toggle view mode ────────────────────────────────────── */
   .view-mode-toggle {
-    display: inline-flex; align-items: center;
-    background: #f1f5f9; border: 1px solid var(--border-soft);
-    border-radius: 8px; padding: 3px; gap: 2px;
+    display:inline-flex;align-items:center;
+    background:#f1f5f9;border:1px solid var(--border-soft);
+    border-radius:8px;padding:3px;gap:2px;
   }
   .view-mode-btn {
-    display: inline-flex; align-items: center; gap: 0.4rem;
-    padding: 0.35rem 0.85rem; border-radius: 6px;
-    font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);
-    text-decoration: none; transition: all 0.15s; white-space: nowrap;
+    display:inline-flex;align-items:center;gap:.4rem;
+    padding:.35rem .85rem;border-radius:6px;
+    font-size:.81rem;font-weight:600;color:var(--text-muted);
+    text-decoration:none;transition:all .15s;white-space:nowrap;
   }
-  .view-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.7); }
-  .view-mode-btn.active { background: var(--bg-surface); color: var(--accent-blue); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .view-mode-btn:hover { color:var(--text-primary);background:rgba(255,255,255,.7); }
+  .view-mode-btn.active { background:var(--bg-surface);color:var(--accent-blue);box-shadow:0 1px 3px rgba(0,0,0,.1); }
 
-  .nd-text { color: #94a3b8; font-style: italic; }
-  .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .nd-text { color:var(--text-faint);font-style:italic; }
+  .clamp-2 { display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden; }
 
   @media (max-width: 992px) {
     .amp-layout { flex-direction: column; }
@@ -312,7 +378,194 @@
     background: #f8fafc;
   }
 
+  #amp-panel-depuracion .amp-card {
+    border-color: rgba(214, 226, 243, .92);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .03), 0 16px 38px rgba(55, 74, 105, .065);
+  }
+
+  #amp-panel-depuracion .amp-card-header {
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  #amp-panel-depuracion .amp-card-header h2 {
+    color: #273449;
+    font-size: 17px;
+    font-weight: 720;
+    letter-spacing: 0;
+  }
+
+  .debug-intro {
+    margin: 0;
+    padding: 16px 18px 8px;
+    color: #64748b;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .debug-legend {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 8px;
+    padding: 8px 18px 14px;
+  }
+
+  .debug-legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid #e3ebf6;
+    border-radius: 13px;
+    background: #fff;
+  }
+
+  .debug-legend-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 4px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+  }
+
+  .debug-legend-title {
+    display: block;
+    color: #273449;
+    font-size: 11.5px;
+    font-weight: 720;
+    line-height: 1.2;
+  }
+
+  .debug-legend-text {
+    display: block;
+    margin-top: 2px;
+    color: #7b8798;
+    font-size: 10.8px;
+    line-height: 1.25;
+  }
+
+  .debug-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 26px;
+    padding: 4px 9px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 680;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .debug-chip i {
+    font-size: 11px;
+  }
+
+  .debug-state-ok,
+  .debug-score-ok,
+  .debug-legend-ok { background: #effaf5; color: #137a56; border-color: #bee8d3; }
+  .debug-state-warn,
+  .debug-score-warn,
+  .debug-legend-warn { background: #fff8e8; color: #9a650f; border-color: #f4df9f; }
+  .debug-state-neutral,
+  .debug-score-neutral,
+  .debug-legend-neutral { background: #f4f7fb; color: #64748b; border-color: #dbe5f1; }
+  .debug-state-danger,
+  .debug-score-danger,
+  .debug-legend-danger { background: #fff1ef; color: #b04c3e; border-color: #f6c8bf; }
+
+  .debug-score {
+    justify-content: center;
+    min-width: 48px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .debug-score small {
+    color: inherit;
+    opacity: .66;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  #tablaDebug {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  #tablaDebug thead th {
+    color: #718096;
+    font-size: 10.5px;
+    font-weight: 760;
+    letter-spacing: .02em;
+    text-transform: none;
+    background: #f8fbff;
+  }
+
+  #tablaDebug tbody tr:nth-child(even) td {
+    background: #fcfdff;
+  }
+
+  #tablaDebug tbody tr:hover td {
+    background: #f7fbff;
+  }
+
+  #tablaDebug tbody td {
+    color: #475569;
+    line-height: 1.35;
+    vertical-align: middle;
+  }
+
+  .debug-canonical {
+    color: #273449;
+    font-size: 12px;
+    font-weight: 720;
+    line-height: 1.25;
+  }
+
+  .debug-ui-label {
+    margin-top: 3px;
+    color: #8a97aa;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .debug-mono {
+    color: #526174;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+  }
+
+  .debug-value {
+    color: #2f3b4f;
+    font-size: 12.2px;
+    line-height: 1.35;
+  }
+
+  .debug-missing-value {
+    color: #9aa6b7;
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .debug-reason {
+    max-width: 260px;
+    color: #7b8798;
+    font-size: 11.5px;
+    line-height: 1.38;
+  }
+
+  .debug-reason-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
   @media (max-width: 768px) {
+    .debug-legend { grid-template-columns: 1fr; }
     .debug-scroll-wrap { max-height: 55vh; }
     .debug-scroll-hint { display: none; } /* en mobile es obvio que hay scroll */
   }
@@ -330,7 +583,7 @@
      data-seccion="vista-ampliada">
 </div>
 
-<div class="amp-layout">
+<div class="amp-layout lp-expanded-view">
 
   {%- macro status_badge(estado) -%}
     {% set est_low = (estado|default(''))|lower %}
@@ -353,156 +606,157 @@
     {% endif %}
   {%- endmacro -%}
 
-  <!-- SIDEBAR NAVEGACIÓN -->
+  <!-- SIDEBAR NAVEGACIÓN PREMIUM -->
   <aside class="amp-nav">
-    <div class="amp-nav-title">Componentes</div>
+
+    {# ── Componentes del proceso ── #}
+    <div class="amp-nav-group">
+      <span class="amp-nav-title">Componentes</span>
+      <span class="amp-nav-group-line"></span>
+    </div>
     <button class="amp-nav-btn active" data-target="renglones">
-      <span><i class="bi bi-box-seam"></i> Renglones</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-box-seam"></i>Renglones</span>
       {% if caso.renglones %}<span class="amp-nav-badge">{{ caso.renglones|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="cronograma">
-      <span><i class="bi bi-calendar-event"></i> Cronograma</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-calendar3"></i>Cronograma</span>
       {% if caso.cronograma %}<span class="amp-nav-badge">{{ caso.cronograma|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="complementarios">
-      <span><i class="bi bi-grid-3x3-gap"></i> Complementarios</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-grid-3x3-gap"></i>Complementarios</span>
       {% if rp_output.matrix_fields %}<span class="amp-nav-badge">{{ rp_output.matrix_fields|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="requisitos">
-      <span><i class="bi bi-check2-square"></i> Requisitos</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-check2-square"></i>Requisitos</span>
       {% if caso.requisitos %}<span class="amp-nav-badge">{{ caso.requisitos|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="garantias">
-      <span><i class="bi bi-shield-check"></i> Garantías</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-shield-check"></i>Garantías</span>
       {% if caso.garantias %}<span class="amp-nav-badge">{{ caso.garantias|length }}</span>{% endif %}
     </button>
 
-    <div class="amp-nav-title mt-2">Documentación</div>
+    {# ── Documentación ── #}
+    <div class="amp-nav-group" style="margin-top:.55rem;">
+      <span class="amp-nav-title">Documentación</span>
+      <span class="amp-nav-group-line"></span>
+    </div>
     <button class="amp-nav-btn" data-target="documentos">
-      <span><i class="bi bi-folder2-open"></i> Documentos</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-folder2-open"></i>Documentos</span>
       {% if caso.documentos_pliego %}<span class="amp-nav-badge">{{ caso.documentos_pliego|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="actos">
-      <span><i class="bi bi-file-earmark-ruled"></i> Actos Adm.</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-file-earmark-ruled"></i>Actos Adm.</span>
       {% if caso.actos_admin %}<span class="amp-nav-badge">{{ caso.actos_admin|length }}</span>{% endif %}
     </button>
 
-    <div class="amp-nav-title mt-2">Auditoría</div>
+    {# ── Auditoría ── #}
+    <div class="amp-nav-group" style="margin-top:.55rem;">
+      <span class="amp-nav-title">Auditoría</span>
+      <span class="amp-nav-group-line"></span>
+    </div>
     <button class="amp-nav-btn" data-target="faltantes">
-      <span><i class="bi bi-exclamation-octagon"></i> Faltantes</span>
-      {% if caso.faltantes %}<span class="amp-nav-badge">{{ caso.faltantes|length }}</span>{% endif %}
+      <span class="amp-nav-btn-inner"><i class="bi bi-exclamation-octagon"></i>Faltantes</span>
+      {% if caso.faltantes %}<span class="amp-nav-badge" style="{% if caso.faltantes %}background:#fee2e2;color:#dc2626;{% endif %}">{{ caso.faltantes|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="hallazgos">
-      <span><i class="bi bi-lightbulb"></i> Hallazgos</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-lightbulb"></i>Hallazgos</span>
       {% if hallazgos_ordenados %}<span class="amp-nav-badge">{{ hallazgos_ordenados|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="trazabilidad">
-      <span><i class="bi bi-diagram-3"></i> Trazabilidad</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-diagram-3"></i>Trazabilidad</span>
       {% if caso.trazabilidad %}<span class="amp-nav-badge">{{ caso.trazabilidad|length }}</span>{% endif %}
     </button>
     {% if debug_matrix %}
     <button class="amp-nav-btn" data-target="depuracion">
-      <span><i class="bi bi-bug"></i> Depuración</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-bug"></i>Depuración</span>
       <span class="amp-nav-badge">{{ debug_matrix|length }}</span>
     </button>
     {% endif %}
     {% if proceso %}
     <button class="amp-nav-btn" data-target="extras">
-      <span><i class="bi bi-database"></i> Datos del Proceso</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-database"></i>Datos Proceso</span>
       <span class="amp-nav-badge">{{ proceso|length }}</span>
     </button>
     {% endif %}
     {% if analitica %}
     <button class="amp-nav-btn" data-target="analitica">
-      <span><i class="bi bi-graph-up-arrow"></i> SIEM Analítica</span>
+      <span class="amp-nav-btn-inner"><i class="bi bi-graph-up-arrow"></i>SIEM Analítica</span>
       <span class="amp-nav-badge">{{ analitica|length }}</span>
     </button>
     {% endif %}
 
-    <!-- CTA volver -->
+    <!-- CTA volver a pantalla principal -->
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="nav-cta-resumida">
-      <div class="cta-label"><i class="bi bi-arrow-left me-1"></i>Volver</div>
-      <div class="cta-title">Vista Resumida</div>
+      <div class="cta-label"><i class="bi bi-arrow-left me-1"></i>Volver a</div>
+      <div class="cta-title">Pantalla principal</div>
     </a>
   </aside>
 
   <!-- MAIN -->
   <main class="amp-main">
 
-    <!-- Hero -->
+    <!-- Hero premium -->
     <div class="amp-hero">
       <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
         <div>
+          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800;color:var(--accent-blue);margin-bottom:.3rem;">
+            Vista completa · Caso #{{ caso.id }}
+          </div>
           <h1>{{ caso.titulo }}</h1>
-          <p>Información completa extraída del pliego: renglones, cronograma, requisitos, garantías, documentos, trazabilidad y hallazgos.</p>
+          <p>Renglones, cronograma, requisitos, garantías, documentos, actos, trazabilidad y hallazgos.</p>
         </div>
-        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" style="display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;background:#f8fafc;border:1px solid var(--border-soft);border-radius:8px;font-size:.85rem;font-weight:600;color:var(--text-secondary);text-decoration:none;white-space:nowrap;">
-          <i class="bi bi-arrow-left"></i> Vista Resumida
+        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
+           style="display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .9rem;
+                  background:var(--bg-app);border:1px solid var(--border-soft);border-radius:8px;
+                  font-size:.82rem;font-weight:600;color:var(--text-muted);text-decoration:none;
+                  white-space:nowrap;transition:all .15s;"
+           onmouseover="this.style.background='#e9edf2'" onmouseout="this.style.background='var(--bg-app)'">
+          <i class="bi bi-arrow-left"></i> Pantalla principal
         </a>
       </div>
 
-      <!-- ── Tira de métricas de completitud ── -->
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:.85rem;margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid var(--border-soft);">
-
+      <!-- Tira de métricas -->
+      <div class="amp-hero-metrics">
         <!-- Ejecutiva -->
-        <div style="display:flex;flex-direction:column;gap:.18rem;">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#059669;">
-            Completitud Ejecutiva
-          </span>
-          <span style="font-size:1.65rem;font-weight:800;color:var(--text-primary);line-height:1;">
-            {{ completitud_ejecutiva.porcentaje }}<span style="font-size:.9rem;color:var(--text-secondary);font-weight:600;">%</span>
-          </span>
-          <div style="height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
-            <div style="height:100%;width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);border-radius:999px;transition:width .4s;"></div>
+        <div class="amp-metric-col">
+          <span class="amp-metric-kicker" style="color:var(--ok);">Completitud Ejecutiva</span>
+          <span class="amp-metric-num">{{ completitud_ejecutiva.porcentaje }}<span style="font-size:.9rem;color:var(--text-muted);font-weight:600;">%</span></span>
+          <div class="amp-metric-bar">
+            <div class="amp-metric-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
           </div>
-          <span style="font-size:.72rem;color:var(--text-secondary);">
-            {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} · Resumen de jefatura
-          </span>
+          <span class="amp-metric-sub">{{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} · Resumen de jefatura</span>
         </div>
-
         <!-- Técnica -->
-        <div style="display:flex;flex-direction:column;gap:.18rem;">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#2563eb;">
-            Completitud Técnica
-          </span>
-          <span style="font-size:1.65rem;font-weight:800;color:var(--text-primary);line-height:1;">
-            {{ completitud_tecnica.porcentaje }}<span style="font-size:.9rem;color:var(--text-secondary);font-weight:600;">%</span>
-          </span>
-          <div style="height:5px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
-            <div style="height:100%;width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:999px;transition:width .4s;"></div>
+        <div class="amp-metric-col">
+          <span class="amp-metric-kicker" style="color:var(--accent-blue);">Completitud Técnica</span>
+          <span class="amp-metric-num">{{ completitud_tecnica.porcentaje }}<span style="font-size:.9rem;color:var(--text-muted);font-weight:600;">%</span></span>
+          <div class="amp-metric-bar">
+            <div class="amp-metric-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
           </div>
-          <span style="font-size:.72rem;color:var(--text-secondary);">
-            {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} · Cobertura detallada
-          </span>
+          <span class="amp-metric-sub">{{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} · Cobertura detallada</span>
         </div>
-
-        <!-- Faltantes documentales -->
-        <div style="display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:.18rem;padding-left:.85rem;border-left:1px solid var(--border-soft);">
-          <span style="font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:{% if caso.faltantes %}#dc2626{% else %}#059669{% endif %};">
-            Faltantes Doc.
-          </span>
-          <span style="font-size:1.65rem;font-weight:800;line-height:1;color:{% if caso.faltantes %}#dc2626{% else %}#059669{% endif %};">
-            {{ caso.faltantes|length }}
-          </span>
-          <span style="font-size:.72rem;color:var(--text-secondary);">
-            {% if caso.faltantes|length == 1 %}faltante real{% else %}faltantes reales{% endif %}
-          </span>
+        <!-- Faltantes -->
+        <div class="amp-metric-faltantes">
+          <span class="amp-metric-kicker" style="color:{% if caso.faltantes %}var(--err){% else %}var(--ok){% endif %};">Faltantes Doc.</span>
+          <span class="amp-metric-num" style="color:{% if caso.faltantes %}var(--err){% else %}var(--ok){% endif %};">{{ caso.faltantes|length }}</span>
+          <span class="amp-metric-sub">{% if caso.faltantes|length == 1 %}faltante real{% else %}faltantes reales{% endif %}</span>
           {% if caso.faltantes %}
-          <a href="#" onclick="activateTab('faltantes');return false;" style="font-size:.7rem;color:#dc2626;font-weight:700;text-decoration:none;margin-top:.1rem;">
+          <a href="#" onclick="activateTab('faltantes');return false;"
+             style="font-size:.7rem;color:var(--err);font-weight:700;text-decoration:none;margin-top:.1rem;">
             Ver detalle →
           </a>
           {% endif %}
         </div>
-
       </div>
+
       <!-- Microcopy -->
-      <div style="margin-top:.85rem;font-size:.77rem;color:var(--text-secondary);display:flex;gap:.5rem;align-items:flex-start;">
-        <i class="bi bi-info-circle" style="flex-shrink:0;margin-top:.1rem;"></i>
+      <div style="margin-top:.85rem;font-size:.75rem;color:var(--text-muted);display:flex;gap:.45rem;align-items:flex-start;
+                  background:var(--bg-app);border:1px solid var(--border-soft);border-radius:8px;padding:.6rem .85rem;">
+        <i class="bi bi-info-circle-fill" style="color:var(--accent-blue);flex-shrink:0;margin-top:.08rem;"></i>
         <span>
-          <strong>Completitud ≠ Faltantes documentales.</strong>
+          <strong style="color:var(--text-second);">Completitud ≠ Faltantes documentales.</strong>
           Los porcentajes miden campos de datos identificados en el Excel.
-          Los faltantes documentales son problemas reales del expediente (renglones incompletos, anexos ausentes)
-          y son independientes del porcentaje de completitud.
+          Los faltantes son problemas reales del expediente y son independientes de la completitud.
         </span>
       </div>
     </div>
@@ -573,7 +827,22 @@
           </table>
         </div>
         {% else %}
-        <div class="p-5 text-center text-muted"><i class="bi bi-box-x fs-1 opacity-25 d-block mb-3"></i> Sin renglones registrados.</div>
+        <div class="lp-empty-state m-3">
+          <div class="lp-empty-icon"><i class="bi bi-box-seam"></i></div>
+          <div class="lp-empty-title">No se detectaron renglones estructurados</div>
+          <p class="lp-empty-copy">
+            El Excel importado no contiene items licitados cargados para esta seccion o la informacion
+            no fue identificada con suficiente certeza. Revisa trazabilidad o faltantes para validar el origen.
+          </p>
+          <div class="mt-3 d-flex justify-content-center gap-2 flex-wrap">
+            <a href="#" onclick="activateTab('trazabilidad');return false;" class="lp-btn lp-btn-secondary">
+              <i class="bi bi-diagram-3"></i>Revisar trazabilidad
+            </a>
+            <a href="#" onclick="activateTab('faltantes');return false;" class="lp-btn lp-btn-secondary">
+              <i class="bi bi-exclamation-octagon"></i>Ver faltantes
+            </a>
+          </div>
+        </div>
         {% endif %}
       </div>
     </div>
@@ -741,17 +1010,36 @@
 
     <!-- PANEL: ACTOS ADMINISTRATIVOS -->
     <div class="amp-panel" id="amp-panel-actos">
-      <div class="amp-card">
+
+      {# Clasificar actos: normativa general vs actos del expediente #}
+      {%- set _NORMATIVA_TOKENS = ['ley', 'decreto', 'resolución general', 'resolucion general', 'disposición', 'disposicion', 'norma', 'reglamento', 'ordenanza', 'decreto reglamentario', 'marco legal', 'convenio marco'] -%}
+      {%- set actos_expediente = [] -%}
+      {%- set actos_normativa = [] -%}
+      {%- for a in caso.actos_admin -%}
+        {%- set _tipo_low = (a.tipo_acto or '')|lower -%}
+        {%- set _es_normativa = false -%}
+        {%- for tok in _NORMATIVA_TOKENS -%}
+          {%- if tok in _tipo_low -%}{%- set _es_normativa = true -%}{%- endif -%}
+        {%- endfor -%}
+        {%- if _es_normativa -%}
+          {%- set _ = actos_normativa.append(a) -%}
+        {%- else -%}
+          {%- set _ = actos_expediente.append(a) -%}
+        {%- endif -%}
+      {%- endfor -%}
+
+      <!-- Sub-sección: Actos del Expediente -->
+      <div class="amp-card" style="margin-bottom:.85rem;">
         <div class="amp-card-header">
-          <h2><i class="bi bi-file-earmark-ruled"></i> Actos Administrativos</h2>
-          <span class="amp-badge">{{ caso.actos_admin|length }}</span>
+          <h2><i class="bi bi-file-earmark-check"></i> Actos del Expediente</h2>
+          <span class="amp-badge">{{ actos_expediente|length }}</span>
         </div>
-        {% if caso.actos_admin %}
+        {% if actos_expediente %}
         <div class="table-responsive">
           <table class="amp-table">
             <thead><tr><th>Tipo Acto</th><th>N°</th><th>Fecha</th><th>Organismo</th><th>Descripción</th></tr></thead>
             <tbody>
-              {% for a in caso.actos_admin %}
+              {% for a in actos_expediente %}
               <tr>
                 <td class="fw-bold">{{ a.tipo_acto or '—' }}</td>
                 <td>{{ a.numero or '—' }}</td>
@@ -764,57 +1052,109 @@
           </table>
         </div>
         {% else %}
-        <div class="p-5 text-center text-muted"><i class="bi bi-file-earmark-x fs-1 opacity-25 d-block mb-3"></i> Sin actos administrativos.</div>
+        <div class="p-4 text-center text-muted" style="font-size:.88rem;">
+          <i class="bi bi-file-earmark-x fs-1 opacity-25 d-block mb-2"></i>
+          Sin actos administrativos del expediente cargados.<br>
+          <span style="font-size:.8rem;opacity:.7;">Aquí deben aparecer: autorización de llamado, preadjudicación, adjudicación, orden de compra, resoluciones propias del expediente.</span>
+        </div>
         {% endif %}
       </div>
-    </div>
 
-    <!-- PANEL: FALTANTES -->
-    <div class="amp-panel" id="amp-panel-faltantes">
-      <div class="amp-card {% if caso.faltantes %}border-danger{% endif %}" style="{% if caso.faltantes %}border-color:#fca5a5{% endif %}">
-        <div class="amp-card-header" style="{% if caso.faltantes %}background:#fef2f2;border-bottom-color:#fca5a5;{% endif %}">
-          <h2 class="{% if caso.faltantes %}text-danger{% endif %}"><i class="bi bi-exclamation-octagon"></i> Faltantes Documentales</h2>
-          {% if caso.faltantes %}<span class="amp-badge" style="background:#fee2e2;color:#dc2626;">{{ caso.faltantes|length }}</span>{% endif %}
-        </div>
-        {% if caso.faltantes %}
-        <!-- Callout explicativo: faltantes documentales ≠ campos no resueltos -->
-        <div style="padding:.85rem 1.4rem;background:#fef9ec;border-bottom:1px solid #fde68a;">
-          <div class="d-flex gap-2 align-items-start">
-            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#d97706;margin-top:.1rem;"></i>
-            <div style="font-size:.81rem;color:#92400e;line-height:1.45;">
-              <strong>Faltantes documentales ≠ campos no resueltos.</strong>
-              Estos faltantes son problemas registrados del expediente: renglones incompletos, anexos no cargados o condiciones no especificadas en el pliego.
-              Son <em>independientes</em> de la completitud ejecutiva
-              (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>) y técnica
-              (<strong>{{ completitud_tecnica.porcentaje }}%</strong>), que miden si los campos de datos
-              fueron identificados en el Excel.
-              {% if completitud_ejecutiva.faltantes_criticos > 0 %}
-              Los faltantes críticos aplican un tope del 89% al porcentaje de completitud.
-              {% endif %}
-            </div>
-          </div>
+      <!-- Sub-sección: Normativa aplicable -->
+      {% if actos_normativa %}
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-journal-text"></i> Normativa aplicable</h2>
+          <span class="amp-badge">{{ actos_normativa|length }}</span>
         </div>
         <div class="table-responsive">
           <table class="amp-table">
-            <thead><tr><th>Campo Objetivo</th><th>Motivo / Detalle</th><th>Criticidad</th><th>Recomendación</th></tr></thead>
+            <thead><tr><th>Tipo</th><th>N°</th><th>Descripción</th></tr></thead>
             <tbody>
-              {% for f in caso.faltantes|sort(attribute='criticidad', reverse=True) %}
-              {% set crit = (f.criticidad or '')|lower %}
-              <tr class="{% if crit in ['alta','crítica','critica','alto'] %}table-danger{% endif %}">
-                <td class="fw-bold">{{ f.campo_objetivo or '—' }}</td>
-                <td>
-                  <span class="d-block fw-semibold mb-1">{{ f.motivo or '—' }}</span>
-                  <span class="text-secondary" style="font-size:.82rem;">{{ f.detalle or '' }}</span>
-                </td>
-                <td>{{ status_badge(f.criticidad) }}</td>
-                <td class="fst-italic" style="font-size:.85rem;">{{ f.accion_recomendada or '—' }}</td>
+              {% for a in actos_normativa %}
+              <tr>
+                <td class="fw-bold">{{ a.tipo_acto or '—' }}</td>
+                <td>{{ a.numero or '—' }}</td>
+                <td>{{ a.descripcion or '—' }}</td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <!-- PANEL: FALTANTES -->
+    <div class="amp-panel" id="amp-panel-faltantes">
+      <div class="amp-card" style="{% if caso.faltantes %}border-color:#fecaca;{% endif %}">
+        <div class="amp-card-header" style="{% if caso.faltantes %}background:#fef8f8;border-bottom-color:#fecaca;{% endif %}">
+          <h2 style="{% if caso.faltantes %}color:#b91c1c;{% endif %}">
+            <i class="bi bi-exclamation-octagon{% if not caso.faltantes %} text-success{% endif %}"></i>
+            Faltantes Documentales
+          </h2>
+          {% if caso.faltantes %}
+          <span class="amp-badge" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;">
+            {{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }}
+          </span>
+          {% else %}
+          <span class="amp-badge" style="background:var(--ok-lt);color:var(--ok);border:1px solid #a7f3d0;">Sin faltantes</span>
+          {% endif %}
+        </div>
+
+        {% if caso.faltantes %}
+        <!-- Callout explicativo -->
+        <div style="padding:.75rem 1.35rem;background:#fffbeb;border-bottom:1px solid #fde68a;">
+          <div style="display:flex;gap:.55rem;align-items:flex-start;">
+            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#d97706;margin-top:.1rem;font-size:.95rem;"></i>
+            <div style="font-size:.79rem;color:#78350f;line-height:1.48;">
+              <strong>Faltantes documentales ≠ campos no resueltos.</strong>
+              Son problemas registrados del expediente: renglones incompletos, anexos no cargados o condiciones sin especificar.
+              Son independientes de la completitud ejecutiva (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>)
+              y técnica (<strong>{{ completitud_tecnica.porcentaje }}%</strong>).
+              {% if completitud_ejecutiva.faltantes_criticos > 0 %}
+              Los faltantes críticos aplican un tope del 89% a la completitud.
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead>
+              <tr>
+                <th>Campo objetivo</th>
+                <th>Motivo / Detalle</th>
+                <th style="width:110px;">Criticidad</th>
+                <th>Recomendación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in caso.faltantes|sort(attribute='criticidad', reverse=True) %}
+              {% set crit = (f.criticidad or '')|lower %}
+              <tr style="{% if crit in ['alta','crítica','critica','alto'] %}background:#fff8f8;{% endif %}">
+                <td style="font-weight:700;white-space:nowrap;">{{ f.campo_objetivo or '—' }}</td>
+                <td>
+                  <div style="font-weight:600;margin-bottom:.2rem;">{{ f.motivo or '—' }}</div>
+                  {% if f.detalle %}
+                  <div style="font-size:.8rem;color:var(--text-muted);">{{ f.detalle }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ status_badge(f.criticidad) }}</td>
+                <td style="font-style:italic;font-size:.83rem;color:var(--text-second);">{{ f.accion_recomendada or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
         {% else %}
-        <div class="p-4 text-center text-success"><i class="bi bi-check-circle-fill fs-2 d-block mb-2"></i> No se registraron faltantes.</div>
+        <div style="padding:2.5rem;text-align:center;color:var(--ok);">
+          <i class="bi bi-check-circle-fill" style="font-size:2rem;display:block;margin-bottom:.65rem;opacity:.85;"></i>
+          <div style="font-weight:700;font-size:.95rem;">Sin faltantes documentales registrados</div>
+          <div style="font-size:.82rem;color:var(--text-muted);margin-top:.3rem;">El expediente no tiene problemas documentales identificados.</div>
+        </div>
         {% endif %}
       </div>
     </div>
@@ -928,31 +1268,49 @@
           </div>
         </div>
         <div class="amp-card-body p-0">
-          <p class="text-muted px-3 pt-3 pb-1" style="font-size:.82rem;">
-            Esta tabla muestra exactamente cómo se resolvió cada campo canónico del resumen:
-            qué fuente aportó el valor, qué alias coincidió, el estado del dato y el puntaje aplicado para la completitud.
+          <p class="debug-intro">
+            Esta tabla muestra como se resolvio cada campo canonico: fuente, alias detectado, valor obtenido,
+            estado visual y puntaje aplicado. Los colores separan problemas reales de casos neutros o no concluyentes.
           </p>
 
-          <!-- Resumen rápido de puntajes -->
-          {% set enc = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Encontrado') | list | length %}
-          {% set inf = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Inferido') | list | length %}
-          {% set amb = debug_matrix | selectattr('estado_resuelto', 'equalto', 'Ambiguo') | list | length %}
-          {% set falt = debug_matrix | rejectattr('valor_resuelto') | list | length %}
-          <div class="d-flex gap-3 px-3 pb-3 flex-wrap">
-            <span class="badge rounded-pill bg-success bg-opacity-15 text-success fw-semibold px-3 py-2">
-              <i class="bi bi-check-circle-fill me-1"></i>{{ enc }} Encontrados
-            </span>
-            <span class="badge rounded-pill bg-warning bg-opacity-15 text-warning fw-semibold px-3 py-2">
-              <i class="bi bi-lightning-fill me-1"></i>{{ inf }} Inferidos
-            </span>
-            <span class="badge rounded-pill bg-secondary bg-opacity-15 text-secondary fw-semibold px-3 py-2">
-              <i class="bi bi-question-circle-fill me-1"></i>{{ amb }} Ambiguos
-            </span>
-            <span class="badge rounded-pill bg-danger bg-opacity-15 text-danger fw-semibold px-3 py-2">
-              <i class="bi bi-x-circle-fill me-1"></i>{{ falt }} Sin valor
-            </span>
+          <!-- Leyenda semantica de estados -->
+          {% set debug_counts = namespace(ok=0, warn=0, neutral=0, danger=0) %}
+          {% for item in debug_matrix %}
+            {% set item_score = item.puntaje_aplicado|float %}
+            {% set item_candidates = item.candidatos_proceso + item.candidatos_trazab + item.candidatos_tematicos %}
+            {% set item_state = (item.estado_resuelto|default('')|lower) %}
+            {% if item_state in ['contradictorio'] %}
+              {% set debug_counts.danger = debug_counts.danger + 1 %}
+            {% elif not item.valor_resuelto %}
+              {% if item_candidates == 0 %}
+                {% set debug_counts.neutral = debug_counts.neutral + 1 %}
+              {% else %}
+                {% set debug_counts.danger = debug_counts.danger + 1 %}
+              {% endif %}
+            {% elif item_state in ['inferido', 'ambiguo', 'pendiente validacion', 'pendiente validación', 'validacion manual', 'validación manual'] or item_score < 0.7 %}
+              {% set debug_counts.warn = debug_counts.warn + 1 %}
+            {% else %}
+              {% set debug_counts.ok = debug_counts.ok + 1 %}
+            {% endif %}
+          {% endfor %}
+          <div class="debug-legend" aria-label="Leyenda de estados de depuracion">
+            <div class="debug-legend-item" title="Campo resuelto con valor confiable.">
+              <span class="debug-legend-dot debug-legend-ok"></span>
+              <span><strong class="debug-legend-title">Verde - Resuelto</strong><span class="debug-legend-text">{{ debug_counts.ok }} campos con valor confiable.</span></span>
+            </div>
+            <div class="debug-legend-item" title="Campo inferido, manual, ambiguo o con puntaje intermedio.">
+              <span class="debug-legend-dot debug-legend-warn"></span>
+              <span><strong class="debug-legend-title">Amarillo - Parcial / revisar</strong><span class="debug-legend-text">{{ debug_counts.warn }} campos inferidos, ambiguos o intermedios.</span></span>
+            </div>
+            <div class="debug-legend-item" title="No aplica, sin candidatos o sin informacion suficiente para marcarlo como faltante real.">
+              <span class="debug-legend-dot debug-legend-neutral"></span>
+              <span><strong class="debug-legend-title">Gris - Sin definicion</strong><span class="debug-legend-text">{{ debug_counts.neutral }} neutros: sin candidatos o no concluyentes.</span></span>
+            </div>
+            <div class="debug-legend-item" title="Campo esperado pero no resuelto, o con conflicto de informacion.">
+              <span class="debug-legend-dot debug-legend-danger"></span>
+              <span><strong class="debug-legend-title">Rojo - Faltante real</strong><span class="debug-legend-text">{{ debug_counts.danger }} problemas reales o conflictos.</span></span>
+            </div>
           </div>
-
           <p class="debug-scroll-hint">
             <i class="bi bi-arrows-move"></i>
             Desplazá horizontalmente para ver todas las columnas — el encabezado y la primera columna quedan fijos.
@@ -973,41 +1331,64 @@
                   <th style="min-width:160px;">Valor resuelto</th>
                   <th style="min-width:80px;">Estado</th>
                   <th style="min-width:60px; text-align:center;">Puntaje</th>
-                  <th style="min-width:60px; text-align:center;">Cands.</th>
-                  <th>Motivo si no resuelve</th>
+                  <th style="min-width:78px; text-align:center;">Candidatos</th>
+                  <th>Motivo / explicaciÃ³n</th>
                 </tr>
               </thead>
               <tbody>
                 {% for row in debug_matrix %}
                 {% set pct = (row.puntaje_aplicado * 100)|int %}
-                {% set estado_css = {
-                    'Encontrado': 'success',
-                    'Inferido': 'warning',
-                    'Ambiguo': 'secondary',
-                    'Contradictorio': 'danger',
-                    'No encontrado': 'danger',
-                    'Pendiente validacion': 'secondary'
-                  }.get(row.estado_resuelto, 'secondary') %}
+                {% set score = row.puntaje_aplicado|float %}
+                {% set candidatos_total = row.candidatos_proceso + row.candidatos_trazab + row.candidatos_tematicos %}
+                {% set estado_low = (row.estado_resuelto|default('')|lower) %}
+                {% if estado_low in ['contradictorio'] %}
+                  {% set estado_kind = 'danger' %}
+                  {% set estado_label = 'Conflicto' %}
+                  {% set estado_help = 'Hay informacion contradictoria o no resoluble con confianza.' %}
+                  {% set estado_icon = 'bi-x-octagon-fill' %}
+                {% elif not row.valor_resuelto %}
+                  {% if candidatos_total == 0 %}
+                    {% set estado_kind = 'neutral' %}
+                    {% set estado_label = 'Sin definir' %}
+                    {% set estado_help = 'No hubo candidatos o informacion suficiente; no se marca como faltante real.' %}
+                    {% set estado_icon = 'bi-dash-circle' %}
+                  {% else %}
+                    {% set estado_kind = 'danger' %}
+                    {% set estado_label = 'Faltante real' %}
+                    {% set estado_help = 'El campo esperaba resolucion, pero no quedo valor resuelto.' %}
+                    {% set estado_icon = 'bi-x-circle-fill' %}
+                  {% endif %}
+                {% elif estado_low in ['inferido', 'ambiguo', 'pendiente validacion', 'pendiente validación', 'validacion manual', 'validación manual'] or score < 0.7 %}
+                  {% set estado_kind = 'warn' %}
+                  {% set estado_label = 'Parcial / revisar' %}
+                  {% set estado_help = 'Existe valor, pero fue inferido, ambiguo, manual o con confianza intermedia.' %}
+                  {% set estado_icon = 'bi-exclamation-triangle-fill' %}
+                {% else %}
+                  {% set estado_kind = 'ok' %}
+                  {% set estado_label = 'Resuelto' %}
+                  {% set estado_help = 'Campo resuelto con valor confiable.' %}
+                  {% set estado_icon = 'bi-check-circle-fill' %}
+                {% endif %}
                 <tr data-search="{{ (row.campo_canonico + ' ' + row.fuente_resuelta + ' ' + row.valor_resuelto + ' ' + row.estado_resuelto)|lower }}"
                     data-estado="{{ row.estado_resuelto }}">
                   <td>
-                    <div class="fw-semibold" style="font-family:monospace;font-size:.78rem;color:#334155;">{{ row.campo_canonico }}</div>
-                    <div class="text-muted" style="font-size:.73rem;">{{ row.label_ui }}</div>
+                    <div class="debug-canonical">{{ row.campo_canonico }}</div>
+                    <div class="debug-ui-label">{{ row.label_ui }}</div>
                   </td>
                   <td>
                     {% if row.fuente_resuelta %}
-                    <span class="badge bg-primary bg-opacity-10 text-primary" style="font-size:.73rem;">{{ row.fuente_resuelta }}</span>
+                    <span class="debug-chip debug-score-neutral">{{ row.fuente_resuelta }}</span>
                     {% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
                   <td>
                     {% if row.hoja_origen %}
-                    <span style="font-size:.75rem;color:#64748b;">{{ row.hoja_origen }}</span>
+                    <span class="debug-mono">{{ row.hoja_origen }}</span>
                     {% else %}<span class="text-muted">—</span>{% endif %}
                   </td>
-                  <td style="font-family:monospace;font-size:.75rem;color:#475569;">
+                  <td class="debug-mono">
                     {{ row.columna_origen or '—' }}
                   </td>
-                  <td style="font-family:monospace;font-size:.75rem;color:#7c3aed;">
+                  <td class="debug-mono">
                     {% if row.alias_detectado and row.alias_detectado != row.campo_canonico %}
                     <i class="bi bi-arrow-right-short text-muted"></i> {{ row.alias_detectado }}
                     {% elif row.alias_detectado %}
@@ -1016,26 +1397,30 @@
                   </td>
                   <td>
                     {% if row.valor_resuelto %}
-                    <div class="clamp-2" title="{{ row.valor_resuelto }}" style="font-size:.8rem;">{{ row.valor_resuelto }}</div>
-                    {% else %}<span class="text-muted fst-italic" style="font-size:.78rem;">Sin valor</span>{% endif %}
+                    <div class="clamp-2 debug-value" title="{{ row.valor_resuelto }}">{{ row.valor_resuelto }}</div>
+                    {% else %}<span class="debug-missing-value">Sin valor</span>{% endif %}
                   </td>
                   <td>
-                    <span class="badge bg-{{ estado_css }} bg-opacity-15 text-{{ estado_css }}" style="font-size:.72rem;">
-                      {{ row.estado_resuelto }}
+                    <span class="debug-chip debug-state-{{ estado_kind }}" title="{{ estado_help }} Estado original: {{ row.estado_resuelto }}">
+                      <i class="bi {{ estado_icon }}"></i>{{ estado_label }}
                     </span>
                   </td>
                   <td class="text-center">
-                    <span class="fw-bold" style="color:{% if pct >= 70 %}#16a34a{% elif pct >= 40 %}#d97706{% else %}#dc2626{% endif %};">
-                      {{ '%.1f'|format(row.puntaje_aplicado) }}
+                    <span class="debug-chip debug-score debug-score-{{ estado_kind }}" title="Puntaje aplicado para completitud: {{ '%.1f'|format(row.puntaje_aplicado) }}. El color sigue el estado visual, no solo el numero.">
+                      {{ '%.1f'|format(row.puntaje_aplicado) }} <small>{{ pct }}%</small>
                     </span>
                   </td>
                   <td class="text-center" style="font-size:.75rem;color:#64748b;">
-                    <span title="Proceso: {{ row.candidatos_proceso }} | Trazabilidad: {{ row.candidatos_trazab }} | Temáticos: {{ row.candidatos_tematicos }}">
-                      {{ row.candidatos_proceso + row.candidatos_trazab + row.candidatos_tematicos }}
+                    <span title="Proceso: {{ row.candidatos_proceso }} | Trazabilidad: {{ row.candidatos_trazab }} | Tematicos: {{ row.candidatos_tematicos }}">
+                      {{ candidatos_total }}
                     </span>
                   </td>
-                  <td style="font-size:.75rem;color:#94a3b8;font-style:italic;max-width:200px;">
-                    {{ row.motivo_si_no_resuelve or '' }}
+                  <td class="debug-reason">
+                    {% if row.motivo_si_no_resuelve %}
+                    <span class="debug-reason-text" title="{{ row.motivo_si_no_resuelve }}">{{ row.motivo_si_no_resuelve }}</span>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
                   </td>
                 </tr>
                 {% endfor %}

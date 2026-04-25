@@ -1669,6 +1669,95 @@ def build_rp_output(caso: PliegoSolicitud) -> dict[str, Any]:
     }
 
 
+# Campos críticos de Fusión que bloquean listo_para_fusion si tienen estado incompleto.
+# La clave es el label RP tal como aparece en FIELD_SPECS.
+_FUSION_CRITICAL_FIELDS: list[str] = [
+    "N° Procesos",
+    "Unidad Ejecutora",
+    "Nombre Proceso",
+    "Objeto Contratación",
+    "Procedimiento Selección",
+    "Tipo Cotización",
+    "Tipo Adjudicación",
+    "Fecha Acto Apertura",
+    "Monto",
+    "Moneda",
+]
+# Campos críticos adicionales solo cuando existen renglones
+_FUSION_CRITICAL_RENGLON_FIELDS: list[str] = [
+    "Descripción",
+    "Cant",
+]
+# Estados que bloquean Fusión en un campo crítico
+_FUSION_BLOCKING_STATUSES: set[str] = {
+    "FALTANTE_REAL",
+    "AMBIGUO",
+    "VALIDACION_MANUAL",
+}
+
+
+def _compute_fusion_status(caso: PliegoSolicitud, n_renglones: int) -> tuple[str, str]:
+    """
+    Evalúa si el caso está listo para carga en Fusión.
+    Bloquea con 'NO' o 'PARCIAL' si hay campos críticos con estados problemáticos.
+    Retorna (listo_para_fusion, motivo_bloqueo).
+    """
+    if n_renglones == 0:
+        return "NO", "Sin renglones registrados"
+
+    try:
+        rp = build_rp_output(caso)
+    except Exception:
+        return "PARCIAL", "Error al evaluar campos críticos"
+
+    gen_idx = {f["label"]: f for f in rp["general_fields"]}
+    # Incluir renglones solo si existen
+    detail_idx: dict[str, dict] = {}
+    if rp["detail_rows"]:
+        for row in rp["detail_rows"]:
+            for lbl, cell in row.items():
+                if lbl in _FUSION_CRITICAL_RENGLON_FIELDS:
+                    # Pesimista: si algún renglón falla en ese campo, se bloquea
+                    prev = detail_idx.get(lbl)
+                    if prev is None or cell.get("coverage_status", "FALTANTE_REAL") in _FUSION_BLOCKING_STATUSES:
+                        detail_idx[lbl] = cell
+
+    blocking: list[str] = []
+
+    for label in _FUSION_CRITICAL_FIELDS:
+        field = gen_idx.get(label)
+        if field is None:
+            blocking.append(label)
+            continue
+        if field.get("coverage_status", "FALTANTE_REAL") in _FUSION_BLOCKING_STATUSES:
+            blocking.append(label)
+
+    if n_renglones > 0:
+        for label in _FUSION_CRITICAL_RENGLON_FIELDS:
+            field = detail_idx.get(label)
+            if field is None or field.get("coverage_status", "FALTANTE_REAL") in _FUSION_BLOCKING_STATUSES:
+                blocking.append(f"{label} (renglones)")
+
+    # Fecha apertura extra: hora 00:00:00 cuenta como bloqueo parcial
+    fecha_field = gen_idx.get("Fecha Acto Apertura", {})
+    display_fecha = fecha_field.get("display_value", "") or ""
+    if display_fecha.endswith("00:00:00") and "Fecha Acto Apertura" not in blocking:
+        blocking.append("Fecha Acto Apertura (hora no identificada)")
+
+    if not blocking:
+        return "SI", ""
+    motivo = "Campos pendientes: " + ", ".join(blocking)
+    # Si los únicos bloqueos son hora ambigua o validacion_manual → PARCIAL; si hay FALTANTE_REAL → NO
+    statuses_criticos = {
+        gen_idx.get(lbl, {}).get("coverage_status", "FALTANTE_REAL")
+        for lbl in _FUSION_CRITICAL_FIELDS
+        if lbl in blocking and lbl in gen_idx
+    }
+    if "FALTANTE_REAL" in statuses_criticos:
+        return "NO", motivo
+    return "PARCIAL", motivo
+
+
 def _get_raw_dual_data(caso: PliegoSolicitud) -> dict[str, list[dict[str, Any]]]:
     """Obtiene los datos crudos de las 14 hojas para el export dual."""
     data = {}
@@ -1843,15 +1932,7 @@ def _get_raw_dual_data(caso: PliegoSolicitud) -> dict[str, list[dict[str, Any]]]
         n_fusion_ren = len(data["Fusion_Renglones"])
         tiene_cabecera = bool(data["Fusion_Cabecera"])
         tiene_analitica = bool(data["SIEM_Analitica"])
-        if n_renglones == 0:
-            listo = "NO"
-            motivo = "Sin renglones registrados"
-        elif not tiene_analitica:
-            listo = "PARCIAL"
-            motivo = "Sin analitica SIEM generada"
-        else:
-            listo = "SI"
-            motivo = ""
+        listo, motivo = _compute_fusion_status(caso, n_renglones)
         data["Control_Carga"] = [{
             "caso_id": caso.id,
             "titulo": caso.titulo or caso.nombre_licitacion or "",
@@ -2276,6 +2357,15 @@ def _apply_erp_format(label: str, field_data: dict[str, Any]) -> dict[str, Any]:
         result = dict(field_data)
         result["display_value"] = formatted
         result["export_value"] = formatted
+        # Para fechas: si la hora es 00:00:00 marcar como ambigua (puede ser default, no real)
+        if label == "Fecha Acto Apertura" and formatted.endswith("00:00:00"):
+            result["hora_no_identificada"] = True
+        return result
+
+    # Fecha sin cambio de formato: verificar igual si la hora es 00:00:00
+    if label == "Fecha Acto Apertura" and re.search(r"00:00:00", _safe_str(formatted)):
+        result = dict(field_data)
+        result["hora_no_identificada"] = True
         return result
 
     return field_data

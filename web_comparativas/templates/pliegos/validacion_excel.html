@@ -5,173 +5,307 @@
 
 {% block toolbar_actions %}
 <div class="d-flex gap-2">
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin" class="btn btn-sm btn-outline-secondary">
+  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
+     class="btn btn-sm btn-outline-secondary" style="border-radius:.6rem;font-weight:600;">
     <i class="bi bi-arrow-left me-1"></i>Volver al caso
   </a>
 </div>
 {% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
 <style>
-  .val-shell { max-width: 1100px; padding:.8rem .2rem 1.5rem; }
-  .val-card { background:#fff; border:1px solid rgba(15,23,42,.08); border-radius:1rem; box-shadow:0 10px 24px rgba(15,23,42,.05); margin-bottom:1rem; }
-  .val-card .card-body { padding:1.15rem 1.2rem; }
-  .metrics-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.75rem; }
-  .metric-box { text-align:center; padding:.9rem .8rem; border-radius:.85rem; background:#f8fafc; border:1px solid rgba(15,23,42,.08); }
-  .metric-box .num { font-size:1.55rem; font-weight:800; line-height:1; color:#123b63; }
-  .metric-box .lbl { font-size:.72rem; text-transform:uppercase; letter-spacing:.07em; color:#6b7280; font-weight:700; margin-top:.3rem; }
-  .progress-bar-wrap { height:10px; background:#e9ecef; border-radius:999px; overflow:hidden; }
-  .progress-bar-fill { height:100%; background:linear-gradient(90deg, #198754, #20c997); }
-  .matrix-table th, .matrix-table td { font-size:.8rem; vertical-align:top; }
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Validación de Carga — Premium v4
+  ═══════════════════════════════════════════════════════════ */
+  :root {
+    --v-surface: #ffffff;
+    --v-bg:      #f3f5f8;
+    --v-border:  #e2e8f0;
+    --v-border2: #cbd5e1;
+    --v-text1:   #0f172a;
+    --v-text2:   #334155;
+    --v-text3:   #64748b;
+    --v-text4:   #94a3b8;
+    --v-accent:  #2563eb;
+    --v-ok:      #059669;
+    --v-warn:    #d97706;
+    --v-err:     #dc2626;
+    --v-shadow:  0 1px 3px rgba(0,0,0,.04),0 4px 14px rgba(15,23,42,.06);
+    --v-radius:  1rem;
+    --v-radius-sm: .7rem;
+  }
+
+  .val-shell { max-width:1100px;padding:.8rem .15rem 2.5rem; }
+
+  /* ── Breadcrumb ─────────────────────────────────────────── */
+  .val-breadcrumb { font-size:.8rem;color:var(--v-text3);margin-bottom:1rem; }
+  .val-breadcrumb a { color:var(--v-text3);text-decoration:none; }
+  .val-breadcrumb a:hover { color:var(--v-accent); }
+
+  /* ── Cards ───────────────────────────────────────────────── */
+  .val-card {
+    background:var(--v-surface);border:1px solid var(--v-border);
+    border-radius:var(--v-radius);box-shadow:var(--v-shadow);margin-bottom:1rem;
+  }
+  .val-card-head {
+    padding:.95rem 1.2rem;border-bottom:1px solid var(--v-border);
+    background:#fafbfc;display:flex;align-items:center;
+    justify-content:space-between;gap:.75rem;
+  }
+  .val-card-title {
+    font-size:.95rem;font-weight:800;color:var(--v-text1);
+    display:flex;align-items:center;gap:.45rem;margin:0;
+  }
+  .val-card-title i { color:var(--v-accent); }
+  .val-card-badge {
+    font-size:.68rem;font-weight:700;padding:.15rem .55rem;
+    border-radius:999px;background:#f1f5f9;color:var(--v-text3);
+  }
+  .val-card-body { padding:1.1rem 1.2rem; }
+
+  /* ── Completitud principal ───────────────────────────────── */
+  .completitud-grid { display:grid;grid-template-columns:1fr 1fr;gap:.85rem; }
+  .completitud-box {
+    padding:1rem 1.15rem;border-radius:var(--v-radius-sm);
+  }
+  .completitud-box-exec { background:#f0fdf4;border:1px solid #bbf7d0; }
+  .completitud-box-tech { background:#eff6ff;border:1px solid #bfdbfe; }
+  .completitud-kicker {
+    font-size:.62rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;margin-bottom:.3rem;
+  }
+  .completitud-num {
+    font-size:2rem;font-weight:800;line-height:1;margin-bottom:.35rem;
+  }
+  .completitud-bar { height:6px;border-radius:999px;overflow:hidden;background:rgba(0,0,0,.08);margin-bottom:.35rem; }
+  .completitud-bar-fill { height:100%;border-radius:999px; }
+  .completitud-sub { font-size:.72rem;font-weight:500; }
+
+  /* ── Métricas sintéticas ─────────────────────────────────── */
+  .metrics-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem; }
+  .metric-box {
+    text-align:center;padding:.85rem .75rem;border-radius:var(--v-radius-sm);
+    background:var(--v-bg);border:1px solid var(--v-border);
+  }
+  .metric-box .num { font-size:1.5rem;font-weight:800;line-height:1;color:#1e3a8a; }
+  .metric-box .lbl {
+    font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--v-text3);font-weight:700;margin-top:.28rem;
+  }
+
+  /* ── Síntesis contadores ─────────────────────────────────── */
+  .sintesis-grid { display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem; }
+  .sintesis-box {
+    text-align:center;padding:.65rem .5rem;border-radius:var(--v-radius-sm);
+  }
+  .sintesis-box .num { font-size:1.38rem;font-weight:800;line-height:1; }
+  .sintesis-box .lbl {
+    font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;
+    font-weight:700;margin-top:.18rem;
+  }
+
+  /* ── Microcopy callout ──────────────────────────────────── */
+  .val-callout {
+    display:flex;gap:.55rem;padding:.75rem .9rem;border-radius:var(--v-radius-sm);
+    background:var(--v-bg);border:1px solid var(--v-border);font-size:.78rem;
+    color:var(--v-text2);line-height:1.48;align-items:flex-start;
+  }
+  .val-callout i { color:var(--v-accent);flex-shrink:0;margin-top:.06rem;font-size:.92rem; }
+
+  /* ── Tabla matriz ────────────────────────────────────────── */
+  .matrix-table {
+    width:100%;border-collapse:collapse;font-size:.82rem;
+  }
+  .matrix-table thead th {
+    font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--v-text3);font-weight:800;background:#f8fafc;
+    padding:.75rem 1rem;text-align:left;border-bottom:2px solid var(--v-border);
+    white-space:nowrap;
+  }
+  .matrix-table tbody td {
+    padding:.72rem 1rem;border-bottom:1px solid var(--v-border);vertical-align:top;
+  }
+  .matrix-table tbody tr:last-child td { border-bottom:none; }
+  .matrix-table tbody tr:hover td { background:#f8fafc; }
+  /* Grupo label en tabla */
+  .matrix-group-cell {
+    font-size:.7rem;font-weight:700;color:var(--v-text3);
+    background:#f8fafc;white-space:nowrap;
+  }
+
+  /* ── Tabla estándar ─────────────────────────────────────── */
+  .val-table { width:100%;border-collapse:collapse;font-size:.84rem; }
+  .val-table thead th {
+    font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--v-text3);font-weight:800;background:#f8fafc;
+    padding:.75rem 1rem;text-align:left;border-bottom:2px solid var(--v-border);
+  }
+  .val-table tbody td { padding:.72rem 1rem;border-bottom:1px solid var(--v-border);vertical-align:top; }
+  .val-table tbody tr:last-child td { border-bottom:none; }
+
+  /* ── Control integración cards ───────────────────────────── */
+  .integration-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:.65rem; }
+  .integration-box {
+    padding:.85rem .95rem;border-radius:var(--v-radius-sm);
+    background:var(--v-bg);border:1px solid var(--v-border);
+  }
+  .integration-kicker {
+    font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
+    font-weight:800;color:var(--v-text3);margin-bottom:.5rem;
+  }
+  .integration-status {
+    display:flex;align-items:center;gap:.5rem;
+    font-size:.88rem;font-weight:700;
+  }
+  .integration-status i { font-size:1.1rem; }
+
+  /* ── Decisión administrativa ─────────────────────────────── */
+  .decision-grid { display:grid;grid-template-columns:1fr 1fr;gap:.75rem; }
+  .decision-box {
+    padding:1rem 1.1rem;border-radius:var(--v-radius-sm);
+    border:1.5px solid var(--v-border);
+  }
+  .decision-box-approve { border-color:#a7f3d0;background:#f0fdf4; }
+  .decision-box-repro   { border-color:#fde68a;background:#fffbeb; }
+  .decision-title {
+    font-size:.88rem;font-weight:800;margin-bottom:.45rem;
+    display:flex;align-items:center;gap:.4rem;
+  }
+  .decision-desc { font-size:.8rem;color:var(--v-text3);margin-bottom:.75rem;line-height:1.45; }
+  .decision-box .form-control {
+    border-radius:.55rem;border-color:var(--v-border2);font-size:.83rem;margin-bottom:.55rem;
+  }
+  .decision-box .btn { border-radius:.55rem;font-weight:700;font-size:.85rem;width:100%; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="val-shell">
-  <nav style="font-size:.82rem" class="mb-3">
-    <a href="/mercado-publico/lectura-pliegos" class="text-muted text-decoration-none">Lectura de Pliegos</a>
+<div class="val-shell lp-validation-view">
+
+  {# ── Breadcrumb ── #}
+  <nav class="val-breadcrumb">
+    <a href="/mercado-publico/lectura-pliegos">Lectura de Pliegos</a>
     <span class="mx-1 text-muted">/</span>
-    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin" class="text-muted text-decoration-none">Caso #{{ caso.id }}</a>
+    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin">Caso #{{ caso.id }}</a>
     <span class="mx-1 text-muted">/</span>
-    <span>Validación de carga</span>
+    <span style="color:#0f172a;font-weight:600;">Validación de carga</span>
   </nav>
 
+  {# ── Errores y advertencias ── #}
   {% if errores %}
-  <div class="alert alert-danger mb-3">
-    <strong><i class="bi bi-x-circle-fill me-2"></i>El Excel tiene errores que impiden la importación:</strong>
-    <ul class="mb-0 mt-2">
-      {% for item in errores %}
-      <li>{{ item }}</li>
-      {% endfor %}
+  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
+    <div style="font-weight:700;color:#991b1b;display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
+      <i class="bi bi-x-circle-fill"></i> El Excel tiene errores que impiden la importación
+    </div>
+    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:#7f1d1d;">
+      {% for item in errores %}<li>{{ item }}</li>{% endfor %}
     </ul>
   </div>
   {% endif %}
 
   {% if advertencias %}
-  <div class="alert alert-warning mb-3">
-    <strong><i class="bi bi-exclamation-triangle-fill me-2"></i>Advertencias:</strong>
-    <ul class="mb-0 mt-2">
-      {% for item in advertencias %}
-      <li>{{ item }}</li>
-      {% endfor %}
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
+    <div style="font-weight:700;color:#92400e;display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
+      <i class="bi bi-exclamation-triangle-fill"></i> Advertencias
+    </div>
+    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:#78350f;">
+      {% for item in advertencias %}<li>{{ item }}</li>{% endfor %}
     </ul>
   </div>
   {% endif %}
 
   {% if not errores %}
-  <!-- ╔══════════════════════════════════════════════════════════╗
-       ║  COMPLETITUD DEL CASO (ejecutiva + técnica)             ║
-       ╚══════════════════════════════════════════════════════════╝ -->
+
+  {# ── 1. Completitud del caso ── #}
   <div class="val-card">
-    <div class="card-body">
-      <div class="mb-3">
-        <h6 class="fw-bold mb-0">Completitud del caso</h6>
-        <div class="text-muted" style="font-size:.82rem">{{ caso.titulo }}</div>
-      </div>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-bar-chart-fill"></i>Completitud del caso</h2>
+      <span style="font-size:.82rem;color:#64748b;">{{ caso.titulo }}</span>
+    </div>
+    <div class="val-card-body">
 
-      <!-- Dos métricas principales -->
-      <div class="row g-3 mb-3">
-        <!-- Ejecutiva -->
-        <div class="col-md-6">
-          <div class="p-3 rounded" style="background:#f0fdf4;border:1px solid #a7f3d0;">
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#059669;font-weight:800;">
-              Completitud Ejecutiva
-            </div>
-            <div class="d-flex align-items-baseline gap-2 mt-1">
-              <span style="font-size:2rem;font-weight:800;color:#065f46;line-height:1;">{{ completitud_ejecutiva.porcentaje }}%</span>
-              <span style="font-size:.8rem;color:#059669;font-weight:600;">
-                {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} campos
-              </span>
-            </div>
-            <div class="progress-bar-wrap mt-2" style="height:6px;">
-              <div class="progress-bar-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
-            </div>
-            <div style="font-size:.73rem;color:#6b7280;margin-top:.45rem;">
-              Resumen para decisión rápida de jefatura · 18 ítems clave
-            </div>
+      {# Dos métricas principales #}
+      <div class="completitud-grid mb-3">
+        <div class="completitud-box completitud-box-exec">
+          <div class="completitud-kicker" style="color:#059669;">Completitud Ejecutiva</div>
+          <div class="completitud-num" style="color:#065f46;">
+            {{ completitud_ejecutiva.porcentaje }}<span style="font-size:1rem;font-weight:600;opacity:.7;">%</span>
+          </div>
+          <div class="completitud-bar">
+            <div class="completitud-bar-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
+          </div>
+          <div class="completitud-sub" style="color:#059669;">
+            {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} campos · 18 ítems clave
           </div>
         </div>
-        <!-- Técnica -->
-        <div class="col-md-6">
-          <div class="p-3 rounded" style="background:#eff6ff;border:1px solid #93c5fd;">
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#2563eb;font-weight:800;">
-              Completitud Técnica
-            </div>
-            <div class="d-flex align-items-baseline gap-2 mt-1">
-              <span style="font-size:2rem;font-weight:800;color:#1e3a8a;line-height:1;">{{ completitud_tecnica.porcentaje }}%</span>
-              <span style="font-size:.8rem;color:#2563eb;font-weight:600;">
-                {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} campos
-              </span>
-            </div>
-            <div class="progress-bar-wrap mt-2" style="height:6px;">
-              <div class="progress-bar-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
-            </div>
-            <div style="font-size:.73rem;color:#6b7280;margin-top:.45rem;">
-              Cobertura detallada de campos canónicos · 33 campos
-            </div>
+        <div class="completitud-box completitud-box-tech">
+          <div class="completitud-kicker" style="color:#2563eb;">Completitud Técnica</div>
+          <div class="completitud-num" style="color:#1e3a8a;">
+            {{ completitud_tecnica.porcentaje }}<span style="font-size:1rem;font-weight:600;opacity:.7;">%</span>
+          </div>
+          <div class="completitud-bar">
+            <div class="completitud-bar-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
+          </div>
+          <div class="completitud-sub" style="color:#2563eb;">
+            {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} campos · 33 canónicos
           </div>
         </div>
       </div>
 
-      <!-- 3 contadores de síntesis -->
-      <div class="row g-2 mb-3">
-        <div class="col-4">
-          <div class="text-center p-2 rounded" style="background:#f0fdf4;border:1px solid #bbf7d0;">
-            <div style="font-size:1.4rem;font-weight:800;color:#059669;">{{ completitud_ejecutiva.campos_encontrados }}</div>
-            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Campos completos</div>
-          </div>
+      {# Síntesis de 3 contadores #}
+      <div class="sintesis-grid mb-3">
+        <div class="sintesis-box" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:.6rem;">
+          <div class="num" style="color:#059669;">{{ completitud_ejecutiva.campos_encontrados }}</div>
+          <div class="lbl" style="color:#059669;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Campos completos</div>
         </div>
-        <div class="col-4">
-          <div class="text-center p-2 rounded" style="background:#fffbeb;border:1px solid #fde68a;">
-            <div style="font-size:1.4rem;font-weight:800;color:#d97706;">{{ completitud_ejecutiva.campos_ambiguos + completitud_ejecutiva.campos_inferidos }}</div>
-            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Con observaciones</div>
-          </div>
+        <div class="sintesis-box" style="background:#fffbeb;border:1px solid #fde68a;border-radius:.6rem;">
+          <div class="num" style="color:#d97706;">{{ completitud_ejecutiva.campos_ambiguos + completitud_ejecutiva.campos_inferidos }}</div>
+          <div class="lbl" style="color:#d97706;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Con observaciones</div>
         </div>
-        <div class="col-4">
-          <div class="text-center p-2 rounded" style="background:#fef2f2;border:1px solid #fecaca;">
-            <div style="font-size:1.4rem;font-weight:800;color:#dc2626;">{{ caso.faltantes|length }}</div>
-            <div style="font-size:.67rem;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;font-weight:700;margin-top:.15rem;">Faltantes documentales</div>
-          </div>
+        <div class="sintesis-box" style="background:#fef2f2;border:1px solid #fecaca;border-radius:.6rem;">
+          <div class="num" style="color:#dc2626;">{{ caso.faltantes|length }}</div>
+          <div class="lbl" style="color:#dc2626;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Faltantes documentales</div>
         </div>
       </div>
 
-      <!-- Microcopy explicativo -->
-      <div class="d-flex gap-2 p-3 rounded" style="background:#f8fafc;border:1px solid #e2e8f0;font-size:.79rem;color:#475569;">
-        <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#2563eb;font-size:.95rem;margin-top:.1rem;"></i>
+      <div class="val-callout">
+        <i class="bi bi-info-circle-fill"></i>
         <div>
           <strong>Completitud alta no equivale a expediente sin problemas.</strong>
-          La completitud ejecutiva y técnica miden si los <em>campos de datos</em> del pliego fueron
-          identificados en el Excel. Los <strong>faltantes documentales</strong> son problemas independientes:
-          renglones incompletos, anexos ausentes o condiciones no especificadas en el pliego.
-          Ambas métricas coexisten y deben evaluarse por separado.
+          Los porcentajes miden si los campos de datos fueron identificados en el Excel.
+          Los <strong>faltantes documentales</strong> son problemas independientes: renglones incompletos,
+          anexos ausentes o condiciones no especificadas. Ambas métricas deben evaluarse por separado.
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Cobertura de campos RP (análisis auxiliar de mapeo) -->
+  {# ── 2. Cobertura de campos RP ── #}
   <div class="val-card">
-    <div class="card-body">
-      <div class="d-flex align-items-center gap-2 mb-3">
-        <h6 class="fw-bold mb-0">Cobertura de campos RP</h6>
-        <span class="badge text-bg-secondary fw-normal" style="font-size:.68rem;">análisis auxiliar de mapeo</span>
-      </div>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-grid-3x3"></i>Cobertura de campos RP</h2>
+      <span class="val-card-badge">análisis auxiliar de mapeo</span>
+    </div>
+    <div class="val-card-body">
       <div class="metrics-grid">
-        <div class="metric-box"><div class="num">{{ rp_validation.completos }}</div><div class="lbl">Completos</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation.ambiguos }}</div><div class="lbl">Ambiguos</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation.requieren_validacion_manual }}</div><div class="lbl">Manual</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation.faltantes_reales }}</div><div class="lbl">Faltantes reales</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation.total_campos_rp }}</div><div class="lbl">Campos RP</div></div>
-        <div class="metric-box"><div class="num">{{ rp_validation_by_group['Datos generales del proceso'].completos }}</div><div class="lbl">Datos proceso</div></div>
+        <div class="metric-box"><div class="num" style="color:#059669;">{{ rp_validation.completos }}</div><div class="lbl">Completos</div></div>
+        <div class="metric-box"><div class="num" style="color:#d97706;">{{ rp_validation.ambiguos }}</div><div class="lbl">Ambiguos</div></div>
+        <div class="metric-box"><div class="num" style="color:#7c3aed;">{{ rp_validation.requieren_validacion_manual }}</div><div class="lbl">Manual</div></div>
+        <div class="metric-box"><div class="num" style="color:#dc2626;">{{ rp_validation.faltantes_reales }}</div><div class="lbl">Faltantes</div></div>
+        <div class="metric-box"><div class="num">{{ rp_validation.total_campos_rp }}</div><div class="lbl">Total RP</div></div>
+        <div class="metric-box"><div class="num">{{ rp_validation_by_group['Datos generales del proceso'].completos }}</div><div class="lbl">Proceso</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Detalle'].completos }}</div><div class="lbl">Detalle</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Matriz Requerimiento del Pliego'].completos }}</div><div class="lbl">Matriz</div></div>
       </div>
     </div>
   </div>
 
+  {# ── 3. Inventario importado ── #}
   <div class="val-card">
-    <div class="card-body">
-      <h6 class="fw-bold mb-3">Inventario base importado</h6>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-inbox-fill"></i>Inventario base importado</h2>
+    </div>
+    <div class="val-card-body">
       <div class="metrics-grid">
         <div class="metric-box"><div class="num">{{ 1 if resumen.proceso else 0 }}</div><div class="lbl">Proceso</div></div>
         <div class="metric-box"><div class="num">{{ resumen.cronograma }}</div><div class="lbl">Cronograma</div></div>
@@ -185,153 +319,191 @@
     </div>
   </div>
 
+  {# ── 4. Faltantes críticos ── #}
   {% if criticos %}
-  <div class="val-card border-danger">
-    <div class="card-body">
-      <h6 class="fw-bold text-danger mb-3"><i class="bi bi-exclamation-triangle-fill me-2"></i>{{ criticos|length }} faltante(s) críticos base</h6>
-      <div class="table-responsive">
-        <table class="table table-sm mb-0">
-          <thead class="table-light"><tr><th>Campo</th><th>Motivo</th><th>Acción recomendada</th></tr></thead>
-          <tbody>
-            {% for item in criticos %}
-            <tr>
-              <td class="fw-semibold">{{ item.campo_objetivo or '—' }}</td>
-              <td>{{ item.motivo or '—' }}</td>
-              <td>{{ item.accion_recomendada or '—' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+  <div class="val-card" style="border-color:#fecaca;">
+    <div class="val-card-head" style="background:#fef8f8;border-bottom-color:#fecaca;">
+      <h2 class="val-card-title" style="color:#b91c1c;">
+        <i class="bi bi-exclamation-triangle-fill" style="color:#dc2626;"></i>
+        {{ criticos|length }} faltante{{ 's' if criticos|length != 1 else '' }} crítico{{ 's' if criticos|length != 1 else '' }} base
+      </h2>
+    </div>
+    <div class="table-responsive">
+      <table class="val-table">
+        <thead><tr><th>Campo</th><th>Motivo</th><th>Acción recomendada</th></tr></thead>
+        <tbody>
+          {% for item in criticos %}
+          <tr>
+            <td style="font-weight:700;">{{ item.campo_objetivo or '—' }}</td>
+            <td>{{ item.motivo or '—' }}</td>
+            <td style="font-style:italic;font-size:.8rem;color:#64748b;">{{ item.accion_recomendada or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
   {% endif %}
 
+  {# ── 5. Matriz de mapeo ── #}
   <div class="val-card">
-    <div class="card-body">
-      <h6 class="fw-bold mb-3">Matriz de mapeo de campos principales</h6>
-      <div class="table-responsive">
-        <table class="table table-sm matrix-table mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>Grupo</th>
-              <th>Campo principal</th>
-              <th>Fuente actual</th>
-              <th>Transformación</th>
-              <th>Estado mapeo</th>
-              <th>Resultado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in rp_mapping_matrix %}
-            <tr>
-              <td>{{ item.grupo }}</td>
-              <td class="fw-semibold">{{ item.campo_rp }}</td>
-              <td>{{ item.fuente_actual or '—' }}</td>
-              <td>{{ item.transformacion or '—' }}</td>
-              <td>{{ item.estado }}</td>
-              <td>{{ item.estado_resultado|replace('_', ' ') }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-table"></i>Matriz de mapeo de campos principales</h2>
+      <span class="val-card-badge">{{ rp_mapping_matrix|length }} campos</span>
+    </div>
+    <div class="table-responsive">
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>Grupo</th>
+            <th>Campo RP</th>
+            <th>Fuente actual</th>
+            <th>Transformación</th>
+            <th>Estado mapeo</th>
+            <th>Resultado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set _last_grupo = namespace(v='') %}
+          {% for item in rp_mapping_matrix %}
+          <tr>
+            <td class="matrix-group-cell">
+              {% if item.grupo != _last_grupo.v %}
+                {% set _last_grupo.v = item.grupo %}
+                <span style="display:inline-flex;align-items:center;gap:.3rem;">
+                  <span style="width:.35rem;height:.35rem;border-radius:50%;background:#2563eb;display:inline-block;"></span>
+                  {{ item.grupo }}
+                </span>
+              {% endif %}
+            </td>
+            <td style="font-weight:700;color:#0f172a;">{{ item.campo_rp }}</td>
+            <td style="font-size:.8rem;color:#475569;">{{ item.fuente_actual or '—' }}</td>
+            <td style="font-size:.8rem;color:#64748b;font-style:italic;">{{ item.transformacion or '—' }}</td>
+            <td>
+              {%- set _est = (item.estado or '')|lower -%}
+              {%- if _est in ['completo','encontrado','ok'] -%}
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:.12rem .48rem;border-radius:999px;">
+                  <i class="bi bi-check-circle-fill"></i> {{ item.estado }}
+                </span>
+              {%- elif _est in ['ambiguo','inferido','manual'] -%}
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:.12rem .48rem;border-radius:999px;">
+                  <i class="bi bi-exclamation-triangle-fill"></i> {{ item.estado }}
+                </span>
+              {%- elif _est in ['faltante','no encontrado','sin dato'] -%}
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:.12rem .48rem;border-radius:999px;">
+                  <i class="bi bi-x-circle-fill"></i> {{ item.estado }}
+                </span>
+              {%- else -%}
+                <span style="font-size:.78rem;color:#64748b;">{{ item.estado or '—' }}</span>
+              {%- endif -%}
+            </td>
+            <td style="font-size:.8rem;color:#475569;">{{ item.estado_resultado|replace('_',' ') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 
+  {# ── 6. Control de integración ── #}
   {% if control_carga %}
   <div class="val-card">
-    <div class="card-body">
-      <h6 class="fw-bold mb-3">Control de Integración (Carga V2)</h6>
-      <div class="row g-3">
-        <!-- Fusion -->
-        <div class="col-md-4">
-          <div class="p-3 rounded h-100" style="background:#f8fafc;border:1px solid #e2e8f0;">
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#475569;font-weight:800;margin-bottom:.5rem;">RP Fusion</div>
-            <div class="d-flex align-items-center gap-2">
-              {% if control_carga.get('listo_para_fusion')|lower in ['sí','si','true','yes','1'] %}
-                <i class="bi bi-check-circle-fill text-success fs-5"></i>
-                <span class="fw-semibold text-success">Listo para carga</span>
-              {% else %}
-                <i class="bi bi-exclamation-circle-fill text-danger fs-5"></i>
-                <span class="fw-semibold text-danger">Con observaciones</span>
-              {% endif %}
-            </div>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-plug-fill"></i>Control de Integración</h2>
+      <span class="val-card-badge">Carga V2</span>
+    </div>
+    <div class="val-card-body">
+      <div class="integration-grid">
+        <div class="integration-box">
+          <div class="integration-kicker">RP Fusión</div>
+          {% if control_carga.get('listo_para_fusion','').upper() in ['SI','SÍ','TRUE','YES','1'] %}
+          <div class="integration-status" style="color:#059669;">
+            <i class="bi bi-check-circle-fill"></i> Listo para carga
           </div>
+          {% else %}
+          <div class="integration-status" style="color:#dc2626;">
+            <i class="bi bi-exclamation-circle-fill"></i> Con observaciones
+          </div>
+          {% endif %}
         </div>
-        <!-- SIEM Principal -->
-        <div class="col-md-4">
-          <div class="p-3 rounded h-100" style="background:#f8fafc;border:1px solid #e2e8f0;">
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#475569;font-weight:800;margin-bottom:.5rem;">SIEM (Operativa)</div>
-            <div class="d-flex align-items-center gap-2">
-              {% if control_carga.get('listo_para_visualizacion')|lower in ['sí','si','true','yes','1'] %}
-                <i class="bi bi-check-circle-fill text-success fs-5"></i>
-                <span class="fw-semibold text-success">Validado</span>
-              {% else %}
-                <i class="bi bi-clock-fill text-warning fs-5"></i>
-                <span class="fw-semibold text-warning">Pendiente validación</span>
-              {% endif %}
-            </div>
+        <div class="integration-box">
+          <div class="integration-kicker">SIEM Operativa</div>
+          {% if control_carga.get('listo_para_visualizacion','').lower() in ['sí','si','true','yes','1'] %}
+          <div class="integration-status" style="color:#059669;">
+            <i class="bi bi-check-circle-fill"></i> Validado
           </div>
+          {% else %}
+          <div class="integration-status" style="color:#d97706;">
+            <i class="bi bi-clock-fill"></i> Pendiente validación
+          </div>
+          {% endif %}
         </div>
-        <!-- SIEM Analitica -->
-        <div class="col-md-4">
-          <div class="p-3 rounded h-100" style="background:#f8fafc;border:1px solid #e2e8f0;">
-            <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:#475569;font-weight:800;margin-bottom:.5rem;">SIEM Analítica</div>
-            <div class="d-flex align-items-center gap-2">
-              {% if control_carga.get('requiere_revision_analista')|lower in ['sí','si','true','yes','1'] %}
-                <i class="bi bi-search text-warning fs-5"></i>
-                <span class="fw-semibold text-warning">Requiere revisión</span>
-              {% else %}
-                <i class="bi bi-check-circle-fill text-success fs-5"></i>
-                <span class="fw-semibold text-success">Validado</span>
-              {% endif %}
-            </div>
+        <div class="integration-box">
+          <div class="integration-kicker">SIEM Analítica</div>
+          {% if control_carga.get('requiere_revision_analista','').lower() in ['sí','si','true','yes','1'] %}
+          <div class="integration-status" style="color:#d97706;">
+            <i class="bi bi-search"></i> Requiere revisión
           </div>
+          {% else %}
+          <div class="integration-status" style="color:#059669;">
+            <i class="bi bi-check-circle-fill"></i> Validado
+          </div>
+          {% endif %}
         </div>
       </div>
-      {% if control_carga.get('observaciones_integracion') and control_carga.get('observaciones_integracion')|string|lower not in ['-','--','n/a','na','none','no','sin observaciones',''] %}
-      <div class="mt-3 p-3 rounded" style="background:#fffbeb;border:1px solid #fde68a;font-size:.85rem;color:#92400e;">
-        <strong><i class="bi bi-info-circle-fill me-1"></i> Observaciones de la integración:</strong>
-        {{ control_carga.get('observaciones_integracion') }}
+      {% set _obs = control_carga.get('observaciones_integracion','') %}
+      {% if _obs and _obs|string|lower not in ['-','--','n/a','na','none','no','sin observaciones',''] %}
+      <div class="val-callout mt-3" style="background:#fffbeb;border-color:#fde68a;color:#78350f;">
+        <i class="bi bi-info-circle-fill" style="color:#d97706;"></i>
+        <div><strong>Observaciones de la integración:</strong> {{ _obs }}</div>
       </div>
       {% endif %}
     </div>
   </div>
   {% endif %}
 
+  {# ── 7. Decisión administrativa ── #}
   <div class="val-card">
-    <div class="card-body">
-      <h6 class="fw-bold mb-3">Decisión administrativa</h6>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="p-3 rounded border border-success h-100">
-            <div class="fw-semibold text-success mb-2"><i class="bi bi-check2-all me-2"></i>Validar y publicar</div>
-            <p style="font-size:.83rem; color:#666">Publica la pantalla principal y deja la información analítica en la pantalla secundaria.</p>
-            <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/publicar">
-              <input type="text" name="comentario" class="form-control form-control-sm mb-2" placeholder="Comentario de publicación (opcional)">
-              <button type="submit" class="btn btn-success btn-sm w-100">
-                <i class="bi bi-send-check me-1"></i>Publicar
-              </button>
-            </form>
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-check2-all"></i>Decisión administrativa</h2>
+    </div>
+    <div class="val-card-body">
+      <div class="decision-grid">
+        <div class="decision-box decision-box-approve">
+          <div class="decision-title" style="color:#065f46;">
+            <i class="bi bi-send-check-fill" style="color:#059669;"></i> Validar y publicar
           </div>
+          <div class="decision-desc">
+            Publica la pantalla principal y deja la información analítica disponible en la vista completa.
+          </div>
+          <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/publicar">
+            <input type="text" name="comentario" class="form-control form-control-sm"
+                   placeholder="Comentario de publicación (opcional)">
+            <button type="submit" class="btn btn-success btn-sm" style="margin-top:.5rem;">
+              <i class="bi bi-send-check me-1"></i>Publicar
+            </button>
+          </form>
         </div>
-        <div class="col-md-6">
-          <div class="p-3 rounded border border-warning h-100">
-            <div class="fw-semibold text-warning mb-2"><i class="bi bi-arrow-repeat me-2"></i>Enviar a reproceso</div>
-            <p style="font-size:.83rem; color:#666">Usar cuando los faltantes o las ambigüedades impiden la carga interna.</p>
-            <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/estado">
-              <input type="hidden" name="nuevo_estado" value="reprocesar">
-              <input type="text" name="comentario" class="form-control form-control-sm mb-2" placeholder="Motivo del reproceso">
-              <button type="submit" class="btn btn-warning btn-sm w-100">
-                <i class="bi bi-arrow-repeat me-1"></i>Enviar a reproceso
-              </button>
-            </form>
+        <div class="decision-box decision-box-repro">
+          <div class="decision-title" style="color:#92400e;">
+            <i class="bi bi-arrow-repeat" style="color:#d97706;"></i> Enviar a reproceso
           </div>
+          <div class="decision-desc">
+            Usar cuando los faltantes o ambigüedades impiden la carga interna y se requiere revisión.
+          </div>
+          <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/estado">
+            <input type="hidden" name="nuevo_estado" value="reprocesar">
+            <input type="text" name="comentario" class="form-control form-control-sm"
+                   placeholder="Motivo del reproceso (requerido)">
+            <button type="submit" class="btn btn-warning btn-sm" style="margin-top:.5rem;">
+              <i class="bi bi-arrow-repeat me-1"></i>Enviar a reproceso
+            </button>
+          </form>
         </div>
       </div>
     </div>
   </div>
-  {% endif %}
+
+  {% endif %}{# /not errores #}
 </div>
 {% endblock %}

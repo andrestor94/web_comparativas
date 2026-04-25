@@ -127,14 +127,14 @@ SUMMARY_FIELD_ALIASES = {
     ],
     "tipo_adjudicacion": [
         "tipo_adjudicacion", "forma_adjudicacion", "tipo_de_adjudicacion",
-        "modalidad_adjudicacion",
+        "adjudicacion_parcial", "adjudicacion_total",
     ],
     "tipo_cotizacion": [
         "tipo_cotizacion", "forma_cotizacion", "tipo_de_cotizacion",
-        "modalidad_cotizacion",
+        "cotizacion_parcial", "cotizacion_total",
     ],
     "lugar_entrega": [
-        "lugar_entrega", "modalidad_entrega", "lugares_entrega",
+        "lugar_entrega", "lugares_entrega",
         "domicilio_entrega", "lugar_de_entrega", "destino_efector",
         "lugar_recepcion", "lugar_recepcion_fisica",
     ],

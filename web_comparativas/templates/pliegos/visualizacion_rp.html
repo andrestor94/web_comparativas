@@ -7,177 +7,291 @@
 {% endblock %}
 
 {% block toolbar_actions %}
-<div class="d-flex gap-2">
+<div class="d-flex gap-2 align-items-center">
   {% if es_admin %}
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin" class="btn btn-sm btn-outline-secondary">
+  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
+     class="btn btn-sm btn-outline-secondary" style="border-radius:.6rem;font-weight:600;letter-spacing:.01em;">
     <i class="bi bi-gear me-1"></i>Gestionar
   </a>
   {% endif %}
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" class="btn btn-sm btn-outline-secondary">
-    <i class="bi bi-layout-text-window-reverse me-1"></i>Pantalla secundaria
+  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada"
+     class="btn btn-sm btn-outline-primary" style="border-radius:.6rem;font-weight:600;letter-spacing:.01em;">
+    <i class="bi bi-layout-text-window-reverse me-1"></i>Vista completa
   </a>
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/rp/export" class="btn btn-sm btn-primary">
+  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/rp/export"
+     class="btn btn-sm btn-success" style="border-radius:.6rem;font-weight:700;letter-spacing:.01em;box-shadow:0 2px 8px rgba(5,150,105,.25);">
     <i class="bi bi-file-earmark-excel me-1"></i>Descargar Excel
   </a>
 </div>
 {% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=4">
 <style>
-  .erp-shell { padding: .7rem .35rem 1.35rem; }
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Lectura de Pliegos · Pantalla Principal — Premium v4
+  ═══════════════════════════════════════════════════════════ */
+  :root {
+    --p-navy:      #091d38;
+    --p-blue:      #1b3a6b;
+    --p-accent:    #2563eb;
+    --p-accent-lt: #dbeafe;
+    --p-ok:        #059669;
+    --p-ok-lt:     #ecfdf5;
+    --p-warn:      #d97706;
+    --p-warn-lt:   #fffbeb;
+    --p-err:       #dc2626;
+    --p-err-lt:    #fef2f2;
+    --p-surface:   #ffffff;
+    --p-bg:        #f5f7fa;
+    --p-border:    #e2e8f0;
+    --p-border-md: #cbd5e1;
+    --p-text1:     #0f172a;
+    --p-text2:     #334155;
+    --p-text3:     #64748b;
+    --p-text4:     #94a3b8;
+    --p-shadow-sm: 0 1px 3px rgba(0,0,0,.04), 0 4px 14px rgba(15,23,42,.05);
+    --p-shadow-md: 0 2px 6px rgba(0,0,0,.05), 0 8px 24px rgba(15,23,42,.07);
+    --p-radius:    1rem;
+    --p-radius-sm: .7rem;
+  }
+
+  .erp-shell { padding: .5rem .1rem 2.5rem; }
+
+  /* ── Hero ───────────────────────────────────────────────── */
   .erp-hero {
-    background: linear-gradient(135deg, #113a5c 0%, #0d2035 100%);
+    background: linear-gradient(135deg, #071628 0%, #0d2748 45%, #0f2a52 100%);
     color: #fff;
-    border-radius: 1.1rem;
-    padding: 1rem 1.1rem;
-    margin-bottom: .85rem;
-    box-shadow: 0 14px 30px rgba(13, 32, 53, .16);
+    border-radius: 1.35rem;
+    padding: 1.5rem 1.6rem;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,.08), 0 20px 50px rgba(7,22,40,.22);
+    position: relative;
+    overflow: hidden;
+  }
+  .erp-hero::before {
+    content:'';position:absolute;top:-80px;right:-50px;
+    width:280px;height:280px;
+    background:radial-gradient(circle,rgba(37,99,235,.22) 0%,transparent 68%);
+    pointer-events:none;
+  }
+  .erp-hero::after {
+    content:'';position:absolute;bottom:-50px;left:25%;
+    width:200px;height:200px;
+    background:radial-gradient(circle,rgba(255,255,255,.035) 0%,transparent 68%);
+    pointer-events:none;
   }
   .erp-hero-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.95fr) minmax(260px, 1fr);
-    gap: .85rem;
-    align-items: start;
+    display:grid;
+    grid-template-columns: minmax(0,2fr) minmax(250px,1fr);
+    gap:1.35rem;
+    align-items:start;
+    position:relative;z-index:1;
   }
   .erp-kicker {
-    font-size: .68rem;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    opacity: .68;
-    font-weight: 800;
-    margin-bottom: .3rem;
+    display:flex;align-items:center;gap:.5rem;
+    font-size:.64rem;letter-spacing:.11em;
+    text-transform:uppercase;opacity:.65;font-weight:800;margin-bottom:.55rem;
   }
-  .erp-title { font-size: 1.32rem; line-height: 1.18; font-weight: 800; margin: 0 0 .25rem; }
-  .erp-subtitle { font-size: .9rem; line-height: 1.42; opacity: .88; margin: 0; max-width: 54rem; }
-  .erp-meta { margin-top: .7rem; display: grid; gap: .28rem; }
-  .erp-meta-line {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .55rem;
-    font-size: .83rem;
-    line-height: 1.35;
-    opacity: .92;
+  .erp-kicker-badge {
+    background:rgba(255,255,255,.16);
+    border:1px solid rgba(255,255,255,.22);
+    border-radius:.45rem;padding:.16rem .6rem;
+    font-weight:900;letter-spacing:.05em;color:#fff;font-size:.66rem;
   }
-  .erp-meta-line strong { font-weight: 800; color: rgba(255,255,255,.92); }
-  .erp-state-card {
-    background: rgba(8, 17, 27, .18);
-    border: 1px solid rgba(255, 255, 255, .16);
-    border-radius: .9rem;
-    padding: .85rem .95rem;
+  .erp-title {
+    font-size:1.45rem;line-height:1.14;font-weight:800;
+    margin:0 0 .6rem;letter-spacing:-.015em;
   }
-  .erp-state-label {
-    font-size: .68rem;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    opacity: .74;
-    font-weight: 800;
-    margin-bottom: .35rem;
+  .erp-meta { display:flex;flex-direction:column;gap:.4rem;margin-top:.65rem; }
+  .erp-meta-row { display:flex;flex-wrap:wrap;gap:.3rem; }
+  .erp-meta-chip {
+    display:inline-flex;align-items:center;gap:.28rem;
+    background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.13);
+    border-radius:.4rem;padding:.14rem .52rem;font-size:.78rem;font-weight:500;
+    line-height:1.3;
   }
-  .erp-state-value { font-size: 1.05rem; line-height: 1.2; font-weight: 800; margin: 0 0 .3rem; }
-  .erp-state-note { margin: 0; font-size: .83rem; line-height: 1.38; opacity: .88; }
+  .erp-meta-chip b { font-weight:700;color:rgba(255,255,255,.9); }
 
+  /* ── State card ──────────────────────────────────────────── */
+  .erp-state-card {
+    background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:1.05rem;padding:1rem 1.1rem;
+    backdrop-filter:blur(8px);
+  }
+  .erp-state-kicker {
+    font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
+    font-weight:800;opacity:.55;margin-bottom:.5rem;
+  }
+  .erp-state-badge {
+    display:inline-flex;align-items:center;gap:.45rem;
+    font-size:.95rem;font-weight:800;margin-bottom:.32rem;line-height:1.2;
+  }
+  .erp-state-dot {
+    width:.62rem;height:.62rem;border-radius:50%;flex-shrink:0;
+    box-shadow:0 0 0 3px rgba(255,255,255,.1);
+  }
+  .erp-state-note { font-size:.78rem;line-height:1.44;opacity:.8;margin:0 0 .7rem; }
+  .erp-state-alert {
+    font-size:.71rem;
+    background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.22);
+    padding:.32rem .52rem;border-radius:.45rem;
+    display:flex;gap:.32rem;align-items:flex-start;
+    margin-bottom:.7rem;line-height:1.42;
+  }
+
+  /* ── Métricas ────────────────────────────────────────────── */
+  .erp-metrics-grid {
+    display:grid;grid-template-columns:1fr 1fr;gap:.55rem;
+    border-top:1px solid rgba(255,255,255,.1);padding-top:.7rem;margin-top:.7rem;
+  }
+  .erp-metric { display:flex;flex-direction:column;gap:.1rem; }
+  .erp-metric-kicker {
+    font-size:.56rem;text-transform:uppercase;letter-spacing:.08em;
+    opacity:.52;font-weight:800;
+  }
+  .erp-metric-val { font-size:1.4rem;font-weight:800;line-height:1; }
+  .erp-metric-bar {
+    height:3px;background:rgba(255,255,255,.12);
+    border-radius:999px;overflow:hidden;margin:.18rem 0;
+  }
+  .erp-metric-fill { height:100%;border-radius:999px; }
+  .erp-metric-sub { font-size:.59rem;opacity:.52; }
+  .erp-faltantes-chip {
+    margin-top:.55rem;font-size:.68rem;
+    background:rgba(220,38,38,.18);border:1px solid rgba(220,38,38,.22);
+    border-radius:.4rem;padding:.3rem .5rem;
+    display:flex;gap:.32rem;align-items:center;line-height:1.35;
+  }
+
+  /* ── Control integración ──────────────────────────────────── */
+  .erp-integration {
+    border-top:1px solid rgba(255,255,255,.1);
+    padding-top:.65rem;margin-top:.65rem;
+  }
+  .erp-integration-kicker {
+    font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;
+    opacity:.52;font-weight:800;margin-bottom:.38rem;
+  }
+  .erp-integration-row {
+    display:flex;align-items:center;gap:.42rem;
+    font-size:.79rem;padding:.15rem 0;
+  }
+  .erp-integration-dot {
+    width:.42rem;height:.42rem;border-radius:50%;flex-shrink:0;
+  }
+  .erp-integration-detail {
+    font-size:.7rem;background:rgba(0,0,0,.16);
+    border-radius:.4rem;padding:.3rem .48rem;
+    margin-top:.3rem;line-height:1.44;opacity:.88;
+  }
+
+  /* ── Secciones ───────────────────────────────────────────── */
   .erp-section {
-    background: #fff;
-    border: 1px solid rgba(15, 23, 42, .08);
-    border-radius: 1rem;
-    box-shadow: 0 10px 24px rgba(15, 23, 42, .05);
-    padding: .95rem 1rem;
-    margin-bottom: .85rem;
+    background:var(--p-surface);
+    border:1px solid var(--p-border);
+    border-radius:var(--p-radius);
+    box-shadow:var(--p-shadow-sm);
+    padding:1.15rem 1.25rem;
+    margin-bottom:1.1rem;
   }
   .erp-section-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: .95rem;
+    display:flex;justify-content:space-between;align-items:flex-end;
+    gap:1rem;margin-bottom:1.1rem;
+    padding-bottom:.85rem;border-bottom:1px solid var(--p-border);
+  }
+  .erp-section-kicker {
+    font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--p-accent);font-weight:800;margin-bottom:.12rem;
   }
   .erp-section-title {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 800;
-    color: #0f172a;
+    margin:0;font-size:1rem;font-weight:800;color:var(--p-text1);
+    display:flex;align-items:center;gap:.52rem;
   }
-  .erp-section-note {
-    font-size: .8rem;
-    color: #64748b;
-    margin: 0;
+  .erp-section-icon {
+    width:1.65rem;height:1.65rem;border-radius:.45rem;
+    background:var(--p-accent-lt);color:var(--p-accent);
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:.82rem;flex-shrink:0;
   }
+  .erp-section-note { font-size:.77rem;color:var(--p-text3);margin:0; }
+
+  /* ── Field cards ─────────────────────────────────────────── */
   .erp-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: .75rem;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(205px,1fr));
+    gap:.78rem;
   }
   .erp-item {
-    border: 1px solid rgba(15, 23, 42, .08);
-    border-radius: .95rem;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-    padding: .8rem .9rem;
-    min-height: 96px;
+    border:1px solid var(--p-border);
+    border-left:3.5px solid var(--p-border-md);
+    border-radius:var(--p-radius-sm);
+    background:var(--p-surface);
+    padding:.88rem 1rem;
+    min-height:88px;
+    transition:box-shadow .18s,transform .18s;
   }
+  .erp-item:hover {
+    box-shadow:var(--p-shadow-md);
+    transform:translateY(-1px);
+  }
+  .erp-item--ok   { border-left-color:var(--p-ok); }
+  .erp-item--warn { border-left-color:var(--p-warn); }
+  .erp-item--miss { border-left-color:var(--p-border-md);background:#fafbfc; }
+  .erp-item--full { grid-column:1/-1; }
+
   .erp-item-label {
-    font-size: .72rem;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    color: #64748b;
-    font-weight: 800;
+    font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--p-text3);font-weight:800;margin-bottom:.42rem;
   }
   .erp-item-value {
-    margin-top: .42rem;
-    color: #0f172a;
-    font-size: .96rem;
-    font-weight: 700;
-    line-height: 1.35;
-    word-break: break-word;
+    color:var(--p-text1);font-size:.95rem;font-weight:700;
+    line-height:1.38;word-break:break-word;
   }
-  .erp-item-hint {
-    margin-top: .45rem;
-    color: #64748b;
-    font-size: .82rem;
-    line-height: 1.35;
+  .erp-item-value--empty {
+    color:var(--p-text4);font-style:italic;font-weight:500;font-size:.87rem;
   }
-  .erp-empty {
-    color: #94a3b8;
-    font-style: italic;
-    font-weight: 500;
+  .erp-item-value--compact {
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
   }
+  .erp-status-pill {
+    display:inline-flex;align-items:center;gap:.28rem;
+    font-size:.65rem;font-weight:700;border-radius:999px;
+    padding:.1rem .48rem;margin-top:.42rem;
+  }
+  .erp-status-pill--warn { background:var(--p-warn-lt);color:#92400e;border:1px solid #fde68a; }
+  .erp-status-pill--ok   { background:var(--p-ok-lt);color:#065f46;border:1px solid #a7f3d0; }
+  .erp-status-pill--miss { background:var(--p-err-lt);color:#991b1b;border:1px solid #fecaca; }
+  /* backward compat */
+  .erp-item-hint { margin-top:.42rem;font-size:.78rem;line-height:1.35; }
+  .erp-empty { color:var(--p-text4);font-style:italic;font-weight:500; }
+
+  /* ── CTA block ───────────────────────────────────────────── */
   .erp-cta {
-    background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-    border: 1px solid rgba(37, 99, 235, .16);
-    border-radius: 1rem;
-    padding: 1rem 1.05rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);
+    border:1px solid rgba(37,99,235,.14);
+    border-radius:var(--p-radius);
+    padding:1.25rem 1.4rem;
+    display:flex;justify-content:space-between;
+    align-items:center;gap:1rem;flex-wrap:wrap;
+    box-shadow:var(--p-shadow-sm);
   }
-  .erp-cta h3 {
-    margin: 0 0 .3rem;
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: #123b63;
-  }
-  .erp-cta p {
-    margin: 0;
-    color: #475569;
-    max-width: 46rem;
-    line-height: 1.45;
-  }
+  .erp-cta h3 { margin:0 0 .28rem;font-size:1rem;font-weight:800;color:#1e3a8a; }
+  .erp-cta p  { margin:0;color:var(--p-text2);font-size:.84rem;max-width:46rem;line-height:1.48; }
   .erp-cta .btn {
-    border-radius: .85rem;
-    padding: .78rem 1.05rem;
-    font-weight: 700;
+    border-radius:.8rem;padding:.72rem 1.2rem;
+    font-weight:700;font-size:.88rem;white-space:nowrap;
+    box-shadow:0 2px 8px rgba(37,99,235,.22);
   }
 
-  @media (max-width: 900px) {
-    .erp-hero-grid { grid-template-columns: 1fr; }
-  }
-
-  @media (max-width: 768px) {
-    .erp-shell { padding: .45rem 0 .95rem; }
-    .erp-hero { padding: .95rem; }
-    .erp-title { font-size: 1.15rem; }
-    .erp-item { min-height: auto; }
+  @media(max-width:900px){ .erp-hero-grid{ grid-template-columns:1fr; } }
+  @media(max-width:768px){
+    .erp-shell{ padding:.3rem 0 1.5rem; }
+    .erp-hero { padding:1.1rem 1rem;border-radius:1rem; }
+    .erp-title{ font-size:1.2rem; }
+    .erp-item { min-height:auto; }
+    .erp-cta  { flex-direction:column;align-items:stretch; }
   }
 </style>
 {% endblock %}
@@ -213,31 +327,51 @@
 {% set tipo_adjudicacion = (canonical_output.general_fields | selectattr("label", "equalto", "Tipo Adjudicación") | list | first) %}
 {% set expediente = (canonical_output.general_fields | selectattr("label", "equalto", "Nro. Expediente") | list | first) %}
 
-{% set core_fields = [origen, unidad, numero_proceso, expediente, nombre_proceso, procedimiento, objeto, monto, moneda, modalidad] %}
-{% set status = namespace(missing=0, review=0) %}
-{% for field in core_fields if field %}
+{# ── Semáforo jerárquico basado en campos críticos de Fusión ── #}
+{% set fusion_critical = [numero_proceso, unidad, nombre_proceso, objeto, procedimiento, tipo_cotizacion, tipo_adjudicacion, fecha_apertura, monto, moneda] %}
+{% set sfus = namespace(faltante_real=0, ambiguo=0, hora_flag=false) %}
+{% for field in fusion_critical if field %}
   {% if field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
-    {% set status.missing = status.missing + 1 %}
+    {% set sfus.faltante_real = sfus.faltante_real + 1 %}
   {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
-    {% set status.review = status.review + 1 %}
+    {% set sfus.ambiguo = sfus.ambiguo + 1 %}
+  {% endif %}
+  {% if field.label == "Fecha Acto Apertura" and field.get('hora_no_identificada') %}
+    {% set sfus.hora_flag = true %}
   {% endif %}
 {% endfor %}
 
-{% if status.missing == 0 and status.review == 0 %}
-  {% set operational_label = "Listo para carga" %}
-  {% set operational_note = "Los datos principales del proceso estan presentes y listos para una carga operativa." %}
-{% elif status.missing == 0 and status.review > 0 %}
-  {% set operational_label = "Listo con observaciones" %}
-  {% set operational_note = "Los datos principales estan disponibles, pero conviene validar algunos valores antes de cargar." %}
-{% elif status.missing <= 2 %}
-  {% set operational_label = "Pendiente validacion" %}
-  {% set operational_note = "Hay pocos datos principales por confirmar antes de considerar la carga como cerrada." %}
+{% set caso_observado = caso.estado in ["observado", "rechazado"] %}
+{% set caso_pendiente = caso.estado not in ["listo", "en_validacion"] %}
+
+{% if caso_observado %}
+  {% set semaforo = "observado" %}
+  {% set operational_label = "Observado / Requiere revisión" %}
+  {% set operational_color = "#f59e0b" %}
+  {% set operational_note = "El caso fue marcado como observado. Revisar comentarios en el historial antes de continuar." %}
+{% elif caso_pendiente %}
+  {% set semaforo = "pendiente" %}
+  {% set operational_label = "Pendiente validación" %}
+  {% set operational_color = "#94a3b8" %}
+  {% set operational_note = "El caso aún no completó el flujo de validación. El estado operativo no ha sido aprobado." %}
+{% elif sfus.faltante_real > 0 %}
+  {% set semaforo = "siem" %}
+  {% set operational_label = "Listo para SIEM — No listo para Fusión" %}
+  {% set operational_color = "#3b82f6" %}
+  {% set operational_note = "Hay " ~ sfus.faltante_real ~ " campo(s) crítico(s) de Fusión sin dato. No enviar a Fusión hasta resolverlos." %}
+{% elif sfus.ambiguo > 0 or sfus.hora_flag %}
+  {% set semaforo = "parcial" %}
+  {% set operational_label = "Listo para SIEM — Fusión parcial" %}
+  {% set operational_color = "#f59e0b" %}
+  {% set operational_note = "Datos presentes pero con ambigüedades (" ~ sfus.ambiguo ~ " campo(s)). Validar antes de cargar en Fusión." %}
 {% else %}
-  {% set operational_label = "Incompleto para carga" %}
-  {% set operational_note = "Faltan datos principales del proceso. Conviene revisar la pantalla secundaria antes de cargar." %}
+  {% set semaforo = "fusion" %}
+  {% set operational_label = "Listo para Fusión" %}
+  {% set operational_color = "#10b981" %}
+  {% set operational_note = "Todos los campos críticos de Fusión están completos. El proceso está listo para carga." %}
 {% endif %}
 
-{% macro field_value(field, empty_text="No identificado") -%}
+{% macro field_value(field, empty_text="Sin dato en pliego") -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value -%}
     {{ empty_text }}
   {%- elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] -%}
@@ -247,15 +381,39 @@
   {%- endif %}
 {%- endmacro %}
 
-{% macro field_hint(field) -%}
+{%- macro field_hint(field) -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
-    <div class="erp-item-hint">No identificado</div>
+    <div class="erp-item-hint" style="color:#94a3b8;font-style:italic;">Sin dato en pliego</div>
   {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
-    <div class="erp-item-hint">Pendiente validacion</div>
+    <div class="erp-item-hint" style="color:#f59e0b;">⚠ Pendiente validacion</div>
   {% endif %}
-{%- endmacro %}
+{%- endmacro -%}
 
-{% macro compact_field_value(field, empty_text="No identificado", max_len=52) -%}
+{%- macro fecha_apertura_hint(field) -%}
+  {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
+    <div class="erp-item-hint" style="color:#94a3b8;font-style:italic;">Sin dato en pliego</div>
+  {% elif field.get('hora_no_identificada') %}
+    <div class="erp-item-hint" style="color:#f59e0b;display:flex;align-items:center;gap:.3rem;">
+      <i class="bi bi-clock-history"></i>
+      <span>Hora no identificada — mostrar solo fecha</span>
+    </div>
+  {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
+    <div class="erp-item-hint" style="color:#f59e0b;">⚠ Pendiente validacion</div>
+  {% endif %}
+{%- endmacro -%}
+
+{%- macro fecha_apertura_value(field) -%}
+  {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
+    Sin dato en pliego
+  {% elif field.get('hora_no_identificada') %}
+    {# Mostrar solo la fecha, omitir 00:00:00 #}
+    {{ (field.display_value or '')|replace(' 00:00:00', '') }}
+  {% else %}
+    {{ field.display_value }}
+  {% endif %}
+{%- endmacro -%}
+
+{% macro compact_field_value(field, empty_text="Sin dato en pliego", max_len=52) -%}
   {% set value = field_value(field, empty_text) | trim %}
   {% if value|length > max_len %}
     {{ value[:max_len].rstrip() }}...
@@ -264,229 +422,268 @@
   {% endif %}
 {%- endmacro %}
 
+{#──────────────────────────────────────────────────────────────
+   MACRO PREMIUM: field_card — renderiza tarjeta completa con estado visual
+──────────────────────────────────────────────────────────────#}
+{%- macro field_card(label, field, full=false, compact=false) -%}
+  {%- if not field or not field.display_value or field.coverage_status == "FALTANTE_REAL" -%}
+    {%- set _fc_cls = "erp-item--miss" -%}
+  {%- elif field.get('hora_no_identificada') or field.coverage_status in ["AMBIGUO","VALIDACION_MANUAL"] -%}
+    {%- set _fc_cls = "erp-item--warn" -%}
+  {%- else -%}
+    {%- set _fc_cls = "erp-item--ok" -%}
+  {%- endif -%}
+<div class="erp-item {{ _fc_cls }}{% if full %} erp-item--full{% endif %}">
+  <div class="erp-item-label">{{ label }}</div>
+  {%- if _fc_cls == "erp-item--miss" -%}
+  <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
+  {%- elif field.get('hora_no_identificada') -%}
+  <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ (field.display_value or '')|replace(' 00:00:00','') }}</div>
+  <span class="erp-status-pill erp-status-pill--warn"><i class="bi bi-clock-history"></i> Hora no identificada</span>
+  {%- elif _fc_cls == "erp-item--warn" -%}
+  <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ field.display_value }}</div>
+  <span class="erp-status-pill erp-status-pill--warn"><i class="bi bi-exclamation-triangle"></i> Pendiente validación</span>
+  {%- else -%}
+  <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ field.display_value }}</div>
+  {%- endif -%}
+</div>
+{%- endmacro -%}
+
 {% set show_fecha_inicio_consulta = fecha_inicio_consulta and (fecha_inicio_consulta.display_value or fecha_inicio_consulta.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"]) %}
 {% set show_fecha_fin_consulta = fecha_fin_consulta and (fecha_fin_consulta.display_value or fecha_fin_consulta.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"]) %}
 
-<div class="erp-shell">
+{# ── Buscar etapa en datos del proceso ── #}
+{% set _etapa = '' %}
+{% for k, v in proceso.items() %}
+  {% if k|lower in ['etapa', 'fase', 'etapa_proceso'] and v and v|string|lower not in ['nan','none','-','--','','n/a'] %}
+    {% if not _etapa %}{% set _etapa = v|string %}{% endif %}
+  {% endif %}
+{% endfor %}
+
+<div class="erp-shell lp-final-view">
+  {# ── Hero premium ── #}
   <div class="erp-hero">
     <div class="erp-hero-grid">
-      <div>
-        <div class="erp-kicker">Pantalla principal</div>
-        <h1 class="erp-title">{{ field_value(nombre_proceso, caso.titulo or "No identificado") }}</h1>
-        <p class="erp-subtitle">
-          Ficha operativa del proceso para carga y validacion.
-        </p>
+
+      {# ── Columna izquierda: identidad del proceso ── #}
+      <div class="erp-ficha-card">
+        <div class="erp-kicker">
+          <span class="erp-kicker-badge">ID SIEM #{{ caso.id }}</span>
+          <span class="erp-kicker-label">Pantalla principal · Ficha operativa</span>
+        </div>
+        <h1 class="erp-title">{{ field_value(nombre_proceso, caso.titulo or "Proceso sin nombre") }}</h1>
         <div class="erp-meta">
-          <div class="erp-meta-line">
-            <strong>Organismo:</strong> {{ field_value(origen) }}
-            <strong>Unidad:</strong> {{ field_value(unidad) }}
+          <div class="erp-meta-row erp-meta-row-primary">
+            {% if field_value(origen) and field_value(origen) != "Sin dato en pliego" %}
+            <span class="erp-meta-chip"><i class="bi bi-building" style="opacity:.65;"></i><b>Organismo:</b> {{ field_value(origen) }}</span>
+            {% endif %}
+            {% if field_value(unidad) and field_value(unidad) != "Sin dato en pliego" %}
+            <span class="erp-meta-chip"><i class="bi bi-diagram-2" style="opacity:.65;"></i><b>Unidad:</b> {{ field_value(unidad) }}</span>
+            {% endif %}
           </div>
-          <div class="erp-meta-line">
-            <strong>Procedimiento:</strong> {{ field_value(procedimiento, "Pendiente validacion") }}
-            <strong>Estado del caso:</strong> {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
+          <div class="erp-meta-row erp-meta-row-secondary">
+            {% if field_value(numero_proceso) and field_value(numero_proceso) != "Sin dato en pliego" %}
+            <span class="erp-meta-chip"><i class="bi bi-hash" style="opacity:.65;"></i><b>N° Proceso:</b> {{ field_value(numero_proceso) }}</span>
+            {% endif %}
+            {% if field_value(procedimiento) and field_value(procedimiento) != "Sin dato en pliego" %}
+            <span class="erp-meta-chip"><i class="bi bi-card-list" style="opacity:.65;"></i><b>Procedimiento:</b> {{ field_value(procedimiento) }}</span>
+            {% endif %}
+            {% if _etapa %}
+            <span class="erp-meta-chip"><i class="bi bi-signpost" style="opacity:.65;"></i><b>Etapa:</b> {{ _etapa }}</span>
+            {% endif %}
+            <span class="erp-meta-chip"><i class="bi bi-circle-fill" style="opacity:.55;font-size:.55rem;"></i>{{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}</span>
           </div>
         </div>
-      </div>
-      <div class="erp-state-card">
-        <div class="erp-state-label">Estado operativo</div>
-        <div class="erp-state-value">{{ operational_label }}</div>
-        <p class="erp-state-note">{{ operational_note }}</p>
-
-        <!-- Métricas de completitud -->
-        <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:.85rem;padding-top:.85rem;">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.65rem;">
-            <!-- Ejecutiva -->
-            <div>
-              <div style="font-size:.58rem;text-transform:uppercase;letter-spacing:.08em;opacity:.65;font-weight:800;margin-bottom:.15rem;">Ejecutiva</div>
-              <div style="font-size:1.4rem;font-weight:800;line-height:1;">
-                {{ completitud_ejecutiva.porcentaje }}<span style="font-size:.75rem;opacity:.75;">%</span>
-              </div>
-              <div style="height:4px;background:rgba(255,255,255,.15);border-radius:999px;overflow:hidden;margin:.25rem 0;">
-                <div style="height:100%;width:{{ completitud_ejecutiva.porcentaje }}%;background:rgba(52,211,153,.85);border-radius:999px;"></div>
-              </div>
-              <div style="font-size:.62rem;opacity:.65;">18 ítems · {{ completitud_ejecutiva.estado }}</div>
-            </div>
-            <!-- Técnica -->
-            <div>
-              <div style="font-size:.58rem;text-transform:uppercase;letter-spacing:.08em;opacity:.65;font-weight:800;margin-bottom:.15rem;">Técnica</div>
-              <div style="font-size:1.4rem;font-weight:800;line-height:1;">
-                {{ completitud_tecnica.porcentaje }}<span style="font-size:.75rem;opacity:.75;">%</span>
-              </div>
-              <div style="height:4px;background:rgba(255,255,255,.15);border-radius:999px;overflow:hidden;margin:.25rem 0;">
-                <div style="height:100%;width:{{ completitud_tecnica.porcentaje }}%;background:rgba(96,165,250,.9);border-radius:999px;"></div>
-              </div>
-              <div style="font-size:.62rem;opacity:.65;">33 campos · {{ completitud_tecnica.estado }}</div>
-            </div>
+        <div class="erp-operational-strip">
+          {% if field_value(expediente) and field_value(expediente) != "Sin dato en pliego" %}
+          <div class="erp-op-item">
+            <span>Expediente</span>
+            <strong>{{ field_value(expediente) }}</strong>
           </div>
-          {% if caso.faltantes %}
-          <div style="margin-top:.6rem;font-size:.7rem;opacity:.88;display:flex;align-items:center;gap:.4rem;background:rgba(220,38,38,.18);padding:.35rem .55rem;border-radius:.45rem;">
-            <i class="bi bi-exclamation-triangle-fill" style="font-size:.78rem;color:#fca5a5;flex-shrink:0;"></i>
-            <span>{{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }} documental{{ 'es' if caso.faltantes|length != 1 else '' }} registrado{{ 's' if caso.faltantes|length != 1 else '' }} · ver pantalla secundaria</span>
+          {% endif %}
+          {% if field_value(fecha_apertura) and field_value(fecha_apertura) != "Sin dato en pliego" %}
+          <div class="erp-op-item">
+            <span>Apertura</span>
+            <strong>{{ fecha_apertura_value(fecha_apertura) }}</strong>
+          </div>
+          {% endif %}
+          {% if field_value(duracion_contrato) and field_value(duracion_contrato) != "Sin dato en pliego" %}
+          <div class="erp-op-item">
+            <span>Contrato</span>
+            <strong>{{ compact_field_value(duracion_contrato, "Sin dato en pliego", 34) }}</strong>
+          </div>
+          {% endif %}
+          {% if field_value(plazo_mantenimiento) and field_value(plazo_mantenimiento) != "Sin dato en pliego" %}
+          <div class="erp-op-item">
+            <span>Mantenimiento oferta</span>
+            <strong>{{ compact_field_value(plazo_mantenimiento, "Sin dato en pliego", 34) }}</strong>
           </div>
           {% endif %}
         </div>
-        
-        <!-- Control Carga -->
-        {% if control_carga %}
-        <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:.85rem;padding-top:.85rem;">
-          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;opacity:.74;font-weight:800;margin-bottom:.45rem;">Control de Integración</div>
-          <div style="display:grid;gap:.4rem;">
-            {% if control_carga.get('listo_para_fusion') %}
-              <div style="font-size:.85rem; display:flex; gap:.5rem;">
-                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('listo_para_fusion')|lower in ['sí','si','true','yes','1'] %}#34d399{% else %}#fca5a5{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
-                <span>Listo para Fusion: <strong>{{ control_carga.get('listo_para_fusion') }}</strong></span>
-              </div>
-            {% endif %}
-            {% if control_carga.get('listo_para_visualizacion') %}
-              <div style="font-size:.85rem; display:flex; gap:.5rem;">
-                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('listo_para_visualizacion')|lower in ['sí','si','true','yes','1'] %}#34d399{% else %}#fca5a5{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
-                <span>Listo para SIEM: <strong>{{ control_carga.get('listo_para_visualizacion') }}</strong></span>
-              </div>
-            {% endif %}
-            {% if control_carga.get('requiere_revision_analista') %}
-              <div style="font-size:.85rem; display:flex; gap:.5rem;">
-                <i class="bi bi-circle-fill" style="color: {% if control_carga.get('requiere_revision_analista')|lower in ['sí','si','true','yes','1'] %}#fbbf24{% else %}#34d399{% endif %}; font-size:.5rem; margin-top:.25rem;"></i>
-                <span>Revisión Analista: <strong>{{ control_carga.get('requiere_revision_analista') }}</strong></span>
-              </div>
-            {% endif %}
-            {% if control_carga.get('observaciones_integracion') and control_carga.get('observaciones_integracion')|string|lower not in ['-','--','n/a','na','none','no','sin observaciones',''] %}
-              <div style="font-size:.8rem; opacity:.9; background:rgba(0,0,0,.15); padding:.45rem .6rem; border-radius:.45rem; margin-top:.25rem;">
-                <i class="bi bi-info-circle me-1"></i> {{ control_carga.get('observaciones_integracion') }}
-              </div>
-            {% endif %}
+      </div>
+
+      {# ── Columna derecha: estado operativo + métricas ── #}
+      <div class="erp-state-card">
+        <div class="erp-state-head">
+          <div class="erp-state-kicker">Estado operativo</div>
+          <div class="erp-state-badge">
+            <span class="erp-state-dot" style="background:{{ operational_color }};box-shadow:0 0 0 4px {{ operational_color }}26;"></span>
+            {{ operational_label }}
           </div>
         </div>
+        <p class="erp-state-note">{{ operational_note }}</p>
+
+        {% if semaforo == "siem" or semaforo == "parcial" %}
+        <div class="erp-state-alert">
+          <i class="bi bi-exclamation-triangle-fill" style="color:#fca5a5;flex-shrink:0;margin-top:.08rem;"></i>
+          <span>No enviar a Fusión hasta resolver campos indicados en la vista completa.</span>
+        </div>
         {% endif %}
+
+        {# ── Métricas de completitud ── #}
+        <div class="erp-metrics-grid">
+          <div class="erp-metric">
+            <div class="erp-metric-kicker">Ejecutiva</div>
+            <div class="erp-metric-val">{{ completitud_ejecutiva.porcentaje }}<span style="font-size:.7rem;opacity:.6;">%</span></div>
+            <div class="erp-metric-bar">
+              <div class="erp-metric-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:rgba(52,211,153,.85);"></div>
+            </div>
+            <div class="erp-metric-sub">18 ítems · {{ completitud_ejecutiva.estado }}</div>
+          </div>
+          <div class="erp-metric">
+            <div class="erp-metric-kicker">Técnica</div>
+            <div class="erp-metric-val">{{ completitud_tecnica.porcentaje }}<span style="font-size:.7rem;opacity:.6;">%</span></div>
+            <div class="erp-metric-bar">
+              <div class="erp-metric-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:rgba(96,165,250,.9);"></div>
+            </div>
+            <div class="erp-metric-sub">33 campos · {{ completitud_tecnica.estado }}</div>
+          </div>
+        </div>
+
+        {% if caso.faltantes %}
+        <div class="erp-faltantes-chip">
+          <i class="bi bi-exclamation-triangle-fill" style="color:#fca5a5;flex-shrink:0;"></i>
+          <span>{{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }} documental{{ 'es' if caso.faltantes|length != 1 else '' }} · ver vista completa</span>
+        </div>
+        {% endif %}
+
+        {# ── Control de integración ── #}
+        <div class="erp-integration">
+          <div class="erp-integration-kicker">Control de integración</div>
+          <div class="erp-integration-row">
+            <span class="erp-integration-dot" style="background:{{ operational_color }};"></span>
+            <span>RP Fusión: <strong>{% if semaforo == "fusion" %}Listo para carga{% elif semaforo == "parcial" %}Parcial — revisar{% else %}No listo{% endif %}</strong></span>
+          </div>
+          <div class="erp-integration-row">
+            <span class="erp-integration-dot" style="background:{% if caso.estado in ['listo','en_validacion'] %}#34d399{% else %}#64748b{% endif %};"></span>
+            <span>SIEM Operativa: <strong>{% if caso.estado in ['listo','en_validacion'] %}Validado{% else %}Pendiente{% endif %}</strong></span>
+          </div>
+          {% if sfus.faltante_real > 0 or sfus.ambiguo > 0 or sfus.hora_flag %}
+          <div class="erp-integration-detail">
+            <i class="bi bi-info-circle me-1"></i>
+            {% if sfus.faltante_real > 0 %}{{ sfus.faltante_real }} campo(s) crítico(s) sin dato.{% endif %}
+            {% if sfus.ambiguo > 0 %} {{ sfus.ambiguo }} campo(s) ambiguo(s).{% endif %}
+            {% if sfus.hora_flag %} Hora de apertura no identificada.{% endif %}
+          </div>
+          {% endif %}
+        </div>
       </div>
+
     </div>
   </div>
 
+  {# ── Sección 1: Datos principales ── #}
   <section class="erp-section">
     <div class="erp-section-head">
-      <h2 class="erp-section-title">Datos principales del proceso</h2>
-      <p class="erp-section-note">Campos clave para identificacion y carga operativa.</p>
+      <div>
+        <div class="erp-section-kicker">Proceso</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-building"></i></span>
+          Datos principales del proceso
+        </h2>
+      </div>
+      <p class="erp-section-note">Campos clave para identificación y carga operativa.</p>
     </div>
     <div class="erp-grid">
-      <div class="erp-item">
-        <div class="erp-item-label">Organismo</div>
-        <div class="erp-item-value">{{ field_value(origen) }}</div>
-        {{ field_hint(origen) }}
+      {{ field_card("Organismo / Entidad", origen) }}
+      {{ field_card("Unidad ejecutora", unidad) }}
+      {{ field_card("Número de proceso", numero_proceso) }}
+      {{ field_card("Nro. Expediente", expediente) }}
+      {{ field_card("Procedimiento de selección", procedimiento) }}
+
+      {# Etapa: viene de proceso dict, no de field object #}
+      <div class="erp-item {% if _etapa %}erp-item--ok{% else %}erp-item--miss{% endif %}">
+        <div class="erp-item-label">Etapa</div>
+        {% if _etapa %}
+        <div class="erp-item-value">{{ _etapa }}</div>
+        {% else %}
+        <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
+        {% endif %}
       </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Unidad ejecutora</div>
-        <div class="erp-item-value">{{ field_value(unidad) }}</div>
-        {{ field_hint(unidad) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Numero de proceso</div>
-        <div class="erp-item-value">{{ field_value(numero_proceso) }}</div>
-        {{ field_hint(numero_proceso) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Expediente</div>
-        <div class="erp-item-value">{{ field_value(expediente) }}</div>
-        {{ field_hint(expediente) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Nombre del proceso</div>
-        <div class="erp-item-value">{{ field_value(nombre_proceso, caso.titulo or "No identificado") }}</div>
-        {{ field_hint(nombre_proceso) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Procedimiento de seleccion</div>
-        <div class="erp-item-value">{{ field_value(procedimiento, "Pendiente validacion") }}</div>
-        {{ field_hint(procedimiento) }}
-      </div>
-      <div class="erp-item" style="grid-column: 1 / -1;">
-        <div class="erp-item-label">Objeto de contratacion</div>
-        <div class="erp-item-value">{{ field_value(objeto, "Pendiente validacion") }}</div>
-        {{ field_hint(objeto) }}
-      </div>
+
+      {# Nombre del proceso y Objeto van en ancho completo #}
+      {{ field_card("Nombre del proceso", nombre_proceso, full=false) }}
+      {{ field_card("Objeto de contratación", objeto, full=true, compact=true) }}
     </div>
   </section>
 
+  {# ── Sección 2: Fechas clave ── #}
   <section class="erp-section">
     <div class="erp-section-head">
-      <h2 class="erp-section-title">Fechas clave</h2>
-      <p class="erp-section-note">Solo fechas utiles para la operacion y la validacion de carga.</p>
+      <div>
+        <div class="erp-section-kicker">Cronología</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-calendar3"></i></span>
+          Fechas clave
+        </h2>
+      </div>
+      <p class="erp-section-note">Fechas relevantes para la operación y validación de carga.</p>
     </div>
     <div class="erp-grid">
-      <div class="erp-item">
-        <div class="erp-item-label">Fecha apertura</div>
-        <div class="erp-item-value">{{ field_value(fecha_apertura) }}</div>
-        {{ field_hint(fecha_apertura) }}
-      </div>
+      {{ field_card("Fecha acto apertura", fecha_apertura) }}
       {% if show_fecha_inicio_consulta %}
-      <div class="erp-item">
-        <div class="erp-item-label">Fecha inicio consulta</div>
-        <div class="erp-item-value">{{ field_value(fecha_inicio_consulta) }}</div>
-        {{ field_hint(fecha_inicio_consulta) }}
-      </div>
+      {{ field_card("Inicio consultas", fecha_inicio_consulta) }}
       {% endif %}
       {% if show_fecha_fin_consulta %}
-      <div class="erp-item">
-        <div class="erp-item-label">Fecha cierre / presentacion</div>
-        <div class="erp-item-value">{{ field_value(fecha_fin_consulta) }}</div>
-        {{ field_hint(fecha_fin_consulta) }}
-      </div>
+      {{ field_card("Cierre / Presentación", fecha_fin_consulta) }}
       {% endif %}
-      <div class="erp-item">
-        <div class="erp-item-label">Duracion contrato</div>
-        <div class="erp-item-value erp-item-value-compact">{{ compact_field_value(duracion_contrato) }}</div>
-        {{ field_hint(duracion_contrato) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Plazo mantenimiento oferta</div>
-        <div class="erp-item-value">{{ field_value(plazo_mantenimiento) }}</div>
-        {{ field_hint(plazo_mantenimiento) }}
-      </div>
+      {{ field_card("Duración del contrato", duracion_contrato, compact=true) }}
+      {{ field_card("Plazo mantenimiento oferta", plazo_mantenimiento) }}
     </div>
   </section>
 
+  {# ── Sección 3: Condiciones comerciales ── #}
   <section class="erp-section">
     <div class="erp-section-head">
-      <h2 class="erp-section-title">Condiciones comerciales y economicas</h2>
-      <p class="erp-section-note">Datos utiles para validar la carga en el sistema interno.</p>
+      <div>
+        <div class="erp-section-kicker">Condiciones</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-currency-dollar"></i></span>
+          Condiciones comerciales y económicas
+        </h2>
+      </div>
+      <p class="erp-section-note">Datos para validar la carga en el sistema interno.</p>
     </div>
     <div class="erp-grid">
-      <div class="erp-item">
-        <div class="erp-item-label">Monto</div>
-        <div class="erp-item-value">{{ field_value(monto) }}</div>
-        {{ field_hint(monto) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Moneda</div>
-        <div class="erp-item-value">{{ field_value(moneda) }}</div>
-        {{ field_hint(moneda) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Modalidad</div>
-        <div class="erp-item-value">{{ field_value(modalidad) }}</div>
-        {{ field_hint(modalidad) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Tipo de cotizacion</div>
-        <div class="erp-item-value">{{ field_value(tipo_cotizacion) }}</div>
-        {{ field_hint(tipo_cotizacion) }}
-      </div>
-      <div class="erp-item">
-        <div class="erp-item-label">Tipo de adjudicacion</div>
-        <div class="erp-item-value">{{ field_value(tipo_adjudicacion) }}</div>
-        {{ field_hint(tipo_adjudicacion) }}
-      </div>
+      {{ field_card("Monto", monto) }}
+      {{ field_card("Moneda", moneda) }}
+      {{ field_card("Modalidad", modalidad) }}
+      {{ field_card("Tipo de cotización", tipo_cotizacion) }}
+      {{ field_card("Tipo de adjudicación", tipo_adjudicacion) }}
     </div>
   </section>
 
+  {# ── CTA: acceso a vista completa ── #}
   <div class="erp-cta">
-    <div>
-      <h3>Ver pantalla secundaria</h3>
+    <div class="erp-cta-body">
+      <h3><i class="bi bi-layout-text-window-reverse me-2" style="color:#2563eb;"></i>Acceder a la vista completa</h3>
       <p>
-        El detalle ampliado del proceso, la trazabilidad, los hallazgos, faltantes,
-        requisitos, garantias, documentos, actos y renglones completos quedan en la pantalla secundaria.
+        La vista completa incluye renglones, cronograma, requisitos, garantías, documentos,
+        actos administrativos, trazabilidad, hallazgos, faltantes y SIEM Analítica.
       </p>
     </div>
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" class="btn btn-primary">
-      Abrir pantalla secundaria
+      <i class="bi bi-arrow-right-circle me-1"></i>Abrir vista completa
     </a>
   </div>
 </div>
@@ -495,10 +692,3 @@
 {% block extra_js %}
 <script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
 {% endblock %}
-
-  .erp-item-value-compact {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
