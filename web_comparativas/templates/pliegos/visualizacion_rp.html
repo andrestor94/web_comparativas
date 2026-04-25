@@ -26,30 +26,30 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=4">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Pantalla Principal — Premium v4
   ═══════════════════════════════════════════════════════════ */
   :root {
-    --p-navy:      #091d38;
-    --p-blue:      #1b3a6b;
-    --p-accent:    #2563eb;
-    --p-accent-lt: #dbeafe;
-    --p-ok:        #059669;
-    --p-ok-lt:     #ecfdf5;
-    --p-warn:      #d97706;
-    --p-warn-lt:   #fffbeb;
-    --p-err:       #dc2626;
-    --p-err-lt:    #fef2f2;
+    --p-navy:      var(--siem-navy);
+    --p-blue:      var(--siem-navy-deep);
+    --p-accent:    var(--siem-blue);
+    --p-accent-lt: var(--siem-blue-soft);
+    --p-ok:        var(--siem-green);
+    --p-ok-lt:     var(--siem-green-soft);
+    --p-warn:      var(--siem-amber);
+    --p-warn-lt:   var(--siem-amber-soft);
+    --p-err:       var(--siem-red);
+    --p-err-lt:    var(--siem-red-soft);
     --p-surface:   #ffffff;
-    --p-bg:        #f5f7fa;
-    --p-border:    #e2e8f0;
-    --p-border-md: #cbd5e1;
-    --p-text1:     #0f172a;
-    --p-text2:     #334155;
-    --p-text3:     #64748b;
-    --p-text4:     #94a3b8;
+    --p-bg:        var(--siem-bg);
+    --p-border:    var(--siem-border);
+    --p-border-md: var(--siem-border);
+    --p-text1:     var(--siem-text-strong);
+    --p-text2:     var(--siem-text);
+    --p-text3:     var(--siem-text-muted);
+    --p-text4:     var(--siem-text-soft);
     --p-shadow-sm: 0 1px 3px rgba(0,0,0,.04), 0 4px 14px rgba(15,23,42,.05);
     --p-shadow-md: 0 2px 6px rgba(0,0,0,.05), 0 8px 24px rgba(15,23,42,.07);
     --p-radius:    1rem;
@@ -60,12 +60,12 @@
 
   /* ── Hero ───────────────────────────────────────────────── */
   .erp-hero {
-    background: linear-gradient(135deg, #071628 0%, #0d2748 45%, #0f2a52 100%);
-    color: #fff;
+    background: linear-gradient(135deg, rgba(255,255,255,.98) 0%, var(--siem-navy-soft) 100%);
+    color: var(--siem-text);
     border-radius: 1.35rem;
     padding: 1.5rem 1.6rem;
     margin-bottom: 1.25rem;
-    box-shadow: 0 4px 6px rgba(0,0,0,.08), 0 20px 50px rgba(7,22,40,.22);
+    box-shadow: var(--siem-shadow-card);
     position: relative;
     overflow: hidden;
   }
@@ -91,16 +91,16 @@
   .erp-kicker {
     display:flex;align-items:center;gap:.5rem;
     font-size:.64rem;letter-spacing:.11em;
-    text-transform:uppercase;opacity:.65;font-weight:800;margin-bottom:.55rem;
+    text-transform:uppercase;opacity:.65;font-weight:650;margin-bottom:.55rem;
   }
   .erp-kicker-badge {
     background:rgba(255,255,255,.16);
     border:1px solid rgba(255,255,255,.22);
     border-radius:.45rem;padding:.16rem .6rem;
-    font-weight:900;letter-spacing:.05em;color:#fff;font-size:.66rem;
+    font-weight:700;letter-spacing:.05em;color:var(--siem-text);font-size:.66rem;
   }
   .erp-title {
-    font-size:1.45rem;line-height:1.14;font-weight:800;
+    font-size:1.45rem;line-height:1.14;font-weight:650;
     margin:0 0 .6rem;letter-spacing:-.015em;
   }
   .erp-meta { display:flex;flex-direction:column;gap:.4rem;margin-top:.65rem; }
@@ -111,7 +111,7 @@
     border-radius:.4rem;padding:.14rem .52rem;font-size:.78rem;font-weight:500;
     line-height:1.3;
   }
-  .erp-meta-chip b { font-weight:700;color:rgba(255,255,255,.9); }
+  .erp-meta-chip b { font-weight:600;color:var(--siem-text); }
 
   /* ── State card ──────────────────────────────────────────── */
   .erp-state-card {
@@ -122,11 +122,11 @@
   }
   .erp-state-kicker {
     font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
-    font-weight:800;opacity:.55;margin-bottom:.5rem;
+    font-weight:650;opacity:.55;margin-bottom:.5rem;
   }
   .erp-state-badge {
     display:inline-flex;align-items:center;gap:.45rem;
-    font-size:.95rem;font-weight:800;margin-bottom:.32rem;line-height:1.2;
+    font-size:.95rem;font-weight:650;margin-bottom:.32rem;line-height:1.2;
   }
   .erp-state-dot {
     width:.62rem;height:.62rem;border-radius:50%;flex-shrink:0;
@@ -149,9 +149,9 @@
   .erp-metric { display:flex;flex-direction:column;gap:.1rem; }
   .erp-metric-kicker {
     font-size:.56rem;text-transform:uppercase;letter-spacing:.08em;
-    opacity:.52;font-weight:800;
+    opacity:.52;font-weight:650;
   }
-  .erp-metric-val { font-size:1.4rem;font-weight:800;line-height:1; }
+  .erp-metric-val { font-size:1.4rem;font-weight:650;line-height:1; }
   .erp-metric-bar {
     height:3px;background:rgba(255,255,255,.12);
     border-radius:999px;overflow:hidden;margin:.18rem 0;
@@ -172,7 +172,7 @@
   }
   .erp-integration-kicker {
     font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;
-    opacity:.52;font-weight:800;margin-bottom:.38rem;
+    opacity:.52;font-weight:650;margin-bottom:.38rem;
   }
   .erp-integration-row {
     display:flex;align-items:center;gap:.42rem;
@@ -203,10 +203,10 @@
   }
   .erp-section-kicker {
     font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;
-    color:var(--p-accent);font-weight:800;margin-bottom:.12rem;
+    color:var(--p-accent);font-weight:650;margin-bottom:.12rem;
   }
   .erp-section-title {
-    margin:0;font-size:1rem;font-weight:800;color:var(--p-text1);
+    margin:0;font-size:1rem;font-weight:650;color:var(--p-text1);
     display:flex;align-items:center;gap:.52rem;
   }
   .erp-section-icon {
@@ -238,12 +238,12 @@
   }
   .erp-item--ok   { border-left-color:var(--p-ok); }
   .erp-item--warn { border-left-color:var(--p-warn); }
-  .erp-item--miss { border-left-color:var(--p-border-md);background:#fafbfc; }
+  .erp-item--miss { border-left-color:var(--p-border-md);background:var(--siem-surface-soft); }
   .erp-item--full { grid-column:1/-1; }
 
   .erp-item-label {
     font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;
-    color:var(--p-text3);font-weight:800;margin-bottom:.42rem;
+    color:var(--p-text3);font-weight:650;margin-bottom:.42rem;
   }
   .erp-item-value {
     color:var(--p-text1);font-size:.95rem;font-weight:700;
@@ -260,16 +260,16 @@
     font-size:.65rem;font-weight:700;border-radius:999px;
     padding:.1rem .48rem;margin-top:.42rem;
   }
-  .erp-status-pill--warn { background:var(--p-warn-lt);color:#92400e;border:1px solid #fde68a; }
-  .erp-status-pill--ok   { background:var(--p-ok-lt);color:#065f46;border:1px solid #a7f3d0; }
-  .erp-status-pill--miss { background:var(--p-err-lt);color:#991b1b;border:1px solid #fecaca; }
+  .erp-status-pill--warn { background:var(--p-warn-lt);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
+  .erp-status-pill--ok   { background:var(--p-ok-lt);color:var(--siem-green);border:1px solid var(--siem-green-border); }
+  .erp-status-pill--miss { background:var(--p-err-lt);color:var(--siem-red);border:1px solid var(--siem-red-border); }
   /* backward compat */
   .erp-item-hint { margin-top:.42rem;font-size:.78rem;line-height:1.35; }
   .erp-empty { color:var(--p-text4);font-style:italic;font-weight:500; }
 
   /* ── CTA block ───────────────────────────────────────────── */
   .erp-cta {
-    background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);
+    background:linear-gradient(135deg,var(--siem-blue-soft) 0%,var(--siem-green-soft) 100%);
     border:1px solid rgba(37,99,235,.14);
     border-radius:var(--p-radius);
     padding:1.25rem 1.4rem;
@@ -277,7 +277,7 @@
     align-items:center;gap:1rem;flex-wrap:wrap;
     box-shadow:var(--p-shadow-sm);
   }
-  .erp-cta h3 { margin:0 0 .28rem;font-size:1rem;font-weight:800;color:#1e3a8a; }
+  .erp-cta h3 { margin:0 0 .28rem;font-size:1rem;font-weight:650;color:var(--siem-navy); }
   .erp-cta p  { margin:0;color:var(--p-text2);font-size:.84rem;max-width:46rem;line-height:1.48; }
   .erp-cta .btn {
     border-radius:.8rem;padding:.72rem 1.2rem;
@@ -347,27 +347,27 @@
 {% if caso_observado %}
   {% set semaforo = "observado" %}
   {% set operational_label = "Observado / Requiere revisión" %}
-  {% set operational_color = "#f59e0b" %}
+  {% set operational_color = "var(--siem-amber)" %}
   {% set operational_note = "El caso fue marcado como observado. Revisar comentarios en el historial antes de continuar." %}
 {% elif caso_pendiente %}
   {% set semaforo = "pendiente" %}
   {% set operational_label = "Pendiente validación" %}
-  {% set operational_color = "#94a3b8" %}
+  {% set operational_color = "var(--siem-text-soft)" %}
   {% set operational_note = "El caso aún no completó el flujo de validación. El estado operativo no ha sido aprobado." %}
 {% elif sfus.faltante_real > 0 %}
   {% set semaforo = "siem" %}
   {% set operational_label = "Listo para SIEM — No listo para Fusión" %}
-  {% set operational_color = "#3b82f6" %}
+  {% set operational_color = "var(--siem-blue)" %}
   {% set operational_note = "Hay " ~ sfus.faltante_real ~ " campo(s) crítico(s) de Fusión sin dato. No enviar a Fusión hasta resolverlos." %}
 {% elif sfus.ambiguo > 0 or sfus.hora_flag %}
   {% set semaforo = "parcial" %}
   {% set operational_label = "Listo para SIEM — Fusión parcial" %}
-  {% set operational_color = "#f59e0b" %}
+  {% set operational_color = "var(--siem-amber)" %}
   {% set operational_note = "Datos presentes pero con ambigüedades (" ~ sfus.ambiguo ~ " campo(s)). Validar antes de cargar en Fusión." %}
 {% else %}
   {% set semaforo = "fusion" %}
   {% set operational_label = "Listo para Fusión" %}
-  {% set operational_color = "#10b981" %}
+  {% set operational_color = "var(--siem-green)" %}
   {% set operational_note = "Todos los campos críticos de Fusión están completos. El proceso está listo para carga." %}
 {% endif %}
 
@@ -383,22 +383,22 @@
 
 {%- macro field_hint(field) -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
-    <div class="erp-item-hint" style="color:#94a3b8;font-style:italic;">Sin dato en pliego</div>
+    <div class="erp-item-hint" style="color:var(--siem-text-soft);font-style:italic;">Sin dato en pliego</div>
   {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
-    <div class="erp-item-hint" style="color:#f59e0b;">⚠ Pendiente validacion</div>
+    <div class="erp-item-hint" style="color:var(--siem-amber);">⚠ Pendiente validacion</div>
   {% endif %}
 {%- endmacro -%}
 
 {%- macro fecha_apertura_hint(field) -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
-    <div class="erp-item-hint" style="color:#94a3b8;font-style:italic;">Sin dato en pliego</div>
+    <div class="erp-item-hint" style="color:var(--siem-text-soft);font-style:italic;">Sin dato en pliego</div>
   {% elif field.get('hora_no_identificada') %}
-    <div class="erp-item-hint" style="color:#f59e0b;display:flex;align-items:center;gap:.3rem;">
+    <div class="erp-item-hint" style="color:var(--siem-amber);display:flex;align-items:center;gap:.3rem;">
       <i class="bi bi-clock-history"></i>
       <span>Hora no identificada — mostrar solo fecha</span>
     </div>
   {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
-    <div class="erp-item-hint" style="color:#f59e0b;">⚠ Pendiente validacion</div>
+    <div class="erp-item-hint" style="color:var(--siem-amber);">⚠ Pendiente validacion</div>
   {% endif %}
 {%- endmacro -%}
 
@@ -527,7 +527,7 @@
         <div class="erp-state-head">
           <div class="erp-state-kicker">Estado operativo</div>
           <div class="erp-state-badge">
-            <span class="erp-state-dot" style="background:{{ operational_color }};box-shadow:0 0 0 4px {{ operational_color }}26;"></span>
+            <span class="erp-state-dot" style="background:{{ operational_color }};box-shadow:0 0 0 4px rgba(100,116,139,.12);"></span>
             {{ operational_label }}
           </div>
         </div>
@@ -535,7 +535,7 @@
 
         {% if semaforo == "siem" or semaforo == "parcial" %}
         <div class="erp-state-alert">
-          <i class="bi bi-exclamation-triangle-fill" style="color:#fca5a5;flex-shrink:0;margin-top:.08rem;"></i>
+          <i class="bi bi-exclamation-triangle-fill" style="color:var(--siem-red-border);flex-shrink:0;margin-top:.08rem;"></i>
           <span>No enviar a Fusión hasta resolver campos indicados en la vista completa.</span>
         </div>
         {% endif %}
@@ -562,7 +562,7 @@
 
         {% if caso.faltantes %}
         <div class="erp-faltantes-chip">
-          <i class="bi bi-exclamation-triangle-fill" style="color:#fca5a5;flex-shrink:0;"></i>
+          <i class="bi bi-exclamation-triangle-fill" style="color:var(--siem-red-border);flex-shrink:0;"></i>
           <span>{{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }} documental{{ 'es' if caso.faltantes|length != 1 else '' }} · ver vista completa</span>
         </div>
         {% endif %}
@@ -575,7 +575,7 @@
             <span>RP Fusión: <strong>{% if semaforo == "fusion" %}Listo para carga{% elif semaforo == "parcial" %}Parcial — revisar{% else %}No listo{% endif %}</strong></span>
           </div>
           <div class="erp-integration-row">
-            <span class="erp-integration-dot" style="background:{% if caso.estado in ['listo','en_validacion'] %}#34d399{% else %}#64748b{% endif %};"></span>
+            <span class="erp-integration-dot" style="background:{% if caso.estado in ['listo','en_validacion'] %}var(--siem-green-border){% else %}var(--siem-text-muted){% endif %};"></span>
             <span>SIEM Operativa: <strong>{% if caso.estado in ['listo','en_validacion'] %}Validado{% else %}Pendiente{% endif %}</strong></span>
           </div>
           {% if sfus.faltante_real > 0 or sfus.ambiguo > 0 or sfus.hora_flag %}
@@ -676,7 +676,7 @@
   {# ── CTA: acceso a vista completa ── #}
   <div class="erp-cta">
     <div class="erp-cta-body">
-      <h3><i class="bi bi-layout-text-window-reverse me-2" style="color:#2563eb;"></i>Acceder a la vista completa</h3>
+      <h3><i class="bi bi-layout-text-window-reverse me-2" style="color:var(--siem-blue);"></i>Acceder a la vista completa</h3>
       <p>
         La vista completa incluye renglones, cronograma, requisitos, garantías, documentos,
         actos administrativos, trazabilidad, hallazgos, faltantes y SIEM Analítica.

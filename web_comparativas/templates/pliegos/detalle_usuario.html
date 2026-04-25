@@ -4,32 +4,33 @@
 {% block header_title %}Solicitud #{{ caso.id }}{% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   .estado-badge { font-size: .75rem; font-weight: 600; padding: .3em .8em; border-radius: 20px; }
-  .estado-borrador              { background: #f0f0f0; color: #666; }
-  .estado-pendiente_revision    { background: #fff3cd; color: #856404; }
-  .estado-en_revision           { background: #cfe2ff; color: #084298; }
-  .estado-pendiente_procesamiento { background: #e2d9f3; color: #432874; }
-  .estado-procesado_externamente { background: #d1ecf1; color: #0c5460; }
-  .estado-excel_cargado         { background: #d4edda; color: #155724; }
-  .estado-en_validacion         { background: #fde8c8; color: #7d4000; }
-  .estado-listo                 { background: #198754; color: #fff; }
-  .estado-observado             { background: #fff0b3; color: #664d03; }
-  .estado-rechazado             { background: #f8d7da; color: #842029; }
-  .estado-reprocesar            { background: #ffd6a5; color: #7c4700; }
-  .estado-archivado             { background: #e9ecef; color: #495057; }
+  .estado-borrador,
+  .estado-archivado             { background: var(--siem-surface-soft); color: var(--siem-text-muted); border:1px solid var(--siem-border); }
+  .estado-pendiente_revision,
+  .estado-pendiente_procesamiento,
+  .estado-en_validacion,
+  .estado-observado,
+  .estado-reprocesar            { background: var(--siem-amber-soft); color: var(--siem-amber); border:1px solid var(--siem-amber-border); }
+  .estado-en_revision,
+  .estado-procesado_externamente { background: var(--siem-blue-soft); color: var(--siem-blue); border:1px solid var(--siem-blue-border); }
+  .estado-excel_cargado,
+  .estado-listo                 { background: var(--siem-green-soft); color: var(--siem-green); border:1px solid var(--siem-green-border); }
+  .estado-rechazado             { background: var(--siem-red-soft); color: var(--siem-red); border:1px solid var(--siem-red-border); }
 
   .timeline { position: relative; padding-left: 1.5rem; }
   .timeline::before { content: ''; position: absolute; left: .5rem; top: 0; bottom: 0;
-    width: 2px; background: var(--bs-border-color); }
+    width: 2px; background: var(--siem-border); }
   .timeline-item { position: relative; margin-bottom: 1rem; }
   .timeline-item::before { content: ''; position: absolute; left: -1.1rem; top: .3rem;
-    width: .6rem; height: .6rem; border-radius: 50%; background: var(--bs-primary); border: 2px solid white;
-    box-shadow: 0 0 0 2px var(--bs-primary); }
-  .timeline-item.estado-listo::before { background: #198754; box-shadow: 0 0 0 2px #198754; }
-  .timeline-item.estado-rechazado::before { background: #dc3545; box-shadow: 0 0 0 2px #dc3545; }
+    width: .6rem; height: .6rem; border-radius: 50%; background: var(--siem-blue); border: 2px solid white;
+    box-shadow: 0 0 0 2px var(--siem-blue); }
+  .timeline-item.estado-listo::before { background: var(--siem-green); box-shadow: 0 0 0 2px var(--siem-green); }
+  .timeline-item.estado-rechazado::before { background: var(--siem-red); box-shadow: 0 0 0 2px var(--siem-red); }
 
-  .info-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: #888; font-weight: 600; }
+  .info-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--siem-text-muted); font-weight: 600; }
   .info-value { font-size: .9rem; }
 </style>
 {% endblock %}
@@ -61,7 +62,7 @@
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
-          <h5 class="mb-1 fw-bold">{{ caso.titulo }}</h5>
+          <h5 class="mb-1 fw-semibold">{{ caso.titulo }}</h5>
           {% if caso.organismo %}
           <div class="text-muted" style="font-size:.88rem">{{ caso.organismo }}</div>
           {% endif %}
@@ -108,12 +109,12 @@
   {% if caso.archivos %}
   <div class="card mb-3">
     <div class="card-body">
-      <h6 class="card-title fw-bold mb-3">
+      <h6 class="card-title fw-semibold mb-3">
         <i class="bi bi-paperclip me-2 text-primary"></i>Archivos adjuntos
       </h6>
       <div class="d-flex flex-column gap-2">
         {% for arch in caso.archivos %}
-        <div class="d-flex align-items-center gap-2 p-2 rounded" style="border: 1px solid var(--bs-border-color); font-size:.85rem">
+        <div class="d-flex align-items-center gap-2 p-2 rounded" style="border: 1px solid var(--siem-border); font-size:.85rem">
           <i class="bi bi-file-earmark-text text-muted"></i>
           <span class="flex-grow-1">{{ arch.nombre_original }}</span>
           {% if arch.tamano_bytes %}
@@ -140,7 +141,7 @@
   {% if caso.observaciones_usuario %}
   <div class="card mb-3">
     <div class="card-body">
-      <h6 class="card-title fw-bold mb-2">
+      <h6 class="card-title fw-semibold mb-2">
         <i class="bi bi-chat-text me-2 text-primary"></i>Tus observaciones
       </h6>
       <div class="p-3 rounded" style="background: rgba(0,0,0,.03); font-size:.88rem; white-space: pre-wrap">{{ caso.observaciones_usuario }}</div>
@@ -150,9 +151,9 @@
 
   {# ── Observaciones del admin ── #}
   {% if caso.observaciones_admin %}
-  <div class="card mb-3" style="border-left: 3px solid #0d6efd">
+  <div class="card mb-3" style="border-left: 3px solid var(--siem-blue)">
     <div class="card-body">
-      <h6 class="card-title fw-bold mb-2">
+      <h6 class="card-title fw-semibold mb-2">
         <i class="bi bi-person-badge me-2 text-primary"></i>Observaciones del equipo
       </h6>
       <div class="p-3 rounded" style="background: rgba(13,110,253,.04); font-size:.88rem; white-space: pre-wrap">{{ caso.observaciones_admin }}</div>
@@ -164,7 +165,7 @@
   {% if caso.historial %}
   <div class="card mb-3">
     <div class="card-body">
-      <h6 class="card-title fw-bold mb-3">
+      <h6 class="card-title fw-semibold mb-3">
         <i class="bi bi-clock-history me-2 text-primary"></i>Historial del caso
       </h6>
       <div class="timeline">

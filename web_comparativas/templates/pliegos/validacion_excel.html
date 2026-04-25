@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Validación de Carga — Premium v4
@@ -21,16 +21,16 @@
   :root {
     --v-surface: #ffffff;
     --v-bg:      #f3f5f8;
-    --v-border:  #e2e8f0;
-    --v-border2: #cbd5e1;
-    --v-text1:   #0f172a;
-    --v-text2:   #334155;
-    --v-text3:   #64748b;
-    --v-text4:   #94a3b8;
-    --v-accent:  #2563eb;
-    --v-ok:      #059669;
-    --v-warn:    #d97706;
-    --v-err:     #dc2626;
+    --v-border:  var(--siem-border);
+    --v-border2: var(--siem-border);
+    --v-text1:   var(--siem-text-strong);
+    --v-text2:   var(--siem-text);
+    --v-text3:   var(--siem-text-muted);
+    --v-text4:   var(--siem-text-soft);
+    --v-accent:  var(--siem-blue);
+    --v-ok:      var(--siem-green);
+    --v-warn:    var(--siem-amber);
+    --v-err:     var(--siem-red);
     --v-shadow:  0 1px 3px rgba(0,0,0,.04),0 4px 14px rgba(15,23,42,.06);
     --v-radius:  1rem;
     --v-radius-sm: .7rem;
@@ -50,17 +50,17 @@
   }
   .val-card-head {
     padding:.95rem 1.2rem;border-bottom:1px solid var(--v-border);
-    background:#fafbfc;display:flex;align-items:center;
+    background:var(--siem-surface-soft);display:flex;align-items:center;
     justify-content:space-between;gap:.75rem;
   }
   .val-card-title {
-    font-size:.95rem;font-weight:800;color:var(--v-text1);
+    font-size:.95rem;font-weight:650;color:var(--v-text1);
     display:flex;align-items:center;gap:.45rem;margin:0;
   }
   .val-card-title i { color:var(--v-accent); }
   .val-card-badge {
     font-size:.68rem;font-weight:700;padding:.15rem .55rem;
-    border-radius:999px;background:#f1f5f9;color:var(--v-text3);
+    border-radius:999px;background:var(--siem-surface-soft);color:var(--v-text3);
   }
   .val-card-body { padding:1.1rem 1.2rem; }
 
@@ -69,13 +69,13 @@
   .completitud-box {
     padding:1rem 1.15rem;border-radius:var(--v-radius-sm);
   }
-  .completitud-box-exec { background:#f0fdf4;border:1px solid #bbf7d0; }
-  .completitud-box-tech { background:#eff6ff;border:1px solid #bfdbfe; }
+  .completitud-box-exec { background:var(--siem-green-soft);border:1px solid var(--siem-green-border); }
+  .completitud-box-tech { background:var(--siem-blue-soft);border:1px solid var(--siem-blue-border); }
   .completitud-kicker {
-    font-size:.62rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;margin-bottom:.3rem;
+    font-size:.62rem;text-transform:uppercase;letter-spacing:.09em;font-weight:650;margin-bottom:.3rem;
   }
   .completitud-num {
-    font-size:2rem;font-weight:800;line-height:1;margin-bottom:.35rem;
+    font-size:2rem;font-weight:650;line-height:1;margin-bottom:.35rem;
   }
   .completitud-bar { height:6px;border-radius:999px;overflow:hidden;background:rgba(0,0,0,.08);margin-bottom:.35rem; }
   .completitud-bar-fill { height:100%;border-radius:999px; }
@@ -87,7 +87,7 @@
     text-align:center;padding:.85rem .75rem;border-radius:var(--v-radius-sm);
     background:var(--v-bg);border:1px solid var(--v-border);
   }
-  .metric-box .num { font-size:1.5rem;font-weight:800;line-height:1;color:#1e3a8a; }
+  .metric-box .num { font-size:1.5rem;font-weight:650;line-height:1;color:var(--siem-navy); }
   .metric-box .lbl {
     font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;
     color:var(--v-text3);font-weight:700;margin-top:.28rem;
@@ -98,7 +98,7 @@
   .sintesis-box {
     text-align:center;padding:.65rem .5rem;border-radius:var(--v-radius-sm);
   }
-  .sintesis-box .num { font-size:1.38rem;font-weight:800;line-height:1; }
+  .sintesis-box .num { font-size:1.38rem;font-weight:650;line-height:1; }
   .sintesis-box .lbl {
     font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;
     font-weight:700;margin-top:.18rem;
@@ -118,7 +118,7 @@
   }
   .matrix-table thead th {
     font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;
-    color:var(--v-text3);font-weight:800;background:#f8fafc;
+    color:var(--v-text3);font-weight:650;background:var(--siem-surface-soft);
     padding:.75rem 1rem;text-align:left;border-bottom:2px solid var(--v-border);
     white-space:nowrap;
   }
@@ -126,18 +126,18 @@
     padding:.72rem 1rem;border-bottom:1px solid var(--v-border);vertical-align:top;
   }
   .matrix-table tbody tr:last-child td { border-bottom:none; }
-  .matrix-table tbody tr:hover td { background:#f8fafc; }
+  .matrix-table tbody tr:hover td { background:var(--siem-surface-soft); }
   /* Grupo label en tabla */
   .matrix-group-cell {
     font-size:.7rem;font-weight:700;color:var(--v-text3);
-    background:#f8fafc;white-space:nowrap;
+    background:var(--siem-surface-soft);white-space:nowrap;
   }
 
   /* ── Tabla estándar ─────────────────────────────────────── */
   .val-table { width:100%;border-collapse:collapse;font-size:.84rem; }
   .val-table thead th {
     font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;
-    color:var(--v-text3);font-weight:800;background:#f8fafc;
+    color:var(--v-text3);font-weight:650;background:var(--siem-surface-soft);
     padding:.75rem 1rem;text-align:left;border-bottom:2px solid var(--v-border);
   }
   .val-table tbody td { padding:.72rem 1rem;border-bottom:1px solid var(--v-border);vertical-align:top; }
@@ -151,7 +151,7 @@
   }
   .integration-kicker {
     font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;
-    font-weight:800;color:var(--v-text3);margin-bottom:.5rem;
+    font-weight:650;color:var(--v-text3);margin-bottom:.5rem;
   }
   .integration-status {
     display:flex;align-items:center;gap:.5rem;
@@ -165,10 +165,10 @@
     padding:1rem 1.1rem;border-radius:var(--v-radius-sm);
     border:1.5px solid var(--v-border);
   }
-  .decision-box-approve { border-color:#a7f3d0;background:#f0fdf4; }
-  .decision-box-repro   { border-color:#fde68a;background:#fffbeb; }
+  .decision-box-approve { border-color:var(--siem-green-border);background:var(--siem-green-soft); }
+  .decision-box-repro   { border-color:var(--siem-amber-border);background:var(--siem-amber-soft); }
   .decision-title {
-    font-size:.88rem;font-weight:800;margin-bottom:.45rem;
+    font-size:.88rem;font-weight:650;margin-bottom:.45rem;
     display:flex;align-items:center;gap:.4rem;
   }
   .decision-desc { font-size:.8rem;color:var(--v-text3);margin-bottom:.75rem;line-height:1.45; }
@@ -188,27 +188,27 @@
     <span class="mx-1 text-muted">/</span>
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin">Caso #{{ caso.id }}</a>
     <span class="mx-1 text-muted">/</span>
-    <span style="color:#0f172a;font-weight:600;">Validación de carga</span>
+    <span style="color:var(--siem-text-strong);font-weight:600;">Validación de carga</span>
   </nav>
 
   {# ── Errores y advertencias ── #}
   {% if errores %}
-  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
-    <div style="font-weight:700;color:#991b1b;display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
+  <div style="background:var(--siem-red-soft);border:1px solid var(--siem-red-border);border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
+    <div style="font-weight:700;color:var(--siem-red);display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
       <i class="bi bi-x-circle-fill"></i> El Excel tiene errores que impiden la importación
     </div>
-    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:#7f1d1d;">
+    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:var(--siem-red);">
       {% for item in errores %}<li>{{ item }}</li>{% endfor %}
     </ul>
   </div>
   {% endif %}
 
   {% if advertencias %}
-  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
-    <div style="font-weight:700;color:#92400e;display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
+  <div style="background:var(--siem-amber-soft);border:1px solid var(--siem-amber-border);border-radius:.85rem;padding:1rem 1.2rem;margin-bottom:1rem;">
+    <div style="font-weight:700;color:var(--siem-amber);display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem;">
       <i class="bi bi-exclamation-triangle-fill"></i> Advertencias
     </div>
-    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:#78350f;">
+    <ul style="margin:0;padding-left:1.4rem;font-size:.84rem;color:var(--siem-amber);">
       {% for item in advertencias %}<li>{{ item }}</li>{% endfor %}
     </ul>
   </div>
@@ -220,33 +220,33 @@
   <div class="val-card">
     <div class="val-card-head">
       <h2 class="val-card-title"><i class="bi bi-bar-chart-fill"></i>Completitud del caso</h2>
-      <span style="font-size:.82rem;color:#64748b;">{{ caso.titulo }}</span>
+      <span style="font-size:.82rem;color:var(--siem-text-muted);">{{ caso.titulo }}</span>
     </div>
     <div class="val-card-body">
 
       {# Dos métricas principales #}
       <div class="completitud-grid mb-3">
         <div class="completitud-box completitud-box-exec">
-          <div class="completitud-kicker" style="color:#059669;">Completitud Ejecutiva</div>
-          <div class="completitud-num" style="color:#065f46;">
+          <div class="completitud-kicker" style="color:var(--siem-green);">Completitud Ejecutiva</div>
+          <div class="completitud-num" style="color:var(--siem-green);">
             {{ completitud_ejecutiva.porcentaje }}<span style="font-size:1rem;font-weight:600;opacity:.7;">%</span>
           </div>
           <div class="completitud-bar">
-            <div class="completitud-bar-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
+            <div class="completitud-bar-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,var(--siem-green),var(--siem-green-border));"></div>
           </div>
-          <div class="completitud-sub" style="color:#059669;">
+          <div class="completitud-sub" style="color:var(--siem-green);">
             {{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} campos · 18 ítems clave
           </div>
         </div>
         <div class="completitud-box completitud-box-tech">
-          <div class="completitud-kicker" style="color:#2563eb;">Completitud Técnica</div>
-          <div class="completitud-num" style="color:#1e3a8a;">
+          <div class="completitud-kicker" style="color:var(--siem-blue);">Completitud Técnica</div>
+          <div class="completitud-num" style="color:var(--siem-navy);">
             {{ completitud_tecnica.porcentaje }}<span style="font-size:1rem;font-weight:600;opacity:.7;">%</span>
           </div>
           <div class="completitud-bar">
-            <div class="completitud-bar-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
+            <div class="completitud-bar-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,var(--siem-blue),var(--siem-blue-border));"></div>
           </div>
-          <div class="completitud-sub" style="color:#2563eb;">
+          <div class="completitud-sub" style="color:var(--siem-blue);">
             {{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} campos · 33 canónicos
           </div>
         </div>
@@ -254,17 +254,17 @@
 
       {# Síntesis de 3 contadores #}
       <div class="sintesis-grid mb-3">
-        <div class="sintesis-box" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:.6rem;">
-          <div class="num" style="color:#059669;">{{ completitud_ejecutiva.campos_encontrados }}</div>
-          <div class="lbl" style="color:#059669;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Campos completos</div>
+        <div class="sintesis-box" style="background:var(--siem-green-soft);border:1px solid var(--siem-green-border);border-radius:.6rem;">
+          <div class="num" style="color:var(--siem-green);">{{ completitud_ejecutiva.campos_encontrados }}</div>
+          <div class="lbl" style="color:var(--siem-green);font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Campos completos</div>
         </div>
-        <div class="sintesis-box" style="background:#fffbeb;border:1px solid #fde68a;border-radius:.6rem;">
-          <div class="num" style="color:#d97706;">{{ completitud_ejecutiva.campos_ambiguos + completitud_ejecutiva.campos_inferidos }}</div>
-          <div class="lbl" style="color:#d97706;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Con observaciones</div>
+        <div class="sintesis-box" style="background:var(--siem-amber-soft);border:1px solid var(--siem-amber-border);border-radius:.6rem;">
+          <div class="num" style="color:var(--siem-amber);">{{ completitud_ejecutiva.campos_ambiguos + completitud_ejecutiva.campos_inferidos }}</div>
+          <div class="lbl" style="color:var(--siem-amber);font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Con observaciones</div>
         </div>
-        <div class="sintesis-box" style="background:#fef2f2;border:1px solid #fecaca;border-radius:.6rem;">
-          <div class="num" style="color:#dc2626;">{{ caso.faltantes|length }}</div>
-          <div class="lbl" style="color:#dc2626;font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Faltantes documentales</div>
+        <div class="sintesis-box" style="background:var(--siem-red-soft);border:1px solid var(--siem-red-border);border-radius:.6rem;">
+          <div class="num" style="color:var(--siem-red);">{{ caso.faltantes|length }}</div>
+          <div class="lbl" style="color:var(--siem-red);font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Faltantes documentales</div>
         </div>
       </div>
 
@@ -288,10 +288,10 @@
     </div>
     <div class="val-card-body">
       <div class="metrics-grid">
-        <div class="metric-box"><div class="num" style="color:#059669;">{{ rp_validation.completos }}</div><div class="lbl">Completos</div></div>
-        <div class="metric-box"><div class="num" style="color:#d97706;">{{ rp_validation.ambiguos }}</div><div class="lbl">Ambiguos</div></div>
-        <div class="metric-box"><div class="num" style="color:#7c3aed;">{{ rp_validation.requieren_validacion_manual }}</div><div class="lbl">Manual</div></div>
-        <div class="metric-box"><div class="num" style="color:#dc2626;">{{ rp_validation.faltantes_reales }}</div><div class="lbl">Faltantes</div></div>
+        <div class="metric-box"><div class="num" style="color:var(--siem-green);">{{ rp_validation.completos }}</div><div class="lbl">Completos</div></div>
+        <div class="metric-box"><div class="num" style="color:var(--siem-amber);">{{ rp_validation.ambiguos }}</div><div class="lbl">Ambiguos</div></div>
+        <div class="metric-box"><div class="num" style="color:var(--siem-blue);">{{ rp_validation.requieren_validacion_manual }}</div><div class="lbl">Manual</div></div>
+        <div class="metric-box"><div class="num" style="color:var(--siem-red);">{{ rp_validation.faltantes_reales }}</div><div class="lbl">Faltantes</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation.total_campos_rp }}</div><div class="lbl">Total RP</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Datos generales del proceso'].completos }}</div><div class="lbl">Proceso</div></div>
         <div class="metric-box"><div class="num">{{ rp_validation_by_group['Detalle'].completos }}</div><div class="lbl">Detalle</div></div>
@@ -321,10 +321,10 @@
 
   {# ── 4. Faltantes críticos ── #}
   {% if criticos %}
-  <div class="val-card" style="border-color:#fecaca;">
-    <div class="val-card-head" style="background:#fef8f8;border-bottom-color:#fecaca;">
-      <h2 class="val-card-title" style="color:#b91c1c;">
-        <i class="bi bi-exclamation-triangle-fill" style="color:#dc2626;"></i>
+  <div class="val-card" style="border-color:var(--siem-red-border);">
+    <div class="val-card-head" style="background:var(--siem-red-soft);border-bottom-color:var(--siem-red-border);">
+      <h2 class="val-card-title" style="color:var(--siem-red);">
+        <i class="bi bi-exclamation-triangle-fill" style="color:var(--siem-red);"></i>
         {{ criticos|length }} faltante{{ 's' if criticos|length != 1 else '' }} crítico{{ 's' if criticos|length != 1 else '' }} base
       </h2>
     </div>
@@ -336,7 +336,7 @@
           <tr>
             <td style="font-weight:700;">{{ item.campo_objetivo or '—' }}</td>
             <td>{{ item.motivo or '—' }}</td>
-            <td style="font-style:italic;font-size:.8rem;color:#64748b;">{{ item.accion_recomendada or '—' }}</td>
+            <td style="font-style:italic;font-size:.8rem;color:var(--siem-text-muted);">{{ item.accion_recomendada or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -371,33 +371,33 @@
               {% if item.grupo != _last_grupo.v %}
                 {% set _last_grupo.v = item.grupo %}
                 <span style="display:inline-flex;align-items:center;gap:.3rem;">
-                  <span style="width:.35rem;height:.35rem;border-radius:50%;background:#2563eb;display:inline-block;"></span>
+                  <span style="width:.35rem;height:.35rem;border-radius:50%;background:var(--siem-blue);display:inline-block;"></span>
                   {{ item.grupo }}
                 </span>
               {% endif %}
             </td>
-            <td style="font-weight:700;color:#0f172a;">{{ item.campo_rp }}</td>
-            <td style="font-size:.8rem;color:#475569;">{{ item.fuente_actual or '—' }}</td>
-            <td style="font-size:.8rem;color:#64748b;font-style:italic;">{{ item.transformacion or '—' }}</td>
+            <td style="font-weight:700;color:var(--siem-text-strong);">{{ item.campo_rp }}</td>
+            <td style="font-size:.8rem;color:var(--siem-text-muted);">{{ item.fuente_actual or '—' }}</td>
+            <td style="font-size:.8rem;color:var(--siem-text-muted);font-style:italic;">{{ item.transformacion or '—' }}</td>
             <td>
               {%- set _est = (item.estado or '')|lower -%}
               {%- if _est in ['completo','encontrado','ok'] -%}
-                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:.12rem .48rem;border-radius:999px;">
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border);padding:.12rem .48rem;border-radius:999px;">
                   <i class="bi bi-check-circle-fill"></i> {{ item.estado }}
                 </span>
               {%- elif _est in ['ambiguo','inferido','manual'] -%}
-                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:.12rem .48rem;border-radius:999px;">
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border);padding:.12rem .48rem;border-radius:999px;">
                   <i class="bi bi-exclamation-triangle-fill"></i> {{ item.estado }}
                 </span>
               {%- elif _est in ['faltante','no encontrado','sin dato'] -%}
-                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:.12rem .48rem;border-radius:999px;">
+                <span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.69rem;font-weight:700;background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border);padding:.12rem .48rem;border-radius:999px;">
                   <i class="bi bi-x-circle-fill"></i> {{ item.estado }}
                 </span>
               {%- else -%}
-                <span style="font-size:.78rem;color:#64748b;">{{ item.estado or '—' }}</span>
+                <span style="font-size:.78rem;color:var(--siem-text-muted);">{{ item.estado or '—' }}</span>
               {%- endif -%}
             </td>
-            <td style="font-size:.8rem;color:#475569;">{{ item.estado_resultado|replace('_',' ') }}</td>
+            <td style="font-size:.8rem;color:var(--siem-text-muted);">{{ item.estado_resultado|replace('_',' ') }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -417,11 +417,11 @@
         <div class="integration-box">
           <div class="integration-kicker">RP Fusión</div>
           {% if control_carga.get('listo_para_fusion','').upper() in ['SI','SÍ','TRUE','YES','1'] %}
-          <div class="integration-status" style="color:#059669;">
+          <div class="integration-status" style="color:var(--siem-green);">
             <i class="bi bi-check-circle-fill"></i> Listo para carga
           </div>
           {% else %}
-          <div class="integration-status" style="color:#dc2626;">
+          <div class="integration-status" style="color:var(--siem-red);">
             <i class="bi bi-exclamation-circle-fill"></i> Con observaciones
           </div>
           {% endif %}
@@ -429,11 +429,11 @@
         <div class="integration-box">
           <div class="integration-kicker">SIEM Operativa</div>
           {% if control_carga.get('listo_para_visualizacion','').lower() in ['sí','si','true','yes','1'] %}
-          <div class="integration-status" style="color:#059669;">
+          <div class="integration-status" style="color:var(--siem-green);">
             <i class="bi bi-check-circle-fill"></i> Validado
           </div>
           {% else %}
-          <div class="integration-status" style="color:#d97706;">
+          <div class="integration-status" style="color:var(--siem-amber);">
             <i class="bi bi-clock-fill"></i> Pendiente validación
           </div>
           {% endif %}
@@ -441,11 +441,11 @@
         <div class="integration-box">
           <div class="integration-kicker">SIEM Analítica</div>
           {% if control_carga.get('requiere_revision_analista','').lower() in ['sí','si','true','yes','1'] %}
-          <div class="integration-status" style="color:#d97706;">
+          <div class="integration-status" style="color:var(--siem-amber);">
             <i class="bi bi-search"></i> Requiere revisión
           </div>
           {% else %}
-          <div class="integration-status" style="color:#059669;">
+          <div class="integration-status" style="color:var(--siem-green);">
             <i class="bi bi-check-circle-fill"></i> Validado
           </div>
           {% endif %}
@@ -453,8 +453,8 @@
       </div>
       {% set _obs = control_carga.get('observaciones_integracion','') %}
       {% if _obs and _obs|string|lower not in ['-','--','n/a','na','none','no','sin observaciones',''] %}
-      <div class="val-callout mt-3" style="background:#fffbeb;border-color:#fde68a;color:#78350f;">
-        <i class="bi bi-info-circle-fill" style="color:#d97706;"></i>
+      <div class="val-callout mt-3" style="background:var(--siem-amber-soft);border-color:var(--siem-amber-border);color:var(--siem-amber);">
+        <i class="bi bi-info-circle-fill" style="color:var(--siem-amber);"></i>
         <div><strong>Observaciones de la integración:</strong> {{ _obs }}</div>
       </div>
       {% endif %}
@@ -470,8 +470,8 @@
     <div class="val-card-body">
       <div class="decision-grid">
         <div class="decision-box decision-box-approve">
-          <div class="decision-title" style="color:#065f46;">
-            <i class="bi bi-send-check-fill" style="color:#059669;"></i> Validar y publicar
+          <div class="decision-title" style="color:var(--siem-green);">
+            <i class="bi bi-send-check-fill" style="color:var(--siem-green);"></i> Validar y publicar
           </div>
           <div class="decision-desc">
             Publica la pantalla principal y deja la información analítica disponible en la vista completa.
@@ -485,8 +485,8 @@
           </form>
         </div>
         <div class="decision-box decision-box-repro">
-          <div class="decision-title" style="color:#92400e;">
-            <i class="bi bi-arrow-repeat" style="color:#d97706;"></i> Enviar a reproceso
+          <div class="decision-title" style="color:var(--siem-amber);">
+            <i class="bi bi-arrow-repeat" style="color:var(--siem-amber);"></i> Enviar a reproceso
           </div>
           <div class="decision-desc">
             Usar cuando los faltantes o ambigüedades impiden la carga interna y se requiere revisión.

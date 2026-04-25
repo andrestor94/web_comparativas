@@ -4,7 +4,7 @@
 {% block header_title %}Nueva solicitud{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Nueva Solicitud — Premium v5
@@ -16,38 +16,38 @@
     text-transform:none !important;
     font-size:.8125rem;
     font-weight:600;
-    color:#374151;
+    color:var(--siem-text);
     letter-spacing:0;
     margin-bottom:.375rem;
     display:block;
   }
   .ns-form .ns-label-req::after {
-    content:'*';color:#dc2626;margin-left:.2em;font-weight:700;
+    content:'*';color:var(--siem-red);margin-left:.2em;font-weight:700;
   }
   .ns-form .form-text {
-    font-size:.75rem;color:#94a3b8;margin-top:.3rem;
+    font-size:.75rem;color:var(--siem-text-soft);margin-top:.3rem;
   }
 
   /* ── Inputs premium ─────────────────────────────────────── */
   .ns-form .form-control,
   .ns-form .form-select {
-    border-radius:.5rem;border:1.5px solid #d1d5db;
+    border-radius:.5rem;border:1.5px solid var(--siem-border);
     min-height:42px;font-size:.875rem;padding:.5rem .75rem;
-    background:#fff;color:#111827;font-family:inherit;
+    background:#fff;color:var(--siem-text-strong);font-family:inherit;
     transition:border-color .18s,box-shadow .18s;
   }
   .ns-form .form-control:focus,
   .ns-form .form-select:focus {
-    border-color:#5770b0;outline:none;
+    border-color:var(--siem-blue);outline:none;
     box-shadow:0 0 0 3px rgba(87,112,176,.13);
     background:#fff;
   }
-  .ns-form .form-control::placeholder { color:#9ca3af; }
+  .ns-form .form-control::placeholder { color:var(--siem-text-soft); }
   .ns-form textarea.form-control { min-height:100px;resize:vertical; }
 
   /* ── Section cards ──────────────────────────────────────── */
   .ns-card {
-    background:#fff;border:1px solid #e5e7eb;
+    background:#fff;border:1px solid var(--siem-border);
     border-radius:12px;
     box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(6,72,111,.04);
     overflow:hidden;margin-bottom:1.25rem;
@@ -55,7 +55,7 @@
   .ns-card-header {
     display:flex;align-items:center;gap:.85rem;
     padding:1rem 1.5rem .9rem;
-    border-bottom:1px solid #f3f4f6;
+    border-bottom:1px solid var(--siem-border);
   }
   .ns-icon-wrap {
     width:36px;height:36px;border-radius:9px;
@@ -63,118 +63,118 @@
     font-size:1rem;flex-shrink:0;
   }
   .ns-card-title {
-    font-size:.9375rem;font-weight:700;color:#111827;margin:0 0 .1rem;
+    font-size:.9375rem;font-weight:700;color:var(--siem-text-strong);margin:0 0 .1rem;
     letter-spacing:-.01em;
   }
   .ns-card-desc {
-    font-size:.75rem;color:#9ca3af;margin:0;
+    font-size:.75rem;color:var(--siem-text-soft);margin:0;
   }
   .ns-card-body { padding:1.25rem 1.5rem 1.5rem; }
 
   /* ── Upload zone ────────────────────────────────────────── */
   .ns-upload-zone {
-    border:2px dashed #93c5fd;border-radius:.75rem;
-    background:#f0f7ff;padding:2rem 1.5rem;
+    border:2px dashed var(--siem-blue-border);border-radius:.75rem;
+    background:var(--siem-blue-soft);padding:2rem 1.5rem;
     text-align:center;cursor:pointer;
     transition:all .2s ease;position:relative;overflow:hidden;
   }
   .ns-upload-zone:hover,
   .ns-upload-zone.dragover {
-    background:#dbeafe;border-color:#3b82f6;border-style:solid;
+    background:var(--siem-blue-soft);border-color:var(--siem-blue);border-style:solid;
   }
   .ns-upload-icon {
-    font-size:2.25rem;color:#3b82f6;display:block;margin-bottom:.75rem;
+    font-size:2.25rem;color:var(--siem-blue);display:block;margin-bottom:.75rem;
     line-height:1;
   }
   .ns-upload-main {
-    font-size:.9rem;font-weight:700;color:#1e3a5f;margin-bottom:.3rem;
+    font-size:.9rem;font-weight:700;color:var(--siem-text);margin-bottom:.3rem;
   }
   .ns-upload-hint {
-    font-size:.78rem;color:#6b7280;line-height:1.4;
+    font-size:.78rem;color:var(--siem-text-muted);line-height:1.4;
   }
 
   /* ── File list item ─────────────────────────────────────── */
   .file-item {
     display:flex;align-items:center;gap:.6rem;
     padding:.5rem .75rem;
-    border:1.5px solid #e5e7eb;border-radius:.5rem;
+    border:1.5px solid var(--siem-border);border-radius:.5rem;
     font-size:.84rem;background:#fafafa;
     transition:border-color .15s;
   }
-  .file-item:hover { border-color:#d1d5db; }
+  .file-item:hover { border-color:var(--siem-border); }
   .file-item .file-icon { font-size:1.1rem;flex-shrink:0; }
-  .file-item .file-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151; }
-  .file-item .file-size { color:#9ca3af;font-size:.73rem;flex-shrink:0; }
+  .file-item .file-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--siem-text); }
+  .file-item .file-size { color:var(--siem-text-soft);font-size:.73rem;flex-shrink:0; }
   .file-item .remove-btn {
-    border:none;background:none;color:#9ca3af;cursor:pointer;
+    border:none;background:none;color:var(--siem-text-soft);cursor:pointer;
     padding:0 .1rem;font-size:.9rem;transition:color .15s;
     display:inline-flex;align-items:center;
   }
-  .file-item .remove-btn:hover { color:#dc2626; }
+  .file-item .remove-btn:hover { color:var(--siem-red); }
 
   /* ── Footer actions ─────────────────────────────────────── */
   .ns-footer {
     padding-top:1.25rem;margin-top:.5rem;
-    border-top:1px solid #f3f4f6;
+    border-top:1px solid var(--siem-border);
   }
   .ns-btn-primary {
     display:inline-flex;align-items:center;gap:.45rem;
     padding:.62rem 1.4rem;border-radius:.5rem;
-    background:#06486f;color:#fff;font-weight:700;
+    background:var(--siem-navy);color:#fff;font-weight:700;
     font-size:.875rem;border:none;cursor:pointer;
     box-shadow:0 2px 6px rgba(6,72,111,.22),0 4px 12px rgba(6,72,111,.14);
     transition:all .2s cubic-bezier(.16,1,.3,1);
     font-family:inherit;min-height:42px;
   }
   .ns-btn-primary:hover {
-    background:#053e61;transform:translateY(-1px);
+    background:var(--siem-navy-deep);transform:translateY(-1px);
     box-shadow:0 4px 12px rgba(6,72,111,.28),0 6px 18px rgba(6,72,111,.16);
   }
   .ns-btn-secondary {
     display:inline-flex;align-items:center;gap:.4rem;
     padding:.6rem 1.2rem;border-radius:.5rem;
-    background:#fff;color:#374151;font-weight:600;
-    font-size:.875rem;border:1.5px solid #d1d5db;cursor:pointer;
+    background:#fff;color:var(--siem-text);font-weight:600;
+    font-size:.875rem;border:1.5px solid var(--siem-border);cursor:pointer;
     transition:all .15s;font-family:inherit;min-height:42px;
     text-decoration:none;
   }
   .ns-btn-secondary:hover {
-    border-color:#9ca3af;background:#f9fafb;color:#111827;text-decoration:none;
+    border-color:var(--siem-text-soft);background:var(--siem-surface-soft);color:var(--siem-text-strong);text-decoration:none;
   }
   .ns-btn-cancel {
     display:inline-flex;align-items:center;
     padding:.6rem .9rem;border-radius:.5rem;
-    background:none;color:#6b7280;font-weight:500;
+    background:none;color:var(--siem-text-muted);font-weight:500;
     font-size:.875rem;border:none;cursor:pointer;
     transition:color .15s;text-decoration:none;
     font-family:inherit;min-height:42px;
   }
-  .ns-btn-cancel:hover { color:#374151;text-decoration:none; }
+  .ns-btn-cancel:hover { color:var(--siem-text);text-decoration:none; }
 
   /* ── Info note block ────────────────────────────────────── */
   .ns-info-block {
     display:flex;align-items:flex-start;gap:.65rem;
-    background:#f8fafc;border:1px solid #e2e8f0;
-    border-left:3px solid #5770b0;border-radius:.5rem;
+    background:var(--siem-surface-soft);border:1px solid var(--siem-border);
+    border-left:3px solid var(--siem-blue);border-radius:.5rem;
     padding:.75rem 1rem;margin-top:1rem;
   }
-  .ns-info-block i { color:#5770b0;font-size:.9rem;flex-shrink:0;margin-top:.05rem; }
-  .ns-info-block p { font-size:.78rem;color:#475569;margin:0;line-height:1.55; }
-  .ns-info-block strong { color:#334155; }
+  .ns-info-block i { color:var(--siem-blue);font-size:.9rem;flex-shrink:0;margin-top:.05rem; }
+  .ns-info-block p { font-size:.78rem;color:var(--siem-text-muted);margin:0;line-height:1.55; }
+  .ns-info-block strong { color:var(--siem-text); }
 
   /* ── Breadcrumb ─────────────────────────────────────────── */
   .ns-breadcrumb {
     display:flex;align-items:center;gap:.4rem;
-    font-size:.8rem;color:#94a3b8;margin-bottom:1.25rem;
+    font-size:.8rem;color:var(--siem-text-soft);margin-bottom:1.25rem;
   }
   .ns-breadcrumb a {
-    color:#6b7280;text-decoration:none;
+    color:var(--siem-text-muted);text-decoration:none;
     display:inline-flex;align-items:center;gap:.3rem;
     transition:color .15s;
   }
-  .ns-breadcrumb a:hover { color:#06486f; }
+  .ns-breadcrumb a:hover { color:var(--siem-navy); }
   .ns-breadcrumb .sep { opacity:.5; }
-  .ns-breadcrumb .current { color:#374151;font-weight:600; }
+  .ns-breadcrumb .current { color:var(--siem-text);font-weight:600; }
 </style>
 {% endblock %}
 
@@ -227,8 +227,8 @@
     {# ══ Sección 1: Identificación ══ #}
     <div class="ns-card">
       <div class="ns-card-header">
-        <div class="ns-icon-wrap" style="background:#eff6ff;">
-          <i class="bi bi-file-text" style="color:#2563eb;"></i>
+        <div class="ns-icon-wrap" style="background:var(--siem-blue-soft);">
+          <i class="bi bi-file-text" style="color:var(--siem-blue);"></i>
         </div>
         <div>
           <div class="ns-card-title">Identificación</div>
@@ -278,8 +278,8 @@
     {# ══ Sección 2: Archivos ══ #}
     <div class="ns-card">
       <div class="ns-card-header">
-        <div class="ns-icon-wrap" style="background:#f0fdf4;">
-          <i class="bi bi-paperclip" style="color:#059669;"></i>
+        <div class="ns-icon-wrap" style="background:var(--siem-green-soft);">
+          <i class="bi bi-paperclip" style="color:var(--siem-green);"></i>
         </div>
         <div>
           <div class="ns-card-title">Archivos del pliego</div>
@@ -309,8 +309,8 @@
     {# ══ Sección 3: Observaciones ══ #}
     <div class="ns-card">
       <div class="ns-card-header">
-        <div class="ns-icon-wrap" style="background:#fefce8;">
-          <i class="bi bi-chat-text" style="color:#d97706;"></i>
+        <div class="ns-icon-wrap" style="background:var(--siem-amber-soft);">
+          <i class="bi bi-chat-text" style="color:var(--siem-amber);"></i>
         </div>
         <div>
           <div class="ns-card-title">Observaciones</div>

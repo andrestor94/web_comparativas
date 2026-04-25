@@ -7,7 +7,7 @@
 <span class="text-muted">No informado</span>
 {% elif data is mapping and 'value' in data and 'provenance' in data and data.provenance %}
 {% set requires_rev = data.get('requires_review', false) %}
-<span class="value-text {% if requires_rev %}text-danger fw-bold{% endif %}" data-original-value="{{ data.value }}"
+<span class="value-text {% if requires_rev %}text-danger fw-semibold{% endif %}" data-original-value="{{ data.value }}"
     title="{% if requires_rev %}Requiere revisión humana (Confianza < 70%){% endif %}">
     {{ data.value }}
     {% if requires_rev %}
@@ -37,7 +37,7 @@
     {% endif %}
     {% endif %}
     {% if data.provenance.source %}
-    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-1 fw-bold text-primary"
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-1 fw-semibold text-primary"
         onclick='openEvidence("{{ data.provenance.source }}", {{ data.provenance.page | tojson | safe }}, {{ data.provenance.evidence_text | default("") | tojson | safe }}, {{ data.provenance.bbox | tojson | safe }})'
         title="Ver evidencia en documento original">
         <i class="bi bi-search"></i> Evidencia
@@ -45,7 +45,7 @@
     {% endif %}
     <!-- Curation Edit Button -->
     {% if field_path %}
-    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-semibold text-secondary edit-field-btn"
         onclick="enableEditMode(this, '{{ field_path }}', {{ data.provenance.confidence | default(none) | tojson | safe }})"
         title="Corregir este valor">
         <i class="bi bi-pencil-square"></i>
@@ -57,7 +57,7 @@
     data.value is not none else 'No informado' }}</span>
 {% if field_path %}
 <span class="auditor-mode-only ms-2 d-none">
-    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-semibold text-secondary edit-field-btn"
         onclick="enableEditMode(this, '{{ field_path }}')" title="Corregir este valor">
         <i class="bi bi-pencil-square"></i>
     </button>
@@ -67,7 +67,7 @@
 <span class="value-text" data-original-value="{{ data }}">{{ data }}</span>
 {% if field_path %}
 <span class="auditor-mode-only ms-2 d-none">
-    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-bold text-secondary edit-field-btn"
+    <button class="btn btn-sm btn-link text-decoration-none p-0 ms-2 fw-semibold text-secondary edit-field-btn"
         onclick="enableEditMode(this, '{{ field_path }}')" title="Corregir este valor">
         <i class="bi bi-pencil-square"></i>
     </button>
@@ -77,34 +77,30 @@
 {% endmacro %}
 
 {% block content %}
-{# Import Outfit Font for Premium Feel #}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 
 <style>
     /* Rediseño Audaz Premium SaaS */
     :root {
         --bg-app: #f4f6f8;
         --bg-surface: #ffffff;
-        --text-primary: #0f172a;
-        --text-secondary: #64748b;
-        --primary: #0f172a;
+        --text-primary: var(--siem-text-strong);
+        --text-secondary: var(--siem-text-muted);
+        --primary: var(--siem-text-strong);
         /* Sleek dark primary */
-        --primary-hover: #334155;
-        --border-soft: #e2e8f0;
+        --primary-hover: var(--siem-text);
+        --border-soft: var(--siem-border);
         --radius-xl: 20px;
         --radius-lg: 12px;
         --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
         --shadow-hover: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
-        --accent-blue: #5770b0;
+        --accent-blue: var(--siem-blue);
         --accent-blue-light: #e8edfa;
     }
 
     body {
         background-color: var(--bg-app) !important;
         background-image: none !important;
-        font-family: 'Outfit', sans-serif !important;
         color: var(--text-primary);
     }
 
@@ -180,7 +176,7 @@
     }
 
     .btn-modern:hover {
-        background: #f8fafc;
+        background: var(--siem-surface-soft);
         transform: translateY(-2px);
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
     }
@@ -193,8 +189,8 @@
     }
 
     .btn-modern.primary:hover {
-        background: #1d4ed8;
-        border-color: #1d4ed8;
+        background: var(--siem-blue);
+        border-color: var(--siem-blue);
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
     }
 
@@ -334,27 +330,27 @@
     }
 
     .widget-body::-webkit-scrollbar-thumb {
-        background: #e2e8f0;
+        background: var(--siem-border);
         border-radius: 10px;
     }
 
     .widget-body:hover::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
+        background: var(--siem-border);
     }
 
     /* Estilos Específicos de Widgets */
     .w-danger .widget-header {
         background: #fffcfc;
-        border-bottom-color: #fee2e2;
+        border-bottom-color: var(--siem-red-soft);
     }
 
     .w-danger .widget-title {
-        color: #dc2626;
+        color: var(--siem-red);
     }
 
     .w-danger .widget-badge {
-        background: #fee2e2;
-        color: #dc2626;
+        background: var(--siem-red-soft);
+        color: var(--siem-red);
         border-radius: 99px;
         padding: 2px 8px;
         font-size: 0.8rem;
@@ -363,16 +359,16 @@
 
     .w-success .widget-header {
         background: #fbfffb;
-        border-bottom-color: #dcfce7;
+        border-bottom-color: var(--siem-green-soft);
     }
 
     .w-success .widget-title {
-        color: #16a34a;
+        color: var(--siem-green);
     }
 
     .w-success .widget-badge {
-        background: #dcfce7;
-        color: #16a34a;
+        background: var(--siem-green-soft);
+        color: var(--siem-green);
         border-radius: 99px;
         padding: 2px 8px;
         font-size: 0.8rem;
@@ -385,11 +381,11 @@
     }
 
     .w-warning .widget-title {
-        color: #d97706;
+        color: var(--siem-amber);
     }
 
     .w-docs .widget-header {
-        background: #f8fafc;
+        background: var(--siem-surface-soft);
         border-bottom-color: var(--border-soft);
     }
 
@@ -403,7 +399,7 @@
         gap: 1rem;
         padding-bottom: 1.25rem;
         margin-bottom: 1.25rem;
-        border-bottom: 1px solid #f1f5f9;
+        border-bottom: 1px solid var(--siem-surface-soft);
         transition: transform 0.2s ease;
     }
 
@@ -470,7 +466,7 @@
     }
 
     .tabs-modern .nav-link:hover::after {
-        background: #cbd5e1;
+        background: var(--siem-border);
     }
 
     .tabs-modern .nav-link.active {
@@ -482,7 +478,7 @@
     }
 
     .tabs-modern .badge {
-        background: #f1f5f9;
+        background: var(--siem-surface-soft);
         color: var(--text-secondary);
         border: 1px solid var(--border-soft);
         margin-left: 0.5rem;
@@ -529,7 +525,7 @@
     }
 
     .info-row:hover {
-        background: #f8fafc !important;
+        background: var(--siem-surface-soft) !important;
         border-radius: 8px;
     }
 
@@ -553,7 +549,7 @@
     }
 
     .table-custom th {
-        background: #f8fafc;
+        background: var(--siem-surface-soft);
         padding: 1rem 1.5rem;
         font-size: 0.75rem;
         letter-spacing: 0.05em;
@@ -568,7 +564,7 @@
 
     /* Bootstrap Tooltip Customization */
     .tooltip-inner {
-        font-family: 'Outfit', sans-serif !important;
+        font-family: inherit !important;
         font-size: 0.85rem;
         padding: 0.6rem 0.85rem;
         background-color: var(--text-primary);
@@ -586,7 +582,7 @@
             <h1>Proceso de compra</h1>
 
             <div class="title-tags">
-                <div class="tag-modern" style="color: var(--text-primary); font-weight: 700; background: #f8fafc;">
+                <div class="tag-modern" style="color: var(--text-primary); font-weight: 700; background: var(--siem-surface-soft);">
                     <i class="bi bi-hash"></i>
                     {{ render_field(data.summary.process_number, 'summary.process_number') if
                     data.summary.process_number else
@@ -594,7 +590,7 @@
                 </div>
 
                 {% if data.completeness_audit and data.completeness_audit.reliability_score is defined %}
-                <div class="tag-modern" style="background: #f0fdf4; border-color: #bbf7d0; color: #15803d;">
+                <div class="tag-modern" style="background: var(--siem-green-soft); border-color: var(--siem-green-border); color: var(--siem-green);">
                     <i class="bi bi-shield-check"></i> {{ data.completeness_audit.reliability_score }}% Confiabilidad
                 </div>
                 {% endif %}
@@ -622,8 +618,8 @@
                     <input class="form-check-input" type="checkbox" role="switch" id="auditorModeToggle"
                         onchange="toggleAuditorMode(this.checked)"
                         style="cursor: pointer; transform: scale(1.1); margin-top: 0; margin-left: -2em;">
-                    <label class="form-check-label ms-2 fw-bold" for="auditorModeToggle"
-                        style="font-size: 0.9rem; cursor: pointer; padding-top: 2px; color: #475569;">
+                    <label class="form-check-label ms-2 fw-semibold" for="auditorModeToggle"
+                        style="font-size: 0.9rem; cursor: pointer; padding-top: 2px; color: var(--siem-text-muted);">
                         <i class="bi bi-shield-check text-primary"></i> Modo Auditor
                     </label>
                 </div>
@@ -683,14 +679,14 @@
                 <div class="list-item-clean">
                     <div class="fs-5 mt-1">{{ risk.icon }}</div>
                     <div>
-                        <div class="fw-bold" style="color: #0f172a; font-size: 0.95rem;">{{ risk.category }}
+                        <div class="fw-semibold" style="color: var(--siem-text-strong); font-size: 0.95rem;">{{ risk.category }}
                             <span class="badge bg-danger bg-opacity-10 text-danger ms-2" style="font-size: 0.65em;">{{
                                 risk.level }}</span>
                         </div>
                         <p class="mb-2 mt-1 text-secondary" style="font-size: 0.85rem; line-height: 1.4;">{{
                             risk.description }}</p>
                         <div class="text-muted"
-                            style="font-size: 0.8rem; font-style: italic; background: #f8fafc; padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border-soft);">
+                            style="font-size: 0.8rem; font-style: italic; background: var(--siem-surface-soft); padding: 0.5rem; border-radius: 6px; border: 1px solid var(--border-soft);">
                             <i class="bi bi-lightbulb-fill text-warning me-1"></i>{{ risk.recommendation }}
                         </div>
                     </div>
@@ -720,7 +716,7 @@
                 <div class="list-item-clean">
                     <div class="fs-5 mt-1">{{ opp.icon }}</div>
                     <div>
-                        <div class="fw-bold" style="color: #0f172a; font-size: 0.95rem;">{{ opp.category }}</div>
+                        <div class="fw-semibold" style="color: var(--siem-text-strong); font-size: 0.95rem;">{{ opp.category }}</div>
                         <p class="mb-0 mt-1 text-secondary" style="font-size: 0.85rem; line-height: 1.4;">{{
                             opp.description }}</p>
                     </div>
@@ -755,7 +751,7 @@
                     {% if data.provenance and data.provenance.warnings %}
                     <div class="mb-3">
                         <span
-                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #dc2626; display: block; margin-bottom: 0.5rem;">Alertas
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--siem-red); display: block; margin-bottom: 0.5rem;">Alertas
                             de parsing</span>
                         {% for warn in data.provenance.warnings %}
                         <div class="text-danger mb-2" style="font-size: 0.85rem; line-height: 1.3;"><i
@@ -768,12 +764,12 @@
                     {% if data.analysis.completeness_audit.missing_critical %}
                     <div class="mb-3">
                         <span
-                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #dc2626; display: block; margin-bottom: 0.5rem;">Falta
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--siem-red); display: block; margin-bottom: 0.5rem;">Falta
                             Info Crítica</span>
                         <div class="d-flex flex-wrap">
                             {% for field in data.analysis.completeness_audit.missing_critical %}
                             <div class="alert-chip"
-                                style="background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c;">{{ field }}
+                                style="background: var(--siem-red-soft); border: 1px solid var(--siem-red-border); color: var(--siem-red);">{{ field }}
                             </div>
                             {% endfor %}
                         </div>
@@ -783,12 +779,12 @@
                     {% if data.analysis.completeness_audit.missing_optional %}
                     <div class="mb-3">
                         <span
-                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #b45309; display: block; margin-bottom: 0.5rem;">Opcionales
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--siem-amber); display: block; margin-bottom: 0.5rem;">Opcionales
                             Faltantes</span>
                         <div class="d-flex flex-wrap">
                             {% for field in data.analysis.completeness_audit.missing_optional %}
                             <div class="alert-chip"
-                                style="background: #fffbeb; border: 1px solid #fde68a; color: #b45309;">{{ field }}
+                                style="background: var(--siem-amber-soft); border: 1px solid var(--siem-amber-border); color: var(--siem-amber);">{{ field }}
                             </div>
                             {% endfor %}
                         </div>
@@ -798,7 +794,7 @@
                     {% if data.analysis.completeness_audit.low_confidence_warnings %}
                     <div>
                         <span
-                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #475569; display: block; margin-bottom: 0.5rem;">Baja
+                            style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: var(--siem-text-muted); display: block; margin-bottom: 0.5rem;">Baja
                             Confianza (Revisar)</span>
                         {% for warn in data.analysis.completeness_audit.low_confidence_warnings %}
                         <div class="text-secondary mb-2" style="font-size: 0.85rem; line-height: 1.3;"><i
@@ -827,14 +823,14 @@
                     {% for doc in data.documents.source_files %}
                     <div class="d-flex align-items-center gap-3 p-2 mb-2 rounded document-file-item" {% if doc.url %}
                         onclick="openPdfViewer('{{ doc.url }}', '{{ doc.filename }}')"
-                        style="background: #f8fafc; border: 1px solid var(--border-soft); transition: all 0.2s ease; cursor: pointer;"
-                        {% else %} style="background: #f8fafc; border: 1px solid var(--border-soft);" {% endif %}>
+                        style="background: var(--siem-surface-soft); border: 1px solid var(--border-soft); transition: all 0.2s ease; cursor: pointer;"
+                        {% else %} style="background: var(--siem-surface-soft); border: 1px solid var(--border-soft);" {% endif %}>
                         <div
                             style="background: white; padding: 8px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                             <i class="bi bi-file-earmark-pdf-fill text-danger fs-5"></i>
                         </div>
                         <div style="overflow: hidden; flex: 1;">
-                            <div class="fw-bold text-truncate"
+                            <div class="fw-semibold text-truncate"
                                 style="font-size: 0.85rem; color: var(--text-primary); {% if doc.url %}text-decoration: underline; text-decoration-color: var(--border-soft);{% endif %}"
                                 data-bs-toggle="tooltip" data-bs-title="{{ doc.filename }}">
                                 {{ doc.filename }}
@@ -886,7 +882,7 @@
                         <div class="accordion-body bg-light">
                             <div class="row">
                                 <div class="col-md-6 border-end">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Cabecera del Proceso</h6>
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Cabecera del Proceso</h6>
                                     <div class="mb-3">
                                         <div class="info-label">Nombre del proceso</div>
                                         <div class="info-val">{{ render_field(data.summary.process_name,
@@ -918,7 +914,7 @@
                                     </div>
                                 </div>
                                 <div class="col-md-6 px-4">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Contacto y Apertura</h6>
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Contacto y Apertura</h6>
                                     <div class="mb-3">
                                         <div class="info-label">Email de Contacto</div>
                                         <div class="info-val">{{ render_field(data.basic_info.contact_email,
@@ -933,7 +929,7 @@
                                     </div>
                                     <div class="mb-3">
                                         <div class="info-label">Fecha de apertura</div>
-                                        <div class="info-val fw-bold text-danger">{{
+                                        <div class="info-val fw-semibold text-danger">{{
                                             render_field(data.basic_info.submission_deadline,
                                             'basic_info.submission_deadline') if
                                             data.basic_info.submission_deadline else 'No informado' }}</div>
@@ -964,7 +960,7 @@
                     <div id="collapseItems" class="accordion-collapse collapse" data-bs-parent="#pliegoAccordion">
                         <div class="accordion-body bg-light p-0 p-lg-3">
                             <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="text-uppercase text-muted small fw-bold mb-0">Detalle Exclusivo</h6>
+                                <h6 class="text-uppercase text-muted small fw-semibold mb-0">Detalle Exclusivo</h6>
                                 <input type="text" id="itemsSearch" class="form-control form-control-sm w-50"
                                     placeholder="Buscar producto..." onkeyup="filterItems()">
                             </div>
@@ -985,11 +981,11 @@
                                     <tbody class="bg-white">
                                         {% for item in items %}
                                         <tr>
-                                            <td class="fw-bold text-center">{{ item.line_number }}</td>
+                                            <td class="fw-semibold text-center">{{ item.line_number }}</td>
                                             <td>{{ item.product_code|default('-') }}</td>
                                             <td>{{ item.programmatic_category|default('-') }}</td>
                                             <td>{{ item.delivery_location|default('-') }}</td>
-                                            <td class="fw-bold">{{ item.quantity }}</td>
+                                            <td class="fw-semibold">{{ item.quantity }}</td>
                                             <td>{{ item.unit_of_measure }}</td>
                                             <td>{{ item.name|default('-') }}</td>
                                         </tr>
@@ -1015,7 +1011,7 @@
                         <div class="accordion-body bg-light">
                             <div class="row">
                                 <div class="col-md-6 border-end">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Plazos y Condiciones
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Plazos y Condiciones
                                         Técnicas</h6>
                                     <div class="mb-3">
                                         <div class="info-label">Términos Generales</div>
@@ -1036,12 +1032,12 @@
                                     </div>
                                 </div>
                                 <div class="col-md-6 ps-4">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Sedes / Destinos</h6>
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Sedes / Destinos</h6>
                                     {% if data.delivery.locations %}
                                     <ul class="list-group list-group-flush border rounded-3 overflow-hidden">
                                         {% for loc in data.delivery.locations %}
                                         <li class="list-group-item bg-white">
-                                            <div class="fw-bold text-dark" style="font-size: 0.9rem;">{{
+                                            <div class="fw-semibold text-dark" style="font-size: 0.9rem;">{{
                                                 loc.name|default('-') }}</div>
                                             <div class="text-muted small"><i class="bi bi-geo-alt"></i> {{
                                                 loc.address|default('Dirección no provista') }}</div>
@@ -1070,7 +1066,7 @@
                         <div class="accordion-body bg-light">
                             <div class="row">
                                 <div class="col-md-6 border-end">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Pagos y Facturación</h6>
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Pagos y Facturación</h6>
                                     <div class="mb-3">
                                         <div class="info-label">Condiciones Generales</div>
                                         <div class="info-val">{{ render_field(data.basic_info.payment_terms,
@@ -1091,16 +1087,16 @@
                                     </div>
                                 </div>
                                 <div class="col-md-6 px-4">
-                                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Garantías Requeridas</h6>
+                                    <h6 class="text-uppercase text-muted small fw-semibold mb-3">Garantías Requeridas</h6>
                                     <div class="mb-3">
                                         <div class="info-label">Mantenimiento de Oferta</div>
-                                        <div class="info-val fs-5 fw-bold text-dark">{{
+                                        <div class="info-val fs-5 fw-semibold text-dark">{{
                                             render_field(data.guarantees.offer_maintenance_pct,
                                             'guarantees.offer_maintenance_pct') }}</div>
                                     </div>
                                     <div class="mb-3">
                                         <div class="info-label">Cumplimiento de Contrato</div>
-                                        <div class="info-val fs-5 fw-bold text-dark">{{
+                                        <div class="info-val fs-5 fw-semibold text-dark">{{
                                             render_field(data.guarantees.contract_compliance_pct,
                                             'guarantees.contract_compliance_pct') }}</div>
                                     </div>
@@ -1165,7 +1161,7 @@
                             <div class="card mb-3 shadow-sm"
                                 style="border-radius: 12px; border: 1px solid var(--border-soft);">
                                 <div
-                                    class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                                    class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
                                     <div><i class="bi bi-archive me-2"></i>{{ sobre.name }}</div>
                                     <span class="badge bg-secondary">{{ sobre.count }} docs</span>
                                 </div>
@@ -1176,7 +1172,7 @@
                                             <div class="d-flex w-100 justify-content-between">
                                                 <div>
                                                     <input type="checkbox" class="form-check-input me-2 sobre-check">
-                                                    <span class="fw-bold me-2">{{ doc.code }}:</span>
+                                                    <span class="fw-semibold me-2">{{ doc.code }}:</span>
                                                     {{ doc.description }}
                                                 </div>
                                                 {% if doc.proof_document %}
@@ -1214,7 +1210,7 @@
             <div class="card h-100 shadow-sm"
                 style="border-radius: var(--radius-xl); border: 1px solid var(--border-soft); background: var(--bg-surface); min-height: 600px; display: flex; flex-direction: column; overflow:hidden;">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-pdf text-danger me-2"></i> Visor de Documentos
+                    <h6 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-pdf text-danger me-2"></i> Visor de Documentos
                     </h6>
                     <button class="btn btn-sm btn-outline-secondary"
                         onclick="document.getElementById('splitPdfViewer').src='about:blank'; document.getElementById('splitPdfViewer').classList.add('d-none'); document.getElementById('viewerEmptyState').classList.remove('d-none');"><i
@@ -1539,7 +1535,7 @@
         <div class="modal-content"
             style="height: 100%; border-radius: var(--radius-xl); border: none; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);">
             <div class="modal-header bg-light border-bottom" style="padding: 1rem 1.5rem;">
-                <h5 class="modal-title fw-bold d-flex align-items-center gap-2" id="pdfViewerModalLabel"
+                <h5 class="modal-title fw-semibold d-flex align-items-center gap-2" id="pdfViewerModalLabel"
                     style="font-size: 1.1rem; color: var(--text-primary);">
                     <i class="bi bi-file-earmark-pdf-fill text-danger fs-4"></i>
                     <span id="pdfViewerTitle" class="text-truncate" style="max-width: 600px;">Documento Original</span>
@@ -1564,7 +1560,7 @@
     .document-file-item:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
-        border-color: #cbd5e1 !important;
+        border-color: var(--siem-border) !important;
     }
 </style>
 {% endblock %}

@@ -31,10 +31,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Vista Completa — Premium v4
@@ -42,20 +39,20 @@
   :root {
     --bg-app:      #f3f5f8;
     --bg-surface:  #ffffff;
-    --text-primary:#0f172a;
-    --text-second: #334155;
-    --text-muted:  #64748b;
-    --text-faint:  #94a3b8;
-    --border-soft: #e2e8f0;
-    --border-mid:  #cbd5e1;
-    --accent-blue: #2563eb;
-    --accent-lt:   #eff6ff;
-    --ok:          #059669;
-    --ok-lt:       #ecfdf5;
-    --warn:        #d97706;
-    --warn-lt:     #fffbeb;
-    --err:         #dc2626;
-    --err-lt:      #fef2f2;
+    --text-primary:var(--siem-text-strong);
+    --text-second: var(--siem-text);
+    --text-muted:  var(--siem-text-muted);
+    --text-faint:  var(--siem-text-soft);
+    --border-soft: var(--siem-border);
+    --border-mid:  var(--siem-border);
+    --accent-blue: var(--siem-blue);
+    --accent-lt:   var(--siem-blue-soft);
+    --ok:          var(--siem-green);
+    --ok-lt:       var(--siem-green-soft);
+    --warn:        var(--siem-amber);
+    --warn-lt:     var(--siem-amber-soft);
+    --err:         var(--siem-red);
+    --err-lt:      var(--siem-red-soft);
     --sidebar-w:   248px;
     --radius-lg:   14px;
     --radius-md:   10px;
@@ -64,7 +61,7 @@
     --shadow-md:   0 2px 6px rgba(0,0,0,.05),0 8px 24px rgba(15,23,42,.07);
   }
 
-  body { background-color:var(--bg-app) !important;font-family:'Outfit',sans-serif !important;color:var(--text-primary); }
+  body { background-color:var(--bg-app) !important;color:var(--text-primary); }
 
   /* ── Layout ───────────────────────────────────────────────── */
   .amp-layout {
@@ -86,7 +83,7 @@
   }
   .amp-nav-title {
     font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;
-    color:var(--text-faint);font-weight:800;white-space:nowrap;
+    color:var(--text-faint);font-weight:650;white-space:nowrap;
   }
   .amp-nav-btn {
     display:flex;align-items:center;justify-content:space-between;
@@ -98,14 +95,14 @@
   }
   .amp-nav-btn-inner { display:flex;align-items:center;gap:.5rem;min-width:0; }
   .amp-nav-btn i { font-size:.95rem;flex-shrink:0;width:1.1rem;text-align:center; }
-  .amp-nav-btn:hover { background:#eef1f6;color:var(--text-primary); }
+  .amp-nav-btn:hover { background:var(--siem-surface-soft);color:var(--text-primary); }
   .amp-nav-btn.active {
     background:var(--bg-surface);color:var(--accent-blue);font-weight:700;
     box-shadow:var(--shadow-sm);border:1px solid var(--border-soft);
     border-left:3px solid var(--accent-blue);padding-left:calc(.9rem - 2px);
   }
   .amp-nav-badge {
-    background:#eef1f6;color:var(--text-muted);
+    background:var(--siem-surface-soft);color:var(--text-muted);
     padding:.08rem .48rem;border-radius:999px;font-size:.68rem;font-weight:700;
     flex-shrink:0;min-width:1.6rem;text-align:center;
   }
@@ -114,12 +111,12 @@
   /* CTA volver a resumida */
   .nav-cta-resumida {
     margin-top:1.2rem;padding:.8rem .9rem;
-    background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);
+    background:linear-gradient(135deg,var(--siem-surface-soft) 0%,var(--siem-surface-soft) 100%);
     border:1px solid var(--border-soft);border-radius:var(--radius-md);
     text-decoration:none;display:block;transition:all .18s;
   }
-  .nav-cta-resumida:hover { background:#eef1f6;border-color:var(--border-mid); }
-  .nav-cta-resumida .cta-label { font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--text-faint);margin-bottom:.15rem; }
+  .nav-cta-resumida:hover { background:var(--siem-surface-soft);border-color:var(--border-mid); }
+  .nav-cta-resumida .cta-label { font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;font-weight:650;color:var(--text-faint);margin-bottom:.15rem; }
   .nav-cta-resumida .cta-title { font-size:.86rem;font-weight:700;color:var(--text-second); }
 
   /* ── Main ────────────────────────────────────────────────── */
@@ -137,9 +134,9 @@
   }
   .amp-hero::before {
     content:'';position:absolute;top:0;left:0;right:0;height:3px;
-    background:linear-gradient(90deg,#2563eb 0%,#7c3aed 50%,#059669 100%);
+    background:linear-gradient(90deg,var(--siem-blue) 0%,var(--siem-blue) 50%,var(--siem-green) 100%);
   }
-  .amp-hero h1 { font-size:1.35rem;font-weight:800;color:var(--text-primary);margin:0 0 .28rem;letter-spacing:-.01em; }
+  .amp-hero h1 { font-size:1.35rem;font-weight:650;color:var(--text-primary);margin:0 0 .28rem;letter-spacing:-.01em; }
   .amp-hero p  { font-size:.87rem;color:var(--text-muted);margin:0; }
 
   /* Métrica strip */
@@ -149,9 +146,9 @@
   }
   .amp-metric-col { display:flex;flex-direction:column;gap:.16rem; }
   .amp-metric-kicker {
-    font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;
+    font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;font-weight:650;
   }
-  .amp-metric-num { font-size:1.6rem;font-weight:800;line-height:1;color:var(--text-primary); }
+  .amp-metric-num { font-size:1.6rem;font-weight:650;line-height:1;color:var(--text-primary); }
   .amp-metric-bar {
     height:5px;background:var(--border-soft);border-radius:999px;overflow:hidden;
   }
@@ -170,17 +167,17 @@
   }
   .amp-card-header {
     padding:1rem 1.35rem;border-bottom:1px solid var(--border-soft);
-    background:#fafbfc;display:flex;align-items:center;
+    background:var(--siem-surface-soft);display:flex;align-items:center;
     justify-content:space-between;gap:1rem;
   }
   .amp-card-header h2 {
-    font-size:.97rem;font-weight:800;margin:0;color:var(--text-primary);
+    font-size:.97rem;font-weight:650;margin:0;color:var(--text-primary);
     display:flex;align-items:center;gap:.5rem;
   }
   .amp-card-header h2 i { color:var(--accent-blue); }
   .amp-card-body { padding:1.2rem 1.35rem; }
   .amp-badge {
-    background:#eef1f6;color:var(--text-muted);
+    background:var(--siem-surface-soft);color:var(--text-muted);
     padding:.12rem .55rem;border-radius:999px;font-size:.72rem;font-weight:700;
     flex-shrink:0;
   }
@@ -193,20 +190,20 @@
     transition:box-shadow .15s;
   }
   .amp-item:hover { box-shadow:var(--shadow-sm); }
-  .amp-label { font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:var(--text-muted); }
+  .amp-label { font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;font-weight:650;color:var(--text-muted); }
   .amp-value { margin-top:.3rem;color:var(--text-primary);font-weight:600;line-height:1.4;word-break:break-word;font-size:.9rem; }
 
   /* ── Tablas ───────────────────────────────────────────────── */
   .amp-table { width:100%;font-size:.86rem;border-collapse:collapse; }
   .amp-table th {
     font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;
-    color:var(--text-muted);font-weight:800;background:#f8fafc;
+    color:var(--text-muted);font-weight:650;background:var(--siem-surface-soft);
     padding:.8rem 1rem;text-align:left;border-bottom:2px solid var(--border-soft);
     white-space:nowrap;
   }
   .amp-table td { padding:.8rem 1rem;border-bottom:1px solid var(--border-soft);vertical-align:top; }
   .amp-table tbody tr:last-child td { border-bottom:none; }
-  .amp-table tbody tr:hover td { background:#f8fafc;transition:background .12s; }
+  .amp-table tbody tr:hover td { background:var(--siem-surface-soft);transition:background .12s; }
 
   /* ── Badges estado ───────────────────────────────────────── */
   .status-badge {
@@ -214,15 +211,15 @@
     padding:.14rem .52rem;border-radius:999px;font-size:.69rem;font-weight:700;
     white-space:nowrap;
   }
-  .status-found   { background:var(--ok-lt);  color:var(--ok);   border:1px solid #a7f3d0; }
-  .status-infer   { background:var(--warn-lt);color:var(--warn); border:1px solid #fde68a; }
-  .status-miss    { background:var(--err-lt); color:var(--err);  border:1px solid #fecaca; }
-  .status-neutral { background:#f1f5f9;color:#475569;border:1px solid var(--border-mid); }
+  .status-found   { background:var(--ok-lt);  color:var(--ok);   border:1px solid var(--siem-green-border); }
+  .status-infer   { background:var(--warn-lt);color:var(--warn); border:1px solid var(--siem-amber-border); }
+  .status-miss    { background:var(--err-lt); color:var(--err);  border:1px solid var(--siem-red-border); }
+  .status-neutral { background:var(--siem-surface-soft);color:var(--siem-text-muted);border:1px solid var(--border-mid); }
 
   /* ── Accordion renglones ─────────────────────────────────── */
   .renglon-master { cursor:pointer;transition:background .12s; }
-  .renglon-master:hover td { background:#f1f5f9; }
-  .renglon-detail-row { display:none;background:#fafbfc; }
+  .renglon-master:hover td { background:var(--siem-surface-soft); }
+  .renglon-detail-row { display:none;background:var(--siem-surface-soft); }
   .renglon-detail-row.open { display:table-row; }
   .renglon-detail-box { padding:1.15rem 1.35rem;border-left:3px solid var(--accent-blue); }
 
@@ -246,7 +243,7 @@
   /* ── Toggle view mode ────────────────────────────────────── */
   .view-mode-toggle {
     display:inline-flex;align-items:center;
-    background:#f1f5f9;border:1px solid var(--border-soft);
+    background:var(--siem-surface-soft);border:1px solid var(--border-soft);
     border-radius:8px;padding:3px;gap:2px;
   }
   .view-mode-btn {
@@ -299,16 +296,16 @@
     overflow-x: auto;
     overflow-y: hidden;
     height: 14px;
-    background: #f1f5f9;
+    background: var(--siem-surface-soft);
     border: 1px solid var(--border-soft);
     border-bottom: none;
     border-radius: 0;
     scrollbar-width: thin;
-    scrollbar-color: #94a3b8 transparent;
+    scrollbar-color: var(--siem-text-soft) transparent;
   }
   .debug-scroll-top::-webkit-scrollbar { height: 8px; }
   .debug-scroll-top::-webkit-scrollbar-track { background: transparent; }
-  .debug-scroll-top::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+  .debug-scroll-top::-webkit-scrollbar-thumb { background: var(--siem-text-soft); border-radius: 4px; }
   .debug-scroll-top-inner { height: 1px; } /* anchura seteada por JS */
 
   /* ── Contenedor principal con altura fija y scroll doble ── */
@@ -318,13 +315,13 @@
     border: 1px solid var(--border-soft);
     border-radius: 0 0 10px 10px;
     scrollbar-width: thin;
-    scrollbar-color: #94a3b8 #f1f5f9;
+    scrollbar-color: var(--siem-text-soft) var(--siem-surface-soft);
     position: relative;
   }
   .debug-scroll-wrap::-webkit-scrollbar { width: 7px; height: 7px; }
-  .debug-scroll-wrap::-webkit-scrollbar-track { background: #f8fafc; }
-  .debug-scroll-wrap::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
-  .debug-scroll-wrap::-webkit-scrollbar-corner { background: #f8fafc; }
+  .debug-scroll-wrap::-webkit-scrollbar-track { background: var(--siem-surface-soft); }
+  .debug-scroll-wrap::-webkit-scrollbar-thumb { background: var(--siem-text-soft); border-radius: 4px; }
+  .debug-scroll-wrap::-webkit-scrollbar-corner { background: var(--siem-surface-soft); }
 
   /* ── Sombra lateral derecha: indica más contenido ── */
   .debug-scroll-outer::after {
@@ -349,7 +346,7 @@
     position: sticky;
     top: 0;
     z-index: 3;
-    background: #f8fafc;
+    background: var(--siem-surface-soft);
     /* Borde inferior que se mantiene visible al hacer scroll */
     box-shadow: inset 0 -2px 0 var(--border-soft);
   }
@@ -363,10 +360,10 @@
   /* Esquina superior-izquierda: thead + primera col */
   #tablaDebug thead th:first-child {
     z-index: 6;
-    background: #eef2f8;
+    background: var(--siem-surface-soft);
     box-shadow:
       inset 0 -2px 0 var(--border-soft),
-      inset -2px 0 0 #d1dae8;
+      inset -2px 0 0 var(--siem-border);
   }
   /* Celdas de la primera columna en tbody */
   #tablaDebug tbody td:first-child {
@@ -375,7 +372,7 @@
     box-shadow: inset -2px 0 0 var(--border-soft);
   }
   #tablaDebug tbody tr:hover td:first-child {
-    background: #f8fafc;
+    background: var(--siem-surface-soft);
   }
 
   #amp-panel-depuracion .amp-card {
@@ -389,16 +386,16 @@
   }
 
   #amp-panel-depuracion .amp-card-header h2 {
-    color: #273449;
+    color: var(--siem-text-strong);
     font-size: 17px;
-    font-weight: 720;
+    font-weight:600;
     letter-spacing: 0;
   }
 
   .debug-intro {
     margin: 0;
     padding: 16px 18px 8px;
-    color: #64748b;
+    color: var(--siem-text-muted);
     font-size: 12.5px;
     line-height: 1.5;
   }
@@ -416,7 +413,7 @@
     gap: 8px;
     min-width: 0;
     padding: 9px 10px;
-    border: 1px solid #e3ebf6;
+    border: 1px solid var(--siem-border);
     border-radius: 13px;
     background: #fff;
   }
@@ -431,16 +428,16 @@
 
   .debug-legend-title {
     display: block;
-    color: #273449;
+    color: var(--siem-text-strong);
     font-size: 11.5px;
-    font-weight: 720;
+    font-weight:600;
     line-height: 1.2;
   }
 
   .debug-legend-text {
     display: block;
     margin-top: 2px;
-    color: #7b8798;
+    color: var(--siem-text-muted);
     font-size: 10.8px;
     line-height: 1.25;
   }
@@ -466,16 +463,16 @@
 
   .debug-state-ok,
   .debug-score-ok,
-  .debug-legend-ok { background: #effaf5; color: #137a56; border-color: #bee8d3; }
+  .debug-legend-ok { background: var(--siem-green-soft); color: var(--siem-green); border-color: var(--siem-green-border); }
   .debug-state-warn,
   .debug-score-warn,
-  .debug-legend-warn { background: #fff8e8; color: #9a650f; border-color: #f4df9f; }
+  .debug-legend-warn { background: var(--siem-amber-soft); color: var(--siem-amber); border-color: var(--siem-amber-border); }
   .debug-state-neutral,
   .debug-score-neutral,
-  .debug-legend-neutral { background: #f4f7fb; color: #64748b; border-color: #dbe5f1; }
+  .debug-legend-neutral { background: var(--siem-surface-soft); color: var(--siem-text-muted); border-color: var(--siem-border); }
   .debug-state-danger,
   .debug-score-danger,
-  .debug-legend-danger { background: #fff1ef; color: #b04c3e; border-color: #f6c8bf; }
+  .debug-legend-danger { background: var(--siem-red-soft); color: var(--siem-red); border-color: var(--siem-red-border); }
 
   .debug-score {
     justify-content: center;
@@ -496,63 +493,62 @@
   }
 
   #tablaDebug thead th {
-    color: #718096;
+    color: var(--siem-text-muted);
     font-size: 10.5px;
-    font-weight: 760;
+    font-weight:600;
     letter-spacing: .02em;
     text-transform: none;
-    background: #f8fbff;
+    background: var(--siem-surface-soft);
   }
 
   #tablaDebug tbody tr:nth-child(even) td {
-    background: #fcfdff;
+    background: var(--siem-surface-soft);
   }
 
   #tablaDebug tbody tr:hover td {
-    background: #f7fbff;
+    background: var(--siem-blue-soft);
   }
 
   #tablaDebug tbody td {
-    color: #475569;
+    color: var(--siem-text-muted);
     line-height: 1.35;
     vertical-align: middle;
   }
 
   .debug-canonical {
-    color: #273449;
+    color: var(--siem-text-strong);
     font-size: 12px;
-    font-weight: 720;
+    font-weight:600;
     line-height: 1.25;
   }
 
   .debug-ui-label {
     margin-top: 3px;
-    color: #8a97aa;
+    color: var(--siem-text-soft);
     font-size: 11px;
     line-height: 1.2;
   }
 
   .debug-mono {
-    color: #526174;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--siem-text-muted);
     font-size: 11.5px;
   }
 
   .debug-value {
-    color: #2f3b4f;
+    color: var(--siem-text);
     font-size: 12.2px;
     line-height: 1.35;
   }
 
   .debug-missing-value {
-    color: #9aa6b7;
+    color: var(--siem-text-soft);
     font-size: 12px;
     font-style: italic;
   }
 
   .debug-reason {
     max-width: 260px;
-    color: #7b8798;
+    color: var(--siem-text-muted);
     font-size: 11.5px;
     line-height: 1.38;
   }
@@ -656,7 +652,7 @@
     </div>
     <button class="amp-nav-btn" data-target="faltantes">
       <span class="amp-nav-btn-inner"><i class="bi bi-exclamation-octagon"></i>Faltantes</span>
-      {% if caso.faltantes %}<span class="amp-nav-badge" style="{% if caso.faltantes %}background:#fee2e2;color:#dc2626;{% endif %}">{{ caso.faltantes|length }}</span>{% endif %}
+      {% if caso.faltantes %}<span class="amp-nav-badge" style="{% if caso.faltantes %}background:var(--siem-red-soft);color:var(--siem-red);{% endif %}">{{ caso.faltantes|length }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="hallazgos">
       <span class="amp-nav-btn-inner"><i class="bi bi-lightbulb"></i>Hallazgos</span>
@@ -699,20 +695,12 @@
     <div class="amp-hero">
       <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
         <div>
-          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;font-weight:800;color:var(--accent-blue);margin-bottom:.3rem;">
+          <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;font-weight:650;color:var(--accent-blue);margin-bottom:.3rem;">
             Vista completa · Caso #{{ caso.id }}
           </div>
           <h1>{{ caso.titulo }}</h1>
           <p>Renglones, cronograma, requisitos, garantías, documentos, actos, trazabilidad y hallazgos.</p>
         </div>
-        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
-           style="display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .9rem;
-                  background:var(--bg-app);border:1px solid var(--border-soft);border-radius:8px;
-                  font-size:.82rem;font-weight:600;color:var(--text-muted);text-decoration:none;
-                  white-space:nowrap;transition:all .15s;"
-           onmouseover="this.style.background='#e9edf2'" onmouseout="this.style.background='var(--bg-app)'">
-          <i class="bi bi-arrow-left"></i> Pantalla principal
-        </a>
       </div>
 
       <!-- Tira de métricas -->
@@ -722,7 +710,7 @@
           <span class="amp-metric-kicker" style="color:var(--ok);">Completitud Ejecutiva</span>
           <span class="amp-metric-num">{{ completitud_ejecutiva.porcentaje }}<span style="font-size:.9rem;color:var(--text-muted);font-weight:600;">%</span></span>
           <div class="amp-metric-bar">
-            <div class="amp-metric-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,#059669,#34d399);"></div>
+            <div class="amp-metric-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:linear-gradient(90deg,var(--siem-green),var(--siem-green-border));"></div>
           </div>
           <span class="amp-metric-sub">{{ completitud_ejecutiva.campos_encontrados }}/{{ completitud_ejecutiva.campos_esperados }} · Resumen de jefatura</span>
         </div>
@@ -731,7 +719,7 @@
           <span class="amp-metric-kicker" style="color:var(--accent-blue);">Completitud Técnica</span>
           <span class="amp-metric-num">{{ completitud_tecnica.porcentaje }}<span style="font-size:.9rem;color:var(--text-muted);font-weight:600;">%</span></span>
           <div class="amp-metric-bar">
-            <div class="amp-metric-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,#2563eb,#60a5fa);"></div>
+            <div class="amp-metric-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:linear-gradient(90deg,var(--siem-blue),var(--siem-blue-border));"></div>
           </div>
           <span class="amp-metric-sub">{{ completitud_tecnica.campos_encontrados }}/{{ completitud_tecnica.campos_esperados }} · Cobertura detallada</span>
         </div>
@@ -788,9 +776,9 @@
               {% for r in caso.renglones|sort(attribute='orden') %}
               <tr class="renglon-master" onclick="toggleRenglon('det-{{ r.id }}', this)">
                 <td class="text-center text-secondary ps-3"><i class="bi bi-chevron-right chevron-icon" style="transition:transform .2s;"></i></td>
-                <td style="font-family:monospace;font-size:.82rem;">{{ r.codigo_item or '—' }}</td>
-                <td class="fw-bold">{{ txt(r.descripcion) }}</td>
-                <td class="fw-bold">{{ r.cantidad or '—' }}</td>
+                <td style="font-size:.82rem;">{{ r.codigo_item or '—' }}</td>
+                <td class="fw-semibold">{{ txt(r.descripcion) }}</td>
+                <td class="fw-semibold">{{ r.cantidad or '—' }}</td>
                 <td>{{ r.unidad or '—' }}</td>
                 <td>{{ status_badge(r.estado) }}</td>
               </tr>
@@ -960,9 +948,9 @@
             <tbody>
               {% for g in caso.garantias %}
               <tr>
-                <td class="fw-bold">{{ g.tipo or '—' }}</td>
+                <td class="fw-semibold">{{ g.tipo or '—' }}</td>
                 <td>{{ g.requerida or '—' }}</td>
-                <td class="fw-bold text-primary" style="font-size:1.05rem;">{{ g.porcentaje or '—' }}</td>
+                <td class="fw-semibold text-primary" style="font-size:1.05rem;">{{ g.porcentaje or '—' }}</td>
                 <td>{{ g.base_calculo or '—' }}</td>
                 <td>{{ g.plazo or '—' }}</td>
                 <td style="font-size:.82rem;">{{ g.formas_admitidas or '—' }}</td>
@@ -992,7 +980,7 @@
             <tbody>
               {% for d in caso.documentos_pliego %}
               <tr>
-                <td class="fw-bold"><i class="bi bi-file-pdf text-danger me-2"></i>{{ d.nombre or '—' }}</td>
+                <td class="fw-semibold"><i class="bi bi-file-pdf text-danger me-2"></i>{{ d.nombre or '—' }}</td>
                 <td>{{ d.tipo or '—' }}</td>
                 <td>{{ d.obligatorio or '—' }}</td>
                 <td>{{ d.fecha or '—' }}</td>
@@ -1041,7 +1029,7 @@
             <tbody>
               {% for a in actos_expediente %}
               <tr>
-                <td class="fw-bold">{{ a.tipo_acto or '—' }}</td>
+                <td class="fw-semibold">{{ a.tipo_acto or '—' }}</td>
                 <td>{{ a.numero or '—' }}</td>
                 <td>{{ a.fecha or '—' }}</td>
                 <td>{{ a.organismo_emisor or '—' }}</td>
@@ -1073,7 +1061,7 @@
             <tbody>
               {% for a in actos_normativa %}
               <tr>
-                <td class="fw-bold">{{ a.tipo_acto or '—' }}</td>
+                <td class="fw-semibold">{{ a.tipo_acto or '—' }}</td>
                 <td>{{ a.numero or '—' }}</td>
                 <td>{{ a.descripcion or '—' }}</td>
               </tr>
@@ -1088,27 +1076,27 @@
 
     <!-- PANEL: FALTANTES -->
     <div class="amp-panel" id="amp-panel-faltantes">
-      <div class="amp-card" style="{% if caso.faltantes %}border-color:#fecaca;{% endif %}">
-        <div class="amp-card-header" style="{% if caso.faltantes %}background:#fef8f8;border-bottom-color:#fecaca;{% endif %}">
-          <h2 style="{% if caso.faltantes %}color:#b91c1c;{% endif %}">
+      <div class="amp-card" style="{% if caso.faltantes %}border-color:var(--siem-red-border);{% endif %}">
+        <div class="amp-card-header" style="{% if caso.faltantes %}background:var(--siem-red-soft);border-bottom-color:var(--siem-red-border);{% endif %}">
+          <h2 style="{% if caso.faltantes %}color:var(--siem-red);{% endif %}">
             <i class="bi bi-exclamation-octagon{% if not caso.faltantes %} text-success{% endif %}"></i>
             Faltantes Documentales
           </h2>
           {% if caso.faltantes %}
-          <span class="amp-badge" style="background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;">
+          <span class="amp-badge" style="background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border);">
             {{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }}
           </span>
           {% else %}
-          <span class="amp-badge" style="background:var(--ok-lt);color:var(--ok);border:1px solid #a7f3d0;">Sin faltantes</span>
+          <span class="amp-badge" style="background:var(--ok-lt);color:var(--ok);border:1px solid var(--siem-green-border);">Sin faltantes</span>
           {% endif %}
         </div>
 
         {% if caso.faltantes %}
         <!-- Callout explicativo -->
-        <div style="padding:.75rem 1.35rem;background:#fffbeb;border-bottom:1px solid #fde68a;">
+        <div style="padding:.75rem 1.35rem;background:var(--siem-amber-soft);border-bottom:1px solid var(--siem-amber-border);">
           <div style="display:flex;gap:.55rem;align-items:flex-start;">
-            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:#d97706;margin-top:.1rem;font-size:.95rem;"></i>
-            <div style="font-size:.79rem;color:#78350f;line-height:1.48;">
+            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:var(--siem-amber);margin-top:.1rem;font-size:.95rem;"></i>
+            <div style="font-size:.79rem;color:var(--siem-amber);line-height:1.48;">
               <strong>Faltantes documentales ≠ campos no resueltos.</strong>
               Son problemas registrados del expediente: renglones incompletos, anexos no cargados o condiciones sin especificar.
               Son independientes de la completitud ejecutiva (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>)
@@ -1133,7 +1121,7 @@
             <tbody>
               {% for f in caso.faltantes|sort(attribute='criticidad', reverse=True) %}
               {% set crit = (f.criticidad or '')|lower %}
-              <tr style="{% if crit in ['alta','crítica','critica','alto'] %}background:#fff8f8;{% endif %}">
+              <tr style="{% if crit in ['alta','crítica','critica','alto'] %}background:var(--siem-red-soft);{% endif %}">
                 <td style="font-weight:700;white-space:nowrap;">{{ f.campo_objetivo or '—' }}</td>
                 <td>
                   <div style="font-weight:600;margin-bottom:.2rem;">{{ f.motivo or '—' }}</div>
@@ -1173,7 +1161,7 @@
             <tbody>
               {% for h in hallazgos_ordenados %}
               <tr>
-                <td class="fw-bold">{{ h.categoria or '—' }}</td>
+                <td class="fw-semibold">{{ h.categoria or '—' }}</td>
                 <td>{{ h.hallazgo or '—' }}</td>
                 <td>{{ status_badge(h.impacto) }}</td>
                 <td class="fst-italic" style="font-size:.85rem;">{{ h.accion_sugerida or '—' }}</td>
@@ -1205,7 +1193,7 @@
             <tbody>
               {% for t in caso.trazabilidad %}
               <tr data-search="{{ ((t.campo or '') + ' ' + (t.documento_fuente or '') + ' ' + (t.valor_extraido or ''))|lower }}">
-                <td class="fw-bold" style="font-size:.82rem;">{{ t.campo or '—' }}</td>
+                <td class="fw-semibold" style="font-size:.82rem;">{{ t.campo or '—' }}</td>
                 <td><div class="clamp-2" title="{{ t.valor_extraido }}">{{ t.valor_extraido or '—' }}</div></td>
                 <td>{{ t.documento_fuente or '—' }}</td>
                 <td class="text-center">{{ t.pagina_seccion or '—' }}</td>
@@ -1410,7 +1398,7 @@
                       {{ '%.1f'|format(row.puntaje_aplicado) }} <small>{{ pct }}%</small>
                     </span>
                   </td>
-                  <td class="text-center" style="font-size:.75rem;color:#64748b;">
+                  <td class="text-center" style="font-size:.75rem;color:var(--siem-text-muted);">
                     <span title="Proceso: {{ row.candidatos_proceso }} | Trazabilidad: {{ row.candidatos_trazab }} | Tematicos: {{ row.candidatos_tematicos }}">
                       {{ candidatos_total }}
                     </span>
