@@ -1,100 +1,300 @@
 {% extends "base.html" %}
 
 {% block title %}Lectura de Pliegos – SIEM{% endblock %}
-
 {% block header_title %}Lectura de Pliegos{% endblock %}
 
 {% block toolbar_actions %}
-<a href="/mercado-publico/lectura-pliegos/nueva" class="btn btn-sm btn-primary">
+<a href="/mercado-publico/lectura-pliegos/nueva"
+   class="btn btn-sm btn-primary lp-cta-btn">
   <i class="bi bi-plus-lg me-1"></i>Nueva solicitud
 </a>
 {% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=2">
 <style>
-  .estado-badge { font-size: .72rem; font-weight: 600; letter-spacing: .03em; padding: .28em .7em; border-radius: 20px; }
-  .estado-borrador              { background: #f0f0f0; color: #666; }
-  .estado-pendiente_revision    { background: #fff3cd; color: #856404; }
-  .estado-en_revision           { background: #cfe2ff; color: #084298; }
-  .estado-pendiente_procesamiento { background: #e2d9f3; color: #432874; }
-  .estado-procesado_externamente { background: #d1ecf1; color: #0c5460; }
-  .estado-excel_cargado         { background: #d4edda; color: #155724; }
-  .estado-en_validacion         { background: #fde8c8; color: #7d4000; }
-  .estado-listo                 { background: #198754; color: #fff; }
-  .estado-observado             { background: #fff0b3; color: #664d03; }
-  .estado-rechazado             { background: #f8d7da; color: #842029; }
-  .estado-reprocesar            { background: #ffd6a5; color: #7c4700; }
-  .estado-archivado             { background: #e9ecef; color: #495057; }
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Lectura de Pliegos · Lista — Premium v5
+  ═══════════════════════════════════════════════════════════ */
 
-  .filter-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .75rem;
-    border-radius: 20px; border: 1.5px solid var(--bs-border-color); font-size: .8rem;
-    cursor: pointer; text-decoration: none; color: inherit; transition: all .15s; }
-  .filter-chip:hover, .filter-chip.active { border-color: var(--bs-primary); background: var(--bs-primary); color: #fff; }
+  /* ── CTA button ─────────────────────────────────────────── */
+  .lp-cta-btn {
+    border-radius:.6rem;font-weight:700;letter-spacing:.01em;
+    box-shadow:0 2px 8px rgba(6,72,111,.25);padding:.4rem 1rem;font-size:.85rem;
+    transition:all .2s cubic-bezier(.16,1,.3,1);
+  }
+  .lp-cta-btn:hover {
+    box-shadow:0 4px 14px rgba(6,72,111,.32);transform:translateY(-1px);
+  }
 
-  .caso-row { transition: background .1s; }
-  .caso-row:hover { background: rgba(0,0,0,.025); }
+  /* ── Estado badges ──────────────────────────────────────── */
+  .estado-badge {
+    font-size:.67rem;font-weight:700;letter-spacing:.02em;
+    padding:.22em .68em;border-radius:999px;display:inline-block;white-space:nowrap;
+  }
+  .estado-borrador                { background:#f1f5f9;color:#475569;border:1px solid #cbd5e1; }
+  .estado-pendiente_revision      { background:#fffbeb;color:#92400e;border:1px solid #fde68a; }
+  .estado-en_revision             { background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe; }
+  .estado-pendiente_procesamiento { background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe; }
+  .estado-procesado_externamente  { background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc; }
+  .estado-excel_cargado           { background:#f0fdf4;color:#166534;border:1px solid #bbf7d0; }
+  .estado-en_validacion           { background:#fff7ed;color:#9a3412;border:1px solid #fed7aa; }
+  .estado-listo                   { background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7; }
+  .estado-observado               { background:#fefce8;color:#854d0e;border:1px solid #fef08a; }
+  .estado-rechazado               { background:#fef2f2;color:#991b1b;border:1px solid #fecaca; }
+  .estado-reprocesar              { background:#fff7ed;color:#7c2d12;border:1px solid #fdba74; }
+  .estado-archivado               { background:#f8fafc;color:#64748b;border:1px solid #e2e8f0; }
 
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; }
-  .stat-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
-    border-radius: .6rem; padding: .75rem 1rem; display: flex; flex-direction: column; }
-  .stat-card .stat-num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
-  .stat-card .stat-label { font-size: .72rem; opacity: .65; margin-top: .2rem; }
+  /* ── Stats strip ────────────────────────────────────────── */
+  .stats-strip {
+    display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;padding:.1rem 0 .3rem;
+  }
+  .stats-strip-sep {
+    font-size:.67rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.08em;color:#94a3b8;margin-right:.2rem;white-space:nowrap;
+    user-select:none;
+  }
+  .stat-pill {
+    display:inline-flex;align-items:center;gap:.42rem;
+    padding:.35rem .9rem;border-radius:999px;
+    background:#fff;border:1.5px solid #e2e8f0;
+    text-decoration:none;color:#334155;
+    transition:all .15s ease;white-space:nowrap;
+    box-shadow:0 1px 2px rgba(6,72,111,.03);
+  }
+  .stat-pill:hover {
+    border-color:var(--pill-c,#5770b0);
+    box-shadow:0 2px 8px rgba(6,72,111,.09);
+    transform:translateY(-1px);text-decoration:none;color:#0f172a;
+  }
+  .stat-pill.active {
+    border-color:var(--pill-c,#5770b0);
+    background:var(--pill-bg,#f8fafc);
+    box-shadow:0 2px 8px rgba(6,72,111,.08);
+    color:#0f172a;
+  }
+  .stat-pill i { font-size:.8rem;color:var(--pill-c,#5770b0);flex-shrink:0; }
+  .sp-num {
+    font-weight:800;font-size:.95rem;color:var(--pill-c,#5770b0);
+    line-height:1;font-variant-numeric:tabular-nums;
+  }
+  .sp-label { font-size:.72rem;font-weight:500;color:#64748b; }
+
+  /* ── Search bar ─────────────────────────────────────────── */
+  .lp-search-form { display:flex;align-items:center;gap:.5rem; }
+  .lp-search-wrap {
+    position:relative;flex-grow:1;max-width:460px;
+  }
+  .lp-search-icon {
+    position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
+    color:#94a3b8;font-size:.85rem;pointer-events:none;z-index:1;
+  }
+  .lp-search-input {
+    width:100%;padding:.44rem .75rem .44rem 2.2rem;
+    border-radius:.65rem;border:1.5px solid #e2e8f0;
+    background:#f8fafc;font-size:.855rem;height:38px;outline:none;
+    transition:all .18s ease;color:#0f172a;font-family:inherit;
+  }
+  .lp-search-input:focus {
+    background:#fff;border-color:#5770b0;
+    box-shadow:0 0 0 3px rgba(87,112,176,.12);
+  }
+  .lp-search-input::placeholder { color:#94a3b8; }
+  .lp-search-clear {
+    position:absolute;right:.55rem;top:50%;transform:translateY(-50%);
+    display:inline-flex;align-items:center;justify-content:center;
+    width:1.35rem;height:1.35rem;border-radius:50%;
+    background:#f1f5f9;color:#64748b;border:none;
+    font-size:.7rem;cursor:pointer;text-decoration:none;
+    transition:all .15s;
+  }
+  .lp-search-clear:hover { background:#e2e8f0;color:#0f172a; }
+  .lp-search-submit {
+    display:inline-flex;align-items:center;gap:.3rem;
+    padding:.42rem .9rem;border-radius:.6rem;
+    background:#06486f;color:#fff;border:none;
+    font-size:.8rem;font-weight:600;cursor:pointer;height:38px;flex-shrink:0;
+    transition:all .15s;font-family:inherit;
+  }
+  .lp-search-submit:hover { background:#053e61; }
+  .lp-clear-all {
+    display:inline-flex;align-items:center;gap:.25rem;
+    padding:.38rem .75rem;border-radius:.55rem;
+    border:1.5px solid #fecaca;background:#fff;color:#991b1b;
+    font-size:.78rem;font-weight:600;cursor:pointer;text-decoration:none;
+    transition:all .15s;height:38px;
+  }
+  .lp-clear-all:hover { background:#fef2f2;text-decoration:none;color:#991b1b; }
+
+  /* ── Filter chips ───────────────────────────────────────── */
+  .filter-chips-row { display:flex;flex-wrap:wrap;gap:.4rem;align-items:center; }
+  .filter-chip {
+    display:inline-flex;align-items:center;gap:.3rem;
+    padding:.26rem .72rem;border-radius:999px;
+    border:1.5px solid #e2e8f0;font-size:.76rem;font-weight:600;
+    cursor:pointer;text-decoration:none;color:#64748b;
+    transition:all .15s;background:#fff;white-space:nowrap;
+  }
+  .filter-chip:hover {
+    border-color:#5770b0;color:#5770b0;background:#eff6ff;text-decoration:none;
+  }
+  .filter-chip.active {
+    border-color:#5770b0;background:#5770b0;color:#fff;
+  }
+  .fc-badge {
+    font-size:.63rem;padding:.05rem .38rem;border-radius:99px;line-height:1.4;
+  }
+  .filter-chip:not(.active) .fc-badge { background:#f1f5f9;color:#64748b; }
+  .filter-chip.active .fc-badge { background:rgba(255,255,255,.25);color:#fff; }
+
+  /* ── Tabla de casos ─────────────────────────────────────── */
+  .casos-wrap {
+    background:#fff;border:1px solid #e2e8f0;
+    border-radius:12px;box-shadow:0 1px 4px rgba(6,72,111,.05),0 4px 12px rgba(6,72,111,.04);
+    overflow:hidden;
+  }
+  .casos-table { width:100%;border-collapse:collapse;font-size:.86rem; }
+  .casos-table thead th {
+    font-size:.625rem;text-transform:uppercase;letter-spacing:.09em;
+    color:#94a3b8;font-weight:800;background:#f8fafc;
+    padding:.88rem 1.1rem;text-align:left;
+    border-bottom:2px solid #f1f5f9;white-space:nowrap;
+  }
+  .casos-table thead th:first-child { padding-left:1.25rem; }
+  .casos-table thead th:last-child  { padding-right:1.25rem; }
+  .casos-table tbody td {
+    padding:.84rem 1.1rem;border-bottom:1px solid #f8fafc;vertical-align:middle;
+  }
+  .casos-table tbody td:first-child { padding-left:1.25rem; }
+  .casos-table tbody td:last-child  { padding-right:1.25rem; }
+  .casos-table tbody tr:last-child td { border-bottom:none; }
+  .caso-row { transition:background .1s; }
+  .caso-row:hover td { background:#f8fafc; }
+
+  /* ── Case title cell ────────────────────────────────────── */
+  .caso-titulo { font-weight:700;font-size:.9rem;color:#0f172a;line-height:1.3; }
+  .caso-sub    { font-size:.76rem;color:#64748b;margin-top:.1rem;line-height:1.3; }
+  .caso-num    { font-size:.71rem;color:#94a3b8;margin-top:.06rem; }
+
+  /* ── ID badge ───────────────────────────────────────────── */
+  .id-badge {
+    font-size:.7rem;font-weight:700;color:#94a3b8;
+    background:#f1f5f9;border-radius:.35rem;
+    padding:.1rem .42rem;font-variant-numeric:tabular-nums;
+    white-space:nowrap;border:1px solid #e2e8f0;
+  }
+
+  /* ── Action buttons ─────────────────────────────────────── */
+  .caso-btn {
+    display:inline-flex;align-items:center;justify-content:center;
+    width:1.9rem;height:1.9rem;border-radius:.45rem;border:1px solid #e2e8f0;
+    background:#fff;color:#64748b;font-size:.82rem;
+    text-decoration:none;transition:all .15s;
+  }
+  .caso-btn:hover {
+    background:#eff6ff;border-color:#5770b0;color:#5770b0;text-decoration:none;
+  }
+  .caso-btn-success { border-color:#a7f3d0;background:#ecfdf5;color:#065f46; }
+  .caso-btn-success:hover { background:#d1fae5;color:#065f46; }
+
+  /* ── Empty state ────────────────────────────────────────── */
+  .lp-empty {
+    text-align:center;padding:4.5rem 1rem;color:#64748b;
+  }
+  .lp-empty .ei { font-size:2.4rem;opacity:.13;display:block;margin-bottom:.8rem; }
+  .lp-empty .et { font-weight:700;font-size:.97rem;color:#334155;margin-bottom:.35rem; }
+  .lp-empty .es { font-size:.84rem; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="py-3 px-1">
+<div class="lp-premium-shell lp-list-page">
+  <section class="lp-page-hero">
+    <div class="lp-hero-grid">
+      <div>
+        <div class="lp-hero-kicker">Mercado Publico · Centro operativo</div>
+        <h1 class="lp-hero-title">Lectura de Pliegos</h1>
+        <p class="lp-hero-subtitle">
+          Gestiona solicitudes, procesamiento externo y visualizacion estructurada de pliegos con trazabilidad,
+          estados claros y una lectura preparada para usuarios finales y administradores.
+        </p>
+      </div>
+      <div class="lp-hero-actions">
+        <a href="/mercado-publico/lectura-pliegos/nueva" class="lp-btn lp-btn-primary">
+          <i class="bi bi-plus-lg"></i>Nueva solicitud
+        </a>
+      </div>
+    </div>
+  </section>
 
-  {# ── ADMIN: panel de estadísticas ── #}
+  {# ── ADMIN: Stats strip ── #}
   {% if es_admin %}
   <div class="mb-4">
-    <div class="stats-grid">
+    <div class="stats-strip">
+      <span class="stats-strip-sep">Estado</span>
       {% set grupos_stat = [
-        ("pendiente_revision", "bi-hourglass-split", "#ffc107"),
-        ("en_revision", "bi-eye", "#0d6efd"),
-        ("excel_cargado", "bi-file-earmark-excel", "#198754"),
-        ("listo", "bi-check-circle-fill", "#20c997"),
-        ("observado", "bi-exclamation-circle", "#fd7e14"),
-        ("reprocesar", "bi-arrow-counterclockwise", "#6f42c1"),
+        ("pendiente_revision",  "bi-hourglass-split",       "#d97706", "#fffbeb"),
+        ("en_revision",         "bi-eye",                    "#2563eb", "#eff6ff"),
+        ("excel_cargado",       "bi-file-earmark-excel",     "#059669", "#f0fdf4"),
+        ("listo",               "bi-check-circle-fill",      "#10b981", "#ecfdf5"),
+        ("observado",           "bi-exclamation-circle",     "#f59e0b", "#fefce8"),
+        ("reprocesar",          "bi-arrow-counterclockwise", "#7c3aed", "#f5f3ff"),
       ] %}
-      {% for est, icon, color in grupos_stat %}
-      <a href="/mercado-publico/lectura-pliegos?estado={{ est }}" class="stat-card text-decoration-none" style="border-left: 3px solid {{ color }};">
-        <div class="stat-num" style="color:{{ color }}">{{ conteos.get(est, 0) }}</div>
-        <div class="stat-label"><i class="bi {{ icon }} me-1"></i>{{ PLIEGO_ESTADO_LABELS[est] }}</div>
+      {% for est, icon, color, bg in grupos_stat %}
+      <a href="/mercado-publico/lectura-pliegos?estado={{ est }}{% if q %}&q={{ q }}{% endif %}"
+         class="stat-pill {% if estado_filtro == est %}active{% endif %}"
+         style="--pill-c:{{ color }};--pill-bg:{{ bg }};"
+         title="{{ PLIEGO_ESTADO_LABELS[est] }}">
+        <i class="bi {{ icon }}"></i>
+        <span class="sp-num">{{ conteos.get(est, 0) }}</span>
+        <span class="sp-label">{{ PLIEGO_ESTADO_LABELS[est] }}</span>
       </a>
       {% endfor %}
     </div>
   </div>
   {% endif %}
 
-  {# ── Buscador y filtro ── #}
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-    <form method="get" action="/mercado-publico/lectura-pliegos" class="d-flex gap-2 flex-grow-1" style="max-width:500px">
+  {# ── Buscador ── #}
+  <div class="mb-3">
+    <form method="get" action="/mercado-publico/lectura-pliegos" class="lp-search-form">
       <input type="hidden" name="estado" value="{{ estado_filtro }}">
-      <input type="text" name="q" value="{{ q }}" placeholder="Buscar por título, organismo, número…"
-             class="form-control form-control-sm">
-      <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-search"></i></button>
+      <div class="lp-search-wrap">
+        <i class="bi bi-search lp-search-icon"></i>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="Buscar por título, organismo, número…"
+               class="lp-search-input"
+               autocomplete="off" spellcheck="false">
+        {% if q %}
+        <a href="/mercado-publico/lectura-pliegos{% if estado_filtro %}?estado={{ estado_filtro }}{% endif %}"
+           class="lp-search-clear" title="Limpiar búsqueda">
+          <i class="bi bi-x-lg"></i>
+        </a>
+        {% endif %}
+      </div>
+      <button type="submit" class="lp-search-submit">
+        <i class="bi bi-search"></i>Buscar
+      </button>
       {% if q or estado_filtro %}
-      <a href="/mercado-publico/lectura-pliegos" class="btn btn-sm btn-outline-danger" title="Limpiar filtros">
-        <i class="bi bi-x-lg"></i>
+      <a href="/mercado-publico/lectura-pliegos" class="lp-clear-all" title="Limpiar todos los filtros">
+        <i class="bi bi-x-circle"></i>Limpiar
       </a>
       {% endif %}
     </form>
   </div>
 
-  {# ── Chips de estado ── #}
+  {# ── Chips de estado (admin) ── #}
   {% if es_admin %}
-  <div class="d-flex flex-wrap gap-2 mb-3">
+  <div class="filter-chips-row mb-4">
     <a href="/mercado-publico/lectura-pliegos{% if q %}?q={{ q }}{% endif %}"
        class="filter-chip {% if not estado_filtro %}active{% endif %}">
-      Todos <span class="badge bg-secondary ms-1">{{ casos|length if not estado_filtro else '' }}</span>
+      Todos <span class="fc-badge">{{ casos|length }}</span>
     </a>
     {% for est in PLIEGO_ESTADOS %}
     {% if conteos.get(est, 0) > 0 %}
     <a href="/mercado-publico/lectura-pliegos?estado={{ est }}{% if q %}&q={{ q }}{% endif %}"
        class="filter-chip {% if estado_filtro == est %}active{% endif %}">
       {{ PLIEGO_ESTADO_LABELS[est] }}
-      <span class="badge bg-secondary ms-1">{{ conteos.get(est, 0) }}</span>
+      <span class="fc-badge">{{ conteos.get(est, 0) }}</span>
     </a>
     {% endif %}
     {% endfor %}
@@ -103,81 +303,100 @@
 
   {# ── Tabla de casos ── #}
   {% if casos %}
-  <div class="table-responsive">
-    <table class="table table-sm align-middle">
-      <thead class="table-light">
-        <tr>
-          <th>#</th>
-          <th>Título / Licitación</th>
-          <th>Organismo</th>
-          {% if es_admin %}<th>Solicitante</th>{% endif %}
-          <th>Estado</th>
-          <th>Actualizado</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for caso in casos %}
-        <tr class="caso-row">
-          <td class="text-muted" style="font-size:.8rem">{{ caso.id }}</td>
-          <td>
-            <div class="fw-semibold" style="font-size:.9rem">{{ caso.titulo }}</div>
-            {% if caso.nombre_licitacion %}
-            <div class="text-muted" style="font-size:.78rem">{{ caso.nombre_licitacion }}</div>
-            {% endif %}
+  <div class="casos-wrap">
+    <div class="lp-list-grid" role="table" aria-label="Casos de lectura de pliegos">
+      <div class="lp-list-header {% if not es_admin %}is-user{% endif %}" role="row">
+        <span>ID</span>
+        <span>Titulo / licitacion</span>
+        <span>Organismo</span>
+        {% if es_admin %}<span>Solicitante</span>{% endif %}
+        <span>Actualizado</span>
+        <span>Estado</span>
+        <span></span>
+      </div>
+
+      {% for caso in casos %}
+      {%- set _org = caso.organismo|default('')|string|trim -%}
+      {%- if not _org or _org|lower in ['none','nan','-','--'] -%}
+        {%- if caso.datos_proceso and caso.datos_proceso.datos -%}
+          {%- set _dp = caso.datos_proceso.datos -%}
+          {%- set _org = (_dp.get('organismo_contratante') or _dp.get('organismo') or _dp.get('entidad_contratante') or '')|string|trim -%}
+        {%- endif -%}
+      {%- endif -%}
+      <article class="caso-row lp-list-row {% if not es_admin %}is-user{% endif %}" role="row">
+        <div class="lp-list-id" role="cell">
+          <span class="id-badge">#{{ caso.id }}</span>
+        </div>
+
+        <div class="lp-list-main" role="cell">
+          <div class="caso-titulo" title="{{ caso.titulo }}">{{ caso.titulo }}</div>
+          <div class="lp-list-reference">
             {% if caso.numero_proceso %}
-            <div class="text-muted" style="font-size:.75rem"><i class="bi bi-hash me-1"></i>{{ caso.numero_proceso }}</div>
+            <span><i class="bi bi-hash"></i>{{ caso.numero_proceso }}</span>
             {% endif %}
-          </td>
-          <td style="font-size:.85rem">{{ caso.organismo or '—' }}</td>
-          {% if es_admin %}
-          <td style="font-size:.82rem">
-            {% if caso.creado_por %}{{ caso.creado_por.email }}{% else %}—{% endif %}
-          </td>
-          {% endif %}
-          <td>
-            <span class="estado-badge estado-{{ caso.estado }}">
-              {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
-            </span>
-          </td>
-          <td style="font-size:.8rem; white-space:nowrap">
-            {{ caso.actualizado_en.strftime('%d/%m/%Y') if caso.actualizado_en else '—' }}
-          </td>
-          <td>
-            <div class="d-flex gap-1">
-              {% if es_admin %}
-              <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
-                 class="btn btn-xs btn-outline-primary" title="Gestionar caso" style="font-size:.75rem; padding:.15rem .5rem">
-                <i class="bi bi-gear-fill"></i>
-              </a>
-              {% endif %}
-              {% if caso.estado == 'listo' %}
-              <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
-                 class="btn btn-xs btn-success" title="Ver resultado" style="font-size:.75rem; padding:.15rem .5rem">
-                <i class="bi bi-eye-fill"></i>
-              </a>
-              {% elif not es_admin %}
-              <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}"
-                 class="btn btn-xs btn-outline-secondary" title="Ver estado" style="font-size:.75rem; padding:.15rem .5rem">
-                <i class="bi bi-info-circle"></i>
-              </a>
-              {% endif %}
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+            {% if caso.nombre_licitacion and caso.nombre_licitacion != caso.titulo %}
+            <span class="caso-sub" title="{{ caso.nombre_licitacion }}">{{ caso.nombre_licitacion }}</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="lp-list-meta lp-list-org" role="cell" title="{{ _org if _org and _org|lower not in ['none','nan','-','--',''] else '' }}">
+          {{ _org if _org and _org|lower not in ['none','nan','-','--',''] else 'Sin organismo' }}
+        </div>
+
+        {% if es_admin %}
+        <div class="lp-list-meta lp-list-requester" role="cell" title="{% if caso.creado_por %}{{ caso.creado_por.email }}{% endif %}">
+          {% if caso.creado_por %}{{ caso.creado_por.email }}{% else %}Sin solicitante{% endif %}
+        </div>
+        {% endif %}
+
+        <time class="lp-list-date" role="cell" datetime="{{ caso.actualizado_en.isoformat() if caso.actualizado_en else '' }}">
+          {{ caso.actualizado_en.strftime('%d/%m/%Y') if caso.actualizado_en else 'Sin fecha' }}
+        </time>
+
+        <div class="lp-list-status" role="cell">
+          <span class="estado-badge estado-{{ caso.estado }}">
+            {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
+          </span>
+        </div>
+
+        <div class="lp-list-actions-cell" role="cell">
+          <div class="lp-list-actions">
+            {% if es_admin %}
+            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
+               class="caso-btn" title="Gestionar caso">
+              <i class="bi bi-gear-fill"></i><span class="d-none d-xl-inline ms-1">Gestionar</span>
+            </a>
+            {% endif %}
+            {% if caso.estado == 'listo' %}
+            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
+               class="caso-btn caso-btn-success" title="Ver resultado">
+              <i class="bi bi-eye-fill"></i><span class="d-none d-xl-inline ms-1">Ver</span>
+            </a>
+            {% elif not es_admin %}
+            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}"
+               class="caso-btn" title="Ver estado">
+              <i class="bi bi-info-circle"></i><span class="d-none d-xl-inline ms-1">Estado</span>
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
   </div>
   {% else %}
-  <div class="text-center py-5 text-muted">
-    <i class="bi bi-inbox" style="font-size:2.5rem; opacity:.3; display:block; margin-bottom:.5rem"></i>
-    <div class="fw-semibold">No hay casos
+  <div class="lp-empty">
+    <i class="bi bi-inbox ei"></i>
+    <div class="et">
+      No hay casos
       {% if estado_filtro %}con estado "{{ PLIEGO_ESTADO_LABELS.get(estado_filtro, estado_filtro) }}"{% endif %}
       {% if q %}que coincidan con "{{ q }}"{% endif %}
     </div>
-    <div style="font-size:.85rem; margin-top:.5rem">
-      <a href="/mercado-publico/lectura-pliegos/nueva" class="text-primary">Crear nueva solicitud</a>
+    <div class="es">
+      <a href="/mercado-publico/lectura-pliegos/nueva" style="color:#5770b0;font-weight:600;">
+        Crear nueva solicitud
+      </a>
     </div>
   </div>
   {% endif %}

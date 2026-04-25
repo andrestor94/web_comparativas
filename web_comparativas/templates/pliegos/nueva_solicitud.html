@@ -1,51 +1,222 @@
 {% extends "base.html" %}
 
 {% block title %}Nueva solicitud de lectura – SIEM{% endblock %}
-{% block header_title %}Nueva solicitud de lectura de pliego{% endblock %}
+{% block header_title %}Nueva solicitud{% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=1">
 <style>
-  .upload-zone {
-    border: 2px dashed var(--bs-border-color);
-    border-radius: .6rem;
-    padding: 2rem 1rem;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color .2s, background .2s;
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Lectura de Pliegos · Nueva Solicitud — Premium v5
+  ═══════════════════════════════════════════════════════════ */
+
+  /* ── Override global label uppercase ───────────────────── */
+  .ns-form label,
+  .ns-form .ns-label {
+    text-transform:none !important;
+    font-size:.8125rem;
+    font-weight:600;
+    color:#374151;
+    letter-spacing:0;
+    margin-bottom:.375rem;
+    display:block;
   }
-  .upload-zone:hover, .upload-zone.dragover {
-    border-color: var(--bs-primary);
-    background: rgba(13,110,253,.04);
+  .ns-form .ns-label-req::after {
+    content:'*';color:#dc2626;margin-left:.2em;font-weight:700;
   }
+  .ns-form .form-text {
+    font-size:.75rem;color:#94a3b8;margin-top:.3rem;
+  }
+
+  /* ── Inputs premium ─────────────────────────────────────── */
+  .ns-form .form-control,
+  .ns-form .form-select {
+    border-radius:.5rem;border:1.5px solid #d1d5db;
+    min-height:42px;font-size:.875rem;padding:.5rem .75rem;
+    background:#fff;color:#111827;font-family:inherit;
+    transition:border-color .18s,box-shadow .18s;
+  }
+  .ns-form .form-control:focus,
+  .ns-form .form-select:focus {
+    border-color:#5770b0;outline:none;
+    box-shadow:0 0 0 3px rgba(87,112,176,.13);
+    background:#fff;
+  }
+  .ns-form .form-control::placeholder { color:#9ca3af; }
+  .ns-form textarea.form-control { min-height:100px;resize:vertical; }
+
+  /* ── Section cards ──────────────────────────────────────── */
+  .ns-card {
+    background:#fff;border:1px solid #e5e7eb;
+    border-radius:12px;
+    box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 12px rgba(6,72,111,.04);
+    overflow:hidden;margin-bottom:1.25rem;
+  }
+  .ns-card-header {
+    display:flex;align-items:center;gap:.85rem;
+    padding:1rem 1.5rem .9rem;
+    border-bottom:1px solid #f3f4f6;
+  }
+  .ns-icon-wrap {
+    width:36px;height:36px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:1rem;flex-shrink:0;
+  }
+  .ns-card-title {
+    font-size:.9375rem;font-weight:700;color:#111827;margin:0 0 .1rem;
+    letter-spacing:-.01em;
+  }
+  .ns-card-desc {
+    font-size:.75rem;color:#9ca3af;margin:0;
+  }
+  .ns-card-body { padding:1.25rem 1.5rem 1.5rem; }
+
+  /* ── Upload zone ────────────────────────────────────────── */
+  .ns-upload-zone {
+    border:2px dashed #93c5fd;border-radius:.75rem;
+    background:#f0f7ff;padding:2rem 1.5rem;
+    text-align:center;cursor:pointer;
+    transition:all .2s ease;position:relative;overflow:hidden;
+  }
+  .ns-upload-zone:hover,
+  .ns-upload-zone.dragover {
+    background:#dbeafe;border-color:#3b82f6;border-style:solid;
+  }
+  .ns-upload-icon {
+    font-size:2.25rem;color:#3b82f6;display:block;margin-bottom:.75rem;
+    line-height:1;
+  }
+  .ns-upload-main {
+    font-size:.9rem;font-weight:700;color:#1e3a5f;margin-bottom:.3rem;
+  }
+  .ns-upload-hint {
+    font-size:.78rem;color:#6b7280;line-height:1.4;
+  }
+
+  /* ── File list item ─────────────────────────────────────── */
   .file-item {
-    display: flex; align-items: center; gap: .6rem;
-    padding: .5rem .75rem;
-    border: 1px solid var(--bs-border-color);
-    border-radius: .5rem;
-    font-size: .85rem;
+    display:flex;align-items:center;gap:.6rem;
+    padding:.5rem .75rem;
+    border:1.5px solid #e5e7eb;border-radius:.5rem;
+    font-size:.84rem;background:#fafafa;
+    transition:border-color .15s;
   }
-  .file-item .file-icon { font-size: 1.1rem; flex-shrink: 0; }
-  .file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-item .file-size { color: #999; font-size: .75rem; flex-shrink: 0; }
-  .file-item .remove-btn { border: none; background: none; color: #dc3545; cursor: pointer; padding: 0; }
+  .file-item:hover { border-color:#d1d5db; }
+  .file-item .file-icon { font-size:1.1rem;flex-shrink:0; }
+  .file-item .file-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151; }
+  .file-item .file-size { color:#9ca3af;font-size:.73rem;flex-shrink:0; }
+  .file-item .remove-btn {
+    border:none;background:none;color:#9ca3af;cursor:pointer;
+    padding:0 .1rem;font-size:.9rem;transition:color .15s;
+    display:inline-flex;align-items:center;
+  }
+  .file-item .remove-btn:hover { color:#dc2626; }
+
+  /* ── Footer actions ─────────────────────────────────────── */
+  .ns-footer {
+    padding-top:1.25rem;margin-top:.5rem;
+    border-top:1px solid #f3f4f6;
+  }
+  .ns-btn-primary {
+    display:inline-flex;align-items:center;gap:.45rem;
+    padding:.62rem 1.4rem;border-radius:.5rem;
+    background:#06486f;color:#fff;font-weight:700;
+    font-size:.875rem;border:none;cursor:pointer;
+    box-shadow:0 2px 6px rgba(6,72,111,.22),0 4px 12px rgba(6,72,111,.14);
+    transition:all .2s cubic-bezier(.16,1,.3,1);
+    font-family:inherit;min-height:42px;
+  }
+  .ns-btn-primary:hover {
+    background:#053e61;transform:translateY(-1px);
+    box-shadow:0 4px 12px rgba(6,72,111,.28),0 6px 18px rgba(6,72,111,.16);
+  }
+  .ns-btn-secondary {
+    display:inline-flex;align-items:center;gap:.4rem;
+    padding:.6rem 1.2rem;border-radius:.5rem;
+    background:#fff;color:#374151;font-weight:600;
+    font-size:.875rem;border:1.5px solid #d1d5db;cursor:pointer;
+    transition:all .15s;font-family:inherit;min-height:42px;
+    text-decoration:none;
+  }
+  .ns-btn-secondary:hover {
+    border-color:#9ca3af;background:#f9fafb;color:#111827;text-decoration:none;
+  }
+  .ns-btn-cancel {
+    display:inline-flex;align-items:center;
+    padding:.6rem .9rem;border-radius:.5rem;
+    background:none;color:#6b7280;font-weight:500;
+    font-size:.875rem;border:none;cursor:pointer;
+    transition:color .15s;text-decoration:none;
+    font-family:inherit;min-height:42px;
+  }
+  .ns-btn-cancel:hover { color:#374151;text-decoration:none; }
+
+  /* ── Info note block ────────────────────────────────────── */
+  .ns-info-block {
+    display:flex;align-items:flex-start;gap:.65rem;
+    background:#f8fafc;border:1px solid #e2e8f0;
+    border-left:3px solid #5770b0;border-radius:.5rem;
+    padding:.75rem 1rem;margin-top:1rem;
+  }
+  .ns-info-block i { color:#5770b0;font-size:.9rem;flex-shrink:0;margin-top:.05rem; }
+  .ns-info-block p { font-size:.78rem;color:#475569;margin:0;line-height:1.55; }
+  .ns-info-block strong { color:#334155; }
+
+  /* ── Breadcrumb ─────────────────────────────────────────── */
+  .ns-breadcrumb {
+    display:flex;align-items:center;gap:.4rem;
+    font-size:.8rem;color:#94a3b8;margin-bottom:1.25rem;
+  }
+  .ns-breadcrumb a {
+    color:#6b7280;text-decoration:none;
+    display:inline-flex;align-items:center;gap:.3rem;
+    transition:color .15s;
+  }
+  .ns-breadcrumb a:hover { color:#06486f; }
+  .ns-breadcrumb .sep { opacity:.5; }
+  .ns-breadcrumb .current { color:#374151;font-weight:600; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="py-3 px-1" style="max-width:780px">
+<div class="lp-premium-shell lp-shell-narrow lp-new-request">
+<div class="ns-form">
 
   {# Breadcrumb #}
-  <nav style="font-size:.82rem" class="mb-3">
-    <a href="/mercado-publico/lectura-pliegos" class="text-muted text-decoration-none">
-      <i class="bi bi-arrow-left me-1"></i>Lectura de Pliegos
+  <nav class="ns-breadcrumb">
+    <a href="/mercado-publico/lectura-pliegos">
+      <i class="bi bi-arrow-left"></i>Lectura de Pliegos
     </a>
-    <span class="mx-1 text-muted">/</span>
-    <span>Nueva solicitud</span>
+    <span class="sep">/</span>
+    <span class="current">Nueva solicitud</span>
   </nav>
 
+  <section class="lp-page-hero">
+    <div class="lp-hero-grid">
+      <div>
+        <div class="lp-hero-kicker">Lectura asistida · Flujo guiado</div>
+        <h1 class="lp-hero-title">Nueva solicitud de lectura</h1>
+        <p class="lp-hero-subtitle">
+          Carga los datos del proceso y adjunta los documentos. Luego un administrador coordina
+          el procesamiento externo y publica la lectura estructurada para consulta.
+        </p>
+      </div>
+      <div class="lp-hero-actions">
+        <span class="lp-status lp-status-info"><i class="bi bi-robot"></i>Procesamiento externo GPT</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="lp-request-steps" aria-label="Pasos de la solicitud">
+    <div class="lp-request-step"><span>1</span>Identificacion</div>
+    <div class="lp-request-step"><span>2</span>Archivos</div>
+    <div class="lp-request-step"><span>3</span>Observaciones</div>
+  </div>
+
   {% if error %}
-  <div class="alert alert-danger d-flex align-items-center gap-2 py-2">
-    <i class="bi bi-exclamation-triangle-fill"></i>
+  <div class="alert alert-danger d-flex align-items-center gap-2 py-2 mb-3"
+       style="border-radius:.6rem;font-size:.875rem;">
+    <i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
     <div>{{ error }}</div>
   </div>
   {% endif %}
@@ -53,17 +224,21 @@
   <form id="frmSolicitud" method="post" enctype="multipart/form-data"
         action="/mercado-publico/lectura-pliegos/nueva">
 
-    {# ── Bloque: identificación ── #}
-    <div class="card mb-3">
-      <div class="card-body">
-        <h6 class="card-title fw-bold mb-3">
-          <i class="bi bi-file-text me-2 text-primary"></i>Identificación
-        </h6>
+    {# ══ Sección 1: Identificación ══ #}
+    <div class="ns-card">
+      <div class="ns-card-header">
+        <div class="ns-icon-wrap" style="background:#eff6ff;">
+          <i class="bi bi-file-text" style="color:#2563eb;"></i>
+        </div>
+        <div>
+          <div class="ns-card-title">Identificación</div>
+          <div class="ns-card-desc">Datos principales del proceso licitatorio</div>
+        </div>
+      </div>
+      <div class="ns-card-body">
 
         <div class="mb-3">
-          <label class="form-label fw-semibold" for="titulo">
-            Título interno <span class="text-danger">*</span>
-          </label>
+          <label class="ns-label ns-label-req" for="titulo">Título interno</label>
           <input type="text" id="titulo" name="titulo" class="form-control"
                  placeholder="Ej: Licitación Suturas – Municipio San Isidro – Mar 2025"
                  value="{{ form.titulo if form else '' }}" required>
@@ -72,45 +247,54 @@
 
         <div class="row g-3">
           <div class="col-md-6">
-            <label class="form-label" for="organismo">Organismo / entidad</label>
+            <label class="ns-label" for="organismo">Organismo / entidad</label>
             <input type="text" id="organismo" name="organismo" class="form-control"
                    placeholder="Ej: Municipalidad de San Isidro"
                    value="{{ form.organismo if form else '' }}">
           </div>
           <div class="col-md-6">
-            <label class="form-label" for="nombre_licitacion">Nombre de la licitación</label>
+            <label class="ns-label" for="nombre_licitacion">Nombre de la licitación</label>
             <input type="text" id="nombre_licitacion" name="nombre_licitacion" class="form-control"
                    placeholder="Ej: Provisión de material de sutura"
                    value="{{ form.nombre_licitacion if form else '' }}">
           </div>
           <div class="col-md-6">
-            <label class="form-label" for="numero_proceso">Número de proceso</label>
+            <label class="ns-label" for="numero_proceso">Número de proceso</label>
             <input type="text" id="numero_proceso" name="numero_proceso" class="form-control"
                    placeholder="Ej: LC-2025-001"
                    value="{{ form.numero_proceso if form else '' }}">
           </div>
           <div class="col-md-6">
-            <label class="form-label" for="expediente">Expediente</label>
+            <label class="ns-label" for="expediente">Expediente</label>
             <input type="text" id="expediente" name="expediente" class="form-control"
                    placeholder="Ej: EXP-2025-12345"
                    value="{{ form.expediente if form else '' }}">
           </div>
         </div>
+
       </div>
     </div>
 
-    {# ── Bloque: archivos ── #}
-    <div class="card mb-3">
-      <div class="card-body">
-        <h6 class="card-title fw-bold mb-3">
-          <i class="bi bi-paperclip me-2 text-primary"></i>Archivos del pliego
-        </h6>
+    {# ══ Sección 2: Archivos ══ #}
+    <div class="ns-card">
+      <div class="ns-card-header">
+        <div class="ns-icon-wrap" style="background:#f0fdf4;">
+          <i class="bi bi-paperclip" style="color:#059669;"></i>
+        </div>
+        <div>
+          <div class="ns-card-title">Archivos del pliego</div>
+          <div class="ns-card-desc">Adjuntá los documentos del proceso (PDF, Word, Excel…)</div>
+        </div>
+      </div>
+      <div class="ns-card-body">
 
-        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('archivos').click()">
-          <i class="bi bi-cloud-upload" style="font-size:1.8rem; color:#0d6efd; display:block; margin-bottom:.5rem"></i>
-          <div class="fw-semibold mb-1">Arrastrá los archivos aquí o hacé clic para seleccionar</div>
-          <div class="text-muted" style="font-size:.82rem">
-            PDF, Word, Excel, imágenes — hasta 50 MB por archivo
+        <div class="ns-upload-zone" id="uploadZone"
+             onclick="document.getElementById('archivos').click()">
+          <i class="bi bi-cloud-arrow-up ns-upload-icon"></i>
+          <div class="ns-upload-main">Arrastrá los archivos aquí o hacé clic para seleccionar</div>
+          <div class="ns-upload-hint">PDF, Word, Excel, imágenes — hasta 50 MB por archivo</div>
+          <div class="lp-format-chips">
+            <span>PDF</span><span>DOCX</span><span>XLSX</span><span>JPG/PNG</span><span>ZIP</span>
           </div>
         </div>
 
@@ -118,37 +302,57 @@
                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.bmp,.tiff,.zip">
 
         <div id="fileList" class="d-flex flex-column gap-2 mt-3"></div>
+
       </div>
     </div>
 
-    {# ── Bloque: observaciones ── #}
-    <div class="card mb-4">
-      <div class="card-body">
-        <h6 class="card-title fw-bold mb-3">
-          <i class="bi bi-chat-text me-2 text-primary"></i>Observaciones
-        </h6>
+    {# ══ Sección 3: Observaciones ══ #}
+    <div class="ns-card">
+      <div class="ns-card-header">
+        <div class="ns-icon-wrap" style="background:#fefce8;">
+          <i class="bi bi-chat-text" style="color:#d97706;"></i>
+        </div>
+        <div>
+          <div class="ns-card-title">Observaciones</div>
+          <div class="ns-card-desc">Información adicional para el administrador (opcional)</div>
+        </div>
+      </div>
+      <div class="ns-card-body">
+
+        <label class="ns-label" for="observaciones_usuario">Notas al administrador</label>
         <textarea id="observaciones_usuario" name="observaciones_usuario"
-                  class="form-control" rows="4"
+                  class="form-control"
                   placeholder="Indicá si hay algo particular a revisar, secciones problemáticas, dudas previas, etc.">{{ form.observaciones_usuario if form else '' }}</textarea>
-        <div class="form-text">Opcional. El administrador verá este texto antes de procesar el caso.</div>
+        <div class="form-text">El administrador verá este texto antes de procesar el caso.</div>
+
       </div>
     </div>
 
-    {# ── Acciones ── #}
-    <div class="d-flex gap-2 flex-wrap">
-      <button type="submit" name="accion" value="enviar" class="btn btn-primary">
-        <i class="bi bi-send me-1"></i>Enviar solicitud
-      </button>
-      <button type="submit" name="accion" value="borrador" class="btn btn-outline-secondary">
-        <i class="bi bi-floppy me-1"></i>Guardar borrador
-      </button>
-      <a href="/mercado-publico/lectura-pliegos" class="btn btn-link text-muted">Cancelar</a>
+    {# ══ Acciones del formulario ══ #}
+    <div class="ns-footer">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <button type="submit" name="accion" value="enviar" class="ns-btn-primary">
+          <i class="bi bi-send"></i>Enviar solicitud
+        </button>
+        <button type="submit" name="accion" value="borrador" class="ns-btn-secondary">
+          <i class="bi bi-floppy"></i>Guardar borrador
+        </button>
+        <a href="/mercado-publico/lectura-pliegos" class="ns-btn-cancel">Cancelar</a>
+      </div>
+
+      <div class="ns-info-block">
+        <i class="bi bi-info-circle-fill"></i>
+        <p>
+          Al <strong>enviar</strong>, la solicitud queda en estado
+          <strong>Pendiente de revisión</strong> y el administrador recibirá notificación
+          para procesarla. Al <strong>guardar como borrador</strong>, solo vos podés verla
+          hasta que la envíes.
+        </p>
+      </div>
     </div>
-    <div class="form-text mt-2">
-      Al enviar, la solicitud queda en estado <strong>Pendiente de revisión</strong> y el administrador recibirá
-      notificación para procesarla. Al guardar como borrador, solo vos podés verla.
-    </div>
+
   </form>
+</div>
 </div>
 {% endblock %}
 
@@ -156,22 +360,22 @@
 <script>
 (function () {
   const input = document.getElementById('archivos');
-  const zone = document.getElementById('uploadZone');
-  const list = document.getElementById('fileList');
+  const zone  = document.getElementById('uploadZone');
+  const list  = document.getElementById('fileList');
   let filesToUpload = new DataTransfer();
 
   const ICONS = {
-    pdf: 'bi-file-earmark-pdf text-danger',
-    doc: 'bi-file-earmark-word text-primary',
+    pdf:  'bi-file-earmark-pdf text-danger',
+    doc:  'bi-file-earmark-word text-primary',
     docx: 'bi-file-earmark-word text-primary',
-    xls: 'bi-file-earmark-excel text-success',
+    xls:  'bi-file-earmark-excel text-success',
     xlsx: 'bi-file-earmark-excel text-success',
-    jpg: 'bi-file-earmark-image text-warning',
+    jpg:  'bi-file-earmark-image text-warning',
     jpeg: 'bi-file-earmark-image text-warning',
-    png: 'bi-file-earmark-image text-warning',
-    bmp: 'bi-file-earmark-image text-warning',
+    png:  'bi-file-earmark-image text-warning',
+    bmp:  'bi-file-earmark-image text-warning',
     tiff: 'bi-file-earmark-image text-warning',
-    zip: 'bi-file-earmark-zip text-secondary',
+    zip:  'bi-file-earmark-zip text-secondary',
   };
 
   function formatBytes(b) {
@@ -226,8 +430,8 @@
     renderList();
   });
 
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', ()  => zone.classList.remove('dragover'));
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('dragover');

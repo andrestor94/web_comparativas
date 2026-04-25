@@ -2,8 +2,8 @@
 
 {% block title %}[Admin] Caso #{{ caso.id }} – SIEM{% endblock %}
 {% block header_title %}
-  <span class="me-2">Caso #{{ caso.id }}</span>
-  <span class="badge estado-{{ caso.estado }}" style="font-size:.7rem; font-weight:600">
+  <span class="me-2" style="font-weight:700;color:#0f172a;">Caso #{{ caso.id }}</span>
+  <span class="ac-estado-badge ac-estado-{{ caso.estado }}">
     {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
   </span>
 {% endblock %}
@@ -12,76 +12,206 @@
 <div class="d-flex gap-2">
   {% if caso.estado == 'listo' %}
   <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
-     class="btn btn-sm btn-success">
+     class="btn btn-sm btn-success ac-toolbar-btn">
     <i class="bi bi-eye me-1"></i>Vista final
   </a>
   {% endif %}
-  <a href="/mercado-publico/lectura-pliegos" class="btn btn-sm btn-outline-secondary">
+  <a href="/mercado-publico/lectura-pliegos"
+     class="btn btn-sm btn-outline-secondary ac-toolbar-btn">
     <i class="bi bi-list-ul me-1"></i>Lista
   </a>
 </div>
 {% endblock %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=3">
 <style>
-  .estado-badge { font-size: .72rem; font-weight: 600; padding: .28em .7em; border-radius: 20px; }
-  .badge.estado-borrador              { background: #f0f0f0 !important; color: #666; }
-  .badge.estado-pendiente_revision    { background: #fff3cd !important; color: #856404; }
-  .badge.estado-en_revision           { background: #cfe2ff !important; color: #084298; }
-  .badge.estado-pendiente_procesamiento { background: #e2d9f3 !important; color: #432874; }
-  .badge.estado-procesado_externamente { background: #d1ecf1 !important; color: #0c5460; }
-  .badge.estado-excel_cargado         { background: #d4edda !important; color: #155724; }
-  .badge.estado-en_validacion         { background: #fde8c8 !important; color: #7d4000; }
-  .badge.estado-listo                 { background: #198754 !important; color: #fff; }
-  .badge.estado-observado             { background: #fff0b3 !important; color: #664d03; }
-  .badge.estado-rechazado             { background: #f8d7da !important; color: #842029; }
-  .badge.estado-reprocesar            { background: #ffd6a5 !important; color: #7c4700; }
-  .badge.estado-archivado             { background: #e9ecef !important; color: #495057; }
+  /* ═══════════════════════════════════════════════════════════
+     SIEM · Lectura de Pliegos · Admin Caso — Premium v5
+  ═══════════════════════════════════════════════════════════ */
 
-  .estado-tag { display:inline-flex; align-items:center; font-size:.72rem; font-weight:600;
-    padding:.28em .7em; border-radius:20px; }
-  .estado-tag.borrador              { background:#f0f0f0; color:#666; }
-  .estado-tag.pendiente_revision    { background:#fff3cd; color:#856404; }
-  .estado-tag.en_revision           { background:#cfe2ff; color:#084298; }
-  .estado-tag.pendiente_procesamiento { background:#e2d9f3; color:#432874; }
-  .estado-tag.procesado_externamente { background:#d1ecf1; color:#0c5460; }
-  .estado-tag.excel_cargado         { background:#d4edda; color:#155724; }
-  .estado-tag.en_validacion         { background:#fde8c8; color:#7d4000; }
-  .estado-tag.listo                 { background:#198754; color:#fff; }
-  .estado-tag.observado             { background:#fff0b3; color:#664d03; }
-  .estado-tag.rechazado             { background:#f8d7da; color:#842029; }
-  .estado-tag.reprocesar            { background:#ffd6a5; color:#7c4700; }
-  .estado-tag.archivado             { background:#e9ecef; color:#495057; }
+  /* ── Override global label uppercase ───────────────────── */
+  .ac-body label,
+  .ac-body .ac-label {
+    text-transform:none !important;
+    font-size:.775rem;font-weight:600;color:#64748b;
+    letter-spacing:0;margin-bottom:.3rem;display:block;
+  }
 
-  .section-label { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em;
-    color:#888; font-weight:700; margin-bottom:.4rem; }
-  .info-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap:1rem; }
-  .info-item .lbl { font-size:.72rem; color:#888; text-transform:uppercase; letter-spacing:.04em; }
-  .info-item .val { font-size:.9rem; font-weight:500; }
+  /* ── Toolbar buttons ────────────────────────────────────── */
+  .ac-toolbar-btn {
+    border-radius:.5rem;font-size:.82rem;font-weight:600;
+    padding:.32rem .85rem;letter-spacing:.01em;
+  }
 
-  .timeline { position: relative; padding-left: 1.6rem; }
-  .timeline::before { content:''; position:absolute; left:.55rem; top:0; bottom:0;
-    width:2px; background:var(--bs-border-color); }
-  .tl-item { position:relative; padding-bottom:1rem; }
-  .tl-item::before { content:''; position:absolute; left:-1.15rem; top:.3rem;
-    width:.65rem; height:.65rem; border-radius:50%; background:var(--bs-primary);
-    border:2px solid white; box-shadow:0 0 0 2px var(--bs-primary); }
-  .tl-item.ev-listo::before { background:#198754; box-shadow:0 0 0 2px #198754; }
-  .tl-item.ev-rechazado::before { background:#dc3545; box-shadow:0 0 0 2px #dc3545; }
-  .tl-item.ev-observado::before { background:#ffc107; box-shadow:0 0 0 2px #ffc107; }
+  /* ── Estado badges (header + inline) ───────────────────── */
+  .ac-estado-badge {
+    display:inline-flex;align-items:center;
+    font-size:.7rem;font-weight:700;padding:.25em .7em;
+    border-radius:999px;letter-spacing:.02em;white-space:nowrap;
+    vertical-align:middle;
+  }
+  .ac-estado-borrador                { background:#f1f5f9;color:#475569;border:1px solid #cbd5e1; }
+  .ac-estado-pendiente_revision      { background:#fffbeb;color:#92400e;border:1px solid #fde68a; }
+  .ac-estado-en_revision             { background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe; }
+  .ac-estado-pendiente_procesamiento { background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe; }
+  .ac-estado-procesado_externamente  { background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc; }
+  .ac-estado-excel_cargado           { background:#f0fdf4;color:#166534;border:1px solid #bbf7d0; }
+  .ac-estado-en_validacion           { background:#fff7ed;color:#9a3412;border:1px solid #fed7aa; }
+  .ac-estado-listo                   { background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7; }
+  .ac-estado-observado               { background:#fefce8;color:#854d0e;border:1px solid #fef08a; }
+  .ac-estado-rechazado               { background:#fef2f2;color:#991b1b;border:1px solid #fecaca; }
+  .ac-estado-reprocesar              { background:#fff7ed;color:#7c2d12;border:1px solid #fdba74; }
+  .ac-estado-archivado               { background:#f8fafc;color:#64748b;border:1px solid #e2e8f0; }
 
-  .archivo-row { display:flex; align-items:center; gap:.7rem; padding:.55rem .75rem;
-    border:1px solid var(--bs-border-color); border-radius:.5rem; font-size:.85rem; }
-  .archivo-row:hover { background:rgba(0,0,0,.025); }
-  .archivo-row .fname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* ── Cards premium ──────────────────────────────────────── */
+  .ac-card {
+    background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+    box-shadow:0 1px 3px rgba(0,0,0,.03),0 4px 12px rgba(6,72,111,.04);
+    margin-bottom:1rem;overflow:hidden;
+  }
+  .ac-card-header {
+    display:flex;align-items:center;justify-content:space-between;
+    padding:.85rem 1.25rem;border-bottom:1px solid #f3f4f6;
+    gap:.75rem;
+  }
+  .ac-card-header-left {
+    display:flex;align-items:center;gap:.65rem;
+  }
+  .ac-card-icon {
+    width:30px;height:30px;border-radius:8px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:.85rem;flex-shrink:0;
+  }
+  .ac-card-title {
+    font-size:.8375rem;font-weight:700;color:#111827;margin:0;
+    letter-spacing:-.01em;
+  }
+  .ac-card-body { padding:1.1rem 1.25rem 1.25rem; }
 
-  .action-panel { background: rgba(0,0,0,.02); border: 1px solid var(--bs-border-color);
-    border-radius:.6rem; padding:1rem; }
-  .trans-btn { min-width:7rem; }
+  /* ── Info grid ──────────────────────────────────────────── */
+  .ac-info-grid {
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.9rem 1.25rem;
+  }
+  .ac-info-item .ai-lbl {
+    font-size:.7rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.06em;color:#94a3b8;margin-bottom:.22rem;display:block;
+  }
+  .ac-info-item .ai-val {
+    font-size:.875rem;font-weight:500;color:#111827;line-height:1.4;
+  }
+
+  /* ── Observaciones del solicitante ─────────────────────── */
+  .ac-obs-block {
+    background:#f8fafc;border-radius:.5rem;
+    padding:.75rem 1rem;font-size:.85rem;
+    white-space:pre-wrap;color:#374151;border:1px solid #f1f5f9;
+    line-height:1.55;
+  }
+
+  /* ── Archivos del pliego ────────────────────────────────── */
+  .ac-file-row {
+    display:flex;align-items:center;gap:.7rem;padding:.55rem .75rem;
+    border:1px solid #f1f5f9;border-radius:.5rem;font-size:.84rem;
+    background:#fafafa;transition:background .12s,border-color .12s;
+  }
+  .ac-file-row:hover { background:#f3f4f6;border-color:#e5e7eb; }
+  .ac-file-row .af-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151; }
+  .ac-file-row .af-size { color:#94a3b8;font-size:.73rem;flex-shrink:0; }
+
+  /* ── Timeline ───────────────────────────────────────────── */
+  .ac-timeline { position:relative;padding-left:1.5rem; }
+  .ac-timeline::before {
+    content:'';position:absolute;left:.48rem;top:.4rem;bottom:0;
+    width:1.5px;background:#e5e7eb;border-radius:2px;
+  }
+  .ac-tl-item { position:relative;padding-bottom:.9rem; }
+  .ac-tl-item:last-child { padding-bottom:0; }
+  .ac-tl-dot {
+    position:absolute;left:-1.12rem;top:.3rem;
+    width:.62rem;height:.62rem;border-radius:50%;
+    background:#5770b0;border:2px solid #fff;
+    box-shadow:0 0 0 2px #5770b0;
+    flex-shrink:0;
+  }
+  .ac-tl-dot--listo     { background:#059669;box-shadow:0 0 0 2px #059669; }
+  .ac-tl-dot--rechazado { background:#dc2626;box-shadow:0 0 0 2px #dc2626; }
+  .ac-tl-dot--observado { background:#d97706;box-shadow:0 0 0 2px #d97706; }
+  .ac-tl-dot--reprocesar{ background:#7c3aed;box-shadow:0 0 0 2px #7c3aed; }
+
+  .ac-tl-body {
+    display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;
+  }
+  .ac-tl-comment { font-size:.8rem;color:#6b7280;margin-top:.22rem;line-height:1.4; }
+  .ac-tl-user    { font-size:.72rem;color:#9ca3af;margin-top:.15rem; }
+  .ac-tl-date    { font-size:.72rem;color:#9ca3af;white-space:nowrap;flex-shrink:0; }
+
+  /* ── Action panels (sidebar) ────────────────────────────── */
+  .ac-action-panel {
+    background:#f8fafc;border:1px solid #e5e7eb;border-radius:.6rem;
+    padding:.9rem 1rem;margin-bottom:.75rem;
+  }
+  .ac-action-title {
+    font-size:.7rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.07em;color:#64748b;margin-bottom:.65rem;
+    display:flex;align-items:center;gap:.35rem;
+  }
+  .ac-action-title i { font-size:.8rem; }
+
+  /* ── Inputs inside action panels ───────────────────────── */
+  .ac-body .form-control,
+  .ac-body .form-select {
+    border-radius:.45rem;border:1.5px solid #d1d5db;
+    font-size:.83rem;padding:.42rem .7rem;
+    background:#fff;color:#111827;font-family:inherit;
+    transition:border-color .18s,box-shadow .18s;
+  }
+  .ac-body .form-control:focus,
+  .ac-body .form-select:focus {
+    border-color:#5770b0;outline:none;
+    box-shadow:0 0 0 3px rgba(87,112,176,.12);
+  }
+  .ac-body .form-control::placeholder { color:#9ca3af; }
+  .ac-body textarea.form-control { resize:vertical; }
+
+  /* ── Data summary list ──────────────────────────────────── */
+  .ac-data-list { display:flex;flex-direction:column;gap:.32rem;font-size:.82rem; }
+  .ac-data-row {
+    display:flex;justify-content:space-between;align-items:center;
+    padding:.28rem 0;border-bottom:1px solid #f3f4f6;
+  }
+  .ac-data-row:last-child { border-bottom:none; }
+  .ac-data-key { color:#6b7280; }
+  .ac-data-val { font-weight:600;color:#111827; }
+
+  /* ── Excel versions list ────────────────────────────────── */
+  .ac-excel-row {
+    display:flex;align-items:center;justify-content:space-between;
+    padding:.32rem 0;border-bottom:1px solid #f3f4f6;font-size:.81rem;
+  }
+  .ac-excel-row:last-child { border-bottom:none; }
+
+  /* ── Publish card (success state) ──────────────────────── */
+  .ac-publish-card {
+    background:#f0fdf4;border:1px solid #bbf7d0;border-radius:.6rem;
+    padding:.9rem 1rem;margin-bottom:.75rem;
+  }
+  .ac-publish-title {
+    font-size:.7rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.07em;color:#166534;margin-bottom:.65rem;
+    display:flex;align-items:center;gap:.35rem;
+  }
+
+  /* ── Procesamiento externo header badge ─────────────────── */
+  .ac-proc-badge-ok   { background:#dcfce7;color:#166534;border-radius:99px;
+                        font-size:.7rem;font-weight:700;padding:.2em .65em; }
+  .ac-proc-badge-pending { background:#f1f5f9;color:#64748b;border-radius:99px;
+                           font-size:.7rem;font-weight:700;padding:.2em .65em; }
 </style>
 {% endblock %}
 
 {% block content %}
+
 {# ── Widget flotante de notas rápidas ── #}
 <div id="pliego-widget-root"
      data-pliego-id="{{ caso.id }}"
@@ -94,99 +224,150 @@
 
 {% set error = request.query_params.get('error') %}
 {% if error %}
-<div class="alert alert-danger alert-dismissible fade show mx-3 mt-2 py-2">
+<div class="alert alert-danger alert-dismissible fade show mx-3 mt-2 py-2"
+     style="border-radius:.6rem;font-size:.875rem;">
   <i class="bi bi-exclamation-triangle me-2"></i>Error: {{ error }}
   <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
 
-<div class="py-3 px-1">
-
-  {# ──────────────── LAYOUT 2 COLUMNAS ──────────────── #}
+<div class="lp-premium-shell lp-admin-cockpit ac-body">
+  {% set criticos_admin = caso.faltantes|selectattr('criticidad','equalto','Alta')|list if caso.faltantes else [] %}
+  <section class="lp-case-hero">
+    <div class="lp-hero-grid">
+      <div>
+        <div class="lp-hero-kicker">Cockpit administrativo · Caso #{{ caso.id }}</div>
+        <h1 class="lp-hero-title">{{ caso.titulo }}</h1>
+        <p class="lp-hero-subtitle">
+          Estado actual: {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }} ·
+          actualizado {{ caso.actualizado_en.strftime('%d/%m/%Y %H:%M') if caso.actualizado_en else 'sin fecha' }}.
+        </p>
+        <div class="lp-admin-hero-tags">
+          {% if caso.organismo %}<span><i class="bi bi-building"></i>{{ caso.organismo }}</span>{% endif %}
+          {% if caso.numero_proceso %}<span><i class="bi bi-hash"></i>{{ caso.numero_proceso }}</span>{% endif %}
+          {% if excel_activo %}<span><i class="bi bi-file-earmark-excel"></i>Excel v{{ excel_activo.version }}</span>{% endif %}
+          {% if criticos_admin %}<span class="is-danger"><i class="bi bi-exclamation-triangle-fill"></i>{{ criticos_admin|length }} faltantes criticos</span>{% endif %}
+        </div>
+      </div>
+      <div class="lp-hero-actions">
+        {% if caso.estado == 'listo' %}
+        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="lp-btn lp-btn-success">
+          <i class="bi bi-eye"></i>Vista final
+        </a>
+        {% endif %}
+        {% if excel_activo %}
+        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel/download" class="lp-btn lp-btn-ghost">
+          <i class="bi bi-download"></i>Excel
+        </a>
+        {% endif %}
+        <a href="/mercado-publico/lectura-pliegos" class="lp-btn lp-btn-ghost">
+          <i class="bi bi-arrow-left"></i>Lista
+        </a>
+      </div>
+    </div>
+  </section>
   <div class="row g-3">
 
-    {# ── COLUMNA PRINCIPAL ── #}
+    {# ══════════════════════════════════════
+       COLUMNA PRINCIPAL
+    ══════════════════════════════════════ #}
     <div class="col-lg-8">
 
-      {# Datos básicos #}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-3">Identificación del caso</div>
-          <div class="info-grid">
-            <div class="info-item">
-              <div class="lbl">Título</div>
-              <div class="val">{{ caso.titulo }}</div>
+      {# ── Identificación del caso ── #}
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#eff6ff;">
+              <i class="bi bi-file-text" style="color:#2563eb;"></i>
+            </div>
+            <span class="ac-card-title">Identificación del caso</span>
+          </div>
+        </div>
+        <div class="ac-card-body">
+          <div class="ac-info-grid">
+            <div class="ac-info-item">
+              <span class="ai-lbl">Título</span>
+              <span class="ai-val">{{ caso.titulo }}</span>
             </div>
             {% if caso.organismo %}
-            <div class="info-item">
-              <div class="lbl">Organismo</div>
-              <div class="val">{{ caso.organismo }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">Organismo</span>
+              <span class="ai-val">{{ caso.organismo }}</span>
             </div>
             {% endif %}
             {% if caso.nombre_licitacion %}
-            <div class="info-item">
-              <div class="lbl">Licitación</div>
-              <div class="val">{{ caso.nombre_licitacion }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">Licitación</span>
+              <span class="ai-val">{{ caso.nombre_licitacion }}</span>
             </div>
             {% endif %}
             {% if caso.numero_proceso %}
-            <div class="info-item">
-              <div class="lbl">N° proceso</div>
-              <div class="val">{{ caso.numero_proceso }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">N° proceso</span>
+              <span class="ai-val">{{ caso.numero_proceso }}</span>
             </div>
             {% endif %}
             {% if caso.expediente %}
-            <div class="info-item">
-              <div class="lbl">Expediente</div>
-              <div class="val">{{ caso.expediente }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">Expediente</span>
+              <span class="ai-val">{{ caso.expediente }}</span>
             </div>
             {% endif %}
-            <div class="info-item">
-              <div class="lbl">Solicitante</div>
-              <div class="val">
+            <div class="ac-info-item">
+              <span class="ai-lbl">Solicitante</span>
+              <span class="ai-val">
                 {% if caso.creado_por %}{{ caso.creado_por.email }}{% else %}—{% endif %}
-              </div>
+              </span>
             </div>
-            <div class="info-item">
-              <div class="lbl">Creado</div>
-              <div class="val">{{ caso.creado_en.strftime('%d/%m/%Y %H:%M') if caso.creado_en else '—' }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">Creado</span>
+              <span class="ai-val">{{ caso.creado_en.strftime('%d/%m/%Y %H:%M') if caso.creado_en else '—' }}</span>
             </div>
-            <div class="info-item">
-              <div class="lbl">Actualizado</div>
-              <div class="val">{{ caso.actualizado_en.strftime('%d/%m/%Y %H:%M') if caso.actualizado_en else '—' }}</div>
+            <div class="ac-info-item">
+              <span class="ai-lbl">Actualizado</span>
+              <span class="ai-val">{{ caso.actualizado_en.strftime('%d/%m/%Y %H:%M') if caso.actualizado_en else '—' }}</span>
             </div>
           </div>
 
           {% if caso.observaciones_usuario %}
           <div class="mt-3">
-            <div class="section-label">Observaciones del solicitante</div>
-            <div class="p-3 rounded" style="background:rgba(0,0,0,.03); font-size:.88rem; white-space:pre-wrap">{{ caso.observaciones_usuario }}</div>
+            <span class="ai-lbl mb-2">Observaciones del solicitante</span>
+            <div class="ac-obs-block">{{ caso.observaciones_usuario }}</div>
           </div>
           {% endif %}
         </div>
       </div>
 
-      {# Archivos del usuario #}
+      {# ── Archivos del pliego ── #}
       {% if caso.archivos %}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-3">
-            <i class="bi bi-paperclip me-1"></i>Archivos del pliego
-            <span class="badge bg-secondary ms-1">{{ caso.archivos|length }}</span>
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#f0fdf4;">
+              <i class="bi bi-paperclip" style="color:#059669;"></i>
+            </div>
+            <span class="ac-card-title">Archivos del pliego</span>
           </div>
+          <span style="font-size:.72rem;font-weight:700;background:#f1f5f9;color:#64748b;
+                       border-radius:99px;padding:.15em .6em;border:1px solid #e2e8f0;">
+            {{ caso.archivos|length }}
+          </span>
+        </div>
+        <div class="ac-card-body">
           <div class="d-flex flex-column gap-2">
             {% for arch in caso.archivos %}
-            <div class="archivo-row">
+            <div class="ac-file-row">
               <i class="bi bi-file-earmark-text text-muted flex-shrink-0"></i>
-              <span class="fname" title="{{ arch.nombre_original }}">{{ arch.nombre_original }}</span>
+              <span class="af-name" title="{{ arch.nombre_original }}">{{ arch.nombre_original }}</span>
               {% if arch.tamano_bytes %}
-              <span class="text-muted" style="font-size:.75rem; flex-shrink:0">
+              <span class="af-size">
                 {% if arch.tamano_bytes < 1048576 %}{{ (arch.tamano_bytes / 1024)|round(1) }} KB
                 {% else %}{{ (arch.tamano_bytes / 1048576)|round(1) }} MB{% endif %}
               </span>
               {% endif %}
               <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/archivo/{{ arch.id }}"
-                 class="btn btn-sm btn-outline-secondary flex-shrink-0" style="font-size:.78rem">
+                 class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                 style="border-radius:.4rem;font-size:.75rem;padding:.25rem .6rem;">
                 <i class="bi bi-download me-1"></i>Descargar
               </a>
             </div>
@@ -196,154 +377,178 @@
       </div>
       {% endif %}
 
-      {# ══ Procesamiento Externo ══ #}
-      <div class="card mb-3" id="seccion-procesamiento">
-        <div class="card-header d-flex align-items-center justify-content-between py-2">
-          <strong style="font-size:.9rem"><i class="bi bi-robot me-2 text-primary"></i>Procesamiento externo</strong>
+      {# ── Procesamiento externo ── #}
+      <div class="ac-card" id="seccion-procesamiento">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#f5f3ff;">
+              <i class="bi bi-robot" style="color:#7c3aed;"></i>
+            </div>
+            <span class="ac-card-title">Procesamiento externo</span>
+          </div>
           {% if caso.enviado_a_gpt_en %}
-          <span class="badge bg-success" style="font-size:.72rem">Enviado el {{ caso.enviado_a_gpt_en.strftime('%d/%m/%Y %H:%M') }}</span>
+          <span class="ac-proc-badge-ok">
+            <i class="bi bi-check-circle me-1"></i>Enviado {{ caso.enviado_a_gpt_en.strftime('%d/%m/%Y') }}
+          </span>
           {% else %}
-          <span class="badge bg-light text-muted border" style="font-size:.72rem">No enviado aún</span>
+          <span class="ac-proc-badge-pending">No enviado aún</span>
           {% endif %}
         </div>
-        <div class="card-body">
-          <p style="font-size:.85rem; color:#666; margin-bottom:1rem">
-            Descargá los archivos del pliego, procesalos con el <strong>GPT personalizado en ChatGPT</strong>,
-            y subí aquí el Excel estructurado resultante.
+        <div class="ac-card-body">
+
+          <p style="font-size:.84rem;color:#6b7280;margin-bottom:1rem;line-height:1.55;">
+            Descargá los archivos del pliego, procesalos con el <strong style="color:#374151;">GPT personalizado</strong>
+            en ChatGPT, y subí aquí el Excel estructurado resultante.
           </p>
 
           <div class="row g-3 mb-3">
-            <div class="col-sm-6">
-              <div class="lbl">Estado del procesamiento</div>
-              <div class="val mt-1">
+            <div class="col-sm-6 ac-proc-tile">
+              <span class="ai-lbl">Estado del procesamiento</span>
+              <div class="ai-val ac-proc-value" style="margin-top:.2rem;">
                 {% if caso.procesado_externamente_en %}
-                <span class="text-success fw-semibold"><i class="bi bi-check-circle me-1"></i>Procesado</span>
+                <span style="color:#059669;font-weight:600;"><i class="bi bi-check-circle me-1"></i>Procesado</span>
                 {% elif caso.enviado_a_gpt_en %}
-                <span class="text-warning fw-semibold"><i class="bi bi-hourglass me-1"></i>Enviado, esperando resultado</span>
+                <span style="color:#d97706;font-weight:600;"><i class="bi bi-hourglass me-1"></i>Enviado, esperando resultado</span>
                 {% else %}
-                <span class="text-muted">Pendiente</span>
+                <span style="color:#94a3b8;">Pendiente</span>
                 {% endif %}
               </div>
             </div>
             {% if caso.enviado_a_gpt_por %}
-            <div class="col-sm-6">
-              <div class="lbl">Admin responsable</div>
-              <div class="val mt-1">{{ caso.enviado_a_gpt_por.email if caso.enviado_a_gpt_por else '—' }}</div>
+            <div class="col-sm-6 ac-proc-tile">
+              <span class="ai-lbl">Admin responsable</span>
+              <div class="ai-val ac-proc-value" style="margin-top:.2rem;" title="{{ caso.enviado_a_gpt_por.email if caso.enviado_a_gpt_por else '' }}">{{ caso.enviado_a_gpt_por.email if caso.enviado_a_gpt_por else '—' }}</div>
             </div>
             {% endif %}
             {% if excel_activo %}
-            <div class="col-sm-6">
-              <div class="lbl">Excel cargado</div>
-              <div class="val mt-1">
-                {{ excel_activo.nombre_archivo }}
-                <span class="text-muted" style="font-size:.78rem">(v{{ excel_activo.version }})</span>
+            <div class="col-sm-6 ac-proc-tile">
+              <span class="ai-lbl">Excel cargado</span>
+              <div class="ai-val ac-proc-value ac-proc-file" style="margin-top:.2rem;">
+                <span class="ac-proc-file-name" title="{{ excel_activo.nombre_archivo }}">{{ excel_activo.nombre_archivo }}</span>
+                <span class="ac-proc-file-version" title="Version {{ excel_activo.version }}">(v{{ excel_activo.version }})</span>
               </div>
             </div>
-            <div class="col-sm-6">
-              <div class="lbl">Cargado el</div>
-              <div class="val mt-1">{{ excel_activo.creado_en.strftime('%d/%m/%Y %H:%M') if excel_activo.creado_en else '—' }}</div>
+            <div class="col-sm-6 ac-proc-tile">
+              <span class="ai-lbl">Cargado el</span>
+              <div class="ai-val ac-proc-value" style="margin-top:.2rem;" title="{{ excel_activo.creado_en.strftime('%d/%m/%Y %H:%M') if excel_activo.creado_en else '' }}">{{ excel_activo.creado_en.strftime('%d/%m/%Y %H:%M') if excel_activo.creado_en else '—' }}</div>
             </div>
             {% endif %}
           </div>
-
           {% if caso.observaciones_procesamiento %}
           <div class="mb-3">
-            <div class="section-label">Observaciones del procesamiento</div>
-            <div class="p-2 rounded text-muted" style="background:rgba(0,0,0,.03); font-size:.85rem">
-              {{ caso.observaciones_procesamiento }}
-            </div>
+            <span class="ai-lbl mb-1">Observaciones del procesamiento</span>
+            <div class="ac-obs-block" style="font-size:.82rem;">{{ caso.observaciones_procesamiento }}</div>
           </div>
           {% endif %}
 
           {# Marcar enviado a GPT #}
           {% if caso.estado in ['en_revision', 'pendiente_procesamiento', 'reprocesar'] %}
-          <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/marcar-gpt"
-                class="action-panel mb-3">
-            <div class="section-label mb-2">Marcar como enviado a procesamiento externo</div>
-            <div class="mb-2">
-              <textarea name="obs_proc" class="form-control form-control-sm" rows="2"
-                        placeholder="Observaciones sobre el procesamiento (opcional)">{{ caso.observaciones_procesamiento or '' }}</textarea>
+          <div class="ac-action-panel mb-3">
+            <div class="ac-action-title">
+              <i class="bi bi-box-arrow-up-right"></i>Marcar como enviado a procesamiento externo
             </div>
-            <button type="submit" class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-box-arrow-up-right me-1"></i>Marcar como enviado a GPT externo
-            </button>
-          </form>
+            <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/marcar-gpt">
+              <div class="mb-2">
+                <textarea name="obs_proc" class="form-control" rows="2"
+                          placeholder="Observaciones sobre el procesamiento (opcional)">{{ caso.observaciones_procesamiento or '' }}</textarea>
+              </div>
+              <button type="submit" class="btn btn-sm btn-outline-primary"
+                      style="border-radius:.45rem;font-size:.8rem;font-weight:600;">
+                <i class="bi bi-send me-1"></i>Marcar como enviado a GPT externo
+              </button>
+            </form>
+          </div>
           {% endif %}
 
           {# Carga del Excel #}
           {% if puede_cargar_excel %}
-          <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel"
-                enctype="multipart/form-data" class="action-panel">
-            <div class="section-label mb-2">
-              <i class="bi bi-file-earmark-excel me-1 text-success"></i>
+          <div class="ac-action-panel">
+            <div class="ac-action-title">
+              <i class="bi bi-file-earmark-excel text-success"></i>
               {% if excel_activo %}Reemplazar Excel{% else %}Subir Excel resultante{% endif %}
             </div>
-            <div class="mb-2">
-              <input type="file" name="excel_file" class="form-control form-control-sm"
-                     accept=".xlsx" required>
-              <div class="form-text">Solo archivos .xlsx generados por el GPT personalizado.</div>
-            </div>
-            <div class="mb-2">
-              <input type="text" name="obs_excel" class="form-control form-control-sm"
-                     placeholder="Observaciones sobre esta carga (opcional)">
-            </div>
-            <div class="d-flex gap-2 align-items-center flex-wrap">
-              <button type="submit" class="btn btn-sm btn-success">
-                <i class="bi bi-upload me-1"></i>Subir Excel
-              </button>
-              {% if excel_activo %}
-              <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel/download"
-                 class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-download me-1"></i>Descargar último Excel
-              </a>
-              {% endif %}
-            </div>
-          </form>
+            <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel"
+                  enctype="multipart/form-data">
+              <div class="mb-2">
+                <input type="file" name="excel_file" class="form-control" accept=".xlsx" required>
+                <div class="form-text" style="font-size:.72rem;color:#94a3b8;margin-top:.25rem;">
+                  Solo archivos .xlsx generados por el GPT personalizado.
+                </div>
+              </div>
+              <div class="mb-2">
+                <input type="text" name="obs_excel" class="form-control"
+                       placeholder="Observaciones sobre esta carga (opcional)">
+              </div>
+              <div class="d-flex gap-2 align-items-center flex-wrap">
+                <button type="submit" class="btn btn-sm btn-success"
+                        style="border-radius:.45rem;font-size:.8rem;font-weight:600;">
+                  <i class="bi bi-upload me-1"></i>Subir Excel
+                </button>
+                {% if excel_activo %}
+                <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel/download"
+                   class="btn btn-sm btn-outline-secondary"
+                   style="border-radius:.45rem;font-size:.8rem;">
+                  <i class="bi bi-download me-1"></i>Descargar último Excel
+                </a>
+                {% endif %}
+              </div>
+            </form>
+          </div>
           {% elif excel_activo %}
           <div class="d-flex gap-2 mt-2">
             <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/excel/download"
-               class="btn btn-sm btn-outline-secondary">
+               class="btn btn-sm btn-outline-secondary"
+               style="border-radius:.45rem;font-size:.8rem;">
               <i class="bi bi-download me-1"></i>Descargar Excel (v{{ excel_activo.version }})
             </a>
             {% if caso.estado in ['excel_cargado', 'en_validacion', 'listo'] %}
             <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/validacion"
-               class="btn btn-sm btn-outline-primary">
+               class="btn btn-sm btn-outline-primary"
+               style="border-radius:.45rem;font-size:.8rem;">
               <i class="bi bi-check2-square me-1"></i>Ver validación
             </a>
             {% endif %}
           </div>
           {% endif %}
+
         </div>
       </div>
 
-      {# Historial #}
+      {# ── Historial ── #}
       {% if caso.historial %}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-3">
-            <i class="bi bi-clock-history me-1"></i>Historial completo
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#fef9c3;">
+              <i class="bi bi-clock-history" style="color:#d97706;"></i>
+            </div>
+            <span class="ac-card-title">Historial completo</span>
           </div>
-          <div class="timeline">
+          <span style="font-size:.72rem;color:#94a3b8;">{{ caso.historial|length }} eventos</span>
+        </div>
+        <div class="ac-card-body">
+          <div class="ac-timeline">
             {% for h in caso.historial|reverse %}
-            <div class="tl-item ev-{{ h.estado_nuevo }}">
-              <div class="d-flex justify-content-between align-items-start gap-2">
-                <div>
-                  <span class="estado-tag {{ h.estado_nuevo }}">
+            <div class="ac-tl-item">
+              <div class="ac-tl-dot ac-tl-dot--{{ h.estado_nuevo }}"></div>
+              <div class="ac-tl-body">
+                <div style="min-width:0;">
+                  <span class="ac-estado-badge ac-estado-{{ h.estado_nuevo }}">
                     {{ PLIEGO_ESTADO_LABELS.get(h.estado_nuevo, h.estado_nuevo) }}
                   </span>
                   {% if h.estado_anterior and h.estado_anterior != h.estado_nuevo %}
-                  <span class="text-muted ms-1" style="font-size:.75rem">
+                  <span style="font-size:.72rem;color:#94a3b8;margin-left:.4rem;">
                     ← {{ PLIEGO_ESTADO_LABELS.get(h.estado_anterior, h.estado_anterior) }}
                   </span>
                   {% endif %}
                   {% if h.comentario %}
-                  <div class="text-muted mt-1" style="font-size:.82rem">{{ h.comentario }}</div>
+                  <div class="ac-tl-comment">{{ h.comentario }}</div>
                   {% endif %}
                   {% if h.usuario %}
-                  <div style="font-size:.75rem; color:#aaa">{{ h.usuario.email }}</div>
+                  <div class="ac-tl-user">{{ h.usuario.email }}</div>
                   {% endif %}
                 </div>
-                <div class="text-muted flex-shrink-0" style="font-size:.75rem">
+                <div class="ac-tl-date">
                   {{ h.creado_en.strftime('%d/%m/%Y %H:%M') if h.creado_en else '' }}
                 </div>
               </div>
@@ -356,47 +561,64 @@
 
     </div>{# /col principal #}
 
-    {# ── COLUMNA LATERAL: ACCIONES ── #}
+    {# ══════════════════════════════════════
+       COLUMNA LATERAL
+    ══════════════════════════════════════ #}
     <div class="col-lg-4">
 
-      {# Observación interna #}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-2"><i class="bi bi-pencil-square me-1"></i>Observación interna</div>
+      {# ── Observación interna ── #}
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#fef9c3;">
+              <i class="bi bi-pencil-square" style="color:#d97706;"></i>
+            </div>
+            <span class="ac-card-title">Observación interna</span>
+          </div>
+        </div>
+        <div class="ac-card-body">
           <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/observacion">
-            <textarea name="observacion" class="form-control form-control-sm mb-2" rows="4"
+            <label class="ac-label" style="font-size:.73rem;margin-bottom:.35rem;">
+              Notas internas (solo admins)
+            </label>
+            <textarea name="observacion" class="form-control mb-2" rows="4"
                       placeholder="Notas internas visibles solo para admins…">{{ caso.observaciones_admin or '' }}</textarea>
-            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
+            <button type="submit" class="btn btn-sm btn-outline-secondary w-100"
+                    style="border-radius:.45rem;font-size:.8rem;font-weight:600;">
               <i class="bi bi-floppy me-1"></i>Guardar observación
             </button>
           </form>
           {% if caso.observaciones_admin %}
-          <div class="mt-2 p-2 rounded" style="background:rgba(13,110,253,.05); font-size:.82rem; white-space:pre-wrap">
-            {{ caso.observaciones_admin }}
-          </div>
+          <div class="ac-obs-block mt-3" style="font-size:.81rem;">{{ caso.observaciones_admin }}</div>
           {% endif %}
         </div>
       </div>
 
-      {# Cambio de estado #}
+      {# ── Cambiar estado ── #}
       {% if transiciones %}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-2"><i class="bi bi-arrow-repeat me-1"></i>Cambiar estado</div>
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#eff6ff;">
+              <i class="bi bi-arrow-repeat" style="color:#2563eb;"></i>
+            </div>
+            <span class="ac-card-title">Cambiar estado</span>
+          </div>
+        </div>
+        <div class="ac-card-body">
           <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/estado">
-            <div class="mb-2">
-              <select name="nuevo_estado" class="form-select form-select-sm" required>
-                <option value="">— Seleccionar nuevo estado —</option>
-                {% for est in transiciones %}
-                <option value="{{ est }}">{{ PLIEGO_ESTADO_LABELS.get(est, est) }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="mb-2">
-              <input type="text" name="comentario" class="form-control form-control-sm"
-                     placeholder="Comentario (opcional)">
-            </div>
-            <button type="submit" class="btn btn-sm btn-primary w-100">
+            <label class="ac-label" style="font-size:.73rem;margin-bottom:.35rem;">Nuevo estado</label>
+            <select name="nuevo_estado" class="form-select mb-2" required>
+              <option value="">— Seleccionar nuevo estado —</option>
+              {% for est in transiciones %}
+              <option value="{{ est }}">{{ PLIEGO_ESTADO_LABELS.get(est, est) }}</option>
+              {% endfor %}
+            </select>
+            <label class="ac-label" style="font-size:.73rem;margin-bottom:.35rem;">Comentario</label>
+            <input type="text" name="comentario" class="form-control mb-2"
+                   placeholder="Comentario (opcional)">
+            <button type="submit" class="btn btn-sm btn-primary w-100"
+                    style="border-radius:.45rem;font-size:.8rem;font-weight:600;">
               <i class="bi bi-arrow-right-circle me-1"></i>Cambiar estado
             </button>
           </form>
@@ -404,21 +626,27 @@
       </div>
       {% endif %}
 
-      {# Publicar si está en en_validacion #}
+      {# ── Publicar (en_validacion) ── #}
       {% if caso.estado == 'en_validacion' %}
-      <div class="card mb-3 border-success">
-        <div class="card-body">
-          <div class="section-label mb-2 text-success">
-            <i class="bi bi-check2-all me-1"></i>Publicar caso
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#dcfce7;">
+              <i class="bi bi-send-check" style="color:#059669;"></i>
+            </div>
+            <span class="ac-card-title" style="color:#166534;">Publicar caso</span>
           </div>
-          <p style="font-size:.82rem; color:#666">
-            Al publicar, el caso queda <strong>Listo para visualización</strong>
+        </div>
+        <div class="ac-card-body">
+          <p style="font-size:.8rem;color:#6b7280;margin-bottom:.85rem;line-height:1.5;">
+            Al publicar, el caso queda <strong style="color:#166534;">Listo para visualización</strong>
             y el solicitante podrá ver el resultado estructurado.
           </p>
           <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/publicar">
-            <input type="text" name="comentario" class="form-control form-control-sm mb-2"
+            <input type="text" name="comentario" class="form-control mb-2"
                    placeholder="Comentario de publicación (opcional)">
-            <button type="submit" class="btn btn-success w-100 btn-sm">
+            <button type="submit" class="btn btn-success w-100 btn-sm"
+                    style="border-radius:.45rem;font-size:.8rem;font-weight:700;">
               <i class="bi bi-send-check me-1"></i>Publicar para visualización
             </button>
           </form>
@@ -426,66 +654,99 @@
       </div>
       {% endif %}
 
-      {# Versiones de Excel #}
+      {# ── Versiones de Excel ── #}
       {% if caso.cargas_excel %}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-2">
-            <i class="bi bi-file-earmark-excel me-1 text-success"></i>Versiones de Excel
-          </div>
-          {% for carga in caso.cargas_excel|sort(attribute='version', reverse=True) %}
-          <div class="d-flex align-items-center justify-content-between mb-1" style="font-size:.82rem">
-            <div>
-              <span class="fw-semibold">v{{ carga.version }}</span>
-              <span class="text-muted ms-1">{{ carga.nombre_archivo[:30] }}{% if carga.nombre_archivo|length > 30 %}…{% endif %}</span>
-              {% if carga.es_activa %}<span class="badge bg-success ms-1" style="font-size:.68rem">activa</span>{% endif %}
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#f0fdf4;">
+              <i class="bi bi-file-earmark-excel" style="color:#059669;"></i>
             </div>
-            <div class="text-muted" style="font-size:.75rem">{{ carga.creado_en.strftime('%d/%m') if carga.creado_en else '—' }}</div>
+            <span class="ac-card-title">Versiones de Excel</span>
           </div>
-          {% endfor %}
+        </div>
+        <div class="ac-card-body">
+          <div>
+            {% for carga in caso.cargas_excel|sort(attribute='version', reverse=True) %}
+            <div class="ac-excel-row">
+              <div style="min-width:0;">
+                <span style="font-weight:700;font-size:.82rem;color:#111827;">v{{ carga.version }}</span>
+                <span style="color:#94a3b8;font-size:.75rem;margin-left:.4rem;">
+                  {{ carga.nombre_archivo[:28] }}{% if carga.nombre_archivo|length > 28 %}…{% endif %}
+                </span>
+                {% if carga.es_activa %}
+                <span style="font-size:.65rem;font-weight:700;background:#dcfce7;color:#166534;
+                             border-radius:99px;padding:.1em .5em;margin-left:.35rem;">activa</span>
+                {% endif %}
+              </div>
+              <div style="font-size:.73rem;color:#94a3b8;flex-shrink:0;">
+                {{ carga.creado_en.strftime('%d/%m') if carga.creado_en else '—' }}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
         </div>
       </div>
       {% endif %}
 
-      {# Resumen rápido si hay datos #}
+      {# ── Datos importados ── #}
       {% if caso.estado in ['excel_cargado', 'en_validacion', 'listo'] %}
-      <div class="card mb-3">
-        <div class="card-body">
-          <div class="section-label mb-2">Datos importados</div>
-          <div class="d-flex flex-column gap-1" style="font-size:.83rem">
-            <div class="d-flex justify-content-between">
-              <span>Proceso</span>
-              <span class="fw-semibold">{% if caso.datos_proceso %}<i class="bi bi-check text-success"></i>{% else %}<i class="bi bi-x text-danger"></i>{% endif %}</span>
+      <div class="ac-card">
+        <div class="ac-card-header">
+          <div class="ac-card-header-left">
+            <div class="ac-card-icon" style="background:#f5f3ff;">
+              <i class="bi bi-table" style="color:#7c3aed;"></i>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Cronograma</span>
-              <span class="fw-semibold">{{ caso.cronograma|length }}</span>
+            <span class="ac-card-title">Datos importados</span>
+          </div>
+        </div>
+        <div class="ac-card-body">
+          <div class="ac-data-list">
+            <div class="ac-data-row">
+              <span class="ac-data-key">Proceso</span>
+              <span class="ac-data-val">
+                {% if caso.datos_proceso %}
+                <i class="bi bi-check-circle text-success"></i>
+                {% else %}
+                <i class="bi bi-x-circle text-danger"></i>
+                {% endif %}
+              </span>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Requisitos</span>
-              <span class="fw-semibold">{{ caso.requisitos|length }}</span>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Cronograma</span>
+              <span class="ac-data-val">{{ caso.cronograma|length }}</span>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Renglones</span>
-              <span class="fw-semibold">{{ caso.renglones|length }}</span>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Requisitos</span>
+              <span class="ac-data-val">{{ caso.requisitos|length }}</span>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Garantías</span>
-              <span class="fw-semibold">{{ caso.garantias|length }}</span>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Renglones</span>
+              <span class="ac-data-val">{{ caso.renglones|length }}</span>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Hallazgos</span>
-              <span class="fw-semibold {% if caso.hallazgos|length > 0 %}text-warning{% endif %}">{{ caso.hallazgos|length }}</span>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Garantías</span>
+              <span class="ac-data-val">{{ caso.garantias|length }}</span>
             </div>
-            <div class="d-flex justify-content-between">
-              <span>Faltantes críticos</span>
-              {% set criticos = caso.faltantes|selectattr('criticidad', 'equalto', 'Alta')|list %}
-              <span class="fw-semibold {% if criticos|length > 0 %}text-danger{% endif %}">{{ criticos|length }}</span>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Hallazgos</span>
+              <span class="ac-data-val {% if caso.hallazgos|length > 0 %}text-warning{% endif %}">
+                {{ caso.hallazgos|length }}
+              </span>
+            </div>
+            <div class="ac-data-row">
+              <span class="ac-data-key">Faltantes críticos</span>
+              {% set criticos = caso.faltantes|selectattr('criticidad','equalto','Alta')|list %}
+              <span class="ac-data-val {% if criticos|length > 0 %}text-danger{% endif %}">
+                {{ criticos|length }}
+              </span>
             </div>
           </div>
+
           {% if caso.estado in ['excel_cargado', 'en_validacion'] %}
           <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/validacion"
-             class="btn btn-outline-primary btn-sm w-100 mt-2">
+             class="btn btn-outline-primary btn-sm w-100 mt-3"
+             style="border-radius:.45rem;font-size:.8rem;font-weight:600;">
             <i class="bi bi-check2-square me-1"></i>Ir a validación
           </a>
           {% endif %}

@@ -272,8 +272,8 @@ def _build_resumen_licitacion(caso: PliegoSolicitud) -> dict:
         "pago": _p("pago", "condiciones de pago", "forma de pago", "condición de pago"),
         "anticipo": _p("anticipo financiero", "anticipo"),
         "contragarantia": _p("contragarantía", "contragarantia", "contra garantía"),
-        "tipo_adjudicacion": _p("tipo de adjudicación", "tipo adjudicacion", "tipo de cotización", "forma de adjudicación"),
-        "tipo_cotizacion": _p("tipo de cotización", "tipo cotizacion", "forma de cotización"),
+        "tipo_adjudicacion": _p("tipo de adjudicación", "tipo adjudicacion", "forma de adjudicación", "adjudicacion parcial", "adjudicacion total"),
+        "tipo_cotizacion": _p("tipo de cotización", "tipo cotizacion", "forma de cotización", "cotizacion parcial", "cotizacion total"),
         "fecha_inicio": _p("fecha estimada de inicio", "fecha inicio", "fecha probable inicio", "inicio del contrato"),
         # Entrega y responsables
         "lugar_entrega": _p("lugar de entrega", "lugar entrega", "domicilio de entrega"),
