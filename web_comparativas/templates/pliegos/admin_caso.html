@@ -2,7 +2,7 @@
 
 {% block title %}[Admin] Caso #{{ caso.id }} – SIEM{% endblock %}
 {% block header_title %}
-  <span class="me-2" style="font-weight:700;color:#0f172a;">Caso #{{ caso.id }}</span>
+  <span class="me-2" style="font-weight:700;color:var(--siem-text-strong);">Caso #{{ caso.id }}</span>
   <span class="ac-estado-badge ac-estado-{{ caso.estado }}">
     {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
   </span>
@@ -10,12 +10,6 @@
 
 {% block toolbar_actions %}
 <div class="d-flex gap-2">
-  {% if caso.estado == 'listo' %}
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
-     class="btn btn-sm btn-success ac-toolbar-btn">
-    <i class="bi bi-eye me-1"></i>Vista final
-  </a>
-  {% endif %}
   <a href="/mercado-publico/lectura-pliegos"
      class="btn btn-sm btn-outline-secondary ac-toolbar-btn">
     <i class="bi bi-list-ul me-1"></i>Lista
@@ -24,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=3">
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Admin Caso — Premium v5
@@ -34,7 +28,7 @@
   .ac-body label,
   .ac-body .ac-label {
     text-transform:none !important;
-    font-size:.775rem;font-weight:600;color:#64748b;
+    font-size:.775rem;font-weight:600;color:var(--siem-text-muted);
     letter-spacing:0;margin-bottom:.3rem;display:block;
   }
 
@@ -51,28 +45,28 @@
     border-radius:999px;letter-spacing:.02em;white-space:nowrap;
     vertical-align:middle;
   }
-  .ac-estado-borrador                { background:#f1f5f9;color:#475569;border:1px solid #cbd5e1; }
-  .ac-estado-pendiente_revision      { background:#fffbeb;color:#92400e;border:1px solid #fde68a; }
-  .ac-estado-en_revision             { background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe; }
-  .ac-estado-pendiente_procesamiento { background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe; }
-  .ac-estado-procesado_externamente  { background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc; }
-  .ac-estado-excel_cargado           { background:#f0fdf4;color:#166534;border:1px solid #bbf7d0; }
-  .ac-estado-en_validacion           { background:#fff7ed;color:#9a3412;border:1px solid #fed7aa; }
-  .ac-estado-listo                   { background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7; }
-  .ac-estado-observado               { background:#fefce8;color:#854d0e;border:1px solid #fef08a; }
-  .ac-estado-rechazado               { background:#fef2f2;color:#991b1b;border:1px solid #fecaca; }
-  .ac-estado-reprocesar              { background:#fff7ed;color:#7c2d12;border:1px solid #fdba74; }
-  .ac-estado-archivado               { background:#f8fafc;color:#64748b;border:1px solid #e2e8f0; }
+  .ac-estado-borrador                { background:var(--siem-surface-soft);color:var(--siem-text-muted);border:1px solid var(--siem-border); }
+  .ac-estado-pendiente_revision      { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
+  .ac-estado-en_revision             { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
+  .ac-estado-pendiente_procesamiento { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
+  .ac-estado-procesado_externamente  { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
+  .ac-estado-excel_cargado           { background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border); }
+  .ac-estado-en_validacion           { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
+  .ac-estado-listo                   { background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border); }
+  .ac-estado-observado               { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
+  .ac-estado-rechazado               { background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border); }
+  .ac-estado-reprocesar              { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
+  .ac-estado-archivado               { background:var(--siem-surface-soft);color:var(--siem-text-muted);border:1px solid var(--siem-border); }
 
   /* ── Cards premium ──────────────────────────────────────── */
   .ac-card {
-    background:#fff;border:1px solid #e5e7eb;border-radius:12px;
+    background:#fff;border:1px solid var(--siem-border);border-radius:12px;
     box-shadow:0 1px 3px rgba(0,0,0,.03),0 4px 12px rgba(6,72,111,.04);
     margin-bottom:1rem;overflow:hidden;
   }
   .ac-card-header {
     display:flex;align-items:center;justify-content:space-between;
-    padding:.85rem 1.25rem;border-bottom:1px solid #f3f4f6;
+    padding:.85rem 1.25rem;border-bottom:1px solid var(--siem-border);
     gap:.75rem;
   }
   .ac-card-header-left {
@@ -84,7 +78,7 @@
     font-size:.85rem;flex-shrink:0;
   }
   .ac-card-title {
-    font-size:.8375rem;font-weight:700;color:#111827;margin:0;
+    font-size:.8375rem;font-weight:700;color:var(--siem-text-strong);margin:0;
     letter-spacing:-.01em;
   }
   .ac-card-body { padding:1.1rem 1.25rem 1.25rem; }
@@ -95,65 +89,65 @@
   }
   .ac-info-item .ai-lbl {
     font-size:.7rem;font-weight:700;text-transform:uppercase;
-    letter-spacing:.06em;color:#94a3b8;margin-bottom:.22rem;display:block;
+    letter-spacing:.06em;color:var(--siem-text-soft);margin-bottom:.22rem;display:block;
   }
   .ac-info-item .ai-val {
-    font-size:.875rem;font-weight:500;color:#111827;line-height:1.4;
+    font-size:.875rem;font-weight:500;color:var(--siem-text-strong);line-height:1.4;
   }
 
   /* ── Observaciones del solicitante ─────────────────────── */
   .ac-obs-block {
-    background:#f8fafc;border-radius:.5rem;
+    background:var(--siem-surface-soft);border-radius:.5rem;
     padding:.75rem 1rem;font-size:.85rem;
-    white-space:pre-wrap;color:#374151;border:1px solid #f1f5f9;
+    white-space:pre-wrap;color:var(--siem-text);border:1px solid var(--siem-surface-soft);
     line-height:1.55;
   }
 
   /* ── Archivos del pliego ────────────────────────────────── */
   .ac-file-row {
     display:flex;align-items:center;gap:.7rem;padding:.55rem .75rem;
-    border:1px solid #f1f5f9;border-radius:.5rem;font-size:.84rem;
+    border:1px solid var(--siem-surface-soft);border-radius:.5rem;font-size:.84rem;
     background:#fafafa;transition:background .12s,border-color .12s;
   }
-  .ac-file-row:hover { background:#f3f4f6;border-color:#e5e7eb; }
-  .ac-file-row .af-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#374151; }
-  .ac-file-row .af-size { color:#94a3b8;font-size:.73rem;flex-shrink:0; }
+  .ac-file-row:hover { background:var(--siem-border);border-color:var(--siem-border); }
+  .ac-file-row .af-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--siem-text); }
+  .ac-file-row .af-size { color:var(--siem-text-soft);font-size:.73rem;flex-shrink:0; }
 
   /* ── Timeline ───────────────────────────────────────────── */
   .ac-timeline { position:relative;padding-left:1.5rem; }
   .ac-timeline::before {
     content:'';position:absolute;left:.48rem;top:.4rem;bottom:0;
-    width:1.5px;background:#e5e7eb;border-radius:2px;
+    width:1.5px;background:var(--siem-border);border-radius:2px;
   }
   .ac-tl-item { position:relative;padding-bottom:.9rem; }
   .ac-tl-item:last-child { padding-bottom:0; }
   .ac-tl-dot {
     position:absolute;left:-1.12rem;top:.3rem;
     width:.62rem;height:.62rem;border-radius:50%;
-    background:#5770b0;border:2px solid #fff;
-    box-shadow:0 0 0 2px #5770b0;
+    background:var(--siem-blue);border:2px solid #fff;
+    box-shadow:0 0 0 2px var(--siem-blue);
     flex-shrink:0;
   }
-  .ac-tl-dot--listo     { background:#059669;box-shadow:0 0 0 2px #059669; }
-  .ac-tl-dot--rechazado { background:#dc2626;box-shadow:0 0 0 2px #dc2626; }
-  .ac-tl-dot--observado { background:#d97706;box-shadow:0 0 0 2px #d97706; }
-  .ac-tl-dot--reprocesar{ background:#7c3aed;box-shadow:0 0 0 2px #7c3aed; }
+  .ac-tl-dot--listo     { background:var(--siem-green);box-shadow:0 0 0 2px var(--siem-green); }
+  .ac-tl-dot--rechazado { background:var(--siem-red);box-shadow:0 0 0 2px var(--siem-red); }
+  .ac-tl-dot--observado { background:var(--siem-amber);box-shadow:0 0 0 2px var(--siem-amber); }
+  .ac-tl-dot--reprocesar{ background:var(--siem-blue);box-shadow:0 0 0 2px var(--siem-blue); }
 
   .ac-tl-body {
     display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;
   }
-  .ac-tl-comment { font-size:.8rem;color:#6b7280;margin-top:.22rem;line-height:1.4; }
-  .ac-tl-user    { font-size:.72rem;color:#9ca3af;margin-top:.15rem; }
-  .ac-tl-date    { font-size:.72rem;color:#9ca3af;white-space:nowrap;flex-shrink:0; }
+  .ac-tl-comment { font-size:.8rem;color:var(--siem-text-muted);margin-top:.22rem;line-height:1.4; }
+  .ac-tl-user    { font-size:.72rem;color:var(--siem-text-soft);margin-top:.15rem; }
+  .ac-tl-date    { font-size:.72rem;color:var(--siem-text-soft);white-space:nowrap;flex-shrink:0; }
 
   /* ── Action panels (sidebar) ────────────────────────────── */
   .ac-action-panel {
-    background:#f8fafc;border:1px solid #e5e7eb;border-radius:.6rem;
+    background:var(--siem-surface-soft);border:1px solid var(--siem-border);border-radius:.6rem;
     padding:.9rem 1rem;margin-bottom:.75rem;
   }
   .ac-action-title {
     font-size:.7rem;font-weight:700;text-transform:uppercase;
-    letter-spacing:.07em;color:#64748b;margin-bottom:.65rem;
+    letter-spacing:.07em;color:var(--siem-text-muted);margin-bottom:.65rem;
     display:flex;align-items:center;gap:.35rem;
   }
   .ac-action-title i { font-size:.8rem; }
@@ -161,51 +155,51 @@
   /* ── Inputs inside action panels ───────────────────────── */
   .ac-body .form-control,
   .ac-body .form-select {
-    border-radius:.45rem;border:1.5px solid #d1d5db;
+    border-radius:.45rem;border:1.5px solid var(--siem-border);
     font-size:.83rem;padding:.42rem .7rem;
-    background:#fff;color:#111827;font-family:inherit;
+    background:#fff;color:var(--siem-text-strong);font-family:inherit;
     transition:border-color .18s,box-shadow .18s;
   }
   .ac-body .form-control:focus,
   .ac-body .form-select:focus {
-    border-color:#5770b0;outline:none;
+    border-color:var(--siem-blue);outline:none;
     box-shadow:0 0 0 3px rgba(87,112,176,.12);
   }
-  .ac-body .form-control::placeholder { color:#9ca3af; }
+  .ac-body .form-control::placeholder { color:var(--siem-text-soft); }
   .ac-body textarea.form-control { resize:vertical; }
 
   /* ── Data summary list ──────────────────────────────────── */
   .ac-data-list { display:flex;flex-direction:column;gap:.32rem;font-size:.82rem; }
   .ac-data-row {
     display:flex;justify-content:space-between;align-items:center;
-    padding:.28rem 0;border-bottom:1px solid #f3f4f6;
+    padding:.28rem 0;border-bottom:1px solid var(--siem-border);
   }
   .ac-data-row:last-child { border-bottom:none; }
-  .ac-data-key { color:#6b7280; }
-  .ac-data-val { font-weight:600;color:#111827; }
+  .ac-data-key { color:var(--siem-text-muted); }
+  .ac-data-val { font-weight:600;color:var(--siem-text-strong); }
 
   /* ── Excel versions list ────────────────────────────────── */
   .ac-excel-row {
     display:flex;align-items:center;justify-content:space-between;
-    padding:.32rem 0;border-bottom:1px solid #f3f4f6;font-size:.81rem;
+    padding:.32rem 0;border-bottom:1px solid var(--siem-border);font-size:.81rem;
   }
   .ac-excel-row:last-child { border-bottom:none; }
 
   /* ── Publish card (success state) ──────────────────────── */
   .ac-publish-card {
-    background:#f0fdf4;border:1px solid #bbf7d0;border-radius:.6rem;
+    background:var(--siem-green-soft);border:1px solid var(--siem-green-border);border-radius:.6rem;
     padding:.9rem 1rem;margin-bottom:.75rem;
   }
   .ac-publish-title {
     font-size:.7rem;font-weight:700;text-transform:uppercase;
-    letter-spacing:.07em;color:#166534;margin-bottom:.65rem;
+    letter-spacing:.07em;color:var(--siem-green);margin-bottom:.65rem;
     display:flex;align-items:center;gap:.35rem;
   }
 
   /* ── Procesamiento externo header badge ─────────────────── */
-  .ac-proc-badge-ok   { background:#dcfce7;color:#166534;border-radius:99px;
+  .ac-proc-badge-ok   { background:var(--siem-green-soft);color:var(--siem-green);border-radius:99px;
                         font-size:.7rem;font-weight:700;padding:.2em .65em; }
-  .ac-proc-badge-pending { background:#f1f5f9;color:#64748b;border-radius:99px;
+  .ac-proc-badge-pending { background:var(--siem-surface-soft);color:var(--siem-text-muted);border-radius:99px;
                            font-size:.7rem;font-weight:700;padding:.2em .65em; }
 </style>
 {% endblock %}
@@ -260,9 +254,6 @@
           <i class="bi bi-download"></i>Excel
         </a>
         {% endif %}
-        <a href="/mercado-publico/lectura-pliegos" class="lp-btn lp-btn-ghost">
-          <i class="bi bi-arrow-left"></i>Lista
-        </a>
       </div>
     </div>
   </section>
@@ -277,8 +268,8 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#eff6ff;">
-              <i class="bi bi-file-text" style="color:#2563eb;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-blue-soft);">
+              <i class="bi bi-file-text" style="color:var(--siem-blue);"></i>
             </div>
             <span class="ac-card-title">Identificación del caso</span>
           </div>
@@ -343,13 +334,13 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#f0fdf4;">
-              <i class="bi bi-paperclip" style="color:#059669;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-green-soft);">
+              <i class="bi bi-paperclip" style="color:var(--siem-green);"></i>
             </div>
             <span class="ac-card-title">Archivos del pliego</span>
           </div>
-          <span style="font-size:.72rem;font-weight:700;background:#f1f5f9;color:#64748b;
-                       border-radius:99px;padding:.15em .6em;border:1px solid #e2e8f0;">
+          <span style="font-size:.72rem;font-weight:700;background:var(--siem-surface-soft);color:var(--siem-text-muted);
+                       border-radius:99px;padding:.15em .6em;border:1px solid var(--siem-border);">
             {{ caso.archivos|length }}
           </span>
         </div>
@@ -381,8 +372,8 @@
       <div class="ac-card" id="seccion-procesamiento">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#f5f3ff;">
-              <i class="bi bi-robot" style="color:#7c3aed;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-blue-soft);">
+              <i class="bi bi-robot" style="color:var(--siem-blue);"></i>
             </div>
             <span class="ac-card-title">Procesamiento externo</span>
           </div>
@@ -396,8 +387,8 @@
         </div>
         <div class="ac-card-body">
 
-          <p style="font-size:.84rem;color:#6b7280;margin-bottom:1rem;line-height:1.55;">
-            Descargá los archivos del pliego, procesalos con el <strong style="color:#374151;">GPT personalizado</strong>
+          <p style="font-size:.84rem;color:var(--siem-text-muted);margin-bottom:1rem;line-height:1.55;">
+            Descargá los archivos del pliego, procesalos con el <strong style="color:var(--siem-text);">GPT personalizado</strong>
             en ChatGPT, y subí aquí el Excel estructurado resultante.
           </p>
 
@@ -406,11 +397,11 @@
               <span class="ai-lbl">Estado del procesamiento</span>
               <div class="ai-val ac-proc-value" style="margin-top:.2rem;">
                 {% if caso.procesado_externamente_en %}
-                <span style="color:#059669;font-weight:600;"><i class="bi bi-check-circle me-1"></i>Procesado</span>
+                <span style="color:var(--siem-green);font-weight:600;"><i class="bi bi-check-circle me-1"></i>Procesado</span>
                 {% elif caso.enviado_a_gpt_en %}
-                <span style="color:#d97706;font-weight:600;"><i class="bi bi-hourglass me-1"></i>Enviado, esperando resultado</span>
+                <span style="color:var(--siem-amber);font-weight:600;"><i class="bi bi-hourglass me-1"></i>Enviado, esperando resultado</span>
                 {% else %}
-                <span style="color:#94a3b8;">Pendiente</span>
+                <span style="color:var(--siem-text-soft);">Pendiente</span>
                 {% endif %}
               </div>
             </div>
@@ -471,7 +462,7 @@
                   enctype="multipart/form-data">
               <div class="mb-2">
                 <input type="file" name="excel_file" class="form-control" accept=".xlsx" required>
-                <div class="form-text" style="font-size:.72rem;color:#94a3b8;margin-top:.25rem;">
+                <div class="form-text" style="font-size:.72rem;color:var(--siem-text-soft);margin-top:.25rem;">
                   Solo archivos .xlsx generados por el GPT personalizado.
                 </div>
               </div>
@@ -519,12 +510,12 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#fef9c3;">
-              <i class="bi bi-clock-history" style="color:#d97706;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-amber-soft);">
+              <i class="bi bi-clock-history" style="color:var(--siem-amber);"></i>
             </div>
             <span class="ac-card-title">Historial completo</span>
           </div>
-          <span style="font-size:.72rem;color:#94a3b8;">{{ caso.historial|length }} eventos</span>
+          <span style="font-size:.72rem;color:var(--siem-text-soft);">{{ caso.historial|length }} eventos</span>
         </div>
         <div class="ac-card-body">
           <div class="ac-timeline">
@@ -537,7 +528,7 @@
                     {{ PLIEGO_ESTADO_LABELS.get(h.estado_nuevo, h.estado_nuevo) }}
                   </span>
                   {% if h.estado_anterior and h.estado_anterior != h.estado_nuevo %}
-                  <span style="font-size:.72rem;color:#94a3b8;margin-left:.4rem;">
+                  <span style="font-size:.72rem;color:var(--siem-text-soft);margin-left:.4rem;">
                     ← {{ PLIEGO_ESTADO_LABELS.get(h.estado_anterior, h.estado_anterior) }}
                   </span>
                   {% endif %}
@@ -570,8 +561,8 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#fef9c3;">
-              <i class="bi bi-pencil-square" style="color:#d97706;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-amber-soft);">
+              <i class="bi bi-pencil-square" style="color:var(--siem-amber);"></i>
             </div>
             <span class="ac-card-title">Observación interna</span>
           </div>
@@ -599,8 +590,8 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#eff6ff;">
-              <i class="bi bi-arrow-repeat" style="color:#2563eb;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-blue-soft);">
+              <i class="bi bi-arrow-repeat" style="color:var(--siem-blue);"></i>
             </div>
             <span class="ac-card-title">Cambiar estado</span>
           </div>
@@ -631,15 +622,15 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#dcfce7;">
-              <i class="bi bi-send-check" style="color:#059669;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-green-soft);">
+              <i class="bi bi-send-check" style="color:var(--siem-green);"></i>
             </div>
-            <span class="ac-card-title" style="color:#166534;">Publicar caso</span>
+            <span class="ac-card-title" style="color:var(--siem-green);">Publicar caso</span>
           </div>
         </div>
         <div class="ac-card-body">
-          <p style="font-size:.8rem;color:#6b7280;margin-bottom:.85rem;line-height:1.5;">
-            Al publicar, el caso queda <strong style="color:#166534;">Listo para visualización</strong>
+          <p style="font-size:.8rem;color:var(--siem-text-muted);margin-bottom:.85rem;line-height:1.5;">
+            Al publicar, el caso queda <strong style="color:var(--siem-green);">Listo para visualización</strong>
             y el solicitante podrá ver el resultado estructurado.
           </p>
           <form method="post" action="/mercado-publico/lectura-pliegos/{{ caso.id }}/publicar">
@@ -659,8 +650,8 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#f0fdf4;">
-              <i class="bi bi-file-earmark-excel" style="color:#059669;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-green-soft);">
+              <i class="bi bi-file-earmark-excel" style="color:var(--siem-green);"></i>
             </div>
             <span class="ac-card-title">Versiones de Excel</span>
           </div>
@@ -670,16 +661,16 @@
             {% for carga in caso.cargas_excel|sort(attribute='version', reverse=True) %}
             <div class="ac-excel-row">
               <div style="min-width:0;">
-                <span style="font-weight:700;font-size:.82rem;color:#111827;">v{{ carga.version }}</span>
-                <span style="color:#94a3b8;font-size:.75rem;margin-left:.4rem;">
+                <span style="font-weight:700;font-size:.82rem;color:var(--siem-text-strong);">v{{ carga.version }}</span>
+                <span style="color:var(--siem-text-soft);font-size:.75rem;margin-left:.4rem;">
                   {{ carga.nombre_archivo[:28] }}{% if carga.nombre_archivo|length > 28 %}…{% endif %}
                 </span>
                 {% if carga.es_activa %}
-                <span style="font-size:.65rem;font-weight:700;background:#dcfce7;color:#166534;
+                <span style="font-size:.65rem;font-weight:700;background:var(--siem-green-soft);color:var(--siem-green);
                              border-radius:99px;padding:.1em .5em;margin-left:.35rem;">activa</span>
                 {% endif %}
               </div>
-              <div style="font-size:.73rem;color:#94a3b8;flex-shrink:0;">
+              <div style="font-size:.73rem;color:var(--siem-text-soft);flex-shrink:0;">
                 {{ carga.creado_en.strftime('%d/%m') if carga.creado_en else '—' }}
               </div>
             </div>
@@ -694,8 +685,8 @@
       <div class="ac-card">
         <div class="ac-card-header">
           <div class="ac-card-header-left">
-            <div class="ac-card-icon" style="background:#f5f3ff;">
-              <i class="bi bi-table" style="color:#7c3aed;"></i>
+            <div class="ac-card-icon" style="background:var(--siem-blue-soft);">
+              <i class="bi bi-table" style="color:var(--siem-blue);"></i>
             </div>
             <span class="ac-card-title">Datos importados</span>
           </div>

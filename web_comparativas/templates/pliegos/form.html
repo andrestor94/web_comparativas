@@ -3,9 +3,10 @@
 {% block title %}Lectura de Pliego IA{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h2 class="m-0 fw-bold" style="color: var(--sa-azul);">Lectura de Pliego IA</h2>
+        <h2 class="m-0 fw-semibold" style="color: var(--siem-navy);">Lectura de Pliego IA</h2>
         <div class="text-muted small">Carga un archivo Excel para visualizar la información del pliego.</div>
     </div>
 </div>
@@ -16,7 +17,7 @@
         <div class="mb-4">
             <div
                 style="position: relative; width: 80px; height: 80px; background: #e0e9f5; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                <i class="bi bi-filetype-json fs-1" style="color: var(--sa-azul);"></i>
+                <i class="bi bi-filetype-json fs-1" style="color: var(--siem-blue);"></i>
             </div>
         </div>
 
@@ -43,8 +44,8 @@
             {% endif %}
 
             <div class="d-grid mt-4">
-                <button type="submit" class="btn btn-primary py-3 fw-bold text-white w-100"
-                    style="background-color: #064066 !important; border-color: #064066 !important; color: #fff !important; font-size: 1.1rem; box-shadow: 0 4px 6px rgba(6, 64, 102, 0.2);">
+                <button type="submit" class="btn btn-primary py-3 fw-semibold text-white w-100"
+                    style="background-color: var(--siem-navy) !important; border-color: var(--siem-navy) !important; color: #fff !important; font-size: 1.1rem; box-shadow: 0 4px 6px rgba(6, 64, 102, 0.2);">
                     <i class="bi bi-eye-fill me-2"></i> Visualizar Pliego
                 </button>
             </div>

@@ -3,6 +3,7 @@
 {% block title %}Detalle del Pliego{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
     /* ... (Estilos previos se mantienen si se desean, agregamos/ajustamos solo cambios) ... */
     :root {
@@ -11,8 +12,8 @@
         --border-color: #e9ecef;
         --text-dark: #343a40;
         --text-muted: #6c757d;
-        --brand-blue: var(--sa-azul);
-        --brand-light-blue: #e0f2fe;
+        --brand-blue: var(--siem-navy);
+        --brand-light-blue: var(--siem-blue-soft);
     }
 
     body {
@@ -38,8 +39,8 @@
     }
 
     .hero-title {
-        font-family: 'Outfit', sans-serif;
-        font-weight: 800;
+        font-family: inherit;
+        font-weight: 650;
         font-size: 2rem;
         color: var(--brand-blue);
         margin-bottom: 1.5rem;
