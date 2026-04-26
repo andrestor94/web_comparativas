@@ -1,595 +1,1180 @@
-﻿{% extends "sic/base_sic.html" %}
-{% block title %}Seguimiento de Usuarios - S.I.C{% endblock %}
+{% extends "sic/base_sic.html" %}
+{% block title %}Seguimiento de Usuarios — S.I.C{% endblock %}
 
 {% block extra_css %}
 <style>
-    .usage-filters-bar {
-        background: var(--sic-card-bg);
-        border-radius: 16px;
-        padding: 20px 24px;
-        margin-bottom: 24px;
-        border: 1px solid var(--sic-border);
-        backdrop-filter: blur(10px);
-    }
+/* ═══════════════════════════════════════════════════
+   VARIABLES & BASE
+═══════════════════════════════════════════════════ */
+:root {
+  --t-bg:       #0a0f1a;
+  --t-surface:  #0f1729;
+  --t-surface2: #131e35;
+  --t-border:   #1e2d4a;
+  --t-border2:  rgba(59,130,246,.18);
+  --t-blue:     #3b82f6;
+  --t-green:    #10b981;
+  --t-red:      #ef4444;
+  --t-yellow:   #f59e0b;
+  --t-purple:   #8b5cf6;
+  --t-cyan:     #06b6d4;
+  --t-text:     #e2e8f0;
+  --t-muted:    #64748b;
+  --t-muted2:   #94a3b8;
+  --t-glass:    rgba(15,23,42,.6);
+  --t-glow-b:   rgba(59,130,246,.15);
+  --t-glow-g:   rgba(16,185,129,.15);
+  --t-glow-r:   rgba(239,68,68,.15);
+  --t-glow-y:   rgba(245,158,11,.15);
+  --radius-lg:  16px;
+  --radius-md:  12px;
+  --radius-sm:  8px;
+  --transition: 220ms cubic-bezier(.4,0,.2,1);
+}
 
-    .usage-kpi-card {
-        height: 100%;
-        min-height: 110px;
-        border-radius: 12px;
-        padding: 16px 18px;
-        background: var(--sic-card-bg);
-        border: 1px solid var(--sic-border);
-        transition: border-color .2s;
-    }
-    .usage-kpi-card:hover { border-color: rgba(0,164,135,.4); }
+/* ═══════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════ */
+.trk-page { font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif; }
 
-    .usage-card-title {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: .6px;
-        font-weight: 600;
-        color: var(--sic-text-muted);
-        margin-bottom: 6px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-    }
-    .usage-card-value {
-        font-size: 26px;
-        font-weight: 700;
-        color: var(--sic-highlight);
-        line-height: 1.1;
-        margin-bottom: 2px;
-    }
-    .usage-card-sub {
-        font-size: 11px;
-        color: var(--sic-text-muted);
-        line-height: 1.3;
-    }
+.trk-header {
+  display: flex; align-items: flex-start;
+  justify-content: space-between; gap: 16px;
+  margin-bottom: 28px; flex-wrap: wrap;
+}
+.trk-title { font-size: 22px; font-weight: 800; color: #f1f5f9; letter-spacing: -.02em; margin: 0; }
+.trk-subtitle { font-size: 13px; color: var(--t-muted2); margin: 4px 0 0; }
 
-    .kpi-help {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: rgba(148,163,184,.15);
-        color: var(--sic-text-muted);
-        font-size: 9px;
-        cursor: help;
-        flex-shrink: 0;
-    }
+/* ═══════════════════════════════════════════════════
+   FILTERS BAR
+═══════════════════════════════════════════════════ */
+.trk-filters {
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  margin-bottom: 24px;
+  backdrop-filter: blur(12px);
+}
+.trk-filters .form-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--t-muted); font-weight: 600; margin-bottom: 5px; }
+.trk-filters .form-control,
+.trk-filters .form-select {
+  background: rgba(10,15,26,.8);
+  border: 1px solid var(--t-border);
+  color: var(--t-text);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.trk-filters .form-control:focus,
+.trk-filters .form-select:focus {
+  background: rgba(10,15,26,.95);
+  border-color: var(--t-blue);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.18);
+  color: var(--t-text);
+}
+.trk-filters input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.5); cursor: pointer; }
+.trk-filters .form-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  padding-right: 34px;
+}
 
-    .nav-pills .nav-link {
-        color: var(--sic-text-muted);
-        border-radius: 8px;
-        padding: 9px 18px;
-        font-size: 13px;
-        font-weight: 500;
-    }
-    .nav-pills .nav-link.active {
-        background-color: var(--sic-highlight);
-        color: #fff;
-    }
-    .nav-pills .nav-link:hover:not(.active) {
-        background-color: rgba(255,255,255,.05);
-        color: #fff;
-    }
+/* ═══════════════════════════════════════════════════
+   KPI BAR
+═══════════════════════════════════════════════════ */
+.kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+@media (max-width: 1399px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } }
+@media (max-width: 767px)  { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
 
-    .usage-chart { min-height: 280px; }
-    .usage-panel-header {
-        font-size: 15px;
-        font-weight: 700;
-        margin-bottom: 3px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        color: #fff;
-    }
-    .usage-panel-header::before {
-        content: "";
-        display: inline-block;
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
-        background: var(--sic-highlight);
-        flex-shrink: 0;
-    }
-    .usage-panel-sub {
-        font-size: 12px;
-        color: var(--sic-text-muted);
-        margin-bottom: 14px;
-    }
+.kpi-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  position: relative; overflow: hidden;
+  transition: border-color var(--transition), transform var(--transition);
+  cursor: default;
+}
+.kpi-card::after {
+  content: ''; position: absolute; inset: 0;
+  border-radius: inherit; opacity: 0; transition: opacity var(--transition);
+}
+.kpi-card:hover { transform: translateY(-2px); }
+.kpi-card:hover::after { opacity: 1; }
+.kpi-card.kpi-green { border-color: rgba(16,185,129,.3); }
+.kpi-card.kpi-green::after { background: linear-gradient(135deg,rgba(16,185,129,.06),transparent); }
+.kpi-card.kpi-blue  { border-color: rgba(59,130,246,.3); }
+.kpi-card.kpi-blue::after  { background: linear-gradient(135deg,rgba(59,130,246,.06),transparent); }
+.kpi-card.kpi-yellow { border-color: rgba(245,158,11,.3); }
+.kpi-card.kpi-yellow::after { background: linear-gradient(135deg,rgba(245,158,11,.06),transparent); }
+.kpi-card.kpi-red { border-color: rgba(239,68,68,.3); }
+.kpi-card.kpi-red::after { background: linear-gradient(135deg,rgba(239,68,68,.06),transparent); }
 
-    .usage-empty {
-        font-size: 13px;
-        color: var(--sic-text-muted);
-        padding: 36px;
-        text-align: center;
-        font-style: italic;
-    }
+.kpi-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
+  font-weight: 700; color: var(--t-muted); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 5px;
+}
+.kpi-help {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: rgba(100,116,139,.15);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; color: var(--t-muted); cursor: help; flex-shrink: 0;
+  margin-left: auto;
+}
+.kpi-value {
+  font-size: 28px; font-weight: 800; line-height: 1;
+  margin-bottom: 6px; font-variant-numeric: tabular-nums;
+  font-family: 'Outfit', monospace;
+}
+.kpi-value.kpi-green { color: var(--t-green); }
+.kpi-value.kpi-blue  { color: var(--t-blue);  }
+.kpi-value.kpi-yellow { color: var(--t-yellow); }
+.kpi-value.kpi-red   { color: var(--t-red);   }
+.kpi-value.kpi-white { color: #f1f5f9; }
 
-    .status-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        flex-shrink: 0;
-    }
-    .status-dot.activo { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.6); }
-    .status-dot.inactivo { background: #f59e0b; }
-    .status-dot.offline { background: #ef4444; }
+.kpi-footer { display: flex; align-items: center; gap: 6px; }
+.kpi-sub { font-size: 11px; color: var(--t-muted); line-height: 1.3; }
+.kpi-trend {
+  font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 6px; border-radius: 4px;
+}
+.kpi-trend.up   { background: rgba(16,185,129,.12); color: #34d399; }
+.kpi-trend.down { background: rgba(239,68,68,.12);  color: #f87171; }
+.kpi-trend.neutral { background: rgba(100,116,139,.1); color: var(--t-muted2); }
 
-    .activity-badge {
-        font-size: 10px;
-        font-weight: 600;
-        padding: 2px 7px;
-        border-radius: 20px;
-        letter-spacing: .3px;
-        text-transform: lowercase;
-    }
-    .ab-navegando { background: rgba(59,130,246,.15); color: #93c5fd; }
-    .ab-buscando { background: rgba(99,102,241,.15); color: #a5b4fc; }
-    .ab-cargando { background: rgba(34,197,94,.15); color: #86efac; }
-    .ab-exportando { background: rgba(234,179,8,.15); color: #fde047; }
-    .ab-editando { background: rgba(168,85,247,.15); color: #d8b4fe; }
-    .ab-activo { background: rgba(148,163,184,.1); color: #94a3b8; }
+.sparkline-wrap { height: 32px; margin-top: 6px; }
 
-    .risk-alto { background: rgba(239,68,68,.15); color: #fca5a5; }
-    .risk-medio { background: rgba(245,158,11,.15); color: #fde68a; }
-    .risk-bajo { background: rgba(34,197,94,.15); color: #86efac; }
+/* ═══════════════════════════════════════════════════
+   TABS
+═══════════════════════════════════════════════════ */
+.trk-tabs {
+  display: flex; gap: 4px; margin-bottom: 20px;
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--radius-md);
+  padding: 4px; width: fit-content; flex-wrap: wrap;
+}
+.trk-tab {
+  padding: 9px 18px; border-radius: 9px;
+  font-size: 13px; font-weight: 600;
+  color: var(--t-muted); cursor: pointer;
+  transition: all var(--transition); white-space: nowrap;
+  display: flex; align-items: center; gap: 7px;
+  background: transparent; border: none; outline: none;
+}
+.trk-tab:hover:not(.active) { background: rgba(255,255,255,.05); color: var(--t-text); }
+.trk-tab.active {
+  background: var(--t-blue);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(59,130,246,.35);
+}
+.trk-tab .tab-badge {
+  background: rgba(255,255,255,.2);
+  color: #fff; font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 999px; min-width: 18px; text-align: center;
+}
+.trk-tab:not(.active) .tab-badge {
+  background: rgba(239,68,68,.2); color: #fca5a5;
+}
 
-    .score-bar-wrap {
-        height: 4px;
-        border-radius: 2px;
-        background: rgba(255,255,255,.06);
-        margin-top: 4px;
-        overflow: hidden;
-    }
-    .score-bar-fill {
-        height: 100%;
-        border-radius: 2px;
-        transition: width .4s;
-    }
+/* ═══════════════════════════════════════════════════
+   PANEL CARD
+═══════════════════════════════════════════════════ */
+.trk-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.trk-card-body { padding: 20px 22px; }
+.trk-card-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 4px;
+}
+.trk-card-title {
+  font-size: 14px; font-weight: 700; color: #e2e8f0;
+  display: flex; align-items: center; gap: 8px; margin: 0;
+}
+.trk-card-title::before {
+  content: ''; width: 4px; height: 16px; border-radius: 2px;
+  background: var(--t-blue); display: inline-block; flex-shrink: 0;
+}
+.trk-card-sub { font-size: 12px; color: var(--t-muted); margin: 0 0 14px; }
 
-    .trend-up { color: #4ade80; font-size: 13px; }
-    .trend-down { color: #f87171; font-size: 13px; }
-    .trend-stable { color: #94a3b8; font-size: 13px; }
+/* ═══════════════════════════════════════════════════
+   STATUS DOTS (animated)
+═══════════════════════════════════════════════════ */
+@keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.7)} 50%{box-shadow:0 0 0 6px rgba(16,185,129,0)} }
+@keyframes blink-yellow { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-    input[type="date"]::-webkit-calendar-picker-indicator {
-        filter: invert(1);
-        cursor: pointer;
-    }
+.sdot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; flex-shrink: 0;
+}
+.sdot-active  { background: var(--t-green);  animation: pulse-green 2s infinite; }
+.sdot-idle    { background: var(--t-yellow); animation: blink-yellow 2s infinite; }
+.sdot-offline { background: var(--t-muted); }
 
-    .score-legend {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-        font-size: 11px;
-        color: var(--sic-text-muted);
-        margin-bottom: 12px;
-        padding: 10px 14px;
-        background: rgba(255,255,255,.03);
-        border-radius: 8px;
-        border: 1px solid var(--sic-border);
-    }
-    .score-legend-item { display: flex; align-items: center; gap: 5px; }
-    .score-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        flex-shrink: 0;
-    }
+/* ═══════════════════════════════════════════════════
+   TABLE STYLES
+═══════════════════════════════════════════════════ */
+.trk-table-wrap { overflow-x: auto; }
+.trk-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: 12.5px; color: var(--t-text);
+}
+.trk-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--t-surface2);
+  padding: 12px 14px;
+  font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--t-muted);
+  border-bottom: 1px solid var(--t-border);
+  white-space: nowrap;
+}
+.trk-table thead th.sortable { cursor: pointer; user-select: none; }
+.trk-table thead th.sortable:hover { color: var(--t-text); }
+.trk-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--t-border);
+  vertical-align: middle;
+}
+.trk-table tbody tr { transition: background var(--transition); cursor: pointer; }
+.trk-table tbody tr:hover td { background: rgba(59,130,246,.06); }
+.trk-table tbody tr:last-child td { border-bottom: none; }
+.trk-table tbody tr.row-expanded td { background: rgba(59,130,246,.08); }
 
-    .alert-card {
-        background: rgba(15,23,42,.45);
-        border-radius: 10px;
-        padding: 14px 16px;
-        border-left: 3px solid;
-        height: 100%;
-    }
-    .alert-card.sev-alta { border-color: #ef4444; }
-    .alert-card.sev-media { border-color: #f59e0b; }
-    .alert-card.sev-baja { border-color: #60a5fa; }
-    .alert-card.sev-info { border-color: #4ade80; }
-    .alert-card-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 10px;
-    }
-    .alert-card-user {
-        font-size: 11px;
-        color: var(--sic-text-muted);
-        margin-top: 2px;
-    }
-    .alert-severity-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: .3px;
-        text-transform: uppercase;
-        border: 1px solid rgba(255,255,255,.08);
-    }
-    .alert-severity-badge.sev-alta { background: rgba(239,68,68,.15); color: #fecaca; }
-    .alert-severity-badge.sev-media { background: rgba(245,158,11,.15); color: #fde68a; }
-    .alert-severity-badge.sev-baja { background: rgba(96,165,250,.15); color: #bfdbfe; }
-    .alert-severity-badge.sev-info { background: rgba(74,222,128,.12); color: #bbf7d0; }
-    .alert-rec {
-        font-size: 11px;
-        color: var(--sic-text-muted);
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid rgba(255,255,255,.06);
-    }
+/* ═══════════════════════════════════════════════════
+   CHIPS / BADGES
+═══════════════════════════════════════════════════ */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.chip-blue   { background: rgba(59,130,246,.12); color: #93c5fd; border-color: rgba(59,130,246,.2); }
+.chip-green  { background: rgba(16,185,129,.12); color: #6ee7b7; border-color: rgba(16,185,129,.2); }
+.chip-yellow { background: rgba(245,158,11,.12);  color: #fde68a; border-color: rgba(245,158,11,.2); }
+.chip-red    { background: rgba(239,68,68,.12);   color: #fca5a5; border-color: rgba(239,68,68,.2); }
+.chip-purple { background: rgba(139,92,246,.12);  color: #c4b5fd; border-color: rgba(139,92,246,.2); }
+.chip-gray   { background: rgba(100,116,139,.1);  color: #94a3b8; border-color: rgba(100,116,139,.15); }
+.chip-cyan   { background: rgba(6,182,212,.12);   color: #67e8f9; border-color: rgba(6,182,212,.2); }
 
-    .prof-stat-box {
-        text-align: center;
-        padding: 10px 8px;
-        background: rgba(255,255,255,.04);
-        border-radius: 8px;
-        border: 1px solid rgba(255,255,255,.06);
-    }
-    .prof-stat-val {
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--sic-highlight);
-        line-height: 1;
-        margin-bottom: 2px;
-    }
-    .prof-stat-lbl {
-        font-size: 10px;
-        color: var(--sic-text-muted);
-        text-transform: uppercase;
-        letter-spacing: .4px;
-    }
-    .timeline-event {
-        display: flex;
-        gap: 10px;
-        padding: 8px 0;
-        border-bottom: 1px solid rgba(255,255,255,.04);
-    }
-    .timeline-icon {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: rgba(255,255,255,.05);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        font-size: 13px;
-    }
-    .table-meta {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .table-meta strong,
-    .table-meta span:first-child {
-        color: #fff;
-        font-weight: 600;
-    }
-    .table-meta small {
-        color: var(--sic-text-muted);
-        font-size: 11px;
-    }
-    .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 600;
-        border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.04);
-        color: #e2e8f0;
-        white-space: nowrap;
-    }
-    .status-pill.is-live { background: rgba(34,197,94,.12); color: #86efac; border-color: rgba(34,197,94,.25); }
-    .status-pill.is-idle { background: rgba(245,158,11,.12); color: #fde68a; border-color: rgba(245,158,11,.25); }
-    .status-pill.is-offline,
-    .status-pill.is-risk { background: rgba(239,68,68,.12); color: #fca5a5; border-color: rgba(239,68,68,.2); }
-    .table-chip-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-    }
-    .metric-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 5px 9px;
-        border-radius: 999px;
-        background: rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.06);
-        color: #cbd5e1;
-        font-size: 11px;
-        line-height: 1;
-    }
-    .profile-section {
-        background: rgba(255,255,255,.03);
-        border: 1px solid rgba(255,255,255,.06);
-        border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 12px;
-    }
-    .profile-section-title {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 12px;
-    }
-    .profile-section-title h6 {
-        margin: 0;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: .4px;
-        color: var(--sic-text-muted);
-        text-transform: uppercase;
-    }
-    .profile-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
-    .profile-kv-label {
-        display: block;
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: .4px;
-        color: var(--sic-text-muted);
-        margin-bottom: 4px;
-    }
-    .profile-kv-value {
-        color: #fff;
-        font-size: 13px;
-        line-height: 1.35;
-        word-break: break-word;
-    }
-    .profile-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .profile-list-item {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 9px 10px;
-        border-radius: 10px;
-        background: rgba(255,255,255,.03);
-        border: 1px solid rgba(255,255,255,.05);
-    }
-    .profile-list-item strong { display: block; color: #fff; font-size: 12px; }
-    .profile-list-item small { display: block; color: var(--sic-text-muted); font-size: 11px; }
-    .profile-list-item span:last-child { text-align: right; color: #e2e8f0; font-size: 12px; white-space: nowrap; }
-    .profile-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    .profile-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(59,130,246,.12);
-        border: 1px solid rgba(59,130,246,.16);
-        color: #bfdbfe;
-        font-size: 11px;
-    }
-    .profile-note { font-size: 11px; color: var(--sic-text-muted); }
-    .profile-timeline { max-height: 280px; overflow-y: auto; padding-right: 4px; }
-    @media (max-width: 767.98px) { .profile-grid { grid-template-columns: 1fr; } }
+/* ═══════════════════════════════════════════════════
+   BREADCRUMB TRAIL
+═══════════════════════════════════════════════════ */
+.nav-trail {
+  display: flex; align-items: center; gap: 3px; flex-wrap: nowrap;
+  font-size: 11px; color: var(--t-muted);
+  overflow: hidden; max-width: 280px;
+}
+.nav-trail-sep { color: var(--t-muted); opacity: .5; font-size: 10px; flex-shrink: 0; }
+.nav-trail-item {
+  background: rgba(59,130,246,.08);
+  border: 1px solid rgba(59,130,246,.12);
+  color: #93c5fd; padding: 2px 7px; border-radius: 4px;
+  font-size: 10.5px; white-space: nowrap; cursor: pointer;
+  transition: background var(--transition);
+  max-width: 100px; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-trail-item:hover { background: rgba(59,130,246,.18); }
+.nav-trail-item.current {
+  background: rgba(59,130,246,.2);
+  color: #bfdbfe; font-weight: 600;
+  border-color: rgba(59,130,246,.3);
+}
+
+/* ═══════════════════════════════════════════════════
+   SCORE BAR
+═══════════════════════════════════════════════════ */
+.score-wrap { min-width: 80px; }
+.score-num {
+  font-size: 13px; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1; margin-bottom: 4px;
+}
+.score-bar-bg {
+  height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,.06); overflow: hidden;
+}
+.score-bar-fill { height: 100%; border-radius: 2px; transition: width .6s; }
+
+/* ═══════════════════════════════════════════════════
+   EXPANDABLE ROW
+═══════════════════════════════════════════════════ */
+.row-detail-panel {
+  padding: 14px 16px;
+  background: rgba(10,15,26,.8);
+  border-bottom: 1px solid var(--t-border);
+}
+.session-timeline {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.session-event {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 11.5px;
+}
+.session-event-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--t-blue); flex-shrink: 0; margin-top: 4px;
+}
+.session-event-time { color: var(--t-muted); white-space: nowrap; min-width: 45px; }
+.session-event-name { color: #e2e8f0; font-weight: 500; }
+
+/* ═══════════════════════════════════════════════════
+   AUTO-REFRESH BAR
+═══════════════════════════════════════════════════ */
+.refresh-bar {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11.5px; color: var(--t-muted);
+  margin-bottom: 10px;
+}
+.refresh-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--t-green); animation: pulse-green 2s infinite;
+}
+.btn-refresh {
+  background: rgba(255,255,255,.05); border: 1px solid var(--t-border);
+  color: var(--t-muted2); border-radius: var(--radius-sm);
+  padding: 4px 10px; font-size: 11px; cursor: pointer;
+  transition: all var(--transition); display: inline-flex; align-items: center; gap: 5px;
+}
+.btn-refresh:hover { background: rgba(59,130,246,.1); border-color: var(--t-blue); color: #93c5fd; }
+
+/* ═══════════════════════════════════════════════════
+   CHARTS CONTAINER
+═══════════════════════════════════════════════════ */
+.chart-container { min-height: 290px; position: relative; }
+.chart-container.tall { min-height: 340px; }
+
+/* ═══════════════════════════════════════════════════
+   METRIC SELECTOR
+═══════════════════════════════════════════════════ */
+.metric-selector {
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+.metric-btn {
+  padding: 5px 12px; border-radius: var(--radius-sm);
+  font-size: 11.5px; font-weight: 600; cursor: pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--t-border);
+  color: var(--t-muted); transition: all var(--transition);
+}
+.metric-btn.active,
+.metric-btn:hover {
+  background: rgba(59,130,246,.15);
+  border-color: rgba(59,130,246,.3);
+  color: #93c5fd;
+}
+
+/* ═══════════════════════════════════════════════════
+   ALERTS TAB
+═══════════════════════════════════════════════════ */
+.alert-filters {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.alert-filter-btn {
+  padding: 6px 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--t-border);
+  color: var(--t-muted); transition: all var(--transition);
+  display: flex; align-items: center; gap: 6px;
+}
+.alert-filter-btn.active { background: rgba(59,130,246,.15); border-color: rgba(59,130,246,.3); color: #93c5fd; }
+.alert-filter-btn .afc { font-size: 10px; background: rgba(255,255,255,.08); padding: 0 5px; border-radius: 999px; min-width: 18px; text-align: center; }
+.alert-filter-btn.f-alta.active  { background: rgba(239,68,68,.12);   border-color: rgba(239,68,68,.3);   color: #fca5a5; }
+.alert-filter-btn.f-media.active { background: rgba(245,158,11,.12);  border-color: rgba(245,158,11,.3);  color: #fde68a; }
+.alert-filter-btn.f-baja.active  { background: rgba(59,130,246,.12);  border-color: rgba(59,130,246,.3);  color: #93c5fd; }
+
+.alert-card {
+  background: rgba(15,23,42,.6);
+  border: 1px solid var(--t-border);
+  border-left: 3px solid;
+  border-radius: var(--radius-md);
+  padding: 16px;
+  transition: transform var(--transition), opacity var(--transition);
+  cursor: pointer;
+}
+.alert-card:hover { transform: translateY(-2px); }
+.alert-card.sev-alta  { border-left-color: var(--t-red); }
+.alert-card.sev-media { border-left-color: var(--t-yellow); }
+.alert-card.sev-baja  { border-left-color: var(--t-blue); }
+.alert-card.sev-info  { border-left-color: var(--t-green); }
+.alert-card.resolving { opacity: 0; transform: scale(.95); }
+
+.alert-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.alert-user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  font-size: 12px; font-weight: 700; color: #fff;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--t-blue), var(--t-purple));
+}
+.alert-title { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0 0 2px; }
+.alert-user-label { font-size: 11px; color: var(--t-muted); }
+.alert-body { font-size: 12px; color: var(--t-muted2); margin-bottom: 8px; line-height: 1.5; }
+.alert-rec {
+  font-size: 11px; color: var(--t-muted);
+  border-top: 1px solid rgba(255,255,255,.06);
+  padding-top: 8px; margin-bottom: 10px;
+  display: flex; align-items: flex-start; gap: 5px;
+}
+.alert-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.alert-time { font-size: 11px; color: var(--t-muted); }
+.alert-actions { display: flex; gap: 6px; }
+.btn-alert-resolve {
+  padding: 4px 12px; border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.25); color: #6ee7b7;
+  transition: all var(--transition);
+}
+.btn-alert-resolve:hover { background: rgba(16,185,129,.22); }
+.btn-alert-profile {
+  padding: 4px 12px; border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.2); color: #93c5fd;
+  transition: all var(--transition);
+}
+.btn-alert-profile:hover { background: rgba(59,130,246,.2); }
+
+/* ═══════════════════════════════════════════════════
+   OFFCANVAS PROFILE (SLIDE-IN)
+═══════════════════════════════════════════════════ */
+.trk-profile-panel {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 500px; max-width: 95vw;
+  background: #0b1628;
+  border-left: 1px solid var(--t-border);
+  z-index: 1080;
+  transform: translateX(110%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column;
+  box-shadow: -20px 0 60px rgba(0,0,0,.5);
+}
+.trk-profile-panel.open { transform: translateX(0); }
+.profile-overlay {
+  position: fixed; inset: 0; z-index: 1079;
+  background: rgba(0,0,0,.5); backdrop-filter: blur(3px);
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+}
+.profile-overlay.open { opacity: 1; pointer-events: all; }
+
+.profile-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--t-border);
+  flex-shrink: 0;
+}
+.profile-close {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: none; color: var(--t-muted2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 18px; transition: all var(--transition);
+}
+.profile-close:hover { background: rgba(239,68,68,.15); color: #fca5a5; }
+.profile-body { flex: 1; overflow-y: auto; padding: 20px; }
+.profile-body::-webkit-scrollbar { width: 4px; }
+.profile-body::-webkit-scrollbar-track { background: transparent; }
+.profile-body::-webkit-scrollbar-thumb { background: var(--t-border); border-radius: 2px; }
+
+.prof-avatar-lg {
+  width: 64px; height: 64px; border-radius: 50%;
+  font-size: 22px; font-weight: 800; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--t-blue), var(--t-purple));
+  margin: 0 auto 12px; position: relative;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+}
+.prof-status-ring {
+  position: absolute; bottom: 1px; right: 1px;
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid #0b1628;
+}
+
+.prof-name { font-size: 18px; font-weight: 800; color: #f1f5f9; text-align: center; margin: 0 0 2px; }
+.prof-email { font-size: 12px; color: var(--t-muted); text-align: center; margin: 0 0 12px; }
+.prof-chips { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+
+.prof-score-big {
+  text-align: center; padding: 14px; margin-bottom: 16px;
+  background: rgba(59,130,246,.06); border: 1px solid rgba(59,130,246,.12);
+  border-radius: var(--radius-md);
+}
+.prof-score-val { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.prof-score-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); margin: 8px 0 4px; overflow: hidden; }
+.prof-score-fill { height: 100%; border-radius: 3px; transition: width .8s; }
+.prof-score-label { font-size: 11px; color: var(--t-muted); }
+
+.prof-stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 16px; }
+.prof-stat { text-align: center; padding: 10px 8px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05); border-radius: var(--radius-sm); }
+.prof-stat-val { font-size: 17px; font-weight: 800; color: var(--t-blue); line-height: 1; margin-bottom: 3px; }
+.prof-stat-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--t-muted); }
+
+.prof-section { margin-bottom: 14px; }
+.prof-section-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+  font-weight: 700; color: var(--t-muted); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.prof-section-title::before {
+  content: ''; width: 3px; height: 12px; background: var(--t-blue); border-radius: 2px;
+}
+
+.prof-nav-stepper {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 10px; background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.05); border-radius: var(--radius-sm);
+}
+.prof-nav-step {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px;
+}
+.prof-nav-step-chip {
+  background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.18);
+  color: #93c5fd; padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+}
+.prof-nav-step-time { font-size: 10px; color: var(--t-muted); }
+.prof-nav-sep { color: var(--t-muted); font-size: 10px; }
+
+.prof-session-item {
+  padding: 10px 12px; background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.04); border-radius: var(--radius-sm);
+  margin-bottom: 8px; cursor: pointer; transition: background var(--transition);
+}
+.prof-session-item:hover { background: rgba(59,130,246,.06); }
+.prof-session-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.prof-session-date { font-size: 12px; font-weight: 700; color: #e2e8f0; }
+.prof-session-dur { font-size: 11px; color: var(--t-green); }
+.prof-session-sections { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.prof-session-section-chip {
+  font-size: 10px; padding: 2px 7px; border-radius: 4px;
+  background: rgba(255,255,255,.04); color: var(--t-muted2);
+  border: 1px solid rgba(255,255,255,.04);
+}
+
+.prof-timeline-list { max-height: 220px; overflow-y: auto; }
+.prof-timeline-list::-webkit-scrollbar { width: 3px; }
+.prof-timeline-list::-webkit-scrollbar-thumb { background: var(--t-border); border-radius: 2px; }
+
+.prof-evt { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.03); align-items: flex-start; }
+.prof-evt-icon {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.15);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #93c5fd; flex-shrink: 0;
+}
+.prof-evt-body { flex: 1; }
+.prof-evt-name { font-size: 12px; color: #e2e8f0; font-weight: 500; }
+.prof-evt-time { font-size: 10.5px; color: var(--t-muted); }
+
+.prof-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.btn-prof-action {
+  flex: 1; min-width: 120px; padding: 8px 14px;
+  border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;
+  cursor: pointer; text-align: center; transition: all var(--transition);
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid;
+}
+.btn-prof-primary { background: rgba(59,130,246,.15); border-color: rgba(59,130,246,.3); color: #93c5fd; }
+.btn-prof-primary:hover { background: rgba(59,130,246,.25); }
+.btn-prof-ghost { background: rgba(255,255,255,.03); border-color: var(--t-border); color: var(--t-muted2); }
+.btn-prof-ghost:hover { background: rgba(255,255,255,.07); color: var(--t-text); }
+
+/* ═══════════════════════════════════════════════════
+   SCORE CHART (weekly evolution)
+═══════════════════════════════════════════════════ */
+.prof-score-chart-wrap { height: 80px; }
+
+/* ═══════════════════════════════════════════════════
+   EMPTY STATE
+═══════════════════════════════════════════════════ */
+.trk-empty {
+  padding: 56px 24px; text-align: center;
+  color: var(--t-muted);
+}
+.trk-empty-icon { font-size: 40px; margin-bottom: 12px; opacity: .4; }
+.trk-empty-title { font-size: 15px; font-weight: 600; color: var(--t-muted2); margin-bottom: 6px; }
+.trk-empty-sub { font-size: 13px; }
+
+/* ═══════════════════════════════════════════════════
+   SCORE LEGEND
+═══════════════════════════════════════════════════ */
+.score-legend {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 11px; color: var(--t-muted);
+  padding: 10px 14px; background: rgba(255,255,255,.02);
+  border: 1px solid var(--t-border); border-radius: var(--radius-sm);
+  margin-bottom: 12px; align-items: center;
+}
+.score-legend-item { display: flex; align-items: center; gap: 5px; }
+.score-leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════
+   UTILITY
+═══════════════════════════════════════════════════ */
+.hidden { display: none !important; }
+.fade-in { animation: fadeSlideIn .25s ease both; }
+@keyframes fadeSlideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+@keyframes countUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+.count-anim { animation: countUp .4s ease both; }
+
+.table-action-col { min-width: 44px; text-align: center; }
+.expand-btn {
+  background: none; border: none; color: var(--t-muted);
+  cursor: pointer; font-size: 14px; transition: color var(--transition);
+  padding: 2px 6px; border-radius: 4px;
+}
+.expand-btn:hover { color: var(--t-text); background: rgba(255,255,255,.06); }
+.expand-btn.open { color: var(--t-blue); transform: rotate(90deg); }
+
+.sev-badge {
+  display: inline-flex; align-items: center; padding: 3px 8px;
+  border-radius: 999px; font-size: 10px; font-weight: 700;
+  letter-spacing: .3px; text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,.08);
+}
+.sev-badge.sev-alta  { background: rgba(239,68,68,.12);  color: #fca5a5; }
+.sev-badge.sev-media { background: rgba(245,158,11,.12); color: #fde68a; }
+.sev-badge.sev-baja  { background: rgba(59,130,246,.1);  color: #93c5fd; }
+.sev-badge.sev-info  { background: rgba(16,185,129,.1);  color: #6ee7b7; }
+
+.live-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.25);
+  color: #6ee7b7; padding: 4px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+}
+.live-spinner { width: 8px; height: 8px; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="row align-items-center mb-4">
-    <div class="col">
-        <h1 class="h3 fw-bold mb-1">Seguimiento de usuarios</h1>
-        <p class="text-white-50 small mb-0">Monitoreo de actividad, adopcion y salud de uso de la plataforma.</p>
-    </div>
-</div>
+<div class="trk-page">
 
-<form id="usage-filters-form" class="usage-filters-bar">
+  <!-- HEADER -->
+  <div class="trk-header">
+    <div>
+      <h1 class="trk-title"><i class="bi bi-broadcast me-2" style="color:var(--t-green);font-size:20px;"></i>Seguimiento de Usuarios</h1>
+      <p class="trk-subtitle">Centro de monitoreo de actividad, adopción y salud operativa de la plataforma.</p>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <div class="live-badge">
+        <div class="sdot sdot-active"></div>
+        <span id="live-count-badge">0</span> online
+      </div>
+      <button id="usage-refresh-btn" class="btn-refresh">
+        <i class="bi bi-arrow-clockwise"></i> Actualizar
+      </button>
+    </div>
+  </div>
+
+  <!-- FILTERS -->
+  <form id="usage-filters-form" class="trk-filters">
     <div class="row g-2 align-items-end">
-        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Desde</label><input type="date" id="flt-date-from" name="date_from" class="form-control form-control-sm form-control-sic"></div>
-        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Hasta</label><input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm form-control-sic"></div>
-        <div class="col-6 col-md-3 col-lg-2">
-            <label class="form-label mb-1 small text-white-50">Rol</label>
-            <select id="flt-role" name="role" class="form-select form-select-sm form-select-sic">
-                <option value="">Todos los roles</option>
-                <option value="analista">Analistas</option>
-                <option value="supervisor">Supervisores</option>
-                <option value="auditor">Auditores</option>
-                <option value="admin">Admin</option>
-            </select>
-        </div>
-        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Equipo / grupo</label><select id="flt-team" name="team" class="form-select form-select-sm form-select-sic"><option value="">Todos los equipos</option></select></div>
-        <div class="col-6 col-md-3 col-lg-2"><label class="form-label mb-1 small text-white-50">Vista temporal</label><select id="flt-granularity" name="granularity" class="form-select form-select-sm form-select-sic"><option value="day">Dia</option><option value="week">Semana</option><option value="month">Mes</option></select></div>
-        <div class="col-6 col-md-3 col-lg-2 d-flex gap-2 justify-content-end align-items-end">
-            <button id="usage-refresh-btn" type="button" class="btn btn-sic-outline btn-sm" title="Actualizar datos" onclick="window.sicRefreshTracking && window.sicRefreshTracking()"><i class="bi bi-arrow-clockwise"></i></button>
-            <button id="usage-apply-filters" type="submit" class="btn btn-sic-primary btn-sm flex-grow-1">Aplicar</button>
-        </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label">Desde</label>
+        <input type="date" id="flt-date-from" name="date_from" class="form-control form-control-sm">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label">Hasta</label>
+        <input type="date" id="flt-date-to" name="date_to" class="form-control form-control-sm">
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label">Rol</label>
+        <select id="flt-role" name="role" class="form-select form-select-sm">
+          <option value="">Todos los roles</option>
+          <option value="analista">Analistas</option>
+          <option value="supervisor">Supervisores</option>
+          <option value="auditor">Auditores</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label">Equipo / grupo</label>
+        <select id="flt-team" name="team" class="form-select form-select-sm">
+          <option value="">Todos los equipos</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-lg-2">
+        <label class="form-label">Granularidad</label>
+        <select id="flt-granularity" name="granularity" class="form-select form-select-sm">
+          <option value="day">Día</option>
+          <option value="week">Semana</option>
+          <option value="month">Mes</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3 col-lg-2 d-flex align-items-end">
+        <button id="usage-apply-filters" type="submit" class="btn btn-sm w-100" style="background:var(--t-blue);color:#fff;border:none;border-radius:var(--radius-sm);font-weight:600;padding:7px;">
+          Aplicar filtros
+        </button>
+      </div>
     </div>
-</form>
+  </form>
 
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card" style="border-color: rgba(34,197,94,.25);"><div class="usage-card-title text-success"><i class="bi bi-broadcast"></i> Conectados ahora <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios con actividad en los ultimos 5 minutos. El tablero en vivo se refresca cada 60 segundos.">?</span></div><div class="usage-card-value text-success" id="card-live-users" style="font-size:30px;">0</div><div class="usage-card-sub">en este momento</div></div></div>
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-graph-up-arrow"></i> Tasa de adopcion <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="% de usuarios con score >= 30/100. Formula base: dias activos (20), cargas (40), busquedas (20) y exportaciones/descargas (20), normalizado a 100.">?</span></div><div class="usage-card-value d-flex align-items-baseline gap-1"><span id="card-adoption-val">0</span><span class="fs-6 fw-normal">%</span></div><div class="usage-card-sub">score >= 30 pts en el periodo</div></div></div>
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title text-warning"><i class="bi bi-moon"></i> Inactivos <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios detectados en el periodo cuyo ultimo acceso supera los 7 dias. Senala riesgo de abandono.">?</span></div><div class="usage-card-value text-warning" id="card-inactive-users">0</div><div class="usage-card-sub">sin actividad > 7 dias</div></div></div>
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-people"></i> Usuarios activos <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Usuarios unicos con al menos un evento en el periodo seleccionado.">?</span></div><div class="usage-card-value" id="card-active-users">0</div><div class="usage-card-sub">en el periodo</div></div></div>
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-clock-history"></i> Horas activas <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Suma estimada del tiempo efectivo en el sistema a partir de sesiones reconstruidas.">?</span></div><div class="usage-card-value" id="card-active-hours">0</div><div class="usage-card-sub">suma de sesiones del periodo</div></div></div>
-    <div class="col-6 col-md-4 col-lg-2"><div class="usage-kpi-card"><div class="usage-card-title"><i class="bi bi-arrow-up-circle"></i> Productividad <span class="kpi-help ms-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-title="Promedio de cargas por sesion. Sirve como proxy de uso orientado a trabajo real.">?</span></div><div class="usage-card-value" id="card-prod-index">0,0</div><div class="usage-card-sub">cargas / sesion (promedio)</div></div></div>
-</div>
-<div id="usage-kpi-state" class="small text-white-50 mb-4">Cargando indicadores del periodo...</div>
+  <!-- KPI GRID -->
+  <div class="kpi-grid" id="kpi-grid">
 
-<ul class="nav nav-pills usage-tabs mb-4" id="usage-tabs">
-    <li class="nav-item"><button class="nav-link active" type="button" data-usage-tab-target="#usage-tab-live"><i class="bi bi-broadcast me-1 text-success"></i> Monitoreo en Vivo</button></li>
-    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-summary">Uso General y Adopcion</button></li>
-    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-by-user">Vista por Usuario</button></li>
-    <li class="nav-item"><button class="nav-link" type="button" data-usage-tab-target="#usage-tab-alerts">Alertas de Uso <span id="nav-alerts-badge" class="badge bg-danger ms-1" style="display:none;">0</span></button></li>
-</ul>
-
-<div class="tab-content" style="min-height: 50vh;">
-    <div id="usage-tab-live" class="tab-pane show active" data-usage-tab-panel>
-        <div class="d-flex justify-content-between align-items-start mb-3">
-            <div>
-                <div class="h5 text-white mb-1 d-flex align-items-center gap-2">Usuarios Online <span class="sic-badge bg-success text-white border-0" id="live-count-badge">0</span><div class="spinner-grow spinner-grow-sm text-success" role="status" id="live-spinner" style="width:.6rem;height:.6rem;" title="Actualizando..."><span class="visually-hidden">Loading...</span></div></div>
-                <div class="small text-white-50">Vista viva de estado, seccion y tipo de actividad. Verde indica actividad reciente; amarillo indica sesion ociosa dentro de la ventana de monitoreo.</div>
-            </div>
-        </div>
-        <div class="sic-card p-0 overflow-hidden">
-            <div class="table-responsive">
-                <table class="sic-table mb-0">
-                    <thead>
-                        <tr>
-                            <th>Usuario</th><th>Rol</th><th>Unidad de negocio</th><th>Grupo</th><th>Seccion actual</th><th>Ultima accion</th><th class="text-end" title="Tiempo desde la ultima actividad util">Tiempo desde ultima actividad</th><th>Estado</th><th>Inicio de sesion actual</th><th>Ultima senal / ping</th><th>Tipo de actividad</th>
-                        </tr>
-                    </thead>
-                    <tbody id="usage-live-tbody"><tr><td colspan="11" class="usage-empty pe-none">Buscando usuarios conectados...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-        <div class="mt-2 text-end"><span class="small text-white-50" id="live-last-update">--</span></div>
+    <div class="kpi-card kpi-green">
+      <div class="kpi-label">
+        <i class="bi bi-broadcast"></i> Conectados ahora
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Usuarios con actividad registrada en los últimos 5 minutos. Se actualiza en tiempo real cada 30 segundos.">?</span>
+      </div>
+      <div class="kpi-value kpi-green count-anim" id="card-live-users">0</div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">en este momento</div>
+        <span class="kpi-trend up" id="kpi-live-trend" style="display:none;"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-live" height="32"></canvas></div>
     </div>
 
-    <div id="usage-tab-summary" class="tab-pane" data-usage-tab-panel>
-        <div class="row g-3">
-            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Actividad por dia de la semana</div><div class="usage-panel-sub">Cantidad total de eventos agrupados por dia.</div><div id="usage-chart-weekday" class="usage-chart"></div></div></div>
-            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Comparativa por usuario (Top 15)</div><div class="usage-panel-sub">Eventos totales y horas activas por usuario, ordenados por actividad.</div><div id="usage-chart-roles" class="usage-chart"></div></div></div>
-            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Mapa de calor dia / hora</div><div class="usage-panel-sub">Intensidad de uso por franja horaria y dia de la semana.</div><div id="usage-chart-heatmap" class="usage-chart"></div></div></div>
-            <div class="col-12 col-lg-6"><div class="sic-card"><div class="usage-panel-header">Secciones mas utilizadas</div><div class="usage-panel-sub">Modulos y secciones con mayor volumen de eventos en el periodo.</div><div id="usage-chart-sections" class="usage-chart"></div></div></div>
-        </div>
-    </div>
-    <div id="usage-tab-by-user" class="tab-pane" data-usage-tab-panel>
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>
-                <div class="h5 text-white mb-1">Salud de adopcion por usuario</div>
-                <div class="small text-white-50">Score, salud operativa y tendencia versus el periodo anterior. Clic en una fila para abrir el perfil lateral.</div>
-            </div>
-        </div>
-
-        <div class="score-legend">
-            <span class="fw-semibold text-white me-1" style="font-size:11px;">Score adopcion:</span>
-            <span class="score-legend-item"><span class="score-dot" style="background:#22c55e;"></span> >= 80 pts - Referente</span>
-            <span class="score-legend-item"><span class="score-dot" style="background:#3b82f6;"></span> 50-79 pts - Consolidado</span>
-            <span class="score-legend-item"><span class="score-dot" style="background:#f59e0b;"></span> 30-49 pts - En progreso</span>
-            <span class="score-legend-item"><span class="score-dot" style="background:#ef4444;"></span> &lt; 30 pts - Baja adopcion</span>
-            <span class="ms-auto text-white-50">Formula base: dias activos (20) + cargas (40) + busquedas (20) + exportaciones/descargas (20), normalizado a 100.</span>
-        </div>
-
-        <div class="sic-card p-0 overflow-hidden">
-            <div class="table-responsive">
-                <table class="sic-table mb-0" style="font-size:13px;">
-                    <thead>
-                        <tr>
-                            <th title="Score de adopcion 0-100">Score</th><th>Usuario</th><th>Rol</th><th>Unidad</th><th>Grupo</th><th>Estado actual</th><th class="text-center" title="Nivel de riesgo segun actividad reciente">Riesgo</th><th class="text-end">Sesiones</th><th class="text-end">Dias activos</th><th class="text-end">Horas activas</th><th class="text-end">Vistas</th><th class="text-end">Busquedas</th><th class="text-end">Descargas</th><th class="text-end">Cargas</th><th>Modulos usados</th><th>Frecuencia</th><th class="text-end">Ultimo acceso</th><th class="text-center" title="Tendencia vs periodo anterior comparable">Tendencia vs periodo anterior</th>
-                        </tr>
-                    </thead>
-                    <tbody id="su-users-byuser-tbody"><tr><td colspan="18" class="usage-empty pe-none">Cargando datos de usuarios...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-label">
+        <i class="bi bi-graph-up-arrow"></i> Tasa de adopción
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Porcentaje de usuarios con score de adopción ≥ 30/100. Fórmula: días activos (20) + cargas (40) + búsquedas (20) + exportaciones (20), normalizado a 100.">?</span>
+      </div>
+      <div class="kpi-value kpi-blue count-anim" id="card-adoption-val">0<span style="font-size:16px;font-weight:500;">%</span></div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">score ≥ 30 pts</div>
+        <span class="kpi-trend" id="kpi-adopt-trend"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-adopt" height="32"></canvas></div>
     </div>
 
-    <div id="usage-tab-alerts" class="tab-pane" data-usage-tab-panel>
-        <div class="d-flex justify-content-between align-items-start mb-3">
-            <div>
-                <div class="h5 text-white mb-1">Alertas de uso</div>
-                <div class="small text-white-50">Situaciones detectadas que requieren atencion del administrador. Cada alerta incluye usuario, motivo, severidad y recomendacion accionable.</div>
-            </div>
+    <div class="kpi-card kpi-yellow">
+      <div class="kpi-label">
+        <i class="bi bi-moon-stars"></i> Inactivos
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Usuarios cuyo último acceso supera los 7 días. Señal de riesgo de abandono del sistema.">?</span>
+      </div>
+      <div class="kpi-value kpi-yellow count-anim" id="card-inactive-users">0</div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">sin actividad &gt; 7 días</div>
+        <span class="kpi-trend down" id="kpi-inactive-trend" style="display:none;"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-inactive" height="32"></canvas></div>
+    </div>
+
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-label">
+        <i class="bi bi-people"></i> Usuarios activos
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Usuarios únicos con al menos un evento registrado en el período seleccionado.">?</span>
+      </div>
+      <div class="kpi-value kpi-white count-anim" id="card-active-users">0</div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">en el período</div>
+        <span class="kpi-trend" id="kpi-active-trend"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-active" height="32"></canvas></div>
+    </div>
+
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-label">
+        <i class="bi bi-clock-history"></i> Horas activas
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Suma estimada del tiempo efectivo en el sistema, calculada a partir de sesiones reconstruidas.">?</span>
+      </div>
+      <div class="kpi-value kpi-white count-anim" id="card-active-hours">0</div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">suma de sesiones</div>
+        <span class="kpi-trend" id="kpi-hours-trend"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-hours" height="32"></canvas></div>
+    </div>
+
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-label">
+        <i class="bi bi-lightning-charge"></i> Productividad
+        <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+          data-bs-title="Promedio de cargas por sesión. Actúa como proxy del uso orientado a trabajo productivo real.">?</span>
+      </div>
+      <div class="kpi-value kpi-white count-anim" id="card-prod-index">0,0</div>
+      <div class="kpi-footer">
+        <div class="kpi-sub">cargas / sesión</div>
+        <span class="kpi-trend" id="kpi-prod-trend"></span>
+      </div>
+      <div class="sparkline-wrap"><canvas id="spark-prod" height="32"></canvas></div>
+    </div>
+
+  </div><!-- /kpi-grid -->
+
+  <div id="usage-kpi-state" class="small mb-3" style="color:var(--t-muted);"></div>
+
+  <!-- TABS -->
+  <div class="trk-tabs" id="usage-tabs">
+    <button class="trk-tab active" type="button" data-usage-tab-target="#usage-tab-live">
+      <i class="bi bi-broadcast text-success"></i> Monitoreo en Vivo
+    </button>
+    <button class="trk-tab" type="button" data-usage-tab-target="#usage-tab-summary">
+      <i class="bi bi-bar-chart-line"></i> Uso General y Adopción
+    </button>
+    <button class="trk-tab" type="button" data-usage-tab-target="#usage-tab-by-user">
+      <i class="bi bi-person-lines-fill"></i> Vista por Usuario
+    </button>
+    <button class="trk-tab" type="button" data-usage-tab-target="#usage-tab-alerts">
+      <i class="bi bi-bell"></i> Alertas
+      <span class="tab-badge" id="nav-alerts-badge" style="display:none;">0</span>
+    </button>
+  </div>
+
+  <!-- TAB CONTENT -->
+  <div class="tab-content" style="min-height:60vh;">
+
+    <!-- ═══════ TAB 1: LIVE ═══════ -->
+    <div id="usage-tab-live" class="tab-pane show active fade-in" data-usage-tab-panel>
+
+      <div class="refresh-bar">
+        <div class="refresh-dot"></div>
+        <span id="live-last-update">Actualizando...</span>
+        <button type="button" class="btn-refresh" onclick="window.sicLiveRefresh && window.sicLiveRefresh()">
+          <i class="bi bi-arrow-clockwise"></i> Refrescar
+        </button>
+      </div>
+
+      <div class="trk-card">
+        <div class="trk-table-wrap">
+          <table class="trk-table">
+            <thead>
+              <tr>
+                <th class="table-action-col"></th>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Unidad</th>
+                <th>Grupo</th>
+                <th>Sección actual</th>
+                <th>Ruta de navegación</th>
+                <th>Última acción</th>
+                <th class="text-end">Tiempo inactivo</th>
+                <th>Estado</th>
+                <th>Inicio sesión</th>
+                <th>Tipo actividad</th>
+              </tr>
+            </thead>
+            <tbody id="usage-live-tbody">
+              <tr>
+                <td colspan="12">
+                  <div class="trk-empty">
+                    <div class="trk-empty-icon"><i class="bi bi-broadcast"></i></div>
+                    <div class="trk-empty-title">Buscando usuarios conectados...</div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div id="alerts-container" class="row g-3"><div class="col-12"><div class="usage-empty pe-none">Calculando alertas del periodo...</div></div></div>
-    </div>
-</div>
+      </div>
 
-<div class="offcanvas offcanvas-end border-0" tabindex="-1" id="userProfileOffcanvas" style="width: 480px; background: rgba(7,23,38,.98) !important; color: white;">
-    <div class="offcanvas-header" style="border-bottom: 1px solid var(--sic-border);">
-        <h5 class="offcanvas-title mb-0 d-flex align-items-center gap-2"><i class="bi bi-person-bounding-box" style="color: var(--sic-highlight);"></i> Perfil de usuario</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
-    </div>
-    <div class="offcanvas-body position-relative px-3 pb-3 pt-3">
-        <div id="profile-loading" class="text-center py-5"><div class="spinner-grow text-success" role="status"><span class="visually-hidden">Cargando...</span></div></div>
-        <div id="profile-content" style="display:none;">
-            <div class="text-center mb-3">
-                <div id="prof-online-badge" class="mb-2" style="display:none;"><span class="badge" style="background:rgba(34,197,94,.15);color:#4ade80;font-size:11px;"><span class="status-dot activo me-1"></span> Conectado ahora</span><span id="prof-online-section" class="ms-1 small text-white-50"></span></div>
-                <h4 id="prof-name" class="fw-bold mb-0">...</h4>
-                <div id="prof-email" class="small text-white-50 mb-2">...</div>
-                <div class="d-flex justify-content-center gap-2 flex-wrap"><span id="prof-role" class="sic-badge border-0" style="background:#0b3a5b;color:#7dd3fc;"></span><span id="prof-bu" class="sic-badge border-0" style="background:rgba(255,255,255,.05);color:#cbd5e1;"></span><span id="prof-group" class="sic-badge border-0" style="background:rgba(99,102,241,.1);color:#a5b4fc;display:none;"></span></div>
-                <div class="mt-2 d-flex justify-content-center gap-2 flex-wrap"><span id="prof-score-badge" class="sic-badge border-0"></span><span id="prof-current-status-badge" class="sic-badge border-0" style="background:rgba(255,255,255,.06);color:#e2e8f0;"></span><span id="prof-risk-badge" class="sic-badge border-0" style="display:none;"></span></div>
+    </div><!-- /tab-live -->
+
+    <!-- ═══════ TAB 2: SUMMARY ═══════ -->
+    <div id="usage-tab-summary" class="tab-pane fade-in" data-usage-tab-panel>
+
+      <!-- Metric selector -->
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <div class="metric-selector" id="metric-selector">
+          <button class="metric-btn active" data-metric="events">Eventos</button>
+          <button class="metric-btn" data-metric="hours">Horas</button>
+          <button class="metric-btn" data-metric="sessions">Sesiones</button>
+          <button class="metric-btn" data-metric="uploads">Cargas</button>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <!-- Actividad por día -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Actividad por día de la semana</h6>
+              </div>
+              <p class="trk-card-sub">Eventos agregados por día, con línea de promedio y detalle por tipo.</p>
+              <div class="chart-container" id="usage-chart-weekday"></div>
             </div>
-
-            <div class="row g-2 mb-3" id="prof-stats-row">
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-sessions">--</div><div class="prof-stat-lbl">Sesiones</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-hours">--</div><div class="prof-stat-lbl">Tiempo activo</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-days">--</div><div class="prof-stat-lbl">Dias activos</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-views">--</div><div class="prof-stat-lbl">Vistas</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-searches">--</div><div class="prof-stat-lbl">Busquedas</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-uploads">--</div><div class="prof-stat-lbl">Cargas</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-exports">--</div><div class="prof-stat-lbl">Exportaciones</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-downloads">--</div><div class="prof-stat-lbl">Descargas</div></div></div>
-                <div class="col-4"><div class="prof-stat-box"><div class="prof-stat-val" id="prof-stat-modules">--</div><div class="prof-stat-lbl">Modulos</div></div></div>
+          </div>
+        </div>
+        <!-- Top usuarios -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Comparativa por usuario (Top 15)</h6>
+              </div>
+              <p class="trk-card-sub">Actividad y score de adopción por persona.</p>
+              <div class="chart-container tall" id="usage-chart-roles"></div>
             </div>
+          </div>
+        </div>
+        <!-- Heatmap -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Mapa de calor día / hora</h6>
+              </div>
+              <p class="trk-card-sub">Intensidad de uso por franja horaria y día. Hover para detalle exacto.</p>
+              <div class="chart-container" id="usage-chart-heatmap"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Secciones -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Secciones más utilizadas</h6>
+              </div>
+              <p class="trk-card-sub">Módulos con mayor volumen de eventos — nombres legibles, % del total.</p>
+              <div class="chart-container" id="usage-chart-sections"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Evolución adopción -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Evolución de adopción en el tiempo</h6>
+              </div>
+              <p class="trk-card-sub">Score de adopción promedio por semana — últimas 8 semanas.</p>
+              <div class="chart-container" id="usage-chart-adoption"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Distribución módulos -->
+        <div class="col-12 col-lg-6">
+          <div class="trk-card">
+            <div class="trk-card-body">
+              <div class="trk-card-hd">
+                <h6 class="trk-card-title">Distribución por módulo</h6>
+              </div>
+              <p class="trk-card-sub">Proporción de uso por módulo de la plataforma.</p>
+              <div class="chart-container" id="usage-chart-donut"></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-            <div class="profile-section">
-                <div class="profile-section-title"><h6><i class="bi bi-person-lines-fill me-1"></i> Resumen actual</h6><span id="prof-last-access-pill" class="profile-note">Ultimo acceso: --</span></div>
-                <div class="profile-grid">
-                    <div><span class="profile-kv-label">Estado actual</span><div class="profile-kv-value" id="prof-current-status">--</div></div>
-                    <div><span class="profile-kv-label">Fecha de alta</span><div class="profile-kv-value" id="prof-created">--</div></div>
-                    <div><span class="profile-kv-label">Ultimo acceso</span><div class="profile-kv-value" id="prof-last-access">--</div></div>
-                    <div><span class="profile-kv-label">Frecuencia</span><div class="profile-kv-value" id="prof-frequency">--</div></div>
-                    <div><span class="profile-kv-label">Evolucion de uso</span><div class="profile-kv-value" id="prof-usage-evolution">--</div></div>
-                    <div><span class="profile-kv-label">Sesiones recientes</span><div class="profile-kv-value" id="prof-recent-sessions-summary">--</div></div>
+    </div><!-- /tab-summary -->
+
+    <!-- ═══════ TAB 3: BY USER ═══════ -->
+    <div id="usage-tab-by-user" class="tab-pane fade-in" data-usage-tab-panel>
+
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#e2e8f0;">Salud de adopción por usuario</div>
+          <div style="font-size:12px;color:var(--t-muted);">Score, actividad y tendencia vs período anterior. Clic en una fila para abrir el perfil lateral completo.</div>
+        </div>
+        <div style="font-size:11px;color:var(--t-muted);">Ordenar por: <strong style="color:var(--t-blue);" id="sort-indicator">Score ↓</strong></div>
+      </div>
+
+      <div class="score-legend">
+        <span style="font-size:11px;font-weight:700;color:var(--t-text);margin-right:4px;">Score adopción:</span>
+        <span class="score-legend-item"><span class="score-leg-dot" style="background:#10b981;"></span> ≥ 80 — Referente</span>
+        <span class="score-legend-item"><span class="score-leg-dot" style="background:#3b82f6;"></span> 50–79 — Consolidado</span>
+        <span class="score-legend-item"><span class="score-leg-dot" style="background:#f59e0b;"></span> 30–49 — En progreso</span>
+        <span class="score-legend-item"><span class="score-leg-dot" style="background:#ef4444;"></span> &lt; 30 — Baja adopción</span>
+        <span class="ms-auto" style="font-size:10px;color:var(--t-muted);">Fórmula: días activos (20) + cargas (40) + búsquedas (20) + exportaciones (20) → normalizado a 100</span>
+      </div>
+
+      <div class="trk-card">
+        <div class="trk-table-wrap">
+          <table class="trk-table" style="font-size:12px;">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="score">Score</th>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Unidad</th>
+                <th>Grupo</th>
+                <th>Estado</th>
+                <th class="text-center">Riesgo</th>
+                <th class="text-end sortable" data-sort="sessions">Sesiones</th>
+                <th class="text-end sortable" data-sort="days">Días</th>
+                <th class="text-end sortable" data-sort="hours">Horas</th>
+                <th class="text-end sortable" data-sort="views">Vistas</th>
+                <th class="text-end sortable" data-sort="searches">Búsquedas</th>
+                <th class="text-end sortable" data-sort="downloads">Descargas</th>
+                <th class="text-end sortable" data-sort="uploads">Cargas</th>
+                <th>Módulos más usados</th>
+                <th>Frecuencia</th>
+                <th class="text-end sortable" data-sort="last_access">Último acceso</th>
+              </tr>
+            </thead>
+            <tbody id="su-users-byuser-tbody">
+              <tr><td colspan="17">
+                <div class="trk-empty">
+                  <div class="trk-empty-icon"><i class="bi bi-people"></i></div>
+                  <div class="trk-empty-title">Cargando datos de usuarios...</div>
                 </div>
-            </div>
-            <div class="profile-section">
-                <div class="profile-section-title"><h6><i class="bi bi-collection me-1"></i> Modulos y acciones</h6><span class="profile-note">Ultimo periodo filtrado</span></div>
-                <div id="prof-modules" class="profile-chip-list mb-2"></div>
-                <div class="table-chip-list">
-                    <span class="metric-pill"><i class="bi bi-search"></i> Busquedas: <strong id="prof-search-count">--</strong></span>
-                    <span class="metric-pill"><i class="bi bi-cloud-upload"></i> Cargas: <strong id="prof-upload-count">--</strong></span>
-                    <span class="metric-pill"><i class="bi bi-download"></i> Descargas: <strong id="prof-download-count">--</strong></span>
-                    <span class="metric-pill"><i class="bi bi-box-arrow-up-right"></i> Exportaciones: <strong id="prof-export-count">--</strong></span>
-                    <span class="metric-pill"><i class="bi bi-clock-history"></i> Tiempo activo: <strong id="prof-active-time">--</strong></span>
-                </div>
-            </div>
-
-            <div class="profile-section">
-                <div class="profile-section-title"><h6><i class="bi bi-journal-text me-1"></i> Sesiones recientes</h6><span class="profile-note" id="prof-sessions-note">Detalle de sesiones reconstruidas</span></div>
-                <div id="prof-recent-sessions" class="profile-list"><div class="usage-empty py-3">Sin sesiones recientes.</div></div>
-            </div>
-
-            <div class="profile-section">
-                <div class="profile-section-title"><h6><i class="bi bi-bell me-1"></i> Alertas asociadas</h6><span class="profile-note">Riesgos y recomendaciones</span></div>
-                <div id="prof-alerts" class="profile-list"><div class="usage-empty py-3">Sin alertas para este usuario.</div></div>
-            </div>
-
-            <div class="profile-section">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="fw-bold mb-0" style="color: var(--sic-text-muted); font-size:12px;"><i class="bi bi-clock-history me-1"></i> ACTIVIDAD RECIENTE</h6>
-                    <span class="badge" style="background:#0b3a5b;color:#7dd3fc;font-weight:400;font-size:10px;" id="prof-timeline-badge">Ultimas 200</span>
-                </div>
-                <div id="prof-timeline" class="profile-timeline"></div>
-            </div>
+              </td></tr>
+            </tbody>
+          </table>
         </div>
+      </div>
+
+    </div><!-- /tab-by-user -->
+
+    <!-- ═══════ TAB 4: ALERTS ═══════ -->
+    <div id="usage-tab-alerts" class="tab-pane fade-in" data-usage-tab-panel>
+
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#e2e8f0;">Alertas de uso</div>
+          <div style="font-size:12px;color:var(--t-muted);">Situaciones detectadas que requieren atención. Cada alerta incluye motivo, severidad y recomendación.</div>
+        </div>
+      </div>
+
+      <div class="alert-filters" id="alert-filters">
+        <button class="alert-filter-btn active" data-filter="all">Todas <span class="afc" id="afc-all">0</span></button>
+        <button class="alert-filter-btn f-alta"  data-filter="alta">Alta  <span class="afc" id="afc-alta">0</span></button>
+        <button class="alert-filter-btn f-media" data-filter="media">Media <span class="afc" id="afc-media">0</span></button>
+        <button class="alert-filter-btn f-baja"  data-filter="baja">Baja  <span class="afc" id="afc-baja">0</span></button>
+      </div>
+
+      <div id="alerts-container" class="row g-3">
+        <div class="col-12">
+          <div class="trk-empty">
+            <div class="trk-empty-icon"><i class="bi bi-bell"></i></div>
+            <div class="trk-empty-title">Calculando alertas...</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-alerts -->
+
+  </div><!-- /tab-content -->
+
+</div><!-- /trk-page -->
+
+<!-- PROFILE OVERLAY -->
+<div class="profile-overlay" id="profile-overlay"></div>
+
+<!-- PROFILE PANEL (slide-in) -->
+<div class="trk-profile-panel" id="userProfilePanel">
+  <div class="profile-hd">
+    <div style="font-size:14px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+      <i class="bi bi-person-bounding-box" style="color:var(--t-blue);"></i> Perfil de usuario
     </div>
-</div>
+    <button class="profile-close" id="profile-close-btn" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="profile-body">
+    <div id="profile-loading" class="text-center py-5">
+      <div class="spinner-grow" style="color:var(--t-blue);" role="status">
+        <span class="visually-hidden">Cargando...</span>
+      </div>
+    </div>
+    <div id="profile-content" style="display:none;">
+
+      <!-- Avatar + nombre -->
+      <div class="text-center mb-3">
+        <div class="prof-avatar-lg" id="prof-avatar">?</div>
+        <h4 class="prof-name" id="prof-name">--</h4>
+        <p class="prof-email" id="prof-email">--</p>
+        <div class="prof-chips" id="prof-chips"></div>
+      </div>
+
+      <!-- Score grande -->
+      <div class="prof-score-big">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--t-muted);margin-bottom:6px;">Score de Adopción</div>
+        <div class="prof-score-val" id="prof-score-val">--</div>
+        <div class="prof-score-bar"><div class="prof-score-fill" id="prof-score-fill" style="width:0%;"></div></div>
+        <div class="prof-score-label" id="prof-score-label">--</div>
+        <div class="prof-score-chart-wrap mt-2"><canvas id="prof-score-chart" height="80"></canvas></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="prof-stats-grid" id="prof-stats-row">
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-sessions">--</div><div class="prof-stat-lbl">Sesiones</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-hours">--</div><div class="prof-stat-lbl">Horas activas</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-days">--</div><div class="prof-stat-lbl">Días activos</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-views">--</div><div class="prof-stat-lbl">Vistas</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-searches">--</div><div class="prof-stat-lbl">Búsquedas</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-uploads">--</div><div class="prof-stat-lbl">Cargas</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-exports">--</div><div class="prof-stat-lbl">Exportaciones</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-downloads">--</div><div class="prof-stat-lbl">Descargas</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-modules">--</div><div class="prof-stat-lbl">Módulos</div></div>
+      </div>
+
+      <!-- Ruta de navegación más reciente -->
+      <div class="prof-section">
+        <div class="prof-section-title"><i class="bi bi-signpost-split me-1"></i> Ruta de sesión más reciente</div>
+        <div id="prof-nav-stepper" class="prof-nav-stepper"></div>
+      </div>
+
+      <!-- Módulos y acciones -->
+      <div class="prof-section">
+        <div class="prof-section-title"><i class="bi bi-collection me-1"></i> Módulos y acciones</div>
+        <div id="prof-modules" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          <span class="chip chip-gray"><i class="bi bi-search"></i> Búsquedas: <strong id="prof-search-count">--</strong></span>
+          <span class="chip chip-gray"><i class="bi bi-cloud-upload"></i> Cargas: <strong id="prof-upload-count">--</strong></span>
+          <span class="chip chip-gray"><i class="bi bi-download"></i> Descargas: <strong id="prof-download-count">--</strong></span>
+          <span class="chip chip-gray"><i class="bi bi-box-arrow-up-right"></i> Exportaciones: <strong id="prof-export-count">--</strong></span>
+        </div>
+      </div>
+
+      <!-- Sesiones recientes -->
+      <div class="prof-section">
+        <div class="prof-section-title"><i class="bi bi-journal-text me-1"></i> Sesiones recientes</div>
+        <div id="prof-recent-sessions"></div>
+      </div>
+
+      <!-- Timeline actividad -->
+      <div class="prof-section">
+        <div class="prof-section-title"><i class="bi bi-clock-history me-1"></i> Actividad reciente</div>
+        <div id="prof-timeline" class="prof-timeline-list"></div>
+      </div>
+
+      <!-- Alertas asociadas -->
+      <div class="prof-section">
+        <div class="prof-section-title"><i class="bi bi-bell me-1"></i> Alertas asociadas</div>
+        <div id="prof-alerts"></div>
+      </div>
+
+      <!-- Acciones -->
+      <div class="prof-actions">
+        <button class="btn-prof-action btn-prof-primary"><i class="bi bi-envelope"></i> Enviar mensaje</button>
+        <button class="btn-prof-action btn-prof-ghost"><i class="bi bi-people"></i> Asignar grupo</button>
+        <button class="btn-prof-action btn-prof-ghost"><i class="bi bi-flag"></i> Marcar seguimiento</button>
+      </div>
+
+    </div><!-- /profile-content -->
+  </div><!-- /profile-body -->
+</div><!-- /trk-profile-panel -->
+
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2026c"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const tooltipEls = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-        tooltipEls.forEach(el => new bootstrap.Tooltip(el, { trigger: 'hover' }));
-    });
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.animation = { duration: 800, easing: 'easeInOutQuart' };
+    if (Chart.helpers && Chart.helpers.storage) {
+      Chart.helpers.storage = { get: () => null, set: () => {}, remove: () => {} };
+    }
+  }
+</script>
+<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2027b"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+      new bootstrap.Tooltip(el, { trigger: 'hover' })
+    );
+  });
 </script>
 {% endblock %}
