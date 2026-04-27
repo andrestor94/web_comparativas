@@ -568,62 +568,96 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
         from web_comparativas.usage_service import get_live_users_data as _live
         from web_comparativas.visibility_service import get_visible_user_ids as _vis_ids
 
-        session = db_session()
+        s = db_session()
+
+        # 1. Todos los usuarios visibles — misma fuente que "Gestión de Usuarios"
         try:
-            visible_ids = _vis_ids(session, user)
-            visible_ids.add(int(user.id))
+            visible_ids = _vis_ids(s, user)
+        except Exception:
+            visible_ids = set()
+        visible_ids.add(int(user.id))
 
+        all_users = (
+            s.query(User)
+            .filter(User.id.in_(visible_ids))
+            .order_by(User.name.asc())
+            .all()
+        ) if visible_ids else []
+
+        # 2. Datos de presencia en vivo (puede ser vacío si nadie está activo ahora)
+        live_map = {}
+        try:
+            for row in _live(s, visible_ids):
+                uid = row.get("id")
+                if uid:
+                    live_map[int(uid)] = row
+        except Exception:
+            pass
+
+        # 3. Stats de actividad de get_usage_summary (enriquecimiento, puede fallar sin datos)
+        stats_map = {}
+        try:
             summary = get_usage_summary(current_user=user)
-            per_user = summary.get("per_user", [])
-
-            live_map = {}
-            try:
-                live_rows = _live(session, visible_ids)
-                for row in live_rows:
-                    uid = row.get("id") or row.get("user_id")
-                    if uid:
-                        live_map[int(uid)] = row
-            except Exception:
-                pass
-
-            merged = []
-            for row in per_user:
+            for row in summary.get("per_user", []):
                 uid = row.get("user_id") or row.get("id")
-                live = live_map.get(int(uid)) if uid else {}
-                entry = {
-                    "id": uid,
-                    "username": row.get("name") or row.get("email", "").split("@")[0],
-                    "email": row.get("email", ""),
-                    "role": row.get("role_raw", "analista"),
-                    "unit": row.get("unit_business", "Sin unidad"),
-                    "group": row.get("group", "Sin grupo"),
-                    "created": str(row.get("created_at", ""))[:10],
-                    "score": int(row.get("adoption_score") or 0),
-                    "sessions": int(row.get("sessions") or 0),
-                    "active_days": int(row.get("active_days") or 0),
-                    "active_hours": float(row.get("active_hours") or 0),
-                    "views": int(row.get("views") or 0),
-                    "searches": int(row.get("searches") or 0),
-                    "downloads": int(row.get("downloads") or 0),
-                    "uploads": int(row.get("uploads") or 0),
-                    "exports": int(row.get("exports") or 0),
-                    "modules": row.get("modules_used_list") or [],
-                    "frequency": row.get("frequency", "Ocasional"),
-                    "risk": row.get("risk_level", "bajo"),
-                    "last_access": str(row.get("last_seen", "") or ""),
-                    "status": live.get("status") or row.get("current_status") or "offline",
-                    "current_section": live.get("current_section") or row.get("current_section") or "",
-                    "last_action": live.get("last_action") or row.get("last_action") or "",
-                    "activity_type": live.get("activity_type") or row.get("activity_type"),
-                    "sessions_detail": row.get("recent_sessions") or [],
-                    "nav_trail": live.get("nav_trail") or [],
-                    "timeline": [],
-                }
-                merged.append(entry)
+                if uid:
+                    stats_map[int(uid)] = row
+        except Exception:
+            pass
 
-            tracking_users_json = _json_mod.dumps(merged, ensure_ascii=False, default=str)
-        finally:
-            session.close()
+        # 4. Construir lista final: base = usuarios reales, enriquecido con actividad si existe
+        merged = []
+        for u in all_users:
+            uid = int(u.id)
+            live = live_map.get(uid, {})
+            st   = stats_map.get(uid, {})
+
+            # Estado en vivo: prioridad live → stats → offline
+            raw_status = (live.get("status") or st.get("current_status") or "").lower()
+            status_map = {
+                "activo": "active", "active": "active",
+                "inactivo": "idle",  "inactive": "idle",
+                "ausente": "idle",
+            }
+            status = status_map.get(raw_status, "offline")
+
+            entry = {
+                "id":       uid,
+                "username": u.full_name or u.name or u.email.split("@")[0].title(),
+                "email":    u.email or "",
+                "role":     (u.role or "analista").lower(),
+                "unit":     (u.unit_business or "Sin unidad").title(),
+                "group":    st.get("group") or "Sin grupo",
+                "created":  str(getattr(u, "created_at", "") or "")[:10],
+                # Actividad (real si existe, 0 si no hay datos aún)
+                "score":       int(st.get("adoption_score") or 0),
+                "sessions":    int(st.get("sessions") or 0),
+                "active_days": int(st.get("active_days") or 0),
+                "active_hours":float(st.get("active_hours") or 0),
+                "views":       int(st.get("views") or 0),
+                "searches":    int(st.get("searches") or 0),
+                "downloads":   int(st.get("downloads") or 0),
+                "uploads":     int(st.get("uploads") or 0),
+                "exports":     int(st.get("exports") or 0),
+                "modules":     st.get("modules_used_list") or [],
+                "frequency":   st.get("frequency") or "Sin datos",
+                "risk":        st.get("risk_level") or "bajo",
+                "last_access": str(st.get("last_seen") or ""),
+                # Presencia en vivo (real si está activo, neutro si no)
+                "status":          status,
+                "current_section": live.get("current_section") or "",
+                "session_start":   live.get("session_start"),
+                "last_ping":       live.get("last_signal"),
+                "last_action":     live.get("last_action") or st.get("last_action") or "Sin actividad registrada",
+                "activity_type":   live.get("activity_type") or st.get("activity_type"),
+                "nav_trail":       [],
+                "sessions_detail": [],
+                "timeline":        [],
+                "score_history":   [],
+            }
+            merged.append(entry)
+
+        tracking_users_json = _json_mod.dumps(merged, ensure_ascii=False, default=str)
     except Exception:
         tracking_users_json = "[]"
 

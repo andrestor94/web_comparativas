@@ -456,56 +456,8 @@
   /* ═══════════════════════════════════════════════════════
      MOCK ALERTS
   ═══════════════════════════════════════════════════════ */
-  const MOCK_ALERTS = [
-    {
-      id: 'a1', severity: 'alta', userId: 4,
-      icon: 'bi-exclamation-octagon',
-      title: 'Usuario inactivo prolongado',
-      body: 'Diego Paredes no registra actividad desde hace 9 días. Riesgo elevado de abandono del sistema.',
-      rec: 'Contactar al usuario para verificar necesidades de capacitación o acceso.',
-      time: dAgo(9),
-    },
-    {
-      id: 'a2', severity: 'alta', userId: 4,
-      icon: 'bi-graph-down-arrow',
-      title: 'Score de adopción crítico',
-      body: 'Diego Paredes mantiene un score de 21/100 desde el inicio. Sin actividad de carga ni exportación.',
-      rec: 'Asignar sesión de onboarding personalizada. Revisar acceso a módulos relevantes.',
-      time: dAgo(7),
-    },
-    {
-      id: 'a3', severity: 'media', userId: 3,
-      icon: 'bi-arrow-down-circle',
-      title: 'Actividad por debajo del umbral',
-      body: 'Laura Ríos presenta frecuencia semanal con score estancado en 45/100. Poca diversidad de módulos.',
-      rec: 'Programar demo de módulos avanzados: Dimensiones y Forecast.',
-      time: dAgo(3),
-    },
-    {
-      id: 'a4', severity: 'media', userId: 2,
-      icon: 'bi-clock-history',
-      title: 'Actividad inusual en horario tardío',
-      body: 'Carlos Méndez registró 3 sesiones entre las 22:00 y las 01:00 en los últimos 5 días.',
-      rec: 'Verificar si el acceso fuera de horario es esperado para este rol (Supervisor).',
-      time: dAgo(2),
-    },
-    {
-      id: 'a5', severity: 'baja', userId: 5,
-      icon: 'bi-shield-check',
-      title: 'Acceso a módulo de auditoría frecuente',
-      body: 'Sofía Herrera accedió a Seguimiento de Usuarios 18 veces en el período. Actividad dentro del rol.',
-      rec: 'Sin acción requerida. Actividad coherente con perfil de Auditor.',
-      time: dAgo(1),
-    },
-    {
-      id: 'a6', severity: 'baja', userId: 1,
-      icon: 'bi-star',
-      title: 'Primer acceso registrado — módulo Forecast',
-      body: 'María González accedió por primera vez al módulo Forecast. Señal positiva de exploración.',
-      rec: 'Enviar guía rápida del módulo Forecast para potenciar la adopción.',
-      time: dAgo(0, 6),
-    },
-  ];
+  // Alertas se generan desde el backend (get_usage_summary → alerts), no datos ficticios
+  const MOCK_ALERTS = [];
 
   /* ═══════════════════════════════════════════════════════
      STATE
