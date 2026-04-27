@@ -557,18 +557,82 @@ def sic_helpdesk_delete(
 # --- TRACKING ---
 @router.get("/tracking", response_class=HTMLResponse)
 def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
-    # Admin check for Tracking
+    import json as _json_mod
     user_role = (user.role or "").lower()
     has_access = user_role in ["admin", "supervisor", "auditor"]
     if not has_access:
         raise HTTPException(status_code=403, detail="Access Denied: Admins Only")
 
-    # Log usage event logic from legacy route
+    tracking_users_json = "[]"
+    try:
+        from web_comparativas.usage_service import get_live_users_data as _live
+        from web_comparativas.visibility_service import get_visible_user_ids as _vis_ids
+
+        session = db_session()
+        try:
+            visible_ids = _vis_ids(session, user)
+            visible_ids.add(int(user.id))
+
+            summary = get_usage_summary(current_user=user)
+            per_user = summary.get("per_user", [])
+
+            live_map = {}
+            try:
+                live_rows = _live(session, visible_ids)
+                for row in live_rows:
+                    uid = row.get("id") or row.get("user_id")
+                    if uid:
+                        live_map[int(uid)] = row
+            except Exception:
+                pass
+
+            merged = []
+            for row in per_user:
+                uid = row.get("user_id") or row.get("id")
+                live = live_map.get(int(uid)) if uid else {}
+                entry = {
+                    "id": uid,
+                    "username": row.get("name") or row.get("email", "").split("@")[0],
+                    "email": row.get("email", ""),
+                    "role": row.get("role_raw", "analista"),
+                    "unit": row.get("unit_business", "Sin unidad"),
+                    "group": row.get("group", "Sin grupo"),
+                    "created": str(row.get("created_at", ""))[:10],
+                    "score": int(row.get("adoption_score") or 0),
+                    "sessions": int(row.get("sessions") or 0),
+                    "active_days": int(row.get("active_days") or 0),
+                    "active_hours": float(row.get("active_hours") or 0),
+                    "views": int(row.get("views") or 0),
+                    "searches": int(row.get("searches") or 0),
+                    "downloads": int(row.get("downloads") or 0),
+                    "uploads": int(row.get("uploads") or 0),
+                    "exports": int(row.get("exports") or 0),
+                    "modules": row.get("modules_used_list") or [],
+                    "frequency": row.get("frequency", "Ocasional"),
+                    "risk": row.get("risk_level", "bajo"),
+                    "last_access": str(row.get("last_seen", "") or ""),
+                    "status": live.get("status") or row.get("current_status") or "offline",
+                    "current_section": live.get("current_section") or row.get("current_section") or "",
+                    "last_action": live.get("last_action") or row.get("last_action") or "",
+                    "activity_type": live.get("activity_type") or row.get("activity_type"),
+                    "sessions_detail": row.get("recent_sessions") or [],
+                    "nav_trail": live.get("nav_trail") or [],
+                    "timeline": [],
+                }
+                merged.append(entry)
+
+            tracking_users_json = _json_mod.dumps(merged, ensure_ascii=False, default=str)
+        finally:
+            session.close()
+    except Exception:
+        tracking_users_json = "[]"
+
     ctx = {
         "request": request,
         "user": user,
         "user_display": user_display,
-        "section": "tracking"
+        "section": "tracking",
+        "tracking_users_json": tracking_users_json,
     }
     return templates.TemplateResponse("sic/tracking.html", ctx)
 

@@ -589,6 +589,39 @@
 .btn-prof-primary:hover { background: rgba(59,130,246,.25); }
 .btn-prof-ghost { background: rgba(255,255,255,.03); border-color: var(--t-border); color: var(--t-muted2); }
 .btn-prof-ghost:hover { background: rgba(255,255,255,.07); color: var(--t-text); }
+.btn-prof-ghost.watch-active { background: rgba(234,179,8,.1); border-color: rgba(234,179,8,.35); color: #fde047; }
+.btn-prof-ghost.watch-active:hover { background: rgba(234,179,8,.18); }
+
+/* Group popover */
+.grp-popover {
+  position: absolute; z-index: 120;
+  background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+  padding: 8px 0; min-width: 180px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.grp-popover-item {
+  padding: 8px 14px; font-size: 12px; color: #94a3b8;
+  cursor: pointer; transition: background .15s, color .15s;
+  display: flex; align-items: center; gap: 8px;
+}
+.grp-popover-item:hover { background: rgba(255,255,255,.06); color: #e2e8f0; }
+.grp-popover-item.selected { color: #60a5fa; }
+.grp-popover-item.selected::after { content: '✓'; margin-left: auto; }
+
+/* Toast notification */
+.trk-toast {
+  position: fixed; bottom: 28px; right: 28px; z-index: 9999;
+  background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+  padding: 10px 16px; font-size: 12px; font-weight: 600; color: #e2e8f0;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .25s, transform .25s;
+  pointer-events: none;
+}
+.trk-toast.show { opacity: 1; transform: translateY(0); }
+.trk-toast.toast-success .toast-icon { color: #4ade80; }
+.trk-toast.toast-info .toast-icon { color: #60a5fa; }
+.trk-toast.toast-warn .toast-icon { color: #fde047; }
 
 /* ═══════════════════════════════════════════════════
    SCORE CHART (weekly evolution)
@@ -655,16 +688,109 @@
   font-size: 12px; font-weight: 700;
 }
 .live-spinner { width: 8px; height: 8px; }
+
+/* ═══════════════════════════════════════════════════
+   FX LAYER — 3D / GSAP / VISUAL
+═══════════════════════════════════════════════════ */
+@media (hover:hover){.trk-page *{cursor:none!important}}
+.trk-cursor{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--t-blue);pointer-events:none;z-index:99999;transform:translate(-50%,-50%);transition:transform .1s,background .2s;mix-blend-mode:screen;top:0;left:0;will-change:transform}
+.trk-cursor.hov{transform:translate(-50%,-50%) scale(1.8);background:var(--t-green)}
+.trk-cursor-ring{position:fixed;width:34px;height:34px;border-radius:50%;border:1.5px solid rgba(59,130,246,.45);pointer-events:none;z-index:99998;transform:translate(-50%,-50%);transition:width .15s,height .15s,border-color .2s;top:0;left:0;will-change:transform}
+.trk-cursor-ring.hov{width:46px;height:46px;border-color:rgba(16,185,129,.55)}
+.trk-scanlines{position:fixed;inset:0;pointer-events:none;z-index:9998;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.015) 2px,rgba(0,0,0,.015) 4px)}
+
+/* Live interface twin */
+.globe-section{display:flex;gap:16px;align-items:flex-start;border-radius:var(--radius-lg);background:var(--t-surface);border:1px solid var(--t-border);padding:16px;overflow:hidden;min-height:440px;margin-bottom:16px}
+.globe-wrap{flex:0 0 60%;position:relative;border-radius:var(--radius-md);overflow:hidden;background:linear-gradient(180deg,#050c18,#081426)}
+#globe-canvas{display:block;width:100%!important;min-height:320px;transition:height .25s ease}
+.globe-tooltip{position:absolute;pointer-events:none;background:rgba(10,15,26,.95);border:1px solid var(--t-border);border-radius:8px;padding:8px 12px;font-size:11.5px;color:var(--t-text);white-space:nowrap;z-index:20;backdrop-filter:blur(8px);box-shadow:0 4px 20px rgba(0,0,0,.4);display:none}
+.globe-online-list{flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:440px}
+.globe-list-hd{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:var(--t-muted);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.globe-user-item{padding:10px 12px;border-radius:var(--radius-sm);background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.1);cursor:pointer;transition:all var(--transition)}
+.globe-user-item:hover,.globe-user-item.selected{background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.25)}
+.globe-user-item.dimmed{opacity:.38}
+.globe-u-name{font-weight:600;color:#e2e8f0;font-size:12px;margin-bottom:4px;display:flex;align-items:center;gap:5px}
+.globe-u-sec{color:var(--t-muted);font-size:11px}
+.globe-u-meta{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;color:var(--t-muted2);font-size:10.5px;line-height:1.35}
+.nav-map-title{position:absolute;top:12px;left:14px;right:14px;z-index:4;pointer-events:none}
+.nav-map-title strong{display:block;color:#e2e8f0;font-size:14px}
+.nav-map-title span{display:block;color:var(--t-muted);font-size:11px;margin-top:2px}
+.nav-map-legend{position:absolute;left:14px;bottom:12px;z-index:4;display:flex;flex-wrap:wrap;gap:8px;pointer-events:none}
+.nav-map-legend span{font-size:10px;color:var(--t-muted);background:rgba(10,15,26,.72);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:3px 7px;backdrop-filter:blur(8px)}
+@media(max-width:991px){.globe-section{flex-direction:column}.globe-wrap{flex:none}}
+
+/* Radar */
+.radar-wrap{width:72px;height:72px;flex-shrink:0}
+.radar-wrap svg{width:72px;height:72px;overflow:visible}
+@keyframes radar-ring-exp{from{r:2;opacity:.75}to{r:30;opacity:0}}
+@keyframes radar-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.radar-ring-a{transform-origin:36px 36px;transform-box:fill-box;animation:radar-ring-exp var(--radar-speed,2.2s) ease-out infinite}
+.radar-ring-a:nth-child(2){animation-delay:calc(var(--radar-speed,2.2s) * .33)}
+.radar-ring-a:nth-child(3){animation-delay:calc(var(--radar-speed,2.2s) * .66)}
+.radar-sweep{transform-origin:36px 36px;transform-box:fill-box;animation:radar-spin var(--radar-speed,2.2s) linear infinite}
+
+/* KPI tilt + shimmer */
+.kpi-card{transform-style:preserve-3d;will-change:transform}
+.kpi-card>*:not(.kpi-shimmer){position:relative;z-index:2}
+.kpi-shimmer{position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:1;opacity:0;transition:opacity .35s;background:radial-gradient(ellipse at var(--mx,50%) var(--my,50%),rgba(59,130,246,.2) 0%,rgba(139,92,246,.13) 45%,rgba(16,185,129,.06) 100%)}
+.kpi-card:hover .kpi-shimmer{opacity:1}
+@keyframes badge-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+.tab-badge.fx-pulse{animation:badge-pulse .5s ease}
+
+/* Alert pulse */
+@keyframes alert-pulse-red{0%,100%{box-shadow:-3px 0 0 #ef4444,0 0 10px rgba(239,68,68,.1)}50%{box-shadow:-3px 0 0 #ef4444,0 0 28px rgba(239,68,68,.38)}}
+@keyframes alert-bg-drift{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+@keyframes alert-icon-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+.alert-card.sev-alta{animation:alert-pulse-red 2.6s ease-in-out infinite;background-image:linear-gradient(115deg,rgba(239,68,68,.04),rgba(59,130,246,.03),rgba(239,68,68,.05));background-size:220% 100%}
+.alert-card.sev-alta{animation:alert-pulse-red 2.6s ease-in-out infinite,alert-bg-drift 8s linear infinite alternate}
+.alert-card.sev-alta .alert-title i{display:inline-block;animation:alert-icon-shake 1.4s ease-in-out infinite}
+
+/* Particle burst */
+.burst-particle{position:fixed;width:7px;height:7px;border-radius:50%;background:#10b981;pointer-events:none;z-index:99990;box-shadow:0 0 8px rgba(16,185,129,.9);will-change:transform}
+
+/* Nav graph */
+#nav-graph-wrap{height:280px;position:relative;border-radius:var(--radius-md);overflow:hidden;background:rgba(0,0,0,.4);border:1px solid var(--t-border)}
+#nav-graph-canvas{display:block;width:100%!important;height:100%!important}
+.nav-graph-tooltip{position:absolute;pointer-events:none;background:rgba(10,15,26,.95);border:1px solid var(--t-border);border-radius:8px;padding:7px 11px;font-size:11px;color:var(--t-text);white-space:nowrap;z-index:20;display:none}
+
+/* Glitch */
+@keyframes glitch-a{0%{clip-path:inset(0 0 90% 0);transform:translate(-3px,0);color:#3b82f6}25%{clip-path:inset(35% 0 50% 0);transform:translate(3px,0);color:#8b5cf6}50%{clip-path:inset(70% 0 10% 0);transform:translate(-2px,0)}75%{clip-path:inset(10% 0 75% 0);transform:translate(2px,0)}100%{clip-path:inset(0);transform:translate(0)}}
+.trk-title{position:relative;overflow:visible}
+.glitch-layer{position:absolute;inset:0;pointer-events:none;animation:glitch-a .58s steps(1) both;color:inherit;font-size:inherit;font-weight:inherit;line-height:inherit;letter-spacing:inherit;background:transparent}
+
+/* Skeleton */
+@keyframes sk-sh{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skeleton{background:linear-gradient(90deg,rgba(255,255,255,.04) 25%,rgba(255,255,255,.09) 50%,rgba(255,255,255,.04) 75%);background-size:400px 100%;animation:sk-sh 1.5s ease infinite;border-radius:6px}
+.skel-row{height:40px;margin-bottom:4px}
+
+/* Vanta overlay */
+.trk-page{position:relative}
+#vanta-bg-el{position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:0}
+#vanta-bg-el::after{content:"";position:absolute;inset:0;background:rgba(10,15,26,.75);pointer-events:none}
+.trk-page>.trk-header,.trk-page>.trk-filters,.trk-page>.kpi-grid,
+.trk-page>#usage-kpi-state,.trk-page>.trk-tabs,.trk-page>.tab-content{position:relative;z-index:1}
+.trk-page.fx-low-power #nav-graph-wrap::before{content:"Visualización 3D pausada por rendimiento";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--t-muted);font-size:12px;background:rgba(5,12,24,.9);z-index:3}
+@media (prefers-reduced-motion: reduce){
+  .trk-page *,.trk-scanlines,.radar-ring-a,.radar-sweep,.alert-card.sev-alta{animation:none!important;transition:none!important}
+  .trk-cursor,.trk-cursor-ring{display:none!important}
+}
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="trk-page">
+  <div id="vanta-bg-el" aria-hidden="true"></div>
+
+  <!-- FX: Custom cursor -->
+  <div id="trk-cursor" class="trk-cursor" aria-hidden="true"></div>
+  <div id="trk-cursor-ring" class="trk-cursor-ring" aria-hidden="true"></div>
+  <!-- FX: Scanlines overlay -->
+  <div class="trk-scanlines" aria-hidden="true"></div>
 
   <!-- HEADER -->
   <div class="trk-header">
     <div>
-      <h1 class="trk-title"><i class="bi bi-broadcast me-2" style="color:var(--t-green);font-size:20px;"></i>Seguimiento de Usuarios</h1>
+      <h1 class="trk-title" id="trk-main-title"><i class="bi bi-broadcast me-2" style="color:var(--t-green);font-size:20px;"></i>Seguimiento de Usuarios</h1>
       <p class="trk-subtitle">Centro de monitoreo de actividad, adopción y salud operativa de la plataforma.</p>
     </div>
     <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -841,6 +967,35 @@
         <button type="button" class="btn-refresh" onclick="window.sicLiveRefresh && window.sicLiveRefresh()">
           <i class="bi bi-arrow-clockwise"></i> Refrescar
         </button>
+      </div>
+
+      <!-- FX: Live interface twin 3D -->
+      <div class="globe-section" id="globe-section">
+        <div class="globe-wrap">
+          <div class="nav-map-title">
+            <strong>Oficina operativa en vivo</strong>
+            <span>Visualizá en tiempo real en qué área del sistema se encuentra cada usuario activo.</span>
+          </div>
+          <canvas id="globe-canvas"></canvas>
+          <div id="globe-tooltip" class="globe-tooltip"></div>
+          <div class="nav-map-legend">
+            <span>12 módulos del sistema</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:3px;"></span>Verde = activo</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:3px;"></span>Amarillo = idle</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:3px;"></span>Rojo = alerta</span>
+            <span>Clic en sala = ver detalle de secciones</span>
+          </div>
+        </div>
+        <div class="globe-online-list">
+          <div class="globe-list-hd" id="office-panel-hd">
+            <div class="sdot sdot-active"></div> Usuarios activos
+          </div>
+          <div id="globe-user-items">
+            <div class="skel-row skeleton"></div>
+            <div class="skel-row skeleton"></div>
+            <div class="skel-row skeleton"></div>
+          </div>
+        </div>
       </div>
 
       <div class="trk-card">
@@ -1030,9 +1185,34 @@
     <div id="usage-tab-alerts" class="tab-pane fade-in" data-usage-tab-panel>
 
       <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-        <div>
-          <div style="font-size:14px;font-weight:700;color:#e2e8f0;">Alertas de uso</div>
-          <div style="font-size:12px;color:var(--t-muted);">Situaciones detectadas que requieren atención. Cada alerta incluye motivo, severidad y recomendación.</div>
+        <div class="d-flex align-items-center gap-3">
+          <!-- FX: Radar sonar -->
+          <div class="radar-wrap">
+            <svg id="alert-radar-svg" viewBox="0 0 72 72" style="--radar-speed:2.2s;">
+              <!-- Anillos de pulso -->
+              <circle class="radar-ring-a" cx="36" cy="36" r="2" fill="none" stroke="#10b981" stroke-width="1"/>
+              <circle class="radar-ring-a" cx="36" cy="36" r="2" fill="none" stroke="#10b981" stroke-width="1"/>
+              <circle class="radar-ring-a" cx="36" cy="36" r="2" fill="none" stroke="#10b981" stroke-width="1"/>
+              <!-- Círculos estáticos de referencia -->
+              <circle cx="36" cy="36" r="10" fill="none" stroke="rgba(30,58,95,.8)" stroke-width=".8"/>
+              <circle cx="36" cy="36" r="20" fill="none" stroke="rgba(30,58,95,.8)" stroke-width=".8"/>
+              <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(30,58,95,.8)" stroke-width=".8"/>
+              <!-- Cruz de referencia -->
+              <line x1="36" y1="6"  x2="36" y2="66" stroke="rgba(30,58,95,.5)" stroke-width=".8"/>
+              <line x1="6"  y1="36" x2="66" y2="36" stroke="rgba(30,58,95,.5)" stroke-width=".8"/>
+              <!-- Línea de barrido -->
+              <g class="radar-sweep">
+                <line x1="36" y1="36" x2="36" y2="6" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" opacity=".9"/>
+                <line x1="36" y1="36" x2="48" y2="12" stroke="#10b981" stroke-width=".8" opacity=".4"/>
+              </g>
+              <!-- Dot central -->
+              <circle cx="36" cy="36" r="2.5" fill="#10b981"/>
+            </svg>
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#e2e8f0;">Alertas de uso</div>
+            <div style="font-size:12px;color:var(--t-muted);">Situaciones detectadas que requieren atención. Cada alerta incluye motivo, severidad y recomendación.</div>
+          </div>
         </div>
       </div>
 
@@ -1113,6 +1293,18 @@
         <div id="prof-nav-stepper" class="prof-nav-stepper"></div>
       </div>
 
+      <!-- FX: Nav graph 3D -->
+      <div class="prof-section" id="nav-graph-section">
+        <div class="prof-section-title"><i class="bi bi-diagram-3 me-1"></i> Mapa de navegación</div>
+        <div id="nav-graph-wrap">
+          <canvas id="nav-graph-canvas"></canvas>
+          <div id="nav-graph-tooltip" class="nav-graph-tooltip"></div>
+        </div>
+        <div style="font-size:10px;color:var(--t-muted);text-align:center;margin-top:5px;">
+          Azul = consulta · Verde = carga · Naranja = exportación · Arrastrá para rotar
+        </div>
+      </div>
+
       <!-- Módulos y acciones -->
       <div class="prof-section">
         <div class="prof-section-title"><i class="bi bi-collection me-1"></i> Módulos y acciones</div>
@@ -1146,21 +1338,26 @@
       <!-- Acciones -->
       <div class="prof-actions">
         <button class="btn-prof-action btn-prof-primary"><i class="bi bi-envelope"></i> Enviar mensaje</button>
-        <button class="btn-prof-action btn-prof-ghost"><i class="bi bi-people"></i> Asignar grupo</button>
-        <button class="btn-prof-action btn-prof-ghost"><i class="bi bi-flag"></i> Marcar seguimiento</button>
+        <button id="btn-assign-group" class="btn-prof-action btn-prof-ghost"><i class="bi bi-people"></i> Asignar grupo</button>
+        <button id="btn-mark-watch" class="btn-prof-action btn-prof-ghost"><i class="bi bi-flag"></i> Marcar seguimiento</button>
       </div>
 
     </div><!-- /profile-content -->
   </div><!-- /profile-body -->
 </div><!-- /trk-profile-panel -->
 
+<!-- Toast notification -->
+<div id="trk-toast" class="trk-toast">
+  <span class="toast-icon bi bi-check-circle-fill"></span>
+  <span id="trk-toast-msg"></span>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"
-        crossorigin="anonymous"
-        referrerpolicy="no-referrer"></script>
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
   if (typeof Chart !== 'undefined') {
     Chart.defaults.animation = { duration: 800, easing: 'easeInOutQuart' };
@@ -1169,7 +1366,19 @@
     }
   }
 </script>
-<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2027b"></script>
+<!-- Three.js r128 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- GSAP 3 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- Vanta.NET (usa Three.js ya cargado) -->
+<script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.net.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>window.TRACKING_USERS_DB = {{ tracking_users_json | safe }};</script>
+<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2027d"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
