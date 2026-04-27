@@ -1839,8 +1839,69 @@
   }
 
   function navNodeKey(raw) {
-    return String(raw || 'sic').toLowerCase().trim().replace(/-/g, '_');
+    if (!raw) return '';
+    return String(raw).toLowerCase().trim().replace(/-/g, '_');
   }
+
+  /* Normaliza cadena quitando acentos/diacríticos para comparación robusta */
+  function _noAccent(s) {
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  /*
+   * Reverse-label lookup: cubre los casos donde el servidor devuelve la etiqueta
+   * legible (_map_section_name) en lugar de la clave técnica.
+   * Lookup normalizado sin acentos para tolerancia de variantes.
+   */
+  const _LABEL_BLOCK = {
+    // Mercado Público (y sub-secciones)
+    'mercado publico':            'mercado_publico',
+    'inicio  mercado publico':    'mercado_publico',
+    'buscador  publico':          'mercado_publico',
+    'dimensiones  publico':       'mercado_publico',
+    'oportunidades  publico':     'mercado_publico',
+    'helpdesk  mercado publico':  'helpdesk',
+    // Mercado Privado
+    'mercado privado':            'mercado_privado',
+    'inicio  mercado privado':    'mercado_privado',
+    'buscador  privado':          'mercado_privado',
+    'dimensiones  privado':       'mercado_privado',
+    'dimensionamiento':           'mercado_privado',
+    // Oportunidades
+    'oportunidades':              'oportunidades',
+    'buscador de oportunidades':  'oportunidades',
+    'analisis de dimensiones':    'oportunidades',
+    // Forecast
+    'proyecciones y forecast':    'forecast',
+    'panel de forecast':          'forecast',
+    'forecast':                   'forecast',
+    // Pliegos
+    'modulo de pliegos':          'pliegos',
+    'visor de pliegos':           'pliegos',
+    'detalle de pliego':          'pliegos',
+    'pliegos':                    'pliegos',
+    // Perfiles (incluye Reporte de Perfiles)
+    'reporte de perfiles':        'perfiles',
+    'perfiles de clientes':       'perfiles',
+    'perfiles':                   'perfiles',
+    // Comparativas
+    'comparativa de mercado':     'comparativas',
+    'inicio  comparativa':        'comparativas',
+    // Dashboard
+    'panel principal':            'dashboard',
+    'centro de mercados':         'dashboard',
+    'inicio  mercados':           'dashboard',
+    // S.I.C. / Seguimiento
+    'seguimiento de usuarios':    'seguimiento_hub',
+    'panel s.i.c.':               'seguimiento_hub',
+    's.i.c. general':             'seguimiento_hub',
+    'api tracking (interno)':     'seguimiento_hub',
+    'panel live':                 'seguimiento_hub',
+    // S.I.C. sub-módulos
+    'gestion de usuarios':        'usuarios',
+    'mesa de ayuda':              'helpdesk',
+    'gestion de contrasenas':     'passwords',
+  };
 
   /* ═══════════════════════════════════════════════════════
      CAMPUS — Oficina isométrica jerárquica de 2 niveles
@@ -1934,23 +1995,34 @@
 
   /* ── Mapeo sección → módulo (12 claves de CAMPUS_ROOMS) ── */
   function blockForSection(raw) {
-    const key = navNodeKey(raw);
+    if (!raw) return null;
+
+    // 1. Intento por etiqueta legible (el servidor puede enviar labels con acentos)
+    const labelKey = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
+    if (_LABEL_BLOCK[labelKey] !== undefined) return _LABEL_BLOCK[labelKey];
+
+    // 2. Clave técnica normalizada (sin acentos, guiones → guion_bajo)
+    const key = _noAccent(navNodeKey(raw));
+
     if (key === 'sic' || key === 'sic_home' || key === 'sic_tracking') return 'seguimiento_hub';
     if (key.includes('tab_live') || key.includes('tab_summary') ||
         key.includes('tab_by_user') || key.includes('tab_alerts') ||
         key === 'sic_config') return 'seguimiento_hub';
     if (key === 'sic_helpdesk' || key.includes('helpdesk')) return 'helpdesk';
-    if (key === 'sic_usuarios' || key.includes('sic_user')) return 'usuarios';
-    if (key === 'sic_password_resets' || key.includes('password_reset')) return 'passwords';
-    if (key.startsWith('mercado_publico')) return 'mercado_publico';
-    if (key.startsWith('mercado_privado')) return 'mercado_privado';
-    if (key.startsWith('oportunidades')) return 'oportunidades';
+    if (key === 'sic_usuario' || key.includes('sic_user')) return 'usuarios';
+    if (key.includes('password_reset') || key.includes('contrasena')) return 'passwords';
+    if (key.startsWith('mercado_publico') || key.includes('mercado_public')) return 'mercado_publico';
+    if (key.startsWith('mercado_privado') || key.includes('mercado_privad')) return 'mercado_privado';
+    if (key.startsWith('oportunidades') || key.startsWith('oportunidad')) return 'oportunidades';
     if (key.startsWith('pliego') || key === 'pliegos') return 'pliegos';
-    if (key.startsWith('forecast')) return 'forecast';
+    if (key.startsWith('forecast') || key.includes('proyeccion')) return 'forecast';
     if (key.startsWith('reporte_perfil') || key === 'perfiles' || key.startsWith('perfil')) return 'perfiles';
     if (key.startsWith('comparativa') || key.startsWith('web_comparativa')) return 'comparativas';
-    if (key === 'dashboard' || key.startsWith('markets')) return 'dashboard';
-    return 'seguimiento_hub';
+    if (key === 'dashboard' || key.startsWith('markets') || key.includes('panel_principal')) return 'dashboard';
+    if (key.startsWith('sic') || key.includes('seguimiento')) return 'seguimiento_hub';
+
+    // Sin coincidencia: no ubicar (null evita asignación errónea a seguimiento_hub)
+    return null;
   }
 
   /* Mapeo sección → sub-sala dentro de un módulo (Nivel 2) */
