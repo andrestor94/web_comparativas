@@ -14,308 +14,329 @@
 <link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
 <style>
   /* ═══════════════════════════════════════════════════════════
-     SIEM · Lectura de Pliegos · Lista — Premium v5
+     SIEM · Lectura de Pliegos · Lista — Premium v6 (Dashboard Mode)
   ═══════════════════════════════════════════════════════════ */
 
-  /* ── CTA button ─────────────────────────────────────────── */
-  .lp-cta-btn {
-    border-radius:.6rem;font-weight:700;letter-spacing:.01em;
-    box-shadow:0 2px 8px rgba(6,72,111,.25);padding:.4rem 1rem;font-size:.85rem;
-    transition:all .2s cubic-bezier(.16,1,.3,1);
-  }
-  .lp-cta-btn:hover {
-    box-shadow:0 4px 14px rgba(6,72,111,.32);transform:translateY(-1px);
+  :root {
+    --lp-card-radius: 1.25rem;
+    --lp-pill-radius: 999px;
+    --lp-card-shadow: 0 4px 20px -4px rgba(6, 72, 111, 0.1);
+    --lp-card-shadow-hover: 0 10px 30px -6px rgba(6, 72, 111, 0.15);
   }
 
-  /* ── Estado badges ──────────────────────────────────────── */
-  .estado-badge {
-    font-size:.67rem;font-weight:700;letter-spacing:.02em;
-    padding:.22em .68em;border-radius:999px;display:inline-block;white-space:nowrap;
+  /* ── Page Hero / Header ─────────────────────────────────── */
+  .lp-page-hero {
+    background: #fff;
+    border: 1px solid var(--siem-border-soft);
+    border-radius: var(--lp-card-radius);
+    padding: 2.5rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--lp-card-shadow);
+    position: relative;
+    overflow: hidden;
   }
-  .estado-borrador                { background:var(--siem-surface-soft);color:var(--siem-text-muted);border:1px solid var(--siem-border); }
-  .estado-pendiente_revision      { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
-  .estado-en_revision             { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
-  .estado-pendiente_procesamiento { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
-  .estado-procesado_externamente  { background:var(--siem-blue-soft);color:var(--siem-blue);border:1px solid var(--siem-blue-border); }
-  .estado-excel_cargado           { background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border); }
-  .estado-en_validacion           { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
-  .estado-listo                   { background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border); }
-  .estado-observado               { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
-  .estado-rechazado               { background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border); }
-  .estado-reprocesar              { background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border); }
-  .estado-archivado               { background:var(--siem-surface-soft);color:var(--siem-text-muted);border:1px solid var(--siem-border); }
-
-  /* ── Stats strip ────────────────────────────────────────── */
-  .stats-strip {
-    display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;padding:.1rem 0 .3rem;
+  .lp-page-hero::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 4px;
+    background: linear-gradient(90deg, var(--siem-navy), var(--siem-blue), var(--siem-green));
   }
-  .stats-strip-sep {
-    font-size:.67rem;font-weight:700;text-transform:uppercase;
-    letter-spacing:.08em;color:var(--siem-text-soft);margin-right:.2rem;white-space:nowrap;
-    user-select:none;
+  .lp-hero-title {
+    font-size: 2.25rem; font-weight: 800; color: var(--siem-navy);
+    letter-spacing: -0.02em; margin-bottom: 0.75rem;
   }
-  .stat-pill {
-    display:inline-flex;align-items:center;gap:.42rem;
-    padding:.35rem .9rem;border-radius:999px;
-    background:#fff;border:1.5px solid var(--siem-border);
-    text-decoration:none;color:var(--siem-text);
-    transition:all .15s ease;white-space:nowrap;
-    box-shadow:0 1px 2px rgba(6,72,111,.03);
+  .lp-hero-subtitle {
+    font-size: 1rem; color: var(--siem-text-muted); max-width: 800px;
+    line-height: 1.6; margin: 0;
   }
-  .stat-pill:hover {
-    border-color:var(--pill-c,var(--siem-blue));
-    box-shadow:0 2px 8px rgba(6,72,111,.09);
-    transform:translateY(-1px);text-decoration:none;color:var(--siem-text-strong);
+  .lp-cta-btn-main {
+    border-radius: 0.85rem; padding: 0.8rem 1.5rem; font-weight: 700;
+    font-size: 0.95rem; display: inline-flex; align-items: center; gap: 0.5rem;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.2);
+    text-decoration: none !important; color: #fff !important;
   }
-  .stat-pill.active {
-    border-color:var(--pill-c,var(--siem-blue));
-    background:var(--pill-bg,var(--siem-surface-soft));
-    box-shadow:0 2px 8px rgba(6,72,111,.08);
-    color:var(--siem-text-strong);
-  }
-  .stat-pill i { font-size:.8rem;color:var(--pill-c,var(--siem-blue));flex-shrink:0; }
-  .sp-num {
-    font-weight:650;font-size:.95rem;color:var(--pill-c,var(--siem-blue));
-    line-height:1;font-variant-numeric:tabular-nums;
-  }
-  .sp-label { font-size:.72rem;font-weight:500;color:var(--siem-text-muted); }
-
-  /* ── Search bar ─────────────────────────────────────────── */
-  .lp-search-form { display:flex;align-items:center;gap:.5rem; }
-  .lp-search-wrap {
-    position:relative;flex-grow:1;max-width:460px;
-  }
-  .lp-search-icon {
-    position:absolute;left:.75rem;top:50%;transform:translateY(-50%);
-    color:var(--siem-text-soft);font-size:.85rem;pointer-events:none;z-index:1;
-  }
-  .lp-search-input {
-    width:100%;padding:.44rem .75rem .44rem 2.2rem;
-    border-radius:.65rem;border:1.5px solid var(--siem-border);
-    background:var(--siem-surface-soft);font-size:.855rem;height:38px;outline:none;
-    transition:all .18s ease;color:var(--siem-text-strong);font-family:inherit;
-  }
-  .lp-search-input:focus {
-    background:#fff;border-color:var(--siem-blue);
-    box-shadow:0 0 0 3px rgba(87,112,176,.12);
-  }
-  .lp-search-input::placeholder { color:var(--siem-text-soft); }
-  .lp-search-clear {
-    position:absolute;right:.55rem;top:50%;transform:translateY(-50%);
-    display:inline-flex;align-items:center;justify-content:center;
-    width:1.35rem;height:1.35rem;border-radius:50%;
-    background:var(--siem-surface-soft);color:var(--siem-text-muted);border:none;
-    font-size:.7rem;cursor:pointer;text-decoration:none;
-    transition:all .15s;
-  }
-  .lp-search-clear:hover { background:var(--siem-border);color:var(--siem-text-strong); }
-  .lp-search-submit {
-    display:inline-flex;align-items:center;gap:.3rem;
-    padding:.42rem .9rem;border-radius:.6rem;
-    background:var(--siem-navy);color:#fff;border:none;
-    font-size:.8rem;font-weight:600;cursor:pointer;height:38px;flex-shrink:0;
-    transition:all .15s;font-family:inherit;
-  }
-  .lp-search-submit:hover { background:var(--siem-navy-deep); }
-  .lp-clear-all {
-    display:inline-flex;align-items:center;gap:.25rem;
-    padding:.38rem .75rem;border-radius:.55rem;
-    border:1.5px solid var(--siem-red-border);background:#fff;color:var(--siem-red);
-    font-size:.78rem;font-weight:600;cursor:pointer;text-decoration:none;
-    transition:all .15s;height:38px;
-  }
-  .lp-clear-all:hover { background:var(--siem-red-soft);text-decoration:none;color:var(--siem-red); }
-
-  /* ── Filter chips ───────────────────────────────────────── */
-  .filter-chips-row { display:flex;flex-wrap:wrap;gap:.4rem;align-items:center; }
-  .filter-chip {
-    display:inline-flex;align-items:center;gap:.3rem;
-    padding:.26rem .72rem;border-radius:999px;
-    border:1.5px solid var(--siem-border);font-size:.76rem;font-weight:600;
-    cursor:pointer;text-decoration:none;color:var(--siem-text-muted);
-    transition:all .15s;background:#fff;white-space:nowrap;
-  }
-  .filter-chip:hover {
-    border-color:var(--siem-blue);color:var(--siem-blue);background:var(--siem-blue-soft);text-decoration:none;
-  }
-  .filter-chip.active {
-    border-color:var(--siem-blue);background:var(--siem-blue);color:#fff;
-  }
-  .fc-badge {
-    font-size:.63rem;padding:.05rem .38rem;border-radius:99px;line-height:1.4;
-  }
-  .filter-chip:not(.active) .fc-badge { background:var(--siem-surface-soft);color:var(--siem-text-muted); }
-  .filter-chip.active .fc-badge { background:rgba(255,255,255,.25);color:#fff; }
-
-  /* ── Tabla de casos ─────────────────────────────────────── */
-  .casos-wrap {
-    background:#fff;border:1px solid var(--siem-border);
-    border-radius:12px;box-shadow:0 1px 4px rgba(6,72,111,.05),0 4px 12px rgba(6,72,111,.04);
-    overflow:hidden;
-  }
-  .casos-table { width:100%;border-collapse:collapse;font-size:.86rem; }
-  .casos-table thead th {
-    font-size:.625rem;text-transform:uppercase;letter-spacing:.09em;
-    color:var(--siem-text-soft);font-weight:650;background:var(--siem-surface-soft);
-    padding:.88rem 1.1rem;text-align:left;
-    border-bottom:2px solid var(--siem-surface-soft);white-space:nowrap;
-  }
-  .casos-table thead th:first-child { padding-left:1.25rem; }
-  .casos-table thead th:last-child  { padding-right:1.25rem; }
-  .casos-table tbody td {
-    padding:.84rem 1.1rem;border-bottom:1px solid var(--siem-surface-soft);vertical-align:middle;
-  }
-  .casos-table tbody td:first-child { padding-left:1.25rem; }
-  .casos-table tbody td:last-child  { padding-right:1.25rem; }
-  .casos-table tbody tr:last-child td { border-bottom:none; }
-  .caso-row { transition:background .1s; }
-  .caso-row:hover td { background:var(--siem-surface-soft); }
-
-  /* ── Case title cell ────────────────────────────────────── */
-  .caso-titulo { font-weight:700;font-size:.9rem;color:var(--siem-text-strong);line-height:1.3; }
-  .caso-sub    { font-size:.76rem;color:var(--siem-text-muted);margin-top:.1rem;line-height:1.3; }
-  .caso-num    { font-size:.71rem;color:var(--siem-text-soft);margin-top:.06rem; }
-
-  /* ── ID badge ───────────────────────────────────────────── */
-  .id-badge {
-    font-size:.7rem;font-weight:700;color:var(--siem-text-soft);
-    background:var(--siem-surface-soft);border-radius:.35rem;
-    padding:.1rem .42rem;font-variant-numeric:tabular-nums;
-    white-space:nowrap;border:1px solid var(--siem-border);
+  .lp-cta-btn-main:hover {
+    transform: translateY(-2px); box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.3);
+    color: #fff !important;
   }
 
-  /* ── Action buttons ─────────────────────────────────────── */
-  .caso-btn {
-    display:inline-flex;align-items:center;justify-content:center;
-    width:1.9rem;height:1.9rem;border-radius:.45rem;border:1px solid var(--siem-border);
-    background:#fff;color:var(--siem-text-muted);font-size:.82rem;
-    text-decoration:none;transition:all .15s;
+  /* ── Stats Strip (Summary Cards) ────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
   }
-  .caso-btn:hover {
-    background:var(--siem-blue-soft);border-color:var(--siem-blue);color:var(--siem-blue);text-decoration:none;
+  .stat-card {
+    background: #fff; border: 1px solid var(--siem-border-soft);
+    border-radius: 1rem; padding: 1.25rem; display: flex; flex-direction: column;
+    gap: 0.5rem; transition: all 0.3s ease; text-decoration: none !important;
+    box-shadow: 0 2px 4px rgba(6, 72, 111, 0.02);
   }
-  .caso-btn-success { border-color:var(--siem-green-border);background:var(--siem-green-soft);color:var(--siem-green); }
-  .caso-btn-success:hover { background:#d1fae5;color:var(--siem-green); }
+  .stat-card:hover {
+    border-color: var(--stat-c); transform: translateY(-3px);
+    box-shadow: 0 10px 15px -3px rgba(6, 72, 111, 0.08);
+  }
+  .stat-card.active {
+    background: var(--stat-bg); border-color: var(--stat-c);
+    box-shadow: inset 0 0 0 1px var(--stat-c);
+  }
+  .sc-header { display: flex; align-items: center; justify-content: space-between; }
+  .sc-icon {
+    width: 2.5rem; height: 2.5rem; border-radius: 0.75rem;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--stat-bg); color: var(--stat-c); font-size: 1.25rem;
+  }
+  .sc-num { font-size: 1.75rem; font-weight: 800; color: var(--siem-navy); line-height: 1; }
+  .sc-label { font-size: 0.75rem; font-weight: 600; color: var(--siem-text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* ── Search & Filter Bar ────────────────────────────────── */
+  .search-filter-section {
+    background: var(--siem-surface-soft);
+    border: 1px solid var(--siem-border-soft);
+    border-radius: 1.25rem; padding: 1.5rem; margin-bottom: 2rem;
+    display: flex; flex-direction: column; gap: 1.25rem;
+  }
+  .lp-search-box {
+    display: flex; gap: 0.75rem; align-items: center;
+  }
+  .lp-input-group {
+    position: relative; flex-grow: 1;
+  }
+  .lp-input-group i {
+    position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%);
+    color: var(--siem-text-soft); font-size: 1.1rem;
+  }
+  .lp-modern-input {
+    width: 100%; height: 3.25rem; padding: 0 1.25rem 0 3.25rem;
+    border-radius: 0.85rem; border: 2px solid var(--siem-border);
+    background: #fff; font-size: 0.95rem; transition: all 0.2s ease;
+  }
+  .lp-modern-input:focus {
+    border-color: var(--siem-blue); outline: none;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+  }
+  .lp-search-btn {
+    height: 3.25rem; padding: 0 1.75rem; border-radius: 0.85rem;
+    background: var(--siem-navy); color: #fff; font-weight: 700;
+    border: none; transition: all 0.2s ease; display: flex; align-items: center; gap: 0.5rem;
+  }
+  .lp-search-btn:hover { background: var(--siem-navy-deep); }
+
+  .filter-pills {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  }
+  .pill-chip {
+    padding: 0.5rem 1rem; border-radius: var(--lp-pill-radius);
+    background: #fff; border: 1px solid var(--siem-border);
+    color: var(--siem-text-muted); font-size: 0.85rem; font-weight: 600;
+    text-decoration: none !important; transition: all 0.2s ease;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .pill-chip:hover { border-color: var(--siem-blue); color: var(--siem-blue); background: var(--siem-blue-soft); }
+  .pill-chip.active { background: var(--siem-navy); color: #fff; border-color: var(--siem-navy); }
+  .pill-badge {
+    background: var(--siem-surface-soft); color: var(--siem-text-muted);
+    font-size: 0.7rem; padding: 0.1rem 0.5rem; border-radius: 99px;
+  }
+  .pill-chip.active .pill-badge { background: rgba(255,255,255,0.2); color: #fff; }
+
+  /* ── Card List View ─────────────────────────────────────── */
+  .casos-list { display: flex; flex-direction: column; gap: 1rem; }
+  .caso-card {
+    background: #fff; border: 1px solid var(--siem-border-soft);
+    border-radius: 1rem; padding: 1.5rem;
+    display: grid; grid-template-columns: auto 1fr auto; gap: 2rem;
+    align-items: center; transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(6, 72, 111, 0.03);
+  }
+  .caso-card:hover {
+    transform: translateX(4px); border-color: var(--siem-blue-border);
+    box-shadow: var(--lp-card-shadow-hover);
+  }
+
+  .cc-id-section { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 80px; }
+  .cc-id-badge {
+    background: var(--siem-surface-soft); border: 1px solid var(--siem-border);
+    padding: 0.25rem 0.6rem; border-radius: 0.5rem;
+    font-size: 0.75rem; font-weight: 800; color: var(--siem-text-soft); font-family: monospace;
+  }
+
+  .cc-main-info { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+  .cc-title-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .cc-title { font-size: 1.1rem; font-weight: 700; color: var(--siem-navy); line-height: 1.3; margin: 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cc-status-badge {
+    font-size: 0.7rem; font-weight: 700; padding: 0.3rem 0.75rem;
+    border-radius: 99px; text-transform: uppercase; letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .cc-details-row {
+    display: flex; flex-wrap: wrap; gap: 1.5rem; row-gap: 0.5rem;
+  }
+  .cc-detail-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.82rem; color: var(--siem-text-muted);
+  }
+  .cc-detail-item i { color: var(--siem-text-soft); font-size: 0.9rem; }
+  .cc-detail-item strong { color: var(--siem-text-strong); font-weight: 600; }
+
+  .cc-actions { display: flex; gap: 0.75rem; align-items: center; }
+  .cc-btn {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.6rem 1.1rem; border-radius: 0.75rem; border: 1px solid var(--siem-border);
+    background: #fff; color: var(--siem-text-strong); font-size: 0.85rem; font-weight: 700;
+    transition: all 0.2s ease; text-decoration: none !important;
+  }
+  .cc-btn:hover {
+    background: var(--siem-blue-soft); border-color: var(--siem-blue); color: var(--siem-blue);
+    transform: translateY(-1px);
+  }
+  .cc-btn-primary {
+    background: var(--siem-blue); color: #fff !important; border-color: var(--siem-blue);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  }
+  .cc-btn-primary:hover {
+    background: var(--siem-navy); border-color: var(--siem-navy); color: #fff !important;
+    box-shadow: 0 8px 16px rgba(37, 99, 235, 0.3);
+  }
 
   /* ── Empty state ────────────────────────────────────────── */
-  .lp-empty {
-    text-align:center;padding:4.5rem 1rem;color:var(--siem-text-muted);
+  .lp-empty-state {
+    text-align: center; padding: 5rem 2rem; background: #fff;
+    border: 2px dashed var(--siem-border); border-radius: 1.5rem;
+    color: var(--siem-text-muted);
   }
-  .lp-empty .ei { font-size:2.4rem;opacity:.13;display:block;margin-bottom:.8rem; }
-  .lp-empty .et { font-weight:700;font-size:.97rem;color:var(--siem-text);margin-bottom:.35rem; }
-  .lp-empty .es { font-size:.84rem; }
+  .lp-empty-icon { font-size: 3.5rem; color: var(--siem-text-soft); margin-bottom: 1rem; opacity: 0.5; }
+  .lp-empty-title { font-size: 1.25rem; font-weight: 700; color: var(--siem-navy); margin-bottom: 0.5rem; }
+  .lp-empty-copy { font-size: 0.95rem; max-width: 500px; margin: 0 auto; line-height: 1.5; }
+
+  /* ── Responsive ─────────────────────────────────────────── */
+  @media (max-width: 992px) {
+    .caso-card { grid-template-columns: 1fr; gap: 1.25rem; }
+    .cc-id-section { align-items: flex-start; }
+    .cc-actions { justify-content: flex-end; }
+    .cc-title { white-space: normal; }
+  }
+
+  /* ── Status Colors ──────────────────────────────────────── */
+  .st-pendiente_revision { --stat-c: var(--siem-amber); --stat-bg: var(--siem-amber-soft); }
+  .st-en_revision { --stat-c: var(--siem-blue); --stat-bg: var(--siem-blue-soft); }
+  .st-excel_cargado { --stat-c: var(--siem-green); --stat-bg: var(--siem-green-soft); }
+  .st-listo { --stat-c: var(--siem-green); --stat-bg: #dcfce7; }
+  .st-observado { --stat-c: var(--siem-amber); --stat-bg: var(--siem-amber-soft); }
+  .st-reprocesar { --stat-c: var(--siem-blue); --stat-bg: var(--siem-blue-soft); }
+
+  .cc-badge-pendiente_revision { background: var(--siem-amber-soft); color: var(--siem-amber); border: 1px solid var(--siem-amber-border); }
+  .cc-badge-en_revision { background: var(--siem-blue-soft); color: var(--siem-blue); border: 1px solid var(--siem-blue-border); }
+  .cc-badge-excel_cargado { background: var(--siem-green-soft); color: var(--siem-green); border: 1px solid var(--siem-green-border); }
+  .cc-badge-listo { background: var(--siem-green-soft); color: var(--siem-green); border: 1px solid var(--siem-green-border); }
+  .cc-badge-observado { background: var(--siem-amber-soft); color: var(--siem-amber); border: 1px solid var(--siem-amber-border); }
+  .cc-badge-reprocesar { background: var(--siem-blue-soft); color: var(--siem-blue); border: 1px solid var(--siem-blue-border); }
+  .cc-badge-borrador { background: var(--siem-surface-soft); color: var(--siem-text-muted); border: 1px solid var(--siem-border); }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="lp-premium-shell lp-list-page">
-  <section class="lp-page-hero">
-    <div class="lp-hero-grid">
-      <div>
-        <div class="lp-hero-kicker">Mercado Publico · Centro operativo</div>
+  
+  {# ── Header Premium ── #}
+  <header class="lp-page-hero">
+    <div class="row align-items-center">
+      <div class="col-lg-8">
+        <div class="lp-hero-kicker mb-2">SIEM · Mercado Público</div>
         <h1 class="lp-hero-title">Lectura de Pliegos</h1>
         <p class="lp-hero-subtitle">
-          Gestiona solicitudes, procesamiento externo y visualizacion estructurada de pliegos con trazabilidad,
-          estados claros y una lectura preparada para usuarios finales y administradores.
+          Centro operativo para la gestión, procesamiento y visualización estructurada de pliegos.
+          Optimice su análisis comercial con trazabilidad completa y estados en tiempo real.
         </p>
       </div>
-      <div class="lp-hero-actions">
-        <a href="/mercado-publico/lectura-pliegos/nueva" class="lp-btn lp-btn-primary">
-          <i class="bi bi-plus-lg"></i>Nueva solicitud
+      <div class="col-lg-4 text-lg-end mt-4 mt-lg-0">
+        <a href="/mercado-publico/lectura-pliegos/nueva" class="lp-cta-btn-main btn btn-primary">
+          <i class="bi bi-plus-lg"></i>
+          <span>Nueva solicitud</span>
         </a>
       </div>
     </div>
-  </section>
+  </header>
 
-  {# ── ADMIN: Stats strip ── #}
+  {# ── Resumen Operativo (Admin) ── #}
   {% if es_admin %}
-  <div class="mb-4">
-    <div class="stats-strip">
-      <span class="stats-strip-sep">Estado</span>
-      {% set grupos_stat = [
-        ("pendiente_revision",  "bi-hourglass-split",       "var(--siem-amber)", "var(--siem-amber-soft)"),
-        ("en_revision",         "bi-eye",                    "var(--siem-blue)", "var(--siem-blue-soft)"),
-        ("excel_cargado",       "bi-file-earmark-excel",     "var(--siem-green)", "var(--siem-green-soft)"),
-        ("listo",               "bi-check-circle-fill",      "var(--siem-green)", "var(--siem-green-soft)"),
-        ("observado",           "bi-exclamation-circle",     "var(--siem-amber)", "var(--siem-amber-soft)"),
-        ("reprocesar",          "bi-arrow-counterclockwise", "var(--siem-blue)", "var(--siem-blue-soft)"),
-      ] %}
-      {% for est, icon, color, bg in grupos_stat %}
-      <a href="/mercado-publico/lectura-pliegos?estado={{ est }}{% if q %}&q={{ q }}{% endif %}"
-         class="stat-pill {% if estado_filtro == est %}active{% endif %}"
-         style="--pill-c:{{ color }};--pill-bg:{{ bg }};"
-         title="{{ PLIEGO_ESTADO_LABELS[est] }}">
-        <i class="bi {{ icon }}"></i>
-        <span class="sp-num">{{ conteos.get(est, 0) }}</span>
-        <span class="sp-label">{{ PLIEGO_ESTADO_LABELS[est] }}</span>
-      </a>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Buscador ── #}
-  <div class="mb-3">
-    <form method="get" action="/mercado-publico/lectura-pliegos" class="lp-search-form">
-      <input type="hidden" name="estado" value="{{ estado_filtro }}">
-      <div class="lp-search-wrap">
-        <i class="bi bi-search lp-search-icon"></i>
-        <input type="text" name="q" value="{{ q }}"
-               placeholder="Buscar por título, organismo, número…"
-               class="lp-search-input"
-               autocomplete="off" spellcheck="false">
-        {% if q %}
-        <a href="/mercado-publico/lectura-pliegos{% if estado_filtro %}?estado={{ estado_filtro }}{% endif %}"
-           class="lp-search-clear" title="Limpiar búsqueda">
-          <i class="bi bi-x-lg"></i>
-        </a>
-        {% endif %}
-      </div>
-      <button type="submit" class="lp-search-submit">
-        <i class="bi bi-search"></i>Buscar
-      </button>
-      {% if q or estado_filtro %}
-      <a href="/mercado-publico/lectura-pliegos" class="lp-clear-all" title="Limpiar todos los filtros">
-        <i class="bi bi-x-circle"></i>Limpiar
-      </a>
-      {% endif %}
-    </form>
-  </div>
-
-  {# ── Chips de estado (admin) ── #}
-  {% if es_admin %}
-  <div class="filter-chips-row mb-4">
-    <a href="/mercado-publico/lectura-pliegos{% if q %}?q={{ q }}{% endif %}"
-       class="filter-chip {% if not estado_filtro %}active{% endif %}">
-      Todos <span class="fc-badge">{{ casos|length }}</span>
-    </a>
-    {% for est in PLIEGO_ESTADOS %}
-    {% if conteos.get(est, 0) > 0 %}
+  <div class="stats-grid">
+    {% set grupos_stat = [
+      ("pendiente_revision",  "bi-hourglass-split",       "var(--siem-amber)", "var(--siem-amber-soft)"),
+      ("en_revision",         "bi-eye",                    "var(--siem-blue)", "var(--siem-blue-soft)"),
+      ("excel_cargado",       "bi-file-earmark-excel",     "var(--siem-green)", "var(--siem-green-soft)"),
+      ("listo",               "bi-check-circle-fill",      "var(--siem-green)", "#dcfce7"),
+      ("observado",           "bi-exclamation-circle",     "var(--siem-amber)", "var(--siem-amber-soft)"),
+      ("reprocesar",          "bi-arrow-counterclockwise", "var(--siem-blue)", "var(--siem-blue-soft)"),
+    ] %}
+    {% for est, icon, color, bg in grupos_stat %}
     <a href="/mercado-publico/lectura-pliegos?estado={{ est }}{% if q %}&q={{ q }}{% endif %}"
-       class="filter-chip {% if estado_filtro == est %}active{% endif %}">
-      {{ PLIEGO_ESTADO_LABELS[est] }}
-      <span class="fc-badge">{{ conteos.get(est, 0) }}</span>
+       class="stat-card st-{{ est }} {% if estado_filtro == est %}active{% endif %}"
+       style="--stat-c: {{ color }}; --stat-bg: {{ bg }};">
+      <div class="sc-header">
+        <div class="sc-icon"><i class="bi {{ icon }}"></i></div>
+        <div class="sc-num">{{ conteos.get(est, 0) }}</div>
+      </div>
+      <div class="sc-label">{{ PLIEGO_ESTADO_LABELS[est] }}</div>
     </a>
-    {% endif %}
     {% endfor %}
   </div>
   {% endif %}
 
-  {# ── Tabla de casos ── #}
-  {% if casos %}
-  <div class="casos-wrap">
-    <div class="lp-list-grid" role="table" aria-label="Casos de lectura de pliegos">
-      <div class="lp-list-header {% if not es_admin %}is-user{% endif %}" role="row">
-        <span>ID</span>
-        <span>Titulo / licitacion</span>
-        <span>Organismo</span>
-        {% if es_admin %}<span>Solicitante</span>{% endif %}
-        <span>Actualizado</span>
-        <span>Estado</span>
-        <span></span>
+  {# ── Buscador y Filtros ── #}
+  <section class="search-filter-section">
+    <form method="get" action="/mercado-publico/lectura-pliegos" class="lp-search-box">
+      <input type="hidden" name="estado" value="{{ estado_filtro }}">
+      <div class="lp-input-group">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="Buscar por título, organismo, número de proceso..."
+               class="lp-modern-input"
+               autocomplete="off">
+        {% if q %}
+        <a href="/mercado-publico/lectura-pliegos{% if estado_filtro %}?estado={{ estado_filtro }}{% endif %}"
+           class="lp-search-clear" style="position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); color: var(--siem-text-soft);">
+          <i class="bi bi-x-circle-fill"></i>
+        </a>
+        {% endif %}
       </div>
+      <button type="submit" class="lp-search-btn">
+        <i class="bi bi-search"></i>
+        <span class="d-none d-md-inline">Buscar</span>
+      </button>
+      {% if q or estado_filtro %}
+      <a href="/mercado-publico/lectura-pliegos" class="btn btn-outline-danger" style="height: 3.25rem; border-radius: 0.85rem; display: flex; align-items: center; font-weight: 600;">
+        <i class="bi bi-trash3 me-2"></i>Limpiar
+      </a>
+      {% endif %}
+    </form>
 
-      {% for caso in casos %}
+    {% if es_admin %}
+    <div class="filter-pills">
+      <a href="/mercado-publico/lectura-pliegos{% if q %}?q={{ q }}{% endif %}"
+         class="pill-chip {% if not estado_filtro %}active{% endif %}">
+        Todos <span class="pill-badge">{{ casos|length }}</span>
+      </a>
+      {% for est in PLIEGO_ESTADOS %}
+        {% if conteos.get(est, 0) > 0 %}
+        <a href="/mercado-publico/lectura-pliegos?estado={{ est }}{% if q %}&q={{ q }}{% endif %}"
+           class="pill-chip {% if estado_filtro == est %}active{% endif %}">
+          {{ PLIEGO_ESTADO_LABELS[est] }}
+          <span class="pill-badge">{{ conteos.get(est, 0) }}</span>
+        </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  {# ── Listado de Casos (Cards) ── #}
+  {% if casos %}
+  <div class="casos-list">
+    {% for caso in casos %}
       {%- set _org = caso.organismo|default('')|string|trim -%}
       {%- if not _org or _org|lower in ['none','nan','-','--'] -%}
         {%- if caso.datos_proceso and caso.datos_proceso.datos -%}
@@ -323,78 +344,84 @@
           {%- set _org = (_dp.get('organismo_contratante') or _dp.get('organismo') or _dp.get('entidad_contratante') or '')|string|trim -%}
         {%- endif -%}
       {%- endif -%}
-      <article class="caso-row lp-list-row {% if not es_admin %}is-user{% endif %}" role="row">
-        <div class="lp-list-id" role="cell">
-          <span class="id-badge">#{{ caso.id }}</span>
+
+      <article class="caso-card">
+        <div class="cc-id-section">
+          <span class="cc-id-badge">#{{ caso.id }}</span>
+          <div class="mt-2 text-center">
+            <small class="text-muted" style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase;">Actualizado</small>
+            <div style="font-size: 0.8rem; font-weight: 600; color: var(--siem-navy);">
+              {{ caso.actualizado_en.strftime('%d/%m/%Y') if caso.actualizado_en else '--/--/----' }}
+            </div>
+          </div>
         </div>
 
-        <div class="lp-list-main" role="cell">
-          <div class="caso-titulo" title="{{ caso.titulo }}">{{ caso.titulo }}</div>
-          <div class="lp-list-reference">
+        <div class="cc-main-info">
+          <div class="cc-title-row">
+            <h2 class="cc-title" title="{{ caso.titulo }}">{{ caso.titulo }}</h2>
+            <span class="cc-status-badge cc-badge-{{ caso.estado }}">
+              {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
+            </span>
+          </div>
+          
+          <div class="cc-details-row">
             {% if caso.numero_proceso %}
-            <span><i class="bi bi-hash"></i>{{ caso.numero_proceso }}</span>
+            <div class="cc-detail-item">
+              <i class="bi bi-hash"></i>
+              <span>Proceso: <strong>{{ caso.numero_proceso }}</strong></span>
+            </div>
             {% endif %}
-            {% if caso.nombre_licitacion and caso.nombre_licitacion != caso.titulo %}
-            <span class="caso-sub" title="{{ caso.nombre_licitacion }}">{{ caso.nombre_licitacion }}</span>
-            {% endif %}
-          </div>
-        </div>
+            
+            <div class="cc-detail-item" title="{{ _org }}">
+              <i class="bi bi-building"></i>
+              <span>Organismo: <strong>{{ _org if _org and _org|lower not in ['none','nan','-','--',''] else 'No especificado' }}</strong></span>
+            </div>
 
-        <div class="lp-list-meta lp-list-org" role="cell" title="{{ _org if _org and _org|lower not in ['none','nan','-','--',''] else '' }}">
-          {{ _org if _org and _org|lower not in ['none','nan','-','--',''] else 'Sin organismo' }}
-        </div>
-
-        {% if es_admin %}
-        <div class="lp-list-meta lp-list-requester" role="cell" title="{% if caso.creado_por %}{{ caso.creado_por.email }}{% endif %}">
-          {% if caso.creado_por %}{{ caso.creado_por.email }}{% else %}Sin solicitante{% endif %}
-        </div>
-        {% endif %}
-
-        <time class="lp-list-date" role="cell" datetime="{{ caso.actualizado_en.isoformat() if caso.actualizado_en else '' }}">
-          {{ caso.actualizado_en.strftime('%d/%m/%Y') if caso.actualizado_en else 'Sin fecha' }}
-        </time>
-
-        <div class="lp-list-status" role="cell">
-          <span class="estado-badge estado-{{ caso.estado }}">
-            {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
-          </span>
-        </div>
-
-        <div class="lp-list-actions-cell" role="cell">
-          <div class="lp-list-actions">
-            {% if es_admin %}
-            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
-               class="caso-btn" title="Gestionar caso">
-              <i class="bi bi-gear-fill"></i><span class="d-none d-xl-inline ms-1">Gestionar</span>
-            </a>
-            {% endif %}
-            {% if caso.estado == 'listo' %}
-            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
-               class="caso-btn caso-btn-success" title="Ver resultado">
-              <i class="bi bi-eye-fill"></i><span class="d-none d-xl-inline ms-1">Ver</span>
-            </a>
-            {% elif not es_admin %}
-            <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}"
-               class="caso-btn" title="Ver estado">
-              <i class="bi bi-info-circle"></i><span class="d-none d-xl-inline ms-1">Estado</span>
-            </a>
+            {% if es_admin and caso.creado_por %}
+            <div class="cc-detail-item">
+              <i class="bi bi-person-circle"></i>
+              <span>Solicitante: <strong>{{ caso.creado_por.email }}</strong></span>
+            </div>
             {% endif %}
           </div>
+        </div>
+
+        <div class="cc-actions">
+          {% if es_admin %}
+          <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
+             class="cc-btn" title="Gestionar caso">
+            <i class="bi bi-gear-fill"></i>
+            <span>Gestionar</span>
+          </a>
+          {% endif %}
+          
+          {% if caso.estado == 'listo' %}
+          <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista"
+             class="cc-btn cc-btn-primary" title="Ver resultado">
+            <i class="bi bi-eye-fill"></i>
+            <span>Ver Pliegos</span>
+          </a>
+          {% elif not es_admin %}
+          <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}"
+             class="cc-btn" title="Ver estado">
+            <i class="bi bi-info-circle"></i>
+            <span>Estado</span>
+          </a>
+          {% endif %}
         </div>
       </article>
-      {% endfor %}
-    </div>
+    {% endfor %}
   </div>
   {% else %}
-  <div class="lp-empty">
-    <i class="bi bi-inbox ei"></i>
-    <div class="et">
-      No hay casos
-      {% if estado_filtro %}con estado "{{ PLIEGO_ESTADO_LABELS.get(estado_filtro, estado_filtro) }}"{% endif %}
-      {% if q %}que coincidan con "{{ q }}"{% endif %}
-    </div>
-    <div class="es">
-      <a href="/mercado-publico/lectura-pliegos/nueva" style="color:var(--siem-blue);font-weight:600;">
+  <div class="lp-empty-state">
+    <div class="lp-empty-icon"><i class="bi bi-inbox"></i></div>
+    <h3 class="lp-empty-title">No se encontraron solicitudes</h3>
+    <p class="lp-empty-copy">
+      No hay casos que coincidan con los filtros seleccionados o la búsqueda actual.
+      Intente limpiar los filtros o cree una nueva solicitud.
+    </p>
+    <div class="mt-4">
+      <a href="/mercado-publico/lectura-pliegos/nueva" class="btn btn-primary px-4 py-2" style="border-radius: 10px; font-weight: 700;">
         Crear nueva solicitud
       </a>
     </div>
