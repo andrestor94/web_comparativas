@@ -84,9 +84,10 @@ def _apply_multi(q, column, values: Optional[str]):
 def _split_filter_values(values: Optional[str]) -> list[str]:
     if not values:
         return []
+    # Separator is "||" to avoid splitting on commas in values (e.g. "0,6 ml" in Spanish decimal notation)
     seen = set()
     parsed: list[str] = []
-    for raw in values.split(","):
+    for raw in values.split("||"):
         value = raw.strip()
         if not value or value in seen:
             continue
@@ -562,7 +563,7 @@ def articulos_por_proveedor(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("art_prov", descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_v3", descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -574,9 +575,7 @@ def articulos_por_proveedor(
     q = (
         select(
             ComparativaRow.proveedor,
-            func.avg(ComparativaRow.precio_unitario).label("avg_precio"),
             func.count(case((ComparativaRow.posicion == 1, 1))).label("veces_ganado"),
-            func.min(case((ComparativaRow.posicion > 0, ComparativaRow.posicion))).label("mejor_posicion"),
             func.sum(ComparativaRow.total_por_renglon).label("total_ofertado"),
             _adj_expr.label("total_adjudicado"),
             func.count().label("count_filas"),
@@ -585,7 +584,6 @@ def articulos_por_proveedor(
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .where(ComparativaRow.proveedor.isnot(None))
         .group_by(ComparativaRow.proveedor)
-        .order_by(_adj_expr.desc())
     )
     q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
@@ -595,24 +593,6 @@ def articulos_por_proveedor(
 
     rows = session.execute(q).all()
 
-    # Mediana de precio_unitario del último año por proveedor (cálculo Python-side)
-    one_year_ago = dt.date.today() - dt.timedelta(days=365)
-    prov_names = [r.proveedor for r in rows]
-    prices_by_prov: dict = {}
-    if prov_names:
-        hist_q = (
-            select(ComparativaRow.proveedor, ComparativaRow.precio_unitario)
-            .where(ComparativaRow.fecha_apertura >= one_year_ago)
-            .where(ComparativaRow.proveedor.in_(prov_names))
-            .where(ComparativaRow.precio_unitario.isnot(None))
-        )
-        hist_q = _apply_exact_text(hist_q, ComparativaRow.descripcion, descripcion)
-        hist_q = _apply_multi(hist_q, ComparativaRow.marca, marca)
-        hist_q = _apply_multi(hist_q, ComparativaRow.rubro, rubro)
-        hist_q = _apply_exact_text(hist_q, ComparativaRow.plataforma, plataforma)
-        for hr in session.execute(hist_q).all():
-            prices_by_prov.setdefault(hr.proveedor, []).append(hr.precio_unitario)
-
     def _median(vals: list) -> float:
         if not vals:
             return 0.0
@@ -621,34 +601,58 @@ def articulos_por_proveedor(
         mid = n // 2
         return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
 
+    # Precios del período para calcular mediana y último precio por proveedor.
+    # Ordenados por fecha desc → primer registro = precio más reciente.
+    prov_names = [r.proveedor for r in rows]
+    prices_by_prov: dict = {}       # prov -> list of unit prices (desc by date)
+    ultimo_precio_by_prov: dict = {}  # prov -> most recent valid price
+    if prov_names:
+        hist_q = (
+            select(
+                ComparativaRow.proveedor,
+                ComparativaRow.precio_unitario,
+            )
+            .where(ComparativaRow.proveedor.in_(prov_names))
+            .where(ComparativaRow.precio_unitario.isnot(None))
+            .where(ComparativaRow.precio_unitario > 0)
+            .order_by(ComparativaRow.fecha_apertura.desc())
+        )
+        hist_q = _apply_exact_text(hist_q, ComparativaRow.descripcion, descripcion)
+        hist_q = _apply_date_filters(hist_q, fecha_desde, fecha_hasta)
+        hist_q = _apply_multi(hist_q, ComparativaRow.marca, marca)
+        hist_q = _apply_multi(hist_q, ComparativaRow.rubro, rubro)
+        hist_q = _apply_exact_text(hist_q, ComparativaRow.plataforma, plataforma)
+        for hr in session.execute(hist_q).all():
+            prov = hr.proveedor
+            prices_by_prov.setdefault(prov, []).append(hr.precio_unitario)
+            if prov not in ultimo_precio_by_prov:
+                ultimo_precio_by_prov[prov] = hr.precio_unitario
+
     data = [
         {
             "proveedor": r.proveedor,
-            "avg_precio": round(r.avg_precio or 0, 2),
+            "mediana_precio": round(_median(prices_by_prov.get(r.proveedor, [])), 2),
             "veces_ganado": int(r.veces_ganado or 0),
-            "mejor_posicion": r.mejor_posicion,
-            "total_ofertado": round(r.total_ofertado or 0, 2),
             "total_adjudicado": round(r.total_adjudicado or 0, 2),
-            "precio_mediana_12m": round(_median(prices_by_prov.get(r.proveedor, [])), 2),
             "count": r.count_filas,
             "procesos": r.procesos,
+            "ultimo_precio": round(ultimo_precio_by_prov.get(r.proveedor, 0), 2),
+            "efectividad": round(int(r.veces_ganado or 0) / r.count_filas * 100, 1) if r.count_filas else 0,
         }
         for r in rows
     ]
 
-    # Calcular ranking ordinal sin empates.
-    # Criterios: 1) mejor_posicion histórica ASC (NULLs al final)
-    #            2) veces_ganado DESC  3) total_adjudicado DESC  4) proveedor ASC (desempate estable)
+    # Ordenar por: efectividad DESC, veces_ganado DESC, total_adjudicado DESC,
+    # mediana_precio ASC (menor precio = más competitivo), proveedor ASC (desempate estable)
     data.sort(
         key=lambda x: (
-            x["mejor_posicion"] if x["mejor_posicion"] else 9999,
+            -(x["efectividad"] or 0),
             -x["veces_ganado"],
             -(x["total_adjudicado"] or 0),
+            x["mediana_precio"] if x["mediana_precio"] else 9_999_999,
             (x["proveedor"] or "").lower(),
         )
     )
-    for i, d in enumerate(data, start=1):
-        d["rank_tabla"] = i
 
     _cache_set(ck, data)
     return {"ok": True, "data": data}
@@ -750,7 +754,7 @@ def articulos_proveedor_historico(
     if not proveedor.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("art_prov_hist", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_hist_v2", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -763,6 +767,7 @@ def articulos_proveedor_historico(
             ComparativaRow.marca,
             ComparativaRow.posicion,
         )
+        .distinct()
         .where(ComparativaRow.proveedor == proveedor)
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .order_by(ComparativaRow.fecha_apertura.desc())

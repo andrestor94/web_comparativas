@@ -878,7 +878,8 @@ function pfSetMultiParam(params, filterId, paramName = FILTER_CONFIG[filterId]?.
   const state = PF.multiFilters[filterId];
   if (state?.appliedAll) return;
   const values = pfGetFilterAppliedValues(filterId);
-  if (values.length) params.set(paramName, values.join(","));
+  // Use "||" as separator to avoid splitting on commas within values (e.g. Spanish decimal "0,6 ml")
+  if (values.length) params.set(paramName, values.join("||"));
 }
 
 function pfBeginRequestGuard(key, cleanup) {
@@ -936,6 +937,47 @@ function pfFilterSeriesByValidPoints(series = [], minPoints = 1) {
     ));
     return validPoints.length >= minPoints;
   });
+}
+
+function pfIsValidTooltipValue(value) {
+  if (value === null || value === undefined || value === "" || value === "-" || value === "—") return false;
+  const n = Number(value);
+  return !Number.isNaN(n) && n > 0;
+}
+
+// Returns a custom ApexCharts tooltip function for shared multi-series money charts.
+// Filters out series with no valid value at the hovered data point.
+function pfMakeSharedMoneyTooltip() {
+  return function({ series, dataPointIndex, w }) {
+    const label = (w.globals.categoryLabels && w.globals.categoryLabels[dataPointIndex])
+      || (w.globals.labels && w.globals.labels[dataPointIndex])
+      || "";
+
+    const items = series.reduce((acc, serieData, i) => {
+      const val = serieData[dataPointIndex];
+      if (!pfIsValidTooltipValue(val)) return acc;
+      const name = (w.globals.seriesNames && w.globals.seriesNames[i]) || "";
+      const color = (w.globals.colors && w.globals.colors[i]) || "#06486f";
+      acc.push(
+        `<div style="display:flex;align-items:center;padding:2px 10px;font-size:11px">` +
+        `<span style="width:8px;height:8px;border-radius:50%;background:${color};` +
+        `display:inline-block;margin-right:6px;flex-shrink:0"></span>` +
+        `<span style="opacity:.75;margin-right:4px">${pfEsc(name)}:</span>` +
+        `<strong>${pfPeso(val)}</strong>` +
+        `</div>`
+      );
+      return acc;
+    }, []);
+
+    if (!items.length) return "";
+
+    return (
+      `<div style="padding:5px 0;min-width:140px">` +
+      (label ? `<div style="padding:4px 10px 3px;font-size:11px;font-weight:600;border-bottom:1px solid rgba(148,163,184,.2)">${pfEsc(label)}</div>` : "") +
+      items.join("") +
+      `</div>`
+    );
+  };
 }
 
 function pfChartBase(overrides = {}) {
@@ -1492,7 +1534,7 @@ async function pfLoadArtEvolucion(params) {
             tooltip: {
               shared: true,
               intersect: false,
-              y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
+              custom: pfMakeSharedMoneyTooltip(),
             },
           })
         );
@@ -1574,7 +1616,7 @@ async function pfLoadArtPorMarca(params) {
         tooltip: {
           shared: true,
           intersect: false,
-          y: { formatter: (value) => value != null ? pfPeso(value) : "-" },
+          custom: pfMakeSharedMoneyTooltip(),
         },
       })
     );
@@ -1640,22 +1682,19 @@ async function pfLoadArtPorProveedor(params) {
 
     if (tbody) {
       tbody.innerHTML = data.map((d) => {
-        // rank_tabla: ranking ordinal único calculado en backend (sin empates).
-        // posClass basado en rank_tabla para que solo el #1 real tenga badge dorado.
-        const rank = d.rank_tabla ?? d.mejor_posicion ?? null;
-        const posClass = rank === 1 ? "pos1" : rank === 2 ? "pos2" : "posn";
         const provId = encodeURIComponent(d.proveedor);
-        const hasMediana = d.precio_mediana_12m > 0;
+        const efct = d.count > 0 ? pfFmt(d.efectividad, 1) + "%" : "-";
+        const hasUltimo = d.ultimo_precio > 0;
         return `
           <tr class="pf-prov-row" data-proveedor="${provId}">
             <td>${pfCellText(d.proveedor, 48)}</td>
-            <td class="num">${pfPeso(d.avg_precio)}</td>
+            <td class="num">${d.mediana_precio > 0 ? pfPeso(d.mediana_precio) : "-"}</td>
             <td class="num">${pfFmt(d.veces_ganado)}</td>
-            <td class="num"><span class="pf-badge ${posClass}">#${rank ?? "-"}</span></td>
-            <td class="num">${pfPeso(d.total_adjudicado)}</td>
+            <td class="num">${efct}</td>
             <td class="num">${pfFmt(d.count)}</td>
+            <td class="num">${pfPeso(d.total_adjudicado)}</td>
             <td class="num pf-hist-cell">
-              ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana_12m)}</span><small>mediana 12m</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
+              ${hasUltimo ? `<span>${pfPeso(d.ultimo_precio)}</span>` : `<span class="pf-text-muted-sm">—</span>`}
               <button class="pf-hist-btn" title="Ver historial del período"
                 onclick="pfToggleHistorico(this, decodeURIComponent('${provId}'))">
                 <i class="bi bi-chevron-down"></i>
