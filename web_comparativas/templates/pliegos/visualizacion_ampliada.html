@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Vista Ampliada · {{ caso.titulo }}{% endblock %}
+{% block title %}Detalle completo · {{ caso.titulo }}{% endblock %}
 
 {% block header_title %}
-  <span>Lectura de Pliego</span>
+  <span>Lectura de Pliegos | Detalle completo</span>
   {% if caso.titulo %}
   <span class="text-muted fw-normal ms-2" style="font-size:.85rem">{{ caso.titulo }}</span>
   {% endif %}
@@ -13,10 +13,10 @@
 <div class="d-flex gap-2 align-items-center">
   <div class="view-mode-toggle">
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="view-mode-btn">
-      <i class="bi bi-layout-sidebar-inset"></i> Vista Resumida
+      <i class="bi bi-layout-sidebar-inset"></i> Ficha del pliego
     </a>
     <span class="view-mode-btn active">
-      <i class="bi bi-layout-text-window-reverse"></i> Vista Ampliada
+      <i class="bi bi-layout-text-window-reverse"></i> Detalle completo
     </span>
   </div>
   {% if es_admin %}
@@ -32,6 +32,7 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
+<link rel="prefetch" as="document" href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Vista Completa — Premium v4
@@ -612,7 +613,8 @@
     </div>
     <button class="amp-nav-btn active" data-target="renglones">
       <span class="amp-nav-btn-inner"><i class="bi bi-box-seam"></i>Renglones</span>
-      {% if caso.renglones %}<span class="amp-nav-badge">{{ caso.renglones|length }}</span>{% endif %}
+      {% set _rn_count = (fusion_ctx.renglones_fusion|length if fusion_ctx and fusion_ctx.renglones_fusion else caso.renglones|length) %}
+      {% if _rn_count %}<span class="amp-nav-badge">{{ _rn_count }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="cronograma">
       <span class="amp-nav-btn-inner"><i class="bi bi-calendar3"></i>Cronograma</span>
@@ -652,7 +654,8 @@
     </div>
     <button class="amp-nav-btn" data-target="faltantes">
       <span class="amp-nav-btn-inner"><i class="bi bi-exclamation-octagon"></i>Faltantes</span>
-      {% if caso.faltantes %}<span class="amp-nav-badge" style="{% if caso.faltantes %}background:var(--siem-red-soft);color:var(--siem-red);{% endif %}">{{ caso.faltantes|length }}</span>{% endif %}
+      {% set total_faltantes = (fusion_ctx.faltantes_criticos|length if fusion_ctx else 0) + caso.faltantes|length %}
+      {% if total_faltantes %}<span class="amp-nav-badge" style="background:var(--siem-red-soft);color:var(--siem-red);">{{ total_faltantes }}</span>{% endif %}
     </button>
     <button class="amp-nav-btn" data-target="hallazgos">
       <span class="amp-nav-btn-inner"><i class="bi bi-lightbulb"></i>Hallazgos</span>
@@ -674,10 +677,11 @@
       <span class="amp-nav-badge">{{ proceso|length }}</span>
     </button>
     {% endif %}
-    {% if analitica %}
+    {% set _an_src = analitica_rows if analitica_rows is defined and analitica_rows else analitica %}
+    {% if _an_src %}
     <button class="amp-nav-btn" data-target="analitica">
       <span class="amp-nav-btn-inner"><i class="bi bi-graph-up-arrow"></i>SIEM Analítica</span>
-      <span class="amp-nav-badge">{{ analitica|length }}</span>
+      <span class="amp-nav-badge">{{ _an_src|length }}</span>
     </button>
     {% endif %}
 
@@ -749,17 +753,168 @@
       </div>
     </div>
 
+    {# ── Banner estado del análisis ── #}
+    {% if fusion_ctx %}
+    {% set ef = fusion_ctx.estado_fusion %}
+    {% if ef == "listo_para_fusion" %}
+      {% set _fc = "var(--siem-green)" %}{% set _fb = "rgba(22,163,74,.08)" %}{% set _fbd = "rgba(22,163,74,.25)" %}
+      {% set _fi = "bi-check-circle-fill" %}{% set _ft = "Análisis completo" %}
+    {% elif ef == "requiere_validacion_manual" %}
+      {% set _fc = "var(--siem-amber)" %}{% set _fb = "rgba(217,119,6,.08)" %}{% set _fbd = "rgba(217,119,6,.25)" %}
+      {% set _fi = "bi-exclamation-circle-fill" %}{% set _ft = "Requiere revisión manual" %}
+    {% else %}
+      {% set _fc = "var(--siem-red)" %}{% set _fb = "rgba(220,38,38,.08)" %}{% set _fbd = "rgba(220,38,38,.2)" %}
+      {% set _fi = "bi-x-octagon-fill" %}{% set _ft = "Análisis incompleto" %}
+    {% endif %}
+    <div style="border:1px solid {{ _fbd }};border-radius:10px;padding:.75rem 1.1rem;background:{{ _fb }};
+                display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:.6rem;">
+        <i class="bi {{ _fi }}" style="color:{{ _fc }};font-size:1.1rem;flex-shrink:0;"></i>
+        <div>
+          <div style="font-weight:700;font-size:.85rem;color:{{ _fc }};">Estado del análisis: {{ _ft }}</div>
+          <div style="font-size:.74rem;color:var(--text-muted);margin-top:.1rem;">
+            {{ fusion_ctx.resumen.campos_completos }}/{{ fusion_ctx.resumen.campos_totales }} campos requeridos ·
+            {{ fusion_ctx.resumen.renglones }} renglones ·
+            {% if fusion_ctx.faltantes_criticos|length %}
+              <span style="color:var(--siem-red);">{{ fusion_ctx.faltantes_criticos|length }} campo{{ 's' if fusion_ctx.faltantes_criticos|length != 1 }} faltante{{ 's' if fusion_ctx.faltantes_criticos|length != 1 }}</span>
+            {% else %}
+              <span style="color:var(--ok);">todos completos</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+        {% if fusion_ctx.contradiccion_licia %}
+        <span style="font-size:.72rem;background:rgba(220,38,38,.12);color:var(--siem-red);border:1px solid var(--siem-red-border);
+                     border-radius:5px;padding:.2rem .55rem;font-weight:600;">
+          <i class="bi bi-exclamation-triangle me-1"></i>Divergencia en análisis
+        </span>
+        {% endif %}
+        <span style="font-size:.72rem;background:rgba(37,99,235,.08);color:var(--accent-blue);border:1px solid rgba(37,99,235,.2);
+                     border-radius:5px;padding:.2rem .55rem;">
+          Análisis automático: <strong>{{ fusion_ctx.estado_licia_texto or '—' }}</strong>
+        </span>
+        <a href="#" onclick="activateTab('faltantes');return false;"
+           style="font-size:.72rem;color:var(--accent-blue);font-weight:600;text-decoration:none;white-space:nowrap;">
+          Ver faltantes →
+        </a>
+      </div>
+    </div>
+    {% if fusion_ctx.contradiccion_licia %}
+    <div style="border:1px solid var(--siem-red-border);border-radius:8px;padding:.6rem .9rem;background:var(--siem-red-soft);
+                font-size:.78rem;color:var(--siem-red);display:flex;gap:.5rem;align-items:flex-start;">
+      <i class="bi bi-exclamation-triangle-fill flex-shrink-0" style="margin-top:.1rem;"></i>
+      <span><strong>Divergencia en análisis:</strong> {{ fusion_ctx.mensaje_contradiccion }}</span>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <!-- PANEL: RENGLONES -->
     <div class="amp-panel active" id="amp-panel-renglones">
+      {% set renglones_src = fusion_ctx.renglones_fusion if fusion_ctx and fusion_ctx.renglones_fusion else [] %}
       <div class="amp-card">
         <div class="amp-card-header">
           <h2><i class="bi bi-box-seam"></i> Renglones (Ítems Licitados)</h2>
           <div class="d-flex align-items-center gap-2">
             <input type="text" id="filtroRenglones" class="form-control form-control-sm" placeholder="Buscar..." style="max-width:200px;">
+            {% if renglones_src %}
+            <span class="amp-badge">{{ renglones_src|length }} ítems</span>
+            {% else %}
             <span class="amp-badge">{{ caso.renglones|length }} ítems</span>
+            {% endif %}
           </div>
         </div>
-        {% if caso.renglones %}
+
+        {# Banner fuente: cuál hoja prevalece #}
+        {% if renglones_src %}
+        <div style="padding:.45rem 1.1rem;font-size:.74rem;color:var(--accent-blue);background:rgba(37,99,235,.06);border-bottom:1px solid rgba(37,99,235,.15);display:flex;gap:.4rem;align-items:center;">
+          <i class="bi bi-layers-fill" style="opacity:.7;"></i>
+          Fuente principal: <strong>Renglones estructurados</strong> (enriquecidos con datos del pliego)
+        </div>
+        {% endif %}
+
+        {% if renglones_src %}
+        <div class="table-responsive">
+          <table class="amp-table" id="tablaRenglones">
+            <thead>
+              <tr>
+                <th style="width:28px;"></th>
+                <th style="width:45px;">#</th>
+                <th>Código SIB</th>
+                <th>Descripción</th>
+                <th style="width:80px;">Cant.</th>
+                <th style="width:65px;">Unidad</th>
+                <th>Lugar / Cond. Entrega</th>
+                <th>Marca</th>
+                <th style="width:95px;">P. Unitario</th>
+                <th style="width:100px;">Importe</th>
+                <th style="width:80px;">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in renglones_src %}
+              {% set idx = loop.index %}
+              <tr class="renglon-master" onclick="toggleRenglon('rdet-{{ idx }}', this)">
+                <td class="text-center text-secondary ps-2"><i class="bi bi-chevron-right chevron-icon" style="transition:transform .2s;font-size:.75rem;"></i></td>
+                <td class="text-center" style="font-size:.8rem;color:var(--text-muted);">{{ r.item or r.orden or idx }}</td>
+                <td style="font-size:.79rem;font-family:monospace;">{{ r.codigo_item or '—' }}</td>
+                <td class="fw-semibold">{{ txt(r.descripcion) }}</td>
+                <td class="text-center">{{ r.cantidad or '—' }}</td>
+                <td class="text-center" style="font-size:.82rem;">{{ r.unidad or '—' }}</td>
+                <td style="font-size:.82rem;">
+                  {% set lugar = r.lugar_entrega or '' %}
+                  {% set plazo = r.plazo_entrega or '' %}
+                  {% set perio = r.periodicidad or '' %}
+                  {% if lugar or plazo or perio %}
+                    {% if lugar %}<span>{{ lugar }}</span>{% endif %}
+                    {% if plazo %}<span class="text-muted ms-1">· {{ plazo }}</span>{% endif %}
+                    {% if perio %}<span class="text-muted ms-1">· {{ perio }}</span>{% endif %}
+                  {% else %}—{% endif %}
+                </td>
+                <td style="font-size:.82rem;">{{ r.marca or '—' }}</td>
+                <td class="text-end" style="font-size:.82rem;font-variant-numeric:tabular-nums;">{{ r.precio_unitario or '—' }}</td>
+                <td class="text-end fw-semibold" style="font-size:.82rem;font-variant-numeric:tabular-nums;">{{ r.importe_total or '—' }}</td>
+                <td>{{ status_badge(r.estado) }}</td>
+              </tr>
+              <tr class="renglon-detail-row" id="rdet-{{ idx }}">
+                <td colspan="11" class="p-0">
+                  <div class="renglon-detail-box">
+                    <div class="row g-3">
+                      {% if r.destino_efector %}
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Destino / Efector</div>
+                        <div class="amp-value">{{ r.destino_efector }}</div>
+                      </div>
+                      {% endif %}
+                      {% if r.obs_tecnicas %}
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Observaciones Técnicas</div>
+                        <div class="amp-value">{{ r.obs_tecnicas }}</div>
+                      </div>
+                      {% endif %}
+                      {% if r.observaciones %}
+                      <div class="col-12 col-md-4">
+                        <div class="amp-label">Observaciones</div>
+                        <div class="amp-value">{{ r.observaciones }}</div>
+                      </div>
+                      {% endif %}
+                      {% if r.fuente %}
+                      <div class="col-12 col-md-3">
+                        <div class="amp-label">Fuente hoja</div>
+                        <div class="amp-value" style="font-size:.78rem;font-family:monospace;">{{ r.fuente }}</div>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% elif caso.renglones %}
+        {# Fallback: mostrar renglones del modelo DB si no hay fusion_ctx #}
         <div class="table-responsive">
           <table class="amp-table" id="tablaRenglones">
             <thead>
@@ -791,11 +946,7 @@
                         <div class="amp-value">{{ r.destino_efector or '—' }}</div>
                       </div>
                       <div class="col-12 col-md-4">
-                        <div class="amp-label">Entrega Parcial</div>
-                        <div class="amp-value">{{ r.entrega_parcial or '—' }}</div>
-                      </div>
-                      <div class="col-12 col-md-4">
-                        <div class="amp-label">Observaciones Técnicas</div>
+                        <div class="amp-label">Obs. Técnicas</div>
                         <div class="amp-value">{{ r.obs_tecnicas or '—' }}</div>
                       </div>
                       {% if r.datos_extra %}
@@ -814,13 +965,14 @@
             </tbody>
           </table>
         </div>
+
         {% else %}
         <div class="lp-empty-state m-3">
           <div class="lp-empty-icon"><i class="bi bi-box-seam"></i></div>
           <div class="lp-empty-title">No se detectaron renglones estructurados</div>
           <p class="lp-empty-copy">
-            El Excel importado no contiene items licitados cargados para esta seccion o la informacion
-            no fue identificada con suficiente certeza. Revisa trazabilidad o faltantes para validar el origen.
+            El Excel importado no contiene ítems licitados identificables.
+            Revisá trazabilidad o faltantes para más detalles.
           </p>
           <div class="mt-3 d-flex justify-content-center gap-2 flex-wrap">
             <a href="#" onclick="activateTab('trazabilidad');return false;" class="lp-btn lp-btn-secondary">
@@ -1076,53 +1228,101 @@
 
     <!-- PANEL: FALTANTES -->
     <div class="amp-panel" id="amp-panel-faltantes">
-      <div class="amp-card" style="{% if caso.faltantes %}border-color:var(--siem-red-border);{% endif %}">
-        <div class="amp-card-header" style="{% if caso.faltantes %}background:var(--siem-red-soft);border-bottom-color:var(--siem-red-border);{% endif %}">
-          <h2 style="{% if caso.faltantes %}color:var(--siem-red);{% endif %}">
-            <i class="bi bi-exclamation-octagon{% if not caso.faltantes %} text-success{% endif %}"></i>
-            Faltantes Documentales
+      {# Clasificación desde fusion_ctx (SIEM independiente) #}
+      {% set fc_fusion = fusion_ctx.faltantes_criticos if fusion_ctx else [] %}
+      {% set fc_doc    = fusion_ctx.faltantes_documentales if fusion_ctx else [] %}
+      {% set fc_dudas  = [] %}
+      {# Las dudas vienen de faltantes con criticidad 'duda' o fuente 'Faltantes_y_Dudas' con motivo tipo pregunta #}
+      {% set fc_doc_filtrado = [] %}
+      {% for f in caso.faltantes %}
+        {% set crit_low = (f.criticidad or '')|lower %}
+        {% if 'duda' in crit_low %}
+          {% set _ = fc_dudas.append(f) %}
+        {% else %}
+          {% set _ = fc_doc_filtrado.append(f) %}
+        {% endif %}
+      {% endfor %}
+
+      {% set tiene_algo = fc_fusion or fc_doc_filtrado or fc_dudas %}
+      <div class="amp-card" style="{% if tiene_algo %}border-color:var(--siem-red-border);{% endif %}">
+        <div class="amp-card-header" style="{% if tiene_algo %}background:var(--siem-red-soft);border-bottom-color:var(--siem-red-border);{% endif %}">
+          <h2 style="{% if tiene_algo %}color:var(--siem-red);{% endif %}">
+            <i class="bi bi-exclamation-octagon{% if not tiene_algo %} text-success{% endif %}"></i>
+            Faltantes y Dudas
           </h2>
-          {% if caso.faltantes %}
+          {% if tiene_algo %}
           <span class="amp-badge" style="background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border);">
-            {{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }}
+            {{ fc_fusion|length + fc_doc_filtrado|length + fc_dudas|length }} registros
           </span>
           {% else %}
           <span class="amp-badge" style="background:var(--ok-lt);color:var(--ok);border:1px solid var(--siem-green-border);">Sin faltantes</span>
           {% endif %}
         </div>
 
-        {% if caso.faltantes %}
-        <!-- Callout explicativo -->
-        <div style="padding:.75rem 1.35rem;background:var(--siem-amber-soft);border-bottom:1px solid var(--siem-amber-border);">
-          <div style="display:flex;gap:.55rem;align-items:flex-start;">
-            <i class="bi bi-info-circle-fill flex-shrink-0" style="color:var(--siem-amber);margin-top:.1rem;font-size:.95rem;"></i>
-            <div style="font-size:.79rem;color:var(--siem-amber);line-height:1.48;">
-              <strong>Faltantes documentales ≠ campos no resueltos.</strong>
-              Son problemas registrados del expediente: renglones incompletos, anexos no cargados o condiciones sin especificar.
-              Son independientes de la completitud ejecutiva (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>)
-              y técnica (<strong>{{ completitud_tecnica.porcentaje }}%</strong>).
-              {% if completitud_ejecutiva.faltantes_criticos > 0 %}
-              Los faltantes críticos aplican un tope del 89% a la completitud.
-              {% endif %}
-            </div>
+        {% if tiene_algo %}
+
+        {# ── GRUPO 1: Campos críticos faltantes ── #}
+        {% if fc_fusion %}
+        <div style="padding:.6rem 1.1rem;background:rgba(220,38,38,.07);border-bottom:1px solid var(--siem-red-border);">
+          <div style="font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--siem-red);margin-bottom:.5rem;">
+            <i class="bi bi-x-octagon-fill me-1"></i>Campos requeridos faltantes ({{ fc_fusion|length }})
+          </div>
+          <div style="font-size:.76rem;color:var(--siem-red);line-height:1.45;opacity:.85;">
+            Estos campos son requeridos para completar el análisis del pliego.
+            Sin ellos el estado es <strong>Incompleto</strong>.
           </div>
         </div>
-
         <div class="table-responsive">
-          <table class="amp-table">
+          <table class="amp-table" style="margin-bottom:0;">
+            <thead>
+              <tr>
+                <th>Campo</th>
+                <th>Etiqueta</th>
+                <th style="width:100px;">Categoría</th>
+                <th>Hoja origen esperada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for campo in fc_fusion %}
+              <tr style="background:rgba(220,38,38,.04);">
+                <td style="font-weight:700;font-family:monospace;font-size:.79rem;">{{ campo.key or campo }}</td>
+                <td>{{ campo.label or '—' }}</td>
+                <td>{{ status_badge(campo.categoria or 'critico') }}</td>
+                <td style="font-size:.79rem;color:var(--text-muted);">{{ campo.hoja_origen or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        {# ── GRUPO 2: Faltantes documentales del expediente (hoja Faltantes_y_Dudas) ── #}
+        {% if fc_doc_filtrado %}
+        <div style="padding:.6rem 1.1rem;background:rgba(217,119,6,.07);border-top:1px solid var(--siem-amber-border);border-bottom:1px solid var(--siem-amber-border);{% if fc_fusion %}margin-top:.5rem;{% endif %}">
+          <div style="font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--siem-amber);margin-bottom:.3rem;">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>Faltantes documentales del expediente ({{ fc_doc_filtrado|length }})
+          </div>
+          <div style="font-size:.76rem;color:var(--siem-amber);line-height:1.45;opacity:.85;">
+            Problemas del expediente real: renglones incompletos, anexos faltantes, condiciones sin especificar.
+            Son independientes de la completitud ejecutiva (<strong>{{ completitud_ejecutiva.porcentaje }}%</strong>).
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="amp-table" style="margin-bottom:0;">
             <thead>
               <tr>
                 <th>Campo objetivo</th>
                 <th>Motivo / Detalle</th>
-                <th style="width:110px;">Criticidad</th>
+                <th style="width:100px;">Criticidad</th>
+                <th>Fuente</th>
                 <th>Recomendación</th>
               </tr>
             </thead>
             <tbody>
-              {% for f in caso.faltantes|sort(attribute='criticidad', reverse=True) %}
+              {% for f in fc_doc_filtrado|sort(attribute='criticidad', reverse=True) %}
               {% set crit = (f.criticidad or '')|lower %}
               <tr style="{% if crit in ['alta','crítica','critica','alto'] %}background:var(--siem-red-soft);{% endif %}">
-                <td style="font-weight:700;white-space:nowrap;">{{ f.campo_objetivo or '—' }}</td>
+                <td style="font-weight:700;white-space:nowrap;font-size:.84rem;">{{ f.campo_objetivo or '—' }}</td>
                 <td>
                   <div style="font-weight:600;margin-bottom:.2rem;">{{ f.motivo or '—' }}</div>
                   {% if f.detalle %}
@@ -1130,18 +1330,54 @@
                   {% endif %}
                 </td>
                 <td>{{ status_badge(f.criticidad) }}</td>
+                <td style="font-size:.78rem;color:var(--text-muted);font-family:monospace;">{{ f.fuente or '—' }}</td>
                 <td style="font-style:italic;font-size:.83rem;color:var(--text-second);">{{ f.accion_recomendada or '—' }}</td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
+        {% endif %}
+
+        {# ── GRUPO 3: Dudas operativas ── #}
+        {% if fc_dudas %}
+        <div style="padding:.6rem 1.1rem;background:rgba(99,102,241,.06);border-top:1px solid rgba(99,102,241,.2);{% if fc_doc_filtrado or fc_fusion %}margin-top:.5rem;{% endif %}">
+          <div style="font-size:.73rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6366f1;margin-bottom:.3rem;">
+            <i class="bi bi-question-circle-fill me-1"></i>Dudas operativas ({{ fc_dudas|length }})
+          </div>
+          <div style="font-size:.76rem;color:#6366f1;line-height:1.45;opacity:.85;">
+            Preguntas o incertidumbres del equipo que requieren validación antes de cargar.
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="amp-table" style="margin-bottom:0;">
+            <thead>
+              <tr>
+                <th>Campo objetivo</th>
+                <th>Descripción / Duda</th>
+                <th>Acción recomendada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in fc_dudas %}
+              <tr style="background:rgba(99,102,241,.03);">
+                <td style="font-weight:700;font-size:.84rem;">{{ f.campo_objetivo or '—' }}</td>
+                <td>{{ f.motivo or f.detalle or '—' }}</td>
+                <td style="font-style:italic;font-size:.83rem;color:var(--text-second);">{{ f.accion_recomendada or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
 
         {% else %}
         <div style="padding:2.5rem;text-align:center;color:var(--ok);">
           <i class="bi bi-check-circle-fill" style="font-size:2rem;display:block;margin-bottom:.65rem;opacity:.85;"></i>
-          <div style="font-weight:700;font-size:.95rem;">Sin faltantes documentales registrados</div>
-          <div style="font-size:.82rem;color:var(--text-muted);margin-top:.3rem;">El expediente no tiene problemas documentales identificados.</div>
+          <div style="font-weight:700;font-size:.95rem;">Sin faltantes ni dudas registradas</div>
+          <div style="font-size:.82rem;color:var(--text-muted);margin-top:.3rem;">
+            No se detectaron campos faltantes ni problemas documentales en este expediente.
+          </div>
         </div>
         {% endif %}
       </div>
@@ -1422,16 +1658,41 @@
     {% endif %}
 
     <!-- PANEL: SIEM ANALÍTICA -->
-    {% if analitica %}
+    {% set analitica_data = analitica_rows if analitica_rows is defined and analitica_rows else (analitica if analitica else []) %}
+    {% if analitica_data %}
     <div class="amp-panel" id="amp-panel-analitica">
       <div class="amp-card">
         <div class="amp-card-header">
           <h2><i class="bi bi-graph-up-arrow"></i> SIEM Analítica</h2>
-          <span class="amp-badge">{{ analitica|length }} campos</span>
+          <span class="amp-badge">{{ analitica_data|length }} fila{{ 's' if analitica_data|length != 1 else '' }}</span>
         </div>
+        {% if analitica_data is iterable and analitica_data|first is mapping %}
+        {# Formato nuevo: lista de dicts (una fila por registro) #}
+        <div class="table-responsive">
+          <table class="amp-table">
+            <thead>
+              <tr>
+                {% for col in analitica_data[0].keys() %}
+                <th>{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in analitica_data %}
+              <tr>
+                {% for v in row.values() %}
+                <td style="font-size:.82rem;">{{ txt(v) }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        {# Fallback: dict clave-valor #}
         <div class="amp-card-body">
           <div class="amp-grid">
-            {% for k, v in analitica.items() %}
+            {% for k, v in analitica_data.items() %}
             <div class="amp-item">
               <div class="amp-label">{{ k }}</div>
               <div class="amp-value">{{ txt(v) }}</div>
@@ -1439,6 +1700,7 @@
             {% endfor %}
           </div>
         </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -1579,4 +1841,5 @@
   })();
 </script>
 <script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
+<script src="{{ url_for('static', path='js/pliegos_navigation.js') }}?v=1"></script>
 {% endblock %}

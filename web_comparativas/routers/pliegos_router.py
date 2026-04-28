@@ -49,6 +49,7 @@ from web_comparativas.pliegos_rp import (
     export_dual_excel_bytes,
 )
 from web_comparativas.pliegos_summary import build_debug_matrix, build_resumen_licitacion
+from web_comparativas.pliegos_fusion import calcular_estado_fusion, FUSION_CAMPOS_OBLIGATORIOS, FUSION_CAMPOS_COMPLEMENTARIOS
 
 router = APIRouter()
 
@@ -991,15 +992,21 @@ def lectura_pliegos_validacion(
         "proceso": bool(caso.datos_proceso and caso.datos_proceso.datos),
     }
 
-    criticos = [f for f in caso.faltantes if (f.criticidad or "").lower() == "alta"]
+    criticos = [f for f in caso.faltantes if (f.criticidad or "").lower() in {"alta", "critica", "crítica", "alto"}]
     rp_output = build_rp_output(caso)
     resumen_summary = build_resumen_licitacion(caso)
     completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
     completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
     completitud_tecnica = resumen_summary["completitud_tecnica"]
 
+    # Calcular estado Fusion independientemente de LicIA
+    fusion_ctx = calcular_estado_fusion(caso)
+
     errores_list = _decode_msgs(errores) if errores else []
     adv_list = _decode_msgs(advertencias) if advertencias else []
+
+    ctrl_datos = caso.control_carga.datos if caso.control_carga else {}
+    ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
 
     return templates.TemplateResponse("pliegos/validacion_excel.html", {
         "request": request,
@@ -1018,7 +1025,9 @@ def lectura_pliegos_validacion(
         "advertencias": adv_list,
         "pendiente": pendiente == "1",
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
-        "control_carga": caso.control_carga.datos if caso.control_carga else {},
+        "control_carga": ctrl_row,
+        "fusion_ctx": fusion_ctx,
+        "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
     })
 
 
@@ -1078,7 +1087,7 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
 
     canonical_output = build_canonical_output(caso)
 
-    # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion.html
+    # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion_rp.html
     resumen = _build_resumen_licitacion(caso)
     resumen_summary = build_resumen_licitacion(caso)
     completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
@@ -1086,26 +1095,33 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
     completitud_tecnica = resumen_summary["completitud_tecnica"]
     proceso = caso.datos_proceso.datos if caso.datos_proceso else {}
 
+    # Calcular estado Fusion independientemente de LicIA
+    fusion_ctx = calcular_estado_fusion(caso)
+
     req_por_cat: dict = {}
     for r in caso.requisitos:
         cat = (r.categoria or "Otros").strip()
         req_por_cat.setdefault(cat, []).append(r)
 
-    # Ordenar hallazgos: primero por impacto (Alto > Medio > Bajo), luego por categoría
     _IMPACTO_ORDER = {"alto": 0, "high": 0, "medio": 1, "medium": 1, "bajo": 2, "low": 2, "baja": 2}
     hallazgos_ordenados = sorted(
         caso.hallazgos,
         key=lambda h: (_IMPACTO_ORDER.get((h.impacto or "").lower(), 5), h.categoria or "")
     )
 
-    # Campos extra del Excel que no están en el resumen conocido
     campos_conocidos_lower = {k.lower() for k in resumen.get("_campos_conocidos", set())}
     proceso_extras = {
         k: v for k, v in proceso.items()
         if type(v) in (str, int, float, bool) and k.lower().strip() not in campos_conocidos_lower
     }
 
-    return templates.TemplateResponse("pliegos/visualizacion_rp.html", {
+    # Versión activa del Excel cargado
+    excel_activo = next(
+        (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
+        None
+    )
+
+    response = templates.TemplateResponse("pliegos/visualizacion_rp.html", {
         "request": request,
         "user": user,
         "caso": caso,
@@ -1121,7 +1137,13 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
         "es_admin": es_admin,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
         "control_carga": caso.control_carga.datos if caso.control_carga else {},
+        "fusion_ctx": fusion_ctx,
+        "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
+        "fusion_campos_complementarios": FUSION_CAMPOS_COMPLEMENTARIOS,
+        "excel_activo": excel_activo,
     })
+    response.headers["Cache-Control"] = "private, max-age=45"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1154,7 +1176,24 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
     resumen_summary = build_resumen_licitacion(caso)
     completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
     completitud_tecnica = resumen_summary["completitud_tecnica"]
-    return templates.TemplateResponse("pliegos/visualizacion_ampliada.html", {
+
+    # Calcular estado Fusion independientemente de LicIA
+    fusion_ctx = calcular_estado_fusion(caso)
+
+    # Parsear SIEM_Analitica para la vista ampliada (lista de filas)
+    analitica_raw = caso.analitica.datos if caso.analitica else []
+    analitica_rows = analitica_raw if isinstance(analitica_raw, list) else []
+
+    # Control_Carga: normalizar para la vista
+    ctrl_datos = caso.control_carga.datos if caso.control_carga else {}
+    ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
+
+    excel_activo = next(
+        (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
+        None
+    )
+
+    response = templates.TemplateResponse("pliegos/visualizacion_ampliada.html", {
         "request": request,
         "user": user,
         "caso": caso,
@@ -1164,10 +1203,16 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
         "completitud_tecnica": completitud_tecnica,
         "es_admin": es_admin,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
-        "control_carga": caso.control_carga.datos if caso.control_carga else {},
+        "control_carga": ctrl_row,
         "analitica": caso.analitica.datos if caso.analitica else {},
+        "analitica_rows": analitica_rows,
+        "fusion_ctx": fusion_ctx,
+        "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
+        "excel_activo": excel_activo,
         **contexto_ampliado,
     })
+    response.headers["Cache-Control"] = "private, max-age=45"
+    return response
 
 
 @router.get("/mercado-publico/lectura-pliegos/{caso_id}/rp/export")
@@ -1473,14 +1518,21 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         col_map = _col_map(df.columns, {
             "orden": ["renglon_orden", "orden", "n°", "nro", "#"],
             "numero_renglon": ["numero_renglon", "renglón", "renglon", "nro_renglon"],
-            "codigo_item": ["codigo", "código", "codigo_item", "cod"],
+            "codigo_item": ["codigo_item", "codigo", "código", "cod"],
             "descripcion": ["descripcion", "descripción", "detalle"],
             "cantidad": ["cantidad", "cant"],
             "unidad": ["unidad_medida", "unidad", "ud", "u.m."],
-            "destino_efector": ["destino", "efector", "destino_efector"],
+            "destino_efector": ["destino_efector", "destino", "efector"],
             "entrega_parcial": ["entrega_parcial", "entrega parcial"],
             "obs_tecnicas": ["observaciones", "obs", "obs_tecnicas"],
             "estado": ["estado"],
+            "fuente": ["fuente"],
+            "marca": ["marca"],
+            "precio_unitario": ["precio_unitario", "precio unitario"],
+            "importe_total": ["importe_total", "importe total"],
+            "lugar_entrega": ["lugar_entrega", "lugar entrega"],
+            "plazo_entrega": ["plazo_entrega", "plazo entrega"],
+            "periodicidad": ["periodicidad"],
         })
         for idx, row in enumerate(_iter_data_rows(df)):
             desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
@@ -1491,10 +1543,15 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
                 orden_int = int(float(orden_val)) if orden_val else idx + 1
             except (ValueError, TypeError):
                 orden_int = idx + 1
+            # Capturar todas las columnas del Excel de LicIA
             extra_data = {
-                "lugar_entrega": _safe_str(row.get("lugar_entrega", "")),
-                "plazo_entrega": _safe_str(row.get("plazo_entrega", "")),
-                "periodicidad": _safe_str(row.get("periodicidad", "")),
+                "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", "lugar_entrega"), "")),
+                "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", "plazo_entrega"), "")),
+                "periodicidad": _safe_str(row.get(col_map.get("periodicidad", "periodicidad"), "")),
+                "marca": _safe_str(row.get(col_map.get("marca", "marca"), "")),
+                "precio_unitario": _safe_str(row.get(col_map.get("precio_unitario", "precio_unitario"), "")),
+                "importe_total": _safe_str(row.get(col_map.get("importe_total", "importe_total"), "")),
+                "fuente": _safe_str(row.get(col_map.get("fuente", "fuente"), "")),
                 "especificaciones_tecnicas": _safe_str(row.get("especificaciones_tecnicas", "")),
                 "muestras": _safe_str(row.get("muestras", "")),
             }
@@ -1517,25 +1574,33 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     if "Documentos" in sheet_map:
         df = xl.parse(sheet_map["Documentos"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
+            "documento_id": ["documento_id", "id", "id_documento"],
             "nombre": ["nombre_documento", "nombre", "documento"],
             "tipo": ["tipo_documento", "tipo"],
-            "rol": ["prioridad_jerarquica", "rol"],
+            "rol": ["prioridad_jerarquica", "rol", "prioridad"],
             "obligatorio": ["obligatorio"],
             "estado_lectura": ["estado", "estado_lectura"],
             "fecha": ["fecha"],
+            "observaciones": ["observaciones", "observacion"],
+            "fuente": ["fuente"],
         })
         for row in _iter_data_rows(df):
             nombre = _safe_str(row.get(col_map.get("nombre", ""), ""))
             if not nombre:
                 continue
+            # Guardar observaciones y fuente en fecha (campo disponible) o en un campo extra
+            # El modelo PliegoDocumento usa fecha para data adicional; usamos el campo existente
+            obs_val = _safe_str(row.get(col_map.get("observaciones", ""), ""))
+            fuente_val = _safe_str(row.get(col_map.get("fuente", ""), ""))
+            doc_id_val = _safe_str(row.get(col_map.get("documento_id", ""), ""))
             db.add(PliegoDocumento(
                 solicitud_id=solicitud_id,
                 nombre=nombre,
                 tipo=_safe_str(row.get(col_map.get("tipo", ""), "")),
                 rol=_safe_str(row.get(col_map.get("rol", ""), "")),
-                obligatorio=_safe_str(row.get(col_map.get("obligatorio", ""), "")),
+                obligatorio=doc_id_val or _safe_str(row.get(col_map.get("obligatorio", ""), "")),
                 estado_lectura=_safe_str(row.get(col_map.get("estado_lectura", ""), "")),
-                fecha=_safe_str(row.get(col_map.get("fecha", ""), "")),
+                fecha=fuente_val or obs_val or _safe_str(row.get(col_map.get("fecha", ""), "")),
             ))
 
     # ── Actos_Administrativos ─────────────────────────────────────────────────
@@ -1568,22 +1633,38 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         df = xl.parse(sheet_map["Hallazgos_Extra"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
             "categoria": ["categoria", "categoría"],
-            "hallazgo": ["titulo", "hallazgo", "descripcion", "detalle"],
+            "titulo": ["titulo", "título"],
+            "hallazgo": ["descripcion", "descripción", "hallazgo", "detalle"],
             "impacto": ["impacto"],
             "accion_sugerida": ["accion_sugerida", "accion", "acción"],
             "fuente": ["fuente"],
+            "campo_dashboard_sugerido": ["campo_dashboard_sugerido", "campo_dashboard"],
+            "valor_sugerido": ["valor_sugerido", "valor sugerido"],
+            "estado": ["estado"],
         })
         for row in _iter_data_rows(df):
-            hallazgo = _safe_str(row.get(col_map.get("hallazgo", ""), ""))
-            if not hallazgo:
+            titulo_val = _safe_str(row.get(col_map.get("titulo", ""), ""))
+            hallazgo_val = _safe_str(row.get(col_map.get("hallazgo", ""), ""))
+            # El campo hallazgo del modelo recibe el texto principal; priorizamos título + descripción
+            texto_principal = titulo_val or hallazgo_val
+            if not texto_principal:
                 continue
+            # Enriquecer: concatenar titulo + descripcion si ambos existen
+            if titulo_val and hallazgo_val and titulo_val != hallazgo_val:
+                texto_principal = f"{titulo_val}: {hallazgo_val}"
+            extra = {
+                "campo_dashboard_sugerido": _safe_str(row.get(col_map.get("campo_dashboard_sugerido", ""), "")),
+                "valor_sugerido": _safe_str(row.get(col_map.get("valor_sugerido", ""), "")),
+                "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
+            }
             db.add(PliegoHallazgo(
                 solicitud_id=solicitud_id,
                 categoria=_safe_str(row.get(col_map.get("categoria", ""), "")),
-                hallazgo=hallazgo,
+                hallazgo=texto_principal,
                 impacto=_safe_str(row.get(col_map.get("impacto", ""), "")),
                 accion_sugerida=_safe_str(row.get(col_map.get("accion_sugerida", ""), "")),
                 fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                datos_extra={k: v for k, v in extra.items() if v} if extra else None,
             ))
 
     # ── Faltantes_y_Dudas ─────────────────────────────────────────────────────
@@ -1591,10 +1672,11 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         df = xl.parse(sheet_map["Faltantes_y_Dudas"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
             "campo_objetivo": ["campo_o_tema", "campo", "campo_objetivo"],
-            "motivo": ["situacion", "motivo"],
-            "detalle": ["detalle", "descripcion"],
+            "motivo": ["situacion", "situación", "motivo"],
+            "detalle": ["detalle", "descripcion", "descripción"],
             "criticidad": ["criticidad", "prioridad"],
-            "accion_recomendada": ["accion_recomendada", "accion"],
+            "accion_recomendada": ["accion_recomendada", "accion_sugerida", "accion", "acción"],
+            "fuente": ["fuente"],
             "estado": ["estado"],
         })
         for row in _iter_data_rows(df):
@@ -1608,6 +1690,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
                 detalle=_safe_str(row.get(col_map.get("detalle", ""), "")),
                 criticidad=_safe_str(row.get(col_map.get("criticidad", ""), "")),
                 accion_recomendada=_safe_str(row.get(col_map.get("accion_recomendada", ""), "")),
+                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
                 estado=_safe_str(row.get(col_map.get("estado", ""), "")),
             ))
 
@@ -1657,26 +1740,41 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     if "Fusion_Renglones" in sheet_map:
         df = xl.parse(sheet_map["Fusion_Renglones"], dtype=str).fillna("")
         col_map = _col_map(df.columns, {
-            "numero_renglon": ["renglón", "renglon", "nro_renglon", "numero_renglon", "n°"],
-            "codigo_item": ["codigo", "código", "item"],
+            "numero_renglon": ["renglon_orden", "renglón", "renglon", "nro_renglon", "numero_renglon", "n°", "#"],
+            "codigo_item": ["codigo_item", "codigo", "código", "item"],
             "descripcion": ["descripcion", "descripción", "detalle"],
             "cantidad": ["cantidad", "cant"],
             "unidad": ["unidad_medida", "unidad", "ud"],
-            "precio_unitario_estimado": ["precio", "precio_unitario", "estimado", "monto"],
+            "precio_unitario_estimado": ["precio_unitario", "precio", "estimado", "monto"],
+            "lugar_entrega": ["lugar_entrega", "lugar entrega"],
+            "plazo_entrega": ["plazo_entrega", "plazo entrega"],
+            "periodicidad": ["periodicidad"],
+            "marca": ["marca"],
+            "importe_total": ["importe_total", "importe total"],
+            "destino_efector": ["destino_efector", "destino"],
+            "observaciones": ["observaciones", "obs"],
+            "fuente": ["fuente"],
+            "estado": ["estado"],
         })
-        for row in _iter_data_rows(df):
+        for idx, row in enumerate(_iter_data_rows(df)):
             desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
-            num_ren = _safe_str(row.get(col_map.get("numero_renglon", ""), ""))
+            num_ren = _safe_str(row.get(col_map.get("numero_renglon", ""), "")) or str(idx + 1)
             if not desc and not num_ren:
                 continue
-            
-            extra_data = {}
-            for col in df.columns:
-                if col not in col_map.values():
-                    val = _safe_str(row.get(col, ""))
-                    if val:
-                        extra_data[str(col)] = val
-            
+
+            # Capturar todos los campos del Excel LicIA en datos_extra
+            extra_data = {
+                "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", ""), "")),
+                "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", ""), "")),
+                "periodicidad": _safe_str(row.get(col_map.get("periodicidad", ""), "")),
+                "marca": _safe_str(row.get(col_map.get("marca", ""), "")),
+                "importe_total": _safe_str(row.get(col_map.get("importe_total", ""), "")),
+                "destino_efector": _safe_str(row.get(col_map.get("destino_efector", ""), "")),
+                "observaciones": _safe_str(row.get(col_map.get("observaciones", ""), "")),
+                "fuente": _safe_str(row.get(col_map.get("fuente", ""), "")),
+                "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
+            }
+
             db.add(PliegoFusionRenglon(
                 solicitud_id=solicitud_id,
                 numero_renglon=num_ren,
@@ -1685,20 +1783,39 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
                 cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
                 unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
                 precio_unitario_estimado=_safe_str(row.get(col_map.get("precio_unitario_estimado", ""), "")),
-                datos_extra=extra_data if extra_data else None,
+                datos_extra={k: v for k, v in extra_data.items() if v} or None,
             ))
 
     # ── SIEM_Analitica ────────────────────────────────────────────────────────
+    # Parsear como lista de filas (no clave-valor) para que la vista ampliada pueda iterar
     if "SIEM_Analitica" in sheet_map:
         df = xl.parse(sheet_map["SIEM_Analitica"], dtype=str).fillna("")
-        datos = _extract_proceso_data(df)
-        db.add(PliegoAnalitica(solicitud_id=solicitud_id, datos=datos))
+        analitica_rows = []
+        for row in _iter_data_rows(df):
+            row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
+            if any(v for v in row_dict.values()):
+                analitica_rows.append(row_dict)
+        # Si tiene formato clave-valor (menos de 3 columnas) usar dict; sino lista de filas
+        datos_analitica = analitica_rows if len(df.columns) >= 3 else _extract_proceso_data(df)
+        db.add(PliegoAnalitica(solicitud_id=solicitud_id, datos=datos_analitica))
 
     # ── Control_Carga ─────────────────────────────────────────────────────────
+    # Parsear como lista de filas para acceso directo; el primer registro es el de control
     if "Control_Carga" in sheet_map:
         df = xl.parse(sheet_map["Control_Carga"], dtype=str).fillna("")
-        datos = _extract_proceso_data(df)
-        db.add(PliegoControlCarga(solicitud_id=solicitud_id, datos=datos))
+        ctrl_rows = []
+        for row in _iter_data_rows(df):
+            row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
+            if any(v for v in row_dict.values()):
+                ctrl_rows.append(row_dict)
+        # Si hay exactamente 1 fila, guardar como dict para compatibilidad; sino lista
+        if len(ctrl_rows) == 1:
+            datos_ctrl = {k.lower().strip(): v for k, v in ctrl_rows[0].items()}
+        elif ctrl_rows:
+            datos_ctrl = [{k.lower().strip(): v for k, v in r.items()} for r in ctrl_rows]
+        else:
+            datos_ctrl = _extract_proceso_data(df)
+        db.add(PliegoControlCarga(solicitud_id=solicitud_id, datos=datos_ctrl))
 
 
 def _col_map(columns, mapping: dict) -> dict:

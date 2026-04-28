@@ -280,6 +280,164 @@
     </div>
   </div>
 
+  {# ── 1b. Estado del análisis ── #}
+  {% if fusion_ctx %}
+  {% set ef = fusion_ctx.estado_fusion %}
+  {% if ef == "listo_para_fusion" %}
+    {% set _fc="var(--siem-green)" %}{% set _fb="var(--siem-green-soft)" %}{% set _fbd="var(--siem-green-border)" %}
+    {% set _fi="bi-check-circle-fill" %}{% set _ft="Análisis completo" %}
+  {% elif ef == "requiere_validacion_manual" %}
+    {% set _fc="var(--siem-amber)" %}{% set _fb="var(--siem-amber-soft)" %}{% set _fbd="var(--siem-amber-border)" %}
+    {% set _fi="bi-exclamation-circle-fill" %}{% set _ft="Requiere revisión manual" %}
+  {% else %}
+    {% set _fc="var(--siem-red)" %}{% set _fb="var(--siem-red-soft)" %}{% set _fbd="var(--siem-red-border)" %}
+    {% set _fi="bi-x-octagon-fill" %}{% set _ft="Análisis incompleto" %}
+  {% endif %}
+  <div class="val-card" style="border-color:{{ _fbd }};">
+    <div class="val-card-head" style="background:{{ _fb }};border-bottom-color:{{ _fbd }};">
+      <h2 class="val-card-title" style="color:{{ _fc }};">
+        <i class="bi {{ _fi }}" style="color:{{ _fc }};"></i>
+        Estado del análisis
+      </h2>
+      <span style="font-size:.78rem;font-weight:600;color:{{ _fc }};">{{ _ft }}</span>
+    </div>
+    <div class="val-card-body">
+
+      {# Divergencia en análisis automático #}
+      {% if fusion_ctx.contradiccion_licia %}
+      <div style="background:var(--siem-red-soft);border:1px solid var(--siem-red-border);border-radius:.7rem;
+                  padding:.75rem 1rem;margin-bottom:1rem;display:flex;gap:.55rem;align-items:flex-start;">
+        <i class="bi bi-exclamation-triangle-fill flex-shrink-0" style="color:var(--siem-red);margin-top:.05rem;"></i>
+        <div style="font-size:.82rem;color:var(--siem-red);">
+          <strong>Divergencia en análisis detectada:</strong> {{ fusion_ctx.mensaje_contradiccion }}
+        </div>
+      </div>
+      {% endif %}
+
+      {# Métricas del análisis #}
+      <div class="metrics-grid mb-3">
+        <div class="metric-box">
+          <div class="num" style="color:var(--siem-green);">{{ fusion_ctx.resumen.campos_completos }}</div>
+          <div class="lbl">Campos OK</div>
+        </div>
+        <div class="metric-box">
+          <div class="num" style="color:var(--siem-red);">{{ fusion_ctx.faltantes_criticos|length }}</div>
+          <div class="lbl">Campos faltantes</div>
+        </div>
+        <div class="metric-box">
+          <div class="num" style="color:var(--siem-blue);">{{ fusion_ctx.resumen.renglones }}</div>
+          <div class="lbl">Renglones</div>
+        </div>
+        <div class="metric-box">
+          <div class="num" style="color:var(--siem-amber);">{{ fusion_ctx.faltantes_documentales|length }}</div>
+          <div class="lbl">Doc. faltantes</div>
+        </div>
+        <div class="metric-box">
+          <div class="num">{{ fusion_ctx.resumen.campos_totales }}</div>
+          <div class="lbl">Total requeridos</div>
+        </div>
+        <div class="metric-box">
+          <div class="num" style="font-size:.78rem;color:{% if ef=='listo_para_fusion' %}var(--siem-green){% elif ef=='requiere_validacion_manual' %}var(--siem-amber){% else %}var(--siem-red){% endif %};">
+            {{ fusion_ctx.estado_licia_texto or '—' }}
+          </div>
+          <div class="lbl">Análisis automático</div>
+        </div>
+      </div>
+
+      <div class="val-callout">
+        <i class="bi bi-info-circle-fill"></i>
+        <div>
+          <strong>El sistema evalúa automáticamente el estado del pliego</strong> según los campos detectados.
+          El análisis automático es complementario — el sistema calcula el estado real de forma independiente.
+          {% if fusion_ctx.contradiccion_licia %}
+          <strong style="color:var(--siem-red);">Existe una divergencia entre el análisis automático y el estado calculado.</strong>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Matriz de campos requeridos ── #}
+  <div class="val-card">
+    <div class="val-card-head">
+      <h2 class="val-card-title"><i class="bi bi-shield-check"></i>Matriz de campos requeridos</h2>
+      <span class="val-card-badge">{{ fusion_campos_obligatorios|length }} campos</span>
+    </div>
+    <div class="table-responsive">
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>Categoría</th>
+            <th>Campo</th>
+            <th>Etiqueta</th>
+            <th>Valor detectado</th>
+            <th>Valor normalizado</th>
+            <th>Hoja origen</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set _last_cat = namespace(v='') %}
+          {% for campo in fusion_campos_obligatorios %}
+          {% set campo_key = campo.key %}
+          {% set campo_data = fusion_ctx.campos_fusion.get(campo_key, {}) if fusion_ctx.campos_fusion else {} %}
+          {% set _est = campo_data.get('estado','faltante_critico_fusion') %}
+          <tr>
+            <td class="matrix-group-cell">
+              {% if campo.categoria != _last_cat.v %}
+                {% set _last_cat.v = campo.categoria %}
+                <span style="display:inline-flex;align-items:center;gap:.3rem;">
+                  <span style="width:.35rem;height:.35rem;border-radius:50%;background:var(--siem-blue);display:inline-block;"></span>
+                  {{ campo.categoria }}
+                </span>
+              {% endif %}
+            </td>
+            <td style="font-family:monospace;font-size:.78rem;font-weight:700;color:var(--siem-text-strong);">{{ campo_key }}</td>
+            <td style="font-size:.82rem;">{{ campo.label }}</td>
+            <td style="font-size:.8rem;color:var(--siem-text-muted);">
+              {% set val_raw = campo_data.get('valor','') %}
+              {% if val_raw %}{{ val_raw[:60] }}{% if val_raw|length > 60 %}…{% endif %}{% else %}<span style="color:var(--siem-red);font-style:italic;">Sin dato</span>{% endif %}
+            </td>
+            <td style="font-size:.8rem;">
+              {% set val_norm = campo_data.get('valor_normalizado','') or campo_data.get('valor','') %}
+              {% if val_norm %}
+                <span style="font-weight:600;">{{ val_norm[:50] }}{% if val_norm|length > 50 %}…{% endif %}</span>
+              {% else %}
+                <span style="color:var(--siem-red);font-style:italic;">—</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.77rem;color:var(--siem-text-muted);font-family:monospace;">
+              {{ campo_data.get('fuente','—') }}
+            </td>
+            <td>
+              {%- if _est == 'completo' -%}
+                <span style="display:inline-flex;align-items:center;gap:.22rem;font-size:.68rem;font-weight:700;
+                             background:var(--siem-green-soft);color:var(--siem-green);border:1px solid var(--siem-green-border);
+                             padding:.12rem .45rem;border-radius:999px;">
+                  <i class="bi bi-check-circle-fill"></i> Completo
+                </span>
+              {%- elif _est == 'requiere_validacion_manual' -%}
+                <span style="display:inline-flex;align-items:center;gap:.22rem;font-size:.68rem;font-weight:700;
+                             background:var(--siem-amber-soft);color:var(--siem-amber);border:1px solid var(--siem-amber-border);
+                             padding:.12rem .45rem;border-radius:999px;">
+                  <i class="bi bi-exclamation-circle-fill"></i> Validar
+                </span>
+              {%- else -%}
+                <span style="display:inline-flex;align-items:center;gap:.22rem;font-size:.68rem;font-weight:700;
+                             background:var(--siem-red-soft);color:var(--siem-red);border:1px solid var(--siem-red-border);
+                             padding:.12rem .45rem;border-radius:999px;">
+                  <i class="bi bi-x-circle-fill"></i> Faltante
+                </span>
+              {%- endif -%}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}{# /fusion_ctx #}
+
   {# ── 2. Cobertura de campos RP ── #}
   <div class="val-card">
     <div class="val-card-head">
