@@ -46,10 +46,14 @@ from web_comparativas.models import (
 from web_comparativas.pliegos_rp import (
     build_rp_output,
     build_canonical_output,
-    export_dual_excel_bytes,
 )
 from web_comparativas.pliegos_summary import build_debug_matrix, build_resumen_licitacion
-from web_comparativas.pliegos_fusion import calcular_estado_fusion, FUSION_CAMPOS_OBLIGATORIOS, FUSION_CAMPOS_COMPLEMENTARIOS
+from web_comparativas.pliegos_fusion import (
+    calcular_estado_fusion,
+    export_fusion_excel_bytes,
+    FUSION_CAMPOS_OBLIGATORIOS,
+    FUSION_CAMPOS_COMPLEMENTARIOS,
+)
 
 router = APIRouter()
 
@@ -1235,9 +1239,9 @@ def lectura_pliegos_exportar_rp(request: Request, caso_id: int):
     if caso.estado != "listo" and not es_admin:
         return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}", 302)
 
-    payload = export_dual_excel_bytes(caso)
-    safe_name = _slugify(caso.titulo or caso.nombre_licitacion or f"caso_{caso.id}")
-    filename = f"pliego_{safe_name or caso.id}.xlsx"
+    payload = export_fusion_excel_bytes(caso)
+    safe_name = _slugify(caso.numero_proceso or caso.titulo or f"caso_{caso.id}")
+    filename = f"SIEM_Fusion_{safe_name or caso.id}.xlsx"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return StreamingResponse(
         io.BytesIO(payload),

@@ -6,9 +6,13 @@ internamente, sin confiar en Control_Carga ni Fusion_Cabecera ciegamente.
 """
 from __future__ import annotations
 
+import io
 import re
 import unicodedata
+import datetime as dt
 from typing import Optional
+
+import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Marcadores de valor faltante — nunca deben tratarse como dato válido
@@ -509,6 +513,70 @@ FUSION_CAMPOS_NO_OBLIGATORIOS = [
     {"key": "codigo_item",              "label": "Cod. Item",                    "categoria": "no_obligatorio"},
 ]
 
+FUSION_EXPORT_PROCESO_COLUMNS = [
+    "Unidad Ejecutora",
+    "N° Procesos",
+    "Nombre Proceso",
+    "Procedimiento Selección",
+    "Objeto Contratación",
+    "Fecha Acto Apertura",
+    "Tipo Cotización",
+    "Tipo Adjudicación",
+    "Cant. Oferta Permitidas",
+    "Plazo Mantenimiento Oferta",
+    "Acepta Redeterminación",
+    "Fecha Inicio Consulta",
+    "Fecha Final Consulta",
+    "Monto",
+    "Moneda",
+    "Duración Contrato",
+    "Acepta Prórroga",
+    "Expediente",
+    "Modalidad",
+    "Ampliación",
+    "Alternativa",
+    "Lugar y Cond. de Entrega",
+    "Garantía de Mantenimiento de Oferta",
+    "Garantía de Anticipo Financiero",
+    "Garantía de Cumplimiento de Contrato",
+    "Garantía de Impugnación al Pliego",
+    "Garantía de Impugnación a la Preadjudicación",
+    "Garantía de Incorporar Contragarantía",
+    "Exigencia con Causal de Desestimación",
+    "¿Lleva Muestras?",
+    "Fecha limite para presentación de muestras",
+]
+
+FUSION_EXPORT_RENGLON_COLUMNS = [
+    "Item",
+    "Obj. Gas.",
+    "Cod. Item",
+    "Descripción",
+    "Cant",
+]
+
+_FUSION_PROCESS_FIELD_BY_COLUMN = {
+    "Unidad Ejecutora": "unidad_ejecutora",
+    "N° Procesos": "numero_proceso",
+    "Nombre Proceso": "nombre_proceso",
+    "Procedimiento Selección": "procedimiento_seleccion",
+    "Objeto Contratación": "objeto_contratacion",
+    "Fecha Acto Apertura": "fecha_apertura",
+    "Tipo Cotización": "tipo_cotizacion",
+    "Tipo Adjudicación": "tipo_adjudicacion",
+    "Cant. Oferta Permitidas": "cant_oferta_permitidas",
+    "Plazo Mantenimiento Oferta": "plazo_mantenimiento_oferta",
+    "Acepta Redeterminación": "acepta_redeterminacion",
+    "Fecha Inicio Consulta": "fecha_inicio_consulta",
+    "Fecha Final Consulta": "fecha_final_consulta",
+    "Monto": "monto",
+    "Moneda": "moneda",
+    "Duración Contrato": "duracion_contrato",
+    "Acepta Prórroga": "acepta_prorroga",
+    "Expediente": "expediente",
+    "Modalidad": "modalidad",
+}
+
 
 # ---------------------------------------------------------------------------
 # Cálculo de renglones Fusion
@@ -546,6 +614,7 @@ def _resolver_renglones_fusion(caso) -> list[dict]:
 
             row = {
                 "item": orden_str,
+                "obj_gasto": _safe(extra.get("obj_gasto", "")) or _safe(extra.get("objeto_gasto", "")) or _safe(extra.get("obj_gas", "")),
                 "codigo_item": _safe(fr.codigo_item),
                 "descripcion": _safe(fr.descripcion),
                 "cantidad": _safe(fr.cantidad),
@@ -581,6 +650,7 @@ def _resolver_renglones_fusion(caso) -> list[dict]:
             extra = fr.datos_extra or {}
             row = {
                 "item": _safe(fr.orden) or str(idx + 1),
+                "obj_gasto": _safe(extra.get("obj_gasto", "")) or _safe(extra.get("objeto_gasto", "")) or _safe(extra.get("obj_gas", "")),
                 "codigo_item": _safe(fr.codigo_item),
                 "descripcion": _safe(fr.descripcion),
                 "cantidad": _safe(fr.cantidad),
@@ -606,6 +676,200 @@ def _resolver_renglones_fusion(caso) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Función principal: calcular_estado_fusion
 # ---------------------------------------------------------------------------
+
+def _clean_export_value(value) -> str:
+    text = _safe(value)
+    return "" if is_fusion_missing(text) else text
+
+
+def _format_export_date(value) -> str:
+    text = _clean_export_value(value)
+    if not text:
+        return ""
+    if isinstance(value, dt.datetime):
+        return value.strftime("%d/%m/%Y %H:%M") if (value.hour or value.minute) else value.strftime("%d/%m/%Y")
+    if isinstance(value, dt.date):
+        return value.strftime("%d/%m/%Y")
+
+    try:
+        parsed = pd.to_datetime(text, dayfirst=True, errors="coerce")
+    except Exception:
+        parsed = None
+    if parsed is not None and not pd.isna(parsed):
+        has_time = bool(getattr(parsed, "hour", 0) or getattr(parsed, "minute", 0))
+        return parsed.strftime("%d/%m/%Y %H:%M") if has_time else parsed.strftime("%d/%m/%Y")
+    return text
+
+
+def _format_export_bool(value) -> str:
+    text = _clean_export_value(value)
+    if not text:
+        return ""
+    norm = _norm(text)
+    token = re.split(r"[\s,;:/()]+", norm)[0] if norm else ""
+    if token in {"si", "s", "yes", "true", "1"}:
+        return "Sí"
+    if token in {"no", "false", "0"}:
+        return "No"
+    return text
+
+
+def _format_export_value(column: str, value) -> str:
+    if column in {
+        "Fecha Acto Apertura",
+        "Fecha Inicio Consulta",
+        "Fecha Final Consulta",
+        "Fecha limite para presentación de muestras",
+    }:
+        return _format_export_date(value)
+    if column in {
+        "Acepta Redeterminación",
+        "Acepta Prórroga",
+        "Ampliación",
+        "Alternativa",
+        "¿Lleva Muestras?",
+    }:
+        return _format_export_bool(value)
+    return _clean_export_value(value)
+
+
+def _lookup_process_value(caso, proc: dict, *aliases) -> str:
+    return _pick(
+        _from_proceso(proc, *aliases),
+        _from_trazabilidad(caso, *aliases),
+        _from_analitica(caso, *aliases),
+        _from_hallazgos(caso, *aliases),
+    )
+
+
+def _garantia_value(caso, *keywords) -> str:
+    keyword_norms = [_norm(k) for k in keywords]
+    for garantia in (caso.garantias or []):
+        tipo_norm = _norm(garantia.tipo)
+        if not any(k and k in tipo_norm for k in keyword_norms):
+            continue
+        pieces = []
+        for value in (garantia.requerida, garantia.porcentaje, garantia.base_calculo, garantia.plazo, garantia.formas_admitidas):
+            clean = _clean_export_value(value)
+            if clean:
+                pieces.append(clean)
+        return " - ".join(pieces) if pieces else _clean_export_value(garantia.tipo)
+    return ""
+
+
+def _lleva_muestras_value(caso, proc: dict) -> str:
+    raw = _lookup_process_value(caso, proc, "lleva_muestras", "muestras", "requiere_muestras")
+    if raw:
+        return raw
+    for requisito in (caso.requisitos or []):
+        text = " ".join(_safe(v) for v in (requisito.categoria, requisito.descripcion, requisito.obligatorio))
+        if "muestra" in _norm(text):
+            return "Sí"
+    return ""
+
+
+def _fecha_limite_muestras_value(caso, proc: dict) -> str:
+    return _pick(
+        _from_cronograma(caso, "muestra", "presentacion de muestras", "presentación de muestras"),
+        _lookup_process_value(caso, proc, "fecha_limite_muestras", "fecha_limite_presentacion_muestras", "fecha limite para presentacion de muestras"),
+    )
+
+
+def _build_fusion_process_export_row(caso, fusion_ctx: dict) -> dict:
+    proc = _get_proceso(caso)
+    campos_fusion = fusion_ctx.get("campos_fusion", {})
+    row = {}
+
+    for column in FUSION_EXPORT_PROCESO_COLUMNS:
+        field_key = _FUSION_PROCESS_FIELD_BY_COLUMN.get(column)
+        value = ""
+        if field_key:
+            field_data = campos_fusion.get(field_key, {})
+            value = field_data.get("valor_normalizado") or field_data.get("valor") or ""
+        elif column == "Ampliación":
+            value = _lookup_process_value(caso, proc, "ampliacion", "ampliación", "acepta_ampliacion")
+        elif column == "Alternativa":
+            value = _lookup_process_value(caso, proc, "alternativa", "oferta_alternativa", "acepta_alternativa")
+        elif column == "Lugar y Cond. de Entrega":
+            value = _lookup_process_value(caso, proc, "lugar_entrega", "lugar y cond de entrega", "condiciones_entrega", "plazo_entrega", "periodicidad")
+        elif column == "Garantía de Mantenimiento de Oferta":
+            value = _garantia_value(caso, "mantenimiento", "oferta")
+        elif column == "Garantía de Anticipo Financiero":
+            value = _garantia_value(caso, "anticipo")
+        elif column == "Garantía de Cumplimiento de Contrato":
+            value = _garantia_value(caso, "cumplimiento", "contrato")
+        elif column == "Garantía de Impugnación al Pliego":
+            value = _garantia_value(caso, "impugnacion", "impugnación", "pliego")
+        elif column == "Garantía de Impugnación a la Preadjudicación":
+            value = _garantia_value(caso, "impugnacion", "impugnación", "preadjudicacion", "preadjudicación")
+        elif column == "Garantía de Incorporar Contragarantía":
+            value = _garantia_value(caso, "contragarantia", "contragarantía", "contra garantia")
+        elif column == "Exigencia con Causal de Desestimación":
+            value = _lookup_process_value(caso, proc, "exigencia_desestimacion", "causal_desestimacion", "causal de desestimacion")
+        elif column == "¿Lleva Muestras?":
+            value = _lleva_muestras_value(caso, proc)
+        elif column == "Fecha limite para presentación de muestras":
+            value = _fecha_limite_muestras_value(caso, proc)
+        row[column] = _format_export_value(column, value)
+
+    return row
+
+
+def _build_fusion_renglones_export_rows(caso, fusion_ctx: dict) -> list[dict]:
+    rows = []
+    for row in fusion_ctx.get("renglones_fusion", []) or []:
+        extra = row.get("datos_extra", {}) if isinstance(row.get("datos_extra", {}), dict) else {}
+        obj_gasto = _pick(
+            row.get("obj_gasto"),
+            row.get("objeto_gasto"),
+            row.get("obj_gas"),
+            extra.get("obj_gasto"),
+            extra.get("objeto_gasto"),
+            extra.get("obj_gas"),
+            extra.get("obj. gas."),
+        )
+        rows.append({
+            "Item": _clean_export_value(row.get("item")),
+            "Obj. Gas.": _clean_export_value(obj_gasto),
+            "Cod. Item": _clean_export_value(row.get("codigo_item")),
+            "Descripción": _clean_export_value(row.get("descripcion")),
+            "Cant": _clean_export_value(row.get("cantidad")),
+        })
+    return rows
+
+
+def export_fusion_excel_bytes(caso) -> bytes:
+    """Genera el Excel final para carga en Fusion, sin hojas internas de LicIA."""
+    fusion_ctx = calcular_estado_fusion(caso)
+    proceso_row = _build_fusion_process_export_row(caso, fusion_ctx)
+    renglones_rows = _build_fusion_renglones_export_rows(caso, fusion_ctx)
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame([proceso_row], columns=FUSION_EXPORT_PROCESO_COLUMNS).to_excel(
+            writer,
+            index=False,
+            sheet_name="Datos del proceso",
+        )
+        pd.DataFrame(renglones_rows, columns=FUSION_EXPORT_RENGLON_COLUMNS).to_excel(
+            writer,
+            index=False,
+            sheet_name="Renglones del pliego",
+        )
+
+        for sheet in writer.book.worksheets:
+            sheet.freeze_panes = "A2"
+            sheet.auto_filter.ref = sheet.dimensions
+            for cell in sheet[1]:
+                cell.font = cell.font.copy(bold=True)
+            for column_cells in sheet.columns:
+                max_len = max(len(str(cell.value or "")) for cell in column_cells)
+                width = min(max(max_len + 2, 10), 42)
+                sheet.column_dimensions[column_cells[0].column_letter].width = width
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
 
 def calcular_estado_fusion(caso) -> dict:
     """
