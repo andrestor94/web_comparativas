@@ -1,23 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}Pantalla principal | {{ caso.titulo }}{% endblock %}
+{% block title %}Ficha del pliego | {{ caso.titulo }}{% endblock %}
 
 {% block header_title %}
-  <span>Lectura de Pliegos | Pantalla principal</span>
+  <span>Lectura de Pliegos | Ficha del pliego</span>
 {% endblock %}
 
 {% block toolbar_actions %}
 <div class="d-flex gap-2 align-items-center">
+  <div class="view-mode-toggle">
+    <span class="view-mode-btn active">
+      <i class="bi bi-layout-sidebar-inset"></i> Ficha del pliego
+    </span>
+    <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" class="view-mode-btn">
+      <i class="bi bi-layout-text-window-reverse"></i> Detalle completo
+    </a>
+  </div>
   {% if es_admin %}
   <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/admin"
      class="btn btn-sm btn-outline-secondary" style="border-radius:.6rem;font-weight:600;letter-spacing:.01em;">
     <i class="bi bi-gear me-1"></i>Gestionar
   </a>
   {% endif %}
-  <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada"
-     class="btn btn-sm btn-outline-primary" style="border-radius:.6rem;font-weight:600;letter-spacing:.01em;">
-    <i class="bi bi-layout-text-window-reverse me-1"></i>Vista completa
-  </a>
   <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/rp/export"
      class="btn btn-sm btn-success" style="border-radius:.6rem;font-weight:700;letter-spacing:.01em;box-shadow:0 2px 8px rgba(5,150,105,.25);">
     <i class="bi bi-file-earmark-excel me-1"></i>Descargar Excel
@@ -27,6 +31,7 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/pliegos_premium.css') }}?v=6">
+<link rel="prefetch" as="document" href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada">
 <style>
   /* ═══════════════════════════════════════════════════════════
      SIEM · Lectura de Pliegos · Pantalla Principal — Premium v4
@@ -327,19 +332,12 @@
 {% set tipo_adjudicacion = (canonical_output.general_fields | selectattr("label", "equalto", "Tipo Adjudicación") | list | first) %}
 {% set expediente = (canonical_output.general_fields | selectattr("label", "equalto", "Nro. Expediente") | list | first) %}
 
-{# ── Semáforo jerárquico basado en campos críticos de Fusión ── #}
-{% set fusion_critical = [numero_proceso, unidad, nombre_proceso, objeto, procedimiento, tipo_cotizacion, tipo_adjudicacion, fecha_apertura, monto, moneda] %}
-{% set sfus = namespace(faltante_real=0, ambiguo=0, hora_flag=false) %}
-{% for field in fusion_critical if field %}
-  {% if field.coverage_status == "FALTANTE_REAL" or not field.display_value %}
-    {% set sfus.faltante_real = sfus.faltante_real + 1 %}
-  {% elif field.coverage_status in ["AMBIGUO", "VALIDACION_MANUAL"] %}
-    {% set sfus.ambiguo = sfus.ambiguo + 1 %}
-  {% endif %}
-  {% if field.label == "Fecha Acto Apertura" and field.get('hora_no_identificada') %}
-    {% set sfus.hora_flag = true %}
-  {% endif %}
-{% endfor %}
+{# ── Estado Fusion calculado por SIEM (independiente de LicIA) ── #}
+{% set _ef = fusion_ctx.estado_fusion %}
+{% set _ev = fusion_ctx.estado_visualizacion %}
+{% set _falt = fusion_ctx.faltantes_criticos | length %}
+{% set _completos = fusion_ctx.campos_completos %}
+{% set _rev = fusion_ctx.requiere_validacion_manual %}
 
 {% set caso_observado = caso.estado in ["observado", "rechazado"] %}
 {% set caso_pendiente = caso.estado not in ["listo", "en_validacion"] %}
@@ -353,23 +351,26 @@
   {% set semaforo = "pendiente" %}
   {% set operational_label = "Pendiente validación" %}
   {% set operational_color = "var(--siem-text-soft)" %}
-  {% set operational_note = "El caso aún no completó el flujo de validación. El estado operativo no ha sido aprobado." %}
-{% elif sfus.faltante_real > 0 %}
-  {% set semaforo = "siem" %}
-  {% set operational_label = "Listo para SIEM — No listo para Fusión" %}
-  {% set operational_color = "var(--siem-blue)" %}
-  {% set operational_note = "Hay " ~ sfus.faltante_real ~ " campo(s) crítico(s) de Fusión sin dato. No enviar a Fusión hasta resolverlos." %}
-{% elif sfus.ambiguo > 0 or sfus.hora_flag %}
-  {% set semaforo = "parcial" %}
-  {% set operational_label = "Listo para SIEM — Fusión parcial" %}
-  {% set operational_color = "var(--siem-amber)" %}
-  {% set operational_note = "Datos presentes pero con ambigüedades (" ~ sfus.ambiguo ~ " campo(s)). Validar antes de cargar en Fusión." %}
-{% else %}
+  {% set operational_note = "El caso aún no completó el flujo de validación." %}
+{% elif _ef == "listo_para_fusion" %}
   {% set semaforo = "fusion" %}
-  {% set operational_label = "Listo para Fusión" %}
+  {% set operational_label = "Listo para Fusion" %}
   {% set operational_color = "var(--siem-green)" %}
-  {% set operational_note = "Todos los campos críticos de Fusión están completos. El proceso está listo para carga." %}
+  {% set operational_note = "Todos los campos obligatorios Fusion están completos. El proceso está listo para carga." %}
+{% elif _ef == "requiere_validacion_manual" %}
+  {% set semaforo = "parcial" %}
+  {% set operational_label = "Requiere validación manual" %}
+  {% set operational_color = "var(--siem-amber)" %}
+  {% set operational_note = "Algunos campos requieren revisión manual antes de cargar en Fusion. (" ~ _falt ~ " faltante(s))" %}
+{% else %}
+  {% set semaforo = "siem" %}
+  {% set operational_label = "No listo para Fusion" %}
+  {% set operational_color = "var(--siem-blue)" %}
+  {% set operational_note = "Hay " ~ _falt ~ " campo(s) obligatorio(s) Fusion sin dato. No enviar a Fusion hasta resolverlos." %}
 {% endif %}
+
+{# Alias de compatibilidad para macros existentes #}
+{% set sfus = namespace(faltante_real=_falt, ambiguo=0, hora_flag=false) %}
 
 {% macro field_value(field, empty_text="Sin dato en pliego") -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value -%}
@@ -422,6 +423,33 @@
   {% endif %}
 {%- endmacro %}
 
+{# ── Macro: fusion_field_card — renderiza un campo de fusion_ctx.campos_fusion ── #}
+{%- macro fusion_field_card(key, label=none, full=false, compact=false) -%}
+  {%- set fc = fusion_ctx.campos_fusion.get(key, {}) -%}
+  {%- set _label = label if label else (fc.label if fc else key) -%}
+  {%- set _val = fc.valor if fc else "" -%}
+  {%- set _est = fc.estado if fc else "faltante_critico_fusion" -%}
+  {%- if _est == "completo" -%}
+    {%- set _cls = "erp-item--ok" -%}
+  {%- elif _est == "requiere_validacion_manual" -%}
+    {%- set _cls = "erp-item--warn" -%}
+  {%- else -%}
+    {%- set _cls = "erp-item--miss" -%}
+  {%- endif -%}
+<div class="erp-item {{ _cls }}{% if full %} erp-item--full{% endif %}">
+  <div class="erp-item-label">{{ _label }}</div>
+  {%- if _cls == "erp-item--miss" -%}
+  <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
+  <span class="erp-status-pill erp-status-pill--miss"><i class="bi bi-exclamation-circle"></i> Faltante Fusion</span>
+  {%- elif _cls == "erp-item--warn" -%}
+  <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ fc.valor_normalizado if fc.valor_normalizado else _val }}</div>
+  <span class="erp-status-pill erp-status-pill--warn"><i class="bi bi-exclamation-triangle"></i> Revisar</span>
+  {%- else -%}
+  <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ fc.valor_normalizado if fc.valor_normalizado else _val }}</div>
+  {%- endif -%}
+</div>
+{%- endmacro -%}
+
 {#──────────────────────────────────────────────────────────────
    MACRO PREMIUM: field_card — renderiza tarjeta completa con estado visual
 ──────────────────────────────────────────────────────────────#}
@@ -461,157 +489,201 @@
 {% endfor %}
 
 <div class="erp-shell lp-final-view">
-  {# ── Hero premium ── #}
-  <div class="erp-hero">
-    <div class="erp-hero-grid">
 
-      {# ── Columna izquierda: identidad del proceso ── #}
-      <div class="erp-ficha-card">
-        <div class="erp-kicker">
-          <span class="erp-kicker-badge">ID SIEM #{{ caso.id }}</span>
-          <span class="erp-kicker-label">Pantalla principal · Ficha operativa</span>
+  {# ── Hero v2: identity → KPI strip → data/state ── #}
+  <div class="erph-wrapper">
+
+    {# ── Zone 1: Identity header ── #}
+    <div class="erph-identity">
+      <div class="erph-id-row">
+        <span class="erph-id-badge">#{{ caso.id }}</span>
+        <span class="erph-estado-pill erph-estado-{{ caso.estado }}">
+          {{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}
+        </span>
+        {% if caso.actualizado_en %}
+        <span class="erph-ts">Actualizado {{ caso.actualizado_en.strftime('%d/%m/%Y') }}</span>
+        {% endif %}
+      </div>
+      <h1 class="erph-title">{{ field_value(nombre_proceso, caso.titulo or "Proceso sin nombre") }}</h1>
+      <div class="erph-meta-line">
+        {% if field_value(origen) and field_value(origen) != "Sin dato en pliego" %}
+        <span class="erph-meta-item"><i class="bi bi-building"></i>{{ field_value(origen) }}</span>
+        {% endif %}
+        {% if field_value(unidad) and field_value(unidad) != "Sin dato en pliego" and field_value(unidad) != field_value(origen) %}
+        <span class="erph-meta-item"><i class="bi bi-diagram-2"></i>{{ field_value(unidad) }}</span>
+        {% endif %}
+        {% if field_value(numero_proceso) and field_value(numero_proceso) != "Sin dato en pliego" %}
+        <span class="erph-meta-item"><i class="bi bi-hash"></i>{{ field_value(numero_proceso) }}</span>
+        {% endif %}
+        {% if field_value(procedimiento) and field_value(procedimiento) != "Sin dato en pliego" %}
+        <span class="erph-meta-item"><i class="bi bi-card-list"></i>{{ field_value(procedimiento) }}</span>
+        {% endif %}
+        {% if _etapa %}
+        <span class="erph-meta-item"><i class="bi bi-signpost"></i>{{ _etapa }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ── Zone 2: KPI strip ── #}
+    <div class="erph-kpi-strip">
+      <div class="erph-kpi erph-kpi--{% if completitud_ejecutiva.porcentaje >= 80 %}ok{% elif completitud_ejecutiva.porcentaje >= 50 %}warn{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ completitud_ejecutiva.porcentaje }}<span class="erph-kpi-unit">%</span></div>
+        <div class="erph-kpi-bar"><div class="erph-kpi-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%"></div></div>
+        <div class="erph-kpi-label">Completitud ejecutiva</div>
+      </div>
+      <div class="erph-kpi erph-kpi--{% if completitud_tecnica.porcentaje >= 80 %}ok{% elif completitud_tecnica.porcentaje >= 50 %}warn{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ completitud_tecnica.porcentaje }}<span class="erph-kpi-unit">%</span></div>
+        <div class="erph-kpi-bar"><div class="erph-kpi-fill" style="width:{{ completitud_tecnica.porcentaje }}%"></div></div>
+        <div class="erph-kpi-label">Completitud técnica</div>
+      </div>
+      <div class="erph-kpi erph-kpi--{% if fusion_ctx.campos_completos == fusion_ctx.campos_total_obligatorios %}ok{% elif fusion_ctx.campos_completos > fusion_ctx.campos_total_obligatorios * 0.7 %}warn{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ fusion_ctx.campos_completos }}<span class="erph-kpi-unit">/{{ fusion_ctx.campos_total_obligatorios }}</span></div>
+        <div class="erph-kpi-label">Campos requeridos</div>
+      </div>
+      <div class="erph-kpi erph-kpi--{% if fusion_ctx.cantidad_renglones > 0 %}ok{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ fusion_ctx.cantidad_renglones }}</div>
+        <div class="erph-kpi-label">Renglones</div>
+      </div>
+      <div class="erph-kpi erph-kpi--{% if fusion_ctx.faltantes_criticos|length == 0 %}ok{% elif fusion_ctx.faltantes_criticos|length <= 3 %}warn{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ fusion_ctx.faltantes_criticos|length }}</div>
+        <div class="erph-kpi-label">Campos faltantes</div>
+      </div>
+      <div class="erph-kpi erph-kpi--{% if fusion_ctx.faltantes_documentales|length == 0 %}ok{% elif fusion_ctx.faltantes_documentales|length <= 2 %}warn{% else %}low{% endif %}">
+        <div class="erph-kpi-val">{{ fusion_ctx.faltantes_documentales|length }}</div>
+        <div class="erph-kpi-label">Doc. faltantes</div>
+      </div>
+    </div>
+
+    {# ── Zone 3: Data + State ── #}
+    <div class="erph-body">
+
+      {# ── Left: operational detail ── #}
+      <div class="erph-data-col">
+        {% if field_value(expediente) and field_value(expediente) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-folder2"></i> Expediente</span>
+          <span class="erph-data-val">{{ field_value(expediente) }}</span>
         </div>
-        <h1 class="erp-title">{{ field_value(nombre_proceso, caso.titulo or "Proceso sin nombre") }}</h1>
-        <div class="erp-meta">
-          <div class="erp-meta-row erp-meta-row-primary">
-            {% if field_value(origen) and field_value(origen) != "Sin dato en pliego" %}
-            <span class="erp-meta-chip"><i class="bi bi-building" style="opacity:.65;"></i><b>Organismo:</b> {{ field_value(origen) }}</span>
-            {% endif %}
-            {% if field_value(unidad) and field_value(unidad) != "Sin dato en pliego" %}
-            <span class="erp-meta-chip"><i class="bi bi-diagram-2" style="opacity:.65;"></i><b>Unidad:</b> {{ field_value(unidad) }}</span>
-            {% endif %}
-          </div>
-          <div class="erp-meta-row erp-meta-row-secondary">
-            {% if field_value(numero_proceso) and field_value(numero_proceso) != "Sin dato en pliego" %}
-            <span class="erp-meta-chip"><i class="bi bi-hash" style="opacity:.65;"></i><b>N° Proceso:</b> {{ field_value(numero_proceso) }}</span>
-            {% endif %}
-            {% if field_value(procedimiento) and field_value(procedimiento) != "Sin dato en pliego" %}
-            <span class="erp-meta-chip"><i class="bi bi-card-list" style="opacity:.65;"></i><b>Procedimiento:</b> {{ field_value(procedimiento) }}</span>
-            {% endif %}
-            {% if _etapa %}
-            <span class="erp-meta-chip"><i class="bi bi-signpost" style="opacity:.65;"></i><b>Etapa:</b> {{ _etapa }}</span>
-            {% endif %}
-            <span class="erp-meta-chip"><i class="bi bi-circle-fill" style="opacity:.55;font-size:.55rem;"></i>{{ PLIEGO_ESTADO_LABELS.get(caso.estado, caso.estado) }}</span>
-          </div>
+        {% endif %}
+        {% if field_value(fecha_apertura) and field_value(fecha_apertura) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-calendar-event"></i> Apertura</span>
+          <span class="erph-data-val">{{ fecha_apertura_value(fecha_apertura) }}</span>
         </div>
-        <div class="erp-operational-strip">
-          {% if field_value(expediente) and field_value(expediente) != "Sin dato en pliego" %}
-          <div class="erp-op-item">
-            <span>Expediente</span>
-            <strong>{{ field_value(expediente) }}</strong>
-          </div>
-          {% endif %}
-          {% if field_value(fecha_apertura) and field_value(fecha_apertura) != "Sin dato en pliego" %}
-          <div class="erp-op-item">
-            <span>Apertura</span>
-            <strong>{{ fecha_apertura_value(fecha_apertura) }}</strong>
-          </div>
-          {% endif %}
-          {% if field_value(duracion_contrato) and field_value(duracion_contrato) != "Sin dato en pliego" %}
-          <div class="erp-op-item">
-            <span>Contrato</span>
-            <strong>{{ compact_field_value(duracion_contrato, "Sin dato en pliego", 34) }}</strong>
-          </div>
-          {% endif %}
-          {% if field_value(plazo_mantenimiento) and field_value(plazo_mantenimiento) != "Sin dato en pliego" %}
-          <div class="erp-op-item">
-            <span>Mantenimiento oferta</span>
-            <strong>{{ compact_field_value(plazo_mantenimiento, "Sin dato en pliego", 34) }}</strong>
-          </div>
-          {% endif %}
+        {% endif %}
+        {% if field_value(fecha_inicio_consulta) and field_value(fecha_inicio_consulta) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-calendar-range"></i> Consultas</span>
+          <span class="erph-data-val">
+            {{ field_value(fecha_inicio_consulta) }}
+            {% if field_value(fecha_fin_consulta) and field_value(fecha_fin_consulta) != "Sin dato en pliego" %}
+            <span style="opacity:.5;margin:0 .2rem;">→</span>{{ field_value(fecha_fin_consulta) }}
+            {% endif %}
+          </span>
         </div>
+        {% endif %}
+        {% if field_value(duracion_contrato) and field_value(duracion_contrato) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-clock"></i> Contrato</span>
+          <span class="erph-data-val">{{ compact_field_value(duracion_contrato, "Sin dato en pliego", 42) }}</span>
+        </div>
+        {% endif %}
+        {% if field_value(plazo_mantenimiento) and field_value(plazo_mantenimiento) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-shield-check"></i> Mant. oferta</span>
+          <span class="erph-data-val">{{ compact_field_value(plazo_mantenimiento, "Sin dato en pliego", 42) }}</span>
+        </div>
+        {% endif %}
+        {% if field_value(monto) and field_value(monto) != "Sin dato en pliego" %}
+        <div class="erph-data-row">
+          <span class="erph-data-lbl"><i class="bi bi-currency-dollar"></i> Monto</span>
+          <span class="erph-data-val erph-data-val--accent">
+            {{ field_value(monto) }}
+            {% if field_value(moneda) and field_value(moneda) != "Sin dato en pliego" %}
+            <span style="font-weight:500;font-size:.85em;opacity:.7;margin-left:.3rem;">{{ field_value(moneda) }}</span>
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% set _obj_val = fusion_ctx.campos_fusion.get('objeto_contratacion', {}).get('valor', '') %}
+        {% if _obj_val %}
+        <div class="erph-data-row erph-data-row--full">
+          <span class="erph-data-lbl"><i class="bi bi-file-text"></i> Objeto</span>
+          <span class="erph-data-val erph-data-val--compact">{{ _obj_val[:130] }}{% if _obj_val|length > 130 %}…{% endif %}</span>
+        </div>
+        {% endif %}
       </div>
 
-      {# ── Columna derecha: estado operativo + métricas ── #}
-      <div class="erp-state-card">
-        <div class="erp-state-head">
-          <div class="erp-state-kicker">Estado operativo</div>
-          <div class="erp-state-badge">
-            <span class="erp-state-dot" style="background:{{ operational_color }};box-shadow:0 0 0 4px rgba(100,116,139,.12);"></span>
-            {{ operational_label }}
+      {# ── Right: state panel ── #}
+      <div class="erph-state-col">
+        <div class="erph-state-header">
+          <div class="erph-state-dot-lg" style="background:{{ operational_color }};"></div>
+          <div>
+            <div class="erph-state-lbl">Estado del análisis</div>
+            <div class="erph-state-val" style="color:{{ operational_color }};">{{ operational_label }}</div>
           </div>
         </div>
-        <p class="erp-state-note">{{ operational_note }}</p>
-
-        {% if semaforo == "siem" or semaforo == "parcial" %}
-        <div class="erp-state-alert">
-          <i class="bi bi-exclamation-triangle-fill" style="color:var(--siem-red-border);flex-shrink:0;margin-top:.08rem;"></i>
-          <span>No enviar a Fusión hasta resolver campos indicados en la vista completa.</span>
+        {% if semaforo in ["siem", "observado"] %}
+        <div class="erph-state-alert-sm erph-alert-red">
+          <i class="bi bi-exclamation-triangle-fill" style="flex-shrink:0;margin-top:.08rem;"></i>
+          <span>Revisar campos pendientes antes de continuar.</span>
         </div>
-        {% endif %}
-
-        {# ── Métricas de completitud ── #}
-        <div class="erp-metrics-grid">
-          <div class="erp-metric">
-            <div class="erp-metric-kicker">Ejecutiva</div>
-            <div class="erp-metric-val">{{ completitud_ejecutiva.porcentaje }}<span style="font-size:.7rem;opacity:.6;">%</span></div>
-            <div class="erp-metric-bar">
-              <div class="erp-metric-fill" style="width:{{ completitud_ejecutiva.porcentaje }}%;background:rgba(52,211,153,.85);"></div>
-            </div>
-            <div class="erp-metric-sub">18 ítems · {{ completitud_ejecutiva.estado }}</div>
-          </div>
-          <div class="erp-metric">
-            <div class="erp-metric-kicker">Técnica</div>
-            <div class="erp-metric-val">{{ completitud_tecnica.porcentaje }}<span style="font-size:.7rem;opacity:.6;">%</span></div>
-            <div class="erp-metric-bar">
-              <div class="erp-metric-fill" style="width:{{ completitud_tecnica.porcentaje }}%;background:rgba(96,165,250,.9);"></div>
-            </div>
-            <div class="erp-metric-sub">33 campos · {{ completitud_tecnica.estado }}</div>
-          </div>
-        </div>
-
-        {% if caso.faltantes %}
-        <div class="erp-faltantes-chip">
-          <i class="bi bi-exclamation-triangle-fill" style="color:var(--siem-red-border);flex-shrink:0;"></i>
-          <span>{{ caso.faltantes|length }} faltante{{ 's' if caso.faltantes|length != 1 else '' }} documental{{ 'es' if caso.faltantes|length != 1 else '' }} · ver vista completa</span>
+        {% elif semaforo == "parcial" %}
+        <div class="erph-state-alert-sm">
+          <i class="bi bi-info-circle-fill" style="flex-shrink:0;margin-top:.08rem;"></i>
+          <span>{{ _falt }} campo(s) requieren revisión manual.</span>
         </div>
         {% endif %}
-
-        {# ── Control de integración ── #}
-        <div class="erp-integration">
-          <div class="erp-integration-kicker">Control de integración</div>
-          <div class="erp-integration-row">
-            <span class="erp-integration-dot" style="background:{{ operational_color }};"></span>
-            <span>RP Fusión: <strong>{% if semaforo == "fusion" %}Listo para carga{% elif semaforo == "parcial" %}Parcial — revisar{% else %}No listo{% endif %}</strong></span>
+        {% if fusion_ctx.contradiccion_licia %}
+        <div class="erph-state-alert-sm erph-alert-red">
+          <i class="bi bi-exclamation-triangle-fill" style="flex-shrink:0;margin-top:.08rem;"></i>
+          <span>{{ fusion_ctx.mensaje_contradiccion }}</span>
+        </div>
+        {% endif %}
+        <div class="erph-state-rows">
+          <div class="erph-state-row">
+            <span class="erph-state-dot-sm" style="background:{{ operational_color }};"></span>
+            <span class="erph-state-row-lbl">Análisis SIEM</span>
+            <span class="erph-state-row-val">{% if semaforo == "fusion" %}Completo{% elif semaforo == "parcial" %}Revisión manual{% else %}Incompleto{% endif %}</span>
           </div>
-          <div class="erp-integration-row">
-            <span class="erp-integration-dot" style="background:{% if caso.estado in ['listo','en_validacion'] %}var(--siem-green-border){% else %}var(--siem-text-muted){% endif %};"></span>
-            <span>SIEM Operativa: <strong>{% if caso.estado in ['listo','en_validacion'] %}Validado{% else %}Pendiente{% endif %}</strong></span>
+          <div class="erph-state-row">
+            {% set _licia_listo = (fusion_ctx.estado_licia.listo_para_fusion if fusion_ctx.estado_licia else '') | lower %}
+            <span class="erph-state-dot-sm" style="background:{% if _licia_listo in ['si','sí','yes','true','1'] %}var(--siem-green){% else %}var(--siem-amber){% endif %};"></span>
+            <span class="erph-state-row-lbl">Análisis automático</span>
+            <span class="erph-state-row-val" title="{{ fusion_ctx.estado_licia_texto or 'No informado' }}">{{ fusion_ctx.estado_licia_texto or "No informado" }}</span>
           </div>
-          {% if sfus.faltante_real > 0 or sfus.ambiguo > 0 or sfus.hora_flag %}
-          <div class="erp-integration-detail">
-            <i class="bi bi-info-circle me-1"></i>
-            {% if sfus.faltante_real > 0 %}{{ sfus.faltante_real }} campo(s) crítico(s) sin dato.{% endif %}
-            {% if sfus.ambiguo > 0 %} {{ sfus.ambiguo }} campo(s) ambiguo(s).{% endif %}
-            {% if sfus.hora_flag %} Hora de apertura no identificada.{% endif %}
+          <div class="erph-state-row">
+            <span class="erph-state-dot-sm" style="background:{% if caso.estado in ['listo','en_validacion'] %}var(--siem-green){% else %}var(--siem-text-soft){% endif %};"></span>
+            <span class="erph-state-row-lbl">Estado del caso</span>
+            <span class="erph-state-row-val">{% if caso.estado in ['listo','en_validacion'] %}Validado{% else %}Pendiente{% endif %}</span>
           </div>
-          {% endif %}
         </div>
       </div>
 
     </div>
   </div>
 
-  {# ── Sección 1: Datos principales ── #}
+  {# ── Sección 1: Identificación para Fusion ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
-        <div class="erp-section-kicker">Proceso</div>
+        <div class="erp-section-kicker">Identificación del proceso</div>
         <h2 class="erp-section-title">
           <span class="erp-section-icon"><i class="bi bi-building"></i></span>
-          Datos principales del proceso
+          Identificación del proceso
         </h2>
       </div>
-      <p class="erp-section-note">Campos clave para identificación y carga operativa.</p>
+      <p class="erp-section-note">Campos clave para identificación del proceso.</p>
     </div>
     <div class="erp-grid">
-      {{ field_card("Organismo / Entidad", origen) }}
-      {{ field_card("Unidad ejecutora", unidad) }}
-      {{ field_card("Número de proceso", numero_proceso) }}
-      {{ field_card("Nro. Expediente", expediente) }}
-      {{ field_card("Procedimiento de selección", procedimiento) }}
+      {# Unidad Ejecutora — campo principal (no "Organismo") #}
+      {{ fusion_field_card("unidad_ejecutora", "Unidad Ejecutora") }}
+      {{ fusion_field_card("numero_proceso", "N° Proceso") }}
+      {{ fusion_field_card("expediente", "Expediente") }}
+      {{ fusion_field_card("procedimiento_seleccion", "Procedimiento Selección") }}
+      {{ fusion_field_card("modalidad", "Modalidad") }}
 
-      {# Etapa: viene de proceso dict, no de field object #}
+      {# Etapa — dato complementario desde proceso #}
       <div class="erp-item {% if _etapa %}erp-item--ok{% else %}erp-item--miss{% endif %}">
         <div class="erp-item-label">Etapa</div>
         {% if _etapa %}
@@ -621,69 +693,225 @@
         {% endif %}
       </div>
 
-      {# Nombre del proceso y Objeto van en ancho completo #}
-      {{ field_card("Nombre del proceso", nombre_proceso, full=false) }}
-      {{ field_card("Objeto de contratación", objeto, full=true, compact=true) }}
+      {{ fusion_field_card("nombre_proceso", "Nombre Proceso") }}
+      {{ fusion_field_card("objeto_contratacion", "Objeto Contratación", full=true, compact=true) }}
     </div>
+
+    {# Dato secundario: organismo contratante si existe y es diferente a unidad ejecutora #}
+    {% set _org_raw = resumen.get('organismo', '') %}
+    {% set _ue_raw = fusion_ctx.campos_fusion.get('unidad_ejecutora', {}).get('valor', '') %}
+    {% if _org_raw and _org_raw != _ue_raw %}
+    <div style="padding:.7rem 0 0;font-size:.78rem;color:var(--p-text3);">
+      <i class="bi bi-building-fill me-1" style="opacity:.5;"></i>
+      <span style="font-weight:600;">Organismo contratante:</span> {{ _org_raw }}
+      <span style="opacity:.5;margin-left:.3rem;">(referencia — se usa Unidad Ejecutora como campo principal)</span>
+    </div>
+    {% endif %}
   </section>
 
-  {# ── Sección 2: Fechas clave ── #}
+  {# ── Sección 2: Cronología Fusion ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
-        <div class="erp-section-kicker">Cronología</div>
+        <div class="erp-section-kicker">Cronología del proceso</div>
         <h2 class="erp-section-title">
           <span class="erp-section-icon"><i class="bi bi-calendar3"></i></span>
           Fechas clave
         </h2>
       </div>
-      <p class="erp-section-note">Fechas relevantes para la operación y validación de carga.</p>
+      <p class="erp-section-note">Fechas clave del proceso. Campos faltantes marcados en rojo.</p>
     </div>
     <div class="erp-grid">
-      {{ field_card("Fecha acto apertura", fecha_apertura) }}
-      {% if show_fecha_inicio_consulta %}
-      {{ field_card("Inicio consultas", fecha_inicio_consulta) }}
-      {% endif %}
-      {% if show_fecha_fin_consulta %}
-      {{ field_card("Cierre / Presentación", fecha_fin_consulta) }}
-      {% endif %}
-      {{ field_card("Duración del contrato", duracion_contrato, compact=true) }}
-      {{ field_card("Plazo mantenimiento oferta", plazo_mantenimiento) }}
+      {{ fusion_field_card("fecha_apertura", "Fecha Acto Apertura") }}
+      {# Siempre mostrar inicio/fin de consulta — si falta, marcado como faltante crítico #}
+      {{ fusion_field_card("fecha_inicio_consulta", "Fecha Inicio Consulta") }}
+      {{ fusion_field_card("fecha_final_consulta", "Fecha Final Consulta") }}
+      {{ fusion_field_card("plazo_mantenimiento_oferta", "Plazo Mantenimiento Oferta") }}
+      {{ fusion_field_card("duracion_contrato", "Duración Contrato", compact=true) }}
     </div>
   </section>
 
-  {# ── Sección 3: Condiciones comerciales ── #}
+  {# ── Sección 3: Condiciones económicas y comerciales ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
-        <div class="erp-section-kicker">Condiciones</div>
+        <div class="erp-section-kicker">Condiciones económicas</div>
         <h2 class="erp-section-title">
           <span class="erp-section-icon"><i class="bi bi-currency-dollar"></i></span>
-          Condiciones comerciales y económicas
+          Condiciones económicas y comerciales
         </h2>
       </div>
-      <p class="erp-section-note">Datos para validar la carga en el sistema interno.</p>
+      <p class="erp-section-note">Datos económicos y comerciales del proceso.</p>
     </div>
     <div class="erp-grid">
-      {{ field_card("Monto", monto) }}
-      {{ field_card("Moneda", moneda) }}
-      {{ field_card("Modalidad", modalidad) }}
-      {{ field_card("Tipo de cotización", tipo_cotizacion) }}
-      {{ field_card("Tipo de adjudicación", tipo_adjudicacion) }}
+      {{ fusion_field_card("monto", "Monto") }}
+      {{ fusion_field_card("moneda", "Moneda") }}
+      {{ fusion_field_card("tipo_cotizacion", "Tipo Cotización") }}
+      {{ fusion_field_card("tipo_adjudicacion", "Tipo Adjudicación") }}
+      {{ fusion_field_card("cant_oferta_permitidas", "Cant. Oferta Permitidas") }}
+      {{ fusion_field_card("acepta_redeterminacion", "Acepta Redeterminación") }}
+      {{ fusion_field_card("acepta_prorroga", "Acepta Prórroga") }}
     </div>
   </section>
+
+  {# ── Sección 4: Renglones Fusion ── #}
+  <section class="erp-section">
+    <div class="erp-section-head">
+      <div>
+        <div class="erp-section-kicker">Renglones del pliego</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-box-seam"></i></span>
+          Renglones
+          <span style="font-size:.75rem;font-weight:500;color:var(--p-text3);margin-left:.5rem;">
+            {{ fusion_ctx.cantidad_renglones }} {{ 'renglón' if fusion_ctx.cantidad_renglones == 1 else 'renglones' }}
+          </span>
+        </h2>
+      </div>
+      <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada#renglones"
+         style="font-size:.8rem;color:var(--p-accent);text-decoration:none;font-weight:600;">
+        Ver detalle completo <i class="bi bi-arrow-right"></i>
+      </a>
+    </div>
+
+    {% if fusion_ctx.renglones_fusion %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.84rem;">
+        <thead>
+          <tr style="background:var(--siem-surface-soft);border-bottom:2px solid var(--p-border);">
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;white-space:nowrap;">Item</th>
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;">Descripción</th>
+            <th style="padding:.55rem .7rem;text-align:center;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;white-space:nowrap;">Cant.</th>
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;">Unidad</th>
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;">Cod. Item</th>
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;">Lugar/Condición Entrega</th>
+            <th style="padding:.55rem .7rem;text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--p-text3);font-weight:700;">Observaciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in fusion_ctx.renglones_fusion %}
+          <tr style="border-bottom:1px solid var(--p-border);{% if loop.index is odd %}background:#fafbfc;{% endif %}">
+            <td style="padding:.5rem .7rem;font-weight:700;color:var(--p-accent);white-space:nowrap;">{{ r.item }}</td>
+            <td style="padding:.5rem .7rem;max-width:320px;">
+              <div style="font-weight:600;color:var(--p-text1);">{{ r.descripcion or '—' }}</div>
+              {% if r.marca %}<div style="font-size:.72rem;color:var(--p-text3);">Marca: {{ r.marca }}</div>{% endif %}
+            </td>
+            <td style="padding:.5rem .7rem;text-align:center;font-weight:600;">{{ r.cantidad or '—' }}</td>
+            <td style="padding:.5rem .7rem;white-space:nowrap;">{{ r.unidad or '—' }}</td>
+            <td style="padding:.5rem .7rem;font-size:.78rem;color:var(--p-text3);">{{ r.codigo_item or '—' }}</td>
+            <td style="padding:.5rem .7rem;font-size:.8rem;max-width:200px;">
+              {% set _lugar = [r.lugar_entrega, r.plazo_entrega, r.periodicidad] | select | join(' / ') %}
+              {{ _lugar or '—' }}
+            </td>
+            <td style="padding:.5rem .7rem;font-size:.78rem;color:var(--p-text2);max-width:180px;">{{ r.observaciones or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding:1.5rem;text-align:center;color:var(--p-text4);font-style:italic;">
+      <i class="bi bi-inbox" style="font-size:1.5rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
+      No se detectaron renglones estructurados en el Excel.
+    </div>
+    {% endif %}
+  </section>
+
+  {# ── Sección 5: Complementarios de pliego (colapsable) ── #}
+  <details class="erp-section" style="cursor:pointer;">
+    <summary style="display:flex;justify-content:space-between;align-items:center;list-style:none;padding:.2rem 0;cursor:pointer;">
+      <div class="erp-section-head" style="border-bottom:none;margin-bottom:0;padding-bottom:0;width:100%;">
+        <div>
+          <div class="erp-section-kicker">Complementarios · Pliego</div>
+          <h2 class="erp-section-title" style="margin:0;">
+            <span class="erp-section-icon"><i class="bi bi-card-checklist"></i></span>
+            Información complementaria de pliego
+          </h2>
+        </div>
+        <span style="font-size:.8rem;color:var(--p-text3);font-weight:600;">
+          <i class="bi bi-chevron-down"></i> Expandir
+        </span>
+      </div>
+    </summary>
+
+    <div style="border-top:1px solid var(--p-border);padding-top:1rem;margin-top:.5rem;">
+      <div class="erp-grid">
+        {# Garantías consolidadas #}
+        {% for g in caso.garantias %}
+        <div class="erp-item {% if g.tipo %}erp-item--ok{% else %}erp-item--miss{% endif %}">
+          <div class="erp-item-label">{{ g.tipo or 'Garantía' }}</div>
+          <div class="erp-item-value">
+            {% if g.porcentaje %}{{ g.porcentaje }}{% endif %}
+            {% if g.plazo %} · {{ g.plazo }}{% endif %}
+            {% if not g.porcentaje and not g.plazo %}<span class="erp-item-value--empty">Sin datos</span>{% endif %}
+          </div>
+          {% if g.fuente %}<div style="font-size:.7rem;color:var(--p-text4);">Fuente: {{ g.fuente }}</div>{% endif %}
+        </div>
+        {% endfor %}
+
+        {# Condiciones de pago #}
+        {% set _pago = resumen.get('pago', '') %}
+        {% if _pago %}
+        <div class="erp-item erp-item--ok">
+          <div class="erp-item-label">Condiciones de Pago</div>
+          <div class="erp-item-value erp-item-value--compact">{{ _pago }}</div>
+        </div>
+        {% endif %}
+
+        {# Anticipo financiero #}
+        {% set _anticipo = resumen.get('anticipo', '') %}
+        {% if _anticipo %}
+        <div class="erp-item erp-item--ok">
+          <div class="erp-item-label">Anticipo Financiero</div>
+          <div class="erp-item-value">{{ _anticipo }}</div>
+        </div>
+        {% endif %}
+
+        {# Observaciones operativas #}
+        {% set _obs = resumen.get('observaciones', '') %}
+        {% if _obs %}
+        <div class="erp-item erp-item--ok erp-item--full">
+          <div class="erp-item-label">Observaciones Operativas</div>
+          <div class="erp-item-value erp-item-value--compact">{{ _obs }}</div>
+        </div>
+        {% endif %}
+
+        {# Contactos / Supervisor #}
+        {% set _contacto = resumen.get('contacto', '') %}
+        {% set _supervisor = resumen.get('supervisor', '') %}
+        {% if _contacto %}
+        <div class="erp-item erp-item--ok">
+          <div class="erp-item-label">Contacto</div>
+          <div class="erp-item-value erp-item-value--compact">{{ _contacto }}</div>
+        </div>
+        {% endif %}
+        {% if _supervisor %}
+        <div class="erp-item erp-item--ok">
+          <div class="erp-item-label">Supervisor / Responsable</div>
+          <div class="erp-item-value erp-item-value--compact">{{ _supervisor }}</div>
+        </div>
+        {% endif %}
+      </div>
+
+      {# Link a vista ampliada para más detalle #}
+      <div style="padding:.8rem 0 0;font-size:.82rem;color:var(--p-text3);">
+        <i class="bi bi-info-circle me-1"></i>
+        Ver requisitos, muestras, exigencias y trazabilidad completa en la
+        <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" style="color:var(--p-accent);font-weight:600;">Detalle completo</a>.
+      </div>
+    </div>
+  </details>
 
   {# ── CTA: acceso a vista completa ── #}
   <div class="erp-cta">
     <div class="erp-cta-body">
-      <h3><i class="bi bi-layout-text-window-reverse me-2" style="color:var(--siem-blue);"></i>Acceder a la vista completa</h3>
+      <h3><i class="bi bi-layout-text-window-reverse me-2" style="color:var(--siem-blue);"></i>Explorar el detalle completo</h3>
       <p>
-        La vista completa incluye renglones, cronograma, requisitos, garantías, documentos,
-        actos administrativos, trazabilidad, hallazgos, faltantes y SIEM Analítica.
+        El detalle completo incluye todos los renglones, cronograma, requisitos, garantías,
+        documentos, trazabilidad, hallazgos y análisis del pliego.
       </p>
     </div>
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" class="btn btn-primary">
-      <i class="bi bi-arrow-right-circle me-1"></i>Abrir vista completa
+      <i class="bi bi-arrow-right-circle me-1"></i>Ver detalle completo
     </a>
   </div>
 </div>
@@ -691,4 +919,5 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
+<script src="{{ url_for('static', path='js/pliegos_navigation.js') }}?v=1"></script>
 {% endblock %}

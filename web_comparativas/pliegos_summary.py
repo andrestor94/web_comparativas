@@ -20,8 +20,16 @@ MISSING_VALUE_MARKERS = {
     "no identificada",
     "sin dato",
     "sin datos",
+    "sin dato en pliego",
     "sin informacion",
     "sin información",
+    "a definir",
+    "a confirmar",
+    "por definir",
+    "por confirmar",
+    "no aplica",
+    "no disponible",
+    "no informado",
     "aaaa-mm-dd",
     "hh:mm",
     "id proceso",
@@ -39,6 +47,8 @@ MISSING_VALUE_MARKERS = {
     "ambigua",
     "contradictorio",
     "contradictoria",
+    "pendiente validacion",
+    "pendiente validación",
 }
 HIGH_CRIT_VALUES = {"alta", "critica", "crítica", "alto", "high"}
 SUMMARY_FIELD_ALIASES = {
@@ -191,6 +201,26 @@ SUMMARY_FIELD_ALIASES = {
         "fecha_apertura", "fecha_hora_apertura", "apertura",
         "fecha_acto_apertura", "fecha_de_apertura",
     ],
+    "fecha_inicio_consulta": [
+        "fecha_inicio_consulta", "inicio_consultas", "inicio_consulta",
+        "fecha_desde_consultas", "apertura_consultas", "inicio consulta",
+        "inicio de consultas", "fecha inicio consultas",
+    ],
+    "fecha_final_consulta": [
+        "fecha_final_consulta", "cierre_consultas", "fin_consulta",
+        "fecha_hasta_consultas", "limite_consultas", "cierre consulta",
+        "fin de consultas", "fecha limite consultas", "fecha cierre consultas",
+    ],
+    "cant_oferta_permitidas": [
+        "cant_oferta_permitidas", "cantidad_ofertas_permitidas",
+        "acepta_mas_de_una_oferta", "oferta_permitida", "cantidad_ofertas",
+        "ofertas_permitidas", "cant ofertas permitidas", "numero de ofertas",
+    ],
+    "unidad_ejecutora": [
+        "unidad_ejecutora", "unidad_ejecutora_fusion", "unidad_operativa",
+        "unidad_operativa_adquisiciones", "unidad_contratante", "uoa",
+        "unidad de compra",
+    ],
 }
 SUMMARY_FIELD_META = {
     "tipo_proceso": {"label": "Tipo de proceso", "icon": "bi-tag"},
@@ -230,6 +260,10 @@ SUMMARY_FIELD_META = {
     "acepta_actualizacion_precios": {"label": "Acepta actualizacion de precios", "icon": "bi-arrow-repeat"},
     "acepta_prorroga": {"label": "Acepta prorroga", "icon": "bi-arrow-clockwise"},
     "fecha_apertura": {"label": "Fecha de apertura", "icon": "bi-calendar2-check"},
+    "fecha_inicio_consulta": {"label": "Fecha inicio consulta", "icon": "bi-calendar-plus"},
+    "fecha_final_consulta": {"label": "Fecha final consulta", "icon": "bi-calendar-x"},
+    "cant_oferta_permitidas": {"label": "Cant. oferta permitidas", "icon": "bi-123"},
+    "unidad_ejecutora": {"label": "Unidad ejecutora", "icon": "bi-building"},
 }
 SUMMARY_GROUPS = {
     "informacion_basica": [
