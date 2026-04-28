@@ -875,19 +875,12 @@
         </div>
         {% endif %}
 
-        {# Contactos / Supervisor #}
+        {# Contacto #}
         {% set _contacto = resumen.get('contacto', '') %}
-        {% set _supervisor = resumen.get('supervisor', '') %}
         {% if _contacto %}
         <div class="erp-item erp-item--ok">
           <div class="erp-item-label">Contacto</div>
           <div class="erp-item-value erp-item-value--compact">{{ _contacto }}</div>
-        </div>
-        {% endif %}
-        {% if _supervisor %}
-        <div class="erp-item erp-item--ok">
-          <div class="erp-item-label">Supervisor / Responsable</div>
-          <div class="erp-item-value erp-item-value--compact">{{ _supervisor }}</div>
         </div>
         {% endif %}
       </div>
