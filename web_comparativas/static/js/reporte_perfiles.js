@@ -1734,14 +1734,16 @@ async function pfToggleHistorico(btn, proveedor) {
       ? data.map((r) => {
           const posC = r.posicion == null ? "posn" : r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
           const posLabel = r.posicion != null ? `#${r.posicion}` : "-";
+          const ref = [r.proceso, r.renglon && r.renglon !== "-" ? `R.${r.renglon}` : ""].filter(Boolean).join(" - ");
           return `<tr>
             <td>${r.fecha ?? "-"}</td>
+            <td>${pfCellText(ref || "-", 42)}</td>
             <td class="num">${pfPeso(r.precio)}</td>
             <td>${r.marca}</td>
             <td class="num"><span class="pf-badge ${posC}">${posLabel}</span></td>
           </tr>`;
         }).join("")
-      : `<tr><td colspan="4" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el último año para los filtros actuales</td></tr>`;
+      : `<tr><td colspan="5" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el último año para los filtros actuales</td></tr>`;
 
     const detailRow = document.createElement("tr");
     detailRow.id = histId;
@@ -1753,6 +1755,7 @@ async function pfToggleHistorico(btn, proveedor) {
           <table class="pf-hist-table">
             <thead><tr>
               <th>Fecha</th>
+              <th>Proceso / renglon</th>
               <th class="num">Precio unit.</th>
               <th>Marca</th>
               <th class="num">Pos.</th>
