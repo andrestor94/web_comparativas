@@ -175,6 +175,52 @@
   .ns-breadcrumb a:hover { color:var(--siem-navy); }
   .ns-breadcrumb .sep { opacity:.5; }
   .ns-breadcrumb .current { color:var(--siem-text);font-weight:600; }
+
+  .lp-new-request .lp-page-hero {
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.98) 0%, rgba(240,247,251,.94) 100%);
+    border:1px solid rgba(203,213,225,.92);
+    border-radius:1.1rem;
+    box-shadow:0 1px 2px rgba(15,47,70,.025),0 14px 34px rgba(15,47,70,.07);
+    padding:1.35rem 1.5rem;
+    overflow:hidden;
+    position:relative;
+  }
+  .lp-new-request .lp-page-hero::before {
+    content:'';
+    position:absolute;top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,var(--siem-navy),var(--siem-blue),var(--siem-green));
+  }
+  .lp-new-request .lp-hero-kicker {
+    display:inline-flex;align-items:center;gap:.4rem;
+    color:var(--siem-blue);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.07em;
+  }
+  .lp-new-request .lp-hero-kicker::before {
+    content:'\F3E7';
+    font-family:'bootstrap-icons';
+    width:1.45rem;height:1.45rem;
+    display:inline-flex;align-items:center;justify-content:center;
+    border-radius:.45rem;
+    background:var(--siem-blue-soft);
+    color:var(--siem-blue);
+    letter-spacing:0;
+    font-size:.78rem;
+  }
+  .lp-new-request .lp-hero-title {
+    margin-top:.35rem;
+    letter-spacing:0;
+  }
+  .ns-ident-grid {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:1rem;
+  }
+  @media (max-width: 768px) {
+    .ns-ident-grid { grid-template-columns:1fr; }
+  }
 </style>
 {% endblock %}
 
@@ -237,38 +283,20 @@
       </div>
       <div class="ns-card-body">
 
-        <div class="mb-3">
-          <label class="ns-label ns-label-req" for="titulo">Título interno</label>
-          <input type="text" id="titulo" name="titulo" class="form-control"
-                 placeholder="Ej: Licitación Suturas – Municipio San Isidro – Mar 2025"
-                 value="{{ form.titulo if form else '' }}" required>
-          <div class="form-text">Nombre que usarás para identificar este caso internamente.</div>
-        </div>
-
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="ns-label" for="organismo">Organismo / entidad</label>
-            <input type="text" id="organismo" name="organismo" class="form-control"
-                   placeholder="Ej: Municipalidad de San Isidro"
-                   value="{{ form.organismo if form else '' }}">
-          </div>
-          <div class="col-md-6">
-            <label class="ns-label" for="nombre_licitacion">Nombre de la licitación</label>
-            <input type="text" id="nombre_licitacion" name="nombre_licitacion" class="form-control"
-                   placeholder="Ej: Provisión de material de sutura"
-                   value="{{ form.nombre_licitacion if form else '' }}">
-          </div>
-          <div class="col-md-6">
-            <label class="ns-label" for="numero_proceso">Número de proceso</label>
+        <div class="ns-ident-grid">
+          <div>
+            <label class="ns-label ns-label-req" for="numero_proceso">ID Proceso</label>
             <input type="text" id="numero_proceso" name="numero_proceso" class="form-control"
-                   placeholder="Ej: LC-2025-001"
-                   value="{{ form.numero_proceso if form else '' }}">
+                   placeholder="Ej: 52/25"
+                   value="{{ form.numero_proceso if form else '' }}" required>
+            <div class="form-text">Identificador del proceso informado por el portal o expediente.</div>
           </div>
-          <div class="col-md-6">
-            <label class="ns-label" for="expediente">Expediente</label>
-            <input type="text" id="expediente" name="expediente" class="form-control"
-                   placeholder="Ej: EXP-2025-12345"
-                   value="{{ form.expediente if form else '' }}">
+          <div>
+            <label class="ns-label ns-label-req" for="titulo">Título interno</label>
+            <input type="text" id="titulo" name="titulo" class="form-control"
+                   placeholder="Ej: Suturas · San Isidro · Mar 2025"
+                   value="{{ form.titulo if form else '' }}" required>
+            <div class="form-text">Nombre que usarás para identificar este caso internamente.</div>
           </div>
         </div>
 
