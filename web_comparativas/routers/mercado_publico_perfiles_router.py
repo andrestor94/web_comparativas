@@ -126,6 +126,77 @@ def _apply_filter_search_context(
         q = _apply_multi(q, ComparativaRow.rubro, rubro)
     return q
 
+
+def _articulos_participaciones_unicas_subquery(
+    *,
+    descripcion: str = "",
+    fecha_desde: str = "",
+    fecha_hasta: str = "",
+    marca: str = "",
+    proveedor: str = "",
+    rubro: str = "",
+    plataforma: str = "",
+):
+    """Base unica de participaciones reales para articulo/proveedor.
+
+    Evita contar duplicados tecnicos de la misma fila normalizada, sin colapsar
+    procesos o renglones distintos que comparten fecha/precio/marca/posicion.
+    """
+    key_cols = (
+        ComparativaRow.upload_id,
+        ComparativaRow.nro_proceso,
+        ComparativaRow.fecha_apertura,
+        ComparativaRow.renglon,
+        ComparativaRow.alternativa,
+        ComparativaRow.codigo,
+        ComparativaRow.descripcion,
+        ComparativaRow.proveedor,
+        ComparativaRow.marca,
+        ComparativaRow.precio_unitario,
+        ComparativaRow.posicion,
+    )
+    rn = func.row_number().over(
+        partition_by=key_cols,
+        order_by=ComparativaRow.id.asc(),
+    ).label("participacion_rank")
+    q = (
+        select(
+            ComparativaRow.id,
+            ComparativaRow.upload_id,
+            ComparativaRow.nro_proceso,
+            ComparativaRow.fecha_apertura,
+            ComparativaRow.comprador,
+            ComparativaRow.proveedor,
+            ComparativaRow.renglon,
+            ComparativaRow.alternativa,
+            ComparativaRow.codigo,
+            ComparativaRow.descripcion,
+            ComparativaRow.precio_unitario,
+            ComparativaRow.cantidad_ofertada,
+            ComparativaRow.total_por_renglon,
+            ComparativaRow.marca,
+            ComparativaRow.posicion,
+            ComparativaRow.rubro,
+            ComparativaRow.plataforma,
+            rn,
+        )
+        .where(ComparativaRow.fecha_apertura.isnot(None))
+        .where(ComparativaRow.proveedor.isnot(None))
+    )
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
+    q = _apply_multi(q, ComparativaRow.marca, marca)
+    q = _apply_multi(q, ComparativaRow.proveedor, proveedor)
+    q = _apply_multi(q, ComparativaRow.rubro, rubro)
+    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
+
+    ranked = q.subquery("participaciones_ranked")
+    return (
+        select(ranked)
+        .where(ranked.c.participacion_rank == 1)
+        .subquery("participaciones_unicas")
+    )
+
 def _resolve_grouped_primary_value(rows) -> dict:
     ranked: list[tuple[str, int]] = []
     for raw_value, raw_count in rows:
@@ -563,33 +634,35 @@ def articulos_por_proveedor(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("art_prov_v3", descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_v4", descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
+    participaciones = _articulos_participaciones_unicas_subquery(
+        descripcion=descripcion,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        marca=marca,
+        rubro=rubro,
+        plataforma=plataforma,
+    )
     _adj_expr = func.sum(
-        case((ComparativaRow.posicion == 1, ComparativaRow.precio_unitario * ComparativaRow.cantidad_ofertada), else_=0)
+        case((participaciones.c.posicion == 1, participaciones.c.precio_unitario * participaciones.c.cantidad_ofertada), else_=0)
     )
     q = (
         select(
-            ComparativaRow.proveedor,
-            func.count(case((ComparativaRow.posicion == 1, 1))).label("veces_ganado"),
-            func.sum(ComparativaRow.total_por_renglon).label("total_ofertado"),
+            participaciones.c.proveedor,
+            func.count(case((participaciones.c.posicion == 1, 1))).label("veces_ganado"),
+            func.sum(participaciones.c.total_por_renglon).label("total_ofertado"),
             _adj_expr.label("total_adjudicado"),
             func.count().label("count_filas"),
-            func.count(distinct(ComparativaRow.upload_id)).label("procesos"),
+            func.count(distinct(participaciones.c.upload_id)).label("procesos"),
         )
-        .where(ComparativaRow.fecha_apertura.isnot(None))
-        .where(ComparativaRow.proveedor.isnot(None))
-        .group_by(ComparativaRow.proveedor)
+        .select_from(participaciones)
+        .group_by(participaciones.c.proveedor)
     )
-    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
-    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
-    q = _apply_multi(q, ComparativaRow.marca, marca)
-    q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
 
@@ -609,19 +682,15 @@ def articulos_por_proveedor(
     if prov_names:
         hist_q = (
             select(
-                ComparativaRow.proveedor,
-                ComparativaRow.precio_unitario,
+                participaciones.c.proveedor,
+                participaciones.c.precio_unitario,
             )
-            .where(ComparativaRow.proveedor.in_(prov_names))
-            .where(ComparativaRow.precio_unitario.isnot(None))
-            .where(ComparativaRow.precio_unitario > 0)
-            .order_by(ComparativaRow.fecha_apertura.desc())
+            .select_from(participaciones)
+            .where(participaciones.c.proveedor.in_(prov_names))
+            .where(participaciones.c.precio_unitario.isnot(None))
+            .where(participaciones.c.precio_unitario > 0)
+            .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
         )
-        hist_q = _apply_exact_text(hist_q, ComparativaRow.descripcion, descripcion)
-        hist_q = _apply_date_filters(hist_q, fecha_desde, fecha_hasta)
-        hist_q = _apply_multi(hist_q, ComparativaRow.marca, marca)
-        hist_q = _apply_multi(hist_q, ComparativaRow.rubro, rubro)
-        hist_q = _apply_exact_text(hist_q, ComparativaRow.plataforma, plataforma)
         for hr in session.execute(hist_q).all():
             prov = hr.proveedor
             prices_by_prov.setdefault(prov, []).append(hr.precio_unitario)
@@ -754,30 +823,38 @@ def articulos_proveedor_historico(
     if not proveedor.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("art_prov_hist_v2", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_hist_v3", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
+    participaciones = _articulos_participaciones_unicas_subquery(
+        descripcion=descripcion,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        marca=marca,
+        proveedor=proveedor,
+        rubro=rubro,
+        plataforma=plataforma,
+    )
     q = (
         select(
-            ComparativaRow.fecha_apertura,
-            ComparativaRow.precio_unitario,
-            ComparativaRow.marca,
-            ComparativaRow.posicion,
+            participaciones.c.fecha_apertura,
+            participaciones.c.precio_unitario,
+            participaciones.c.marca,
+            participaciones.c.posicion,
+            participaciones.c.nro_proceso,
+            participaciones.c.upload_id,
+            participaciones.c.renglon,
+            participaciones.c.codigo,
+            participaciones.c.descripcion,
+            participaciones.c.comprador,
         )
-        .distinct()
-        .where(ComparativaRow.proveedor == proveedor)
-        .where(ComparativaRow.fecha_apertura.isnot(None))
-        .order_by(ComparativaRow.fecha_apertura.desc())
+        .select_from(participaciones)
+        .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
         .limit(500)
     )
-    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
-    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
-    q = _apply_multi(q, ComparativaRow.marca, marca)
-    q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
     data = [
@@ -786,6 +863,11 @@ def articulos_proveedor_historico(
             "precio": round(r.precio_unitario or 0, 2),
             "marca": r.marca or "-",
             "posicion": r.posicion,
+            "proceso": r.nro_proceso or (f"Upload {r.upload_id}" if r.upload_id else "-"),
+            "renglon": r.renglon or "-",
+            "codigo": r.codigo or "",
+            "descripcion": r.descripcion or "",
+            "comprador": r.comprador or "",
         }
         for r in rows
     ]
