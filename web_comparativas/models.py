@@ -1375,8 +1375,12 @@ PLIEGO_ESTADO_LABELS = {
 class PliegoSolicitud(Base):
     """Caso principal de lectura de pliego."""
     __tablename__ = "pliego_solicitudes"
+    __table_args__ = (
+        UniqueConstraint("client_request_id", name="uq_pliego_solicitud_client_request_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
+    client_request_id = Column(String(64), nullable=True)
     titulo = Column(String, nullable=False)
     organismo = Column(String, nullable=True)
     nombre_licitacion = Column(String, nullable=True)
@@ -1632,6 +1636,8 @@ class PliegoHallazgo(Base):
     impacto = Column(String, nullable=True)
     accion_sugerida = Column(Text, nullable=True)
     fuente = Column(String, nullable=True)
+    # Campos extra del Excel LicIA: campo_dashboard_sugerido, valor_sugerido, estado
+    datos_extra = Column(JSON, nullable=True)
 
     solicitud = relationship("PliegoSolicitud", back_populates="hallazgos")
 
@@ -1649,6 +1655,7 @@ class PliegoFaltante(Base):
     criticidad = Column(String, nullable=True)
     accion_recomendada = Column(Text, nullable=True)
     estado = Column(String, nullable=True)
+    fuente = Column(String, nullable=True)
 
     solicitud = relationship("PliegoSolicitud", back_populates="faltantes")
 

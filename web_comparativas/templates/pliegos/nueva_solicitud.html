@@ -130,6 +130,13 @@
     background:var(--siem-navy-deep);transform:translateY(-1px);
     box-shadow:0 4px 12px rgba(6,72,111,.28),0 6px 18px rgba(6,72,111,.16);
   }
+  .ns-btn-primary:disabled,
+  .ns-btn-secondary:disabled {
+    opacity:.62;
+    cursor:not-allowed;
+    transform:none;
+    box-shadow:none;
+  }
   .ns-btn-secondary {
     display:inline-flex;align-items:center;gap:.4rem;
     padding:.6rem 1.2rem;border-radius:.5rem;
@@ -269,6 +276,7 @@
 
   <form id="frmSolicitud" method="post" enctype="multipart/form-data"
         action="/mercado-publico/lectura-pliegos/nueva">
+    <input type="hidden" name="client_request_id" value="{{ client_request_id }}">
 
     {# ══ Sección 1: Identificación ══ #}
     <div class="ns-card">
@@ -359,11 +367,11 @@
     {# ══ Acciones del formulario ══ #}
     <div class="ns-footer">
       <div class="d-flex gap-2 flex-wrap align-items-center">
-        <button type="submit" name="accion" value="enviar" class="ns-btn-primary">
-          <i class="bi bi-send"></i>Enviar solicitud
+        <button type="submit" name="accion" value="enviar" class="ns-btn-primary" data-submit-label="Enviar solicitud">
+          <i class="bi bi-send"></i><span>Enviar solicitud</span>
         </button>
-        <button type="submit" name="accion" value="borrador" class="ns-btn-secondary">
-          <i class="bi bi-floppy"></i>Guardar borrador
+        <button type="submit" name="accion" value="borrador" class="ns-btn-secondary" data-submit-label="Guardar borrador">
+          <i class="bi bi-floppy"></i><span>Guardar borrador</span>
         </button>
         <a href="/mercado-publico/lectura-pliegos" class="ns-btn-cancel">Cancelar</a>
       </div>
@@ -387,10 +395,51 @@
 {% block extra_js %}
 <script>
 (function () {
+  const form = document.getElementById('frmSolicitud');
   const input = document.getElementById('archivos');
   const zone  = document.getElementById('uploadZone');
   const list  = document.getElementById('fileList');
   let filesToUpload = new DataTransfer();
+  let isSubmitting = false;
+
+  function logCreateStep(step, data) {
+    console.debug('[LP_CREATE]', step, data || {});
+  }
+
+  if (form) {
+    form.addEventListener('submit', function (event) {
+      const submitter = event.submitter || document.activeElement;
+      logCreateStep('submit-handler', {
+        action: submitter && submitter.value ? submitter.value : 'unknown',
+        files: input ? input.files.length : 0,
+      });
+
+      if (isSubmitting) {
+        event.preventDefault();
+        logCreateStep('duplicate-submit-blocked');
+        return;
+      }
+
+      if (!form.checkValidity()) {
+        return;
+      }
+
+      isSubmitting = true;
+      form.querySelectorAll('button[type="submit"]').forEach(button => {
+        button.disabled = true;
+      });
+      if (submitter && submitter.tagName === 'BUTTON') {
+        const label = submitter.querySelector('span');
+        if (label) label.textContent = 'Enviando...';
+      }
+    });
+
+    form.querySelectorAll('button[type="submit"]').forEach(button => {
+      button.addEventListener('click', function () {
+        logCreateStep('submit-click', { action: this.value || 'unknown' });
+      });
+    });
+  }
 
   const ICONS = {
     pdf:  'bi-file-earmark-pdf text-danger',
