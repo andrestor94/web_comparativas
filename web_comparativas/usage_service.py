@@ -64,18 +64,41 @@ def _default_date_range(date_from: str | None, date_to: str | None) -> Tuple[dt.
 def _map_section_name(raw: str) -> str:
     original = (raw or "").strip()
     mapping = {
-        "home": "Inicio",
-        "sic": "S.I.C. General",
-        "sic_usuarios": "Gestión de Usuarios",
-        "sic_helpdesk": "Mesa de Ayuda",
-        "sic_tracking": "Seguimiento de Usuarios",
-        "sic_tracking_api": "API Tracking (Interno)",
-        "mercado_privado": "Mercado Privado (Landing)",
-        "mercado_privado_dimensiones": "Dimensionamiento",
-        "mercado_publico": "Mercado Público",
-        "auth": "Inicio de Sesión",
-        "live_users_dashboard": "Panel Live",
-        "": "Sin Sección",
+        # Inicio / auth
+        "home":                         "Inicio",
+        "auth":                         "Inicio de Sesión",
+        # S.I.C.
+        "sic":                          "S.I.C. General",
+        "sic_usuarios":                 "Gestión de Usuarios",
+        "sic_helpdesk":                 "Mesa de Ayuda",
+        "sic_tracking":                 "Seguimiento de Usuarios",
+        "sic_tracking_api":             "API Tracking (Interno)",
+        "sic_password_resets":          "Gestión de Contraseñas",
+        # Mercado Público
+        "mercado_publico":              "Mercado Público",
+        "mercado_publico_oportunidades":"Oportunidades — Público",
+        # Mercado Privado
+        "mercado_privado":              "Mercado Privado",
+        "mercado_privado_dimensiones":  "Dimensionamiento",
+        # Oportunidades
+        "oportunidades":                "Oportunidades",
+        "oportunidades_buscador":       "Buscador de Oportunidades",
+        "oportunidades_dimensiones":    "Análisis de Dimensiones",
+        # Cargas / Historial
+        "cargas":                       "Cargas",
+        "cargas_historial":             "Cargas — Historial",
+        # Comparativa
+        "comparativa":                  "Comparativa de Mercado",
+        # Perfiles
+        "reporte_perfiles":             "Reporte de Perfiles",
+        # Forecast
+        "forecast":                     "Proyecciones y Forecast",
+        # Dashboard
+        "dashboard":                    "Panel Principal",
+        # Misceláneos
+        "live_users_dashboard":         "Panel Live",
+        "otro":                         "Sin clasificar",
+        "":                             "Sin Sección",
     }
     if original in mapping:
         return mapping[original]
@@ -696,6 +719,45 @@ def _sessionize_events(events: List[UsageEvent]) -> Dict[str, Any]:
     return {"count": len(sessions), "active_minutes": round(total_minutes, 1), "recent": list(reversed(recent[-5:]))}
 
 
+def _session_metric_buckets(events: List[UsageEvent]) -> Dict[str, Dict[Tuple[int, int | None], float]]:
+    buckets: Dict[str, Dict[Tuple[int, int | None], float]] = {
+        "weekday_sessions": defaultdict(float),
+        "weekday_minutes": defaultdict(float),
+        "hour_sessions": defaultdict(float),
+        "hour_minutes": defaultdict(float),
+    }
+    if not events:
+        return buckets
+
+    current = None
+    last_ts = None
+    for event in sorted(events, key=lambda item: item.timestamp or dt.datetime.utcnow()):
+        ts = event.timestamp
+        if ts is None:
+            continue
+        if current is None or last_ts is None or (ts - last_ts).total_seconds() / 60.0 > _SESSION_BREAK_MINUTES:
+            if current is not None:
+                start = current["start"]
+                minutes = max(1.0, round((current["end"] - start).total_seconds() / 60.0, 1))
+                buckets["weekday_sessions"][(start.weekday(), None)] += 1
+                buckets["weekday_minutes"][(start.weekday(), None)] += minutes
+                buckets["hour_sessions"][(start.weekday(), start.hour)] += 1
+                buckets["hour_minutes"][(start.weekday(), start.hour)] += minutes
+            current = {"start": ts, "end": ts}
+        current["end"] = ts
+        last_ts = ts
+
+    if current is not None:
+        start = current["start"]
+        minutes = max(1.0, round((current["end"] - start).total_seconds() / 60.0, 1))
+        buckets["weekday_sessions"][(start.weekday(), None)] += 1
+        buckets["weekday_minutes"][(start.weekday(), None)] += minutes
+        buckets["hour_sessions"][(start.weekday(), start.hour)] += 1
+        buckets["hour_minutes"][(start.weekday(), start.hour)] += minutes
+
+    return buckets
+
+
 def _engagement_score(sessions: int, active_days: int, uploads: int, searches: int, exports: int, views: int, modules_used: int) -> float:
     return (sessions * 1.5) + (active_days * 2) + (uploads * 4) + (searches * 2.5) + (exports * 2) + (views * 0.5) + (modules_used * 1.5)
 
@@ -869,8 +931,11 @@ def _get_usage_summary_impl(
 
         by_user_current: Dict[int, List[UsageEvent]] = defaultdict(list)
         by_user_previous: Dict[int, List[UsageEvent]] = defaultdict(list)
-        weekday_stats = {i: {"events": 0, "user_ids": set()} for i in range(7)}
+        weekday_stats = {i: {"events": 0, "user_ids": set(), "uploads": 0, "sessions": 0, "active_minutes": 0.0} for i in range(7)}
         heatmap: Dict[Tuple[int, int], int] = {}
+        heatmap_uploads: Dict[Tuple[int, int], int] = {}
+        heatmap_sessions: Dict[Tuple[int, int], float] = {}
+        heatmap_minutes: Dict[Tuple[int, int], float] = {}
         section_stats: Dict[str, Dict[str, Any]] = {}
 
         for event in current_events:
@@ -881,9 +946,14 @@ def _get_usage_summary_impl(
             weekday_stats[ts.weekday()]["events"] += 1
             weekday_stats[ts.weekday()]["user_ids"].add(int(event.user_id))
             heatmap[(ts.weekday(), ts.hour)] = heatmap.get((ts.weekday(), ts.hour), 0) + 1
+            if (event.action_type or "").lower() == "file_upload":
+                weekday_stats[ts.weekday()]["uploads"] += 1
+                heatmap_uploads[(ts.weekday(), ts.hour)] = heatmap_uploads.get((ts.weekday(), ts.hour), 0) + 1
             section_name = _map_section_name(event.section or "")
-            bucket = section_stats.setdefault(section_name, {"section": section_name, "events": 0, "user_ids": set()})
+            bucket = section_stats.setdefault(section_name, {"section": section_name, "events": 0, "uploads": 0, "active_minutes": 0.0, "sessions": 0, "user_ids": set()})
             bucket["events"] += 1
+            if (event.action_type or "").lower() == "file_upload":
+                bucket["uploads"] += 1
             bucket["user_ids"].add(int(event.user_id))
 
         for event in previous_events:
@@ -895,6 +965,15 @@ def _get_usage_summary_impl(
             current = by_user_current.get(uid, [])
             previous = by_user_previous.get(uid, [])
             current_session = _sessionize_events(current)
+            session_buckets = _session_metric_buckets(current)
+            for (weekday, _), count in session_buckets["weekday_sessions"].items():
+                weekday_stats[weekday]["sessions"] += int(count)
+            for (weekday, _), minutes in session_buckets["weekday_minutes"].items():
+                weekday_stats[weekday]["active_minutes"] += float(minutes)
+            for key, count in session_buckets["hour_sessions"].items():
+                heatmap_sessions[key] = heatmap_sessions.get(key, 0.0) + float(count)
+            for key, minutes in session_buckets["hour_minutes"].items():
+                heatmap_minutes[key] = heatmap_minutes.get(key, 0.0) + float(minutes)
             previous_session = _sessionize_events(previous)
             current_non_heartbeat = [event for event in current if (event.action_type or "").lower() != "heartbeat"]
             previous_non_heartbeat = [event for event in previous if (event.action_type or "").lower() != "heartbeat"]
@@ -908,6 +987,12 @@ def _get_usage_summary_impl(
             active_minutes = float(current_session["active_minutes"])
             active_hours = round(active_minutes / 60.0, 1)
             sessions = int(current_session["count"])
+            if current_non_heartbeat and active_minutes > 0:
+                events_count = len(current_non_heartbeat)
+                for name, count in modules_counter.items():
+                    if name in section_stats:
+                        section_stats[name]["active_minutes"] += active_minutes * (count / events_count)
+                        section_stats[name]["sessions"] += sessions * (count / events_count)
             adoption_score = _adoption_score(active_days, active_minutes, uploads, searches, exports, modules_used)
             productivity_index = round(uploads / sessions, 2) if sessions > 0 else 0.0
 
@@ -998,10 +1083,10 @@ def _get_usage_summary_impl(
             "kpis": {"connected_now": connected_now, "eligible_users": len(eligible_ids), "adoption_eligible_users": len(adoption_rows), "active_users": active_users, "uploads": uploads_total, "active_hours": total_active_hours, "avg_productivity_index": avg_productivity, "adoption_rate": adoption_rate, "inactive_7d_count": inactive_7d_count},
             "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "adoption_threshold": _ADOPTION_THRESHOLD, "states": states},
             "charts": {
-                "by_weekday": [{"weekday_index": idx, "weekday_label": weekday_labels[idx], "events": int(weekday_stats[idx]["events"]), "users": len(weekday_stats[idx]["user_ids"])} for idx in range(7)],
-                "users_vs_users": [{"user_label": row["name"], "events": row["events"], "active_hours": row["active_hours"]} for row in [r for r in per_user_rows if r["events"] > 0][:15]],
-                "heatmap": [{"weekday": weekday, "hour": hour, "events": int(count)} for (weekday, hour), count in sorted(heatmap.items())],
-                "sections": [{"section": sec, "events": int(data["events"]), "users": len(data["user_ids"])} for sec, data in sorted(section_stats.items(), key=lambda item: item[1]["events"], reverse=True)[:20]],
+                "by_weekday": [{"weekday_index": idx, "weekday_label": weekday_labels[idx], "events": int(weekday_stats[idx]["events"]), "users": len(weekday_stats[idx]["user_ids"]), "uploads": int(weekday_stats[idx]["uploads"]), "sessions": int(weekday_stats[idx]["sessions"]), "active_hours": round(float(weekday_stats[idx]["active_minutes"]) / 60.0, 1)} for idx in range(7)],
+                "users_vs_users": [{"user_label": row["name"], "events": row["events"], "active_hours": row["active_hours"], "sessions": row["sessions"], "uploads": row["uploads"]} for row in [r for r in per_user_rows if r["events"] > 0][:15]],
+                "heatmap": [{"weekday": weekday, "hour": hour, "events": int(count), "uploads": int(heatmap_uploads.get((weekday, hour), 0)), "sessions": int(heatmap_sessions.get((weekday, hour), 0)), "active_hours": round(float(heatmap_minutes.get((weekday, hour), 0.0)) / 60.0, 1)} for (weekday, hour), count in sorted(heatmap.items())],
+                "sections": [{"section": sec, "events": int(data["events"]), "users": len(data["user_ids"]), "uploads": int(data["uploads"]), "sessions": int(round(data["sessions"])), "active_hours": round(float(data["active_minutes"]) / 60.0, 1)} for sec, data in sorted(section_stats.items(), key=lambda item: item[1]["events"], reverse=True)[:20]],
             },
             "per_user": per_user_rows,
             "alerts": alerts,
