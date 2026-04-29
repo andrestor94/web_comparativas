@@ -195,6 +195,9 @@
   overflow: hidden;
 }
 .trk-card-body { padding: 20px 22px; }
+#usage-tab-summary .row.g-3 > [class*="col-"] { display: flex; }
+#usage-tab-summary .trk-card { width: 100%; display: flex; flex-direction: column; }
+#usage-tab-summary .trk-card-body { min-height: 410px; display: flex; flex-direction: column; width: 100%; }
 .trk-card-hd {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 4px;
@@ -353,8 +356,8 @@
 /* ═══════════════════════════════════════════════════
    CHARTS CONTAINER
 ═══════════════════════════════════════════════════ */
-.chart-container { min-height: 290px; position: relative; }
-.chart-container.tall { min-height: 340px; }
+.chart-container { height: 310px; min-height: 310px; position: relative; flex: 1 1 auto; }
+.chart-container.tall { height: 310px; min-height: 310px; }
 
 /* ═══════════════════════════════════════════════════
    METRIC SELECTOR
@@ -1337,7 +1340,7 @@
 
       <!-- Acciones -->
       <div class="prof-actions">
-        <button class="btn-prof-action btn-prof-primary"><i class="bi bi-envelope"></i> Enviar mensaje</button>
+        <button id="btn-send-message" class="btn-prof-action btn-prof-primary"><i class="bi bi-envelope"></i> Enviar mensaje</button>
         <button id="btn-assign-group" class="btn-prof-action btn-prof-ghost"><i class="bi bi-people"></i> Asignar grupo</button>
         <button id="btn-mark-watch" class="btn-prof-action btn-prof-ghost"><i class="bi bi-flag"></i> Marcar seguimiento</button>
       </div>
@@ -1377,7 +1380,10 @@
 <!-- Vanta.NET (usa Three.js ya cargado) -->
 <script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.net.min.js"
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script>window.TRACKING_USERS_DB = {{ tracking_users_json | safe }};</script>
+<script>
+window.TRACKING_USERS_DB = {{ tracking_users_json | safe }};
+window.TRACKING_USAGE_SUMMARY = {{ tracking_summary_json | safe }};
+</script>
 <script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2027e"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {

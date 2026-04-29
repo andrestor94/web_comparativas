@@ -30,19 +30,23 @@
     'mercado_publico_home':         'Inicio — Mercado Público',
     'mercado_publico_helpdesk':     'Helpdesk — Mercado Público',
     'mercado_publico_oportunidades':'Oportunidades — Público',
-    'mercado_publico_dimensiones':  'Dimensiones — Público',
+    'mercado_publico_dimensiones':  'Dimensionamiento — Público',
     'mercado_publico_buscador':     'Buscador — Público',
 
     // Mercado Privado
     'mercado_privado':              'Mercado Privado',
     'mercado_privado_home':         'Inicio — Mercado Privado',
-    'mercado_privado_dimensiones':  'Dimensiones — Privado',
+    'mercado_privado_dimensiones':  'Dimensionamiento',
     'mercado_privado_buscador':     'Buscador — Privado',
 
     // Oportunidades
     'oportunidades':                'Oportunidades',
     'oportunidades_buscador':       'Buscador de Oportunidades',
     'oportunidades_dimensiones':    'Análisis de Dimensiones',
+
+    // Cargas / Historial
+    'cargas':                       'Cargas',
+    'cargas_historial':             'Cargas — Historial',
 
     // Pliegos
     'pliegos':                      'Módulo de Pliegos',
@@ -65,8 +69,13 @@
     // Auth
     'login':                        'Inicio de Sesión',
     'logout':                       'Cierre de Sesión',
+    'auth':                         'Inicio de Sesión',
 
-    // Fallback
+    // Sin clasificar (fallback explícito para 'otro' del middleware)
+    'otro':                         'Sin clasificar',
+
+    // Inicio / vacío
+    'home':                         'Inicio',
     '/':                            'Inicio',
     '':                             'Inicio',
   };
@@ -473,11 +482,176 @@
   let sortState    = { col: 'score', dir: 'desc' };
   let sparkCharts  = {};
   let profScoreChart = null;
+  let activeMetric = 'events';
+  let latestUsageSummary = null;
+
+  const METRIC_CONFIG = {
+    events:   { label: 'Eventos',       short: 'eventos', color: '#3b82f6', key: 'events' },
+    hours:    { label: 'Horas activas', short: 'h',       color: '#8b5cf6', key: 'active_hours' },
+    sessions: { label: 'Sesiones',      short: 'sesiones', color: '#06b6d4', key: 'sessions' },
+    uploads:  { label: 'Cargas',        short: 'cargas',  color: '#10b981', key: 'uploads' },
+  };
+
+  const SUMMARY_CHART_IDS = [
+    'usage-chart-weekday',
+    'usage-chart-roles',
+    'usage-chart-heatmap',
+    'usage-chart-sections',
+    'usage-chart-adoption',
+    'usage-chart-donut',
+  ];
+
+  function metricCfg(metric = activeMetric) {
+    return METRIC_CONFIG[metric] || METRIC_CONFIG.events;
+  }
+
+  function metricValue(obj, metric = activeMetric) {
+    const cfg = metricCfg(metric);
+    if (!obj) return 0;
+    if (metric === 'events') return Number(obj.events ?? obj.count ?? obj.value ?? 0) || 0;
+    if (metric === 'hours') return Number(obj.active_hours ?? obj.hours ?? 0) || 0;
+    return Number(obj[cfg.key] ?? obj[metric] ?? 0) || 0;
+  }
+
+  function metricTooltip(v, metric = activeMetric) {
+    if (metric === 'hours') return `${fmtDec(v, 1)} h`;
+    return `${fmtInt(v)} ${metricCfg(metric).short}`;
+  }
+
+  function destroySummaryCharts() {
+    SUMMARY_CHART_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el._chart) {
+        el._chart.destroy();
+        el._chart = null;
+      }
+    });
+    chartsBuilt.summary = false;
+  }
+
+  function normalizeSummaryUser(row, existing = {}) {
+    const uid = Number(row.user_id ?? row.id ?? existing.id ?? 0);
+    const score = Math.max(0, Math.min(100, Math.round(Number(row.adoption_score ?? row.score ?? existing.score ?? 0))));
+    const base = Math.max(0, score - 14);
+    const hist = Array.from({ length: 8 }, (_, i) => Math.min(100, base + Math.round(i * (score - base) / 7)));
+    return {
+      ...existing,
+      id: uid,
+      username: row.name || row.username || existing.username || (row.email || '').split('@')[0],
+      email: row.email || existing.email || '',
+      role: row.role_raw || row.role || existing.role || 'analista',
+      unit: row.unit_business || row.unit || existing.unit || 'Sin unidad',
+      group: row.group || existing.group || 'Sin grupo',
+      created: String(row.created_at || existing.created || '').slice(0, 10),
+      score,
+      sessions: Number(row.sessions ?? existing.sessions ?? 0),
+      active_days: Number(row.active_days ?? existing.active_days ?? 0),
+      active_hours: Number(row.active_hours ?? existing.active_hours ?? 0),
+      views: Number(row.views ?? existing.views ?? 0),
+      searches: Number(row.searches ?? existing.searches ?? 0),
+      downloads: Number(row.downloads ?? row.exports ?? existing.downloads ?? 0),
+      uploads: Number(row.uploads ?? existing.uploads ?? 0),
+      exports: Number(row.exports ?? existing.exports ?? 0),
+      modules: Array.isArray(row.modules_used_list) ? row.modules_used_list : (existing.modules || []),
+      frequency: row.frequency || existing.frequency || 'Sin actividad',
+      last_access: row.last_seen || existing.last_access || null,
+      risk: row.risk_level || existing.risk || 'bajo',
+      status: existing.status || 'offline',
+      current_section: existing.current_section || '',
+      session_start: existing.session_start || null,
+      last_ping: existing.last_ping || row.last_signal || row.last_seen || null,
+      last_action: existing.last_action || row.last_action || 'Sin actividad registrada',
+      activity_type: existing.activity_type || row.activity_type || null,
+      nav_trail: existing.nav_trail || [],
+      sessions_detail: Array.isArray(row.recent_sessions) ? row.recent_sessions : (existing.sessions_detail || []),
+      timeline: existing.timeline || [],
+      score_history: existing.score_history?.length ? existing.score_history : hist,
+    };
+  }
+
+  function syncUsageSummary(summary) {
+    if (!summary || typeof summary !== 'object') return;
+    latestUsageSummary = summary;
+
+    if (Array.isArray(summary.per_user)) {
+      const existingById = new Map(MOCK_USERS.map(u => [Number(u.id), u]));
+      const nextUsers = summary.per_user.map(row => {
+        const uid = Number(row.user_id ?? row.id ?? 0);
+        return normalizeSummaryUser(row, existingById.get(uid) || {});
+      }).filter(u => u.id);
+      if (nextUsers.length) {
+        MOCK_USERS.length = 0;
+        nextUsers.forEach(u => MOCK_USERS.push(u));
+      }
+    }
+
+    const charts = summary.charts || {};
+    if (Array.isArray(charts.by_weekday) && charts.by_weekday.length) {
+      WEEKDAY_DATA.length = 0;
+      charts.by_weekday.forEach(row => WEEKDAY_DATA.push({
+        day: row.weekday_label || row.day || String(row.weekday_index ?? ''),
+        events: Number(row.events || 0),
+        users: Number(row.users || 0),
+        active_hours: Number(row.active_hours || 0),
+        sessions: Number(row.sessions || 0),
+        uploads: Number(row.uploads || 0),
+      }));
+    }
+
+    if (Array.isArray(charts.heatmap)) {
+      HEATMAP_DATA.length = 0;
+      const dayLabels = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
+      charts.heatmap.forEach(row => HEATMAP_DATA.push({
+        day: dayLabels[Number(row.weekday)] || String(row.weekday),
+        hour: Number(row.hour || 0),
+        value: Number(row.events || 0),
+        events: Number(row.events || 0),
+        active_hours: Number(row.active_hours || 0),
+        sessions: Number(row.sessions || 0),
+        uploads: Number(row.uploads || 0),
+      }));
+    }
+
+    if (Array.isArray(charts.sections)) {
+      SECTION_USAGE.length = 0;
+      charts.sections.forEach(row => SECTION_USAGE.push({
+        key: row.section || row.key || '',
+        count: Number(row.events || row.count || 0),
+        events: Number(row.events || row.count || 0),
+        users: Number(row.users || 0),
+        active_hours: Number(row.active_hours || 0),
+        sessions: Number(row.sessions || 0),
+        uploads: Number(row.uploads || 0),
+      }));
+    }
+
+    if (Array.isArray(summary.alerts)) {
+      MOCK_ALERTS.length = 0;
+      summary.alerts.forEach((a, idx) => {
+        const severity = (a.severity || 'baja').toLowerCase();
+        const icon = severity === 'alta' ? 'bi-exclamation-octagon' : (severity === 'media' ? 'bi-exclamation-triangle' : 'bi-info-circle');
+        const uid = Number(a.user_id ?? a.userId ?? 0);
+        MOCK_ALERTS.push({
+          id: String(a.id || `${uid || 'sys'}-${severity}-${idx}-${a.reason || 'alert'}`),
+          userId: uid,
+          severity,
+          icon,
+          title: a.reason || a.title || 'Alerta de uso',
+          body: a.message || a.body || 'Situacion detectada por el seguimiento operativo.',
+          rec: a.recommendation || a.rec || 'Revisar el caso y definir accion de seguimiento.',
+          time: a.timestamp || a.time || new Date().toISOString(),
+          status: a.status || 'abierta',
+        });
+      });
+      resolvedAlerts = new Set();
+    }
+  }
 
   /* ═══════════════════════════════════════════════════════
      INIT
   ═══════════════════════════════════════════════════════ */
   document.addEventListener('DOMContentLoaded', () => {
+    syncUsageSummary(window.TRACKING_USAGE_SUMMARY);
     setDefaultDates();
     initTabs();
     initFiltersForm();
@@ -494,9 +668,9 @@
 
     // Refresh button
     const rbtn = $('#usage-refresh-btn');
-    if (rbtn) rbtn.addEventListener('click', () => { renderLiveTable(); renderKPIs(); });
+    if (rbtn) rbtn.addEventListener('click', () => { loadUsageSummaryFromBackend(); fetchLiveUsersFromBackend(); });
     window.sicLiveRefresh = renderLiveTable;
-    window.sicRefreshTracking = () => { renderLiveTable(); renderKPIs(); };
+    window.sicRefreshTracking = () => { loadUsageSummaryFromBackend(); };
 
     // FX layer (non-blocking — all effects degrade gracefully)
     setTimeout(initAllEffects, 0);
@@ -560,15 +734,37 @@
     if (!form) return;
     form.addEventListener('submit', e => {
       e.preventDefault();
-      renderLiveTable();
-      renderKPIs();
-      renderByUserTable();
-      renderAlerts();
-      if (currentTab === 'usage-tab-summary') {
-        chartsBuilt.summary = false;
-        buildSummaryCharts();
-      }
+      loadUsageSummaryFromBackend();
     });
+  }
+
+  function loadUsageSummaryFromBackend() {
+    const form = $('#usage-filters-form');
+    const params = new URLSearchParams();
+    if (form) {
+      const data = new FormData(form);
+      ['date_from', 'date_to', 'role', 'team', 'granularity'].forEach(key => {
+        const value = data.get(key);
+        if (value != null && String(value).trim() !== '') params.set(key, value);
+      });
+    }
+
+    return fetch(`/sic/api/usage/summary?${params.toString()}`)
+      .then(r => r.json())
+      .then(resp => {
+        if (!resp || resp.ok === false) throw new Error(resp?.detail || 'summary_error');
+        syncUsageSummary(resp);
+        renderKPIs();
+        renderLiveTable();
+        renderByUserTable();
+        renderAlerts();
+        destroySummaryCharts();
+        if (currentTab === 'usage-tab-summary') setTimeout(buildSummaryCharts, 30);
+        return resp;
+      })
+      .catch(() => {
+        showToast('No se pudo actualizar el resumen de uso. Se mantienen los datos cargados.', 'warn');
+      });
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -580,15 +776,31 @@
   }
 
   function renderKPIs() {
-    animateNumber('card-live-users', ONLINE_COUNT);
-    animateNumber('card-adoption-val', ADOPTION_RATE, {
+    const liveCount = MOCK_USERS.filter(u => u.status === 'active' || u.status === 'idle').length;
+    const activeUsers = MOCK_USERS.filter(u => Number(u.active_days || 0) > 0);
+    const inactiveUsers = MOCK_USERS.filter(u => {
+      if (!u.last_access) return true;
+      return ((Date.now() - new Date(u.last_access).getTime()) / 86400000) > 7;
+    });
+    const totalHours = MOCK_USERS.reduce((s, u) => s + Number(u.active_hours || 0), 0);
+    const totalSessions = MOCK_USERS.reduce((s, u) => s + Number(u.sessions || 0), 0);
+    const totalUploads = MOCK_USERS.reduce((s, u) => s + Number(u.uploads || 0), 0);
+    const adoptionRate = latestUsageSummary?.kpis?.adoption_rate != null
+      ? Number(latestUsageSummary.kpis.adoption_rate)
+      : (MOCK_USERS.length ? Math.round(MOCK_USERS.filter(u => Number(u.score || 0) >= 30).length / MOCK_USERS.length * 100) : 0);
+    const productivity = latestUsageSummary?.kpis?.avg_productivity_index != null
+      ? Number(latestUsageSummary.kpis.avg_productivity_index)
+      : (totalSessions > 0 ? totalUploads / totalSessions : 0);
+
+    animateNumber('card-live-users', latestUsageSummary?.kpis?.connected_now ?? liveCount);
+    animateNumber('card-adoption-val', adoptionRate, {
       suffix: '<span style="font-size:16px;font-weight:500;">%</span>',
     });
-    animateNumber('card-inactive-users', INACTIVE_USERS.length);
-    animateNumber('card-active-users', ACTIVE_USERS.length);
-    animateNumber('card-active-hours', TOTAL_HOURS, { decimals: 0 });
-    animateNumber('card-prod-index', PRODUCTIVITY, { decimals: 1, commaDecimal: true });
-    animateNumber('live-count-badge', ONLINE_COUNT);
+    animateNumber('card-inactive-users', latestUsageSummary?.kpis?.inactive_7d_count ?? inactiveUsers.length);
+    animateNumber('card-active-users', latestUsageSummary?.kpis?.active_users ?? activeUsers.length);
+    animateNumber('card-active-hours', latestUsageSummary?.kpis?.active_hours ?? totalHours, { decimals: 0 });
+    animateNumber('card-prod-index', productivity, { decimals: 1, commaDecimal: true });
+    animateNumber('live-count-badge', latestUsageSummary?.kpis?.connected_now ?? liveCount);
 
     // KPI state text
     setEl('usage-kpi-state', `
@@ -802,11 +1014,41 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-     AUTO-REFRESH LIVE
+     AUTO-REFRESH LIVE — sincroniza con datos reales del backend
   ═══════════════════════════════════════════════════════ */
+  function fetchLiveUsersFromBackend() {
+    fetch('/sic/api/usage/live-users')
+      .then(r => r.json())
+      .then(resp => {
+        if (!resp.ok || !Array.isArray(resp.users)) return;
+        resp.users.forEach(live => {
+          const uid = Number(live.id);
+          const existing = MOCK_USERS.find(u => u.id === uid);
+          if (!existing) return;
+          // Actualizar campos de presencia en vivo
+          if (live.current_section != null) existing.current_section = live.current_section;
+          if (live.last_action)             existing.last_action     = live.last_action;
+          if (live.activity_type)           existing.activity_type   = live.activity_type;
+          if (live.last_signal)             existing.last_ping       = live.last_signal;
+          if (live.session_start)           existing.session_start   = live.session_start;
+          // Actualizar estado según señal
+          const rawStatus = (live.status || '').toLowerCase();
+          const statusMap = { activo: 'active', active: 'active', inactivo: 'idle', inactive: 'idle', ausente: 'idle' };
+          existing.status = statusMap[rawStatus] || 'offline';
+        });
+        // Marcar como offline a quienes no aparecen en live
+        const liveIds = new Set(resp.users.map(u => Number(u.id)));
+        MOCK_USERS.forEach(u => { if (!liveIds.has(u.id)) u.status = 'offline'; });
+      })
+      .catch(() => { /* red no disponible, mantener datos actuales */ });
+  }
+
   function startLiveRefresh() {
     if (liveTimer) clearInterval(liveTimer);
+    // Primer ciclo: sincronizar datos reales inmediatamente
+    fetchLiveUsersFromBackend();
     liveTimer = setInterval(() => {
+      fetchLiveUsersFromBackend();
       if (currentTab === 'usage-tab-live') renderLiveTable();
     }, 30000);
   }
@@ -824,20 +1066,25 @@
   function buildSummaryCharts() {
     if (typeof ApexCharts === 'undefined') return;
     chartsBuilt.summary = true;
+    const cfg = metricCfg();
 
     // 1. Actividad por día
     const wdEl = document.getElementById('usage-chart-weekday');
     if (wdEl && !wdEl._chart) {
+      const weekdayValues = WEEKDAY_DATA.map(d => metricValue(d));
+      const weekdayAvg = weekdayValues.length
+        ? Math.round((weekdayValues.reduce((s, v) => s + v, 0) / weekdayValues.length) * 10) / 10
+        : 0;
       const c = new ApexCharts(wdEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 280, toolbar: { show: false } },
+        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 310, toolbar: { show: false } },
         series: [
-          { name: 'Eventos', data: WEEKDAY_DATA.map(d => d.events) },
-          { name: 'Promedio', type: 'line', data: WEEKDAY_DATA.map(d => d.avg) },
+          { name: cfg.label, data: weekdayValues },
+          { name: 'Promedio', type: 'line', data: WEEKDAY_DATA.map(() => weekdayAvg) },
         ],
         xaxis: { categories: WEEKDAY_DATA.map(d => d.day), labels: { style: { colors: '#64748b', fontSize: '11px' } } },
         yaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' } } },
-        colors: ['#3b82f6', '#f59e0b'],
+        colors: [cfg.color, '#f59e0b'],
         stroke: { width: [0, 2.5], curve: 'smooth' },
         fill: { opacity: [.85, 1], type: ['solid','solid'] },
         markers: { size: [0, 4] },
@@ -848,7 +1095,7 @@
           theme: 'dark',
           shared: true,
           intersect: false,
-          y: { formatter: v => fmtInt(v) + ' eventos' },
+          y: { formatter: v => metricTooltip(v) },
         },
       });
       c.render(); wdEl._chart = c;
@@ -857,20 +1104,20 @@
     // 2. Top usuarios (barras horizontales)
     const rolesEl = document.getElementById('usage-chart-roles');
     if (rolesEl && !rolesEl._chart) {
-      const sorted = [...MOCK_USERS].sort((a, b) => b.active_hours - a.active_hours);
+      const sorted = [...MOCK_USERS].sort((a, b) => metricValue(b) - metricValue(a)).slice(0, 15);
       const c = new ApexCharts(rolesEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 340, toolbar: { show: false } },
+        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 310, toolbar: { show: false } },
         plotOptions: { bar: { horizontal: true, borderRadius: 4, dataLabels: { position: 'top' } } },
         series: [
-          { name: 'Horas activas', data: sorted.map(u => ({ x: u.username.split(' ')[0], y: Math.round(u.active_hours) })) },
+          { name: cfg.label, data: sorted.map(u => ({ x: u.username.split(' ')[0], y: metricValue(u) })) },
           { name: 'Score',         data: sorted.map(u => ({ x: u.username.split(' ')[0], y: u.score })) },
         ],
-        colors: ['#3b82f6', '#10b981'],
+        colors: [cfg.color, '#10b981'],
         xaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' } } },
         yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' }, maxWidth: 100 } },
         legend: { labels: { colors: '#94a3b8' }, fontSize: '12px' },
-        tooltip: { theme: 'dark', shared: false },
+        tooltip: { theme: 'dark', shared: false, y: { formatter: (v, opts) => opts.seriesIndex === 0 ? metricTooltip(v) : `${fmtInt(v)} pts` } },
       });
       c.render(); rolesEl._chart = c;
     }
@@ -882,16 +1129,17 @@
       const series = days.map(d => ({
         name: d,
         data: Array.from({ length: 24 }, (_, h) => {
-          const entry = HEATMAP_DATA.find(x => x.day === d && x.hour === h);
-          return { x: `${h}:00`, y: entry ? entry.value : 0 };
+          const dKey = d.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const entry = HEATMAP_DATA.find(x => x.hour === h && (x.day === d || x.day === dKey));
+          return { x: `${h}:00`, y: entry ? metricValue(entry) : 0 };
         }),
       }));
       const c = new ApexCharts(hmEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'heatmap', height: 280, toolbar: { show: false } },
+        chart: { ...CHART_DEFAULTS.chart, type: 'heatmap', height: 310, toolbar: { show: false } },
         series,
         dataLabels: { enabled: false },
-        colors: ['#3b82f6'],
+        colors: [cfg.color],
         xaxis: {
           labels: {
             show: true, rotate: 0,
@@ -908,7 +1156,7 @@
             const hour = w.config.series[seriesIndex].data[dataPointIndex].x;
             return `<div style="padding:8px 12px;font-size:12px;background:#0f1729;border:1px solid #1e2d4a;border-radius:8px;">
               <strong>${day} ${hour}</strong><br>
-              <span style="color:#93c5fd;">${val} eventos</span>
+              <span style="color:#93c5fd;">${metricTooltip(val)}</span>
             </div>`;
           },
         },
@@ -919,20 +1167,20 @@
     // 4. Secciones más usadas
     const secEl = document.getElementById('usage-chart-sections');
     if (secEl && !secEl._chart) {
-      const total = SECTION_USAGE.reduce((s, x) => s + x.count, 0);
+      const total = SECTION_USAGE.reduce((s, x) => s + metricValue(x), 0);
       const c = new ApexCharts(secEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 280, toolbar: { show: false } },
+        chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 310, toolbar: { show: false } },
         plotOptions: { bar: { horizontal: true, borderRadius: 4, dataLabels: { position: 'top' } } },
-        series: [{ name: 'Eventos', data: SECTION_USAGE.map(s => ({ x: sectionLabel(s.key), y: s.count })) }],
-        colors: ['#6366f1'],
+        series: [{ name: cfg.label, data: SECTION_USAGE.map(s => ({ x: sectionLabel(s.key), y: metricValue(s) })) }],
+        colors: [cfg.color],
         xaxis: { labels: { style: { colors: '#64748b', fontSize: '11px' } } },
         yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' }, maxWidth: 160 } },
         tooltip: {
           theme: 'dark',
           y: { formatter: (v, { dataPointIndex }) => {
-            const pct = ((SECTION_USAGE[dataPointIndex].count / total) * 100).toFixed(1);
-            return `${fmtInt(v)} eventos (${pct}%)`;
+            const pct = total > 0 ? ((metricValue(SECTION_USAGE[dataPointIndex]) / total) * 100).toFixed(1) : '0.0';
+            return `${metricTooltip(v)} (${pct}%)`;
           }},
         },
       });
@@ -944,7 +1192,7 @@
     if (adoptEl && !adoptEl._chart) {
       const c = new ApexCharts(adoptEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'area', height: 280, toolbar: { show: false } },
+        chart: { ...CHART_DEFAULTS.chart, type: 'area', height: 310, toolbar: { show: false } },
         series: [{ name: 'Score promedio', data: ADOPTION_WEEKLY.map(d => d.score) }],
         xaxis: { categories: ADOPTION_WEEKLY.map(d => d.week), labels: { style: { colors: '#64748b', fontSize: '11px' } } },
         yaxis: { min: 40, max: 100, labels: { style: { colors: '#64748b', fontSize: '11px' }, formatter: v => v + ' pts' } },
@@ -967,8 +1215,8 @@
       const topModules = SECTION_USAGE.slice(0, 6);
       const c = new ApexCharts(donutEl, {
         ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'donut', height: 290, toolbar: { show: false } },
-        series: topModules.map(s => s.count),
+        chart: { ...CHART_DEFAULTS.chart, type: 'donut', height: 310, toolbar: { show: false } },
+        series: topModules.map(s => metricValue(s)),
         labels: topModules.map(s => sectionLabel(s.key)),
         colors: ['#3b82f6','#10b981','#6366f1','#f59e0b','#ef4444','#06b6d4'],
         stroke: { width: 2, colors: ['#0f1729'] },
@@ -989,7 +1237,7 @@
             fontWeight: 700,
             color: '#e2e8f0',
             offsetY: 4,
-            formatter: val => fmtInt(val),
+            formatter: val => activeMetric === 'hours' ? fmtDec(val, 1) : fmtInt(val),
           },
           total: {
             show: true,
@@ -997,11 +1245,11 @@
             fontSize: '11px',
             fontFamily: '"Outfit",system-ui,sans-serif',
             color: '#94a3b8',
-            formatter: () => fmtInt(SECTION_USAGE.reduce((s,x)=>s+x.count,0)) + ' ev.',
+            formatter: () => metricTooltip(SECTION_USAGE.reduce((s,x)=>s + metricValue(x),0)),
           },
         }}}},
         legend: { position: 'bottom', labels: { colors: '#94a3b8' }, fontSize: '11px' },
-        tooltip: { theme: 'dark', y: { formatter: v => fmtInt(v) + ' eventos' } },
+        tooltip: { theme: 'dark', y: { formatter: v => metricTooltip(v) } },
       });
       c.render(); donutEl._chart = c;
     }
@@ -1016,7 +1264,9 @@
       btn.addEventListener('click', () => {
         btns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        // If charts are built, we'd update them — placeholder for API integration
+        activeMetric = btn.dataset.metric || 'events';
+        destroySummaryCharts();
+        buildSummaryCharts();
       });
     });
   }
@@ -1269,8 +1519,8 @@
   }
 
   function openProfile(uid) {
-    const u = MOCK_USERS.find(x => x.id === uid);
-    if (!u) return;
+    const uBase = MOCK_USERS.find(x => x.id === uid);
+    if (!uBase) return;
 
     const panel   = document.getElementById('userProfilePanel');
     const overlay = document.getElementById('profile-overlay');
@@ -1283,15 +1533,89 @@
     panel.classList.add('open');
     overlay?.classList.add('open');
 
+    // Muestra datos base inmediatamente y luego enriquece con API
     setTimeout(() => {
-      populateProfile(u);
+      populateProfile(uBase);
       loading.style.display = 'none';
       content.style.display = '';
-      buildProfileScoreChart(u);
+      buildProfileScoreChart(uBase);
       if (typeof initNavGraph === 'function' && typeof THREE !== 'undefined') {
-        setTimeout(() => initNavGraph(u), 80);
+        setTimeout(() => initNavGraph(uBase), 80);
       }
-    }, 280);
+    }, 180);
+
+    // Fetch real data from API (sesiones, timeline, alertas)
+    fetch(`/sic/api/usage/user-profile/${uid}`)
+      .then(r => r.json())
+      .then(resp => {
+        if (!resp.ok || !resp.profile) return;
+        const p = resp.profile;
+
+        // Mapear estructura API → estructura UI
+        const uEnriched = { ...uBase };
+
+        // Sesiones recientes: API devuelve recent_sessions con start/end/sections
+        if (Array.isArray(p.recent_sessions) && p.recent_sessions.length) {
+          uEnriched.sessions_detail = p.recent_sessions.map(s => ({
+            date:     s.start || s.date,
+            duration: s.active_minutes != null ? fmtHours(s.active_minutes / 60) : '—',
+            sections: Array.isArray(s.sections) ? s.sections : [],
+          }));
+        }
+
+        // Timeline / actividad reciente: API devuelve array de eventos
+        if (Array.isArray(p.timeline) && p.timeline.length) {
+          uEnriched.timeline = p.timeline.map(ev => ({
+            time:    ev.timestamp,
+            action:  _apiActionToLocal(ev.action_type),
+            section: ev.section || '',
+          }));
+        }
+
+        // Alertas del usuario desde el perfil real
+        if (Array.isArray(p.alerts) && p.alerts.length) {
+          uEnriched._api_alerts = p.alerts;
+        }
+
+        // Stats enriquecidos si el backend los tiene
+        if (p.stats) {
+          const st = p.stats;
+          uEnriched.sessions    = st.sessions    ?? uBase.sessions;
+          uEnriched.active_days = st.active_days ?? uBase.active_days;
+          uEnriched.active_hours= st.active_hours?? uBase.active_hours;
+          uEnriched.views       = st.views       ?? uBase.views;
+          uEnriched.searches    = st.searches    ?? uBase.searches;
+          uEnriched.uploads     = st.uploads     ?? uBase.uploads;
+          uEnriched.exports     = st.exports     ?? uBase.exports;
+          uEnriched.downloads   = st.downloads   ?? uBase.downloads;
+          uEnriched.modules     = Array.isArray(st.modules_used_list) ? st.modules_used_list : uBase.modules;
+        }
+        if (p.adoption_score != null) uEnriched.score = p.adoption_score;
+        if (p.risk_level)             uEnriched.risk  = p.risk_level;
+
+        // Sección actual desde live info
+        if (p.current_status?.current_section) {
+          uEnriched.current_section = p.current_status.current_section;
+        }
+
+        // Actualizar el panel ya visible con datos enriquecidos
+        populateProfile(uEnriched);
+        buildProfileScoreChart(uEnriched);
+      })
+      .catch(() => { /* silencioso: los datos base ya están visibles */ });
+  }
+
+  /** Convierte action_type de la API al formato local usado por evLabel/evIcon */
+  function _apiActionToLocal(at) {
+    const map = {
+      'page_view':    'view',
+      'module_visit': 'view',
+      'file_upload':  'upload',
+      'export':       'export',
+      'search':       'search',
+      'download':     'download',
+    };
+    return map[(at || '').toLowerCase()] || 'view';
   }
 
   /* ── Toast notification ── */
@@ -1472,26 +1796,48 @@
       `).join('') || '<div class="trk-empty" style="padding:20px;">Sin actividad</div>';
     }
 
-    // Alerts for this user
+    // Alerts for this user — usa alertas reales de API si existen, si no las del mock
     const alertsEl = document.getElementById('prof-alerts');
     if (alertsEl) {
-      const userAlerts = MOCK_ALERTS.filter(a => a.userId === u.id && !resolvedAlerts.has(a.id));
-      alertsEl.innerHTML = userAlerts.length
-        ? userAlerts.map(a => `
-          <div style="padding:9px 12px;border-left:2px solid;border-left-color:${a.severity==='alta'?'#ef4444':a.severity==='media'?'#f59e0b':'#3b82f6'};
+      const apiAlerts = u._api_alerts;
+      if (apiAlerts && apiAlerts.length) {
+        // Alertas reales desde el endpoint de perfil
+        const sevColor = { alta: '#ef4444', media: '#f59e0b', baja: '#3b82f6', info: '#3b82f6' };
+        alertsEl.innerHTML = apiAlerts.map(a => `
+          <div style="padding:9px 12px;border-left:2px solid;border-left-color:${sevColor[a.severity] || '#3b82f6'};
             background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:6px;">
             <div style="font-size:12px;font-weight:600;color:#e2e8f0;margin-bottom:3px;">
-              <i class="bi ${a.icon} me-1"></i>${esc(a.title)}
+              ${esc(a.reason || a.title || 'Alerta')}
             </div>
-            <div style="font-size:11px;color:var(--t-muted);">${esc(a.rec)}</div>
+            <div style="font-size:11px;color:var(--t-muted);">${esc(a.recommendation || a.message || '')}</div>
           </div>
-        `).join('')
-        : '<div style="font-size:12px;color:var(--t-muted);padding:10px;">Sin alertas activas.</div>';
+        `).join('');
+      } else {
+        const userAlerts = MOCK_ALERTS.filter(a => a.userId === u.id && !resolvedAlerts.has(a.id));
+        alertsEl.innerHTML = userAlerts.length
+          ? userAlerts.map(a => `
+            <div style="padding:9px 12px;border-left:2px solid;border-left-color:${a.severity==='alta'?'#ef4444':a.severity==='media'?'#f59e0b':'#3b82f6'};
+              background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:6px;">
+              <div style="font-size:12px;font-weight:600;color:#e2e8f0;margin-bottom:3px;">
+                <i class="bi ${a.icon} me-1"></i>${esc(a.title)}
+              </div>
+              <div style="font-size:11px;color:var(--t-muted);">${esc(a.rec)}</div>
+            </div>
+          `).join('')
+          : '<div style="font-size:12px;color:var(--t-muted);padding:10px;">Sin alertas activas.</div>';
+      }
     }
 
     // Wire profile action buttons
+    const btnMsg   = document.getElementById('btn-send-message');
     const btnGroup = document.getElementById('btn-assign-group');
     const btnWatch = document.getElementById('btn-mark-watch');
+
+    if (btnMsg) {
+      const fresh = btnMsg.cloneNode(true);
+      btnMsg.parentNode.replaceChild(fresh, btnMsg);
+      fresh.addEventListener('click', e => { e.stopPropagation(); openMessageComposer(u); });
+    }
     if (btnGroup) {
       const fresh = btnGroup.cloneNode(true);
       btnGroup.parentNode.replaceChild(fresh, btnGroup);
@@ -1503,6 +1849,44 @@
       fresh.classList.toggle('watch-active', trackedUsers.has(u.id));
       fresh.addEventListener('click', () => toggleWatchUser(u));
     }
+  }
+
+  /* ── Compositor de mensaje al usuario ── */
+  function openMessageComposer(u) {
+    closeActivePopover();
+    const btn = document.getElementById('btn-send-message');
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const pop  = document.createElement('div');
+    pop.className = 'grp-popover';
+    pop.style.cssText = `top:${rect.top + window.scrollY - 140}px;left:${rect.left + window.scrollX}px;min-width:260px;padding:12px;`;
+    pop.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">
+        <i class="bi bi-envelope me-1" style="color:var(--t-blue);"></i> Mensaje para ${esc(u.username)}
+      </div>
+      <textarea id="msg-composer-text" placeholder="Escribí el mensaje…"
+        style="width:100%;height:72px;resize:none;background:#0f1729;border:1px solid #1e2d4a;
+        border-radius:6px;color:#e2e8f0;font-size:12px;padding:8px;outline:none;"></textarea>
+      <div style="display:flex;gap:6px;margin-top:8px;justify-content:flex-end;">
+        <button id="msg-cancel-btn" class="btn-prof-action btn-prof-ghost" style="font-size:11px;padding:4px 10px;">Cancelar</button>
+        <button id="msg-send-btn"   class="btn-prof-action btn-prof-primary" style="font-size:11px;padding:4px 10px;">
+          <i class="bi bi-send"></i> Enviar
+        </button>
+      </div>`;
+    document.body.appendChild(pop);
+    _activePopover = pop;
+    pop.querySelector('#msg-composer-text')?.focus();
+    pop.querySelector('#msg-cancel-btn')?.addEventListener('click', closeActivePopover);
+    pop.querySelector('#msg-send-btn')?.addEventListener('click', () => {
+      const text = (pop.querySelector('#msg-composer-text')?.value || '').trim();
+      if (!text) { showToast('Escribí un mensaje antes de enviar.', 'warn'); return; }
+      closeActivePopover();
+      showToast(`Mensaje enviado a ${u.username}`, 'success');
+      // TODO: conectar con endpoint real de mensajería cuando esté disponible
+    });
+    setTimeout(() => document.addEventListener('click', e => {
+      if (!pop.contains(e.target)) closeActivePopover();
+    }, { once: true }), 0);
   }
 
   function evIcon(a) {
@@ -2009,10 +2393,11 @@
         key.includes('tab_by_user') || key.includes('tab_alerts') ||
         key === 'sic_config') return 'seguimiento_hub';
     if (key === 'sic_helpdesk' || key.includes('helpdesk')) return 'helpdesk';
-    if (key === 'sic_usuario' || key.includes('sic_user')) return 'usuarios';
-    if (key.includes('password_reset') || key.includes('contrasena')) return 'passwords';
+    if (key === 'sic_usuarios' || key === 'sic_usuario' || key.includes('sic_user')) return 'usuarios';
+    if (key.includes('password_reset') || key.includes('sic_password') || key.includes('contrasena')) return 'passwords';
     if (key.startsWith('mercado_publico') || key.includes('mercado_public')) return 'mercado_publico';
     if (key.startsWith('mercado_privado') || key.includes('mercado_privad')) return 'mercado_privado';
+    if (key === 'cargas' || key === 'cargas_historial' || key.startsWith('carga')) return 'mercado_publico';
     if (key.startsWith('oportunidades') || key.startsWith('oportunidad')) return 'oportunidades';
     if (key.startsWith('pliego') || key === 'pliegos') return 'pliegos';
     if (key.startsWith('forecast') || key.includes('proyeccion')) return 'forecast';

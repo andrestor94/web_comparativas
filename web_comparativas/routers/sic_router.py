@@ -564,6 +564,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
         raise HTTPException(status_code=403, detail="Access Denied: Admins Only")
 
     tracking_users_json = "[]"
+    tracking_summary_json = "{}"
     try:
         from web_comparativas.usage_service import get_live_users_data as _live
         from web_comparativas.visibility_service import get_visible_user_ids as _vis_ids
@@ -598,6 +599,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
         stats_map = {}
         try:
             summary = get_usage_summary(current_user=user)
+            tracking_summary_json = _json_mod.dumps(summary, ensure_ascii=False, default=str)
             for row in summary.get("per_user", []):
                 uid = row.get("user_id") or row.get("id")
                 if uid:
@@ -667,6 +669,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
         "user_display": user_display,
         "section": "tracking",
         "tracking_users_json": tracking_users_json,
+        "tracking_summary_json": tracking_summary_json,
     }
     return templates.TemplateResponse("sic/tracking.html", ctx)
 
