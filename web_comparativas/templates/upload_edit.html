@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Modificar carga - Web Comparativas{% endblock %}
+{% block header_title %}Modificar carga{% endblock %}
+{% block extra_head %}
+<style>
+  .upload-edit-shell {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .is-readonly {
+    background-color: #f8fafc;
+    cursor: default;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Mercado Publico</span>
+    <h1 class="h-page-header__title">Modificar carga</h1>
+    <p class="h-page-header__subtitle">Editar datos principales de la carga #{{ upload.id }}</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a href="/cargas/historial" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-clock-history me-1"></i> Historial
+    </a>
+  </div>
+</div>
+
+<div class="upload-edit-shell">
+  <div class="h-panel">
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form action="/cargas/{{ upload.id }}/editar" method="post" class="row g-3" id="editUploadForm">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">N&deg; de proceso</label>
+        <input name="proceso_nro" class="form-control" value="{{ upload.proceso_nro or '' }}" required />
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Fecha de apertura</label>
+        <input name="apertura_fecha" type="date" class="form-control" value="{{ upload.apertura_fecha or '' }}" required />
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">N&deg; de cuenta</label>
+        <input name="cuenta_nro" id="n_cuenta" class="form-control" value="{{ upload.cuenta_nro or '' }}" />
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Plataforma</label>
+        {% set platform_value = upload.platform_hint or '' %}
+        <select name="plataforma" id="plataformaSel" class="form-select">
+          <option value="">-- Seleccionar --</option>
+          {% for p in ["BAC", "COMPRAR", "PBAC", "LA_PAMPA", "SIPROSA"] %}
+          <option value="{{ p }}" {% if platform_value == p %}selected{% endif %}>{{ p.replace("_", " ") }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Comprador</label>
+        <input name="comprador" id="compradorInp" class="form-control is-readonly"
+          value="{{ upload.buyer_hint or '' }}" placeholder="Se completa automaticamente"
+          readonly aria-readonly="true" tabindex="-1" />
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Provincia/Municipio</label>
+        <input name="provincia" id="provinciaInp" class="form-control is-readonly"
+          value="{{ upload.province_hint or '' }}" placeholder="Se completa automaticamente"
+          readonly aria-readonly="true" tabindex="-1" />
+      </div>
+
+      <input type="hidden" name="platform_hint" id="platform_hint" />
+      <input type="hidden" name="buyer_hint" id="buyer_hint" />
+      <input type="hidden" name="province_hint" id="province_hint" />
+
+      <div class="col-12 mt-4 d-flex gap-2">
+        <button class="btn btn-primary d-inline-flex align-items-center gap-2" type="submit">
+          <i class="bi bi-check2"></i> Guardar cambios
+        </button>
+        <a href="/cargas/historial" class="btn btn-outline-secondary">Cancelar</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById('editUploadForm');
+  const plataforma = document.getElementById('plataformaSel');
+  const comprador = document.getElementById('compradorInp');
+  const provincia = document.getElementById('provinciaInp');
+  const cuenta = document.getElementById('n_cuenta');
+  const hPlatform = document.getElementById('platform_hint');
+  const hBuyer = document.getElementById('buyer_hint');
+  const hProvince = document.getElementById('province_hint');
+
+  function lockAutoFields() {
+    [comprador, provincia].forEach(function (el) {
+      if (!el) return;
+      el.readOnly = true;
+      el.setAttribute('readonly', 'readonly');
+      el.setAttribute('aria-readonly', 'true');
+      el.setAttribute('tabindex', '-1');
+      el.classList.add('is-readonly');
+    });
+  }
+
+  function preventManualEdit(ev) {
+    const el = ev.currentTarget;
+    if (!el || el.readOnly !== true) return;
+    if (ev.type === 'keydown') {
+      const allowed = ['Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape'];
+      if (allowed.includes(ev.key) || ev.ctrlKey || ev.metaKey) return;
+    }
+    ev.preventDefault();
+  }
+
+  [comprador, provincia].forEach(function (el) {
+    if (!el) return;
+    ['beforeinput', 'paste', 'drop'].forEach(function (eventName) {
+      el.addEventListener(eventName, preventManualEdit);
+    });
+    el.addEventListener('keydown', preventManualEdit);
+  });
+
+  function syncHints() {
+    hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
+    hBuyer.value = (comprador && comprador.value ? comprador.value : '').trim();
+    hProvince.value = (provincia && provincia.value ? provincia.value : '').trim();
+    lockAutoFields();
+  }
+
+  async function buscarCliente(nro) {
+    try {
+      const resp = await fetch('/api/clientes/' + encodeURIComponent(nro));
+      if (!resp.ok) return { ok: false };
+      return await resp.json();
+    } catch (err) {
+      console.warn('Error consultando cliente:', err);
+      return { ok: false };
+    }
+  }
+
+  function limpiarCamposAutocompletados() {
+    if (comprador) comprador.value = '';
+    if (provincia) provincia.value = '';
+    syncHints();
+  }
+
+  function rellenarCampos(data) {
+    if (!data) return;
+    if (comprador) comprador.value = data.comprador || '';
+    if (provincia) provincia.value = data.provincia || '';
+    syncHints();
+  }
+
+  let ultimoBuscado = (cuenta && cuenta.value ? cuenta.value : '').trim();
+  async function manejarCuenta(force) {
+    const valor = (cuenta && cuenta.value ? cuenta.value : '').trim();
+    if (!valor) {
+      ultimoBuscado = '';
+      limpiarCamposAutocompletados();
+      return;
+    }
+    if (!force && valor === ultimoBuscado) return;
+    ultimoBuscado = valor;
+    const res = await buscarCliente(valor);
+    if (res && res.ok && res.data) rellenarCampos(res.data);
+    else limpiarCamposAutocompletados();
+  }
+
+  if (plataforma) plataforma.addEventListener('change', syncHints);
+  if (cuenta) {
+    cuenta.addEventListener('blur', function () { manejarCuenta(false); });
+    cuenta.addEventListener('change', function () { manejarCuenta(true); });
+    cuenta.addEventListener('keyup', function (ev) {
+      const valor = (cuenta.value || '').trim();
+      if (ev.key === 'Enter') manejarCuenta(true);
+      else if (valor.length >= 4) manejarCuenta(false);
+    });
+  }
+  if (form) form.addEventListener('submit', syncHints);
+
+  lockAutoFields();
+  syncHints();
+})();
+</script>
+{% endblock %}

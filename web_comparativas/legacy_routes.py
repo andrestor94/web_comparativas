@@ -88,6 +88,7 @@ from .models import (
     NormalizedFile,
     Run,
     Dashboard,
+    ComparativaRow,
     ChatChannel,
     ChatMember,
     ChatMessage,
@@ -822,34 +823,56 @@ CLIENTES_PATH = Path(__file__).with_name("data") / "BASE_CLIENTES_SUIZO.xlsx"
 # Cargamos el Excel una sola vez al iniciar la app
 _clientes_index: dict[str, dict] = {}
 
+def _norm_lookup_key(value: Any) -> str:
+    value = "" if value is None else str(value)
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _excel_cell(row, *column_names: str) -> str:
+    wanted = {_norm_lookup_key(name) for name in column_names}
+    for column, value in row.items():
+        if _norm_lookup_key(column) in wanted:
+            return str(value or "").strip()
+    return ""
+
+
+def _cliente_hints_por_cuenta(n_cuenta: str) -> Optional[dict]:
+    key = str(n_cuenta or "").strip()
+    if not key:
+        return None
+    data = _clientes_index.get(key)
+    if data:
+        return data
+    try:
+        numeric_key = str(int(float(key)))
+    except Exception:
+        numeric_key = key
+    return _clientes_index.get(numeric_key)
+
 if CLIENTES_PATH.exists():
     df_clientes = pd.read_excel(CLIENTES_PATH).fillna("")
     # Ojo: en el Excel la columna viene como "Nombre Fantasia " (con espacio)
     for _, row in df_clientes.iterrows():
-        nro = str(row.get("N┬░ Cuenta", "")).strip()
+        nro = _excel_cell(row, "N Cuenta", "Nro Cuenta", "Numero Cuenta", "N° Cuenta")
         if not nro:
             continue
+        try:
+            nro = str(int(float(nro)))
+        except Exception:
+            nro = str(nro).strip()
 
         _clientes_index[nro] = {
             # Esto lo vamos a usar para el campo "Comprador"
-            "comprador": str(row.get("Nombre Fantasia ", "")).strip().strip('"'),
+            "comprador": _excel_cell(row, "Nombre Fantasia", "Razon Social").strip('"'),
             # Esto lo vamos a usar para el campo "Provincia/Municipio"
-            "provincia": str(row.get("Provincia", "")).strip(),
+            "provincia": _excel_cell(row, "Provincia"),
             # Lo dejo preparado por si despu├®s agregamos "plataforma" en el Excel
-            "plataforma": "",
+            "plataforma": _excel_cell(row, "Plataforma"),
         }
 else:
     print(f"[WARN] No se encontr├│ el archivo de clientes en {CLIENTES_PATH}")
-
-
-# @router.get("/api/clientes/{n_cuenta}")
-# def api_get_cliente_por_cuenta(n_cuenta: str):
-#     """Devuelve los datos del cliente para autocompletar el formulario."""
-#     key = n_cuenta.strip()
-#     data = _clientes_index.get(key)
-#     if not data:
-#         return {"ok": False, "msg": "Cliente no encontrado"}
-#     return {"ok": True, "data": data}
 
 
 # ======================================================================
@@ -1003,6 +1026,18 @@ def require_roles(*roles: str):
         return user
 
     return _dep
+
+
+@router.get("/api/clientes/{n_cuenta}", response_class=JSONResponse)
+def api_get_cliente_por_cuenta(
+    n_cuenta: str,
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+):
+    """Devuelve los datos del cliente para autocompletar el formulario."""
+    data = _cliente_hints_por_cuenta(n_cuenta)
+    if not data:
+        return JSONResponse({"ok": False, "msg": "Cliente no encontrado"}, status_code=404)
+    return JSONResponse({"ok": True, "data": data})
 
 
 # ======================================================================
@@ -3374,6 +3409,10 @@ async def crear_carga(
     platform_hint = (platform_hint or plataforma).strip()
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
+    auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
+    if (cuenta_nro or "").strip():
+        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
+        province_hint = (auto_hints or {}).get("provincia", "").strip()
 
     # --- L├│gica espec├¡fica por plataforma (unificada) ---
     final_filename = ""
@@ -3453,6 +3492,10 @@ async def crear_carga(
     platform_hint = (platform_hint or plataforma).strip()
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
+    auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
+    if (cuenta_nro or "").strip():
+        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
+        province_hint = (auto_hints or {}).get("provincia", "").strip()
 
     # Normalizamos el n├║mero de proceso para detectar duplicados
     proceso_nro_clean = (proceso_nro or "").strip() or None
@@ -3606,6 +3649,10 @@ async def crear_carga_otras_fuentes(
     platform_hint = (platform_hint or plataforma).strip()
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
+    auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
+    if (cuenta_nro or "").strip():
+        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
+        province_hint = (auto_hints or {}).get("provincia", "").strip()
 
     # Caso especial: LA_PAMPA
     if platform_hint == "LA_PAMPA":
@@ -3805,6 +3852,13 @@ def _parse_date_like(s: str) -> Optional[dt.date]:
         return dt.datetime.fromisoformat(s).date()
     except Exception:
         return None
+
+
+def _normalize_upload_date(s: str) -> str:
+    parsed = _parse_date_like(s)
+    if parsed:
+        return parsed.isoformat()
+    return (s or "").strip()
 
 
 _STATUS_LABELS = {
@@ -4078,6 +4132,135 @@ def eliminar_carga(
         db_session.rollback()
         logger.error("[ELIMINAR] Error eliminando carga %s: %s", upload_id, e)
         raise HTTPException(status_code=500, detail="Error al eliminar la comparativa")
+
+
+# ======================================================================
+# MODIFICAR METADATA DE CARGA (solo Admin)
+# ======================================================================
+@router.get("/cargas/{upload_id}/editar", response_class=HTMLResponse)
+def editar_carga_form(
+    request: Request,
+    upload_id: int,
+    user: User = Depends(require_roles("admin")),
+):
+    upload = db_session.get(UploadModel, upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Carga no encontrada")
+
+    return templates.TemplateResponse(
+        "upload_edit.html",
+        {"request": request, "user": user, "upload": upload, "error": None},
+    )
+
+
+@router.post("/cargas/{upload_id}/editar", response_class=HTMLResponse)
+def actualizar_carga_metadata(
+    request: Request,
+    upload_id: int,
+    proceso_nro: str = Form(""),
+    apertura_fecha: str = Form(""),
+    cuenta_nro: str = Form(""),
+    plataforma: str = Form(""),
+    platform_hint: str = Form(""),
+    buyer_hint: str = Form(""),
+    province_hint: str = Form(""),
+    comprador: str = Form(""),
+    provincia: str = Form(""),
+    user: User = Depends(require_roles("admin")),
+):
+    upload = db_session.get(UploadModel, upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Carga no encontrada")
+
+    proceso_nro_clean = (proceso_nro or "").strip() or None
+    proceso_key = normalize_proceso_nro(proceso_nro_clean)
+    if proceso_key:
+        duplicate = (
+            db_session.query(UploadModel)
+            .filter(
+                UploadModel.id != upload_id,
+                func.upper(func.trim(UploadModel.proceso_key)) == proceso_key,
+            )
+            .first()
+        )
+        if duplicate:
+            return templates.TemplateResponse(
+                "upload_edit.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "upload": upload,
+                    "error": "Ya existe otra carga con ese numero de proceso.",
+                },
+                status_code=400,
+            )
+
+    cuenta_clean = (cuenta_nro or "").strip()
+    platform_clean = (platform_hint or plataforma or "").strip()
+    auto_hints = _cliente_hints_por_cuenta(cuenta_clean)
+    if cuenta_clean:
+        buyer_clean = (auto_hints or {}).get("comprador", "").strip()
+        province_clean = (auto_hints or {}).get("provincia", "").strip()
+    else:
+        buyer_clean = ""
+        province_clean = ""
+
+    fecha_clean = _normalize_upload_date(apertura_fecha) or None
+    fecha_rows = _parse_date_like(fecha_clean) if fecha_clean else None
+
+    try:
+        upload.proceso_nro = proceso_nro_clean
+        upload.proceso_key = proceso_key
+        upload.apertura_fecha = fecha_clean
+        upload.cuenta_nro = cuenta_clean or None
+        upload.platform_hint = platform_clean or None
+        upload.buyer_hint = buyer_clean or None
+        upload.province_hint = province_clean or None
+        upload.updated_at = dt.datetime.utcnow()
+
+        db_session.query(ComparativaRow).filter(
+            ComparativaRow.upload_id == upload_id
+        ).update(
+            {
+                ComparativaRow.fecha_apertura: fecha_rows,
+                ComparativaRow.nro_proceso: proceso_nro_clean,
+                ComparativaRow.comprador: buyer_clean or None,
+                ComparativaRow.plataforma: platform_clean or None,
+                ComparativaRow.cuenta: cuenta_clean or None,
+                ComparativaRow.provincia: province_clean or None,
+            },
+            synchronize_session=False,
+        )
+
+        db_session.commit()
+        logger.info("[EDITAR_CARGA] Admin uid=%s actualizo carga id=%s", user.id, upload_id)
+        log_usage_event(
+            user=user,
+            action_type="upload_metadata_update",
+            section="cargas_editar",
+            request=request,
+            resource_id=str(upload_id),
+            extra_data={
+                "proceso_nro": proceso_nro_clean or "",
+                "cuenta_nro": cuenta_clean,
+                "platform": platform_clean,
+            },
+        )
+    except Exception as e:
+        db_session.rollback()
+        logger.error("[EDITAR_CARGA] Error actualizando carga %s: %s", upload_id, e)
+        return templates.TemplateResponse(
+            "upload_edit.html",
+            {
+                "request": request,
+                "user": user,
+                "upload": upload,
+                "error": "No se pudo guardar la modificacion.",
+            },
+            status_code=500,
+        )
+
+    return RedirectResponse("/cargas/historial", status_code=303)
 
 
 # ======================================================================
