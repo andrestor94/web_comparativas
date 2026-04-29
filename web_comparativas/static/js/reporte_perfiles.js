@@ -2439,7 +2439,7 @@ async function pfLoadCliArticulos(params) {
           <td class="num">${pfFmt(d.cant_adjudicada, 2)}</td>
           <td class="num">${pfFmt(d.frecuencia)}</td>
           <td class="num">${pfPeso(d.monto_total)}</td>
-          <td class="num">${pfPeso(d.avg_precio)}</td>
+          <td class="num">${d.precio_mediana > 0 ? pfPeso(d.precio_mediana) : `<span class="pf-text-muted-sm">—</span>`}</td>
           <td class="num pf-hist-cell">
             <button class="pf-hist-btn" title="Ver detalle del articulo"
               onclick="pfToggleArtDetalle(this, decodeURIComponent('${descId}'))">
@@ -2475,19 +2475,12 @@ async function pfToggleArtDetalle(btn, descripcion) {
     const params = PF._cliArtParams ? new URLSearchParams(PF._cliArtParams.toString()) : new URLSearchParams();
     params.set("descripcion", descripcion);
     const data = await pfFetch(`${BASE}/cliente/articulo-detalle?${params}`);
-    const minPrecio = data.reduce((min, item) => {
-      const value = Number(item.precio);
-      if (!Number.isFinite(value)) return min;
-      return value < min ? value : min;
-    }, Number.POSITIVE_INFINITY);
-
     const bodyRows = data.length
       ? data.map((r) => {
-          const isWinner = Number.isFinite(minPrecio) && Number(r.precio) === minPrecio;
           return `<tr>
             <td>${r.fecha ?? "-"}</td>
             <td>${pfEsc(r.marca)}</td>
-            <td class="num"><span class="${isWinner ? "pf-price-winner" : ""}">${pfPeso(r.precio)}</span></td>
+            <td class="num">${pfPeso(r.precio)}</td>
             <td>${pfEsc(pfTrunc(r.proveedor, 42))}</td>
           </tr>`;
         }).join("")
@@ -2504,7 +2497,7 @@ async function pfToggleArtDetalle(btn, descripcion) {
             <thead><tr>
               <th>Fecha</th>
               <th>Marca</th>
-              <th class="num">Precio ganador</th>
+              <th class="num">Precio unit.</th>
               <th>Proveedor</th>
             </tr></thead>
             <tbody>${bodyRows}</tbody>
