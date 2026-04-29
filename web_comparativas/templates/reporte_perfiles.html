@@ -324,6 +324,7 @@
               <tr>
                 <th>Descripcion</th>
                 <th class="num">Mediana de precio</th>
+                <th class="num">Participación</th>
                 <th class="num">Veces ganado</th>
                 <th class="num">Efectividad</th>
                 <th class="num">Monto adjudicado</th>
@@ -332,7 +333,7 @@
             </thead>
             <tbody id="compPosTbody">
               <tr>
-                <td colspan="6">
+                <td colspan="7">
                   <div class="pf-empty-state">
                     <i class="bi bi-building"></i>
                     <p>Busca un proveedor para ver su posicionamiento por articulo.</p>
@@ -474,5 +475,5 @@
 </div>
 
 <script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
-<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=9"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles.js') }}?v=10"></script>
 {% endblock %}

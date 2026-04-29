@@ -2042,7 +2042,7 @@ async function pfLoadCompPosiciones(params) {
     const data = await pfFetch(`${BASE}/competidor/posiciones?${params}`);
     if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
     if (!data.length) {
-      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 6);
+      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 7);
       return;
     }
 
@@ -2056,6 +2056,7 @@ async function pfLoadCompPosiciones(params) {
         <tr>
           <td>${pfCellText(d.descripcion, 56)}</td>
           <td class="num">${hasMediana ? pfPeso(d.precio_mediana) : `<span class="pf-text-muted-sm">—</span>`}</td>
+          <td class="num">${pfFmt(d.participaciones ?? d.count ?? 0)}</td>
           <td class="num">${pfFmt(d.veces_ganado ?? 0)}</td>
           <td class="num"><span class="pf-efectividad ${efClass}">${ef}%</span></td>
           <td class="num">${pfPeso(d.monto_total)}</td>
@@ -2070,7 +2071,7 @@ async function pfLoadCompPosiciones(params) {
     }).join("");
   } catch (err) {
     if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
-    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 6);
+    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 7);
   }
 }
 
@@ -2113,7 +2114,7 @@ async function pfToggleCompPosHistorico(btn, descripcion) {
     detailRow.id = histId;
     detailRow.className = "pf-hist-row";
     detailRow.innerHTML = `
-      <td colspan="6">
+      <td colspan="7">
         <div class="pf-hist-detail">
           <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial — ${pfEsc(pfTrunc(descripcion, 60))}</div>
           <table class="pf-hist-table">
