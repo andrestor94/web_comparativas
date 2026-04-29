@@ -2093,7 +2093,7 @@ async function pfToggleCompPosHistorico(btn, descripcion) {
   try {
     const params = pfGetCompParams();
     params.set("descripcion", descripcion);
-    const data = await pfFetch(`${BASE}/articulos/proveedor-historico?${params}`);
+    const data = await pfFetch(`${BASE}/competidor/articulo-detalle?${params}`);
 
     const bodyRows = data.length
       ? data.map((r) => {
