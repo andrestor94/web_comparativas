@@ -2044,6 +2044,8 @@ async function pfLoadCompProductosCompetitivos(params) {
 async function pfLoadCompPosiciones(params) {
   const tbody = document.getElementById("compPosTbody");
   if (!tbody) return;
+  const countEl = document.getElementById("compPosCount");
+  if (countEl) countEl.textContent = "";
   const requestToken = pfBeginRequestGuard("comp:posiciones");
 
   try {
@@ -2053,6 +2055,8 @@ async function pfLoadCompPosiciones(params) {
       tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 7);
       return;
     }
+
+    if (countEl) countEl.textContent = `${data.length} artículo${data.length !== 1 ? "s" : ""}`;
 
     tbody.innerHTML = data.map((d) => {
       const ef = d.efectividad ?? 0;
