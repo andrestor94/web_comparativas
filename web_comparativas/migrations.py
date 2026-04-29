@@ -520,6 +520,39 @@ def ensure_ticket_pliego_columns():
     print("[MIGRATION] Columnas de widget Lectura de Pliegos verificadas/creadas.", flush=True)
 
 
+def ensure_pliego_request_idempotency_columns():
+    """
+    Agrega el token idempotente de creacion de solicitudes de Lectura de Pliegos.
+    La columna permite bloquear doble submit aun si el frontend repite el POST.
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE pliego_solicitudes ADD COLUMN client_request_id VARCHAR(64)",
+            "pliego_solicitudes.client_request_id",
+        )
+
+    idx_name = "uq_pliego_solicitud_client_request_id"
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {idx_name} "
+                    "ON pliego_solicitudes (client_request_id)"
+                )
+            )
+        print(f"[MIGRATION] Indice '{idx_name}' verificado/creado.", flush=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "duplicate" in msg:
+            print(f"[MIGRATION] Indice '{idx_name}': ya existe. (OK)", flush=True)
+        elif "no such table" in msg or "undefined table" in msg or "does not exist" in msg:
+            print("[MIGRATION] pliego_solicitudes no existe aun. (Saltando indice idempotencia)", flush=True)
+        else:
+            print(f"[MIGRATION] Indice '{idx_name}': advertencia - {e}", flush=True)
+    print("[MIGRATION] Idempotencia de Lectura de Pliegos verificada/creada.", flush=True)
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados que aÃºn no tienen normalized_content en DB,

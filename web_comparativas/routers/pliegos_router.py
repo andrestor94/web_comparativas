@@ -6,6 +6,7 @@ Flujo semimanual: usuario carga archivos → admin gestiona → GPT externo → 
 from __future__ import annotations
 
 import io
+import os
 import uuid
 import datetime as dt
 import traceback
@@ -18,6 +19,7 @@ import pandas as pd
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import (
@@ -65,6 +67,7 @@ EXCEL_DIR = BASE_DIR / "static" / "uploads" / "pliegos_excel"
 
 # Extensiones permitidas para archivos del usuario
 ALLOWED_USER_EXTS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".zip"}
+DEDUP_WINDOW_SECONDS = 60
 
 # Hojas mínimas requeridas en el Excel del GPT
 REQUIRED_SHEETS = [
@@ -162,6 +165,115 @@ def _safe_str(val) -> str:
 def _slugify(value: str) -> str:
     text = unicodedata.normalize("NFKD", _safe_str(value)).encode("ascii", "ignore").decode("ascii")
     return _re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
+
+
+def _pliegos_create_debug(message: str, **data) -> None:
+    enabled = os.getenv("PLIEGOS_CREATE_DEBUG")
+    if enabled is None:
+        enabled = "0" if os.getenv("RENDER") == "true" else "1"
+    if enabled.lower() not in {"1", "true", "yes", "on"}:
+        return
+    payload = " ".join(f"{key}={value}" for key, value in data.items())
+    print(f"[LP_CREATE] {message}{(' ' + payload) if payload else ''}", flush=True)
+
+
+def _normalize_duplicate_value(value: str | None) -> str:
+    text = unicodedata.normalize("NFKD", _safe_str(value)).encode("ascii", "ignore").decode("ascii")
+    return _re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _normalize_request_id(value: str | None) -> str | None:
+    value = _safe_str(value)
+    if not value:
+        return None
+    clean = _re.sub(r"[^a-zA-Z0-9_-]", "", value)[:64]
+    return clean or None
+
+
+def _files_signature(files: List[UploadFile]) -> tuple[str, ...]:
+    return tuple(sorted(_normalize_duplicate_value(f.filename) for f in files if getattr(f, "filename", "")))
+
+
+def _same_create_payload(
+    caso: PliegoSolicitud,
+    *,
+    accion: str,
+    titulo: str,
+    organismo: str,
+    nombre_licitacion: str,
+    numero_proceso: str,
+    expediente: str,
+    archivos_validos: List[UploadFile],
+) -> bool:
+    estado_inicial = "borrador" if accion == "borrador" else "pendiente_revision"
+    if caso.estado != estado_inicial:
+        return False
+
+    values_match = all(
+        _normalize_duplicate_value(getattr(caso, field)) == _normalize_duplicate_value(value)
+        for field, value in (
+            ("titulo", titulo),
+            ("organismo", organismo),
+            ("nombre_licitacion", nombre_licitacion),
+            ("numero_proceso", numero_proceso),
+            ("expediente", expediente),
+        )
+    )
+    if not values_match:
+        return False
+
+    existing_files = tuple(
+        sorted(_normalize_duplicate_value(archivo.nombre_original) for archivo in (caso.archivos or []))
+    )
+    return existing_files == _files_signature(archivos_validos)
+
+
+def _find_recent_duplicate_request(
+    db: Session,
+    *,
+    user_id: int,
+    client_request_id: str | None,
+    accion: str,
+    titulo: str,
+    organismo: str,
+    nombre_licitacion: str,
+    numero_proceso: str,
+    expediente: str,
+    archivos_validos: List[UploadFile],
+) -> PliegoSolicitud | None:
+    if client_request_id:
+        existing = (
+            db.query(PliegoSolicitud)
+            .filter(PliegoSolicitud.client_request_id == client_request_id)
+            .first()
+        )
+        if existing:
+            return existing
+
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=DEDUP_WINDOW_SECONDS)
+    recent = (
+        db.query(PliegoSolicitud)
+        .filter(
+            PliegoSolicitud.creado_por_id == user_id,
+            PliegoSolicitud.creado_en >= cutoff,
+        )
+        .order_by(PliegoSolicitud.creado_en.desc())
+        .limit(20)
+        .all()
+    )
+    for caso in recent:
+        if _same_create_payload(
+            caso,
+            accion=accion,
+            titulo=titulo,
+            organismo=organismo,
+            nombre_licitacion=nombre_licitacion,
+            numero_proceso=numero_proceso,
+            expediente=expediente,
+            archivos_validos=archivos_validos,
+        ):
+            return caso
+    return None
 
 
 def _buscar_proceso(datos: dict, *claves) -> str:
@@ -404,6 +516,14 @@ def lectura_pliegos_lista(request: Request, estado: str = "", q: str = ""):
         )
 
     casos = query.order_by(PliegoSolicitud.actualizado_en.desc()).all()
+    _pliegos_create_debug(
+        "list-refresh",
+        user_id=user.id,
+        admin=es_admin,
+        estado=estado or "todos",
+        q=bool(q),
+        count=len(casos),
+    )
 
     # Conteo por estado para el admin
     conteos = {}
@@ -434,9 +554,16 @@ def lectura_pliegos_nueva_form(request: Request):
     blocked = _require_user(request)
     if blocked:
         return blocked
+    client_request_id = uuid.uuid4().hex
+    _pliegos_create_debug(
+        "new-form",
+        user_id=request.state.user.id,
+        request_id=client_request_id,
+    )
     return templates.TemplateResponse("pliegos/nueva_solicitud.html", {
         "request": request,
         "user": request.state.user,
+        "client_request_id": client_request_id,
     })
 
 
@@ -444,6 +571,7 @@ def lectura_pliegos_nueva_form(request: Request):
 async def lectura_pliegos_nueva_submit(
     request: Request,
     accion: str = Form("enviar"),
+    client_request_id: str = Form(""),
     titulo: str = Form(...),
     organismo: str = Form(""),
     nombre_licitacion: str = Form(""),
@@ -458,12 +586,23 @@ async def lectura_pliegos_nueva_submit(
 
     user: User = request.state.user
     db: Session = request.state.db
+    client_request_id = _normalize_request_id(client_request_id)
+    _pliegos_create_debug(
+        "endpoint-entry",
+        user_id=user.id,
+        accion=accion,
+        request_id=client_request_id or "none",
+        titulo=_normalize_duplicate_value(titulo),
+    )
 
     if not titulo.strip():
+        new_request_id = client_request_id or uuid.uuid4().hex
+        _pliegos_create_debug("validation-error", reason="missing-title", request_id=new_request_id)
         return templates.TemplateResponse("pliegos/nueva_solicitud.html", {
             "request": request,
             "user": user,
             "error": "El título es obligatorio.",
+            "client_request_id": new_request_id,
             "form": {"titulo": titulo, "organismo": organismo,
                      "nombre_licitacion": nombre_licitacion,
                      "numero_proceso": numero_proceso, "expediente": expediente,
@@ -475,16 +614,44 @@ async def lectura_pliegos_nueva_submit(
     for f in archivos_validos:
         ext = Path(f.filename).suffix.lower()
         if ext not in ALLOWED_USER_EXTS:
+            new_request_id = client_request_id or uuid.uuid4().hex
+            _pliegos_create_debug(
+                "validation-error",
+                reason="invalid-extension",
+                request_id=new_request_id,
+                filename=f.filename,
+            )
             return templates.TemplateResponse("pliegos/nueva_solicitud.html", {
                 "request": request,
                 "user": user,
                 "error": f"Extensión no permitida: {f.filename}. Permitidas: {', '.join(ALLOWED_USER_EXTS)}",
+                "client_request_id": new_request_id,
                 "form": {"titulo": titulo},
             })
 
     estado_inicial = "borrador" if accion == "borrador" else "pendiente_revision"
+    duplicate = _find_recent_duplicate_request(
+        db,
+        user_id=user.id,
+        client_request_id=client_request_id,
+        accion=accion,
+        titulo=titulo,
+        organismo=organismo,
+        nombre_licitacion=nombre_licitacion,
+        numero_proceso=numero_proceso,
+        expediente=expediente,
+        archivos_validos=archivos_validos,
+    )
+    if duplicate:
+        _pliegos_create_debug(
+            "duplicate-blocked-before-insert",
+            request_id=client_request_id or "none",
+            existing_id=duplicate.id,
+        )
+        return RedirectResponse(f"/mercado-publico/lectura-pliegos/{duplicate.id}", 303)
 
     caso = PliegoSolicitud(
+        client_request_id=client_request_id,
         titulo=titulo.strip(),
         organismo=organismo.strip() or None,
         nombre_licitacion=nombre_licitacion.strip() or None,
@@ -495,7 +662,37 @@ async def lectura_pliegos_nueva_submit(
         creado_por_id=user.id,
     )
     db.add(caso)
-    db.flush()  # Get ID
+    try:
+        db.flush()  # Get ID and enforce idempotency before writing files.
+    except IntegrityError:
+        db.rollback()
+        duplicate = _find_recent_duplicate_request(
+            db,
+            user_id=user.id,
+            client_request_id=client_request_id,
+            accion=accion,
+            titulo=titulo,
+            organismo=organismo,
+            nombre_licitacion=nombre_licitacion,
+            numero_proceso=numero_proceso,
+            expediente=expediente,
+            archivos_validos=archivos_validos,
+        )
+        if duplicate:
+            _pliegos_create_debug(
+                "duplicate-blocked-by-unique-index",
+                request_id=client_request_id or "none",
+                existing_id=duplicate.id,
+            )
+            return RedirectResponse(f"/mercado-publico/lectura-pliegos/{duplicate.id}", 303)
+        raise
+    _pliegos_create_debug(
+        "db-insert-flushed",
+        request_id=client_request_id or "none",
+        solicitud_id=caso.id,
+        estado=estado_inicial,
+        files=len(archivos_validos),
+    )
 
     _registrar_historial(db, caso.id, None, estado_inicial,
                          "Solicitud creada", user.id)
@@ -523,8 +720,19 @@ async def lectura_pliegos_nueva_submit(
                 url_path=f"/static/uploads/pliegos_solicitudes/{caso.id}/{nombre_guardado}",
             )
             db.add(archivo)
+            _pliegos_create_debug(
+                "file-attached",
+                solicitud_id=caso.id,
+                filename=f.filename,
+                bytes=len(content),
+            )
 
     db.commit()
+    _pliegos_create_debug(
+        "db-commit",
+        request_id=client_request_id or "none",
+        solicitud_id=caso.id,
+    )
 
     # --- Notificación a admins solo si la solicitud fue enviada (no borrador) ---
     if estado_inicial == "pendiente_revision":
