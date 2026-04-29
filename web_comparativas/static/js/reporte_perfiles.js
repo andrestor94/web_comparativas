@@ -1843,13 +1843,6 @@ async function pfLoadCompKpis(params) {
         sub: "Con presencia en la muestra",
         icon: "bi-tags",
       }),
-      pfKpiCard({
-        tone: "neutral",
-        label: "Mejor posicion",
-        value: data.mejor_posicion != null ? String(data.mejor_posicion) : "-",
-        sub: "Mejor puesto alcanzado",
-        icon: "bi-trophy",
-      }),
     ].join("");
   } catch (err) {
     if (!pfIsRequestCurrent("comp:kpis", requestToken)) return;
@@ -2049,26 +2042,25 @@ async function pfLoadCompPosiciones(params) {
     const data = await pfFetch(`${BASE}/competidor/posiciones?${params}`);
     if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
     if (!data.length) {
-      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 7);
+      tbody.innerHTML = pfTableEmpty("bi-building", "Sin articulos para este proveedor.", 6);
       return;
     }
 
     tbody.innerHTML = data.map((d) => {
-      const posClass = d.mejor_posicion === 1 ? "pos1" : d.mejor_posicion === 2 ? "pos2" : "posn";
       const ef = d.efectividad ?? 0;
       const efClass = ef >= 50 ? "pf-efectividad--high" : ef >= 20 ? "pf-efectividad--mid" : "pf-efectividad--low";
       const descId = encodeURIComponent(d.descripcion);
       const hasMediana = d.precio_mediana > 0;
+      const hasUltimo = d.ultimo_precio > 0;
       return `
         <tr>
           <td>${pfCellText(d.descripcion, 56)}</td>
-          <td class="num"><span class="pf-badge ${posClass}">#${d.mejor_posicion ?? "-"}</span></td>
-          <td class="num">${pfPeso(d.monto_total)}</td>
-          <td class="num">${pfFmt(d.count)}</td>
+          <td class="num">${hasMediana ? pfPeso(d.precio_mediana) : `<span class="pf-text-muted-sm">—</span>`}</td>
           <td class="num">${pfFmt(d.veces_ganado ?? 0)}</td>
           <td class="num"><span class="pf-efectividad ${efClass}">${ef}%</span></td>
+          <td class="num">${pfPeso(d.monto_total)}</td>
           <td class="num pf-hist-cell">
-            ${hasMediana ? `<div class="pf-hist-mediana"><span>${pfPeso(d.precio_mediana)}</span><small>mediana</small></div>` : `<span class="pf-text-muted-sm">—</span>`}
+            ${hasUltimo ? `<span>${pfPeso(d.ultimo_precio)}</span>` : `<span class="pf-text-muted-sm">—</span>`}
             <button class="pf-hist-btn" title="Ver historial de precios"
               onclick="pfToggleCompPosHistorico(this, decodeURIComponent('${descId}'))">
               <i class="bi bi-chevron-down"></i>
@@ -2078,7 +2070,7 @@ async function pfLoadCompPosiciones(params) {
     }).join("");
   } catch (err) {
     if (!pfIsRequestCurrent("comp:posiciones", requestToken)) return;
-    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 7);
+    tbody.innerHTML = pfTableEmpty("bi-exclamation-circle", "Error al cargar posiciones.", 6);
   }
 }
 
@@ -2103,25 +2095,34 @@ async function pfToggleCompPosHistorico(btn, descripcion) {
     const data = await pfFetch(`${BASE}/articulos/proveedor-historico?${params}`);
 
     const bodyRows = data.length
-      ? data.map((r) => `<tr>
-          <td>${r.fecha ?? "-"}</td>
-          <td class="num">${pfPeso(r.precio)}</td>
-          <td>${pfEsc(r.marca ?? "-")}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="3" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el período para los filtros actuales</td></tr>`;
+      ? data.map((r) => {
+          const posC = r.posicion == null ? "posn" : r.posicion === 1 ? "pos1" : r.posicion === 2 ? "pos2" : "posn";
+          const posLabel = r.posicion != null ? `#${r.posicion}` : "-";
+          const ref = [r.proceso, r.renglon && r.renglon !== "-" ? `R.${r.renglon}` : ""].filter(Boolean).join(" - ");
+          return `<tr>
+            <td>${r.fecha ?? "-"}</td>
+            <td>${pfCellText(ref || "-", 42)}</td>
+            <td class="num">${pfPeso(r.precio)}</td>
+            <td>${r.marca}</td>
+            <td class="num"><span class="pf-badge ${posC}">${posLabel}</span></td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="5" style="text-align:center;padding:.6rem;color:var(--pf-text-muted);font-size:.77rem">Sin registros en el período para los filtros actuales</td></tr>`;
 
     const detailRow = document.createElement("tr");
     detailRow.id = histId;
     detailRow.className = "pf-hist-row";
     detailRow.innerHTML = `
-      <td colspan="7">
+      <td colspan="6">
         <div class="pf-hist-detail">
           <div class="pf-hist-header"><i class="bi bi-clock-history"></i> Historial — ${pfEsc(pfTrunc(descripcion, 60))}</div>
           <table class="pf-hist-table">
             <thead><tr>
               <th>Fecha</th>
+              <th>Proceso / renglón</th>
               <th class="num">Precio unit.</th>
               <th>Marca</th>
+              <th class="num">Pos.</th>
             </tr></thead>
             <tbody>${bodyRows}</tbody>
           </table>
