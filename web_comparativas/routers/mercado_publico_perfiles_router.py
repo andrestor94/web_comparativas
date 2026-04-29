@@ -823,7 +823,7 @@ def articulos_proveedor_historico(
     if not proveedor.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("art_prov_hist_v3", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
+    ck = _cache_key("art_prov_hist_v4", proveedor, descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1049,33 +1049,36 @@ def competidor_posiciones(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("comp_pos_v6", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
+    ck = _cache_key("comp_pos_v7", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
-    _adj_monto = func.sum(case((ComparativaRow.posicion == 1, ComparativaRow.total_por_renglon), else_=0))
-    _veces_ganado = func.count(case((ComparativaRow.posicion == 1, 1)))
+    participaciones = _articulos_participaciones_unicas_subquery(
+        descripcion=descripcion,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        proveedor=proveedor,
+        rubro=rubro,
+        plataforma=plataforma,
+    )
+    _adj_monto = func.sum(case((participaciones.c.posicion == 1, participaciones.c.total_por_renglon), else_=0))
+    _veces_ganado = func.count(case((participaciones.c.posicion == 1, 1)))
     q = (
         select(
-            ComparativaRow.descripcion,
-            func.avg(ComparativaRow.posicion).label("posicion_promedio"),
-            func.count().label("count_filas"),
+            participaciones.c.descripcion,
+            func.avg(participaciones.c.posicion).label("posicion_promedio"),
+            func.count().label("participaciones"),
             _adj_monto.label("monto_total"),
             _veces_ganado.label("veces_ganado"),
         )
-        .where(ComparativaRow.fecha_apertura.isnot(None))
-        .where(ComparativaRow.descripcion.isnot(None))
-        .group_by(ComparativaRow.descripcion)
-        .order_by(func.avg(ComparativaRow.posicion).asc())
+        .select_from(participaciones)
+        .where(participaciones.c.descripcion.isnot(None))
+        .group_by(participaciones.c.descripcion)
+        .order_by(func.avg(participaciones.c.posicion).asc())
         .limit(30)
     )
-    q = _apply_exact_text(q, ComparativaRow.proveedor, proveedor)
-    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
-    q = _apply_multi(q, ComparativaRow.rubro, rubro)
-    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
-    q = _apply_exact_text(q, ComparativaRow.plataforma, plataforma)
 
     rows = session.execute(q).all()
 
@@ -1086,18 +1089,16 @@ def competidor_posiciones(
     if desc_list and proveedor.strip():
         price_q = (
             select(
-                ComparativaRow.descripcion,
-                ComparativaRow.precio_unitario,
-                ComparativaRow.fecha_apertura,
+                participaciones.c.descripcion,
+                participaciones.c.precio_unitario,
+                participaciones.c.fecha_apertura,
+                participaciones.c.id,
             )
-            .where(ComparativaRow.proveedor == proveedor)
-            .where(ComparativaRow.precio_unitario.isnot(None))
-            .where(ComparativaRow.descripcion.in_(desc_list))
-            .order_by(ComparativaRow.fecha_apertura.desc())
+            .select_from(participaciones)
+            .where(participaciones.c.precio_unitario.isnot(None))
+            .where(participaciones.c.descripcion.in_(desc_list))
+            .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
         )
-        price_q = _apply_date_filters(price_q, fecha_desde, fecha_hasta)
-        price_q = _apply_multi(price_q, ComparativaRow.rubro, rubro)
-        price_q = _apply_exact_text(price_q, ComparativaRow.plataforma, plataforma)
         for pr in session.execute(price_q).all():
             prices_by_desc.setdefault(pr.descripcion, []).append(pr.precio_unitario)
             # Primera ocurrencia por desc = precio más reciente (orden desc)
@@ -1116,10 +1117,11 @@ def competidor_posiciones(
         {
             "descripcion": r.descripcion,
             "posicion_promedio": round(r.posicion_promedio or 0, 1),
-            "count": r.count_filas,
+            "count": int(r.participaciones or 0),
+            "participaciones": int(r.participaciones or 0),
             "monto_total": round(r.monto_total or 0, 2),
             "veces_ganado": int(r.veces_ganado or 0),
-            "efectividad": round(int(r.veces_ganado or 0) / r.count_filas * 100, 1) if r.count_filas else 0,
+            "efectividad": round(int(r.veces_ganado or 0) / r.participaciones * 100, 1) if r.participaciones else 0,
             "precio_mediana": round(_median_pos(prices_by_desc.get(r.descripcion, [])), 2),
             "ultimo_precio": round(ultimo_precio_by_desc.get(r.descripcion, 0), 2),
         }
@@ -1505,7 +1507,7 @@ def cliente_articulos(
     fecha_hasta: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("cli_art_v4", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
+    ck = _cache_key("cli_art_v5", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1539,6 +1541,7 @@ def cliente_articulos(
                 ComparativaRow.precio_unitario,
             )
             .where(ComparativaRow.precio_unitario.isnot(None))
+            .where(ComparativaRow.posicion == 1)
             .where(ComparativaRow.descripcion.in_(desc_list))
         )
         price_q = _apply_cliente_filters(price_q, comprador, nro_proceso, plataforma, provincia)
@@ -1583,7 +1586,7 @@ def cliente_articulo_detalle(
     if not descripcion.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("cli_art_det_v2", descripcion, comprador, plataforma, provincia, fecha_desde, fecha_hasta)
+    ck = _cache_key("cli_art_det_v3", descripcion, comprador, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1598,6 +1601,9 @@ def cliente_articulo_detalle(
         )
         .where(ComparativaRow.descripcion == descripcion)
         .where(ComparativaRow.fecha_apertura.isnot(None))
+        .where(ComparativaRow.posicion == 1)
+        .where(ComparativaRow.proveedor.isnot(None))
+        .where(ComparativaRow.precio_unitario.isnot(None))
         .order_by(ComparativaRow.fecha_apertura.desc())
         .limit(150)
     )
