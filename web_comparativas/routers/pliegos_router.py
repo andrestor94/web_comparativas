@@ -244,7 +244,10 @@ def _find_recent_duplicate_request(
     if client_request_id:
         existing = (
             db.query(PliegoSolicitud)
-            .filter(PliegoSolicitud.client_request_id == client_request_id)
+            .filter(
+                PliegoSolicitud.client_request_id == client_request_id,
+                PliegoSolicitud.deleted_at.is_(None),
+            )
             .first()
         )
         if existing:
@@ -256,6 +259,7 @@ def _find_recent_duplicate_request(
         .filter(
             PliegoSolicitud.creado_por_id == user_id,
             PliegoSolicitud.creado_en >= cutoff,
+            PliegoSolicitud.deleted_at.is_(None),
         )
         .order_by(PliegoSolicitud.creado_en.desc())
         .limit(20)
@@ -489,7 +493,13 @@ def pliegos_legacy_upload_redirect():
 # ---------------------------------------------------------------------------
 
 @router.get("/mercado-publico/lectura-pliegos", response_class=HTMLResponse)
-def lectura_pliegos_lista(request: Request, estado: str = "", q: str = ""):
+def lectura_pliegos_lista(
+    request: Request,
+    estado: str = "",
+    q: str = "",
+    deleted: str = "",
+    delete_error: str = "",
+):
     blocked = _require_user(request)
     if blocked:
         return blocked
@@ -498,7 +508,7 @@ def lectura_pliegos_lista(request: Request, estado: str = "", q: str = ""):
     db: Session = request.state.db
     es_admin = _is_admin(request)
 
-    query = db.query(PliegoSolicitud)
+    query = db.query(PliegoSolicitud).filter(PliegoSolicitud.deleted_at.is_(None))
 
     if not es_admin:
         query = query.filter(PliegoSolicitud.creado_por_id == user.id)
@@ -530,7 +540,9 @@ def lectura_pliegos_lista(request: Request, estado: str = "", q: str = ""):
     if es_admin:
         for est in PLIEGO_ESTADOS:
             conteos[est] = db.query(PliegoSolicitud).filter(
-                PliegoSolicitud.estado == est).count()
+                PliegoSolicitud.estado == est,
+                PliegoSolicitud.deleted_at.is_(None),
+            ).count()
 
     return templates.TemplateResponse("pliegos/lista.html", {
         "request": request,
@@ -539,6 +551,8 @@ def lectura_pliegos_lista(request: Request, estado: str = "", q: str = ""):
         "es_admin": es_admin,
         "estado_filtro": estado,
         "q": q,
+        "deleted": deleted,
+        "delete_error": delete_error,
         "conteos": conteos,
         "PLIEGO_ESTADOS": PLIEGO_ESTADOS,
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
@@ -825,6 +839,45 @@ def lectura_pliegos_admin_caso(request: Request, caso_id: int):
         "excel_activo": excel_activo,
         "ESTADOS_CARGA_EXCEL": list(ESTADOS_CARGA_EXCEL),
     })
+
+
+# ---------------------------------------------------------------------------
+# ELIMINAR SOLICITUD (admin, soft delete)
+# ---------------------------------------------------------------------------
+
+@router.post("/mercado-publico/lectura-pliegos/{caso_id}/eliminar")
+async def lectura_pliegos_eliminar(
+    request: Request,
+    caso_id: int,
+    next_url: str = Form("/mercado-publico/lectura-pliegos"),
+):
+    user = getattr(request.state, "user", None)
+    if not user or (user.role or "").lower() != "admin":
+        raise HTTPException(403, "Solo un usuario Admin puede eliminar solicitudes")
+
+    db: Session = request.state.db
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso or caso.deleted_at is not None:
+        raise HTTPException(404, "Solicitud no encontrada")
+
+    now = dt.datetime.now(dt.timezone.utc)
+    caso.deleted_at = now
+    caso.deleted_by_id = user.id
+    caso.actualizado_en = now
+    _registrar_historial(
+        db,
+        caso.id,
+        caso.estado,
+        caso.estado,
+        "Solicitud eliminada por Admin",
+        user.id,
+    )
+    db.commit()
+
+    if not isinstance(next_url, str) or not next_url.startswith("/mercado-publico/lectura-pliegos"):
+        next_url = "/mercado-publico/lectura-pliegos"
+    separator = "&" if "?" in next_url else "?"
+    return RedirectResponse(f"{next_url}{separator}deleted=1", 303)
 
 
 # ---------------------------------------------------------------------------

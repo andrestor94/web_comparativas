@@ -1397,6 +1397,8 @@ class PliegoSolicitud(Base):
     creado_en = Column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
     actualizado_en = Column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
     publicado_en = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Procesamiento externo
     enviado_a_gpt_en = Column(DateTime(timezone=True), nullable=True)
@@ -1408,6 +1410,7 @@ class PliegoSolicitud(Base):
     # Relationships
     creado_por = relationship("User", foreign_keys=[creado_por_id])
     admin_responsable = relationship("User", foreign_keys=[admin_responsable_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_id])
     archivos = relationship("PliegoArchivo", back_populates="solicitud",
                             cascade="all, delete-orphan")
     historial = relationship("PliegoHistorial", back_populates="solicitud",
