@@ -197,6 +197,68 @@ def _articulos_participaciones_unicas_subquery(
         .subquery("participaciones_unicas")
     )
 
+
+def _cliente_adjudicaciones_unicas_subquery(
+    *,
+    descripcion: str = "",
+    comprador: str = "",
+    nro_proceso: str = "",
+    plataforma: str = "",
+    provincia: str = "",
+    fecha_desde: str = "",
+    fecha_hasta: str = "",
+):
+    key_cols = (
+        ComparativaRow.upload_id,
+        ComparativaRow.nro_proceso,
+        ComparativaRow.fecha_apertura,
+        ComparativaRow.renglon,
+        ComparativaRow.codigo,
+        ComparativaRow.descripcion,
+        ComparativaRow.proveedor,
+    )
+    rn = func.row_number().over(
+        partition_by=key_cols,
+        order_by=ComparativaRow.id.asc(),
+    ).label("adjudicacion_rank")
+    q = (
+        select(
+            ComparativaRow.id,
+            ComparativaRow.upload_id,
+            ComparativaRow.nro_proceso,
+            ComparativaRow.fecha_apertura,
+            ComparativaRow.comprador,
+            ComparativaRow.proveedor,
+            ComparativaRow.renglon,
+            ComparativaRow.codigo,
+            ComparativaRow.descripcion,
+            ComparativaRow.precio_unitario,
+            ComparativaRow.cantidad_ofertada,
+            ComparativaRow.total_por_renglon,
+            ComparativaRow.marca,
+            ComparativaRow.posicion,
+            ComparativaRow.rubro,
+            ComparativaRow.plataforma,
+            ComparativaRow.provincia,
+            rn,
+        )
+        .where(ComparativaRow.fecha_apertura.isnot(None))
+        .where(ComparativaRow.descripcion.isnot(None))
+        .where(ComparativaRow.proveedor.isnot(None))
+        .where(ComparativaRow.precio_unitario.isnot(None))
+        .where(ComparativaRow.posicion == 1)
+    )
+    q = _apply_exact_text(q, ComparativaRow.descripcion, descripcion)
+    q = _apply_cliente_filters(q, comprador, nro_proceso, plataforma, provincia)
+    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
+
+    ranked = q.subquery("cliente_adjudicaciones_ranked")
+    return (
+        select(ranked)
+        .where(ranked.c.adjudicacion_rank == 1)
+        .subquery("cliente_adjudicaciones_unicas")
+    )
+
 def _resolve_grouped_primary_value(rows) -> dict:
     ranked: list[tuple[str, int]] = []
     for raw_value, raw_count in rows:
@@ -879,6 +941,71 @@ def articulos_proveedor_historico(
 # TAB 2 — COMPETIDOR
 # ══════════════════════════════════════════════════════════════════════════════
 
+@router.get("/competidor/articulo-detalle")
+def competidor_articulo_detalle(
+    request: Request,
+    proveedor: str = Query(""),
+    descripcion: str = Query(""),
+    fecha_desde: str = Query(""),
+    fecha_hasta: str = Query(""),
+    rubro: str = Query(""),
+    plataforma: str = Query(""),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+):
+    if not proveedor.strip() or not descripcion.strip():
+        return {"ok": True, "data": []}
+
+    ck = _cache_key("comp_art_det_v1", proveedor, descripcion, fecha_desde, fecha_hasta, rubro, plataforma)
+    cached = _cache_get(ck, _TTL_ANALYTICS)
+    if cached is not None:
+        return {"ok": True, "data": cached}
+
+    session = _get_session(request)
+    participaciones = _articulos_participaciones_unicas_subquery(
+        descripcion=descripcion,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+        proveedor=proveedor,
+        rubro=rubro,
+        plataforma=plataforma,
+    )
+    q = (
+        select(
+            participaciones.c.fecha_apertura,
+            participaciones.c.precio_unitario,
+            participaciones.c.marca,
+            participaciones.c.posicion,
+            participaciones.c.nro_proceso,
+            participaciones.c.upload_id,
+            participaciones.c.renglon,
+            participaciones.c.codigo,
+            participaciones.c.descripcion,
+            participaciones.c.comprador,
+        )
+        .select_from(participaciones)
+        .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
+        .limit(500)
+    )
+
+    rows = session.execute(q).all()
+    data = [
+        {
+            "fecha": r.fecha_apertura.isoformat() if r.fecha_apertura else None,
+            "precio": round(r.precio_unitario or 0, 2),
+            "marca": r.marca or "-",
+            "posicion": r.posicion,
+            "proceso": r.nro_proceso or (f"Upload {r.upload_id}" if r.upload_id else "-"),
+            "renglon": r.renglon or "-",
+            "codigo": r.codigo or "",
+            "descripcion": r.descripcion or "",
+            "comprador": r.comprador or "",
+        }
+        for r in rows
+    ]
+    _cache_set(ck, data)
+    return {"ok": True, "data": data}
+
+
 @router.get("/competidor/kpis")
 def competidor_kpis(
     request: Request,
@@ -1507,28 +1634,35 @@ def cliente_articulos(
     fecha_hasta: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("cli_art_v5", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
+    ck = _cache_key("cli_art_v6", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
-    _adj = func.sum(case((ComparativaRow.posicion == 1, ComparativaRow.total_por_renglon), else_=0))
-    _adj_cant = func.sum(case((ComparativaRow.posicion == 1, ComparativaRow.cantidad_ofertada), else_=0))
+    adjudicaciones = _cliente_adjudicaciones_unicas_subquery(
+        comprador=comprador,
+        nro_proceso=nro_proceso,
+        plataforma=plataforma,
+        provincia=provincia,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
     q = (
         select(
-            ComparativaRow.descripcion,
-            _adj_cant.label("cant_adjudicada"),
-            func.count(distinct(ComparativaRow.upload_id)).label("frecuencia"),
-            _adj.label("monto_total"),
+            adjudicaciones.c.descripcion,
+            func.sum(adjudicaciones.c.cantidad_ofertada).label("cant_adjudicada"),
+            func.count().label("frecuencia"),
+            func.sum(adjudicaciones.c.total_por_renglon).label("monto_total"),
         )
-        .where(ComparativaRow.fecha_apertura.isnot(None))
-        .where(ComparativaRow.descripcion.isnot(None))
-        .group_by(ComparativaRow.descripcion)
-        .order_by(_adj.desc(), _adj_cant.desc(), ComparativaRow.descripcion.asc())
+        .select_from(adjudicaciones)
+        .group_by(adjudicaciones.c.descripcion)
+        .order_by(
+            func.sum(adjudicaciones.c.total_por_renglon).desc(),
+            func.sum(adjudicaciones.c.cantidad_ofertada).desc(),
+            adjudicaciones.c.descripcion.asc(),
+        )
     )
-    q = _apply_cliente_filters(q, comprador, nro_proceso, plataforma, provincia)
-    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
 
     rows = session.execute(q).all()
     desc_list = [r.descripcion for r in rows]
@@ -1537,15 +1671,13 @@ def cliente_articulos(
     if desc_list:
         price_q = (
             select(
-                ComparativaRow.descripcion,
-                ComparativaRow.precio_unitario,
+                adjudicaciones.c.descripcion,
+                adjudicaciones.c.precio_unitario,
             )
-            .where(ComparativaRow.precio_unitario.isnot(None))
-            .where(ComparativaRow.posicion == 1)
-            .where(ComparativaRow.descripcion.in_(desc_list))
+            .select_from(adjudicaciones)
+            .where(adjudicaciones.c.precio_unitario.isnot(None))
+            .where(adjudicaciones.c.descripcion.in_(desc_list))
         )
-        price_q = _apply_cliente_filters(price_q, comprador, nro_proceso, plataforma, provincia)
-        price_q = _apply_date_filters(price_q, fecha_desde, fecha_hasta)
         for pr in session.execute(price_q).all():
             prices_by_desc.setdefault(pr.descripcion, []).append(pr.precio_unitario)
 
@@ -1586,29 +1718,31 @@ def cliente_articulo_detalle(
     if not descripcion.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("cli_art_det_v3", descripcion, comprador, plataforma, provincia, fecha_desde, fecha_hasta)
+    ck = _cache_key("cli_art_det_v4", descripcion, comprador, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
+    adjudicaciones = _cliente_adjudicaciones_unicas_subquery(
+        descripcion=descripcion,
+        comprador=comprador,
+        plataforma=plataforma,
+        provincia=provincia,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
     q = (
         select(
-            ComparativaRow.fecha_apertura,
-            ComparativaRow.marca,
-            ComparativaRow.precio_unitario,
-            ComparativaRow.proveedor,
+            adjudicaciones.c.fecha_apertura,
+            adjudicaciones.c.marca,
+            adjudicaciones.c.precio_unitario,
+            adjudicaciones.c.proveedor,
         )
-        .where(ComparativaRow.descripcion == descripcion)
-        .where(ComparativaRow.fecha_apertura.isnot(None))
-        .where(ComparativaRow.posicion == 1)
-        .where(ComparativaRow.proveedor.isnot(None))
-        .where(ComparativaRow.precio_unitario.isnot(None))
-        .order_by(ComparativaRow.fecha_apertura.desc())
+        .select_from(adjudicaciones)
+        .order_by(adjudicaciones.c.fecha_apertura.desc(), adjudicaciones.c.id.asc())
         .limit(150)
     )
-    q = _apply_cliente_filters(q, comprador, "", plataforma, provincia)
-    q = _apply_date_filters(q, fecha_desde, fecha_hasta)
 
     rows = session.execute(q).all()
     data = [
