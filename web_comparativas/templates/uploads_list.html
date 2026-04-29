@@ -186,7 +186,7 @@
     right: 0;
     z-index: 2;
     background: #fff;
-    min-width: 140px;
+    min-width: 230px;
     text-align: right;
     white-space: nowrap;
     box-shadow: -3px 0 8px rgba(0,0,0,0.06);
@@ -565,6 +565,7 @@
                   Tablero
                 </a>
                 {% if is_admin %}
+                <a class="btn btn-outline-secondary btn-sm" href="/cargas/{{ r.id }}/editar">Modificar</a>
                 <button class="btn btn-sm btn-outline-danger btn-eliminar-carga"
                   data-upload-id="{{ r.id }}"
                   data-proceso="{{ r.proceso_nro or '-' }}"

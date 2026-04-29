@@ -8,6 +8,10 @@
     width: 100%;
     margin: 0 auto;
   }
+  .is-readonly {
+    background-color: #f8fafc;
+    cursor: default;
+  }
 </style>
 {% endblock %}
 
@@ -58,14 +62,14 @@
 
         <div class="col-md-4">
           <label class="form-label fw-semibold">Comprador</label>
-          <input name="comprador" id="compradorInp" class="form-control" placeholder="Se completa automáticamente" readonly />
-          <div class="form-text">Se autocompleta al ingresar el número de proceso.</div>
+          <input name="comprador" id="compradorInp" class="form-control is-readonly" placeholder="Se completa automáticamente" readonly aria-readonly="true" tabindex="-1" />
+          <div class="form-text">Se autocompleta al ingresar el número de cuenta.</div>
         </div>
 
         <div class="col-md-4">
           <label class="form-label fw-semibold">Provincia/Municipio</label>
-          <input name="provincia" id="provinciaInp" class="form-control" placeholder="Se completa automáticamente" readonly />
-          <div class="form-text">Se autocompleta al ingresar el número de proceso.</div>
+          <input name="provincia" id="provinciaInp" class="form-control is-readonly" placeholder="Se completa automáticamente" readonly aria-readonly="true" tabindex="-1" />
+          <div class="form-text">Se autocompleta al ingresar el número de cuenta.</div>
         </div>
 
         <div class="col-12" id="genericFileSection">
@@ -151,6 +155,36 @@
     const hPlatform = document.getElementById('platform_hint');
     const hBuyer = document.getElementById('buyer_hint');
     const hProvince = document.getElementById('province_hint');
+
+    function lockAutoFields() {
+      [comprador, provincia].forEach(function (el) {
+        if (!el) return;
+        el.readOnly = true;
+        el.setAttribute('readonly', 'readonly');
+        el.setAttribute('aria-readonly', 'true');
+        el.setAttribute('tabindex', '-1');
+        el.classList.add('is-readonly');
+      });
+    }
+
+    function preventManualEdit(ev) {
+      const el = ev.currentTarget;
+      if (!el || el.readOnly !== true) return;
+      if (ev.type === 'keydown') {
+        const allowed = ['Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape'];
+        if (allowed.includes(ev.key) || ev.ctrlKey || ev.metaKey) return;
+      }
+      ev.preventDefault();
+    }
+
+    [comprador, provincia].forEach(function (el) {
+      if (!el) return;
+      ['beforeinput', 'paste', 'drop'].forEach(function (eventName) {
+        el.addEventListener(eventName, preventManualEdit);
+      });
+      el.addEventListener('keydown', preventManualEdit);
+    });
+    lockAutoFields();
 
     // --- Lógica de toggle para La Pampa / Siprosa ---
     function handlePlatformChange() {
@@ -270,6 +304,7 @@
       hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
       hBuyer.value = (comprador && comprador.value ? comprador.value : '').trim();
       hProvince.value = (provincia && provincia.value ? provincia.value : '').trim();
+      lockAutoFields();
     }
 
     if (plataforma) {
@@ -302,12 +337,14 @@
         if (!data) return;
         if (comprador && data.comprador) comprador.value = data.comprador;
         if (provincia && data.provincia) provincia.value = data.provincia;
+        lockAutoFields();
         syncHints();
       }
 
       function limpiarCamposAutocompletados() {
         if (comprador) comprador.value = "";
         if (provincia) provincia.value = "";
+        lockAutoFields();
         syncHints();
       }
 
