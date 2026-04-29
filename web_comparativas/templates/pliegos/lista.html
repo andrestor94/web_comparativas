@@ -235,6 +235,17 @@
   .cc-badge-observado { background: var(--siem-amber-soft); color: var(--siem-amber); border: 1px solid var(--siem-amber-border); }
   .cc-badge-reprocesar { background: var(--siem-blue-soft); color: var(--siem-blue); border: 1px solid var(--siem-blue-border); }
   .cc-badge-borrador { background: var(--siem-surface-soft); color: var(--siem-text-muted); border: 1px solid var(--siem-border); }
+  .cc-delete-form { margin: 0; }
+  .cc-btn-danger {
+    color: #b91c1c;
+    border-color: rgba(185, 28, 28, 0.28);
+    background: #fff;
+  }
+  .cc-btn-danger:hover {
+    background: #fef2f2;
+    border-color: #dc2626;
+    color: #991b1b;
+  }
 </style>
 {% endblock %}
 
@@ -334,6 +345,12 @@
   </section>
 
   {# ── Listado de Casos (Cards) ── #}
+  {% if deleted %}
+  <div class="alert alert-success py-2 mb-3" style="border-radius:.75rem;font-size:.875rem;">
+    Solicitud eliminada correctamente.
+  </div>
+  {% endif %}
+
   {% if casos %}
   <div class="casos-list">
     {% for caso in casos %}
@@ -393,6 +410,16 @@
             <i class="bi bi-gear-fill"></i>
             <span>Gestionar</span>
           </a>
+          <form method="post"
+                action="/mercado-publico/lectura-pliegos/{{ caso.id }}/eliminar"
+                class="cc-delete-form"
+                onsubmit="return confirm('¿Seguro que querés eliminar esta solicitud? Esta acción no se puede deshacer.');">
+            <input type="hidden" name="next_url" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+            <button type="submit" class="cc-btn cc-btn-danger" title="Eliminar solicitud">
+              <i class="bi bi-trash3"></i>
+              <span>Eliminar</span>
+            </button>
+          </form>
           {% endif %}
           
           {% if caso.estado == 'listo' %}

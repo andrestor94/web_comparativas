@@ -553,6 +553,41 @@ def ensure_pliego_request_idempotency_columns():
     print("[MIGRATION] Idempotencia de Lectura de Pliegos verificada/creada.", flush=True)
 
 
+def ensure_pliego_soft_delete_columns():
+    """
+    Agrega columnas de soft delete para solicitudes de Lectura de Pliegos.
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE pliego_solicitudes ADD COLUMN deleted_at TIMESTAMP",
+            "pliego_solicitudes.deleted_at",
+        )
+
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE pliego_solicitudes ADD COLUMN deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "pliego_solicitudes.deleted_by_id",
+        )
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_pliego_solicitudes_deleted_at ON pliego_solicitudes (deleted_at)")
+            )
+        print("[MIGRATION] Indice 'ix_pliego_solicitudes_deleted_at' verificado/creado.", flush=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "duplicate" in msg:
+            print("[MIGRATION] Indice 'ix_pliego_solicitudes_deleted_at': ya existe. (OK)", flush=True)
+        elif "no such table" in msg or "undefined table" in msg or "does not exist" in msg:
+            print("[MIGRATION] pliego_solicitudes no existe aun. (Saltando indice soft delete)", flush=True)
+        else:
+            print(f"[MIGRATION] Indice soft delete pliegos: advertencia - {e}", flush=True)
+    print("[MIGRATION] Soft delete de Lectura de Pliegos verificado/creado.", flush=True)
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados que aÃºn no tienen normalized_content en DB,
