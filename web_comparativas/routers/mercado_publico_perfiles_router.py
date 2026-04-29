@@ -1505,7 +1505,7 @@ def cliente_articulos(
     fecha_hasta: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("cli_art_v3", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
+    ck = _cache_key("cli_art_v4", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1519,7 +1519,6 @@ def cliente_articulos(
             _adj_cant.label("cant_adjudicada"),
             func.count(distinct(ComparativaRow.upload_id)).label("frecuencia"),
             _adj.label("monto_total"),
-            func.avg(ComparativaRow.precio_unitario).label("avg_precio"),
         )
         .where(ComparativaRow.fecha_apertura.isnot(None))
         .where(ComparativaRow.descripcion.isnot(None))
@@ -1530,13 +1529,38 @@ def cliente_articulos(
     q = _apply_date_filters(q, fecha_desde, fecha_hasta)
 
     rows = session.execute(q).all()
+    desc_list = [r.descripcion for r in rows]
+
+    prices_by_desc: dict = {}
+    if desc_list:
+        price_q = (
+            select(
+                ComparativaRow.descripcion,
+                ComparativaRow.precio_unitario,
+            )
+            .where(ComparativaRow.precio_unitario.isnot(None))
+            .where(ComparativaRow.descripcion.in_(desc_list))
+        )
+        price_q = _apply_cliente_filters(price_q, comprador, nro_proceso, plataforma, provincia)
+        price_q = _apply_date_filters(price_q, fecha_desde, fecha_hasta)
+        for pr in session.execute(price_q).all():
+            prices_by_desc.setdefault(pr.descripcion, []).append(pr.precio_unitario)
+
+    def _median_art(vals: list) -> float:
+        if not vals:
+            return 0.0
+        s = sorted(vals)
+        n = len(s)
+        mid = n // 2
+        return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
     data = [
         {
             "descripcion": r.descripcion,
             "cant_adjudicada": round(r.cant_adjudicada or 0, 2),
             "frecuencia": r.frecuencia,
             "monto_total": round(r.monto_total or 0, 2),
-            "avg_precio": round(r.avg_precio or 0, 2),
+            "precio_mediana": round(_median_art(prices_by_desc.get(r.descripcion, [])), 2),
         }
         for r in rows
     ]
