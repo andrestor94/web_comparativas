@@ -1303,7 +1303,7 @@ def competidor_posiciones(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("comp_pos_v8", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
+    ck = _cache_key("comp_pos_v9", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1340,7 +1340,6 @@ def competidor_posiciones(
         .where(participaciones.c.descripcion.isnot(None))
         .group_by(participaciones.c.descripcion)
         .order_by(_avg_pos.asc())
-        .limit(30)
     )
 
     rows = session.execute(q).all()
