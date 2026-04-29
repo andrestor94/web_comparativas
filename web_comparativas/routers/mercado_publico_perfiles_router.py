@@ -891,7 +891,7 @@ def competidor_kpis(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("comp_kpis_v3", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, marca, plataforma)
+    ck = _cache_key("comp_kpis_v4", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, marca, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -904,7 +904,6 @@ def competidor_kpis(
             func.count(distinct(ComparativaRow.upload_id)).label("procesos"),
             func.count(distinct(ComparativaRow.descripcion)).label("descripciones"),
             func.count(distinct(ComparativaRow.rubro)).label("rubros"),
-            func.min(ComparativaRow.posicion).label("mejor_posicion"),
             func.count(distinct(ComparativaRow.marca)).label("marcas"),
         )
         .where(ComparativaRow.fecha_apertura.isnot(None))
@@ -922,7 +921,6 @@ def competidor_kpis(
         "procesos": row.procesos if row else 0,
         "descripciones_cotizadas": row.descripciones if row else 0,
         "rubros_cubiertos": row.rubros if row else 0,
-        "mejor_posicion": row.mejor_posicion if row else None,
         "marcas_utilizadas": row.marcas if row else 0,
     }
     _cache_set(ck, data)
@@ -1051,7 +1049,7 @@ def competidor_posiciones(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("comp_pos_v5", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
+    ck = _cache_key("comp_pos_v6", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
@@ -1063,7 +1061,6 @@ def competidor_posiciones(
         select(
             ComparativaRow.descripcion,
             func.avg(ComparativaRow.posicion).label("posicion_promedio"),
-            func.min(ComparativaRow.posicion).label("mejor_posicion"),
             func.count().label("count_filas"),
             _adj_monto.label("monto_total"),
             _veces_ganado.label("veces_ganado"),
@@ -1082,21 +1079,30 @@ def competidor_posiciones(
 
     rows = session.execute(q).all()
 
-    # Mediana de precio_unitario por descripción (mismo filtro de proveedor + fechas)
+    # Precios por descripción: mediana y último precio (ordenado por fecha desc)
     desc_list = [r.descripcion for r in rows]
     prices_by_desc: dict = {}
+    ultimo_precio_by_desc: dict = {}
     if desc_list and proveedor.strip():
         price_q = (
-            select(ComparativaRow.descripcion, ComparativaRow.precio_unitario)
+            select(
+                ComparativaRow.descripcion,
+                ComparativaRow.precio_unitario,
+                ComparativaRow.fecha_apertura,
+            )
             .where(ComparativaRow.proveedor == proveedor)
             .where(ComparativaRow.precio_unitario.isnot(None))
             .where(ComparativaRow.descripcion.in_(desc_list))
+            .order_by(ComparativaRow.fecha_apertura.desc())
         )
         price_q = _apply_date_filters(price_q, fecha_desde, fecha_hasta)
         price_q = _apply_multi(price_q, ComparativaRow.rubro, rubro)
         price_q = _apply_exact_text(price_q, ComparativaRow.plataforma, plataforma)
         for pr in session.execute(price_q).all():
             prices_by_desc.setdefault(pr.descripcion, []).append(pr.precio_unitario)
+            # Primera ocurrencia por desc = precio más reciente (orden desc)
+            if pr.descripcion not in ultimo_precio_by_desc:
+                ultimo_precio_by_desc[pr.descripcion] = pr.precio_unitario
 
     def _median_pos(vals: list) -> float:
         if not vals:
@@ -1110,12 +1116,12 @@ def competidor_posiciones(
         {
             "descripcion": r.descripcion,
             "posicion_promedio": round(r.posicion_promedio or 0, 1),
-            "mejor_posicion": r.mejor_posicion,
             "count": r.count_filas,
             "monto_total": round(r.monto_total or 0, 2),
             "veces_ganado": int(r.veces_ganado or 0),
             "efectividad": round(int(r.veces_ganado or 0) / r.count_filas * 100, 1) if r.count_filas else 0,
             "precio_mediana": round(_median_pos(prices_by_desc.get(r.descripcion, [])), 2),
+            "ultimo_precio": round(ultimo_precio_by_desc.get(r.descripcion, 0), 2),
         }
         for r in rows
     ]
