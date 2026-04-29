@@ -1521,6 +1521,7 @@ async function pfLoadArtEvolucion(params) {
       if (!seriesFiltradas.length) {
         pfRenderEmpty("artPrecioChart", "Sin marcas con precio valido para el periodo seleccionado.", "bi-graph-up");
       } else {
+        pfDestroyChart("artPrecioChart");
         PF.charts.artPrecioChart = new ApexCharts(
           document.getElementById("artPrecioChart"),
           pfChartBase({
@@ -1547,6 +1548,7 @@ async function pfLoadArtEvolucion(params) {
     // artCantidadChart: sin cambios
     const labels = data.map((d) => d.month_label);
     if (!pfIsRequestCurrent("art:evol", requestToken)) return;
+    pfDestroyChart("artCantidadChart");
     PF.charts.artCantidadChart = new ApexCharts(
       document.getElementById("artCantidadChart"),
       pfChartBase({
@@ -1602,6 +1604,7 @@ async function pfLoadArtPorMarca(params) {
       pfRenderEmpty("artMarcaChart", "Sin marcas con precio ganador valido para el filtro actual.", "bi-tags");
       return;
     }
+    pfDestroyChart("artMarcaChart");
     PF.charts.artMarcaChart = new ApexCharts(
       document.getElementById("artMarcaChart"),
       pfChartBase({
@@ -1643,6 +1646,7 @@ async function pfLoadArtPorProveedor(params) {
     const top = data.slice(0, 15);
     const treemapData = top.map((d) => ({ x: pfTrunc(d.proveedor, 28), y: d.total_adjudicado }));
     if (!pfIsRequestCurrent("art:proveedor", requestToken)) return;
+    pfDestroyChart("artProvChart");
     PF.charts.artProvChart = new ApexCharts(
       document.getElementById("artProvChart"),
       pfChartBase({
@@ -1862,6 +1866,7 @@ async function pfLoadCompEvolucion(params) {
     }
 
     if (!pfIsRequestCurrent("comp:evol", requestToken)) return;
+    pfDestroyChart("compEvolChart");
     PF.charts.compEvolChart = new ApexCharts(
       document.getElementById("compEvolChart"),
       pfChartBase({
@@ -1899,6 +1904,7 @@ async function pfLoadCompRubros(params) {
     }
 
     if (!pfIsRequestCurrent("comp:rubros", requestToken)) return;
+    pfDestroyChart("compRubroChart");
     PF.charts.compRubroChart = new ApexCharts(
       document.getElementById("compRubroChart"),
       pfChartBase({
@@ -1944,6 +1950,7 @@ async function pfLoadCompTopArt(params) {
 
     const top = data.slice(0, 10);
     if (!pfIsRequestCurrent("comp:top-art", requestToken)) return;
+    pfDestroyChart("compArtChart");
     PF.charts.compArtChart = new ApexCharts(
       document.getElementById("compArtChart"),
       pfChartBase({
@@ -1987,6 +1994,7 @@ async function pfLoadCompProductosCompetitivos(params) {
 
     const top = data.slice(0, 12);
     if (!pfIsRequestCurrent("comp:productos", requestToken)) return;
+    pfDestroyChart("compMarcaChart");
     PF.charts.compMarcaChart = new ApexCharts(
       document.getElementById("compMarcaChart"),
       pfChartBase({
@@ -2226,6 +2234,7 @@ async function pfLoadCliEvolucion(params) {
     }
 
     if (!pfIsRequestCurrent("cli:evol", requestToken)) return;
+    pfDestroyChart("cliEvolChart");
     PF.charts.cliEvolChart = new ApexCharts(
       document.getElementById("cliEvolChart"),
       pfChartBase({
@@ -2263,6 +2272,7 @@ async function pfLoadCliRubros(params) {
     }
 
     if (!pfIsRequestCurrent("cli:rubros", requestToken)) return;
+    pfDestroyChart("cliRubroChart");
     PF.charts.cliRubroChart = new ApexCharts(
       document.getElementById("cliRubroChart"),
       pfChartBase({
@@ -2309,6 +2319,7 @@ function pfRenderCliProvChart() {
   const fmtTooltip  = (v) => pfPeso(v);
 
   if (!pfIsRequestCurrent("cli:prov-chart", renderToken)) return;
+  pfDestroyChart("cliProvChart");
   PF.charts.cliProvChart = new ApexCharts(
     document.getElementById("cliProvChart"),
     pfChartBase({
@@ -2383,6 +2394,7 @@ function pfRenderCliArtChart() {
   const fmtTooltip = useMonto ? (value) => pfPeso(value) : (value) => pfFmt(value, 2);
 
   if (!pfIsRequestCurrent("cli:art-chart", renderToken)) return;
+  pfDestroyChart("cliArtChart");
   PF.charts.cliArtChart = new ApexCharts(
     document.getElementById("cliArtChart"),
     pfChartBase({

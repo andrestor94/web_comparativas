@@ -941,6 +941,131 @@ def articulos_proveedor_historico(
 # TAB 2 — COMPETIDOR
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _competidor_participaciones_con_posicion_subquery(
+    *,
+    proveedor: str,
+    descripcion: str = "",
+    fecha_desde: str = "",
+    fecha_hasta: str = "",
+    rubro: str = "",
+    plataforma: str = "",
+):
+    """
+    Retorna las participaciones únicas del competidor con posición calculada dinámicamente.
+
+    La posición (posicion_calculada) se calcula como dense_rank() por precio_unitario ASC
+    dentro de cada (nro_proceso, renglon, descripcion), comparando contra TODOS los
+    proveedores de ese mismo proceso/renglón/artículo.
+
+    Esto produce la posición real aunque la columna posicion del DB solo tenga valores
+    ganadores (1) o nulos. El campo `posicion` original del DB se conserva como
+    posicion_original por si se necesita referencia.
+    """
+    proveedor_vals = _split_filter_values(proveedor)
+
+    # Clave de deduplicación SIN posicion para no perder filas de no-ganadores
+    # que pudieran tener posicion=NULL en el DB
+    key_cols_nopos = (
+        ComparativaRow.upload_id,
+        ComparativaRow.nro_proceso,
+        ComparativaRow.fecha_apertura,
+        ComparativaRow.renglon,
+        ComparativaRow.alternativa,
+        ComparativaRow.codigo,
+        ComparativaRow.descripcion,
+        ComparativaRow.proveedor,
+        ComparativaRow.marca,
+        ComparativaRow.precio_unitario,
+    )
+    dup_rank = func.row_number().over(
+        partition_by=key_cols_nopos,
+        order_by=ComparativaRow.id.asc(),
+    ).label("dup_rank")
+
+    # Universo completo (todos los proveedores) para poder calcular ranking relativo
+    base_q = (
+        select(
+            ComparativaRow.id,
+            ComparativaRow.upload_id,
+            ComparativaRow.nro_proceso,
+            ComparativaRow.fecha_apertura,
+            ComparativaRow.comprador,
+            ComparativaRow.proveedor,
+            ComparativaRow.renglon,
+            ComparativaRow.alternativa,
+            ComparativaRow.codigo,
+            ComparativaRow.descripcion,
+            ComparativaRow.precio_unitario,
+            ComparativaRow.cantidad_ofertada,
+            ComparativaRow.total_por_renglon,
+            ComparativaRow.marca,
+            ComparativaRow.posicion.label("posicion_original"),
+            ComparativaRow.rubro,
+            ComparativaRow.plataforma,
+            dup_rank,
+        )
+        .where(ComparativaRow.fecha_apertura.isnot(None))
+        .where(ComparativaRow.proveedor.isnot(None))
+        .where(ComparativaRow.precio_unitario.isnot(None))
+    )
+    if descripcion:
+        base_q = _apply_exact_text(base_q, ComparativaRow.descripcion, descripcion)
+    base_q = _apply_date_filters(base_q, fecha_desde, fecha_hasta)
+    base_q = _apply_multi(base_q, ComparativaRow.rubro, rubro)
+    base_q = _apply_exact_text(base_q, ComparativaRow.plataforma, plataforma)
+
+    all_ranked = base_q.subquery("cp_all_ranked")
+
+    # Deduplicar: una fila por combinación única de proveedor/proceso/precio
+    all_unique = (
+        select(all_ranked)
+        .where(all_ranked.c.dup_rank == 1)
+        .subquery("cp_all_unique")
+    )
+
+    # Calcular posición competitiva: dense_rank por precio ASC dentro de cada
+    # proceso / renglón / descripción (menor precio = mejor posición = #1)
+    pos_calculada = func.dense_rank().over(
+        partition_by=(
+            all_unique.c.nro_proceso,
+            all_unique.c.renglon,
+            all_unique.c.descripcion,
+        ),
+        order_by=all_unique.c.precio_unitario.asc(),
+    ).label("posicion_calculada")
+
+    all_with_pos = (
+        select(
+            all_unique.c.id,
+            all_unique.c.upload_id,
+            all_unique.c.nro_proceso,
+            all_unique.c.fecha_apertura,
+            all_unique.c.comprador,
+            all_unique.c.proveedor,
+            all_unique.c.renglon,
+            all_unique.c.alternativa,
+            all_unique.c.codigo,
+            all_unique.c.descripcion,
+            all_unique.c.precio_unitario,
+            all_unique.c.cantidad_ofertada,
+            all_unique.c.total_por_renglon,
+            all_unique.c.marca,
+            all_unique.c.posicion_original,
+            all_unique.c.rubro,
+            all_unique.c.plataforma,
+            pos_calculada,
+        )
+        .select_from(all_unique)
+    ).subquery("cp_all_with_pos")
+
+    # Filtrar solo las filas del competidor seleccionado
+    comp_q = select(all_with_pos)
+    if proveedor_vals:
+        comp_q = comp_q.where(all_with_pos.c.proveedor.in_(proveedor_vals))
+
+    return comp_q.subquery("comp_participaciones_con_pos")
+
+
 @router.get("/competidor/articulo-detalle")
 def competidor_articulo_detalle(
     request: Request,
@@ -955,17 +1080,19 @@ def competidor_articulo_detalle(
     if not proveedor.strip() or not descripcion.strip():
         return {"ok": True, "data": []}
 
-    ck = _cache_key("comp_art_det_v1", proveedor, descripcion, fecha_desde, fecha_hasta, rubro, plataforma)
+    ck = _cache_key("comp_art_det_v2", proveedor, descripcion, fecha_desde, fecha_hasta, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
     session = _get_session(request)
-    participaciones = _articulos_participaciones_unicas_subquery(
+    # Usa posición calculada dinámicamente para mostrar el ranking real del competidor
+    # frente a los demás oferentes del mismo proceso/renglón/artículo.
+    participaciones = _competidor_participaciones_con_posicion_subquery(
+        proveedor=proveedor,
         descripcion=descripcion,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
-        proveedor=proveedor,
         rubro=rubro,
         plataforma=plataforma,
     )
@@ -974,7 +1101,7 @@ def competidor_articulo_detalle(
             participaciones.c.fecha_apertura,
             participaciones.c.precio_unitario,
             participaciones.c.marca,
-            participaciones.c.posicion,
+            participaciones.c.posicion_calculada,
             participaciones.c.nro_proceso,
             participaciones.c.upload_id,
             participaciones.c.renglon,
@@ -993,7 +1120,7 @@ def competidor_articulo_detalle(
             "fecha": r.fecha_apertura.isoformat() if r.fecha_apertura else None,
             "precio": round(r.precio_unitario or 0, 2),
             "marca": r.marca or "-",
-            "posicion": r.posicion,
+            "posicion": r.posicion_calculada,
             "proceso": r.nro_proceso or (f"Upload {r.upload_id}" if r.upload_id else "-"),
             "renglon": r.renglon or "-",
             "codigo": r.codigo or "",
@@ -1176,26 +1303,35 @@ def competidor_posiciones(
     plataforma: str = Query(""),
     user: User = Depends(require_roles("admin", "supervisor", "auditor")),
 ):
-    ck = _cache_key("comp_pos_v7", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
+    ck = _cache_key("comp_pos_v8", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
     if cached is not None:
         return {"ok": True, "data": cached}
 
+    if not proveedor.strip():
+        return {"ok": True, "data": []}
+
     session = _get_session(request)
-    participaciones = _articulos_participaciones_unicas_subquery(
+    # Usa posición calculada dinámicamente: participación = TODAS las ofertas del competidor
+    # (ganadas y no ganadas); posicion_calculada = ranking real por precio dentro de cada
+    # proceso/renglón/descripción comparado contra todos los proveedores.
+    participaciones = _competidor_participaciones_con_posicion_subquery(
+        proveedor=proveedor,
         descripcion=descripcion,
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
-        proveedor=proveedor,
         rubro=rubro,
         plataforma=plataforma,
     )
-    _adj_monto = func.sum(case((participaciones.c.posicion == 1, participaciones.c.total_por_renglon), else_=0))
-    _veces_ganado = func.count(case((participaciones.c.posicion == 1, 1)))
+    _adj_monto = func.sum(
+        case((participaciones.c.posicion_calculada == 1, participaciones.c.total_por_renglon), else_=0)
+    )
+    _veces_ganado = func.count(case((participaciones.c.posicion_calculada == 1, 1)))
+    _avg_pos = func.avg(cast(participaciones.c.posicion_calculada, SAFloat))
     q = (
         select(
             participaciones.c.descripcion,
-            func.avg(participaciones.c.posicion).label("posicion_promedio"),
+            _avg_pos.label("posicion_promedio"),
             func.count().label("participaciones"),
             _adj_monto.label("monto_total"),
             _veces_ganado.label("veces_ganado"),
@@ -1203,17 +1339,18 @@ def competidor_posiciones(
         .select_from(participaciones)
         .where(participaciones.c.descripcion.isnot(None))
         .group_by(participaciones.c.descripcion)
-        .order_by(func.avg(participaciones.c.posicion).asc())
+        .order_by(_avg_pos.asc())
         .limit(30)
     )
 
     rows = session.execute(q).all()
 
     # Precios por descripción: mediana y último precio (ordenado por fecha desc)
+    # Calculados sobre TODAS las ofertas del competidor (no solo ganadas)
     desc_list = [r.descripcion for r in rows]
     prices_by_desc: dict = {}
     ultimo_precio_by_desc: dict = {}
-    if desc_list and proveedor.strip():
+    if desc_list:
         price_q = (
             select(
                 participaciones.c.descripcion,
@@ -1228,7 +1365,6 @@ def competidor_posiciones(
         )
         for pr in session.execute(price_q).all():
             prices_by_desc.setdefault(pr.descripcion, []).append(pr.precio_unitario)
-            # Primera ocurrencia por desc = precio más reciente (orden desc)
             if pr.descripcion not in ultimo_precio_by_desc:
                 ultimo_precio_by_desc[pr.descripcion] = pr.precio_unitario
 
@@ -1243,7 +1379,7 @@ def competidor_posiciones(
     data = [
         {
             "descripcion": r.descripcion,
-            "posicion_promedio": round(r.posicion_promedio or 0, 1),
+            "posicion_promedio": round(float(r.posicion_promedio or 0), 1),
             "count": int(r.participaciones or 0),
             "participaciones": int(r.participaciones or 0),
             "monto_total": round(r.monto_total or 0, 2),
