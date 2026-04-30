@@ -588,22 +588,24 @@ def ensure_pliego_soft_delete_columns():
     print("[MIGRATION] Soft delete de Lectura de Pliegos verificado/creado.", flush=True)
 
 
-def ensure_pliego_legacy_json_columns():
+def ensure_pliego_legacy_columns():
     """
     Alinea tablas legacy de Lectura de Pliegos con los modelos actuales.
 
-    En produccion hay solicitudes cargadas antes de que se agregaran columnas
-    JSON auxiliares. SQLAlchemy las incluye al lazy-load de las relaciones, asi
-    que si faltan en la tabla la vista del pliego termina en 500.
+    En produccion hay solicitudes cargadas antes de que se agregaran algunas
+    columnas auxiliares. SQLAlchemy las incluye al lazy-load de las relaciones,
+    asi que si faltan en la tabla la vista del pliego termina en 500 aun cuando
+    los datos procesados esten persistidos en PostgreSQL.
     """
     json_type = "JSON" if IS_SQLITE else "JSONB"
     columns = [
-        ("pliego_renglones", "datos_extra"),
-        ("pliego_hallazgos", "datos_extra"),
-        ("pliego_fusion_renglones", "datos_extra"),
+        ("pliego_renglones", "datos_extra", json_type),
+        ("pliego_hallazgos", "datos_extra", json_type),
+        ("pliego_fusion_renglones", "datos_extra", json_type),
+        ("pliego_faltantes", "fuente", "VARCHAR"),
     ]
 
-    for table_name, column_name in columns:
+    for table_name, column_name, column_type in columns:
         try:
             if not inspect(engine).has_table(table_name):
                 print(f"[MIGRATION] {table_name}.{column_name}: tabla no existe aun. (Saltando)", flush=True)
@@ -618,11 +620,15 @@ def ensure_pliego_legacy_json_columns():
         with engine.begin() as conn:
             _add_column_safe(
                 conn,
-                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {json_type}",
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}",
                 f"{table_name}.{column_name}",
             )
 
-    print("[MIGRATION] Columnas JSON legacy de Lectura de Pliegos verificadas/creadas.", flush=True)
+    print("[MIGRATION] Columnas legacy de Lectura de Pliegos verificadas/creadas.", flush=True)
+
+
+def ensure_pliego_legacy_json_columns():
+    ensure_pliego_legacy_columns()
 
 
 def backfill_normalized_content():

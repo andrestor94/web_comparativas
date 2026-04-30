@@ -312,6 +312,12 @@
      data-seccion="vista-principal">
 </div>
 
+{% if archivo_estado and archivo_estado.mensaje %}
+<div class="alert alert-warning border-0 shadow-sm mx-3 mt-3 mb-0" role="alert">
+  <i class="bi bi-info-circle me-1"></i>{{ archivo_estado.mensaje }}
+</div>
+{% endif %}
+
 {% set base_general = canonical_output._base.general_fields %}
 
 {% set origen = (base_general | selectattr("label", "equalto", "Origen") | list | first) %}
