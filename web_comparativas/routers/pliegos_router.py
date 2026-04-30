@@ -6,6 +6,7 @@ Flujo semimanual: usuario carga archivos → admin gestiona → GPT externo → 
 from __future__ import annotations
 
 import io
+import logging
 import os
 import uuid
 import datetime as dt
@@ -58,6 +59,7 @@ from web_comparativas.pliegos_fusion import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -1350,6 +1352,18 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
     if caso.estado != "listo" and not es_admin:
         return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}", 302)
 
+    try:
+        return _render_pliego_vista_final(request, user, caso, es_admin)
+    except Exception as exc:
+        logger.exception("[PLIEGOS] Error renderizando vista final caso_id=%s", caso_id)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return _render_pliego_visualizacion_error(request, user, caso, es_admin, exc)
+
+
+def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicitud, es_admin: bool):
     canonical_output = build_canonical_output(caso)
 
     # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion_rp.html
@@ -1408,6 +1422,29 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
         "excel_activo": excel_activo,
     })
     response.headers["Cache-Control"] = "private, max-age=45"
+    return response
+
+
+def _render_pliego_visualizacion_error(
+    request: Request,
+    user: User,
+    caso: PliegoSolicitud,
+    es_admin: bool,
+    exc: Exception,
+):
+    technical_detail = None
+    if es_admin:
+        technical_detail = f"{exc.__class__.__name__}: {exc}"
+
+    response = templates.TemplateResponse("pliegos/visualizacion_error.html", {
+        "request": request,
+        "user": user,
+        "caso": caso,
+        "es_admin": es_admin,
+        "technical_detail": technical_detail,
+        "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
+    })
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
