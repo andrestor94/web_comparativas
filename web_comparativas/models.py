@@ -1460,6 +1460,7 @@ class PliegoArchivo(Base):
     tipo_mime = Column(String, nullable=True)
     tamano_bytes = Column(Integer, nullable=True)
     url_path = Column(String, nullable=True)
+    contenido_bytes = Column(LargeBinary, nullable=True)  # copia persistente en DB (evita pérdida en Render)
     creado_en = Column(DateTime(timezone=True),
                        default=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -1494,6 +1495,7 @@ class PliegoExcelCarga(Base):
     nombre_archivo = Column(String, nullable=False)
     version = Column(Integer, default=1)
     url_path = Column(String, nullable=True)
+    contenido_bytes = Column(LargeBinary, nullable=True)  # copia persistente en DB (evita pérdida en Render)
     cargado_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     creado_en = Column(DateTime(timezone=True),
                        default=lambda: dt.datetime.now(dt.timezone.utc))
