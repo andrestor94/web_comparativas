@@ -24,7 +24,7 @@ from .models import (
 )
 
 logger = logging.getLogger("wc.dimensionamiento.query")
-_NO_FILTER_TOKENS = frozenset({"todos", "todas", "all", "*"})
+_NO_FILTER_TOKENS = frozenset({"__all__", "__todos__", "todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
 DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v7"
 _SUMMARY_REQUIRED_COLUMNS = frozenset(

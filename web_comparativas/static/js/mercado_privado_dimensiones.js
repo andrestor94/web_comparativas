@@ -51,6 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const FAMILY_LIST_OVERSCAN = 8;
     const PIVOT_ROW_HEIGHT = 42;
     const PIVOT_OVERSCAN = 10;
+    const NO_FILTER_TOKENS = new Set(['__ALL__', '__all__', 'ALL', 'all', 'Todos', 'TODOS', 'todos', '__TODOS__', '__todos__', 'Todas', 'TODAS', 'todas', '*']);
+    const QUERY_WARN_LENGTH = 7000;
+    const MULTI_FILTER_QUERY_KEYS = new Set(['cliente', 'provincia', 'familia', 'unidad_negocio', 'subunidad_negocio', 'plataforma']);
 
     // AbortController activo para cancelar request /bootstrap en vuelo
     let _loadAbortController = null;
@@ -191,6 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             getApplied() {
                 return Array.from(applied);
+            },
+            getOptionValues() {
+                return allOptions.map(o => String(o.value));
             },
             setApplied(values) {
                 const vals = Array.isArray(values) ? values : [values];
@@ -748,18 +754,88 @@ document.addEventListener('DOMContentLoaded', () => {
         const rawFechaHasta = dateRangeCtrl.getAppliedMax();
 
         return {
-            cliente:                msClient   ? msClient.getApplied()   : [],
-            provincia:              msProvince ? msProvince.getApplied()  : [],
-            familia:                msFamily   ? msFamily.getApplied()    : [],
-            unidad_negocio:         msUnit     ? msUnit.getApplied()      : [],
+            cliente:                normalizeMultiSelectParam('cliente', msClient),
+            provincia:              normalizeMultiSelectParam('provincia', msProvince),
+            familia:                normalizeMultiSelectParam('familia', msFamily),
+            unidad_negocio:         normalizeMultiSelectParam('unidad_negocio', msUnit),
             unidad_negocio_excluir: state.hiddenSeriesCodes.size > 0 ? [...state.hiddenSeriesCodes] : [],
             resultado:              state.activeResultados.size  > 0 ? [...state.activeResultados]  : [],
-            subunidad_negocio:      msSubunit  ? msSubunit.getApplied()   : [],
-            plataforma:             plataformas,
+            subunidad_negocio:      normalizeMultiSelectParam('subunidad_negocio', msSubunit),
+            plataforma:             normalizeMultiFilterForQuery(plataformas, elements.platformCheckboxes.map(cb => cb.value), 'plataforma'),
             fecha_desde:            rawFechaDesde,
             fecha_hasta:            rawFechaHasta,
             is_client:  elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
         };
+    }
+
+    function normalizeMultiSelectParam(name, control) {
+        if (!control) return [];
+        return normalizeMultiFilterForQuery(control.getApplied(), control.getOptionValues(), name);
+    }
+
+    function normalizeMultiFilterForQuery(values, allOptions = [], name = '') {
+        const arr = Array.isArray(values) ? values : [];
+        const clean = arr
+            .map(value => String(value || '').trim())
+            .filter(Boolean)
+            .filter(value => !isNoFilterToken(value));
+
+        const cleaned = [];
+        const seen = new Set();
+        clean.forEach(value => {
+            const key = value.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            cleaned.push(value);
+        });
+
+        if (cleaned.length === 0) return [];
+
+        const all = Array.isArray(allOptions)
+            ? allOptions
+                .map(value => String(value ?? '').trim())
+                .filter(Boolean)
+            : [];
+        const allUnique = [];
+        const allSeen = new Set();
+        all.forEach(value => {
+            const key = value.toLowerCase();
+            if (allSeen.has(key)) return;
+            allSeen.add(key);
+            allUnique.push(value);
+        });
+
+        const selectedAllAvailable = allUnique.length > 0 && cleaned.length >= allUnique.length;
+
+        if (selectedAllAvailable) {
+            logQueryNormalization(name, cleaned.length, allUnique.length);
+            return [];
+        }
+
+        return cleaned;
+    }
+
+    function isNoFilterToken(value) {
+        const text = String(value || '').trim();
+        return NO_FILTER_TOKENS.has(text) || NO_FILTER_TOKENS.has(text.toLowerCase());
+    }
+
+    function logQueryNormalization(name, selectedCount, totalCount) {
+        if (isDimQueryDebugEnabled()) {
+            console.info('[DIM] filtro omitido por representar Todos', {
+                filtro: name,
+                seleccionados: selectedCount,
+                disponibles: totalCount,
+            });
+        }
+    }
+
+    function isDimQueryDebugEnabled() {
+        try {
+            return window.localStorage && window.localStorage.getItem('dimQueryDebug') === '1';
+        } catch (_) {
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -932,8 +1008,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // apiGet
     // ─────────────────────────────────────────────────────────────────────────
     async function apiGet(path, params = {}, signal = undefined) {
+        const safeParams = normalizeParamsForQuery(params);
         const query = new URLSearchParams();
-        Object.entries(params).forEach(([key, value]) => {
+        Object.entries(safeParams).forEach(([key, value]) => {
             if (value === undefined || value === null || value === '') return;
             if (Array.isArray(value)) {
                 value.forEach(item => {
@@ -944,13 +1021,76 @@ document.addEventListener('DOMContentLoaded', () => {
             query.append(key, value);
         });
 
-        const url = `/api/mercado-privado/dimensiones${path}${query.toString() ? `?${query}` : ''}`;
+        const queryString = query.toString();
+        const url = `/api/mercado-privado/dimensiones${path}${queryString ? `?${queryString}` : ''}`;
+        logQueryDiagnostics(path, safeParams, queryString, url.length);
         const fetchOptions = { headers: { Accept: 'application/json' } };
         if (signal) fetchOptions.signal = signal;
         const response = await fetch(url, fetchOptions);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
         return payload;
+    }
+
+    function normalizeParamsForQuery(params = {}) {
+        const normalized = {};
+        Object.entries(params || {}).forEach(([key, value]) => {
+            if (MULTI_FILTER_QUERY_KEYS.has(key)) {
+                normalized[key] = normalizeMultiFilterForQuery(value, getAllOptionsForQueryKey(key), key);
+                return;
+            }
+            normalized[key] = value;
+        });
+        return normalized;
+    }
+
+    function getAllOptionsForQueryKey(key) {
+        if (key === 'familia' && msFamily) return msFamily.getOptionValues();
+        if (key === 'cliente' && msClient) return msClient.getOptionValues();
+        if (key === 'provincia' && msProvince) return msProvince.getOptionValues();
+        if (key === 'unidad_negocio' && msUnit) return msUnit.getOptionValues();
+        if (key === 'subunidad_negocio' && msSubunit) return msSubunit.getOptionValues();
+        if (key === 'plataforma') return elements.platformCheckboxes.map(cb => cb.value);
+
+        const filters = state.lastBootstrap && state.lastBootstrap.filters ? state.lastBootstrap.filters : {};
+        if (key === 'familia') return filters.familias || [];
+        if (key === 'cliente') return filters.clientes || [];
+        if (key === 'provincia') return filters.provincias || [];
+        if (key === 'unidad_negocio') return filters.unidades_negocio || [];
+        if (key === 'subunidad_negocio') return filters.subunidades_negocio || [];
+        if (key === 'plataforma') return filters.plataformas || [];
+        return [];
+    }
+
+    function logQueryDiagnostics(path, params, queryString, urlLength) {
+        if (urlLength > QUERY_WARN_LENGTH) {
+            console.warn('[DIM] query extensa antes del request', {
+                endpoint: path,
+                urlLength,
+                queryLength: queryString.length,
+                familia: Array.isArray(params.familia) ? params.familia.length : 0,
+                cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
+                provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
+                unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
+                subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
+                plataforma: Array.isArray(params.plataforma) ? params.plataforma.length : 0,
+            });
+            return;
+        }
+
+        if (isDimQueryDebugEnabled()) {
+            console.debug('[DIM] query normalizada', {
+                endpoint: path,
+                urlLength,
+                queryLength: queryString.length,
+                familia: Array.isArray(params.familia) ? params.familia.length : 0,
+                cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
+                provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
+                unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
+                subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
+                plataforma: Array.isArray(params.plataforma) ? params.plataforma.length : 0,
+            });
+        }
     }
 
     function assertBootstrapSupportsValorizacion(bootstrap) {
