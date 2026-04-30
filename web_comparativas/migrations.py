@@ -588,6 +588,43 @@ def ensure_pliego_soft_delete_columns():
     print("[MIGRATION] Soft delete de Lectura de Pliegos verificado/creado.", flush=True)
 
 
+def ensure_pliego_legacy_json_columns():
+    """
+    Alinea tablas legacy de Lectura de Pliegos con los modelos actuales.
+
+    En produccion hay solicitudes cargadas antes de que se agregaran columnas
+    JSON auxiliares. SQLAlchemy las incluye al lazy-load de las relaciones, asi
+    que si faltan en la tabla la vista del pliego termina en 500.
+    """
+    json_type = "JSON" if IS_SQLITE else "JSONB"
+    columns = [
+        ("pliego_renglones", "datos_extra"),
+        ("pliego_hallazgos", "datos_extra"),
+        ("pliego_fusion_renglones", "datos_extra"),
+    ]
+
+    for table_name, column_name in columns:
+        try:
+            if not inspect(engine).has_table(table_name):
+                print(f"[MIGRATION] {table_name}.{column_name}: tabla no existe aun. (Saltando)", flush=True)
+                continue
+        except Exception:
+            pass
+
+        if _column_exists(table_name, column_name):
+            print(f"[MIGRATION] {table_name}.{column_name}: ya existe. (OK)", flush=True)
+            continue
+
+        with engine.begin() as conn:
+            _add_column_safe(
+                conn,
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {json_type}",
+                f"{table_name}.{column_name}",
+            )
+
+    print("[MIGRATION] Columnas JSON legacy de Lectura de Pliegos verificadas/creadas.", flush=True)
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados que aÃºn no tienen normalized_content en DB,
