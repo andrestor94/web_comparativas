@@ -1,5 +1,7 @@
 # web_comparativas/usage_service.py
 import datetime as dt
+import logging
+import re
 from collections import Counter, defaultdict
 from typing import Optional, Dict, Any, List, Tuple, Set
 
@@ -7,6 +9,9 @@ from sqlalchemy import func
 
 from .models import db_session, UsageEvent, User, Group, GroupMember
 from .visibility_service import get_visible_user_ids as visible_user_ids  # fuente única de verdad
+
+logger = logging.getLogger("wc.usage")
+_UNMAPPED_SECTION_LOGGED: Set[str] = set()
 
 
 # ======================================================================
@@ -97,12 +102,136 @@ def _map_section_name(raw: str) -> str:
         "dashboard":                    "Panel Principal",
         # Misceláneos
         "live_users_dashboard":         "Panel Live",
-        "otro":                         "Sin clasificar",
+        "otro":                         "",
         "":                             "Sin Sección",
     }
     if original in mapping:
         return mapping[original]
     return original.replace("_", " ").title()
+
+
+def _humanize_section_key(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    text = text.split("?", 1)[0].split("#", 1)[0].strip("/")
+    text = re.sub(r"\b\d+\b", "", text)
+    text = re.sub(r"[0-9a-f]{8,}(-[0-9a-f]{4,})*", "", text, flags=re.I)
+    text = text.replace("-", "_").replace("/", "_")
+    words = [word.lower() for word in text.split("_") if word and word.lower() not in {"api"}]
+    if not words:
+        return ""
+    phrases = {
+        "analisis_dimensiones": "Analisis de Dimensiones",
+        "fuentes_externas": "Fuentes Externas",
+        "helpdesk_tickets": "Mesa de Ayuda / Tickets",
+        "users": "Usuarios",
+        "usuarios": "Usuarios",
+        "password_resets": "Reseteo de Contrasenas",
+        "reporte_perfiles": "Reporte de Perfiles",
+        "mercado_publico_reporte_perfiles": "Reporte de Perfiles",
+        "mercado_privado_reporte_perfiles": "Reporte de Perfiles",
+        "cargas_historial": "Cargas Historial",
+        "oportunidades_buscador": "Buscador de Oportunidades",
+    }
+    joined = "_".join(words)
+    if joined in phrases:
+        return phrases[joined]
+    for size in range(min(3, len(words)), 0, -1):
+        suffix = "_".join(words[-size:])
+        if suffix in phrases:
+            return phrases[suffix]
+    acronyms = {"sic": "S.I.C", "siem": "SIEM", "ia": "IA"}
+    display_words = words[-2:] if len(words) > 2 else words
+    return " ".join(acronyms.get(word, word.capitalize()) for word in display_words)
+
+
+def _map_section_name(raw: str) -> str:
+    original = (raw or "").strip()
+    key = original.lower().replace("-", "_").replace("/", "_").strip("_")
+    key = re.sub(r"_+", "_", key)
+
+    generic_aliases = {
+        "otro", "otros", "sin_identificar", "sin_clasificar", "sin clasificar",
+        "sin identificar", "unknown", "undefined", "n/a", "no identificado",
+    }
+    if key in generic_aliases:
+        return ""
+
+    mapping = {
+        "home": "Inicio",
+        "dashboard": "Dashboard",
+        "markets": "Centro de Mercados",
+        "markets_home": "Centro de Mercados",
+        "sic": "S.I.C General",
+        "sic_general": "S.I.C General",
+        "sic_home": "S.I.C General",
+        "sic_tracking": "Seguimiento de Usuarios",
+        "sic_tracking_api": "API Tracking Interno",
+        "sic_helpdesk": "Mesa de Ayuda",
+        "sic_helpdesk_tickets": "Mesa de Ayuda / Tickets",
+        "sic_users": "Usuarios",
+        "sic_usuarios": "Usuarios",
+        "sic_password_resets": "Reseteo de Contrasenas",
+        "admin_password_resets": "Administracion de Reseteos",
+        "administracion": "Administracion",
+        "grupos": "Grupos",
+        "notificaciones": "Notificaciones",
+        "mercado_publico": "Mercado Publico Home",
+        "mercado_publico_home": "Mercado Publico Home",
+        "mercado_publico_helpdesk": "Mesa de Ayuda Mercado Publico",
+        "mercado_publico_oportunidades": "Oportunidades",
+        "mercado_publico_buscador": "Buscador Mercado Publico",
+        "mercado_publico_dimensiones": "Dimensionamiento Mercado Publico",
+        "mercado_publico_analisis_dimensiones": "Analisis de Dimensiones",
+        "mercado_publico_fuentes_externas": "Fuentes Externas",
+        "mercado_privado": "Mercado Privado",
+        "mercado_privado_home": "Mercado Privado Home",
+        "mercado_privado_helpdesk": "Mesa de Ayuda Mercado Privado",
+        "mercado_privado_dimensiones": "Dimensionamiento",
+        "dimensionamiento": "Dimensionamiento",
+        "oportunidades": "Oportunidades",
+        "oportunidades_buscador": "Buscador de Oportunidades",
+        "oportunidades_dimensiones": "Dimensiones de Oportunidades",
+        "lectura_pliegos": "Lectura de Pliegos",
+        "pliegos": "Lectura de Pliegos",
+        "pliego_widget": "Visor de Pliegos",
+        "pliego_detalle": "Detalle de Pliego",
+        "reporte_perfiles": "Reporte de Perfiles",
+        "mercado_publico_reporte_perfiles": "Reporte de Perfiles",
+        "mercado_privado_reporte_perfiles": "Reporte de Perfiles",
+        "perfiles": "Reporte de Perfiles",
+        "comparativa": "Comparativa de Mercado",
+        "comparativa_mercado": "Comparativa de Mercado",
+        "web_comparativas": "Comparativa de Mercado",
+        "tablero_comparativa": "Tablero de Comparativa",
+        "vistas_guardadas": "Vistas Guardadas",
+        "cargas": "Cargas",
+        "cargas_nueva": "Nueva Carga",
+        "cargas_edicion": "Edicion de Carga",
+        "cargas_historial": "Cargas Historial",
+        "fuentes_externas": "Fuentes Externas",
+        "descargas": "Descargas",
+        "reporte_proceso": "Reporte de Proceso",
+        "informes": "Informes",
+        "forecast": "Forecast",
+        "forecast_widget": "Panel de Forecast",
+        "auth": "Inicio de Sesion",
+        "auth_login": "Inicio de Sesion",
+        "auth_logout": "Cierre de Sesion",
+        "auth_password": "Gestion de Contrasena",
+        "comentarios": "Comentarios",
+        "clientes_api": "Consulta de Clientes",
+        "live_users_dashboard": "Panel Live",
+        "": "Inicio",
+    }
+    if key in mapping:
+        return mapping[key]
+    label = _humanize_section_key(original)
+    if label and key not in _UNMAPPED_SECTION_LOGGED:
+        _UNMAPPED_SECTION_LOGGED.add(key)
+        logger.warning("[tracking] ruta sin mapping explicito: %s -> %s", original, label)
+    return label
 
 
 def _map_action_label(action_type: str) -> str:
@@ -636,7 +765,7 @@ def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
             "email": user.email,
             "name": user.full_name or user.name or user.email.split("@")[0].title(),
             "role": _role_label(user.role),
-            "unit_business": (user.unit_business or "Otros").title(),
+            "unit_business": (user.unit_business or "Sin unidad").title(),
             "group": _primary_group(group_names) or "Sin grupo",
             "group_names": group_names,
             "current_section": presence["current_section"],
@@ -693,7 +822,9 @@ def _sessionize_events(events: List[UsageEvent]) -> Dict[str, Any]:
         current["end"] = ts
         current["events"] += 1
         current["actions"][(event.action_type or "").lower()] += 1
-        current["sections"][_map_section_name(event.section or "")] += 1
+        section_name = _map_section_name(event.section or "")
+        if section_name:
+            current["sections"][section_name] += 1
         last_ts = ts
 
     if current is not None:
@@ -713,7 +844,7 @@ def _sessionize_events(events: List[UsageEvent]) -> Dict[str, Any]:
             "searches": int(session["actions"].get("search", 0)),
             "exports": int(session["actions"].get("export", 0)),
             "views": int(session["actions"].get("page_view", 0) + session["actions"].get("module_visit", 0)),
-            "sections": [name for name, _ in session["sections"].most_common(4) if name != "Sin Sección"],
+            "sections": [name for name, _ in session["sections"].most_common(4) if name],
         })
 
     return {"count": len(sessions), "active_minutes": round(total_minutes, 1), "recent": list(reversed(recent[-5:]))}
@@ -840,7 +971,8 @@ def _timeline_detail(event: UsageEvent) -> str:
         export_name = extra.get("format") or extra.get("export_type") or resource
         return f"Exportacion {export_name}" if export_name else "Exporto resultados"
     if action in {"page_view", "module_visit"}:
-        return f"Visito {_map_section_name(event.section or '')}"
+        section_name = _map_section_name(event.section or "")
+        return f"Visito {section_name}" if section_name else "Visito"
     if action == "form_submit":
         return "Completo una accion de edicion"
     if action == "login":
@@ -950,11 +1082,12 @@ def _get_usage_summary_impl(
                 weekday_stats[ts.weekday()]["uploads"] += 1
                 heatmap_uploads[(ts.weekday(), ts.hour)] = heatmap_uploads.get((ts.weekday(), ts.hour), 0) + 1
             section_name = _map_section_name(event.section or "")
-            bucket = section_stats.setdefault(section_name, {"section": section_name, "events": 0, "uploads": 0, "active_minutes": 0.0, "sessions": 0, "user_ids": set()})
-            bucket["events"] += 1
-            if (event.action_type or "").lower() == "file_upload":
-                bucket["uploads"] += 1
-            bucket["user_ids"].add(int(event.user_id))
+            if section_name:
+                bucket = section_stats.setdefault(section_name, {"section": section_name, "events": 0, "uploads": 0, "active_minutes": 0.0, "sessions": 0, "user_ids": set()})
+                bucket["events"] += 1
+                if (event.action_type or "").lower() == "file_upload":
+                    bucket["uploads"] += 1
+                bucket["user_ids"].add(int(event.user_id))
 
         for event in previous_events:
             by_user_previous[int(event.user_id)].append(event)
@@ -982,7 +1115,8 @@ def _get_usage_summary_impl(
             searches = sum(1 for event in current_non_heartbeat if (event.action_type or "").lower() == "search")
             uploads = sum(1 for event in current_non_heartbeat if (event.action_type or "").lower() == "file_upload")
             exports = sum(1 for event in current_non_heartbeat if (event.action_type or "").lower() == "export")
-            modules_counter = Counter(_map_section_name(event.section or "") for event in current_non_heartbeat if _map_section_name(event.section or "") != "Sin Sección")
+            current_section_names = [_map_section_name(event.section or "") for event in current_non_heartbeat]
+            modules_counter = Counter(name for name in current_section_names if name)
             modules_used = len(modules_counter)
             active_minutes = float(current_session["active_minutes"])
             active_hours = round(active_minutes / 60.0, 1)
@@ -1001,7 +1135,8 @@ def _get_usage_summary_impl(
             prev_searches = sum(1 for event in previous_non_heartbeat if (event.action_type or "").lower() == "search")
             prev_uploads = sum(1 for event in previous_non_heartbeat if (event.action_type or "").lower() == "file_upload")
             prev_exports = sum(1 for event in previous_non_heartbeat if (event.action_type or "").lower() == "export")
-            prev_modules = len(Counter(_map_section_name(event.section or "") for event in previous_non_heartbeat if _map_section_name(event.section or "") != "Sin Sección"))
+            previous_section_names = [_map_section_name(event.section or "") for event in previous_non_heartbeat]
+            prev_modules = len(Counter(name for name in previous_section_names if name))
             current_engagement = _engagement_score(sessions, active_days, uploads, searches, exports, views, modules_used)
             previous_engagement = _engagement_score(int(previous_session["count"]), prev_active_days, prev_uploads, prev_searches, prev_exports, prev_views, prev_modules)
             if previous_engagement <= 0 and current_engagement <= 0:
@@ -1026,7 +1161,7 @@ def _get_usage_summary_impl(
                 "email": user.email,
                 "role_raw": role_raw,
                 "role": _role_label(user.role),
-                "unit_business": (user.unit_business or "Otros").title(),
+                "unit_business": (user.unit_business or "Sin unidad").title(),
                 "group": _primary_group(groups),
                 "group_names": groups,
                 "created_at": user.created_at.isoformat() + "Z" if getattr(user, "created_at", None) else None,
@@ -1115,7 +1250,8 @@ def _get_user_profile_timeline_impl(session, user_id: int) -> Dict[str, Any]:
     searches = sum(1 for event in non_heartbeat if (event.action_type or "").lower() == "search")
     uploads = sum(1 for event in non_heartbeat if (event.action_type or "").lower() == "file_upload")
     exports = sum(1 for event in non_heartbeat if (event.action_type or "").lower() == "export")
-    modules_counter = Counter(_map_section_name(event.section or "") for event in non_heartbeat if _map_section_name(event.section or "") != "Sin Sección")
+    section_names = [_map_section_name(event.section or "") for event in non_heartbeat]
+    modules_counter = Counter(name for name in section_names if name)
     active_days = len({event.timestamp.date() for event in non_heartbeat if event.timestamp})
     active_minutes = float(session_data["active_minutes"])
     adoption_score = _adoption_score(active_days, active_minutes, uploads, searches, exports, len(modules_counter))
@@ -1127,7 +1263,7 @@ def _get_user_profile_timeline_impl(session, user_id: int) -> Dict[str, Any]:
         "name": user.full_name or user.name or user.email.split("@")[0].title(),
         "email": user.email,
         "role": _role_label(user.role),
-        "unit_business": (user.unit_business or "Otros").title(),
+        "unit_business": (user.unit_business or "Sin unidad").title(),
         "group": _primary_group(groups),
         "group_names": groups,
         "created_at": user.created_at.isoformat() + "Z" if getattr(user, "created_at", None) else None,
@@ -1267,7 +1403,7 @@ def get_usage_summary(
             user_stats[uid] = {
                 "user_id": uid,
                 "role": (eligible_user.role or "").lower(),
-                "unit_business": getattr(eligible_user, "unit_business", "Otros"),
+                "unit_business": getattr(eligible_user, "unit_business", "Sin unidad"),
                 "days": set(),
                 "events": 0,
                 "uploads": 0,
@@ -1298,7 +1434,7 @@ def get_usage_summary(
                 {
                     "user_id": uid,
                     "role": role,
-                    "unit_business": "Otros",
+                    "unit_business": "Sin unidad",
                     "days": set(),
                     "events": 0,
                     "uploads": 0,
@@ -1379,7 +1515,9 @@ def get_usage_summary(
 
             # Secciones
             raw_sec = (ev.section or "").strip()
-            sec_name = _map_section_name(raw_sec) or "Otras"
+            sec_name = _map_section_name(raw_sec)
+            if not sec_name:
+                continue
             st["sections_used"].add(sec_name)
             sec_st = section_stats.setdefault(
                 sec_name, {"section": sec_name, "events": 0, "user_ids": set()}
@@ -1417,7 +1555,7 @@ def get_usage_summary(
                 st["name"] = u.full_name or u.name or u.email
                 st["email"] = u.email
                 st["role"] = (u.role or st["role"] or "").lower()
-                st["unit_business"] = getattr(u, "unit_business", "Otros")
+                st["unit_business"] = getattr(u, "unit_business", "Sin unidad")
                 created = getattr(u, "created_at", None)
                 st["created_at"] = created.isoformat() + "Z" if created else None
 
@@ -1586,7 +1724,7 @@ def get_usage_summary(
                 "name": st.get("name") or (u.email if u else f"User {uid}"),
                 "email": st.get("email") or (u.email if u else None),
                 "role": role_label,
-                "unit_business": (st.get("unit_business") or "Otros").title(),
+                "unit_business": (st.get("unit_business") or "Sin unidad").title(),
                 "group": group_names[0] if group_names else None,
                 "group_names": group_names,
                 "created_at": st.get("created_at"),
@@ -1843,7 +1981,7 @@ def get_user_profile_timeline(session, user_id: int) -> Dict[str, Any]:
         "name": u.full_name or u.name or u.email.split("@")[0].title(),
         "email": u.email,
         "role": _role_label(u.role),
-        "unit_business": (getattr(u, "unit_business", None) or "Otros").title(),
+        "unit_business": (getattr(u, "unit_business", None) or "Sin unidad").title(),
         "group_names": group_names,
         "created_at": u.created_at.isoformat() + "Z" if getattr(u, "created_at", None) else None,
         "adoption_score": adoption_score,
