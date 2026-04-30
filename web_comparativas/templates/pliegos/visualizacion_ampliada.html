@@ -580,6 +580,12 @@
      data-seccion="vista-ampliada">
 </div>
 
+{% if archivo_estado and archivo_estado.mensaje %}
+<div class="alert alert-warning border-0 shadow-sm mx-3 mt-3 mb-0" role="alert">
+  <i class="bi bi-info-circle me-1"></i>{{ archivo_estado.mensaje }}
+</div>
+{% endif %}
+
 <div class="amp-layout lp-expanded-view">
 
   {%- macro status_badge(estado) -%}

@@ -1395,10 +1395,7 @@ def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicit
     }
 
     # Versión activa del Excel cargado
-    excel_activo = next(
-        (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
-        None
-    )
+    excel_activo, archivo_estado = _active_excel_file_status(caso)
 
     response = templates.TemplateResponse("pliegos/visualizacion_rp.html", {
         "request": request,
@@ -1420,6 +1417,7 @@ def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicit
         "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
         "fusion_campos_complementarios": FUSION_CAMPOS_COMPLEMENTARIOS,
         "excel_activo": excel_activo,
+        "archivo_estado": archivo_estado,
     })
     response.headers["Cache-Control"] = "private, max-age=45"
     return response
@@ -1446,6 +1444,25 @@ def _render_pliego_visualizacion_error(
     })
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _active_excel_file_status(caso: PliegoSolicitud):
+    excel_activo = next(
+        (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
+        None
+    )
+    if not excel_activo or not getattr(excel_activo, "url_path", None):
+        return excel_activo, {
+            "excel_disponible": False,
+            "mensaje": "Archivo Excel original no disponible para descarga o reprocesamiento.",
+        }
+
+    path = BASE_DIR / str(excel_activo.url_path).lstrip("/\\")
+    exists = path.exists()
+    return excel_activo, {
+        "excel_disponible": exists,
+        "mensaje": "" if exists else "Archivo Excel original no disponible para descarga o reprocesamiento.",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1490,10 +1507,7 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
     ctrl_datos = caso.control_carga.datos if caso.control_carga else {}
     ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
 
-    excel_activo = next(
-        (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
-        None
-    )
+    excel_activo, archivo_estado = _active_excel_file_status(caso)
 
     response = templates.TemplateResponse("pliegos/visualizacion_ampliada.html", {
         "request": request,
@@ -1511,6 +1525,7 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
         "fusion_ctx": fusion_ctx,
         "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
         "excel_activo": excel_activo,
+        "archivo_estado": archivo_estado,
         **contexto_ampliado,
     })
     response.headers["Cache-Control"] = "private, max-age=45"
