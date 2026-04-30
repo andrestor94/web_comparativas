@@ -53,6 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const PIVOT_OVERSCAN = 10;
     const NO_FILTER_TOKENS = new Set(['__ALL__', '__all__', 'ALL', 'all', 'Todos', 'TODOS', 'todos', '__TODOS__', '__todos__', 'Todas', 'TODAS', 'todas', '*']);
     const QUERY_WARN_LENGTH = 7000;
+    const POST_URL_LENGTH_THRESHOLD = 1800;
+    const POST_ARRAY_LENGTH_THRESHOLD = 50;
     const MULTI_FILTER_QUERY_KEYS = new Set(['cliente', 'provincia', 'familia', 'unidad_negocio', 'subunidad_negocio', 'plataforma']);
 
     // AbortController activo para cancelar request /bootstrap en vuelo
@@ -1009,8 +1011,43 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─────────────────────────────────────────────────────────────────────────
     async function apiGet(path, params = {}, signal = undefined) {
         const safeParams = normalizeParamsForQuery(params);
+        const { url, queryString } = buildRequestUrl(path, safeParams);
+
+        if (shouldUsePostForFilters(safeParams, url)) {
+            logRequestMethod('POST', path, safeParams, queryString, url.length);
+            return apiPost(path, safeParams, signal);
+        }
+
+        logRequestMethod('GET', path, safeParams, queryString, url.length);
+        const fetchOptions = { headers: { Accept: 'application/json' } };
+        if (signal) fetchOptions.signal = signal;
+        const response = await fetch(url, fetchOptions);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
+        return payload;
+    }
+
+    async function apiPost(path, params = {}, signal = undefined) {
+        const url = `/api/mercado-privado/dimensiones${path}`;
+        const fetchOptions = {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(params || {}),
+        };
+        if (signal) fetchOptions.signal = signal;
+        const response = await fetch(url, fetchOptions);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
+        return payload;
+    }
+
+    function buildRequestUrl(path, params = {}) {
         const query = new URLSearchParams();
-        Object.entries(safeParams).forEach(([key, value]) => {
+        Object.entries(params || {}).forEach(([key, value]) => {
             if (value === undefined || value === null || value === '') return;
             if (Array.isArray(value)) {
                 value.forEach(item => {
@@ -1020,16 +1057,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             query.append(key, value);
         });
-
         const queryString = query.toString();
         const url = `/api/mercado-privado/dimensiones${path}${queryString ? `?${queryString}` : ''}`;
-        logQueryDiagnostics(path, safeParams, queryString, url.length);
-        const fetchOptions = { headers: { Accept: 'application/json' } };
-        if (signal) fetchOptions.signal = signal;
-        const response = await fetch(url, fetchOptions);
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.message || `Error HTTP ${response.status}`);
-        return payload;
+        return { url, queryString };
+    }
+
+    function shouldUsePostForFilters(params, candidateUrl) {
+        if (candidateUrl && candidateUrl.length > POST_URL_LENGTH_THRESHOLD) return true;
+        return Array.from(MULTI_FILTER_QUERY_KEYS).some(key =>
+            Array.isArray(params[key]) && params[key].length > POST_ARRAY_LENGTH_THRESHOLD
+        );
     }
 
     function normalizeParamsForQuery(params = {}) {
@@ -1062,34 +1099,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return [];
     }
 
-    function logQueryDiagnostics(path, params, queryString, urlLength) {
+    function logRequestMethod(method, path, params, queryString, urlLength) {
+        const payload = {
+            endpoint: path,
+            method,
+            urlLength,
+            queryLength: queryString.length,
+            familia: Array.isArray(params.familia) ? params.familia.length : 0,
+            cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
+            provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
+            unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
+            subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
+            plataforma: Array.isArray(params.plataforma) ? params.plataforma.length : 0,
+        };
+
+        if (method === 'POST') {
+            console.info('[DIM] request grande: usando POST', payload);
+            return;
+        }
+
         if (urlLength > QUERY_WARN_LENGTH) {
-            console.warn('[DIM] query extensa antes del request', {
-                endpoint: path,
-                urlLength,
-                queryLength: queryString.length,
-                familia: Array.isArray(params.familia) ? params.familia.length : 0,
-                cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
-                provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
-                unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
-                subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
-                plataforma: Array.isArray(params.plataforma) ? params.plataforma.length : 0,
-            });
+            console.warn('[DIM] query extensa antes del request GET', payload);
             return;
         }
 
         if (isDimQueryDebugEnabled()) {
-            console.debug('[DIM] query normalizada', {
-                endpoint: path,
-                urlLength,
-                queryLength: queryString.length,
-                familia: Array.isArray(params.familia) ? params.familia.length : 0,
-                cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
-                provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
-                unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
-                subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
-                plataforma: Array.isArray(params.plataforma) ? params.plataforma.length : 0,
-            });
+            console.debug('[DIM] query normalizada', payload);
         }
     }
 

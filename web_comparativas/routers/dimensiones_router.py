@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -205,6 +205,75 @@ def _filters_from_query(
     )
 
 
+def _payload_list(payload: dict[str, Any] | None, *keys: str) -> list[str] | None:
+    if not payload:
+        return None
+    for key in keys:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value in (None, ""):
+            return None
+        if isinstance(value, list):
+            return value
+        return [value]
+    return None
+
+
+def _payload_date(payload: dict[str, Any] | None, key: str) -> dt.date | None:
+    if not payload or not payload.get(key):
+        return None
+    value = payload.get(key)
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _payload_bool(payload: dict[str, Any] | None, key: str, default: bool | None = None) -> bool | None:
+    if not payload or key not in payload:
+        return default
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return default
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "s"}
+
+
+def _payload_int(payload: dict[str, Any] | None, key: str, default: int) -> int:
+    if not payload or key not in payload:
+        return default
+    try:
+        return int(payload.get(key))
+    except (TypeError, ValueError):
+        return default
+
+
+def _filters_from_payload(payload: dict[str, Any] | None):
+    return build_filters(
+        clientes=_payload_list(payload, "cliente", "clientes"),
+        provincias=_payload_list(payload, "provincia", "provincias"),
+        familias=_payload_list(payload, "familia", "familias"),
+        plataformas=_payload_list(payload, "plataforma", "plataformas"),
+        unidades_negocio=_payload_list(payload, "unidad_negocio", "unidades_negocio", "unidadNegocio"),
+        unidades_negocio_excluir=_payload_list(payload, "unidad_negocio_excluir", "unidades_negocio_excluir"),
+        subunidades_negocio=_payload_list(payload, "subunidad_negocio", "subunidades_negocio", "subunidad"),
+        resultados=_payload_list(payload, "resultado", "resultados"),
+        fecha_desde=_payload_date(payload, "fecha_desde"),
+        fecha_hasta=_payload_date(payload, "fecha_hasta"),
+        is_client=_payload_bool(payload, "is_client"),
+    )
+
+
+def _filters_for_request(request: Request, query_filters, payload: dict[str, Any] | None):
+    return _filters_from_payload(payload) if request.method.upper() == "POST" else query_filters
+
+
 @router.get("/status")
 def dimensionamiento_status(
     _: AllowedUser,
@@ -224,23 +293,27 @@ def dimensionamiento_status(
         raise
 
 
-@router.get("/bootstrap")
+@router.api_route("/bootstrap", methods=["GET", "POST"])
 def dimensionamiento_bootstrap(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     include_status: bool = Query(default=True),
     bypass_snapshot: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
+    active_filters = _filters_for_request(request, filters, payload)
+    active_include_status = _payload_bool(payload, "include_status", include_status)
+    active_bypass_snapshot = _payload_bool(payload, "bypass_snapshot", bypass_snapshot)
     return _safe_dashboard_response(
         request,
         "bootstrap",
         lambda: get_dashboard_bootstrap(
             db,
-            filters,
-            include_status=include_status,
-            bypass_snapshot=bypass_snapshot,
+            active_filters,
+            include_status=active_include_status,
+            bypass_snapshot=active_bypass_snapshot,
         ),
         {
             "status": {"has_data": False, "total_rows": 0, "platforms": [], "last_import": None},
@@ -312,12 +385,15 @@ def dimensionamiento_negocio_labels(_: AllowedUser):
     return {"ok": True, "data": _load_negocio_labels()}
 
 
-@router.get("/filters")
+@router.api_route("/filters", methods=["GET", "POST"])
 def dimensionamiento_filters(
+    request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     logger.info("[DIM][API] GET /filters start filters=%s", filters)
     try:
         data = get_filter_options(db, filters)
@@ -352,13 +428,15 @@ def dimensionamiento_filters(
         }
 
 
-@router.get("/kpis")
+@router.api_route("/kpis", methods=["GET", "POST"])
 def dimensionamiento_kpis(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "kpis",
@@ -374,13 +452,15 @@ def dimensionamiento_kpis(
     )
 
 
-@router.get("/series")
+@router.api_route("/series", methods=["GET", "POST"])
 def dimensionamiento_series(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "series",
@@ -389,13 +469,15 @@ def dimensionamiento_series(
     )
 
 
-@router.get("/results")
+@router.api_route("/results", methods=["GET", "POST"])
 def dimensionamiento_results(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "results",
@@ -404,13 +486,15 @@ def dimensionamiento_results(
     )
 
 
-@router.get("/top-families")
+@router.api_route("/top-families", methods=["GET", "POST"])
 def dimensionamiento_top_families(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "top_families",
@@ -419,13 +503,15 @@ def dimensionamiento_top_families(
     )
 
 
-@router.get("/geo")
+@router.api_route("/geo", methods=["GET", "POST"])
 def dimensionamiento_geo(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "geo",
@@ -434,14 +520,17 @@ def dimensionamiento_geo(
     )
 
 
-@router.get("/clients-by-result")
+@router.api_route("/clients-by-result", methods=["GET", "POST"])
 def dimensionamiento_clients_by_result(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     limit: int = Query(default=10, ge=1, le=30),
 ):
+    filters = _filters_for_request(request, filters, payload)
+    limit = max(1, min(30, _payload_int(payload, "limit", limit)))
     return _safe_dashboard_response(
         request,
         "clients_by_result",
@@ -450,13 +539,15 @@ def dimensionamiento_clients_by_result(
     )
 
 
-@router.get("/family-consumption")
+@router.api_route("/family-consumption", methods=["GET", "POST"])
 def dimensionamiento_family_consumption(
     request: Request,
     _: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
+    filters = _filters_for_request(request, filters, payload)
     return _safe_dashboard_response(
         request,
         "family_consumption",
