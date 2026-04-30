@@ -71,8 +71,8 @@
     'logout':                       'Cierre de Sesión',
     'auth':                         'Inicio de Sesión',
 
-    // Sin clasificar (fallback explícito para 'otro' del middleware)
-    'otro':                         'Sin clasificar',
+    // Alias tecnico antiguo; no se muestra como apartado
+    'otro':                         '',
 
     // Inicio / vacío
     'home':                         'Inicio',
@@ -80,17 +80,116 @@
     '':                             'Inicio',
   };
 
+  Object.assign(SECTION_MAP, {
+    sic: 'S.I.C General',
+    sic_general: 'S.I.C General',
+    sic_tracking_api: 'API Tracking Interno',
+    sic_users: 'Usuarios',
+    sic_usuarios: 'Usuarios',
+    admin_password_resets: 'Administracion de Reseteos',
+    administracion: 'Administracion',
+    grupos: 'Grupos',
+    notificaciones: 'Notificaciones',
+    mercado_publico: 'Mercado Publico Home',
+    mercado_publico_home: 'Mercado Publico Home',
+    mercado_publico_helpdesk: 'Mesa de Ayuda Mercado Publico',
+    mercado_publico_oportunidades: 'Oportunidades',
+    mercado_publico_dimensiones: 'Dimensionamiento Mercado Publico',
+    mercado_privado_home: 'Mercado Privado Home',
+    mercado_privado_helpdesk: 'Mesa de Ayuda Mercado Privado',
+    mercado_privado_dimensiones: 'Dimensionamiento',
+    dimensionamiento: 'Dimensionamiento',
+    oportunidades_dimensiones: 'Dimensiones de Oportunidades',
+    lectura_pliegos: 'Lectura de Pliegos',
+    pliegos: 'Lectura de Pliegos',
+    comparativa_mercado: 'Comparativa de Mercado',
+    mercado_publico_reporte_perfiles: 'Reporte de Perfiles',
+    mercado_privado_reporte_perfiles: 'Reporte de Perfiles',
+    tablero_comparativa: 'Tablero de Comparativa',
+    vistas_guardadas: 'Vistas Guardadas',
+    cargas_nueva: 'Nueva Carga',
+    cargas_edicion: 'Edicion de Carga',
+    fuentes_externas: 'Fuentes Externas',
+    descargas: 'Descargas',
+    reporte_proceso: 'Reporte de Proceso',
+    informes: 'Informes',
+    auth_login: 'Inicio de Sesion',
+    auth_logout: 'Cierre de Sesion',
+    auth_password: 'Gestion de Contrasena',
+    comentarios: 'Comentarios',
+    clientes_api: 'Consulta de Clientes',
+    sic_helpdesk_tickets: 'Mesa de Ayuda / Tickets',
+    mercado_publico_analisis_dimensiones: 'Analisis de Dimensiones',
+    mercado_publico_fuentes_externas: 'Fuentes Externas',
+    otro: '',
+    otros: '',
+    sin_identificar: '',
+    sin_clasificar: '',
+    unknown: '',
+    undefined: '',
+    'n/a': '',
+  });
+
+  function normalizeSectionKey(raw) {
+    return String(raw || '')
+      .toLowerCase()
+      .trim()
+      .split('?')[0]
+      .split('#')[0]
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/-/g, '_')
+      .replace(/\//g, '_')
+      .replace(/_+/g, '_');
+  }
+
+  function isGenericSectionLabel(key) {
+    return ['otro', 'otros', 'sin_identificar', 'sin_clasificar', 'sin identificar',
+      'sin clasificar', 'unknown', 'undefined', 'n/a', 'no identificado'].includes(key);
+  }
+
+  function humanizeSectionKey(raw) {
+    const key = normalizeSectionKey(raw)
+      .replace(/\b\d+\b/g, '')
+      .replace(/[0-9a-f]{8,}(_[0-9a-f]{4,})*/gi, '');
+    const words = key.split('_').filter(w => w && w !== 'api');
+    if (!words.length) return '';
+    const phrases = {
+      analisis_dimensiones: 'Analisis de Dimensiones',
+      fuentes_externas: 'Fuentes Externas',
+      helpdesk_tickets: 'Mesa de Ayuda / Tickets',
+      users: 'Usuarios',
+      usuarios: 'Usuarios',
+      password_resets: 'Reseteo de Contrasenas',
+      reporte_perfiles: 'Reporte de Perfiles',
+      cargas_historial: 'Cargas Historial',
+      oportunidades_buscador: 'Buscador de Oportunidades',
+    };
+    const joined = words.join('_');
+    if (phrases[joined]) return phrases[joined];
+    for (let size = Math.min(3, words.length); size > 0; size -= 1) {
+      const suffix = words.slice(-size).join('_');
+      if (phrases[suffix]) return phrases[suffix];
+    }
+    const acronyms = { sic: 'S.I.C', siem: 'SIEM', ia: 'IA' };
+    const displayWords = words.length > 2 ? words.slice(-2) : words;
+    return displayWords.map(w => acronyms[w] || (w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+  }
+
   /** Resuelve un nombre técnico a su etiqueta legible. */
   function sectionLabel(raw) {
     if (!raw) return 'Inicio';
-    const key = String(raw).toLowerCase().trim().replace(/-/g, '_');
+    const key = normalizeSectionKey(raw);
+    if (isGenericSectionLabel(key)) return '';
     if (SECTION_MAP[key]) return SECTION_MAP[key];
     // Try partial match
     for (const [k, v] of Object.entries(SECTION_MAP)) {
       if (k && key.includes(k) && k.length > 3) return v;
     }
-    // Title-case fallback
-    return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const label = humanizeSectionKey(raw);
+    if (label && window.console && console.warn) {
+      console.warn('[tracking] ruta sin mapping explicito:', raw, '->', label);
+    }
+    return label;
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -2283,8 +2382,31 @@
     'panel live':                 'seguimiento_hub',
     // S.I.C. sub-módulos
     'gestion de usuarios':        'usuarios',
+    'usuarios':                   'usuarios',
     'mesa de ayuda':              'helpdesk',
+    'mesa de ayuda mercado publico': 'helpdesk',
+    'mesa de ayuda mercado privado': 'helpdesk',
     'gestion de contrasenas':     'passwords',
+    'reseteo de contrasenas':     'passwords',
+    'administracion de reseteos':  'administracion',
+    'administracion':             'administracion',
+    'grupos':                     'administracion',
+    'notificaciones':             'seguimiento_hub',
+    'api tracking interno':       'seguimiento_hub',
+    'lectura de pliegos':         'pliegos',
+    'dimensiones de oportunidades': 'oportunidades',
+    'cargas':                     'cargas',
+    'cargas historial':           'cargas',
+    'nueva carga':                'cargas',
+    'edicion de carga':           'cargas',
+    'fuentes externas':           'cargas',
+    'tablero de comparativa':     'comparativas',
+    'vistas guardadas':           'comparativas',
+    'descargas':                  'comparativas',
+    'reporte de proceso':         'comparativas',
+    'informes':                   'comparativas',
+    'comentarios':                'comparativas',
+    'consulta de clientes':       'comparativas',
   };
 
   /* ═══════════════════════════════════════════════════════
@@ -2309,6 +2431,8 @@
     { key: 'perfiles',        label: 'Perfiles',            sub: 'Reportes',     gx: 4, gy: 3, sw: 2, sd: 1 },
     { key: 'comparativas',    label: 'Comparativas',        sub: 'Análisis',     gx: 0, gy: 4, sw: 3, sd: 1 },
     { key: 'dashboard',       label: 'Dashboard',           sub: 'Panel',        gx: 3, gy: 4, sw: 3, sd: 1 },
+    { key: 'cargas',          label: 'Cargas',              sub: 'Historial',     gx: 0, gy: 5, sw: 3, sd: 1 },
+    { key: 'administracion',  label: 'Administracion',      sub: 'Sistema',       gx: 3, gy: 5, sw: 3, sd: 1 },
   ];
 
   const CAMPUS_LINKS = [
@@ -2317,7 +2441,8 @@
     ['seguimiento_hub', 'mercado_privado'], ['seguimiento_hub', 'forecast'],
     ['seguimiento_hub', 'oportunidades'],   ['seguimiento_hub', 'pliegos'],
     ['seguimiento_hub', 'perfiles'],        ['seguimiento_hub', 'comparativas'],
-    ['seguimiento_hub', 'dashboard'],
+    ['seguimiento_hub', 'dashboard'],        ['seguimiento_hub', 'cargas'],
+    ['seguimiento_hub', 'administracion'],
   ];
 
   /* ── Nivel 2: sub-secciones por módulo ── */
@@ -2361,6 +2486,20 @@
     'comparativas': [
       { key: 'comparativa_home', label: 'Inicio',      sub: 'Panel',    gx: 0, gy: 0, sw: 2, sd: 1 },
       { key: 'comparativa',      label: 'Comparativa', sub: 'Análisis', gx: 2, gy: 0, sw: 4, sd: 1, main: true },
+      { key: 'tablero_comparativa', label: 'Tablero',  sub: 'Vistas',   gx: 0, gy: 1, sw: 2, sd: 1 },
+      { key: 'descargas',        label: 'Descargas',   sub: 'Archivos', gx: 2, gy: 1, sw: 2, sd: 1 },
+      { key: 'informes',         label: 'Informes',    sub: 'Reportes', gx: 4, gy: 1, sw: 2, sd: 1 },
+    ],
+    'cargas': [
+      { key: 'cargas',           label: 'Cargas',       sub: 'Panel',     gx: 0, gy: 0, sw: 2, sd: 1, main: true },
+      { key: 'cargas_nueva',     label: 'Nueva Carga',  sub: 'Ingreso',   gx: 2, gy: 0, sw: 2, sd: 1 },
+      { key: 'cargas_historial', label: 'Historial',    sub: 'Auditoria', gx: 4, gy: 0, sw: 2, sd: 1 },
+      { key: 'fuentes_externas', label: 'Fuentes',      sub: 'Externas',  gx: 0, gy: 1, sw: 3, sd: 1 },
+    ],
+    'administracion': [
+      { key: 'administracion',         label: 'Administracion', sub: 'Sistema', gx: 0, gy: 0, sw: 3, sd: 1, main: true },
+      { key: 'admin_password_resets',  label: 'Reseteos',       sub: 'Accesos', gx: 3, gy: 0, sw: 3, sd: 1 },
+      { key: 'grupos',                 label: 'Grupos',         sub: 'Equipos', gx: 0, gy: 1, sw: 3, sd: 1 },
     ],
     'dashboard': [
       { key: 'dashboard',    label: 'Panel Principal', sub: 'Home', gx: 0, gy: 0, sw: 3, sd: 1, main: true },
@@ -2386,35 +2525,47 @@
     if (_LABEL_BLOCK[labelKey] !== undefined) return _LABEL_BLOCK[labelKey];
 
     // 2. Clave técnica normalizada (sin acentos, guiones → guion_bajo)
-    const key = _noAccent(navNodeKey(raw));
+    const key = _noAccent(normalizeSectionKey(raw));
 
-    if (key === 'sic' || key === 'sic_home' || key === 'sic_tracking') return 'seguimiento_hub';
+    if (isGenericSectionLabel(key)) return null;
+    if (key === 'sic' || key === 'sic_home' || key === 'sic_general' ||
+        key === 'sic_tracking' || key === 'sic_tracking_api') return 'seguimiento_hub';
     if (key.includes('tab_live') || key.includes('tab_summary') ||
         key.includes('tab_by_user') || key.includes('tab_alerts') ||
         key === 'sic_config') return 'seguimiento_hub';
     if (key === 'sic_helpdesk' || key.includes('helpdesk')) return 'helpdesk';
-    if (key === 'sic_usuarios' || key === 'sic_usuario' || key.includes('sic_user')) return 'usuarios';
+    if (key === 'sic_users' || key === 'sic_usuarios' || key === 'sic_usuario' || key.includes('sic_user')) return 'usuarios';
     if (key.includes('password_reset') || key.includes('sic_password') || key.includes('contrasena')) return 'passwords';
+    if (key.includes('administracion') || key.startsWith('admin_') || key === 'grupos') return 'administracion';
+    if (key.includes('notificacion')) return 'seguimiento_hub';
+    if (key.includes('lectura_pliegos')) return 'pliegos';
     if (key.startsWith('mercado_publico') || key.includes('mercado_public')) return 'mercado_publico';
-    if (key.startsWith('mercado_privado') || key.includes('mercado_privad')) return 'mercado_privado';
-    if (key === 'cargas' || key === 'cargas_historial' || key.startsWith('carga')) return 'mercado_publico';
+    if (key.startsWith('mercado_privado') || key.includes('mercado_privad') || key === 'dimensionamiento') return 'mercado_privado';
+    if (key === 'cargas' || key === 'cargas_historial' || key === 'cargas_nueva' ||
+        key === 'cargas_edicion' || key === 'fuentes_externas' || key.startsWith('carga')) return 'cargas';
     if (key.startsWith('oportunidades') || key.startsWith('oportunidad')) return 'oportunidades';
     if (key.startsWith('pliego') || key === 'pliegos') return 'pliegos';
     if (key.startsWith('forecast') || key.includes('proyeccion')) return 'forecast';
     if (key.startsWith('reporte_perfil') || key === 'perfiles' || key.startsWith('perfil')) return 'perfiles';
-    if (key.startsWith('comparativa') || key.startsWith('web_comparativa')) return 'comparativas';
+    if (key.startsWith('comparativa') || key.startsWith('web_comparativa') ||
+        key.includes('tablero') || key.includes('vista_guardada') ||
+        key.includes('descarga') || key.includes('informe') ||
+        key.includes('reporte_proceso') || key.includes('comentario') ||
+        key.includes('cliente')) return 'comparativas';
     if (key === 'dashboard' || key.startsWith('markets') || key.includes('panel_principal')) return 'dashboard';
     if (key.startsWith('sic') || key.includes('seguimiento')) return 'seguimiento_hub';
 
-    // Sin coincidencia: no ubicar (null evita asignación errónea a seguimiento_hub)
-    return null;
+    if (window.console && console.warn) {
+      console.warn('[tracking] Seccion inferida sin bloque especifico', raw, key);
+    }
+    return 'dashboard';
   }
 
   /* Mapeo sección → sub-sala dentro de un módulo (Nivel 2) */
   function subRoomForSection(moduleKey, raw) {
     const subs = LEVEL2_SUBS[moduleKey];
     if (!subs) return null;
-    const key = navNodeKey(raw);
+    const key = normalizeSectionKey(raw);
     const exact = subs.find(s => s.key === key);
     if (exact) return exact.key;
     const partial = subs.find(s => key.includes(s.key) || s.key.includes(key));
