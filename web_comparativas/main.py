@@ -71,6 +71,7 @@ from web_comparativas.migrations import (
     ensure_pliego_request_idempotency_columns,
     ensure_pliego_soft_delete_columns,
     ensure_pliego_legacy_columns,
+    ensure_pliego_file_binary_columns,
     ensure_forecast_perf_indexes,
     ensure_cliente_visible_columns,
     ensure_cliente_visible_backfill,
@@ -163,6 +164,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: pliego legacy columns checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning pliego legacy columns: {e}", flush=True)
+
+    try:
+        ensure_pliego_file_binary_columns()
+        print("[MIGRATION] SUCCESS: pliego file binary columns checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning pliego file binary columns: {e}", flush=True)
 
     try:
         ensure_dimensionamiento_text_columns()

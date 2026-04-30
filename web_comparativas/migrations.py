@@ -631,6 +631,39 @@ def ensure_pliego_legacy_json_columns():
     ensure_pliego_legacy_columns()
 
 
+def ensure_pliego_file_binary_columns():
+    """
+    Agrega columna contenido_bytes (BYTEA) a pliego_excel_cargas y pliego_archivos.
+    Permite persistir el binario del archivo en PostgreSQL para sobrevivir redeployments
+    en Render, donde el filesystem es efímero.
+    """
+    bytea_type = "BYTEA" if not IS_SQLITE else "BLOB"
+    columns = [
+        ("pliego_excel_cargas", "contenido_bytes", bytea_type),
+        ("pliego_archivos", "contenido_bytes", bytea_type),
+    ]
+    for table_name, column_name, column_type in columns:
+        try:
+            if not inspect(engine).has_table(table_name):
+                print(f"[MIGRATION] {table_name}.{column_name}: tabla no existe aun. (Saltando)", flush=True)
+                continue
+        except Exception:
+            pass
+
+        if _column_exists(table_name, column_name):
+            print(f"[MIGRATION] {table_name}.{column_name}: ya existe. (OK)", flush=True)
+            continue
+
+        with engine.begin() as conn:
+            _add_column_safe(
+                conn,
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}",
+                f"{table_name}.{column_name}",
+            )
+
+    print("[MIGRATION] Columnas binarias de archivos de Lectura de Pliegos verificadas/creadas.", flush=True)
+
+
 def backfill_normalized_content():
     """
     Recorre uploads procesados que aÃºn no tienen normalized_content en DB,

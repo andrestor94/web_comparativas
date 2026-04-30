@@ -555,7 +555,7 @@ def _resolve_active_excel_path(caso: PliegoSolicitud) -> Path | None:
     url_path = _safe_str(cargas[0].url_path)
     if not url_path:
         return None
-    base_dir = Path(__file__).resolve().parent
+    base_dir = Path(__file__).resolve().parent.parent
     return base_dir / url_path.lstrip("/\\")
 
 

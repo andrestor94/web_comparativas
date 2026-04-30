@@ -734,6 +734,7 @@ async def lectura_pliegos_nueva_submit(
                 tipo_mime=f.content_type,
                 tamano_bytes=len(content),
                 url_path=f"/static/uploads/pliegos_solicitudes/{caso.id}/{nombre_guardado}",
+                contenido_bytes=content,
             )
             db.add(archivo)
             _pliegos_create_debug(
@@ -1119,6 +1120,7 @@ async def lectura_pliegos_cargar_excel(
         nombre_archivo=excel_file.filename,
         version=nueva_version,
         url_path=f"/static/uploads/pliegos_excel/{caso_id}/{nombre_guardado}",
+        contenido_bytes=content,
         cargado_por_id=user.id,
         es_activa=True,
         observaciones=obs_excel.strip() or None,
@@ -1158,15 +1160,25 @@ def lectura_pliegos_descargar_excel(request: Request, caso_id: int):
         .order_by(PliegoExcelCarga.version.desc())
         .first()
     )
-    if not carga or not carga.url_path:
+    if not carga:
         raise HTTPException(404, "No hay Excel disponible")
 
-    path = BASE_DIR / carga.url_path.lstrip("/")
-    if not path.exists():
-        raise HTTPException(404, "Archivo no encontrado en disco")
+    # Intentar servir desde disco primero
+    if carga.url_path:
+        path = BASE_DIR / carga.url_path.lstrip("/")
+        if path.exists():
+            return FileResponse(str(path), filename=carga.nombre_archivo,
+                                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    return FileResponse(str(path), filename=carga.nombre_archivo,
-                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # Fallback: servir desde bytes guardados en PostgreSQL
+    if carga.contenido_bytes:
+        return StreamingResponse(
+            io.BytesIO(carga.contenido_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{carga.nombre_archivo}"'},
+        )
+
+    raise HTTPException(404, "Archivo no encontrado en disco ni en base de datos")
 
 
 # ---------------------------------------------------------------------------
@@ -1193,11 +1205,22 @@ def lectura_pliegos_descargar_archivo(request: Request, caso_id: int, archivo_id
     if not archivo or archivo.solicitud_id != caso_id:
         raise HTTPException(404)
 
-    path = BASE_DIR / archivo.url_path.lstrip("/")
-    if not path.exists():
-        raise HTTPException(404, "Archivo no encontrado en disco")
+    # Intentar servir desde disco primero
+    if archivo.url_path:
+        path = BASE_DIR / archivo.url_path.lstrip("/")
+        if path.exists():
+            return FileResponse(str(path), filename=archivo.nombre_original)
 
-    return FileResponse(str(path), filename=archivo.nombre_original)
+    # Fallback: servir desde bytes guardados en PostgreSQL
+    if archivo.contenido_bytes:
+        media_type = archivo.tipo_mime or "application/octet-stream"
+        return StreamingResponse(
+            io.BytesIO(archivo.contenido_bytes),
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{archivo.nombre_original}"'},
+        )
+
+    raise HTTPException(404, "Archivo no encontrado en disco ni en base de datos")
 
 
 def _build_ampliada_context(caso: PliegoSolicitud, rp_output: dict) -> dict:
@@ -1451,17 +1474,23 @@ def _active_excel_file_status(caso: PliegoSolicitud):
         (c for c in sorted(caso.cargas_excel, key=lambda x: x.version, reverse=True) if c.es_activa),
         None
     )
-    if not excel_activo or not getattr(excel_activo, "url_path", None):
+    if not excel_activo:
         return excel_activo, {
             "excel_disponible": False,
             "mensaje": "Archivo Excel original no disponible para descarga o reprocesamiento.",
         }
 
-    path = BASE_DIR / str(excel_activo.url_path).lstrip("/\\")
-    exists = path.exists()
+    # Verificar disponibilidad: disco primero, luego bytes en DB
+    disponible = False
+    if excel_activo.url_path:
+        path = BASE_DIR / str(excel_activo.url_path).lstrip("/\\")
+        disponible = path.exists()
+    if not disponible and getattr(excel_activo, "contenido_bytes", None):
+        disponible = True
+
     return excel_activo, {
-        "excel_disponible": exists,
-        "mensaje": "" if exists else "Archivo Excel original no disponible para descarga o reprocesamiento.",
+        "excel_disponible": disponible,
+        "mensaje": "" if disponible else "Archivo Excel original no disponible para descarga o reprocesamiento.",
     }
 
 
