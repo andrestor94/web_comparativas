@@ -2386,6 +2386,8 @@
     'seguimiento de usuarios':                  'sic',
     'panel s.i.c.':                             'sic',
     's.i.c. general':                           'sic',
+    's.i.c general':                            'sic',    // sin punto final
+    's.i.c':                                    'sic',
     'api tracking (interno)':                   'sic',
     'api tracking interno':                     'sic',
     'panel live':                               'sic',
@@ -2400,10 +2402,22 @@
     'administracion de reseteos':               'sic',
     'administracion':                           'sic',
     'grupos':                                   'sic',
-    // Panel principal / Centro de Mercados → sin módulo específico
+    // Panel principal / Centro de Mercados → SIC como módulo de control
     'panel principal':                          'sic',
+    'inicio  siem':                             'sic',
     'centro de mercados':                       'sic',
     'inicio  mercados':                         'sic',
+    'inicio mercados':                          'sic',
+    // Auth / Sistema — no son módulos navegables, no se asignan a sala
+    'inicio de sesion':                         null,
+    'cierre de sesion':                         null,
+    'inicio de sesion  siem':                   null,
+    // Tablero → sub de Comparativa → Mercado Público
+    'tablero':                                  'mercado_publico',
+    'tablero de comparativa':                   'mercado_publico',
+    // Inicio genérico sin contexto → SIC (hub central)
+    'inicio':                                   'sic',
+    'inicio general':                           'sic',
   };
 
   /* ═══════════════════════════════════════════════════════

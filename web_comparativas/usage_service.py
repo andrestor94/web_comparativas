@@ -160,12 +160,16 @@ def _map_section_name(raw: str) -> str:
 
     mapping = {
         "home": "Inicio",
-        "dashboard": "Dashboard",
+        "inicio": "Inicio",                      # label re-feed
+        "dashboard": "Inicio — Panel Principal",
         "markets": "Centro de Mercados",
         "markets_home": "Centro de Mercados",
-        "sic": "S.I.C General",
-        "sic_general": "S.I.C General",
-        "sic_home": "S.I.C General",
+        "centro de mercados": "Centro de Mercados",
+        "sic": "S.I.C",
+        "sic_general": "S.I.C",
+        "sic_home": "S.I.C",
+        "s.i.c general": "S.I.C",               # label re-feed (sin punto final)
+        "s.i.c. general": "S.I.C",              # label re-feed (con punto)
         "sic_tracking": "Seguimiento de Usuarios",
         "sic_tracking_api": "API Tracking Interno",
         "sic_helpdesk": "Mesa de Ayuda",
@@ -177,8 +181,9 @@ def _map_section_name(raw: str) -> str:
         "administracion": "Administracion",
         "grupos": "Grupos",
         "notificaciones": "Notificaciones",
-        "mercado_publico": "Mercado Publico Home",
-        "mercado_publico_home": "Mercado Publico Home",
+        "mercado_publico": "Mercado Público — Inicio",
+        "mercado_publico_home": "Mercado Público — Inicio",
+        "mercado publico home": "Mercado Público — Inicio",   # label re-feed
         "mercado_publico_helpdesk": "Mesa de Ayuda Mercado Publico",
         "mercado_publico_oportunidades": "Oportunidades",
         "mercado_publico_buscador": "Buscador Mercado Publico",
@@ -204,6 +209,7 @@ def _map_section_name(raw: str) -> str:
         "comparativa": "Comparativa de Mercado",
         "comparativa_mercado": "Comparativa de Mercado",
         "web_comparativas": "Comparativa de Mercado",
+        "tablero": "Tablero de Comparativa",                  # label re-feed corto
         "tablero_comparativa": "Tablero de Comparativa",
         "vistas_guardadas": "Vistas Guardadas",
         "cargas": "Cargas",
@@ -220,6 +226,12 @@ def _map_section_name(raw: str) -> str:
         "auth_login": "Inicio de Sesion",
         "auth_logout": "Cierre de Sesion",
         "auth_password": "Gestion de Contrasena",
+        "inicio de sesion": "Inicio de Sesion",                # label re-feed
+        "cierre de sesion": "Cierre de Sesion",                # label re-feed
+        "gestion de contrasena": "Gestion de Contrasena",      # label re-feed
+        "api tracking interno": "API Tracking Interno",        # label re-feed
+        "api tracking (interno)": "API Tracking Interno",      # label re-feed
+        "seguimiento de usuarios": "Seguimiento de Usuarios",  # label re-feed
         "comentarios": "Comentarios",
         "clientes_api": "Consulta de Clientes",
         "live_users_dashboard": "Panel Live",

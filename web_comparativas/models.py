@@ -57,6 +57,19 @@ DB_FILE = BASE_DIR / "app.db"
 
 # Si hay DATABASE_URL, la usamos (y normalizamos postgres:// -> postgresql://)
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+
+# ── Guardia de seguridad: bloquea arranque local contra base productiva ──────
+_APP_ENV = os.getenv("APP_ENV", "").strip().lower()
+_is_production_context = RENDER_MODE or _APP_ENV == "production"
+if not _is_production_context and DATABASE_URL and "render.com" in DATABASE_URL.lower():
+    _host_masked = DATABASE_URL.split("@")[-1].split("/")[0][:30] if "@" in DATABASE_URL else DATABASE_URL[:30]
+    raise RuntimeError(
+        "\n\n⛔  BLOQUEO DE SEGURIDAD — entorno local apuntando a producción.\n"
+        f"   DATABASE_URL contiene un host de Render ({_host_masked}...)\n"
+        "   Para desarrollo local, quitá DATABASE_URL del .env y usá SQLite.\n"
+        "   Render inyecta su propia DATABASE_URL como variable de entorno real.\n"
+    )
+
 if DATABASE_URL:
     SQLALCHEMY_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://")
 else:
