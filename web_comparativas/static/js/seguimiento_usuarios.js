@@ -2377,35 +2377,33 @@
     'mercado privado home':                     'mercado_privado',
     'dimensionamiento':                         'mercado_privado',
     'dimensiones  privado':                     'mercado_privado',
-    'helpdesk  mercado publico':                'helpdesk',
+    'helpdesk  mercado publico':                'sic',
     // Forecast
     'proyecciones y forecast':                  'forecast',
     'panel de forecast':                        'forecast',
     'forecast':                                 'forecast',
-    // Panel principal / selector
-    'panel principal':                          'selector',
-    'centro de mercados':                       'selector',
-    'inicio  mercados':                         'selector',
-    // S.I.C. / Seguimiento
-    'seguimiento de usuarios':                  'seguimiento_hub',
-    'panel s.i.c.':                             'seguimiento_hub',
-    's.i.c. general':                           'seguimiento_hub',
-    'api tracking (interno)':                   'seguimiento_hub',
-    'api tracking interno':                     'seguimiento_hub',
-    'panel live':                               'seguimiento_hub',
-    'notificaciones':                           'seguimiento_hub',
-    // S.I.C. sub-módulos
-    'gestion de usuarios':                      'usuarios',
-    'usuarios':                                 'usuarios',
-    'mesa de ayuda':                            'helpdesk',
-    'mesa de ayuda mercado publico':            'helpdesk',
-    'mesa de ayuda mercado privado':            'helpdesk',
-    'gestion de contrasenas':                   'passwords',
-    'reseteo de contrasenas':                   'passwords',
-    // Administración
-    'administracion de reseteos':               'administracion',
-    'administracion':                           'administracion',
-    'grupos':                                   'administracion',
+    // S.I.C. (todos sus sub-módulos apuntan al módulo raíz)
+    'seguimiento de usuarios':                  'sic',
+    'panel s.i.c.':                             'sic',
+    's.i.c. general':                           'sic',
+    'api tracking (interno)':                   'sic',
+    'api tracking interno':                     'sic',
+    'panel live':                               'sic',
+    'notificaciones':                           'sic',
+    'gestion de usuarios':                      'sic',
+    'usuarios':                                 'sic',
+    'mesa de ayuda':                            'sic',
+    'mesa de ayuda mercado publico':            'sic',
+    'mesa de ayuda mercado privado':            'sic',
+    'gestion de contrasenas':                   'sic',
+    'reseteo de contrasenas':                   'sic',
+    'administracion de reseteos':               'sic',
+    'administracion':                           'sic',
+    'grupos':                                   'sic',
+    // Panel principal / Centro de Mercados → sin módulo específico
+    'panel principal':                          'sic',
+    'centro de mercados':                       'sic',
+    'inicio  mercados':                         'sic',
   };
 
   /* ═══════════════════════════════════════════════════════
@@ -2416,104 +2414,166 @@
      Algoritmo del pintor: ordenar por gy + sd
   ═══════════════════════════════════════════════════════ */
 
-  /* ── Nivel 1: campus — módulos reales de SIEM ── */
+  /* ── Nivel 1: campus — 4 módulos principales de SIEM ── */
   const CAMPUS_ROOMS = [
-    { key: 'helpdesk',        label: 'Mesa de Ayuda',      sub: 'S.I.C.',       gx: 0, gy: 0, sw: 2, sd: 1 },
-    { key: 'usuarios',        label: 'Usuarios',            sub: 'S.I.C.',       gx: 2, gy: 0, sw: 2, sd: 1 },
-    { key: 'passwords',       label: 'Contraseñas',         sub: 'S.I.C.',       gx: 4, gy: 0, sw: 2, sd: 1 },
-    { key: 'seguimiento_hub', label: 'Seguimiento S.I.C.',  sub: 'Hub Central',  gx: 0, gy: 1, sw: 6, sd: 1, main: true },
-    { key: 'mercado_publico', label: 'Mercado Público',     sub: 'Módulo',       gx: 0, gy: 2, sw: 2, sd: 1 },
-    { key: 'mercado_privado', label: 'Mercado Privado',     sub: 'Módulo',       gx: 2, gy: 2, sw: 2, sd: 1 },
-    { key: 'forecast',        label: 'Forecast',            sub: 'Proyecciones', gx: 4, gy: 2, sw: 2, sd: 1 },
-    { key: 'administracion',  label: 'Administración',      sub: 'Sistema',      gx: 0, gy: 3, sw: 3, sd: 1 },
-    { key: 'selector',        label: 'Panel Principal',     sub: 'Inicio SIEM',  gx: 3, gy: 3, sw: 3, sd: 1 },
+    { key: 'mercado_publico', label: 'Mercado Público',  sub: 'Módulo',         gx: 0, gy: 0, sw: 3, sd: 1 },
+    { key: 'mercado_privado', label: 'Mercado Privado',  sub: 'Módulo',         gx: 3, gy: 0, sw: 3, sd: 1 },
+    { key: 'forecast',        label: 'Forecast',         sub: 'Proyecciones',   gx: 0, gy: 1, sw: 3, sd: 1 },
+    { key: 'sic',             label: 'S.I.C.',           sub: 'Control Center', gx: 3, gy: 1, sw: 3, sd: 1, main: true },
   ];
 
   const CAMPUS_LINKS = [
-    ['seguimiento_hub', 'helpdesk'],
-    ['seguimiento_hub', 'usuarios'],
-    ['seguimiento_hub', 'passwords'],
-    ['seguimiento_hub', 'mercado_publico'],
-    ['seguimiento_hub', 'mercado_privado'],
-    ['seguimiento_hub', 'forecast'],
-    ['seguimiento_hub', 'administracion'],
-    ['seguimiento_hub', 'selector'],
+    ['sic', 'mercado_publico'],
+    ['sic', 'mercado_privado'],
+    ['sic', 'forecast'],
   ];
 
-  /* ── Nivel 2: sub-secciones por módulo ── */
+  /* ── Nivel 2: apartados internos por módulo ── */
   const LEVEL2_SUBS = {
-    'seguimiento_hub': [
-      { key: 'tab_live',    label: 'Monitoreo en Vivo',  sub: 'Live',      gx: 0, gy: 0, sw: 3, sd: 1, main: true },
-      { key: 'tab_summary', label: 'Uso General',         sub: 'Adopción',  gx: 3, gy: 0, sw: 3, sd: 1 },
-      { key: 'tab_alerts',  label: 'Alertas',             sub: 'Riesgo',    gx: 0, gy: 1, sw: 2, sd: 1 },
-      { key: 'tab_by_user', label: 'Vista Usuario',       sub: 'Perfiles',  gx: 2, gy: 1, sw: 2, sd: 1 },
-      { key: 'sic_config',  label: 'Configuración',       sub: 'S.I.C.',    gx: 4, gy: 1, sw: 2, sd: 1 },
-    ],
     'mercado_publico': [
-      { key: 'mercado_publico_home',            label: 'Inicio',               sub: 'Público',    gx: 0, gy: 0, sw: 2, sd: 1 },
-      { key: 'comparativa_mercado',             label: 'Comparativas',         sub: 'Análisis',   gx: 2, gy: 0, sw: 2, sd: 1, main: true },
-      { key: 'mercado_publico_oportunidades',   label: 'Oportunidades',        sub: 'Búsqueda',   gx: 4, gy: 0, sw: 2, sd: 1 },
-      { key: 'lectura_pliegos',                 label: 'Lectura de Pliegos',   sub: 'Documentos', gx: 0, gy: 1, sw: 2, sd: 1 },
-      { key: 'mercado_publico_reporte_perfiles',label: 'Reporte de Perfiles',  sub: 'Informes',   gx: 2, gy: 1, sw: 2, sd: 1 },
-      { key: 'cargas_historial',                label: 'Historial de Cargas',  sub: 'Cargas',     gx: 4, gy: 1, sw: 2, sd: 1 },
-      { key: 'cargas_nueva',                    label: 'Nueva Carga',          sub: 'Cargas',     gx: 0, gy: 2, sw: 2, sd: 1 },
-      { key: 'fuentes_externas',                label: 'Fuentes Externas',     sub: 'Externas',   gx: 2, gy: 2, sw: 2, sd: 1 },
-      { key: 'tablero_comparativa',             label: 'Tablero',              sub: 'Vistas',     gx: 4, gy: 2, sw: 2, sd: 1 },
+      { key: 'mercado_publico_home',             label: 'Inicio',             sub: 'Público',    gx: 0, gy: 0, sw: 2, sd: 1 },
+      { key: 'comparativa_mercado',              label: 'Comparativa',        sub: 'Análisis',   gx: 2, gy: 0, sw: 4, sd: 1, main: true },
+      { key: 'lectura_pliegos',                  label: 'Lectura de Pliegos', sub: 'Documentos', gx: 0, gy: 1, sw: 2, sd: 1 },
+      { key: 'mercado_publico_oportunidades',    label: 'Oportunidades',      sub: 'Búsqueda',   gx: 2, gy: 1, sw: 2, sd: 1 },
+      { key: 'mercado_publico_reporte_perfiles', label: 'Reporte de Perfiles',sub: 'Informes',   gx: 4, gy: 1, sw: 2, sd: 1 },
+      { key: 'mercado_publico_helpdesk',         label: 'Mesa de Ayuda',      sub: 'Soporte',    gx: 0, gy: 2, sw: 3, sd: 1 },
+      { key: 'auth_password_mp',                 label: 'Mi Contraseña',      sub: 'Acceso',     gx: 3, gy: 2, sw: 3, sd: 1 },
     ],
     'mercado_privado': [
-      { key: 'mercado_privado_home',             label: 'Inicio',              sub: 'Privado',    gx: 0, gy: 0, sw: 2, sd: 1 },
-      { key: 'dimensionamiento',                 label: 'Dimensionamiento',    sub: 'Análisis',   gx: 2, gy: 0, sw: 4, sd: 1, main: true },
-      { key: 'mercado_privado_reporte_perfiles', label: 'Reporte de Perfiles', sub: 'Informes',   gx: 0, gy: 1, sw: 4, sd: 1 },
-      { key: 'auth_password',                    label: 'Mi Contraseña',       sub: 'Acceso',     gx: 4, gy: 1, sw: 2, sd: 1 },
+      { key: 'mercado_privado_home',             label: 'Inicio',             sub: 'Privado',    gx: 0, gy: 0, sw: 2, sd: 1 },
+      { key: 'dimensionamiento',                 label: 'Dimensionamiento',   sub: 'Análisis',   gx: 2, gy: 0, sw: 4, sd: 1, main: true },
+      { key: 'mercado_privado_reporte_perfiles', label: 'Reporte de Perfiles',sub: 'Informes',   gx: 0, gy: 1, sw: 4, sd: 1 },
+      { key: 'auth_password',                    label: 'Mi Contraseña',      sub: 'Acceso',     gx: 4, gy: 1, sw: 2, sd: 1 },
     ],
     'forecast': [
-      { key: 'forecast',        label: 'Proyecciones',      sub: 'Panel',   gx: 0, gy: 0, sw: 3, sd: 1, main: true },
-      { key: 'forecast_widget', label: 'Panel de Forecast', sub: 'Widget',  gx: 3, gy: 0, sw: 3, sd: 1 },
+      { key: 'forecast',        label: 'Forecast',          sub: 'Panel',    gx: 0, gy: 0, sw: 4, sd: 1, main: true },
+      { key: 'forecast_widget', label: 'Panel de Forecast', sub: 'Detalle',  gx: 4, gy: 0, sw: 2, sd: 1 },
     ],
-    'administracion': [
-      { key: 'administracion',        label: 'Administración', sub: 'Sistema', gx: 0, gy: 0, sw: 3, sd: 1, main: true },
-      { key: 'admin_password_resets', label: 'Reseteos',       sub: 'Accesos', gx: 3, gy: 0, sw: 3, sd: 1 },
-      { key: 'grupos',                label: 'Grupos',         sub: 'Equipos', gx: 0, gy: 1, sw: 3, sd: 1 },
-    ],
-    'selector': [
-      { key: 'dashboard',    label: 'Panel Principal', sub: 'Home',     gx: 0, gy: 0, sw: 3, sd: 1, main: true },
-      { key: 'markets_home', label: 'Inicio Mercados', sub: 'Mercados', gx: 3, gy: 0, sw: 3, sd: 1 },
-    ],
-    'helpdesk': [
-      { key: 'sic_helpdesk',         label: 'Mesa de Ayuda', sub: 'Soporte',  gx: 0, gy: 0, sw: 4, sd: 1, main: true },
-      { key: 'sic_helpdesk_tickets', label: 'Tickets',       sub: 'Gestión',  gx: 4, gy: 0, sw: 2, sd: 1 },
-    ],
-    'usuarios': [
-      { key: 'sic_users',    label: 'Gestión de Usuarios', sub: 'Admin',    gx: 0, gy: 0, sw: 6, sd: 1, main: true },
-    ],
-    'passwords': [
-      { key: 'sic_password_resets', label: 'Gestión de Contraseñas', sub: 'Accesos', gx: 0, gy: 0, sw: 6, sd: 1, main: true },
+    'sic': [
+      { key: 'sic_general',         label: 'Panel S.I.C.',           sub: 'Hub',       gx: 0, gy: 0, sw: 6, sd: 1, main: true },
+      { key: 'sic_helpdesk',        label: 'Mesa de Ayuda',          sub: 'Soporte',   gx: 0, gy: 1, sw: 2, sd: 1 },
+      { key: 'sic_tracking',        label: 'Seguimiento de Usuarios',sub: 'Monitoreo', gx: 2, gy: 1, sw: 2, sd: 1 },
+      { key: 'sic_users',           label: 'Usuarios',               sub: 'Gestión',   gx: 4, gy: 1, sw: 2, sd: 1 },
+      { key: 'sic_password_resets', label: 'Contraseñas',            sub: 'Accesos',   gx: 0, gy: 2, sw: 3, sd: 1 },
+      { key: 'sic_admin',           label: 'Administración',         sub: 'Sistema',   gx: 3, gy: 2, sw: 3, sd: 1 },
     ],
   };
 
-  /* ── Mapeo sección → módulo (9 claves de CAMPUS_ROOMS) ── */
+  /* ── Mapeo sección técnica → apartado (Nivel 2) dentro de su módulo ── */
+  const SECTION_TO_L2 = {
+    'mercado_publico': {
+      'mercado_publico_home':            'mercado_publico_home',
+      'comparativa_mercado':             'comparativa_mercado',
+      'cargas_nueva':                    'comparativa_mercado',
+      'cargas_historial':                'comparativa_mercado',
+      'cargas_edicion':                  'comparativa_mercado',
+      'fuentes_externas':                'comparativa_mercado',
+      'tablero_comparativa':             'comparativa_mercado',
+      'vistas_guardadas':                'comparativa_mercado',
+      'descargas':                       'comparativa_mercado',
+      'informes':                        'comparativa_mercado',
+      'reporte_proceso':                 'comparativa_mercado',
+      'comentarios':                     'comparativa_mercado',
+      'lectura_pliegos':                 'lectura_pliegos',
+      'pliego_widget':                   'lectura_pliegos',
+      'pliego_detalle':                  'lectura_pliegos',
+      'mercado_publico_oportunidades':   'mercado_publico_oportunidades',
+      'oportunidades_buscador':          'mercado_publico_oportunidades',
+      'oportunidades_dimensiones':       'mercado_publico_oportunidades',
+      'oportunidades':                   'mercado_publico_oportunidades',
+      'mercado_publico_reporte_perfiles':'mercado_publico_reporte_perfiles',
+      'reporte_perfiles':                'mercado_publico_reporte_perfiles',
+      'mercado_publico_helpdesk':        'mercado_publico_helpdesk',
+    },
+    'mercado_privado': {
+      'mercado_privado_home':            'mercado_privado_home',
+      'dimensionamiento':                'dimensionamiento',
+      'mercado_privado_dimensiones':     'dimensionamiento',
+      'mercado_privado_reporte_perfiles':'mercado_privado_reporte_perfiles',
+      'auth_password':                   'auth_password',
+    },
+    'forecast': {
+      'forecast':                        'forecast',
+      'forecast_widget':                 'forecast_widget',
+    },
+    'sic': {
+      'sic_general':                     'sic_general',
+      'sic_home':                        'sic_general',
+      'sic_tracking':                    'sic_tracking',
+      'sic_tracking_api':                'sic_tracking',
+      'sic_helpdesk':                    'sic_helpdesk',
+      'sic_helpdesk_tickets':            'sic_helpdesk',
+      'sic_users':                       'sic_users',
+      'sic_usuarios':                    'sic_users',
+      'sic_password_resets':             'sic_password_resets',
+      'admin_password_resets':           'sic_admin',
+      'administracion':                  'sic_admin',
+      'grupos':                          'sic_users',
+      'notificaciones':                  'sic_general',
+      'dashboard':                       'sic_general',
+      'markets_home':                    'sic_general',
+      'home':                            'sic_general',
+    },
+  };
+
+  /* ── Etiquetas de subapartado (Nivel 3) para el breadcrumb ── */
+  const LEVEL3_LABELS = {
+    // Mercado Público › Comparativa
+    'comparativa_mercado':             'Vista Principal',
+    'cargas_nueva':                    'Nueva Carga',
+    'cargas_historial':                'Historial de Cargas',
+    'cargas_edicion':                  'Edición de Carga',
+    'fuentes_externas':                'Otras Fuentes',
+    'tablero_comparativa':             'Tablero',
+    'vistas_guardadas':                'Vistas Guardadas',
+    // Mercado Público › Oportunidades
+    'oportunidades':                   'Panel',
+    'oportunidades_buscador':          'Buscador',
+    'oportunidades_dimensiones':       'Dimensiones',
+    // Mercado Público › Lectura de Pliegos
+    'lectura_pliegos':                 'Listado',
+    'pliego_widget':                   'Visor de Pliegos',
+    'pliego_detalle':                  'Detalle del Pliego',
+    // Mercado Privado › Dimensionamiento
+    'dimensionamiento':                'Vista General',
+    'mercado_privado_dimensiones':     'Vista General',
+    // S.I.C. › Seguimiento de Usuarios
+    'sic_tracking':                    'Monitoreo en Vivo',
+    'sic_tracking_api':                'API Tracking',
+    // S.I.C. › Usuarios
+    'sic_users':                       'Gestión de Usuarios',
+    'sic_usuarios':                    'Gestión de Usuarios',
+    'grupos':                          'Grupos',
+    // S.I.C. › Contraseñas
+    'sic_password_resets':             'Solicitudes de Contraseña',
+    'admin_password_resets':           'Administración de Reseteos',
+    // S.I.C. › Mesa de Ayuda
+    'sic_helpdesk':                    'Soporte',
+    'sic_helpdesk_tickets':            'Tickets',
+  };
+
+  /* ── Mapeo sección → módulo principal (4 claves de CAMPUS_ROOMS) ── */
   function blockForSection(raw) {
     if (!raw) return null;
 
-    // 1. Intento por etiqueta legible (el servidor puede enviar labels con acentos)
+    // 1. Intento por etiqueta legible
     const labelKey = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
     if (_LABEL_BLOCK[labelKey] !== undefined) return _LABEL_BLOCK[labelKey];
 
-    // 2. Clave técnica normalizada (sin acentos, guiones → guion_bajo)
+    // 2. Clave técnica normalizada
     const key = _noAccent(normalizeSectionKey(raw));
 
     if (isGenericSectionLabel(key)) return null;
 
-    // ── S.I.C. ──────────────────────────────────────────────────────────────
-    if (key === 'sic' || key === 'sic_home' || key === 'sic_general' ||
-        key === 'sic_tracking' || key === 'sic_tracking_api') return 'seguimiento_hub';
+    // ── S.I.C. — todos sus apartados apuntan al módulo raíz ─────────────────
+    if (key.startsWith('sic') || key.includes('seguimiento')) return 'sic';
     if (key.includes('tab_live') || key.includes('tab_summary') ||
         key.includes('tab_by_user') || key.includes('tab_alerts') ||
-        key === 'sic_config' || key.includes('notificacion')) return 'seguimiento_hub';
-    if (key === 'sic_helpdesk' || key === 'sic_helpdesk_tickets') return 'helpdesk';
-    if (key === 'sic_users' || key === 'sic_usuarios' || key === 'sic_usuario') return 'usuarios';
-    if (key === 'sic_password_resets' || key.includes('contrasena')) return 'passwords';
-    if (key.startsWith('sic') || key.includes('seguimiento')) return 'seguimiento_hub';
+        key === 'sic_config') return 'sic';
+    if (key === 'dashboard' || key.startsWith('markets') || key === 'home') return 'sic';
+    if (key.includes('administracion') || key.startsWith('admin_') ||
+        key === 'grupos' || key.includes('notificacion')) return 'sic';
+    if (key.includes('contrasena')) return 'sic';
 
     // ── Mercado Privado ──────────────────────────────────────────────────────
     if (key === 'mercado_privado_reporte_perfiles') return 'mercado_privado';
@@ -2533,36 +2593,60 @@
         key.includes('reporte_proceso') || key.includes('comentario') ||
         key.includes('cliente')) return 'mercado_publico';
     if (key.startsWith('mercado_publico') || key.includes('mercado_public')) return 'mercado_publico';
-    // reporte_perfiles sin prefijo de mercado → fallback a público
     if (key === 'reporte_perfiles' || key === 'perfiles' || key.startsWith('reporte_perfil') ||
         key.startsWith('perfil')) return 'mercado_publico';
 
     // ── Forecast ────────────────────────────────────────────────────────────
     if (key.startsWith('forecast') || key.includes('proyeccion')) return 'forecast';
 
-    // ── Administración ───────────────────────────────────────────────────────
-    if (key.includes('administracion') || key.startsWith('admin_') || key === 'grupos') return 'administracion';
-
-    // ── Panel Principal / Selector ───────────────────────────────────────────
-    if (key === 'dashboard' || key.startsWith('markets') || key === 'home') return 'selector';
-
     if (window.console && console.warn) {
-      console.warn('[tracking] Sección sin bloque asignado:', raw, '→', key);
+      console.warn('[tracking] Sección sin módulo asignado:', raw, '→', key);
     }
     return null;
   }
 
-  /* Mapeo sección → sub-sala dentro de un módulo (Nivel 2) */
+  /* Mapeo sección → apartado (Nivel 2) dentro de su módulo */
   function subRoomForSection(moduleKey, raw) {
+    if (!raw || !moduleKey) return null;
     const subs = LEVEL2_SUBS[moduleKey];
     if (!subs) return null;
-    const key = normalizeSectionKey(raw);
-    const exact = subs.find(s => s.key === key);
-    if (exact) return exact.key;
+    const key = _noAccent(normalizeSectionKey(raw));
+    // 1. Coincidencia directa con la clave de un apartado L2
+    if (subs.find(s => s.key === key)) return key;
+    // 2. Mapeo explícito en SECTION_TO_L2
+    const mapped = (SECTION_TO_L2[moduleKey] || {})[key];
+    if (mapped && subs.find(s => s.key === mapped)) return mapped;
+    // 3. Coincidencia parcial
     const partial = subs.find(s => key.includes(s.key) || s.key.includes(key));
     if (partial) return partial.key;
+    // 4. Sala principal del módulo
     const main = subs.find(s => s.main);
     return main ? main.key : (subs[0]?.key || null);
+  }
+
+  /* Breadcrumb completo: Módulo › Apartado › Subapartado */
+  function userBreadcrumb(u) {
+    if (!u || !u.current_section) return null;
+    const sec = _noAccent(normalizeSectionKey(u.current_section));
+    const moduleKey = blockForSection(u.current_section);
+    if (!moduleKey) return sectionLabel(u.current_section) || null;
+
+    const moduleRoom = CAMPUS_ROOMS.find(r => r.key === moduleKey);
+    const modLabel   = moduleRoom ? moduleRoom.label : moduleKey;
+
+    const l2Key  = subRoomForSection(moduleKey, u.current_section);
+    const l2Subs = LEVEL2_SUBS[moduleKey] || [];
+    const l2Room = l2Subs.find(s => s.key === l2Key);
+    const l2Label = l2Room ? l2Room.label : null;
+
+    if (!l2Label) return modLabel;
+
+    const l3Label = LEVEL3_LABELS[sec] || null;
+    // Solo mostrar L3 si aporta información distinta al L2
+    if (l3Label && l3Label !== l2Room.label) {
+      return `${modLabel} › ${l2Label} › ${l3Label}`;
+    }
+    return `${modLabel} › ${l2Label}`;
   }
 
   function blockRouteForUser(user) {
@@ -2604,7 +2688,7 @@
       return `
       <div class="globe-user-item${selectedUid === u.id ? ' selected' : ''}" data-uid="${u.id}">
         <div class="globe-u-name"><span class="sdot ${sdotCls}"></span>${esc(u.username)}</div>
-        <div class="globe-u-sec">${esc(sectionLabel(u.current_section))}</div>
+        <div class="globe-u-sec">${esc(userBreadcrumb(u) || sectionLabel(u.current_section))}</div>
         <div class="globe-u-meta">
           <span>${esc(u.role)}</span><span>${statusLabel}</span>
           <span>${esc(u.unit)}</span><span>${esc(timeInCurrentSection(u))}</span>
@@ -2720,9 +2804,11 @@
 
     function setLevelParams() {
       if (drillDown === null) {
-        CANVAS_H = 420;
-        CW = Math.max(26, Math.min(42, W / 16));
-        OY = 42;
+        const maxGx = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gx + r.sw), 6);
+        const maxGy = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gy + r.sd), 3);
+        CANVAS_H = Math.max(260, 80 + (maxGx + maxGy + 1) * 28);
+        CW = Math.max(30, Math.min(56, W / (maxGx + 2)));
+        OY = 52;
       } else {
         const subs = LEVEL2_SUBS[drillDown] || [];
         const maxGx = subs.reduce((m, s) => Math.max(m, s.gx + s.sw), 6);
@@ -3075,8 +3161,10 @@
 
       if (drillDown === null) {
         /* ── NIVEL 1: campus ── */
+        const l1MaxGx = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gx + r.sw), 6);
+        const l1MaxGy = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gy + r.sd), 3);
         ctx.globalAlpha = transAlpha * .05;
-        for (let gx = 0; gx <= 6; gx++) for (let gy = 0; gy <= 5; gy++) {
+        for (let gx = 0; gx <= l1MaxGx; gx++) for (let gy = 0; gy <= l1MaxGy; gy++) {
           const p = iso(gx, gy);
           ctx.beginPath(); ctx.arc(p.x, p.y, 1.1, 0, Math.PI * 2);
           ctx.fillStyle = '#3b82f6'; ctx.fill();
@@ -3160,7 +3248,7 @@
           ttEl.innerHTML =
             `<strong>${esc(u.username)}</strong><br>` +
             `${esc(u.role)} · ${esc(u.unit)}<br>` +
-            `<span style="color:#94a3b8">📍 ${esc(sectionLabel(u.current_section))}</span><br>` +
+            `<span style="color:#94a3b8">📍 ${esc(userBreadcrumb(u) || sectionLabel(u.current_section))}</span><br>` +
             `<span style="color:#94a3b8">⚡ ${esc(u.last_action)}</span><br>` +
             `<span style="color:#94a3b8">⏱ ${esc(timeInCurrentSection(u))}</span>`;
         } else {
