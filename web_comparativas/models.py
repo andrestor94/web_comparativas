@@ -7,6 +7,12 @@ from typing import Iterable, List
 import re  # <-- para normalizar procesos
 import logging
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey, Float, event, text,
     UniqueConstraint, select, Boolean, JSON, Text, func, LargeBinary, Date, Index
