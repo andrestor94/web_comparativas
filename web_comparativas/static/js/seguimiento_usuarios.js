@@ -149,6 +149,46 @@
       'sin clasificar', 'unknown', 'undefined', 'n/a', 'no identificado'].includes(key);
   }
 
+  /* Normaliza etiqueta legible para lookup robusto (sin acentos, sin puntos, em-dash→espacio) */
+  function normalizeLabelKey(s) {
+    return _noAccent(String(s || '').toLowerCase().trim())
+      .replace(/\s*[—–]\s*/g, ' ')
+      .replace(/\./g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /* Secciones técnicas (auth, API): se silencian sin warning visual */
+  const KNOWN_TECHNICAL_LABELS = new Set([
+    'inicio de sesion', 'cierre de sesion',
+    'api tracking interno', 'api tracking (interno)',
+    'inicio de sesion siem',
+  ]);
+
+  /* Etiquetas enviadas por el servidor → label display limpia.
+   * Claves: resultado de normalizeLabelKey(label_del_servidor). */
+  const LABEL_SECTION_MAP = {
+    'mercado publico inicio':     'Mercado Público — Inicio',
+    'mercado publico home':       'Mercado Público — Inicio',
+    'inicio  mercado publico':    'Mercado Público — Inicio',
+    'mercado publico':            'Mercado Público',
+    'mercado privado inicio':     'Mercado Privado — Inicio',
+    'mercado privado home':       'Mercado Privado — Inicio',
+    'mercado privado':            'Mercado Privado',
+    'sic':                        'S.I.C.',
+    'sic general':                'S.I.C.',
+    'panel sic':                  'Panel S.I.C.',
+    'panel sic':                  'Panel S.I.C.',
+    'inicio':                     'Inicio',
+    'tablero':                    'Tablero de Comparativa',
+    'tablero de comparativa':     'Tablero de Comparativa',
+    'seguimiento de usuarios':    'Seguimiento de Usuarios',
+    'inicio de sesion':           'Inicio de Sesión',
+    'cierre de sesion':           'Cierre de Sesión',
+    'api tracking interno':       'API Tracking Interno',
+    'api tracking (interno)':     'API Tracking Interno',
+  };
+
   function humanizeSectionKey(raw) {
     const key = normalizeSectionKey(raw)
       .replace(/\b\d+\b/g, '')
@@ -177,16 +217,22 @@
     return displayWords.map(w => acronyms[w] || (w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
   }
 
-  /** Resuelve un nombre técnico a su etiqueta legible. */
+  /** Resuelve un nombre técnico o etiqueta de servidor a su etiqueta legible. */
   function sectionLabel(raw) {
     if (!raw) return 'Inicio';
+    // 1. Clave técnica normalizada (underscores, minúsculas)
     const key = normalizeSectionKey(raw);
     if (isGenericSectionLabel(key)) return '';
     if (SECTION_MAP[key]) return SECTION_MAP[key];
-    // Try partial match
+    // 2. Coincidencia parcial con clave técnica
     for (const [k, v] of Object.entries(SECTION_MAP)) {
       if (k && key.includes(k) && k.length > 3) return v;
     }
+    // 3. Etiqueta legible normalizada (sin acentos, sin puntos, em-dash→espacio)
+    const lk = normalizeLabelKey(raw);
+    if (LABEL_SECTION_MAP[lk] !== undefined) return LABEL_SECTION_MAP[lk];
+    // 4. Eventos técnicos conocidos — silenciar sin warning
+    if (KNOWN_TECHNICAL_LABELS.has(lk)) return raw;
     const label = humanizeSectionKey(raw);
     if (label && window.console && console.warn) {
       console.warn('[tracking] ruta sin mapping explicito:', raw, '->', label);
@@ -2341,8 +2387,10 @@
   const _LABEL_BLOCK = {
     // Mercado Público y sub-secciones
     'mercado publico':                          'mercado_publico',
+    'mercado publico  inicio':                  'mercado_publico',   // "Mercado Público — Inicio"
     'inicio  mercado publico':                  'mercado_publico',
     'mercado publico home':                     'mercado_publico',
+    'mercado publico inicio':                   'mercado_publico',   // variante espacio simple
     'oportunidades  publico':                   'mercado_publico',
     'oportunidades':                            'mercado_publico',
     'buscador de oportunidades':                'mercado_publico',
@@ -2570,12 +2618,23 @@
   function blockForSection(raw) {
     if (!raw) return null;
 
-    // 1. Intento por etiqueta legible
-    const labelKey = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
+    // 1. Lookup por etiqueta legible — doble normalización para cubrir variantes
+    //    a) versión con doble espacio (formato histórico del replace)
+    const labelKeyDS = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
+    if (_LABEL_BLOCK[labelKeyDS] !== undefined) return _LABEL_BLOCK[labelKeyDS];
+    //    b) versión normalizeLabelKey (espacio simple, sin puntos)
+    const labelKey = normalizeLabelKey(raw);
     if (_LABEL_BLOCK[labelKey] !== undefined) return _LABEL_BLOCK[labelKey];
 
-    // 2. Clave técnica normalizada
-    const key = _noAccent(normalizeSectionKey(raw));
+    // 2. Secciones técnicas conocidas — no son módulos navegables, devolver null sin warning
+    if (KNOWN_TECHNICAL_LABELS.has(labelKey)) return null;
+
+    // 3. Clave técnica: normalizar también em-dash y espacios a guion bajo
+    const key = _noAccent(normalizeSectionKey(raw))
+      .replace(/\s*[—–]\s*/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/\./g, '')
+      .replace(/_+/g, '_');
 
     if (isGenericSectionLabel(key)) return null;
 
@@ -2613,6 +2672,7 @@
     // ── Forecast ────────────────────────────────────────────────────────────
     if (key.startsWith('forecast') || key.includes('proyeccion')) return 'forecast';
 
+    // Solo advertir si la sección es genuinamente desconocida
     if (window.console && console.warn) {
       console.warn('[tracking] Sección sin módulo asignado:', raw, '→', key);
     }
