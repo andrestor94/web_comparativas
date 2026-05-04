@@ -302,7 +302,7 @@ def _quarter_expr():
 @router.get("/sync/status")
 def sync_status(
     request: Request,
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     session = _get_session(request)
     total_uploads = session.execute(
@@ -346,7 +346,7 @@ def trigger_sync(
 @router.get("/filtros")
 def get_filtros(
     request: Request,
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("filtros_globales")
     cached = _cache_get(ck, _TTL_FILTERS)
@@ -389,7 +389,7 @@ def search_filtro(
     plataforma: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     CAMPO_MAP = {
         "descripcion": ComparativaRow.descripcion,
@@ -429,7 +429,7 @@ def filtros_rango_fechas(
     comprador: str = Query(""),
     provincia: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("rango_fechas", descripcion, proveedor, marca, rubro, comprador, provincia, plataforma)
     cached = _cache_get(ck, _TTL_FILTERS)
@@ -487,7 +487,7 @@ def articulos_kpis(
     proveedor: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("art_kpis", descripcion, fecha_desde, fecha_hasta, marca, proveedor, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -578,7 +578,7 @@ def articulos_evolucion(
     proveedor: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("art_evol", descripcion, fecha_desde, fecha_hasta, marca, proveedor, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -645,7 +645,7 @@ def articulos_por_marca(
     proveedor: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("art_marca_ganador", descripcion, fecha_desde, fecha_hasta, proveedor, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -694,7 +694,7 @@ def articulos_por_proveedor(
     marca: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("art_prov_v4", descripcion, fecha_desde, fecha_hasta, marca, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -806,7 +806,7 @@ def articulos_evolucion_marca(
     proveedor: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("art_evol_marca_v2", descripcion, fecha_desde, fecha_hasta, marca, proveedor, rubro, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -880,7 +880,7 @@ def articulos_proveedor_historico(
     marca: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     if not proveedor.strip():
         return {"ok": True, "data": []}
@@ -1075,7 +1075,7 @@ def competidor_articulo_detalle(
     fecha_hasta: str = Query(""),
     rubro: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     if not proveedor.strip() or not descripcion.strip():
         return {"ok": True, "data": []}
@@ -1143,7 +1143,7 @@ def competidor_kpis(
     descripcion: str = Query(""),
     marca: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("comp_kpis_v4", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, marca, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1190,7 +1190,7 @@ def competidor_evolucion(
     rubro: str = Query(""),
     descripcion: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("comp_evol_v3", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1250,7 +1250,7 @@ def competidor_rubros(
     rubro: str = Query(""),
     descripcion: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("comp_rubros_v3", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1301,7 +1301,7 @@ def competidor_posiciones(
     rubro: str = Query(""),
     descripcion: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("comp_pos_v9", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1400,7 +1400,7 @@ def competidor_top_marcas(
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     """Mantenido por compatibilidad. El frontend usa /competidor/productos-competitivos."""
     ck = _cache_key("comp_marcas", proveedor, fecha_desde, fecha_hasta, plataforma)
@@ -1443,7 +1443,7 @@ def competidor_productos_competitivos(
     rubro: str = Query(""),
     descripcion: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     """Artículos donde el competidor más veces fue adjudicado (posicion=1)."""
     ck = _cache_key("comp_prod_comp_v2", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
@@ -1497,7 +1497,7 @@ def competidor_top_articulos(
     rubro: str = Query(""),
     descripcion: str = Query(""),
     plataforma: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("comp_art_v3", proveedor, fecha_desde, fecha_hasta, rubro, descripcion, plataforma)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1554,7 +1554,7 @@ def cliente_kpis(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("cli_kpis_v2", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1609,7 +1609,7 @@ def cliente_evolucion(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("cli_evol_v2", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1666,7 +1666,7 @@ def cliente_proveedores(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("cli_prov_v3", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1719,7 +1719,7 @@ def cliente_rubros(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("cli_rubros_v2", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1767,7 +1767,7 @@ def cliente_articulos(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     ck = _cache_key("cli_art_v6", comprador, nro_proceso, plataforma, provincia, fecha_desde, fecha_hasta)
     cached = _cache_get(ck, _TTL_ANALYTICS)
@@ -1847,7 +1847,7 @@ def cliente_articulo_detalle(
     provincia: str = Query(""),
     fecha_desde: str = Query(""),
     fecha_hasta: str = Query(""),
-    user: User = Depends(require_roles("admin", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "supervisor", "auditor", "analista", "analyst")),
 ):
     """Detalle de registros de un artículo para el desplegable de la tabla Artículos Solicitados."""
     if not descripcion.strip():
