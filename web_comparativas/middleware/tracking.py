@@ -159,7 +159,7 @@ def _detect_section(path: str) -> str:
         return "dimensionamiento"
     if path.startswith("/mercado-privado"):
         if "reporte-perfiles" in path:
-            return "reporte_perfiles"
+            return "mercado_privado_reporte_perfiles"
         if "dimensiones" in path or "oportunidades" in path:
             return "dimensionamiento"
         if "comentarios" in path:
@@ -173,7 +173,7 @@ def _detect_section(path: str) -> str:
         return "mercado_privado_home"
 
     if path.startswith("/api/mercado-publico/perfiles"):
-        return "reporte_perfiles"
+        return "mercado_publico_reporte_perfiles"
     if path.startswith("/api/mercado-publico"):
         if "lectura-pliegos" in path or "/pliegos" in path:
             return "lectura_pliegos"
@@ -186,7 +186,7 @@ def _detect_section(path: str) -> str:
         if "lectura-pliegos" in path or "/pliegos" in path:
             return "lectura_pliegos"
         if "reporte-perfiles" in path:
-            return "reporte_perfiles"
+            return "mercado_publico_reporte_perfiles"
         if "web-comparativas" in path or "comparativas" in path:
             return "comparativa_mercado"
         if "oportunidades" in path:
@@ -265,7 +265,8 @@ def _detect_section(path: str) -> str:
 _KNOWN_SECTION_KEYS = {
     "home", "sic_tracking_api", "sic_helpdesk", "sic_password_resets",
     "sic_users", "sic_tracking", "sic_general", "dimensionamiento",
-    "reporte_perfiles", "comentarios", "auth_password",
+    "reporte_perfiles", "mercado_publico_reporte_perfiles",
+    "mercado_privado_reporte_perfiles", "comentarios", "auth_password",
     "mercado_privado_helpdesk", "mercado_privado_home", "lectura_pliegos",
     "comparativa_mercado", "mercado_publico_oportunidades",
     "mercado_publico_helpdesk", "mercado_publico_home",
