@@ -763,7 +763,7 @@
         <!-- ====== /Oportunidades ====== -->
 
         <!-- Reporte perfiles -->
-        {% if user and r in ['admin','supervisor','auditor'] %}
+        {% if user and r in ['admin','supervisor','auditor','analista','analyst'] %}
         <a href="/mercado-publico/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
           <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>

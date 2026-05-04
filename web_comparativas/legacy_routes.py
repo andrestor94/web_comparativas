@@ -2194,7 +2194,7 @@ def mercado_publico_oportunidades(
 def mercado_publico_reporte_perfiles(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "supervisor", "auditor")
+        require_roles("admin", "supervisor", "auditor", "analista", "analyst")
     ),
 ):
     """
