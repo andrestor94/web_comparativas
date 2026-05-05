@@ -1575,12 +1575,36 @@ def maybe_run_startup_ingestion() -> dict[str, Any]:
     row_count = _count_dimensionamiento_rows()
     startup_mode = _normalize_startup_mode()
 
-    _dim_log("info", "[DIM] Table row count = %s", row_count)
+    if IS_SQLITE:
+        _dim_log("info", "[DIM] Local SQLite detected")
+    elif IS_POSTGRES:
+        _dim_log("info", "[DIM] PostgreSQL detected, preserving production startup behavior")
+
+    _dim_log("info", "[DIM] dimensionamiento_records count=%s", row_count)
     _dim_log("info", "[DIM] Startup mode = %s", startup_mode)
 
     if row_count > 0 and startup_mode != STARTUP_MODE_FORCE_INGEST:
         result = {"status": "skipped", "reason": "table_has_data", "row_count": row_count}
-        _dim_log("info", "[DIM] Ingestion skipped because table already has data")
+        _dim_log("info", "[DIM] Dimensionamiento already loaded, skipping ingestion")
+        return result
+
+    if IS_SQLITE and row_count == 0:
+        dataset_path = Path(os.getenv("DIMENSIONAMIENTO_CSV_PATH") or DEFAULT_CSV_PATH).expanduser().resolve()
+        if not dataset_path.exists():
+            _dim_log("warning", "[DIM] dataset_unificado.csv not found at expected path: %s", dataset_path)
+            return {"status": "skipped", "reason": "missing_source", "row_count": row_count}
+
+        _dim_log("info", "[DIM] dataset_unificado.csv found at %s", dataset_path)
+        _dim_log("info", "[DIM] Starting local ingestion from dataset_unificado.csv")
+        result = bootstrap_dimensionamiento(
+            csv_path=dataset_path,
+            chunk_size=DEFAULT_CHUNK_SIZE,
+            mode="replace",
+            force=True,
+        )
+        loaded_count = _count_dimensionamiento_rows()
+        _dim_log("info", "[DIM] Local ingestion finished: records=%s", loaded_count)
+        _dim_log("info", "[DIM] Startup ingestion result = %s", json.dumps(result, ensure_ascii=False))
         return result
 
     if row_count == 0 and startup_mode == STARTUP_MODE_VALIDATE:

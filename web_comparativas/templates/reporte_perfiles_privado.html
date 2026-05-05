@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% block title %}Reporte de Perfiles — Mercado Privado{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=perfiles-v1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/reporte_perfiles.css') }}?v=perfiles-ui-v6">
+{% endblock %}
+
+{% block content %}
+<div class="pf-page pf-page--private">
+  <div class="pf-shell">
+
+    <!-- ── HERO ──────────────────────────────────────────────── -->
+    <section class="pf-hero">
+      <div class="pf-hero__main">
+        <span class="pf-hero__eyebrow">Mercado Privado</span>
+        <h1 class="pf-hero__title">Reporte de perfiles</h1>
+        <p class="pf-hero__subtitle">
+          Análisis de valorización, consumo y perfiles de compra por artículo y cliente.
+        </p>
+        <div class="pf-hero__meta">
+          <span class="pf-meta-pill pf-meta-pill--brand">
+            <i class="bi bi-shield-check"></i>
+            Privado
+          </span>
+          <span class="pf-meta-pill">
+            <i class="bi bi-columns-gap"></i>
+            2 vistas analíticas
+          </span>
+        </div>
+      </div>
+
+      <div class="pf-hero__aside">
+        <div class="pf-hero__status-card">
+          <div class="pf-hero__status-top">
+            <span class="pf-mini-panel__label">Fuente de datos</span>
+            <span class="pf-status-pill pf-status-pill--ok" id="pvStatusBadge">
+              <i class="bi bi-database-check"></i>
+              <span id="pvStatusText">Dimensionamiento</span>
+            </span>
+          </div>
+          <div class="pf-hero__facts">
+            <div class="pf-hero__fact">
+              <span>Familias</span>
+              <strong id="pvFamiliasLabel">—</strong>
+            </div>
+            <div class="pf-hero__fact">
+              <span>Clientes</span>
+              <strong id="pvClientesLabel">—</strong>
+            </div>
+            <div class="pf-hero__fact">
+              <span>Período</span>
+              <strong id="pvPeriodoLabel">Todas las fechas</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── TABS ───────────────────────────────────────────────── -->
+    <section class="pf-tabs-panel">
+      <div class="pf-tabs">
+        <button type="button" class="pf-tab active" data-tab="articulo" onclick="pvSwitchTab('articulo', this)">
+          <span class="pf-tab__icon"><i class="bi bi-capsule"></i></span>
+          <span class="pf-tab__copy">
+            <strong>Artículo</strong>
+            <small>Precio y valorización</small>
+          </span>
+        </button>
+        <button type="button" class="pf-tab" data-tab="cliente" onclick="pvSwitchTab('cliente', this)">
+          <span class="pf-tab__icon"><i class="bi bi-hospital"></i></span>
+          <span class="pf-tab__copy">
+            <strong>Cliente</strong>
+            <small>Perfil y consumo</small>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── TOOLBAR FECHAS ─────────────────────────────────────── -->
+    <section class="pf-toolbar">
+      <span class="pf-toolbar__label">
+        <i class="bi bi-calendar3"></i>
+        Marco temporal
+      </span>
+      <div class="pf-toolbar__controls">
+        <div class="pf-toolbar__group">
+          <label for="pvFechaDesde">Desde</label>
+          <input type="date" id="pvFechaDesde">
+        </div>
+        <div class="pf-toolbar__group">
+          <label for="pvFechaHasta">Hasta</label>
+          <input type="date" id="pvFechaHasta">
+        </div>
+      </div>
+      <div class="pf-toolbar__actions">
+        <button type="button" class="pf-btn-apply" onclick="pvApplyDates()">
+          <i class="bi bi-funnel-fill"></i>
+          Aplicar
+        </button>
+        <button type="button" class="pf-btn-clear" onclick="pvClearAll()">
+          <i class="bi bi-x-lg"></i>
+          Limpiar
+        </button>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- TAB: ARTÍCULO                                              -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <div id="tab-articulo" class="pf-tab-content active">
+
+      <!-- Filtro principal -->
+      <section class="pf-filter-card">
+        <div class="pf-filter-card__intro">
+          <div>
+            <span class="pf-filter-card__eyebrow">Filtro principal</span>
+            <p class="pf-filter-card__hint">Seleccioná una familia para habilitar KPIs, gráficos y detalle. Luego podés combinar cliente y fechas para profundizar el análisis.</p>
+          </div>
+          <span class="pf-filter-card__required"><i class="bi bi-asterisk"></i> Familia requerida</span>
+        </div>
+        <div class="pf-filter-grid">
+          <div class="pf-sf-group pf-sf-group--wide" id="artFamiliaMount"></div>
+          <div class="pf-sf-group pf-sf-group--wide" id="artClienteMount"></div>
+        </div>
+      </section>
+
+      <!-- Empty state artículo -->
+      <section class="pf-card pf-required-state" id="artEmptyState">
+        <div class="pf-required-state__icon">
+          <i class="bi bi-binoculars"></i>
+        </div>
+        <div class="pf-required-state__body">
+          <span class="pf-required-state__eyebrow">Esperando contexto</span>
+          <h3>Seleccioná una familia para visualizar el reporte.</h3>
+          <p>Una vez definida la familia, vas a poder combinar cliente y fechas para profundizar el análisis.</p>
+          <div class="pf-required-state__tips">
+            <span><i class="bi bi-check2-circle"></i> Usá el filtro principal para elegir la familia</span>
+            <span><i class="bi bi-check2-circle"></i> Cliente y fechas son filtros complementarios opcionales</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dashboard artículo -->
+      <div id="artDashboard" class="pf-dashboard-stack" hidden>
+
+        <!-- KPIs -->
+        <div class="pf-kpi-row" id="artKpiRow">
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        </div>
+
+        <!-- Gráficos fila 1 -->
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Serie temporal</span>
+              <h3 class="pf-card__title">Evolución del precio en el tiempo</h3>
+            </div>
+            <div class="pf-chart-box" id="artPrecioChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Valorización</span>
+              <h3 class="pf-card__title">Evolución monto en el tiempo</h3>
+            </div>
+            <div class="pf-chart-box" id="artMontoChart"></div>
+          </article>
+        </div>
+
+        <!-- Gráficos fila 2 -->
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Mix</span>
+              <h3 class="pf-card__title">Valorización por plataforma</h3>
+            </div>
+            <div class="pf-chart-box" id="artPlataformaChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Top clientes</span>
+              <h3 class="pf-card__title">Valorización por cliente</h3>
+            </div>
+            <div class="pf-chart-box" id="artClientesChart"></div>
+          </article>
+        </div>
+
+        <!-- Tabla consumo mensual -->
+        <article class="pf-card pf-card--table">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Detalle</span>
+            <h3 class="pf-card__title">Mediana de consumo por mes</h3>
+          </div>
+          <div class="pf-tscroll">
+            <table class="pf-table" id="artConsumoTable">
+              <thead>
+                <tr>
+                  <th>Familia</th>
+                  <th class="num">Ene</th>
+                  <th class="num">Feb</th>
+                  <th class="num">Mar</th>
+                  <th class="num">Abr</th>
+                  <th class="num">May</th>
+                  <th class="num">Jun</th>
+                  <th class="num">Jul</th>
+                  <th class="num">Ago</th>
+                  <th class="num">Sep</th>
+                  <th class="num">Oct</th>
+                  <th class="num">Nov</th>
+                  <th class="num">Dic</th>
+                  <th class="num pf-total-col">Total</th>
+                </tr>
+              </thead>
+              <tbody id="artConsumoTbody">
+                <tr>
+                  <td colspan="14">
+                    <div class="pf-empty-state">
+                      <i class="bi bi-search"></i>
+                      <p>Seleccioná una familia para ver el consumo mensual.</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+      </div><!-- /artDashboard -->
+    </div><!-- /tab-articulo -->
+
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- TAB: CLIENTE                                               -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <div id="tab-cliente" class="pf-tab-content">
+
+      <!-- Filtro principal -->
+      <section class="pf-filter-card">
+        <div class="pf-filter-card__intro">
+          <div>
+            <span class="pf-filter-card__eyebrow">Filtro principal</span>
+            <p class="pf-filter-card__hint">Seleccioná un cliente para habilitar KPIs, gráficos y detalle. Luego podés combinar familia y fechas para profundizar el análisis.</p>
+          </div>
+        </div>
+        <div class="pf-filter-grid">
+          <div class="pf-sf-group pf-sf-group--wide" id="cliClienteMount"></div>
+          <div class="pf-sf-group pf-sf-group--wide" id="cliFamiliaMount"></div>
+        </div>
+      </section>
+
+      <!-- Empty state cliente -->
+      <section class="pf-card pf-required-state" id="cliEmptyState">
+        <div class="pf-required-state__icon">
+          <i class="bi bi-hospital"></i>
+        </div>
+        <div class="pf-required-state__body">
+          <span class="pf-required-state__eyebrow">Esperando contexto</span>
+          <h3>Seleccioná un cliente para visualizar el reporte.</h3>
+          <p>Una vez definido el cliente, vas a poder combinar familias y fechas para profundizar el análisis.</p>
+          <div class="pf-required-state__tips">
+            <span><i class="bi bi-check2-circle"></i> Usá el filtro principal para elegir el cliente</span>
+            <span><i class="bi bi-check2-circle"></i> Familia y fechas son filtros complementarios opcionales</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dashboard cliente -->
+      <div id="cliDashboard" class="pf-dashboard-stack" hidden>
+
+        <!-- KPIs -->
+        <div class="pf-kpi-row" id="cliKpiRow">
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+          <div class="pf-kpi pf-skeleton pf-loading-kpi"></div>
+        </div>
+
+        <!-- Gráficos fila 1 -->
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Serie temporal</span>
+              <h3 class="pf-card__title">Valorizado en el tiempo por negocio</h3>
+            </div>
+            <div class="pf-chart-box" id="cliNegocioChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Valorización</span>
+              <h3 class="pf-card__title">Valorizado total en el tiempo</h3>
+            </div>
+            <div class="pf-chart-box" id="cliTotalChart"></div>
+          </article>
+        </div>
+
+        <!-- Gráficos fila 2 -->
+        <div class="pf-grid-2">
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Ranking</span>
+              <h3 class="pf-card__title">Ranking de productos por valorización</h3>
+            </div>
+            <div class="pf-chart-box" id="cliRankingChart"></div>
+          </article>
+
+          <article class="pf-card pf-card--chart">
+            <div class="pf-card__head">
+              <span class="pf-card__eyebrow">Mix</span>
+              <h3 class="pf-card__title">Valorización por subnegocio</h3>
+            </div>
+            <div class="pf-chart-box" id="cliSubnegocioChart"></div>
+          </article>
+        </div>
+
+        <!-- Tabla consumo mensual por artículo -->
+        <article class="pf-card pf-card--table">
+          <div class="pf-card__head">
+            <span class="pf-card__eyebrow">Detalle</span>
+            <h3 class="pf-card__title">Mediana de consumo por mes por artículo</h3>
+          </div>
+          <div class="pf-tscroll">
+            <table class="pf-table" id="cliConsumoTable">
+              <thead>
+                <tr>
+                  <th>Familia</th>
+                  <th class="num">Ene</th>
+                  <th class="num">Feb</th>
+                  <th class="num">Mar</th>
+                  <th class="num">Abr</th>
+                  <th class="num">May</th>
+                  <th class="num">Jun</th>
+                  <th class="num">Jul</th>
+                  <th class="num">Ago</th>
+                  <th class="num">Sep</th>
+                  <th class="num">Oct</th>
+                  <th class="num">Nov</th>
+                  <th class="num">Dic</th>
+                  <th class="num pf-total-col">Total</th>
+                </tr>
+              </thead>
+              <tbody id="cliConsumoTbody">
+                <tr>
+                  <td colspan="14">
+                    <div class="pf-empty-state">
+                      <i class="bi bi-hospital"></i>
+                      <p>Seleccioná un cliente para ver el consumo mensual por artículo.</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+      </div><!-- /cliDashboard -->
+    </div><!-- /tab-cliente -->
+
+  </div><!-- /pf-shell -->
+</div><!-- /pf-page -->
+
+<script src="{{ url_for('static', path='vendor/apexcharts/apexcharts.min.js') }}"></script>
+<script src="{{ url_for('static', path='js/reporte_perfiles_privado.js') }}?v=2"></script>
+{% endblock %}

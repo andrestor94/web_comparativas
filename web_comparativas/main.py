@@ -501,6 +501,7 @@ from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
 from web_comparativas.routers.forecast_router import router as forecast_router
 from web_comparativas.routers.mercado_publico_perfiles_router import router as perfiles_router
+from web_comparativas.routers.mercado_privado_perfiles_router import router as perfiles_privado_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
@@ -509,6 +510,7 @@ app.include_router(pliegos_router)
 app.include_router(comments_router)
 app.include_router(forecast_router)
 app.include_router(perfiles_router)
+app.include_router(perfiles_privado_router)
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
