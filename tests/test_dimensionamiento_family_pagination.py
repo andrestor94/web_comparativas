@@ -50,6 +50,7 @@ def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
     legacy_snapshot = SimpleNamespace(
         import_run_id=77,
         generated_at=None,
+        version="v7",
         payload={
             "family_consumption": {
                 "months": ["01"],
@@ -69,6 +70,8 @@ def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
     monkeypatch.setattr(qs, "_normalize_dashboard_filters", lambda session, filters: filters)
     monkeypatch.setattr(qs, "_apply_local_statement_timeout", lambda session, milliseconds: None)
     monkeypatch.setattr(qs, "_has_active_filters", lambda filters: False)
+    monkeypatch.setattr(qs, "_summary_health_snapshot_cached", lambda session: {"usable": True, "valorizacion_mismatch": False})
+    monkeypatch.setattr(qs, "_snapshot_payload_needs_refresh", lambda snapshot: False)
     monkeypatch.setattr(qs, "_get_dashboard_snapshot", lambda session: legacy_snapshot)
     monkeypatch.setattr(qs, "_latest_success_import_run", lambda session: SimpleNamespace(id=77))
 
@@ -85,6 +88,50 @@ def test_bootstrap_refreshes_legacy_snapshot_family_consumption(monkeypatch):
     assert "page_size" not in result["family_consumption"]
 
 
+def test_refresh_default_dashboard_snapshot_reuses_live_bootstrap(monkeypatch):
+    class DummySession:
+        def add(self, _obj):
+            return None
+
+        def commit(self):
+            return None
+
+        def refresh(self, _obj):
+            return None
+
+    snapshot = SimpleNamespace(
+        generated_at=None,
+        import_run_id=None,
+        payload={},
+        version="v7",
+    )
+    live_payload = {
+        "status": {"has_data": True},
+        "filters": {"clientes": []},
+        "kpis": {"valorizacion": 123.0},
+        "series": {"months": [], "datasets": []},
+        "results": [],
+        "top_families": [],
+        "geo": [],
+        "clients_by_result": [],
+        "family_consumption": {"months": [], "rows": [], "total": 0},
+        "meta": {"source": "live", "stale": False},
+    }
+
+    monkeypatch.setattr(qs, "_log_query_start", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(qs, "_log_query_success", lambda *args, **kwargs: None)
+    monkeypatch.setattr(qs, "_get_dashboard_snapshot", lambda session: snapshot)
+    monkeypatch.setattr(qs, "_latest_success_import_run", lambda session: SimpleNamespace(id=77))
+    monkeypatch.setattr(qs, "get_dashboard_bootstrap", lambda session, filters, include_status, bypass_snapshot: dict(live_payload))
+    monkeypatch.setattr(qs, "_build_dashboard_bootstrap_payload", lambda session: (_ for _ in ()).throw(AssertionError("legacy builder should not be used")))
+
+    payload = qs.refresh_default_dashboard_snapshot(DummySession(), import_run_id=77, commit=True)
+
+    assert payload["kpis"]["valorizacion"] == 123.0
+    assert payload["meta"]["source"] == "snapshot"
+    assert payload["meta"]["import_run_id"] == 77
+
+
 def test_aggregate_bootstrap_family_consumption_keeps_full_universe():
     rows = [
         (
@@ -99,6 +146,7 @@ def test_aggregate_bootstrap_family_consumption_keeps_full_universe():
             True,
             True,
             float(500 - index),
+            float(1000 - index),
             1,
         )
         for index in range(55)
@@ -129,6 +177,7 @@ def test_aggregate_bootstrap_uses_visible_client_name_and_counts_provinces():
             True,
             False,
             15.0,
+            150.0,
             2,
         ),
         (
@@ -143,6 +192,7 @@ def test_aggregate_bootstrap_uses_visible_client_name_and_counts_provinces():
             True,
             True,
             5.0,
+            50.0,
             1,
         ),
     ]

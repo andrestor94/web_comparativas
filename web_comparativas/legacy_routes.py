@@ -2033,7 +2033,7 @@ def mercado_privado_reporte_perfiles(
         "user": user,
         "market_context": "private",
     }
-    return templates.TemplateResponse("reporte_perfiles.html", ctx)
+    return templates.TemplateResponse("reporte_perfiles_privado.html", ctx)
 
 
 @router.get("/mercado-privado/comentarios", response_class=HTMLResponse)
