@@ -710,7 +710,11 @@ def privado_cliente_producto_ranking(
     db: Session = Depends(_get_db),
 ):
     filters = _build_filters_from_payload(payload)
-    limit = int((payload or {}).get("limit", 10))
+    raw_limit = (payload or {}).get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        limit = None
     key = _ck("cli_ranking", filters, limit)
     hit = _cache_get(key, _TTL_ANALYTICS)
     if hit is not None:
@@ -728,11 +732,12 @@ def privado_cliente_producto_ranking(
             )
             .where(model.familia.isnot(None))
             .group_by(model.familia)
-            .order_by(func.coalesce(func.sum(val_col), 0).desc())
-            .limit(max(1, min(30, limit))),
+            .order_by(func.coalesce(func.sum(val_col), 0).desc()),
             model,
             filters,
         )
+        if limit is not None:
+            stmt = stmt.limit(max(1, limit))
         rows = db.execute(stmt).all()
         data = [
             {"familia": r.familia, "total_valorizado": float(r.total or 0)}

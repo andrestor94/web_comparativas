@@ -94,7 +94,7 @@
         </div>
       </div>
       <div class="pf-toolbar__actions">
-        <button type="button" class="pf-btn-apply" onclick="pvApplyDates()">
+        <button type="button" class="pf-btn-apply" onclick="pvApplyFilters()">
           <i class="bi bi-funnel-fill"></i>
           Aplicar
         </button>
@@ -300,15 +300,17 @@
 
         <!-- Gráficos fila 2 -->
         <div class="pf-grid-2">
-          <article class="pf-card pf-card--chart">
+          <article class="pf-card pf-card--chart pv-ranking-card">
             <div class="pf-card__head">
               <span class="pf-card__eyebrow">Ranking</span>
               <h3 class="pf-card__title">Ranking de productos por valorización</h3>
             </div>
-            <div class="pf-chart-box" id="cliRankingChart"></div>
+            <div class="pv-ranking-scroll">
+              <div class="pf-chart-box" id="cliRankingChart"></div>
+            </div>
           </article>
 
-          <article class="pf-card pf-card--chart">
+          <article class="pf-card pf-card--chart pv-treemap-card">
             <div class="pf-card__head">
               <span class="pf-card__eyebrow">Mix</span>
               <h3 class="pf-card__title">Valorización por subnegocio</h3>
