@@ -735,9 +735,9 @@ function pvRenderTreemapChart(elId, data) {
       custom: ({ seriesIndex, dataPointIndex, w }) => {
         const point = w.config.series[seriesIndex]?.data?.[dataPointIndex] || {};
         return `
-          <div class="pf-apex-tooltip">
-            <div class="pf-apex-tooltip__title">${pvEsc(point.x || EMPTY_DASH)}</div>
-            <div class="pf-apex-tooltip__value">${formatNumberFull(point.y)}</div>
+          <div class="pv-treemap-tooltip">
+            <div class="pv-treemap-tooltip__title">${pvEsc(point.x || EMPTY_DASH)}</div>
+            <div class="pv-treemap-tooltip__value">${formatNumberFull(point.y)}</div>
           </div>`;
       },
     },
