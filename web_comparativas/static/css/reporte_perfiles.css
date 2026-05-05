@@ -1966,6 +1966,53 @@
   padding-top: 0.35rem;
 }
 
+.pf-page--private .pf-apex-tooltip {
+  padding: 0.65rem 0.75rem;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.pf-page--private .pf-apex-tooltip__title {
+  max-width: 260px;
+  color: var(--pf-brand-900);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.pf-page--private .pf-apex-tooltip__value {
+  color: var(--pf-text);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.pf-page--private .pv-ranking-card,
+.pf-page--private .pv-treemap-card {
+  height: 360px;
+  max-height: 360px;
+  overflow: hidden;
+}
+
+.pf-page--private .pv-ranking-card .pv-ranking-scroll {
+  height: 260px;
+  max-height: 260px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  overscroll-behavior: contain;
+}
+
+.pf-page--private .pv-ranking-scroll .pf-chart-box {
+  min-height: 260px;
+  padding-top: 0;
+}
+
+.pf-page--private .pv-ranking-scroll .apexcharts-canvas,
+.pf-page--private .pv-ranking-scroll .apexcharts-svg {
+  max-width: 100%;
+}
+
 .pf-page--private .pf-tscroll {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.82);

@@ -211,13 +211,26 @@ function pvSwitchTab(tab, btn) {
   PV.activeTab = tab;
 }
 
-// Toolbar fechas
-function pvApplyDates() {
+// Toolbar principal
+function pvApplyFilters() {
   PV.fechaDesde = document.getElementById("pvFechaDesde").value || "";
   PV.fechaHasta = document.getElementById("pvFechaHasta").value || "";
-// Recargar
+
+  if (PV.activeTab === "articulo") {
+    pvCommitDropdownSelection("artFamiliaMount");
+    pvCommitDropdownSelection("artClienteMount");
+  }
+  if (PV.activeTab === "cliente") {
+    pvCommitDropdownSelection("cliClienteMount");
+    pvCommitDropdownSelection("cliFamiliaMount");
+  }
+
   if (PV.activeTab === "articulo") pvLoadArticulo();
   if (PV.activeTab === "cliente") pvLoadCliente();
+}
+
+function pvApplyDates() {
+  pvApplyFilters();
 }
 
 function pvClearAll() {
@@ -225,19 +238,22 @@ function pvClearAll() {
   document.getElementById("pvFechaHasta").value = "";
   PV.fechaDesde = "";
   PV.fechaHasta = "";
-  // Reset selecciones
-  PV.artFamilia = null;
-  PV.artCliente = null;
-  PV.cliCliente = null;
-  PV.cliFamilia = null;
-  // Resetear dropdowns
-  pvResetDropdown("artFamiliaMount", "Familia");
-  pvResetDropdown("artClienteMount", "Cliente");
-  pvResetDropdown("cliClienteMount", "Cliente");
-  pvResetDropdown("cliFamiliaMount", "Familia");
-  // Mostrar empty states
-  pvShowArticuloEmpty();
-  pvShowClienteEmpty();
+
+  if (PV.activeTab === "articulo") {
+    PV.artFamilia = null;
+    PV.artCliente = null;
+    pvClearDropdownSelection("artFamiliaMount");
+    pvClearDropdownSelection("artClienteMount");
+    pvShowArticuloEmpty();
+  }
+
+  if (PV.activeTab === "cliente") {
+    PV.cliCliente = null;
+    PV.cliFamilia = null;
+    pvClearDropdownSelection("cliClienteMount");
+    pvClearDropdownSelection("cliFamiliaMount");
+    pvShowClienteEmpty();
+  }
 }
 
 // Dropdowns
@@ -387,10 +403,29 @@ function pvClearDropdownDraft(mountId) {
 }
 
 function pvApplyDropdownSelection(mountId) {
+  pvCommitDropdownSelection(mountId);
+  pvUpdateDropdownTrigger(mountId);
+  pvCloseDropdownPanel(mountId);
+}
+
+function pvCommitDropdownSelection(mountId) {
   const state = PV.dropdowns[mountId];
-  if (!state) return;
+  if (!state) return false;
   state.selected = state.draft || '';
   if (typeof state.onChange === 'function') state.onChange(state.selected);
+  return true;
+}
+
+function pvClearDropdownSelection(mountId) {
+  const state = PV.dropdowns[mountId];
+  if (!state) return;
+  state.selected = '';
+  state.draft = '';
+  state.query = '';
+  if (typeof state.onChange === 'function') state.onChange('');
+  const search = document.getElementById(`${mountId}Search`);
+  if (search) search.value = '';
+  pvRenderDropdownOptions(mountId);
   pvUpdateDropdownTrigger(mountId);
   pvCloseDropdownPanel(mountId);
 }
@@ -678,32 +713,56 @@ function pvRenderTreemapChart(elId, data) {
   pvDestroyChart(elId);
   const el = document.getElementById(elId);
   if (!el) return;
+  const points = (data || []).map(d => ({
+    x: cleanMojibakeText(d.cliente || d.familia || d.subnegocio || EMPTY_DASH),
+    y: Math.round(d.total_valorizado || 0),
+  }));
+  const total = points.reduce((acc, point) => acc + Math.max(point.y || 0, 0), 0);
+  const visibleLabelIndexes = new Set(
+    points
+      .map((point, index) => ({ index, pct: total > 0 ? point.y / total : 0 }))
+      .filter((point, index) => point.pct >= 0.08 || (index < 5 && point.pct >= 0.03))
+      .map(point => point.index)
+  );
   const opts = {
     ...pvChartDefaults(),
     chart: { ...pvChartDefaults().chart, type: "treemap", height: 220 },
     series: [{
-      data: data.map(d => ({
-        x: cleanMojibakeText(d.cliente || d.familia || d.subnegocio || EMPTY_DASH),
-        y: Math.round(d.total_valorizado || 0),
-      }))
+      data: points,
     }],
     colors: COLORS.palette,
-    tooltip: { y: { formatter: (v) => formatNumberFull(v) } },
+    tooltip: {
+      custom: ({ seriesIndex, dataPointIndex, w }) => {
+        const point = w.config.series[seriesIndex]?.data?.[dataPointIndex] || {};
+        return `
+          <div class="pf-apex-tooltip">
+            <div class="pf-apex-tooltip__title">${pvEsc(point.x || EMPTY_DASH)}</div>
+            <div class="pf-apex-tooltip__value">${formatNumberFull(point.y)}</div>
+          </div>`;
+      },
+    },
     plotOptions: { treemap: { distributed: true, enableShades: false } },
     legend: { show: false },
-    dataLabels: { style: { fontSize: "11px" } },
+    dataLabels: {
+      enabled: true,
+      formatter: (text, opts) => visibleLabelIndexes.has(opts.dataPointIndex) ? cleanMojibakeText(text) : "",
+      style: { fontSize: "11px", fontWeight: 700 },
+    },
   };
   PV.charts[elId] = new ApexCharts(el, opts);
   PV.charts[elId].render();
 }
 
-function pvRenderHBarChart(elId, categories, values) {
+function pvRenderHBarChart(elId, categories, values, options = {}) {
   pvDestroyChart(elId);
   const el = document.getElementById(elId);
   if (!el) return;
+  const visibleHeight = options.visibleHeight || 260;
+  const rowHeight = options.rowHeight || 26;
+  const height = Math.max(visibleHeight, (categories || []).length * rowHeight);
   const opts = {
     ...pvChartDefaults(),
-    chart: { ...pvChartDefaults().chart, type: "bar", height: Math.max(180, categories.length * 30 + 60) },
+    chart: { ...pvChartDefaults().chart, type: "bar", height },
     series: [{ name: "Valorizaci\u00f3n", data: values }],
     xaxis: {
       categories: (categories || []).map(cleanMojibakeText),
@@ -721,6 +780,8 @@ function pvRenderHBarChart(elId, categories, values) {
     tooltip: { y: { formatter: (v) => formatNumberFull(v) } },
     legend: { show: false },
   };
+  el.style.height = `${height}px`;
+  el.style.minHeight = `${height}px`;
   PV.charts[elId] = new ApexCharts(el, opts);
   PV.charts[elId].render();
 }
@@ -867,7 +928,7 @@ async function pvLoadCliente() {
     pvPost("/cliente/kpis", payload),
     pvPost("/cliente/negocio-evolucion", payload),
     pvPost("/cliente/total-evolucion", payload),
-    pvPost("/cliente/producto-ranking", { ...payload, limit: 10 }),
+    pvPost("/cliente/producto-ranking", payload),
     pvPost("/cliente/subnegocio", payload),
     pvPost("/cliente/consumo-mensual", payload),
   ]);
@@ -932,7 +993,8 @@ async function pvLoadCliente() {
     pvRenderHBarChart(
       "cliRankingChart",
       items.map(i => cleanMojibakeText(i.familia || EMPTY_DASH)),
-      items.map(i => Math.round(i.total_valorizado))
+      items.map(i => Math.round(i.total_valorizado)),
+      { visibleHeight: 260, rowHeight: 26 }
     );
   } else {
     pvRenderChartError("cliRankingChart");
