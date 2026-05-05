@@ -153,6 +153,20 @@ function formatNumberShort(value, decimals = 2) {
   return format(number, abs < 10 && abs % 1 ? 2 : 0);
 }
 
+function formatMoneyFull(value, decimals = 2) {
+  const formatted = formatNumberFull(value, decimals);
+  return formatted === EMPTY_DASH ? EMPTY_DASH : `$ ${formatted}`;
+}
+
+function formatMoneyShort(value, decimals = 2) {
+  const formatted = formatNumberShort(value, decimals);
+  return formatted === EMPTY_DASH ? EMPTY_DASH : `$ ${formatted}`;
+}
+
+function formatPrice(value) {
+  return formatMoneyFull(value);
+}
+
 function formatCellValue(value) {
   const number = toFiniteNumber(value);
   if (number == null) return EMPTY_DASH;
@@ -164,12 +178,20 @@ function pvFmt(n, decimals = 2) {
   return formatNumberShort(n, decimals);
 }
 
+function pvFmtMoney(n, decimals = 2) {
+  return formatMoneyShort(n, decimals);
+}
+
 function pvFmtInt(n) {
   return formatNumberFull(n, 0);
 }
 
 function pvFmtLabel(n) {
   return formatNumberShort(n);
+}
+
+function pvFmtMoneyLabel(n) {
+  return formatMoneyShort(n);
 }
 
 function pvFmtMonthLabel(isoMonth) {
@@ -393,19 +415,15 @@ function pvSetDropdownDraftByVisibleIndex(mountId, index) {
 }
 
 function pvClearDropdownDraft(mountId) {
-  const state = PV.dropdowns[mountId];
-  if (!state) return;
-  state.draft = '';
-  state.query = '';
-  const search = document.getElementById(`${mountId}Search`);
-  if (search) search.value = '';
-  pvRenderDropdownOptions(mountId);
+  pvClearDropdownSelection(mountId);
+  pvRefreshActiveDashboard();
 }
 
 function pvApplyDropdownSelection(mountId) {
   pvCommitDropdownSelection(mountId);
   pvUpdateDropdownTrigger(mountId);
   pvCloseDropdownPanel(mountId);
+  pvRefreshActiveDashboard();
 }
 
 function pvCommitDropdownSelection(mountId) {
@@ -428,6 +446,11 @@ function pvClearDropdownSelection(mountId) {
   pvRenderDropdownOptions(mountId);
   pvUpdateDropdownTrigger(mountId);
   pvCloseDropdownPanel(mountId);
+}
+
+function pvRefreshActiveDashboard() {
+  if (PV.activeTab === "articulo") pvLoadArticulo();
+  if (PV.activeTab === "cliente") pvLoadCliente();
 }
 
 function pvUpdateDropdownTrigger(mountId) {
@@ -578,7 +601,7 @@ function pvChartDefaults() {
   return {
     chart: { fontFamily: "inherit", toolbar: { show: false }, animations: { enabled: true, speed: 400 } },
     grid: { borderColor: "rgba(87,112,176,0.1)", strokeDashArray: 3 },
-    tooltip: { theme: "light", y: { formatter: (v) => formatNumberFull(v) } },
+    tooltip: { theme: "light", y: { formatter: (v) => formatMoneyFull(v) } },
   };
 }
 
@@ -600,7 +623,7 @@ function pvRenderLineChart(elId, months, series, yFormatter) {
     },
     yaxis: {
       labels: {
-        formatter: yFormatter || ((v) => formatNumberShort(v)),
+        formatter: yFormatter || ((v) => formatMoneyShort(v)),
       },
     },
     stroke: { width: 2.5, curve: "smooth" },
@@ -635,7 +658,7 @@ function pvRenderAreaChart(elId, months, series, yFormatter) {
     },
     yaxis: {
       labels: {
-        formatter: yFormatter || ((v) => formatNumberShort(v)),
+        formatter: yFormatter || ((v) => formatMoneyShort(v)),
       },
     },
     stroke: { curve: "smooth", width: 2 },
@@ -654,7 +677,7 @@ function pvRenderAreaChart(elId, months, series, yFormatter) {
     grid: { borderColor: "rgba(87,112,176,0.1)", strokeDashArray: 3 },
     tooltip: {
       theme: "light",
-      y: { formatter: (v) => formatNumberFull(v) },
+      y: { formatter: (v) => formatMoneyFull(v) },
     },
   };
   PV.charts[elId] = new ApexCharts(el, opts);
@@ -675,11 +698,11 @@ function pvRenderBarChart(elId, months, values, yFormatter) {
       categories: months.map(pvFmtMonthLabel),
       labels: { style: { fontSize: "11px" }, rotate: -30 },
     },
-    yaxis: { labels: { formatter: yFormatter || ((v) => formatNumberShort(v)) } },
+    yaxis: { labels: { formatter: yFormatter || ((v) => formatMoneyShort(v)) } },
     colors: [COLORS.brand700],
     dataLabels: { enabled: false },
     plotOptions: { bar: { borderRadius: 4, dataLabels: { enabled: false } } },
-    tooltip: { y: { formatter: (v) => formatNumberFull(v) } },
+    tooltip: { y: { formatter: (v) => formatMoneyFull(v) } },
     legend: { show: false },
   };
   PV.charts[elId] = new ApexCharts(el, opts);
@@ -702,7 +725,7 @@ function pvRenderDonutChart(elId, labels, values) {
       formatter: (val) => val.toFixed(1).replace(".", ",") + "%",
     },
     tooltip: {
-      y: { formatter: (v) => formatNumberFull(v) },
+      y: { formatter: (v) => formatMoneyFull(v) },
     },
   };
   PV.charts[elId] = new ApexCharts(el, opts);
@@ -737,7 +760,7 @@ function pvRenderTreemapChart(elId, data) {
         return `
           <div class="pv-treemap-tooltip">
             <div class="pv-treemap-tooltip__title">${pvEsc(point.x || EMPTY_DASH)}</div>
-            <div class="pv-treemap-tooltip__value">${formatNumberFull(point.y)}</div>
+            <div class="pv-treemap-tooltip__value">${formatMoneyFull(point.y)}</div>
           </div>`;
       },
     },
@@ -766,18 +789,18 @@ function pvRenderHBarChart(elId, categories, values, options = {}) {
     series: [{ name: "Valorizaci\u00f3n", data: values }],
     xaxis: {
       categories: (categories || []).map(cleanMojibakeText),
-      labels: { style: { fontSize: "11px" }, formatter: (v) => formatNumberShort(v) },
+      labels: { style: { fontSize: "11px" }, formatter: (v) => formatMoneyShort(v) },
     },
     yaxis: { labels: { style: { fontSize: "11px" }, maxWidth: 160 } },
     plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
     colors: [COLORS.brand500],
     dataLabels: {
       enabled: true,
-      formatter: (v) => formatNumberShort(v),
+      formatter: (v) => formatMoneyShort(v),
       offsetX: 6,
       style: { fontSize: "11px", fontWeight: 700 },
     },
-    tooltip: { y: { formatter: (v) => formatNumberFull(v) } },
+    tooltip: { y: { formatter: (v) => formatMoneyFull(v) } },
     legend: { show: false },
   };
   el.style.height = `${height}px`;
@@ -839,12 +862,12 @@ async function pvLoadArticulo() {
     pvRenderKpiRow("artKpiRow", [
       {
         label: "Total valorizado",
-        value: pvFmt(d.total_valorizado),
+        value: pvFmtMoney(d.total_valorizado),
         sub: "Suma de valorizaci\u00f3n estimada",
       },
       {
         label: "Mediana precio unitario",
-        value: d.mediana_precio_unitario != null ? formatNumberFull(d.mediana_precio_unitario) : EMPTY_DASH,
+        value: d.mediana_precio_unitario != null ? formatPrice(d.mediana_precio_unitario) : EMPTY_DASH,
         sub: "Mediana de precio por unidad",
       },
       {
@@ -868,7 +891,7 @@ async function pvLoadArticulo() {
       "artPrecioChart",
       d.months || [],
       [{ name: "Mediana precio unitario", data: d.values || [] }],
-      (v) => pvFmtLabel(v)
+      (v) => pvFmtMoneyLabel(v)
     );
   } else {
     pvRenderChartError("artPrecioChart");
@@ -939,7 +962,7 @@ async function pvLoadCliente() {
     pvRenderKpiRow("cliKpiRow", [
       {
         label: "Total valorizado",
-        value: pvFmt(d.total_valorizado),
+        value: pvFmtMoney(d.total_valorizado),
         sub: "Suma de valorizaci\u00f3n estimada",
       },
       {
