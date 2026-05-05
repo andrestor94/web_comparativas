@@ -1987,6 +1987,30 @@
   font-weight: 700;
 }
 
+.pf-page--private .pv-treemap-tooltip,
+.pf-page--private .pv-treemap-tooltip * {
+  color: #fff !important;
+}
+
+.pf-page--private .pv-treemap-tooltip {
+  padding: 0.65rem 0.75rem;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.pf-page--private .pv-treemap-tooltip__title {
+  max-width: 260px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.pf-page--private .pv-treemap-tooltip__value {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .pf-page--private .pv-ranking-card,
 .pf-page--private .pv-treemap-card {
   height: 360px;
