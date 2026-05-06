@@ -223,6 +223,20 @@ h4 {
   gap: .5rem;
 }
 
+@media (max-width: 768px) {
+  .process-header {
+    padding-right: 1rem;
+  }
+
+  .ph-right {
+    position: static;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-top: .5rem;
+  }
+}
+
 .ph-actions .btn {
   padding: .28rem .55rem;
   font-size: .8rem;
@@ -306,6 +320,18 @@ h4 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: .5rem
     /* Reduced from .75rem */
+}
+
+@media (max-width: 768px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpi-card {
@@ -402,6 +428,18 @@ h4 {
   /* Restored larger height */
 }
 
+@media (max-width: 768px) {
+  .chart-treemap {
+    height: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chart-treemap {
+    height: 240px;
+  }
+}
+
 .chart-donut>canvas,
 .chart-bar>canvas,
 .chart-treemap>canvas {
@@ -434,6 +472,21 @@ h4 {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 1rem
+}
+
+@media (max-width: 992px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 576px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-grid .span-6 {
+    grid-column: 1 / -1;
+  }
 }
 
 .pane {
@@ -832,6 +885,13 @@ body,
 /* Búsqueda y chips */
 .search {
   min-width: 260px
+}
+
+@media (max-width: 576px) {
+  .search {
+    min-width: 0;
+    width: 100%;
+  }
 }
 
 .cell-prov {
