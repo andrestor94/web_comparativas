@@ -7,9 +7,10 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud
+from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
+from web_comparativas.notifications_service import create_notification
 
 # Setup templates
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -584,6 +585,20 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
             .order_by(User.name.asc())
             .all()
         ) if visible_ids else []
+        group_by_user = {}
+        if visible_ids:
+            memberships = (
+                s.query(GroupMember)
+                .join(Group, Group.id == GroupMember.group_id)
+                .filter(GroupMember.user_id.in_(visible_ids))
+                .order_by(GroupMember.added_at.desc())
+                .all()
+            )
+            for membership in memberships:
+                group_by_user.setdefault(
+                    int(membership.user_id),
+                    membership.group.name if membership.group else "Sin grupo",
+                )
 
         # 2. Datos de presencia en vivo (puede ser vacío si nadie está activo ahora)
         live_map = {}
@@ -629,7 +644,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
                 "email":    u.email or "",
                 "role":     (u.role or "analista").lower(),
                 "unit":     (u.unit_business or "Sin unidad").title(),
-                "group":    st.get("group") or "Sin grupo",
+                "group":    group_by_user.get(uid) or st.get("group") or "Sin grupo",
                 "created":  str(getattr(u, "created_at", "") or "")[:10],
                 # Actividad (real si existe, 0 si no hay datos aún)
                 "score":       int(st.get("adoption_score") or 0),
@@ -722,6 +737,16 @@ class TrackEventSchema(BaseModel):
     duration_ms: Optional[int] = None
     extra_data: Optional[Dict[str, Any]] = None
 
+class TrackingMessagePayload(BaseModel):
+    title: str = "Mensaje desde SIC"
+    message: str
+
+class TrackingAssignGroupPayload(BaseModel):
+    group_id: int
+
+class TrackingCreateGroupPayload(BaseModel):
+    name: str
+
 @router.post("/api/track-event", response_class=JSONResponse)
 def sic_api_track_event(
     request: Request,
@@ -772,6 +797,178 @@ def sic_api_user_profile(
         session.close()
 
     return JSONResponse({"ok": True, "profile": profile})
+
+@router.post("/api/tracking/users/{user_id}/message", response_class=JSONResponse)
+def sic_api_tracking_send_message(
+    request: Request,
+    user_id: int,
+    payload: TrackingMessagePayload,
+    user: User = Depends(sic_access_required),
+):
+    user_role = (user.role or "").lower()
+    if user_role not in ["admin", "supervisor", "auditor"]:
+        return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
+
+    message = (payload.message or "").strip()
+    title = (payload.title or "Mensaje desde SIC").strip()[:120]
+    if not message:
+        return JSONResponse({"ok": False, "error": "El mensaje no puede estar vacio."}, status_code=400)
+
+    session = db_session()
+    try:
+        visible_ids = get_visible_user_ids(session, user)
+        visible_ids.add(int(user.id))
+        if user_id not in visible_ids:
+            return JSONResponse({"ok": False, "error": "No autorizado para contactar este usuario"}, status_code=403)
+
+        target = session.get(User, user_id)
+        if not target:
+            return JSONResponse({"ok": False, "error": "Usuario no encontrado"}, status_code=404)
+
+        sender_name = user_display(user) or user.email or "SIC"
+        notif = create_notification(
+            session,
+            user_id=target.id,
+            title=title,
+            message=f"{sender_name}: {message}",
+            category="sic",
+            link="/notifications",
+        )
+        log_usage_event(
+            user=user,
+            action_type="sic_tracking_message",
+            section="sic_tracking",
+            resource_id=str(target.id),
+            request=request,
+            extra_data={"notification_id": notif.id},
+        )
+    finally:
+        session.close()
+
+    return JSONResponse({"ok": True, "message": "Mensaje enviado como notificacion interna."})
+
+@router.get("/api/tracking/groups", response_class=JSONResponse)
+def sic_api_tracking_groups(
+    request: Request,
+    user: User = Depends(sic_access_required),
+):
+    user_role = (user.role or "").lower()
+    if user_role not in ["admin", "supervisor"]:
+        return JSONResponse({"ok": True, "can_assign": False, "groups": []})
+
+    session = db_session()
+    try:
+        q = session.query(Group).order_by(Group.name.asc())
+        if user_role == "supervisor":
+            bu = (user.unit_business or "").strip()
+            q = q.filter(or_(Group.business_unit == None, Group.business_unit == "", Group.business_unit == bu))
+        groups = [
+            {"id": g.id, "name": g.name, "business_unit": g.business_unit or ""}
+            for g in q.all()
+        ]
+    finally:
+        session.close()
+
+    return JSONResponse({"ok": True, "can_assign": True, "groups": groups})
+
+@router.post("/api/tracking/groups", response_class=JSONResponse)
+def sic_api_tracking_create_group(
+    request: Request,
+    payload: TrackingCreateGroupPayload,
+    user: User = Depends(sic_access_required),
+):
+    user_role = (user.role or "").lower()
+    if user_role not in ["admin", "supervisor"]:
+        return JSONResponse({"ok": False, "error": "No tenes permisos para crear grupos."}, status_code=403)
+
+    name = (payload.name or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Ingresá un nombre para el grupo."}, status_code=400)
+
+    business_unit = None if user_role == "admin" else (user.unit_business or "Otros")
+    session = db_session()
+    try:
+        exists = (
+            session.query(Group)
+            .filter(func.lower(func.trim(Group.name)) == name.lower())
+            .first()
+        )
+        if exists:
+            return JSONResponse({"ok": False, "error": "Ya existe un grupo con ese nombre."}, status_code=409)
+
+        group = Group(
+            name=name,
+            business_unit=business_unit,
+            created_by_user_id=user.id,
+            created_at=dt.datetime.utcnow(),
+        )
+        session.add(group)
+        session.flush()
+        session.add(GroupMember(
+            group_id=group.id,
+            user_id=user.id,
+            role_in_group="owner",
+            added_by_user_id=user.id,
+        ))
+        session.commit()
+        created = {"id": group.id, "name": group.name, "business_unit": group.business_unit or ""}
+    except Exception as exc:
+        session.rollback()
+        return JSONResponse({"ok": False, "error": f"No se pudo crear el grupo: {exc}"}, status_code=500)
+    finally:
+        session.close()
+
+    return JSONResponse({"ok": True, "group": created})
+
+@router.post("/api/tracking/users/{user_id}/group", response_class=JSONResponse)
+def sic_api_tracking_assign_group(
+    request: Request,
+    user_id: int,
+    payload: TrackingAssignGroupPayload,
+    user: User = Depends(sic_access_required),
+):
+    user_role = (user.role or "").lower()
+    if user_role not in ["admin", "supervisor"]:
+        return JSONResponse({"ok": False, "error": "No tenes permisos para asignar grupos."}, status_code=403)
+
+    session = db_session()
+    try:
+        target = session.get(User, user_id)
+        group = session.get(Group, int(payload.group_id))
+        if not target:
+            return JSONResponse({"ok": False, "error": "Usuario no encontrado"}, status_code=404)
+        if not group:
+            return JSONResponse({"ok": False, "error": "Grupo no encontrado"}, status_code=404)
+        if not user.can_add_member(target, group):
+            return JSONResponse({"ok": False, "error": "No autorizado para asignar este usuario a ese grupo"}, status_code=403)
+
+        assigned_group = {"id": group.id, "name": group.name}
+        session.query(GroupMember).filter(GroupMember.user_id == target.id).delete(synchronize_session=False)
+        session.add(GroupMember(
+            group_id=group.id,
+            user_id=target.id,
+            role_in_group="member",
+            added_by_user_id=user.id,
+        ))
+        session.commit()
+        try:
+            log_usage_event(
+                user=user,
+                action_type="sic_tracking_assign_group",
+                section="sic_tracking",
+                resource_id=str(target.id),
+                request=request,
+                extra_data={"group_id": assigned_group["id"], "group_name": assigned_group["name"]},
+            )
+        except Exception:
+            pass
+    except Exception as exc:
+        session.rollback()
+        return JSONResponse({"ok": False, "error": f"No se pudo asignar el grupo: {exc}"}, status_code=500)
+    finally:
+        session.close()
+
+    return JSONResponse({"ok": True, "group": assigned_group})
 
 @router.get("/api/usage/live-users", response_class=JSONResponse)
 def sic_api_usage_live_users(

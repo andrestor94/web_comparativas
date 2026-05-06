@@ -110,6 +110,9 @@
     tablero_comparativa: 'Tablero de Comparativa',
     vistas_guardadas: 'Vistas Guardadas',
     cargas_nueva: 'Nueva Carga',
+    nueva_carga: 'Nueva Carga',
+    panel_live: 'Panel Live',
+    fuentes_nueva: 'Fuentes Nueva',
     cargas_edicion: 'Edicion de Carga',
     fuentes_externas: 'Fuentes Externas',
     descargas: 'Descargas',
@@ -187,6 +190,9 @@
     'cierre de sesion':           'Cierre de Sesión',
     'api tracking interno':       'API Tracking Interno',
     'api tracking (interno)':     'API Tracking Interno',
+    'panel live':                 'Panel Live',
+    'nueva carga':                'Nueva Carga',
+    'fuentes nueva':              'Fuentes Nueva',
   };
 
   function humanizeSectionKey(raw) {
@@ -234,9 +240,6 @@
     // 4. Eventos técnicos conocidos — silenciar sin warning
     if (KNOWN_TECHNICAL_LABELS.has(lk)) return raw;
     const label = humanizeSectionKey(raw);
-    if (label && window.console && console.warn) {
-      console.warn('[tracking] ruta sin mapping explicito:', raw, '->', label);
-    }
     return label;
   }
 
@@ -631,6 +634,17 @@
   let profScoreChart = null;
   let activeMetric = 'events';
   let latestUsageSummary = null;
+
+  try {
+    JSON.parse(localStorage.getItem('sic_tracked_users') || '[]')
+      .forEach(id => trackedUsers.add(Number(id)));
+  } catch (_) {}
+
+  function persistTrackedUsers() {
+    try {
+      localStorage.setItem('sic_tracked_users', JSON.stringify([...trackedUsers]));
+    } catch (_) {}
+  }
 
   const METRIC_CONFIG = {
     events:   { label: 'Eventos',       short: 'eventos', color: '#3b82f6', key: 'events' },
@@ -1780,54 +1794,179 @@
     _toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2800);
   }
 
+  async function postTrackingJson(url, payload) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || data.detail || 'No se pudo completar la accion.');
+    }
+    return data;
+  }
+
   /* ── Group assigner popover ── */
   let _activePopover = null;
   function closeActivePopover() {
     if (_activePopover) { _activePopover.remove(); _activePopover = null; }
   }
-  function openGroupAssigner(u) {
+  async function openGroupAssigner(u) {
     closeActivePopover();
-    const groups = [...new Set(MOCK_USERS.map(x => x.group).filter(Boolean))];
     const btn    = document.getElementById('btn-assign-group');
     if (!btn) return;
     const rect   = btn.getBoundingClientRect();
     const pop    = document.createElement('div');
     pop.className = 'grp-popover';
-    pop.style.cssText = `top:${rect.bottom + window.scrollY + 4}px;left:${rect.left + window.scrollX}px;`;
-    const currentGroup = userGroupOverrides.get(u.id) || u.group;
-    pop.innerHTML = groups.map(g => `
-      <div class="grp-popover-item${g === currentGroup ? ' selected' : ''}" data-group="${esc(g)}">
-        <i class="bi bi-people" style="font-size:11px;"></i>${esc(g)}
-      </div>
-    `).join('');
-    pop.querySelectorAll('.grp-popover-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const chosen = item.dataset.group;
-        userGroupOverrides.set(u.id, chosen);
-        const mu = MOCK_USERS.find(x => x.id === u.id);
-        if (mu) mu.group = chosen;
-        closeActivePopover();
-        showToast(`Grupo asignado: ${chosen}`, 'success');
-        populateProfile(MOCK_USERS.find(x => x.id === u.id) || u);
-      });
-    });
+    pop.style.cssText = `top:${rect.bottom + window.scrollY + 4}px;left:${rect.left + window.scrollX}px;min-width:240px;`;
+    pop.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:#94a3b8;">Cargando grupos...</div>';
+    pop.addEventListener('click', e => e.stopPropagation());
     document.body.appendChild(pop);
     _activePopover = pop;
     setTimeout(() => document.addEventListener('click', closeActivePopover, { once: true }), 0);
+
+    const renderCreateGroup = (message = 'No hay grupos disponibles para asignar.') => {
+      pop.innerHTML = `
+        <div style="padding:12px 14px 6px;font-size:12px;color:#cbd5e1;">${esc(message)}</div>
+        <div style="padding:6px 12px 12px;">
+          <label style="display:block;font-size:10.5px;color:#94a3b8;margin-bottom:5px;">Crear grupo</label>
+          <input id="trk-new-group-name" type="text" placeholder="Nombre del grupo"
+            style="width:100%;background:#0f1729;border:1px solid #1e2d4a;border-radius:6px;color:#e2e8f0;font-size:12px;padding:8px;outline:none;">
+          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;">
+            <button id="trk-new-group-cancel" class="btn-prof-action btn-prof-ghost" style="font-size:11px;padding:4px 10px;">Cancelar</button>
+            <button id="trk-new-group-save" class="btn-prof-action btn-prof-primary" style="font-size:11px;padding:4px 10px;">Crear grupo</button>
+          </div>
+        </div>`;
+      pop.querySelector('#trk-new-group-cancel')?.addEventListener('click', closeActivePopover);
+      pop.querySelector('#trk-new-group-save')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const input = pop.querySelector('#trk-new-group-name');
+        const saveBtn = pop.querySelector('#trk-new-group-save');
+        const name = (input?.value || '').trim();
+        if (!name) {
+          showToast('Ingresá un nombre para el grupo.', 'warn');
+          input?.focus();
+          return;
+        }
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Creando...';
+        }
+        try {
+          const created = await postTrackingJson('/sic/api/tracking/groups', { name });
+          const group = created.group;
+          showToast(`Grupo creado: ${group.name}`, 'success');
+          renderGroups([group]);
+        } catch (err) {
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Crear grupo';
+          }
+          showToast(err.message || 'No se pudo crear el grupo.', 'warn');
+        }
+      });
+      setTimeout(() => pop.querySelector('#trk-new-group-name')?.focus(), 0);
+    };
+
+    const renderGroups = (groups) => {
+      const currentGroup = userGroupOverrides.get(u.id) || u.group;
+      pop.innerHTML = `
+        <div style="padding:8px 14px 6px;font-size:11px;font-weight:700;color:#e2e8f0;">Asignar grupo a ${esc(u.username)}</div>
+        ${groups.map(g => `
+          <div class="grp-popover-item${g.name === currentGroup ? ' selected' : ''}" data-group-id="${g.id}" data-group="${esc(g.name)}">
+            <i class="bi bi-people" style="font-size:11px;"></i>${esc(g.name)}
+          </div>
+        `).join('')}
+        <div style="border-top:1px solid #334155;margin-top:4px;padding-top:4px;">
+          <button id="trk-create-group-inline" class="grp-popover-item" style="width:100%;border:0;background:transparent;text-align:left;">
+            <i class="bi bi-plus-circle" style="font-size:11px;"></i>Crear grupo
+          </button>
+        </div>`;
+      pop.querySelector('#trk-create-group-inline')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        renderCreateGroup('Creá un nuevo grupo y luego asignalo al usuario.');
+      });
+      pop.querySelectorAll('.grp-popover-item[data-group-id]').forEach(item => {
+        item.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const chosen = item.dataset.group;
+          const groupId = Number(item.dataset.groupId);
+          if (!groupId) {
+            showToast('Grupo invalido.', 'warn');
+            return;
+          }
+          item.style.opacity = '.65';
+          item.style.pointerEvents = 'none';
+          try {
+            await postTrackingJson(`/sic/api/tracking/users/${encodeURIComponent(u.id)}/group`, {
+              group_id: groupId,
+            });
+            userGroupOverrides.set(u.id, chosen);
+            const mu = MOCK_USERS.find(x => x.id === u.id);
+            if (mu) mu.group = chosen;
+            closeActivePopover();
+            showToast(`Grupo asignado: ${chosen}`, 'success');
+            populateProfile(MOCK_USERS.find(x => x.id === u.id) || u);
+            renderLiveTable();
+            renderByUserTable();
+          } catch (err) {
+            item.style.opacity = '';
+            item.style.pointerEvents = '';
+            showToast(err.message || 'No se pudo asignar el grupo.', 'warn');
+          }
+        });
+      });
+    };
+
+    try {
+      const resp = await fetch('/sic/api/tracking/groups', { credentials: 'same-origin' });
+      const data = await resp.json();
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'No se pudieron cargar los grupos.');
+      if (!data.can_assign) {
+        pop.innerHTML = '<div style="padding:12px 14px;font-size:12px;color:#cbd5e1;">No tenes permisos para asignar grupos desde esta vista.</div>';
+        return;
+      }
+      const groups = Array.isArray(data.groups) ? data.groups : [];
+      if (!groups.length) {
+        renderCreateGroup();
+        return;
+      }
+
+      renderGroups(groups);
+    } catch (err) {
+      pop.innerHTML = `<div style="padding:12px 14px;font-size:12px;color:#fca5a5;">${esc(err.message || 'No se pudieron cargar los grupos.')}</div>`;
+    }
   }
 
   /* ── Toggle watch ── */
-  function toggleWatchUser(u) {
+  function updateWatchButton(u) {
     const btn = document.getElementById('btn-mark-watch');
-    if (trackedUsers.has(u.id)) {
-      trackedUsers.delete(u.id);
-      if (btn) btn.classList.remove('watch-active');
-      showToast(`Seguimiento removido: ${u.username}`, 'info');
+    if (!btn) return;
+    const active = trackedUsers.has(Number(u.id));
+    btn.classList.toggle('watch-active', active);
+    btn.innerHTML = active
+      ? '<i class="bi bi-flag-fill"></i> Quitar seguimiento'
+      : '<i class="bi bi-flag"></i> Marcar seguimiento';
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  }
+
+  function toggleWatchUser(u) {
+    const id = Number(u.id);
+    if (trackedUsers.has(id)) {
+      trackedUsers.delete(id);
+      persistTrackedUsers();
+      showToast(`Seguimiento quitado: ${u.username}`, 'info');
     } else {
-      trackedUsers.add(u.id);
-      if (btn) btn.classList.add('watch-active');
-      showToast(`Marcado en seguimiento: ${u.username}`, 'warn');
+      trackedUsers.add(id);
+      persistTrackedUsers();
+      showToast(`Usuario marcado para seguimiento: ${u.username}`, 'warn');
     }
+    populateProfile(MOCK_USERS.find(x => Number(x.id) === id) || u);
   }
 
   function populateProfile(u) {
@@ -1855,6 +1994,7 @@
       <span class="chip chip-blue" style="text-transform:capitalize;">${esc(u.role)}</span>
       <span class="chip chip-gray">${esc(u.unit)}</span>
       <span class="chip chip-purple">${esc(u.group)}</span>
+      ${trackedUsers.has(Number(u.id)) ? '<span class="chip chip-yellow"><i class="bi bi-flag-fill"></i> En seguimiento</span>' : ''}
       ${statusPill(u.status)}
     `;
 
@@ -1946,11 +2086,20 @@
     // Alerts for this user — usa alertas reales de API si existen, si no las del mock
     const alertsEl = document.getElementById('prof-alerts');
     if (alertsEl) {
+      const manualTrackingAlert = trackedUsers.has(Number(u.id)) ? `
+        <div style="padding:9px 12px;border-left:2px solid;border-left-color:#eab308;
+          background:rgba(234,179,8,.08);border-radius:6px;margin-bottom:6px;">
+          <div style="font-size:12px;font-weight:600;color:#fde68a;margin-bottom:3px;">
+            <i class="bi bi-flag-fill me-1"></i>Usuario marcado para seguimiento manual
+          </div>
+          <div style="font-size:11px;color:#fef3c7;">Este usuario fue priorizado para revisi&oacute;n durante esta sesi&oacute;n.</div>
+        </div>
+      ` : '';
       const apiAlerts = u._api_alerts;
       if (apiAlerts && apiAlerts.length) {
         // Alertas reales desde el endpoint de perfil
         const sevColor = { alta: '#ef4444', media: '#f59e0b', baja: '#3b82f6', info: '#3b82f6' };
-        alertsEl.innerHTML = apiAlerts.map(a => `
+        alertsEl.innerHTML = manualTrackingAlert + apiAlerts.map(a => `
           <div style="padding:9px 12px;border-left:2px solid;border-left-color:${sevColor[a.severity] || '#3b82f6'};
             background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:6px;">
             <div style="font-size:12px;font-weight:600;color:#e2e8f0;margin-bottom:3px;">
@@ -1961,7 +2110,7 @@
         `).join('');
       } else {
         const userAlerts = MOCK_ALERTS.filter(a => a.userId === u.id && !resolvedAlerts.has(a.id));
-        alertsEl.innerHTML = userAlerts.length
+        const mockAlertsHtml = userAlerts.length
           ? userAlerts.map(a => `
             <div style="padding:9px 12px;border-left:2px solid;border-left-color:${a.severity==='alta'?'#ef4444':a.severity==='media'?'#f59e0b':'#3b82f6'};
               background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:6px;">
@@ -1971,6 +2120,9 @@
               <div style="font-size:11px;color:var(--t-muted);">${esc(a.rec)}</div>
             </div>
           `).join('')
+          : '';
+        alertsEl.innerHTML = (manualTrackingAlert || mockAlertsHtml)
+          ? manualTrackingAlert + mockAlertsHtml
           : '<div style="font-size:12px;color:var(--t-muted);padding:10px;">Sin alertas activas.</div>';
       }
     }
@@ -1993,7 +2145,7 @@
     if (btnWatch) {
       const fresh = btnWatch.cloneNode(true);
       btnWatch.parentNode.replaceChild(fresh, btnWatch);
-      fresh.classList.toggle('watch-active', trackedUsers.has(u.id));
+      updateWatchButton(u);
       fresh.addEventListener('click', () => toggleWatchUser(u));
     }
   }
@@ -2024,12 +2176,28 @@
     _activePopover = pop;
     pop.querySelector('#msg-composer-text')?.focus();
     pop.querySelector('#msg-cancel-btn')?.addEventListener('click', closeActivePopover);
-    pop.querySelector('#msg-send-btn')?.addEventListener('click', () => {
+    pop.querySelector('#msg-send-btn')?.addEventListener('click', async () => {
+      const sendBtn = pop.querySelector('#msg-send-btn');
       const text = (pop.querySelector('#msg-composer-text')?.value || '').trim();
       if (!text) { showToast('Escribí un mensaje antes de enviar.', 'warn'); return; }
-      closeActivePopover();
-      showToast(`Mensaje enviado a ${u.username}`, 'success');
-      // TODO: conectar con endpoint real de mensajería cuando esté disponible
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.8rem;height:.8rem;"></span> Enviando';
+      }
+      try {
+        await postTrackingJson(`/sic/api/tracking/users/${encodeURIComponent(u.id)}/message`, {
+          title: 'Mensaje desde SIC',
+          message: text,
+        });
+        closeActivePopover();
+        showToast(`Mensaje enviado a ${u.username}`, 'success');
+      } catch (err) {
+        if (sendBtn) {
+          sendBtn.disabled = false;
+          sendBtn.innerHTML = '<i class="bi bi-send"></i> Enviar';
+        }
+        showToast(err.message || 'No se pudo enviar el mensaje.', 'warn');
+      }
     });
     setTimeout(() => document.addEventListener('click', e => {
       if (!pop.contains(e.target)) closeActivePopover();
