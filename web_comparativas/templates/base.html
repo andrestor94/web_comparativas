@@ -362,6 +362,13 @@
       -ms-overflow-style: none;
     }
 
+    .app.sidebar-collapsed .submenu-panel,
+    .app.sidebar-collapsed .submenu-panel.is-open {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+    }
+
     .submenu-panel.is-open::-webkit-scrollbar {
       display: none;
     }
@@ -392,24 +399,97 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 18px;
-      padding: 0 0.5rem;
+      position: relative;
+      min-height: 19px;
+      padding: 0.12rem 0.52rem;
       border-radius: 999px;
       margin-left: 0.5rem;
-      font-size: 0.58rem;
+      font-size: 0.57rem;
       line-height: 1;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      font-weight: 800;
+      font-weight: 750;
       vertical-align: middle;
       white-space: nowrap;
+      overflow: hidden;
+      max-width: 4rem;
+      transition: opacity 0.18s ease, transform 0.18s ease, max-width 0.18s ease, margin 0.18s ease;
     }
 
     .sidebar-nav-pill--new {
-      color: #8a5a09;
-      border: 1px solid rgba(245, 158, 11, 0.26);
-      background: linear-gradient(180deg, rgba(255, 247, 223, 0.98), rgba(255, 239, 196, 0.94));
-      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.12);
+      color: #dcecff;
+      border: 1px solid rgba(147, 197, 253, 0.36);
+      background:
+        linear-gradient(180deg, rgba(59, 130, 246, 0.28), rgba(37, 99, 235, 0.16)),
+        rgba(15, 23, 42, 0.12);
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      animation: sidebar-new-pill-breathe 3.8s ease-in-out infinite;
+    }
+
+    .sidebar-nav-pill--new::before {
+      content: "";
+      position: absolute;
+      inset: 1px auto 1px -45%;
+      width: 38%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+      transform: skewX(-16deg);
+      animation: sidebar-new-pill-sheen 5.2s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .app.sidebar-collapsed .sidebar-nav-pill {
+      opacity: 0;
+      visibility: hidden;
+      max-width: 0;
+      min-height: 0;
+      padding: 0;
+      margin-left: 0;
+      border-width: 0;
+      transform: scale(0.96);
+      animation: none;
+    }
+
+    .app.sidebar-collapsed .sidebar-nav-pill::before {
+      animation: none;
+    }
+
+    @keyframes sidebar-new-pill-breathe {
+      0%,
+      100% {
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      }
+
+      50% {
+        box-shadow: 0 5px 18px rgba(59, 130, 246, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+      }
+    }
+
+    @keyframes sidebar-new-pill-sheen {
+      0%,
+      62% {
+        left: -45%;
+        opacity: 0;
+      }
+
+      72% {
+        opacity: 0.75;
+      }
+
+      86%,
+      100% {
+        left: 110%;
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sidebar-nav-pill--new,
+      .sidebar-nav-pill--new::before {
+        animation: none;
+      }
     }
 
     .sidebar .submenu-section-title {
@@ -619,7 +699,7 @@
         {% if user and r in ['admin','supervisor','auditor'] %}
         <a href="/mercado-privado/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/reporte-perfiles') %}active{% endif %}">
-          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles</div>
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
         </a>
         {% endif %}
 
@@ -945,14 +1025,38 @@
     };
 
     // ====== SIDEBAR DESKTOP TOGGLE (Global) ======
+    function getAppContainer() {
+      return document.getElementById('app-container');
+    }
+
+    function isDesktopSidebarCollapsed() {
+      var appContainer = getAppContainer();
+      return !!(appContainer && appContainer.classList.contains('sidebar-collapsed'));
+    }
+
+    function syncSidebarSubmenus() {
+      document.querySelectorAll('[data-submenu-target]').forEach(function (trigger) {
+        var targetSelector = trigger.getAttribute('data-submenu-target');
+        var panel = targetSelector ? document.querySelector(targetSelector) : null;
+        if (!panel) return;
+
+        var isOpen = trigger.getAttribute('aria-expanded') === 'true' || panel.classList.contains('is-open');
+        applySidebarSubmenuState(panel, isOpen);
+      });
+    }
+
+    function setDesktopSidebarCollapsed(collapsed) {
+      var appContainer = getAppContainer();
+      if (!appContainer) return;
+
+      appContainer.classList.toggle('sidebar-collapsed', collapsed);
+      localStorage.setItem('siem_sidebar_collapsed', collapsed ? 'true' : 'false');
+      syncSidebarSubmenus();
+    }
+
     window.toggleDesktopSidebar = function (e) {
       if (e) e.preventDefault();
-      var appContainer = document.getElementById('app-container');
-      if (appContainer) {
-        appContainer.classList.toggle('sidebar-collapsed');
-        var isCollapsed = appContainer.classList.contains('sidebar-collapsed');
-        localStorage.setItem('siem_sidebar_collapsed', isCollapsed ? 'true' : 'false');
-      }
+      setDesktopSidebarCollapsed(!isDesktopSidebarCollapsed());
     };
 
     // Close sidebar on ESC
@@ -972,15 +1076,16 @@
     function applySidebarSubmenuState(panel, open) {
       if (!panel) return;
 
+      var visibleOpen = open && !isDesktopSidebarCollapsed();
       panel.classList.toggle('is-open', open);
-      panel.style.display = open ? 'flex' : 'none';
-      panel.style.flexDirection = open ? 'column' : '';
-      panel.style.gap = open ? '0.15rem' : '';
-      panel.style.visibility = open ? 'visible' : 'hidden';
-      panel.style.opacity = open ? '1' : '0';
+      panel.style.display = visibleOpen ? 'flex' : 'none';
+      panel.style.flexDirection = visibleOpen ? 'column' : '';
+      panel.style.gap = visibleOpen ? '0.15rem' : '';
+      panel.style.visibility = visibleOpen ? 'visible' : 'hidden';
+      panel.style.opacity = visibleOpen ? '1' : '0';
 
       Array.prototype.forEach.call(panel.children, function (child) {
-        if (!open) {
+        if (!visibleOpen) {
           child.style.display = '';
           child.style.visibility = '';
           child.style.opacity = '';
@@ -1006,14 +1111,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-      document.querySelectorAll('[data-submenu-target]').forEach(function (trigger) {
-        var targetSelector = trigger.getAttribute('data-submenu-target');
-        var panel = targetSelector ? document.querySelector(targetSelector) : null;
-        if (!panel) return;
-
-        var isOpen = trigger.getAttribute('aria-expanded') === 'true' || panel.classList.contains('is-open');
-        applySidebarSubmenuState(panel, isOpen);
-      });
+      syncSidebarSubmenus();
     });
 
     document.addEventListener('click', function (e) {
@@ -1028,7 +1126,12 @@
       var panel = document.querySelector(targetSelector);
       if (!panel) return;
 
-      var willOpen = trigger.getAttribute('aria-expanded') !== 'true';
+      var wasCollapsed = isDesktopSidebarCollapsed();
+      if (wasCollapsed) {
+        setDesktopSidebarCollapsed(false);
+      }
+
+      var willOpen = wasCollapsed || trigger.getAttribute('aria-expanded') !== 'true';
 
       // Accordion mode: Close other open submenus
       if (willOpen) {

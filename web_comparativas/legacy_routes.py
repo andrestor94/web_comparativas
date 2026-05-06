@@ -6263,6 +6263,8 @@ def my_password_submit(
         require_roles("admin", "analista", "auditor", "supervisor", "gerente")
     ),
 ):
+    force_change = bool(getattr(user, "must_change_password", False))
+
     if not verify_password(actual, user.password_hash):
         return RedirectResponse(
             "/mi/password?error=Contrase├▒a%20actual%20incorrecta",
@@ -6281,11 +6283,20 @@ def my_password_submit(
     try:
         user.password_hash = hash_password(nueva)
         # Si tenía cambio obligatorio pendiente, lo limpiamos
-        if getattr(user, "must_change_password", False):
+        if force_change:
             user.must_change_password = False
         db_session.add(user)
         db_session.commit()
-        return RedirectResponse("/mi/password?ok=1", status_code=303)
+        ctx = {
+            "request": request,
+            "user": user,
+            "market_context": "account",
+            "error": "",
+            "ok": "",
+            "force": False,
+            "redirect_after_password_change": True,
+        }
+        return templates.TemplateResponse("account_password.html", ctx)
     except Exception:
         db_session.rollback()
         return RedirectResponse(
