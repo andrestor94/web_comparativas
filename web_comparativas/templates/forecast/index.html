@@ -508,11 +508,37 @@
     .fc-date-inline { flex-wrap: wrap; }
   }
   @media (max-width: 700px) {
-    .fc-wrap { flex-direction: column; height: auto; }
-    .fc-main { min-height: 80vh; }
+    .fc-wrap { flex-direction: column; height: auto; overflow: visible; }
+    .fc-main { min-height: unset; overflow: visible; }
+    .fc-content { overflow-y: visible; flex: none; }
+    /* Devuelve scroll al body cuando fc-wrap ya no tiene alto fijo */
+    body:has(#fcApp) { overflow: auto; }
     .fc-kpi-row { grid-template-columns: 1fr 1fr; }
-    .fc-view-tabs { padding: 8px 12px 0; }
-    .fc-view-tab { padding: 8px 14px; font-size: 0.78rem; }
+    .fc-view-tabs { padding: 8px 12px 0; overflow-x: auto; flex-wrap: nowrap; }
+    .fc-view-tab { padding: 8px 14px; font-size: 0.78rem; flex-shrink: 0; }
+    .fc-filter-bar { padding: 10px 12px; }
+    .fc-main__header { padding: 12px 14px 10px; }
+    .fc-content { padding: 14px 12px 30px; }
+
+    /*
+     * FIX: en desktop, #prodGrid usa flex:1 para llenarse del alto de su padre,
+     * que a su vez recibe alto definido desde fc-wrap {height: calc(100vh - 70px)}.
+     * En mobile, fc-wrap pasa a height:auto → la cadena de alto se rompe →
+     * fc-explorer-col solo tiene min-height:420px pero ningún hijo sabe el alto real →
+     * #prodGrid (flex:1; min-height:0) mide 0px → ag-Grid no renderiza filas.
+     * Solución: dar altura explícita al grid en mobile para que ag-Grid pueda renderizar.
+     */
+    .fc-explorer-col {
+      min-height: 0;        /* ya no necesita el mínimo de 420px — el grid tiene su propio alto */
+    }
+    .fc-explorer-col #prodGrid {
+      flex: none;
+      height: 380px;        /* alto fijo: ag-Grid domLayout:'normal' requiere alto explícito */
+    }
+  }
+  @media (max-width: 480px) {
+    .fc-kpi-row { grid-template-columns: 1fr; }
+    .fc-param-chip { margin-left: 0; }
   }
 </style>
 {% endblock %}

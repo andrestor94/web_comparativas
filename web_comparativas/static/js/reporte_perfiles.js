@@ -988,6 +988,9 @@ function pfChartBase(overrides = {}) {
       toolbar: { show: false },
       animations: { enabled: false },
       parentHeightOffset: 0,
+      width: "100%",
+      redrawOnParentResize: true,
+      redrawOnWindowResize: true,
     },
     colors: COLORS.palette,
     dataLabels: { enabled: false },
@@ -1032,6 +1035,22 @@ function pfChartBase(overrides = {}) {
       text: "Sin datos para el periodo seleccionado",
       style: { color: COLORS.slate, fontSize: "13px", fontFamily: "Outfit, system-ui, sans-serif" },
     },
+    responsive: [
+      {
+        breakpoint: 480,
+        options: {
+          chart: { height: 210 },
+          legend: {
+            position: "bottom",
+            fontSize: "10px",
+            itemMargin: { horizontal: 6, vertical: 2 },
+          },
+          xaxis: { labels: { rotate: -45, style: { fontSize: "9px" } } },
+          yaxis: { labels: { style: { fontSize: "9px" } } },
+          grid: { padding: { left: 0, right: 0 } },
+        },
+      },
+    ],
   };
 
   return {

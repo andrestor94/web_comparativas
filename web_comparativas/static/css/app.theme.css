@@ -1725,6 +1725,7 @@ body {
   margin-bottom: 2rem;
   padding-bottom: 1.25rem;
   border-bottom: 1px solid var(--ink-200);
+  flex-wrap: wrap;
 }
 .page-header__eyebrow {
   font-size: 0.7rem;
@@ -2094,6 +2095,7 @@ body {
   margin-bottom: 1.75rem;
   padding-bottom: 1.25rem;
   border-bottom: 1px solid var(--ink-200, #e2e8f0);
+  flex-wrap: wrap;
 }
 .h-page-header__eyebrow {
   font-size: 0.7rem;
@@ -2171,7 +2173,10 @@ body {
   grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
 }
-@media (max-width: 640px) {
+@media (max-width: 768px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
   .kpi-grid { grid-template-columns: 1fr; }
 }
 .kpi-card {

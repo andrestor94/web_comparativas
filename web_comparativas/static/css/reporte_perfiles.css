@@ -1025,6 +1025,15 @@
 
 .pf-chart-box {
   min-height: 250px;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.pf-chart-box .apexcharts-canvas,
+.pf-chart-box .apexcharts-svg {
+  max-width: 100% !important;
+  width: 100% !important;
 }
 
 .pf-chart-box .apexcharts-canvas {
@@ -1381,6 +1390,29 @@
   .pf-sf-group--compact,
   .pf-filter-actions {
     grid-column: span 2;
+  }
+}
+
+/* Cierra el hueco entre 720px (breakpoint propio) y 768px (responsive.css global) */
+@media (max-width: 768px) {
+  .pf-shell {
+    max-width: 100%;
+  }
+
+  /* Asegura que el aside del hero no fuerce ancho mínimo al colapsar */
+  .pf-hero__aside {
+    min-width: 0;
+  }
+
+  /* El card de estado dentro del aside tampoco puede tener ancho mínimo */
+  .pf-hero__status-card {
+    min-width: 0;
+  }
+
+  /* Asegura que las tarjetas de gráficos no excedan el ancho del contenedor */
+  .pf-card--chart {
+    max-width: 100%;
+    min-width: 0;
   }
 }
 
@@ -2047,8 +2079,35 @@
     grid-template-columns: 1fr;
   }
 
-  .pf-page--private .pf-hero__facts,
+  .pf-page--private .pf-hero__aside {
+    min-width: 0;
+  }
+
+  .pf-page--private .pf-hero__facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .pf-page--private .pf-filter-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Private: charts — garantiza ancho 100% para que ApexCharts se recalcule */
+  .pf-page--private .pf-chart-box,
+  .pf-page--private .pf-card--chart {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Private: ranking scroll — scroll interno, no rompe el layout */
+  .pf-page--private .pv-ranking-card {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .pf-page--private .pf-hero__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

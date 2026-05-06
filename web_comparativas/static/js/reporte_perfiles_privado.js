@@ -231,6 +231,9 @@ function pvSwitchTab(tab, btn) {
   btn.classList.add("active");
   document.getElementById(`tab-${tab}`).classList.add("active");
   PV.activeTab = tab;
+  // Gráficos que se renderizaron con la tab oculta pueden tener ancho incorrecto.
+  // Disparar resize para que ApexCharts recalcule con el ancho real visible.
+  setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
 }
 
 // Toolbar principal
@@ -599,9 +602,26 @@ function pvDestroyChart(id) {
 
 function pvChartDefaults() {
   return {
-    chart: { fontFamily: "inherit", toolbar: { show: false }, animations: { enabled: true, speed: 400 } },
+    chart: {
+      fontFamily: "inherit",
+      toolbar: { show: false },
+      animations: { enabled: true, speed: 400 },
+      width: "100%",
+      redrawOnParentResize: true,
+      redrawOnWindowResize: true,
+    },
     grid: { borderColor: "rgba(87,112,176,0.1)", strokeDashArray: 3 },
     tooltip: { theme: "light", y: { formatter: (v) => formatMoneyFull(v) } },
+    responsive: [
+      {
+        breakpoint: 480,
+        options: {
+          chart: { height: 200 },
+          legend: { position: "bottom", fontSize: "10px", itemMargin: { horizontal: 5, vertical: 2 } },
+          xaxis: { labels: { rotate: -45, style: { fontSize: "9px" } } },
+        },
+      },
+    ],
   };
 }
 
@@ -647,6 +667,9 @@ function pvRenderAreaChart(elId, months, series, yFormatter) {
       fontFamily: "inherit",
       toolbar: { show: false },
       animations: { enabled: true, speed: 400 },
+      width: "100%",
+      redrawOnParentResize: true,
+      redrawOnWindowResize: true,
     },
     series: (series || []).map(s => ({
       name: cleanMojibakeText(s.name || ""),

@@ -1,0 +1,315 @@
+/* =================================================================
+   responsive.css — Correcciones responsive SIEM (capa global)
+   Aplica a todos los dashboards. No modifica diseño desktop.
+   ================================================================= */
+
+/* ── 1. CONTENEDOR RAÍZ ─────────────────────────────────────────
+   Asegura que ningún hijo rompa el ancho del viewport.
+   No usamos overflow-x: hidden como solución principal;
+   solo donde el contenido realmente debe quedar contenido.
+   ─────────────────────────────────────────────────────────────── */
+
+.app,
+.main,
+.main-content {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Evita que gráficos canvas con width auto rompan el layout */
+canvas {
+  max-width: 100%;
+}
+
+/* ── 2. TABLAS RESPONSIVAS ──────────────────────────────────────
+   Cualquier tabla grande debe tener scroll horizontal INTERNO,
+   no romper la página entera.
+   ─────────────────────────────────────────────────────────────── */
+
+.table-responsive,
+.table-responsive-mobile,
+.dash-v2 .table-responsive {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Tablas sin wrapper: aplica scroll al contenedor más cercano */
+@media (max-width: 768px) {
+  .section-card .table,
+  .h-panel .table,
+  .card-tech .table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ── 3. CHARTS ──────────────────────────────────────────────────
+   Gráficos deben ocupar el 100% del contenedor, nunca ancho fijo.
+   ─────────────────────────────────────────────────────────────── */
+
+.chart-container,
+.chart-box,
+.pf-chart-box {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ApexCharts: forzar ancho al 100% del wrapper en mobile */
+@media (max-width: 768px) {
+  .apexcharts-canvas,
+  .apexcharts-svg {
+    max-width: 100% !important;
+  }
+}
+
+/* ── 4. FILTROS / TOOLBARS ──────────────────────────────────────
+   Los filtros deben hacer wrap en pantallas pequeñas,
+   nunca salirse del viewport ni quedar cortados.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 992px) {
+  .tech-toolbar,
+  .pf-toolbar,
+  .filters-bar,
+  .filters-row-top {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Botones Consultar/Aplicar siempre visibles */
+  .pf-btn-apply,
+  .pf-btn-clear,
+  .btn-consultar {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  /* Grupos de filtro ocupa ancho completo */
+  .filter-group,
+  .pf-toolbar__group,
+  .pf-sf-group,
+  .pf-sf-group--wide,
+  .pf-sf-group--compact {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* ── 5. CARDS KPI ───────────────────────────────────────────────
+   Valores y labels no deben cortarse ni superponerse.
+   ─────────────────────────────────────────────────────────────── */
+
+.kpi-card,
+.kpi-modern,
+.dim-kpi-card,
+.pf-kpi {
+  min-width: 0;
+}
+
+.kpi-value,
+.kpi-val,
+.kv,
+.pf-kpi__value {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* ── 6. GRIDS GENÉRICOS ─────────────────────────────────────────
+   Protección para grids sin breakpoints propios.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Grillas de Bootstrap row con columnas fijas */
+  .row.g-3 > [class*="col-"]:not([class*="col-12"]):not([class*="col-sm"]):not([class*="col-md"]):not([class*="col-lg"]):not([class*="col-xl"]) {
+    /* No tocamos clases Bootstrap, solo las custom */
+  }
+
+  /* ph-meta-grid: info del proceso */
+  .ph-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .ph-meta-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── 7. SIDEBAR en MOBILE ───────────────────────────────────────
+   Ya manejado en app.theme.css. Sólo reforzamos que el main
+   no genere scroll horizontal cuando el sidebar está oculto.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .app>.sidebar+.main,
+  .app.sidebar-collapsed>.sidebar+.main {
+    overflow-x: hidden;
+  }
+
+  /* Submenús colapsados: prevenir apertura inline (refuerzo) */
+  .app.sidebar-collapsed .submenu.collapse {
+    display: none !important;
+  }
+
+  .app.sidebar-collapsed .submenu.collapse.show {
+    display: none !important;
+  }
+}
+
+/* ── 8. MAPAS (Leaflet) ─────────────────────────────────────────
+   El contenedor del mapa debe ser responsive.
+   ─────────────────────────────────────────────────────────────── */
+
+#mapContainer,
+.leaflet-container {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+@media (max-width: 768px) {
+  #mapContainer {
+    height: 220px !important;
+    min-height: 180px !important;
+  }
+}
+
+/* ── 9. PLIEGOS / VISUALIZACIÓN ─────────────────────────────────
+   Grilla auto-fit ya es responsive, pero la hero puede crecer.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .hero-header {
+    padding: 1.25rem;
+  }
+
+  .hero-title {
+    font-size: 1.25rem !important;
+  }
+
+  .hero-meta {
+    gap: 0.5rem;
+  }
+
+  .ampliada-cta-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .btn-ver-ampliada {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ── 10. FORECAST ───────────────────────────────────────────────
+   El dashboard de forecast puede tener tablas y gráficos grandes.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* Contenedores internos de forecast que puedan desbordar */
+  [id*="forecast"],
+  [class*="forecast"] {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+}
+
+/* ── 11. MERCADO PRIVADO HOME ───────────────────────────────────
+   KPI grid y secciones del home de mercado privado.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .mercado-privado-home .kpi-grid,
+  .mercado-privado-home .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .mercado-privado-home .kpi-grid,
+  .mercado-privado-home .kpi-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 12. SIC TRACKING ───────────────────────────────────────────
+   El .trk-page tiene su propio CSS inline bien armado.
+   Solo aseguramos que los chart-containers no rompan.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .trk-page {
+    padding: 1rem 0.75rem !important;
+  }
+
+  .trk-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* ── 13. MODALES ────────────────────────────────────────────────
+   Las vistas flotantes (views-modal) ya usan max-width: 90vw.
+   Reforzamos para mobile.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 576px) {
+  .views-modal {
+    width: 95%;
+    max-height: 95vh;
+  }
+
+  .vm-body {
+    padding: 0.85rem;
+  }
+}
+
+/* ── 14. PÁGINA DE PERFIL / REPORTE ─────────────────────────────
+   La página reporte_perfiles ya tiene responsive propio.
+   Solo reforzamos el padding de pantallas muy pequeñas.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 360px) {
+  .pf-page {
+    padding-inline: 0.35rem;
+  }
+
+  .pf-hero,
+  .pf-card,
+  .pf-toolbar,
+  .pf-filter-card {
+    padding-inline: 0.65rem;
+  }
+}
+
+/* ── 15. TEXTO LARGO ────────────────────────────────────────────
+   Evitar desborde de texto en celdas y labels.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .desc-tip {
+    display: none !important; /* los tooltips de descripción no funcionan bien en touch */
+  }
+
+  /* Etiquetas de proceso: permitir wrap */
+  .ph-title {
+    flex-wrap: wrap;
+  }
+}
+
+/* ── 16. OVERFLOW HORIZONTAL GLOBAL (último recurso) ────────────
+   Solo se aplica al wrapper principal, no al body global.
+   El contenido se adapta; esto es solo para catch-all final.
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .main {
+    overflow-x: hidden;
+  }
+}
