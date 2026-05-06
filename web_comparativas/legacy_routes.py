@@ -6419,21 +6419,24 @@ def password_solicitar(
     Crea una solicitud interna de restablecimiento de contraseña.
     No envía emails externos. Queda registrada para revisión del admin.
     """
+    import re as _re
+    import logging as _log
+
     user_email = (user_email or "").strip().lower()
 
-    # Validación mínima de backend
-    import re as _re
     email_re = _re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
     if not user_email or not email_re.match(user_email):
         return JSONResponse({"ok": False, "error": "Email inválido."}, status_code=400)
 
+    db = request.state.db
+
     # Derivar full_name del registro de usuario existente (o usar prefijo del email)
     try:
-        existing_user = db_session.query(User).filter(
+        existing_user = db.query(User).filter(
             func.lower(User.email) == user_email
         ).first()
     except Exception:
-        db_session.rollback()
+        db.rollback()
         existing_user = None
 
     if existing_user:
@@ -6455,12 +6458,26 @@ def password_solicitar(
             status="Pendiente",
             must_change_password_on_next_login=True,
         )
-        db_session.add(req)
-        db_session.commit()
+        db.add(req)
+        db.flush()  # persiste sin cerrar la transacción para obtener el id
+
+        # Notificar a todos los admins sobre la nueva solicitud
+        try:
+            from .notifications_service import notify_admins
+            notify_admins(
+                db,
+                title="Nueva solicitud de restablecimiento de contraseña",
+                message=f"{full_name} ({user_email}) solicitó restablecimiento de contraseña.",
+                category="system",
+                link="/admin/reset-solicitudes?status_filter=Pendiente",
+            )
+        except Exception as notif_exc:
+            _log.getLogger("wc.reset").warning("notify_admins falló (no crítico): %s", notif_exc)
+
+        db.commit()
         return JSONResponse({"ok": True})
     except Exception as exc:
-        db_session.rollback()
-        import logging as _log
+        db.rollback()
         _log.getLogger("wc.reset").error("Error al guardar solicitud de reset: %s", exc)
         return JSONResponse({"ok": False, "error": "Error interno."}, status_code=500)
 
@@ -6473,7 +6490,8 @@ def admin_reset_list(
     status_filter: str = Query(""),
     user: User = Depends(require_roles("admin")),
 ):
-    q = db_session.query(PasswordResetRequest).order_by(
+    db = request.state.db
+    q = db.query(PasswordResetRequest).order_by(
         PasswordResetRequest.request_date.desc()
     )
     if status_filter:
@@ -6499,7 +6517,8 @@ def admin_reset_detail(
     req_id: int,
     user: User = Depends(require_roles("admin")),
 ):
-    sol = db_session.get(PasswordResetRequest, req_id)
+    db = request.state.db
+    sol = db.get(PasswordResetRequest, req_id)
     if not sol:
         return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
 
@@ -6510,6 +6529,7 @@ def admin_reset_detail(
         "statuses": ["Pendiente", "En proceso", "Resuelto", "Rechazado"],
         "ok": request.query_params.get("ok", ""),
         "err": request.query_params.get("err", ""),
+        "tmp_pwd": request.query_params.get("tmp_pwd", ""),
     })
 
 
@@ -6523,7 +6543,8 @@ def admin_reset_update_status(
     admin_observation: str = Form(""),
     user: User = Depends(require_roles("admin")),
 ):
-    sol = db_session.get(PasswordResetRequest, req_id)
+    db = request.state.db
+    sol = db.get(PasswordResetRequest, req_id)
     if not sol:
         return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
 
@@ -6538,13 +6559,13 @@ def admin_reset_update_status(
         sol.admin_observation = (admin_observation or "").strip() or sol.admin_observation
         sol.handled_by = user.email
         sol.handled_date = dt.datetime.utcnow()
-        db_session.add(sol)
-        db_session.commit()
+        db.add(sol)
+        db.commit()
         return RedirectResponse(
             f"/admin/reset-solicitudes/{req_id}?ok=estado_actualizado", status_code=303
         )
     except Exception:
-        db_session.rollback()
+        db.rollback()
         return RedirectResponse(
             f"/admin/reset-solicitudes/{req_id}?err=save_error", status_code=303
         )
@@ -6566,7 +6587,8 @@ def admin_reset_resolver(
     admin_observation: str = Form(""),
     user: User = Depends(require_roles("admin")),
 ):
-    sol = db_session.get(PasswordResetRequest, req_id)
+    db = request.state.db
+    sol = db.get(PasswordResetRequest, req_id)
     if not sol:
         return RedirectResponse("/admin/reset-solicitudes?err=not_found", status_code=303)
 
@@ -6586,7 +6608,7 @@ def admin_reset_resolver(
 
     # Buscar al usuario por email
     target_user = (
-        db_session.query(User)
+        db.query(User)
         .filter(func.lower(func.trim(User.email)) == sol.user_email.lower())
         .first()
     )
@@ -6600,7 +6622,7 @@ def admin_reset_resolver(
 
         target_user.password_hash = hash_password(new_password)
         target_user.must_change_password = force_change
-        db_session.add(target_user)
+        db.add(target_user)
 
         sol.status = "Resuelto"
         sol.handled_by = user.email
@@ -6610,7 +6632,7 @@ def admin_reset_resolver(
         obs = (admin_observation or "").strip()
         if obs:
             sol.admin_observation = obs
-        db_session.add(sol)
+        db.add(sol)
 
         # Auditoría
         log_usage_event(
@@ -6626,7 +6648,7 @@ def admin_reset_resolver(
             },
         )
 
-        db_session.commit()
+        db.commit()
 
         # Devolver contraseña temporal solo si fue generada (mostrar al admin UNA VEZ)
         if generated:
@@ -6640,7 +6662,7 @@ def admin_reset_resolver(
         )
 
     except Exception:
-        db_session.rollback()
+        db.rollback()
         return RedirectResponse(
             f"/admin/reset-solicitudes/{req_id}?err=save_error", status_code=303
         )

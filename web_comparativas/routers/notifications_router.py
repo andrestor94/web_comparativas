@@ -31,8 +31,13 @@ def _db(request: Request):
 
 @router.get("/unread-count")
 def api_unread_count(request: Request, user: User = Depends(login_required)):
-    count = get_unread_count(_db(request), user.id)
-    return {"count": count}
+    try:
+        count = get_unread_count(_db(request), user.id)
+        return {"count": count}
+    except Exception as e:
+        import logging
+        logging.getLogger("wc.notifications").warning("unread-count error: %s", e)
+        return {"count": 0}
 
 @router.get("/", response_class=HTMLResponse)
 def page_notifications(request: Request, user: User = Depends(login_required)):

@@ -171,20 +171,24 @@
       body: body.toString(),
     })
     .then(function(r) {
-      if (r.ok || r.redirected) {
-        /* cerrar modal y mostrar confirmación en la página */
-        const modal = bootstrap.Modal.getInstance(
-          document.getElementById('modalSolicitarReset')
-        );
-        modal.hide();
-        /* redirigir con flag de éxito */
-        window.location.href = '/login?reset_ok=1';
-      } else {
-        return r.text().then(function(t) { throw new Error(t || 'Error al enviar.'); });
-      }
+      return r.json().then(function(data) {
+        if (r.ok && data.ok) {
+          /* cerrar modal y mostrar confirmación en la página */
+          const modal = bootstrap.Modal.getInstance(
+            document.getElementById('modalSolicitarReset')
+          );
+          modal.hide();
+          window.location.href = '/login?reset_ok=1';
+        } else {
+          throw new Error(data.error || 'Error al enviar la solicitud.');
+        }
+      });
     })
     .catch(function(err) {
-      globalErr.textContent = 'Ocurrió un error al enviar la solicitud. Intentá nuevamente.';
+      var msg = (err && err.message && err.message !== '[object Object]')
+        ? err.message
+        : 'Ocurrió un error al enviar la solicitud. Intentá nuevamente.';
+      globalErr.textContent = msg;
       globalErr.classList.remove('d-none');
       btn.disabled = false;
       spinEl.classList.add('d-none');
