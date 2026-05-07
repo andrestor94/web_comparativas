@@ -155,6 +155,50 @@
             }
         }
 
+        /* ── HOME SIEM Navbar responsive ─────────────────────────────
+           En mobile el navbar tiene height:80px fija y px-4 de padding.
+           Con nombres largos como "Administrador" el user-pill puede
+           quedar apretado o con salto de línea accidental.
+        ─────────────────────────────────────────────────────────────── */
+        @media (max-width: 576px) {
+            .navbar-custom {
+                height: auto;
+                min-height: 60px;
+                padding-top: 0.4rem;
+                padding-bottom: 0.4rem;
+            }
+
+            .navbar-custom .container-fluid {
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+                flex-wrap: nowrap;
+                align-items: center;
+            }
+
+            .navbar-brand img {
+                height: 38px !important;
+            }
+
+            .user-pill {
+                padding: 0.35rem 0.7rem;
+                font-size: 0.8rem;
+                max-width: 170px;
+                min-width: 0;
+            }
+
+            .user-name-text {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 100px;
+            }
+
+            /* Hero padding ajustado a la nueva altura del navbar */
+            .hero-section {
+                padding-top: calc(60px + 1.25rem);
+            }
+        }
+
         /* Market cards: reutilizamos .market-card-v2 del design system,
            aquí sólo ajustes contextuales de esta página */
         .market-card {
@@ -394,9 +438,9 @@
                         type="button" data-bs-toggle="dropdown" aria-expanded="false"
                         title="{{ user.email if user else '' }}"
                         style="cursor:pointer;">
-                    <i class="bi bi-person-circle"></i>
-                    {{ user_display(user) if user else 'Invitado' }}
-                    <i class="bi bi-chevron-down ms-1 opacity-50" style="font-size:0.7rem;"></i>
+                    <i class="bi bi-person-circle" style="flex-shrink:0;"></i>
+                    <span class="user-name-text">{{ user_display(user) if user else 'Invitado' }}</span>
+                    <i class="bi bi-chevron-down ms-1 opacity-50" style="font-size:0.7rem;flex-shrink:0;"></i>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width:175px;">
                     <li>
