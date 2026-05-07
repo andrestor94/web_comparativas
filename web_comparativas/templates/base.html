@@ -36,7 +36,7 @@
   <!-- Tema personalizado (global) + cache-busting -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=revert-v2">
   <!-- Correcciones responsive globales -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/responsive.css') }}?v=1.1">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/responsive.css') }}?v=1.2">
 
   <style>
     /* SPLASH SCREEN (PREMIUM) */
@@ -921,7 +921,7 @@
           <i class="bi bi-list fs-2"></i>
         </button>
 
-        <div class="title h5 m-0">{% block header_title %}Panel{% endblock %}</div>
+        <div class="title h5 m-0 header-title-truncate">{% block header_title %}Panel{% endblock %}</div>
 
         <div class="d-none d-md-flex align-items-center gap-2">
           {% block toolbar_actions %}
@@ -933,11 +933,11 @@
           {% endblock %}
         </div>
 
-        <div class="ms-auto d-flex align-items-center gap-3">
-          <div class="meta small text-muted d-flex flex-column flex-md-row gap-1 gap-md-2 align-items-md-center">
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <div class="meta small text-muted d-flex flex-row align-items-center gap-2">
 
             <!-- Notificaciones Icon -->
-            <div class="position-relative me-2" id="nav-notif-container">
+            <div class="position-relative" id="nav-notif-container">
               <a href="/notifications" class="text-secondary opacity-75 hover-opacity-100" title="Notificaciones">
                 <i class="bi bi-bell-fill fs-5"></i>
                 <span id="nav-notif-badge"
@@ -950,16 +950,16 @@
 
             <!-- Menú de usuario -->
             <div class="dropdown">
-              <button class="btn btn-link text-secondary p-0 d-flex align-items-center gap-2 text-decoration-none"
+              <button class="btn btn-link text-secondary p-0 d-flex align-items-center gap-1 gap-md-2 text-decoration-none"
                       type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                <div style="width:28px;height:28px;background:#e8edf5;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                <div style="width:28px;height:28px;background:#e8edf5;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
                   <i class="bi bi-person-fill" style="font-size:0.8rem;color:#6c757d;"></i>
                 </div>
-                <span class="small">
+                <span class="small d-none d-md-inline">
                   {% if user_display is defined %}{{ user_display(user) }}{% else %}{{ _display_name or '—' }}{% endif %}
                 </span>
                 <span class="top-user-pill">{{ (r or '')|capitalize }}</span>
-                <i class="bi bi-chevron-down opacity-50" style="font-size:0.7rem;"></i>
+                <i class="bi bi-chevron-down opacity-50 d-none d-md-inline" style="font-size:0.7rem;"></i>
               </button>
               <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width:170px;">
                 <li>

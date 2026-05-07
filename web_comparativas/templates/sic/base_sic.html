@@ -50,6 +50,32 @@
             height: 68px;
         }
 
+        /* ── SIC Responsive Navbar ─────────────────────────── */
+        .sic-label-desktop {
+            /* Text labels shown on desktop, hidden on mobile */
+        }
+
+        @media (max-width: 768px) {
+            .navbar-sic {
+                height: auto;
+                min-height: 56px;
+            }
+            .navbar-sic .container-fluid {
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+                flex-wrap: nowrap;
+            }
+            .sic-nav-actions {
+                gap: 0.625rem;
+            }
+            .sic-label-desktop {
+                display: none;
+            }
+            .sic-user-name {
+                display: none;
+            }
+        }
+
         .brand-logo {
             font-weight: 700;
             font-size: 1.35rem;
@@ -196,7 +222,7 @@
                 <span class="brand-logo">S.I.C</span>
             </a>
 
-            <div class="d-flex align-items-center gap-4">
+            <div class="d-flex align-items-center gap-4 sic-nav-actions">
                 <div class="d-none d-md-flex gap-3 me-3">
                     <a href="/sic/helpdesk"
                         class="nav-link small {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}">Mesa
@@ -218,16 +244,16 @@
                 </div>
 
                 {% if user and (user.role == 'admin' or user.role == 'administrator') %}
-                <button type="button" class="btn btn-link text-danger fw-bold small text-decoration-none px-0 me-3"
+                <button type="button" class="btn btn-link text-danger fw-bold small text-decoration-none px-0"
                     data-bs-toggle="modal" data-bs-target="#resetFactoryModal"
-                    title="Borrar todo y volver a estado inicial">
-                    <i class="bi bi-trash3-fill me-1"></i>Resetear Interfaz
+                    title="Resetear Interfaz">
+                    <i class="bi bi-trash3-fill"></i><span class="sic-label-desktop ms-1">Resetear Interfaz</span>
                 </button>
                 {% endif %}
 
                 {% if user and (user.role == 'admin' or user.role == 'administrator') %}
                 <!-- Bell for Admin in SIC -->
-                <div class="position-relative me-3" id="nav-notif-container">
+                <div class="position-relative" id="nav-notif-container">
                     <a href="/notifications" class="text-secondary opacity-75 hover-opacity-100" title="Notificaciones">
                         <i class="bi bi-bell-fill fs-5" style="color: var(--sic-text-muted);"></i>
                         <span id="nav-notif-badge"
@@ -250,7 +276,10 @@
                 {% else %}
                     {% set _back_url = '/markets' %}
                 {% endif %}
-                <a href="{{ _back_url }}" class="nav-link text-decoration-none small">Volver a SIEM</a>
+                <a href="{{ _back_url }}" class="nav-link text-decoration-none small" title="Volver a SIEM">
+                    <i class="bi bi-arrow-left-circle d-md-none"></i>
+                    <span class="sic-label-desktop">Volver a SIEM</span>
+                </a>
                 <!-- Menú de usuario S.I.C -->
                 <div class="dropdown">
                     <button class="btn btn-link p-0 d-flex align-items-center gap-2 text-white text-decoration-none small"
@@ -258,7 +287,7 @@
                         <div style="width:32px;height:32px;background:rgba(255,255,255,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center;">
                             <i class="bi bi-person"></i>
                         </div>
-                        <span>{{ user_display(user) if user else 'Admin' }}</span>
+                        <span class="sic-user-name">{{ user_display(user) if user else 'Admin' }}</span>
                         <i class="bi bi-chevron-down opacity-50" style="font-size:0.7rem;"></i>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end border-0 shadow"
