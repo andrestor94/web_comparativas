@@ -1,3 +1,4 @@
+
 :root {
   --pf-bg: #edf3f8;
   --pf-surface: rgba(255, 255, 255, 0.96);
@@ -498,10 +499,14 @@
   gap: 0.7rem;
   position: relative;
   isolation: isolate;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .pf-tab-content.active {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ── SECTION HEAD ───────────────────────────────────────────── */
@@ -850,9 +855,13 @@
 
 .pf-dashboard-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.7rem;
   position: relative;
   z-index: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .pf-kpi {
@@ -988,6 +997,9 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* ── CARDS ──────────────────────────────────────────────────── */
@@ -1393,29 +1405,321 @@
   }
 }
 
-/* Cierra el hueco entre 720px (breakpoint propio) y 768px (responsive.css global) */
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE MOBILE — Reporte de Perfiles (Público y Privado)
+   Breakpoints: 768px | 720px | 480px
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 768px: Mobile base ──────────────────────────────────────── */
 @media (max-width: 768px) {
+
+  /* ── Page shell ── */
   .pf-shell {
     max-width: 100%;
   }
 
-  /* Asegura que el aside del hero no fuerce ancho mínimo al colapsar */
-  .pf-hero__aside {
-    min-width: 0;
+  /* Sin altura fija: la página crece con su contenido y el documento scrollea */
+  .pf-page {
+    padding: 0.75rem 0.75rem 2rem;
+    min-height: 100svh;
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
   }
 
-  /* El card de estado dentro del aside tampoco puede tener ancho mínimo */
+  /* ── Hero ── */
+  /* Ambos dashboards: hero en una sola columna */
+  .pf-hero {
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+  }
+
+  .pf-hero__aside,
   .pf-hero__status-card {
     min-width: 0;
+    width: 100%;
   }
 
-  /* Asegura que las tarjetas de gráficos no excedan el ancho del contenedor */
+  .pf-hero__title {
+    font-size: clamp(1.5rem, 7vw, 2rem);
+  }
+
+  .pf-hero__subtitle {
+    font-size: 0.82rem;
+  }
+
+  /* ── Tabs: no se comprimen, se apilan ── */
+  .pf-tabs {
+    grid-template-columns: 1fr;
+    gap: 0.22rem;
+  }
+
+  .pf-page--private .pf-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pf-tab {
+    min-height: 46px;
+    padding: 0.42rem 0.6rem;
+  }
+
+  /* L2181: .pf-page--private .pf-tab {min-height:58px} aparece después y ganaría sin !important */
+  .pf-page--private .pf-tab {
+    min-height: 46px !important;
+    padding: 0.42rem 0.6rem !important;
+  }
+
+  /* ── Toolbar: apilado vertical ── */
+  .pf-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+    padding: 0.7rem 0.85rem;
+  }
+
+  .pf-toolbar__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .pf-toolbar__group {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+
+  /* Quita min-width fija en fecha del dashboard privado */
+  .pf-page--private .pf-toolbar__group {
+    min-width: 0 !important;
+    flex: 1 1 120px;
+  }
+
+  .pf-toolbar__actions {
+    margin-left: 0;
+    display: flex;
+    gap: 0.45rem;
+  }
+
+  .pf-btn-apply,
+  .pf-btn-clear {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* ── Filtros: una sola columna ── */
+  .pf-filter-card {
+    height: auto;
+    min-height: 0;
+    padding: 0.72rem 0.8rem;
+  }
+
+  .pf-filter-grid {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .pf-sf-group,
+  .pf-sf-group--wide,
+  .pf-sf-group--compact,
+  .pf-filter-actions {
+    grid-column: auto;
+    min-width: 0;
+  }
+
+  .pf-filter-actions {
+    margin-top: 0.15rem;
+  }
+
+  .pf-filter-card__intro {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .pf-filter-card__required {
+    align-self: flex-start;
+  }
+
+  /* ── KPI row: 2 columnas compactas en mobile, 1 en extra-small ── */
+  .pf-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .pf-kpi {
+    min-height: 78px;
+    padding: 0.62rem 0.72rem 0.55rem;
+  }
+
+  .pf-kpi__value {
+    font-size: clamp(0.92rem, 4vw, 1.2rem);
+  }
+
+  /* ── Cards genéricas: sin altura fija ── */
+  .pf-card {
+    height: auto;
+    min-height: 0;
+  }
+
+  /* ── Cards de gráficos: sin altura fija, crece con el gráfico ── */
   .pf-card--chart {
     max-width: 100%;
     min-width: 0;
+    min-height: 0;
+    height: auto;
+  }
+
+  /* L2344: .pf-page--private .pf-card--chart {min-height:330px} aparece después y ganaría sin !important */
+  .pf-page--private .pf-card--chart {
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  .pf-card--table {
+    min-height: 0;
+    height: auto;
+  }
+
+  /* ── Grid 2 columnas → 1 columna en mobile ── */
+  .pf-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Gráficos: ancho completo y altura mínima legible ── */
+  .pf-chart-box {
+    width: 100%;
+    min-width: 0;
+    min-height: 260px;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Override especificidad para private: mismo min-height explícito */
+  .pf-page--private .pf-chart-box {
+    min-height: 260px;
+    height: auto;
+    width: 100%;
+  }
+
+  /* ApexCharts: forzar ancho al 100% del contenedor */
+  .pf-chart-box .apexcharts-canvas,
+  .pf-chart-box .apexcharts-svg {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Leyenda debajo del gráfico si no entra en horizontal */
+  .pf-chart-box .apexcharts-legend {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+  }
+
+  /* ── Private ranking/treemap cards: altura libre en mobile ── */
+  /* L2403: {height:360px;overflow:hidden} aparece después y ganaría sin !important */
+  .pf-page--private .pv-ranking-card,
+  .pf-page--private .pv-treemap-card {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* L2410: {height:260px;overflow-x:hidden} aparece después y ganaría sin !important */
+  .pf-page--private .pv-ranking-card .pv-ranking-scroll {
+    height: auto !important;
+    max-height: 340px !important;
+    overflow-y: auto !important;
+    overflow-x: visible !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .pf-page--private .pv-ranking-scroll .pf-chart-box {
+    min-height: 220px;
+  }
+
+  /* ── Tablas: scroll horizontal propio, sin max-height fija en mobile ── */
+  /* Con overflow-x:auto y max-height:none el contenedor crece y la página scrollea */
+  .pf-tscroll {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: none;
+    border-radius: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* min-width en tabla para que columnas sean legibles con scroll horizontal.
+     14 columnas mensual × ~52px ≈ 728px; 7 columnas detalle × ~90px ≈ 630px */
+  .pf-tscroll .pf-table {
+    min-width: 700px;
+  }
+
+  /* ── Section head ── */
+  .pf-section-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+
+  .pf-section-title {
+    font-size: 1.15rem;
+  }
+
+  /* ── Private hero facts: 2 columnas para que quepan en pantalla ── */
+  /* L2158 y L2443(1080px): ambos imponen 3 cols después → necesita !important */
+  .pf-page--private .pf-hero__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* ── Filtro privado: 1 columna ── */
+  .pf-page--private .pf-filter-grid {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .pf-page--private .pf-sf-group,
+  .pf-page--private .pf-sf-group--wide,
+  .pf-page--private .pf-sf-group--compact {
+    grid-column: auto;
+  }
+
+  /* Required state */
+  .pf-required-state {
+    grid-template-columns: 1fr;
+    text-align: center;
+    justify-items: center;
+    padding: 1.1rem 0.95rem;
+  }
+
+  .pf-required-state__tips {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .pf-required-state__tips span {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Card-head row: wrappea en mobile */
+  .pf-card__head--row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  /* Metric toggle ocupa ancho completo */
+  .pf-metric-toggle {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .pf-toggle-btn {
+    flex: 1 1 auto;
+    text-align: center;
   }
 }
 
+/* ── 720px: Mobile refinamiento ─────────────────────────────── */
 @media (max-width: 720px) {
   .pf-page {
     padding-inline: 0.5rem;
@@ -1425,17 +1729,19 @@
   .pf-toolbar,
   .pf-filter-card,
   .pf-card {
-    border-radius: 14px;
-    padding-inline: 0.82rem;
+    border-radius: 12px;
+    padding-inline: 0.75rem;
   }
 
-  .pf-toolbar {
+  .pf-toolbar__controls {
     flex-direction: column;
-    align-items: stretch;
   }
 
-  .pf-toolbar__actions {
-    margin-left: 0;
+  .pf-toolbar__group,
+  .pf-page--private .pf-toolbar__group {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
   }
 
   .pf-filter-grid,
@@ -1450,12 +1756,33 @@
     grid-column: auto;
   }
 
+  /* KPIs: 1 columna en móviles medianos */
   .pf-kpi-row {
     grid-template-columns: 1fr;
   }
 
+  /* Gráficos: altura suficiente para lectura */
+  .pf-chart-box {
+    min-height: 260px;
+  }
+
+  /* Donut/pie: puede ser algo más bajo */
+  .pf-card--chart:has(#artPlataformaChart),
+  .pf-card--chart:has(#compRubroChart),
+  .pf-card--chart:has(#cliRubroChart),
+  .pf-card--chart:has(#cliSubnegocioChart) {
+    min-height: 0;
+  }
+
+  /* Tabla: sin max-height para que el contenido sea completo y el usuario scrollea la página */
+  .pf-tscroll {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: auto;
+  }
+
   .pf-required-state {
-    padding: 1.1rem 0.95rem;
+    padding: 1rem 0.85rem;
   }
 
   .pf-required-state__tips {
@@ -1467,13 +1794,65 @@
     width: 100%;
     justify-content: center;
   }
+}
 
-  .pf-chart-box {
-    min-height: 240px;
+/* ── 480px: Extra-small phones ───────────────────────────────── */
+@media (max-width: 480px) {
+  .pf-page {
+    padding: 0.5rem 0.4rem 1.5rem;
   }
 
-  .pf-tscroll {
-    max-height: 340px;
+  .pf-hero__title {
+    font-size: 1.55rem;
+  }
+
+  /* Tabs apilados en 1 columna en pantallas muy chicas */
+  /* L2175: {repeat(2,...)} aparece después y ganaría sin !important */
+  .pf-page--private .pf-tabs {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* KPIs en 1 columna siempre */
+  .pf-kpi-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pf-kpi {
+    min-height: 72px;
+  }
+
+  /* Facts del hero: 2 cols si caben, else 1 */
+  .pf-page--private .pf-hero__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Gráficos algo más bajos en pantallas muy chicas */
+  .pf-chart-box {
+    min-height: 230px;
+  }
+
+  .pf-page--private .pv-ranking-scroll .pf-chart-box {
+    min-height: 190px;
+  }
+
+  .pf-hero,
+  .pf-toolbar,
+  .pf-filter-card,
+  .pf-card {
+    border-radius: 10px;
+    padding: 0.65rem 0.7rem;
+  }
+
+  /* Reducir padding de la tabla para más espacio para las columnas */
+  .pf-table thead th,
+  .pf-table tbody td {
+    padding: 0.5rem 0.55rem;
+    font-size: 0.75rem;
+  }
+
+  /* Sección head simplificada */
+  .pf-section-title {
+    font-size: 1.05rem;
   }
 }
 
@@ -2089,25 +2468,5 @@
 
   .pf-page--private .pf-filter-grid {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 768px) {
-  /* Private: charts — garantiza ancho 100% para que ApexCharts se recalcule */
-  .pf-page--private .pf-chart-box,
-  .pf-page--private .pf-card--chart {
-    width: 100%;
-    min-width: 0;
-  }
-
-  /* Private: ranking scroll — scroll interno, no rompe el layout */
-  .pf-page--private .pv-ranking-card {
-    overflow-x: auto;
-  }
-}
-
-@media (max-width: 480px) {
-  .pf-page--private .pf-hero__facts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
