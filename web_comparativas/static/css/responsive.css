@@ -376,3 +376,85 @@ canvas {
     font-size: 0.9rem;
   }
 }
+
+/* ── 18. TABLAS DASHBOARD — PRIMERA COLUMNA RESPONSIVE ──────────
+   En mobile, las tablas con table-layout:auto y primera columna
+   sticky con min-width fijo hacen que ésta absorba casi todo el
+   ancho visible, dejando el resto de columnas comprimidas.
+
+   Estrategia por tabla:
+   - tech-table (Dimensionamiento): min-width 190px → 130px en mobile
+   - dim-pivot-table: min/max-width 240px → 140-160px en mobile
+   - pf-table (Reporte de perfiles): primera columna Familia sin ancho
+   - h-table (Home SIEM): columnas Proceso/Archivo sin límite
+   - #fitContainer vars: reducir desc-col-w y w-prov en mobile
+   ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+
+  /* ── DIMENSIONAMIENTO: tabla principal (tech-table) ─────────────
+     Primera columna sticky con min-width:190px + table-layout:auto
+     + white-space:nowrap en demás columnas → absorbe todo el espacio.
+  ── */
+  #dimensionamientoApp .tech-table td:first-child {
+    min-width: 130px !important;
+    max-width: 150px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── DIMENSIONAMIENTO: tabla pivote ─────────────────────────────
+     Primera columna tiene min-width y max-width de 240px; con
+     table-layout:fixed esto bloquea el ancho en mobile.
+  ── */
+  #dimensionamientoApp .dim-pivot-table td:first-child,
+  #dimensionamientoApp .dim-pivot-table th:first-child {
+    min-width: 140px !important;
+    max-width: 160px !important;
+  }
+
+  /* ── REPORTE DE PERFILES: tabla consumo mensual (pf-table) ──────
+     Columna Familia (primera) sin ancho explícito + table-layout:auto
+     → absorbe espacio restante dentro del min-width:700px del wrapper.
+  ── */
+  .pf-tscroll .pf-table th:first-child,
+  .pf-tscroll .pf-table td:first-child {
+    min-width: 130px;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── HOME SIEM: tabla "Últimos procesados" (h-table) ─────────────
+     Columnas Proceso (2°) y Archivo (3°) sin ancho definido.
+     La tabla ya tiene .table-responsive wrapper con scroll horizontal.
+  ── */
+  .h-table {
+    min-width: 600px;
+  }
+  .h-table td:nth-child(2),
+  .h-table th:nth-child(2) {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .h-table td:nth-child(3),
+  .h-table th:nth-child(3) {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── DASHBOARD COMPARATIVA: rankTable columnas variables ─────────
+     CSS vars declaradas en el template; reducirlas en mobile para
+     que las columnas sean más compactas sin romper el layout fijo.
+  ── */
+  #fitContainer {
+    --desc-col-w: 130px;
+    --w-prov: 140px;
+  }
+}
