@@ -320,3 +320,59 @@ canvas {
     overflow-x: hidden;
   }
 }
+
+/* ── 17. HEADER / TOPBAR SIEM RESPONSIVE ────────────────────────
+   Corrige el header compartido (base.html) en mobile/tablet.
+   El root cause era .meta con flex-column en mobile (campana
+   apilada encima del menú de usuario). Ahora siempre es flex-row.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Base: header nunca desborda */
+.header {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* El título de sección puede truncar si no entra */
+.header-title-truncate {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0.5rem 0.75rem;
+    gap: 0.5rem !important;
+  }
+
+  /* Lado derecho: sin overflow */
+  .header .ms-auto {
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  /* Pill de rol: compacta */
+  .top-user-pill {
+    padding: 3px 7px;
+    font-size: 0.7rem;
+  }
+
+  /* Botón hamburguesa: área táctil adecuada */
+  #sidebarToggle {
+    flex-shrink: 0;
+    padding: 0.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    padding: 0.4rem 0.6rem;
+  }
+
+  /* En pantallas muy pequeñas ocultar la pill si el nombre ya fue ocultado */
+  .header .title {
+    font-size: 0.9rem;
+  }
+}
