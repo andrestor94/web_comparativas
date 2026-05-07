@@ -1457,8 +1457,8 @@ body {
 
   /* 1. App Shell: Single Column */
   .app {
-    display: block;
-    /* Disable Grid */
+    display: block !important;
+    /* !important overrides Bootstrap d-flex that uses !important, enabling document scroll */
     position: relative;
     overflow-x: hidden;
   }
@@ -1468,7 +1468,8 @@ body {
     position: fixed;
     top: 0;
     left: 0;
-    height: 100vh;
+    height: 100vh;           /* fallback for older browsers */
+    height: 100dvh;          /* dynamic viewport height: accounts for mobile browser chrome */
     width: 280px;
     z-index: 1040;
     /* Above header */
@@ -1477,6 +1478,22 @@ body {
     box-shadow: none;
     margin: 0;
     border-radius: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Sidebar nav scrolls internally so bottom items are always reachable */
+  .sidebar .nav {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Bottom actions (Cambiar Mercado / Cerrar sesión) stay pinned at bottom */
+  .sidebar .signout {
+    flex-shrink: 0;
   }
 
   .app>.sidebar+.main,
@@ -1502,7 +1519,8 @@ body {
     top: 0;
     left: 0;
     width: 100vw;
-    height: 100vh;
+    height: 100vh;           /* fallback */
+    height: 100dvh;          /* dynamic viewport height */
     background: rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(2px);
     z-index: 1030;

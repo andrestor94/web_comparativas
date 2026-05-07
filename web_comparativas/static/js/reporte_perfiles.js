@@ -1037,6 +1037,20 @@ function pfChartBase(overrides = {}) {
     },
     responsive: [
       {
+        breakpoint: 768,
+        options: {
+          chart: { height: 230 },
+          legend: {
+            position: "bottom",
+            fontSize: "11px",
+            itemMargin: { horizontal: 6, vertical: 3 },
+          },
+          xaxis: { labels: { rotate: -30, style: { fontSize: "10px" } } },
+          yaxis: { labels: { style: { fontSize: "10px" } } },
+          grid: { padding: { left: 0, right: 0 } },
+        },
+      },
+      {
         breakpoint: 480,
         options: {
           chart: { height: 210 },

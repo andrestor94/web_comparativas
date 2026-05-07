@@ -554,6 +554,7 @@ function pvShowArticuloEmpty() {
 function pvShowArticuloDashboard() {
   document.getElementById("artEmptyState").style.display = "none";
   document.getElementById("artDashboard").hidden = false;
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 }
 
 function pvShowClienteEmpty() {
@@ -564,6 +565,7 @@ function pvShowClienteEmpty() {
 function pvShowClienteDashboard() {
   document.getElementById("cliEmptyState").style.display = "none";
   document.getElementById("cliDashboard").hidden = false;
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 }
 
 // KPI rendering
@@ -613,6 +615,14 @@ function pvChartDefaults() {
     grid: { borderColor: "rgba(87,112,176,0.1)", strokeDashArray: 3 },
     tooltip: { theme: "light", y: { formatter: (v) => formatMoneyFull(v) } },
     responsive: [
+      {
+        breakpoint: 768,
+        options: {
+          chart: { height: 240 },
+          legend: { position: "bottom", fontSize: "11px", itemMargin: { horizontal: 6, vertical: 3 } },
+          xaxis: { labels: { rotate: -30, style: { fontSize: "10px" } } },
+        },
+      },
       {
         breakpoint: 480,
         options: {
@@ -826,8 +836,13 @@ function pvRenderHBarChart(elId, categories, values, options = {}) {
     tooltip: { y: { formatter: (v) => formatMoneyFull(v) } },
     legend: { show: false },
   };
-  el.style.height = `${height}px`;
-  el.style.minHeight = `${height}px`;
+  if (window.innerWidth > 768) {
+    el.style.height = `${height}px`;
+    el.style.minHeight = `${height}px`;
+  } else {
+    el.style.height = "";
+    el.style.minHeight = "260px";
+  }
   PV.charts[elId] = new ApexCharts(el, opts);
   PV.charts[elId].render();
 }
