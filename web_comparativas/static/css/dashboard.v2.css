@@ -957,3 +957,48 @@ body,
   background: var(--sa-gris-100);
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
+
+/* ── MOBILE: rankTable responsive (Tablero Web Comparativas) ────────────────
+   Problema 1: col-nro + col-desc + col-cant sticky-left = 294px = 75% del
+   viewport 390px → casi no queda espacio para las columnas de precios.
+   Problema 2: thead th sticky-top + col-nro/desc/cant sticky-left = dual
+   sticky → conflicto z-index → los headers de las 3 primeras columnas no
+   bajan con el scroll vertical.
+   Solución: en mobile quitamos el sticky-left de las 3 columnas fijas y
+   reducimos los anchos de columna para que el scroll horizontal sea cómodo.
+   ─────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* Reducir anchos de columna para viewport mobile */
+  #fitContainer {
+    --col-nro-w:  40px;
+    --desc-col-w: 120px;
+    --cant-col-w:  65px;
+    --w-price:     88px;
+    --w-rel:       80px;
+    --w-asig:      72px;
+    --w-prov:     120px;
+  }
+
+  /* Quitar sticky-left de las 3 columnas fijas en thead, tbody y filters-row.
+     Simple scroll horizontal es mejor UX en mobile que dual-sticky. */
+  #rankTable th.col-nro,
+  #rankTable td.col-nro,
+  #rankTable .filters-row th.col-nro,
+  #rankTable th.col-desc,
+  #rankTable td.col-desc,
+  #rankTable .filters-row th.col-desc,
+  #rankTable th.col-cant,
+  #rankTable td.col-cant,
+  #rankTable .filters-row th.col-cant {
+    position: static !important;
+    left: auto !important;
+    box-shadow: none !important;
+  }
+
+  /* min-width para scroll horizontal predecible
+     (40+120+65+88+80+72+120 = 585px por 1 posición) */
+  .dash-v2 #rankTable {
+    min-width: 585px !important;
+  }
+}
