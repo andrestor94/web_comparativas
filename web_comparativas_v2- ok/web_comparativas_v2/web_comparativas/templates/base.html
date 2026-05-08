@@ -1,0 +1,1389 @@
+<!doctype html>
+{% if user %}
+{% set _display_name = (user.name or user.full_name or user.nombre) %}
+{% if not _display_name %}
+{% set _email = user.email|default('') %}
+{% set parts = _email|split('@') %}
+{% set _alias = (parts[0] if parts|length > 0 else '') %}
+{% set _alias = _alias|replace('.',' ')|replace('_',' ')|replace('-',' ') %}
+{% set _display_name = _alias|title %}
+{% endif %}
+{% else %}
+{% set _display_name = '' %}
+{% endif %}
+<html lang="es" data-user-role="{{ (user and (user.role or ''))|lower }}"
+  data-user-display="{{ _display_name or 'Yo' }}">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#0B4A7A" />
+  <link rel="icon" href="{{ url_for('static', path='favicon.ico') }}" />
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='icons/apple-touch-icon.png') }}">
+  <link rel="manifest" href="{{ url_for('static', path='manifest.json') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SIEM">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>{% block title %}SIEM{% endblock %}</title>
+
+  <!-- Google Fonts: Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap"
+    rel="stylesheet">
+
+  <!-- Bootstrap CSS (local) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap/css/bootstrap.min.css') }}">
+  <!-- Bootstrap Icons (local) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/bootstrap-icons/font/bootstrap-icons.min.css') }}">
+
+  <!-- Tema personalizado (global) + cache-busting -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.theme.css') }}?v=revert-v2">
+  <!-- Correcciones responsive globales -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/responsive.css') }}?v=1.3">
+
+  <style>
+    /* SPLASH SCREEN (PREMIUM) */
+    #splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
+      z-index: 99999;
+      /* Even higher */
+      display: flex;
+      /* Always visible initially */
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 1;
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.6s ease;
+    }
+
+    #splash-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    #splash-logo {
+      width: 450px;
+      max-width: 80vw;
+      height: auto;
+      opacity: 0;
+      filter: blur(10px);
+      transform: scale(0.95);
+      animation: logo-premium-entry 1.2s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+      image-rendering: -webkit-optimize-contrast;
+      backface-visibility: hidden;
+      will-change: transform, opacity, filter;
+    }
+
+    .splash-loader {
+      width: 60px;
+      height: 3px;
+      background: rgba(6, 64, 102, 0.1);
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+      opacity: 0;
+      animation: fade-in-simple 0.8s ease-out 0.4s forwards;
+    }
+
+    .splash-loader::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 40%;
+      background: #064066;
+      /* var(--sa-azul) */
+      border-radius: 99px;
+      animation: loader-slide 1.5s infinite ease-in-out;
+    }
+
+    @keyframes logo-premium-entry {
+      0% {
+        opacity: 0;
+        filter: blur(10px);
+        transform: scale(0.95);
+      }
+
+      100% {
+        opacity: 1;
+        filter: blur(0);
+        transform: scale(1);
+      }
+    }
+
+    @keyframes fade-in-simple {
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes loader-slide {
+      0% {
+        left: -40%;
+      }
+
+      50% {
+        left: 100%;
+      }
+
+      100% {
+        left: -40%;
+      }
+    }
+
+    .splash-hidden {
+      opacity: 0 !important;
+      visibility: hidden;
+      pointer-events: none;
+    }
+  </style>
+
+  <!-- ========== Notificaciones SA (UI) ========== -->
+  <style>
+    /* Hide ALL scrollbars in sidebar area (aggressive) */
+    .sidebar,
+    .sidebar * {
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+
+    .sidebar *::-webkit-scrollbar {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+    }
+
+    /* ===== pill del usuario (header, arriba a la derecha) ===== */
+    .top-user-pill {
+      background-color: #6886c4;
+      color: #ffffff;
+      border-radius: 9999px;
+      padding: 3px 12px 4px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+
+    .top-user-pill span,
+    .top-user-pill i,
+    .top-user-pill svg {
+      color: #ffffff;
+    }
+
+    /* ===== Notificaciones SA ===== */
+    #toast-root {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 4000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .sa-toast {
+      pointer-events: auto;
+      background: var(--sa-blanco, #fff);
+      color: var(--sa-text, #064066);
+      border: 1px solid var(--sa-gris-borde, #e5e7eb);
+      border-radius: 12px;
+      box-shadow: var(--shadow-2, 0 10px 32px rgba(6, 64, 102, .12));
+      padding: 12px 14px 10px;
+      width: min(360px, 90vw);
+      transform: translateY(8px);
+      animation: sa-toast-in .18s ease-out both;
+    }
+
+    .sa-toast--out {
+      animation: sa-toast-out .18s ease-in both;
+    }
+
+    .sa-toast__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .sa-toast__title {
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .sa-toast__body {
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .sa-toast__footer {
+      margin-top: 8px;
+    }
+
+    .sa-toast__action {
+      background: #eef2f7;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .sa-toast__close {
+      background: transparent;
+      border: 0;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      color: #64748b;
+    }
+
+    .sa-toast__bar {
+      height: 3px;
+      width: 100%;
+      margin-top: 8px;
+      transform-origin: left center;
+      transform: scaleX(1);
+      border-radius: 2px;
+      opacity: .9;
+    }
+
+    @keyframes sa-toast-in {
+      from {
+        opacity: 0;
+        transform: translateY(8px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes sa-toast-out {
+      from {
+        opacity: 1;
+        transform: translateY(0)
+      }
+
+      to {
+        opacity: 0;
+        transform: translateY(6px)
+      }
+    }
+
+    #banner-root {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3500;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: min(820px, 94vw);
+    }
+
+    .sa-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--sa-gris-soft, #eef2f7);
+      border: 1px solid var(--sa-gris-borde, #e5e7eb);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--shadow-1, 0 3px 14px rgba(6, 64, 102, .06));
+    }
+
+    .sa-banner__dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    .sa-banner__msg {
+      color: var(--sa-text, #064066);
+      font-size: 14px;
+    }
+
+    .sa-banner__close {
+      margin-left: auto;
+      background: transparent;
+      border: 0;
+      font-size: 18px;
+      cursor: pointer;
+      color: #64748b;
+    }
+
+    /* ====== Sidebar: toggler con caret (seguro) ====== */
+    .nav-link-toggle {
+      cursor: pointer;
+      background: transparent;
+      color: inherit;
+      border: 0;
+      text-align: left;
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: .375rem;
+      flex-shrink: 0;
+    }
+
+    .nav-link-toggle .caret {
+      font-size: .9rem;
+      transition: transform .18s ease;
+    }
+
+    .nav-link-toggle[aria-expanded="true"] .caret {
+      transform: rotate(90deg);
+    }
+
+    /* submenú con sangría */
+    .nav .submenu a.nav-link {
+      padding-left: 1.75rem;
+    }
+
+    .submenu-panel {
+      display: none;
+    }
+
+    .submenu-panel.is-open {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    .app.sidebar-collapsed .submenu-panel,
+    .app.sidebar-collapsed .submenu-panel.is-open {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+    }
+
+    .submenu-panel.is-open::-webkit-scrollbar {
+      display: none;
+    }
+
+    .sidebar .submenu-link {
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      visibility: visible !important;
+      opacity: 1 !important;
+      font-size: 0.95rem !important;
+      line-height: 1.3 !important;
+      color: rgba(255, 255, 255, 0.78) !important;
+      padding: 0.75rem 1rem 0.75rem 1.75rem !important;
+      border-radius: var(--radius-sm);
+      flex-shrink: 0 !important;
+    }
+
+    .sidebar .submenu-link:hover {
+      color: #fff !important;
+    }
+
+    .sidebar .submenu-link.active {
+      color: #fff !important;
+    }
+
+    .sidebar-nav-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      min-height: 19px;
+      padding: 0.12rem 0.52rem;
+      border-radius: 999px;
+      margin-left: 0.5rem;
+      font-size: 0.57rem;
+      line-height: 1;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 750;
+      vertical-align: middle;
+      white-space: nowrap;
+      overflow: hidden;
+      max-width: 4rem;
+      transition: opacity 0.18s ease, transform 0.18s ease, max-width 0.18s ease, margin 0.18s ease;
+    }
+
+    .sidebar-nav-pill--new {
+      color: #dcecff;
+      border: 1px solid rgba(147, 197, 253, 0.36);
+      background:
+        linear-gradient(180deg, rgba(59, 130, 246, 0.28), rgba(37, 99, 235, 0.16)),
+        rgba(15, 23, 42, 0.12);
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      animation: sidebar-new-pill-breathe 3.8s ease-in-out infinite;
+    }
+
+    .sidebar-nav-pill--new::before {
+      content: "";
+      position: absolute;
+      inset: 1px auto 1px -45%;
+      width: 38%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+      transform: skewX(-16deg);
+      animation: sidebar-new-pill-sheen 5.2s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .app.sidebar-collapsed .sidebar-nav-pill {
+      opacity: 0;
+      visibility: hidden;
+      max-width: 0;
+      min-height: 0;
+      padding: 0;
+      margin-left: 0;
+      border-width: 0;
+      transform: scale(0.96);
+      animation: none;
+    }
+
+    .app.sidebar-collapsed .sidebar-nav-pill::before {
+      animation: none;
+    }
+
+    @keyframes sidebar-new-pill-breathe {
+      0%,
+      100% {
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      }
+
+      50% {
+        box-shadow: 0 5px 18px rgba(59, 130, 246, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+      }
+    }
+
+    @keyframes sidebar-new-pill-sheen {
+      0%,
+      62% {
+        left: -45%;
+        opacity: 0;
+      }
+
+      72% {
+        opacity: 0.75;
+      }
+
+      86%,
+      100% {
+        left: 110%;
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sidebar-nav-pill--new,
+      .sidebar-nav-pill--new::before {
+        animation: none;
+      }
+    }
+
+    .sidebar .submenu-section-title {
+      display: block !important;
+      font-size: 0.58rem !important;
+      line-height: 1.2 !important;
+      letter-spacing: 0.3px !important;
+      font-weight: 600 !important;
+      color: rgba(255, 255, 255, 0.65) !important;
+    }
+
+    .sidebar .submenu-panel.is-open>.submenu-section-title {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      color: rgba(255, 255, 255, 0.65) !important;
+      margin-top: 1.25rem !important;
+      margin-bottom: 0.5rem !important;
+      font-size: 0.58rem !important;
+    }
+
+    .sidebar,
+    .sidebar::before,
+    .sidebar::after {
+      background: #06486f !important;
+      background-color: #06486f !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+      opacity: 1 !important;
+    }
+
+    .sidebar::before,
+    .sidebar::after {
+      content: none !important;
+      display: none !important;
+    }
+
+    .sidebar-brand-container,
+    .sidebar .nav,
+    .sidebar .signout,
+    .sidebar .submenu,
+    .sidebar .submenu-panel,
+    .sidebar .submenu-panel.is-open,
+    .sidebar .nav-link,
+    .sidebar .nav-link:hover,
+    .sidebar .nav-link:focus,
+    .sidebar .nav-link.active,
+    .sidebar .nav-link-toggle,
+    .sidebar .nav-link-toggle:hover,
+    .sidebar .nav-link-toggle:focus,
+    .sidebar .submenu-link,
+    .sidebar .submenu-link:hover,
+    .sidebar .submenu-link:focus,
+    .sidebar .submenu-link.active {
+      background: transparent !important;
+      background-color: transparent !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+    }
+
+    .sidebar .nav-link::before,
+    .sidebar .nav-link::after,
+    .sidebar .nav-link.active::after,
+    .sidebar .nav-link-toggle::before,
+    .sidebar .nav-link-toggle::after,
+    .sidebar .submenu-link::before,
+    .sidebar .submenu-link::after {
+      content: none !important;
+      display: none !important;
+    }
+
+    /* SIEM Sidebar Brand */
+    .sidebar-brand-container {
+      padding: 1rem 1rem;
+      border-bottom: 1px solid var(--sa-gris-borde, #e5e7eb);
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .sidebar-logo {
+      height: 58px;
+      /* Increased from 42px for sharp visibility */
+      width: auto;
+      object-fit: contain;
+      align-self: flex-start;
+      margin-bottom: 0.25rem;
+      /* Subtle entry animation */
+      animation: fade-in-logo 0.8s ease-out forwards;
+
+      /* Rendering fixes for pixelation */
+      image-rendering: -webkit-optimize-contrast;
+      transform: translateZ(0);
+      /* Trigger GPU */
+    }
+
+    .sidebar-market-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-300);
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    @keyframes fade-in-logo {
+      from {
+        opacity: 0;
+        transform: translateX(-5px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+  </style>
+  <!-- ========== /Notificaciones SA (UI) ========== -->
+
+  {% block extra_head %}{% endblock %}
+  {% block page_skin %}{% endblock %}
+</head>
+
+<body class="{% block body_class %}{% endblock %}">
+  <!-- SPLASH SCREEN ELEMENT (Universal) -->
+  <div id="splash-screen">
+    <div id="splash-content">
+      <img id="splash-logo" src="{{ url_for('static', path='img/logo_siem_azul.png') }}"
+        alt="SIEM - Sistema Integrado de Estimación de Mercados" />
+      <div class="splash-loader"></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const splash = document.getElementById('splash-screen');
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          splash.classList.add('splash-hidden');
+        }, 2200);
+      });
+    })();
+  </script>
+
+  <div class="app d-flex" id="app-container" style="min-height:100vh">
+    <!-- Check localstorage FIRST to avoid flash -->
+    <script>
+      (function () {
+        if (localStorage.getItem('siem_sidebar_collapsed') === 'true') {
+          document.getElementById('app-container').classList.add('sidebar-collapsed');
+        }
+      })();
+    </script>
+    <!-- Sidebar -->
+    {% if user %}
+    <aside class="sidebar" role="navigation" aria-label="Menú lateral">
+      <div class="sidebar-brand-container d-flex align-items-center justify-content-between">
+        <div>
+          <!-- Logo SIEM Blanco (contraste fondo oscuro) -->
+          <img src="{{ url_for('static', path='img/logo_siem_blanco.png') }}" alt="SIEM" class="sidebar-logo">
+
+          {% if market_context == 'private' %}
+          <div class="sidebar-market-label" style="color: var(--sa-azul-alt, #5274ce);">Mercado Privado</div>
+          {% elif market_context == 'forecast' %}
+          <div class="sidebar-market-label" style="color: #059669;">Forecast</div>
+          {% elif market_context == 'notifications' %}
+          <div class="sidebar-market-label" style="color: #94a3b8;">Notificaciones</div>
+          {% elif market_context == 'account' %}
+          <div class="sidebar-market-label" style="color: #94a3b8;">Mi Cuenta</div>
+          {% else %}
+          <div class="sidebar-market-label">Mercado Público</div>
+          {% endif %}
+        </div>
+        <button class="btn btn-link text-white p-0 d-none d-md-inline-block" id="desktopSidebarToggle"
+          aria-label="Colapsar Menú" title="Colapsar Menú" onclick="toggleDesktopSidebar(event)">
+          <i class="bi bi-list fs-4"></i>
+        </button>
+      </div>
+
+      {% if user %}
+      {% set r = (user.role or user.rol or '')|lower %}
+      {% else %}
+      {% set r = '' %}
+      {% endif %}
+
+      <nav class="nav flex-column flex-nowrap px-3 py-2 gap-1">
+
+        {% if market_context == 'private' %}
+        <!-- ================= MENÚ MERCADO PRIVADO ================= -->
+
+        <!-- Home -->
+        <a href="/mercado-privado" class="nav-link {% if request.url.path == '/mercado-privado' %}active{% endif %}">
+          <div><i class="bi bi-house-door"></i> Home</div>
+        </a>
+
+        <!-- Dimensionamiento de mercado -->
+        <a href="/mercado-privado/dimensiones"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/dimensiones') %}active{% endif %}">
+          <div><i class="bi bi-pie-chart"></i> Dimensionamiento</div>
+        </a>
+
+        <!-- Reporte perfiles (Reutilizado) -->
+        {% if user and r in ['admin','supervisor','auditor'] %}
+        <a href="/mercado-privado/reporte-perfiles"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/reporte-perfiles') %}active{% endif %}">
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
+        </a>
+        {% endif %}
+
+        <!-- Mesa de ayuda (Reutilizado) -->
+        {% if user and r in ['analista','supervisor','auditor'] %}
+        {% set is_comments = request.url.path.startswith('/mercado-privado/comentarios') %}
+        <a href="/mercado-privado/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
+          id="cmMenuLink" title="Mesa de ayuda">
+          <div><i class="bi bi-headset"></i> Mesa de ayuda</div>
+          <span class="ms-2">
+            <span id="cmMenuBadge" class="badge rounded-pill bg-primary-subtle text-primary"
+              style="display:none">0</span>
+          </span>
+        </a>
+        {% endif %}
+
+        <!-- Mi contraseña -->
+        <a href="/mi/password"
+          class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
+        </a>
+
+        {% elif market_context == 'account' or market_context == 'notifications' %}
+        <!-- ================= VISTA STANDALONE (SIN SIDEBAR DE MERCADO) ================= -->
+        <a href="javascript:history.back()" class="nav-link">
+          <div><i class="bi bi-arrow-left"></i> Volver</div>
+        </a>
+
+        {% elif market_context == 'forecast' %}
+        <!-- ================= MENÚ FORECAST (INDEPENDIENTE) ================= -->
+
+        <!-- Home Alternativo (opcional si hay sub-rutas, hoy apunta a /forecast) -->
+        <a href="/forecast/" class="nav-link {% if request.url.path.startswith('/forecast') %}active{% endif %}">
+          <div><i class="bi bi-graph-up-arrow"></i> Forecast</div>
+        </a>
+
+        <!-- Mi contraseña -->
+        <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
+        </a>
+
+        {% else %}
+        <!-- ================= MENÚ MERCADO PÚBLICO (DEFAULT) ================= -->
+
+        {% set _pending = total_pending|default(None) %}
+        {% set _done = total_done|default(None) %}
+
+        {# Comparativa siempre inicia colapsado; solo se abre por acción manual del usuario. #}
+        {% set wc_expand = false %}
+
+        {% set op_expand =
+        request.url.path.startswith('/oportunidades')
+        or request.url.path.startswith('/mercado-publico/oportunidades') %}
+
+        <!-- Home Mercado Público -->
+        <a href="/mercado-publico" class="nav-link {% if request.url.path == '/mercado-publico' %}active{% endif %}">
+          <div><i class="bi bi-house-door"></i> Home</div>
+        </a>
+
+        <!-- ====== Web Comparativa (submenú colapsable) ====== -->
+        <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+          data-submenu-target="#wcMenu" aria-expanded="{{ 'true' if wc_expand else 'false' }}" aria-controls="wcMenu">
+          <div><i class="bi bi-intersect"></i> Comparativa</div>
+          <span class="caret">▸</span>
+        </button>
+
+        <div id="wcMenu" class="submenu submenu-panel{% if wc_expand %} is-open{% endif %}">
+{% if user and r in ['admin','analista','supervisor'] %}
+          <a href="/otras-fuentes/nueva"
+            class="submenu-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
+            <span>Nueva carga</span>
+          </a>
+          {% endif %}
+
+          <div class="px-3 mt-2 mb-1 text-uppercase submenu-section-title">
+            Otras Fuentes
+          </div>
+          <a href="/otras-fuentes-externas"
+            class="submenu-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
+            <span>Nueva carga</span>
+          </a>
+
+          <!-- Separador -->
+          <div class="my-2 border-top border-white opacity-10 mx-3"></div>
+
+          {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          {% set is_hist =
+          request.url.path.startswith('/cargas/historial')
+          or request.url.path == '/historial'
+          or (request.url.path.startswith('/cargas/') and not request.url.path.startswith('/cargas/nueva'))
+          or request.url.path.startswith('/tablero/') %}
+          <a href="/cargas/historial" class="submenu-link {% if is_hist %}active{% endif %}">
+            <span>Historial</span>
+            <span class="ms-2">
+              {% if _pending is not none and _pending|int > 0 %}
+              <span class="badge rounded-pill bg-warning-subtle text-warning">{{ _pending }}</span>
+              {% endif %}
+              {% if _done is not none and _done|int > 0 %}
+              <span class="badge rounded-pill bg-success-subtle text-success ms-1">{{ _done }}</span>
+              {% endif %}
+            </span>
+          </a>
+          {% endif %}
+
+          {% if user and r in ['admin','supervisor'] %}
+          {% set is_groups = request.url.path.startswith('/grupos') %}
+          <a href="/grupos" class="submenu-link {% if is_groups %}active{% endif %}">
+            <span>Grupos</span>
+          </a>
+          {% endif %}
+        </div>
+        <!-- ====== /Web Comparativa ====== -->
+
+        
+        <!-- ====== Lectura de Pliegos ====== -->
+        {% if user and r in ['admin','analista','supervisor','auditor','visor'] %}
+        <a href="/mercado-publico/lectura-pliegos" class="nav-link {% if request.url.path.startswith('/mercado-publico/lectura-pliegos') %}active{% endif %}">
+          <div><i class="bi bi-file-earmark-text"></i> Lectura de Pliegos</div>
+        </a>
+        {% endif %}
+<!-- ====== Oportunidades (submenú colapsable) ====== -->
+        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+        <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
+          data-submenu-target="#opMenu" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
+          <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
+          <span class="caret">▸</span>
+        </button>
+
+        <div id="opMenu" class="submenu submenu-panel{% if op_expand %} is-open{% endif %}">
+          <a href="/oportunidades/buscador"
+            class="submenu-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
+            <span>Buscador</span>
+          </a>
+          <a href="/oportunidades/dimensiones"
+            class="submenu-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
+            <span>Dimensiones</span>
+          </a>
+        </div>
+        {% endif %}
+        <!-- ====== /Oportunidades ====== -->
+
+        <!-- Reporte perfiles -->
+        {% if user and r in ['admin','supervisor','auditor','analista','analyst'] %}
+        <a href="/mercado-publico/reporte-perfiles"
+          class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
+          <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
+        </a>
+        {% endif %}
+
+        <!-- Mesa de ayuda -->
+        <!-- Mesa de ayuda (SIC) -->
+        {% if user %}
+        {% if (r in ['analista', 'supervisor', 'auditor']) %}
+        <a href="/mercado-publico/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/mercado-publico/helpdesk') %}active{% endif %}"
+          title="Mesa de ayuda">
+          <div><i class="bi bi-headset"></i> Mesa de ayuda</div>
+        </a>
+        {% elif (r == 'admin') %}
+        <a href="/sic/helpdesk"
+          class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}"
+          title="Mesa de ayuda">
+          <div><i class="bi bi-headset"></i> Mesa de ayuda (SIC)</div>
+          <span class="ms-2">
+            <i class="bi bi-box-arrow-up-right" style="font-size: 0.7em;"></i>
+          </span>
+        </a>
+        {% endif %}
+        {% endif %}
+
+        <!-- Mi contraseña -->
+        {% if user %}
+        <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
+        </a>
+        {% endif %}
+
+        {% endif %} <!-- End if market_context -->
+
+      </nav>
+
+      <div class="signout mt-auto px-3 py-3 border-top">
+        {% if user %}
+        {% if market_context == 'account' or market_context == 'notifications' %}
+        {# Account standalone: solo cerrar sesión #}
+        <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
+          href="/logout">
+          <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+        </a>
+        {% else %}
+        {% if r != 'gerente' %}
+        {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
+        <a class="btn btn-outline-secondary w-100 mb-2 btn-sm" href="/switch-market">Cambiar Mercado</a>
+        {% endif %}
+        {% endif %}
+        <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
+          href="/logout">
+          <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+        </a>
+        {% endif %} {# end market_context == account else #}
+        {% else %}
+        <a class="btn btn-primary w-100" href="/login">Ingresar</a>
+        {% endif %}
+      </div>
+    </aside>
+    {% endif %}
+
+    <!-- Main -->
+    <main class="main flex-fill" style="min-width: 0;">
+      <!-- Header -->
+      {% if user %}
+      <header class="header d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-white">
+        <!-- Mobile Sidebar Toggle -->
+        <button class="btn btn-link text-dark p-0 me-2 d-md-none" id="sidebarToggle" aria-label="Menu"
+          onclick="toggleAppSidebar(event)">
+          <i class="bi bi-list fs-2"></i>
+        </button>
+
+        <div class="title h5 m-0 header-title-truncate">{% block header_title %}Panel{% endblock %}</div>
+
+        <div class="d-none d-md-flex align-items-center gap-2">
+          {% block toolbar_actions %}
+          {% if user and (user.role or '')|lower in ['admin','supervisor']
+          and request.url.path.startswith('/grupos')
+          and request.url.path != '/grupos/nuevo' %}
+          <a class="btn btn-sm btn-primary" href="/grupos/nuevo">+ Nuevo grupo</a>
+          {% endif %}
+          {% endblock %}
+        </div>
+
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <div class="meta small text-muted d-flex flex-row align-items-center gap-2">
+
+            <!-- Notificaciones Icon -->
+            <div class="position-relative" id="nav-notif-container">
+              <a href="/notifications" class="text-secondary opacity-75 hover-opacity-100" title="Notificaciones">
+                <i class="bi bi-bell-fill fs-5"></i>
+                <span id="nav-notif-badge"
+                  class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger border border-white p-1"
+                  style="display:none;font-size:0.6rem;">
+                  <span class="visually-hidden">New alerts</span>
+                </span>
+              </a>
+            </div>
+
+            <!-- Menú de usuario -->
+            <div class="dropdown">
+              <button class="btn btn-link text-secondary p-0 d-flex align-items-center gap-1 gap-md-2 text-decoration-none"
+                      type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <div style="width:28px;height:28px;background:#e8edf5;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+                  <i class="bi bi-person-fill" style="font-size:0.8rem;color:#6c757d;"></i>
+                </div>
+                <span class="small d-none d-md-inline">
+                  {% if user_display is defined %}{{ user_display(user) }}{% else %}{{ _display_name or '—' }}{% endif %}
+                </span>
+                <span class="top-user-pill">{{ (r or '')|capitalize }}</span>
+                <i class="bi bi-chevron-down opacity-50 d-none d-md-inline" style="font-size:0.7rem;"></i>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" style="min-width:170px;">
+                <li>
+                  <a class="dropdown-item d-flex align-items-center gap-2 text-danger small" href="/logout">
+                    <i class="bi bi-box-arrow-right"></i>Cerrar sesión
+                  </a>
+                </li>
+              </ul>
+            </div>
+
+
+          </div>
+        </div>
+      </header>
+      {% endif %}
+
+      <div id="flash-container" class="px-3 pt-3"></div>
+
+      <div class="px-3">
+        {% block notifications %}{% endblock %}
+      </div>
+
+      <div class="px-3 py-3">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+
+
+  <!-- Contenedores de notificaciones -->
+  <div id="banner-root" aria-live="polite" aria-atomic="true"></div>
+  <div id="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Bootstrap JS (local) -->
+  <script src="{{ url_for('static', path='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+
+  <!-- ====== SIDEBAR TOGGLE (isolated script so it never breaks) ====== -->
+  <script>
+    // ====== SIDEBAR MOBILE TOGGLE (Global) ======
+    window.toggleAppSidebar = function (e) {
+      if (e) e.stopPropagation();
+      var sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+      var overlay = document.querySelector('.sidebar-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', function () {
+          sidebar.classList.remove('show');
+          overlay.classList.remove('show');
+          document.body.style.overflow = '';
+        });
+      }
+      if (sidebar.classList.contains('show')) {
+        sidebar.classList.remove('show');
+        overlay.classList.remove('show');
+        document.body.style.overflow = '';
+      } else {
+        sidebar.classList.add('show');
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden';
+      }
+    };
+
+    // ====== SIDEBAR DESKTOP TOGGLE (Global) ======
+    function getAppContainer() {
+      return document.getElementById('app-container');
+    }
+
+    function isDesktopSidebarCollapsed() {
+      var appContainer = getAppContainer();
+      return !!(appContainer && appContainer.classList.contains('sidebar-collapsed'));
+    }
+
+    function syncSidebarSubmenus() {
+      document.querySelectorAll('[data-submenu-target]').forEach(function (trigger) {
+        var targetSelector = trigger.getAttribute('data-submenu-target');
+        var panel = targetSelector ? document.querySelector(targetSelector) : null;
+        if (!panel) return;
+
+        var isOpen = trigger.getAttribute('aria-expanded') === 'true' || panel.classList.contains('is-open');
+        applySidebarSubmenuState(panel, isOpen);
+      });
+    }
+
+    function setDesktopSidebarCollapsed(collapsed) {
+      var appContainer = getAppContainer();
+      if (!appContainer) return;
+
+      appContainer.classList.toggle('sidebar-collapsed', collapsed);
+      localStorage.setItem('siem_sidebar_collapsed', collapsed ? 'true' : 'false');
+      syncSidebarSubmenus();
+    }
+
+    window.toggleDesktopSidebar = function (e) {
+      if (e) e.preventDefault();
+      setDesktopSidebarCollapsed(!isDesktopSidebarCollapsed());
+    };
+
+    // Close sidebar on ESC
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var sidebar = document.querySelector('.sidebar');
+        if (sidebar && sidebar.classList.contains('show')) {
+          sidebar.classList.remove('show');
+          var ov = document.querySelector('.sidebar-overlay');
+          if (ov) ov.classList.remove('show');
+          document.body.style.overflow = '';
+        }
+      }
+    });
+
+    // Sidebar submenus: force visible state inline to bypass inherited sidebar rules.
+    function applySidebarSubmenuState(panel, open) {
+      if (!panel) return;
+
+      var visibleOpen = open && !isDesktopSidebarCollapsed();
+      panel.classList.toggle('is-open', open);
+      panel.style.display = visibleOpen ? 'flex' : 'none';
+      panel.style.flexDirection = visibleOpen ? 'column' : '';
+      panel.style.gap = visibleOpen ? '0.15rem' : '';
+      panel.style.visibility = visibleOpen ? 'visible' : 'hidden';
+      panel.style.opacity = visibleOpen ? '1' : '0';
+
+      Array.prototype.forEach.call(panel.children, function (child) {
+        if (!visibleOpen) {
+          child.style.display = '';
+          child.style.visibility = '';
+          child.style.opacity = '';
+          child.style.fontSize = '';
+          child.style.color = '';
+          child.style.lineHeight = '';
+          return;
+        }
+
+        if (child.tagName === 'A') {
+          child.style.display = 'flex';
+          child.style.visibility = 'visible';
+          child.style.opacity = '1';
+          child.style.fontSize = '0.95rem';
+          child.style.lineHeight = '1.3';
+          child.style.color = 'rgba(255,255,255,0.78)';
+        } else {
+          child.style.display = 'block';
+          child.style.visibility = 'visible';
+          child.style.opacity = '1';
+        }
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      syncSidebarSubmenus();
+    });
+
+    document.addEventListener('click', function (e) {
+      var trigger = e.target.closest('[data-submenu-target]');
+      if (!trigger) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      var targetSelector = trigger.getAttribute('data-submenu-target');
+      if (!targetSelector) return;
+
+      var panel = document.querySelector(targetSelector);
+      if (!panel) return;
+
+      var wasCollapsed = isDesktopSidebarCollapsed();
+      if (wasCollapsed) {
+        setDesktopSidebarCollapsed(false);
+      }
+
+      var willOpen = wasCollapsed || trigger.getAttribute('aria-expanded') !== 'true';
+
+      // Accordion mode: Close other open submenus
+      if (willOpen) {
+        document.querySelectorAll('[data-submenu-target]').forEach(function (otherTrigger) {
+          if (otherTrigger !== trigger && otherTrigger.getAttribute('aria-expanded') === 'true') {
+            var otherTargetSelector = otherTrigger.getAttribute('data-submenu-target');
+            var otherPanel = document.querySelector(otherTargetSelector);
+            if (otherPanel) {
+              applySidebarSubmenuState(otherPanel, false);
+              otherTrigger.setAttribute('aria-expanded', 'false');
+            }
+          }
+        });
+      }
+
+      applySidebarSubmenuState(panel, willOpen);
+      trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  </script>
+
+  <!-- Notify (UI de toasts/banners) -->
+  <script src="{{ url_for('static', path='js/notify.js') }}" defer></script>
+
+  <script>
+    // ====== Usuario (expuesto a JS global + data-attrs en <html>) ======
+    (function () {
+      var APP_USER = {
+        role: {{ ((user and(user.role or user.rol or '')) | lower) | tojson
+    }},
+    display: {{ (_display_name or 'Yo') | tojson }},
+    email: {{ (user and user.email or '') | tojson }}
+      };
+    window.APP_USER = APP_USER;
+
+    const rootEl = document.documentElement;
+    if (!rootEl.dataset.userRole) rootEl.dataset.userRole = APP_USER.role || '';
+    if (!rootEl.dataset.userDisplay) rootEl.dataset.userDisplay = APP_USER.display || 'Yo';
+
+    const wc = document.getElementById('wc-comments-panel');
+    if (wc) {
+      if (!wc.dataset.userRole) wc.dataset.userRole = APP_USER.role || '';
+      if (!wc.dataset.userDisplay) wc.dataset.userDisplay = APP_USER.display || 'Yo';
+    }
+    }) ();
+
+    // ====== Badge "Mesa de ayuda" (abiertos) ======
+    (function () {
+      // ... (existing code if any, irrelevant here, just place at end of script block)
+    })();
+
+    // ====== CONFIRMACION MANUAL (si el onclick inline falla) ======
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest('.btn-delete-group')) {
+        e.preventDefault();
+        const btn = e.target.closest('.btn-delete-group');
+        const name = btn.dataset.name || 'este grupo';
+        if (confirm(`¿Eliminar el grupo ${name}? Esta acción no se puede deshacer.`)) {
+          window.location.href = btn.href;
+        }
+      }
+      if (e.target && e.target.closest('.btn-remove-member')) {
+        e.preventDefault();
+        const btn = e.target.closest('.btn-remove-member');
+        const name = btn.dataset.name || 'este usuario';
+        if (confirm(`¿Quitar a ${name} del grupo?`)) {
+          window.location.href = btn.href;
+        }
+      }
+    });
+
+
+    (function () {
+      const badge = document.getElementById('cmMenuBadge');
+      const link = document.getElementById('cmMenuLink');
+      if (!badge || !link) return;
+
+      async function refresh() {
+        try {
+          const r = await fetch('/api/comments/inbox?status=open&page=1&page_size=1', {
+            headers: { 'accept': 'application/json' }
+          });
+          if (!r.ok) return;
+          const data = await r.json();
+
+          const open = (data && typeof data.total === 'number')
+            ? data.total
+            : (Array.isArray(data) ? data.length : 0);
+
+          if (open > 0) {
+            badge.textContent = String(open);
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+          link.title = `Mesa de ayuda · Abiertos: ${open}`;
+        } catch { }
+      }
+
+      refresh();
+      setInterval(refresh, 60000);
+    })();
+
+    // ====== Badge "Notificaciones" (System) ======
+    (function () {
+      const badge = document.getElementById('nav-notif-badge');
+      if (!badge) return;
+      let checkNotifsInFlight = false;
+
+      async function checkNotifs() {
+        if (checkNotifsInFlight) return;
+        checkNotifsInFlight = true;
+        try {
+          const r = await fetch('/notifications/unread-count');
+          if (!r.ok) return;
+          const data = await r.json();
+          const count = data.count || 0;
+
+          if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : count;
+            badge.style.display = '';
+          } else {
+            badge.style.display = 'none';
+          }
+        } catch (e) { console.error('Error checking notifications', e); }
+        finally { checkNotifsInFlight = false; }
+      }
+
+      checkNotifs();
+      // Poll every 30 seconds
+      setInterval(checkNotifs, 30000);
+    })();
+
+    // ====== Helper global: Enter = enviar / Shift+Enter = salto ======
+    (function () {
+      function bindEnterSubmit(textarea, form) {
+        if (!textarea || !form || textarea.dataset._enterBound) return;
+        textarea.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            const txt = (textarea.value || '').trim();
+            if (!txt) return;
+            if (typeof form.requestSubmit === 'function') form.requestSubmit();
+            else form.submit();
+          }
+        });
+        textarea.dataset._enterBound = '1';
+      }
+      window.bindEnterSubmit = bindEnterSubmit;
+
+      const ta = document.getElementById('cmReplyBody');
+      const fm = document.getElementById('cmReplyForm');
+      if (ta && fm) bindEnterSubmit(ta, fm);
+
+      document.addEventListener('shown.bs.offcanvas', function () {
+        const t = document.getElementById('cmReplyBody');
+        const f = document.getElementById('cmReplyForm');
+        if (t && f) bindEnterSubmit(t, f);
+      });
+    })();
+  </script>
+
+  {# ===== Feedback reset_ok / reset_err (toasts o alerts) ===== #}
+  {% if reset_ok %}
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      var msg = 'Se resetearon los procesos correctamente.';
+      if (window.Notify && Notify.toastSuccess) {
+        Notify.toastSuccess('Reset completado', msg);
+      } else {
+        var box = document.getElementById('flash-container');
+        if (box) {
+          box.innerHTML =
+            '<div class="alert alert-success alert-dismissible fade show" role="alert">'
+            + msg +
+            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
+        }
+      }
+    });
+  </script>
+  {% endif %}
+
+  {% if reset_err %}
+  {% set _reset_err_msg = reset_err if reset_err is string else 'No se pudo resetear los procesos. Verificá la
+  contraseña e intentá nuevamente.' %}
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      var msg = {{ _reset_err_msg | tojson
+    }};
+    if (window.Notify && Notify.toastError) {
+      Notify.toastError('No se pudo resetear', msg);
+    } else {
+      var box = document.getElementById('flash-container');
+      if (box) {
+        box.innerHTML =
+          '<div class="alert alert-danger alert-dismissible fade show" role="alert">'
+          + msg +
+          '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button></div>';
+      }
+    }
+    });
+  </script>
+  {% endif %}
+
+  {% block extra_js %}{% endblock %}
+
+  {% if user %}
+  {# ── Heartbeat global: mantiene la presencia del usuario en Monitoreo en Vivo ── #}
+  <script>
+  (function () {
+    var _hbSection = (function () {
+      var p = window.location.pathname;
+      if (p === "/" || p === "") return "home";
+      if (p.indexOf("/sic/tracking") !== -1) return "sic_tracking";
+      if (p.indexOf("/sic/usuarios") !== -1) return "sic_usuarios";
+      if (p.indexOf("/sic/helpdesk") !== -1) return "sic_helpdesk";
+      if (p.indexOf("/sic") !== -1) return "sic";
+      if (p.indexOf("/mercado-privado/dimensiones") !== -1) return "mercado_privado_dimensiones";
+      if (p.indexOf("/mercado-privado") !== -1) return "mercado_privado";
+      if (p.indexOf("/mercado-publico") !== -1) return "mercado_publico";
+      return "otro";
+    })();
+    var _hbInFlight = false;
+
+    function _sendHeartbeat() {
+      if (_hbInFlight) return;
+      _hbInFlight = true;
+      fetch("/api/heartbeat?section=" + encodeURIComponent(_hbSection), {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+        keepalive: true,
+      }).catch(function () {
+        /* silencioso — no interrumpir la experiencia del usuario */
+      }).finally(function () {
+        _hbInFlight = false;
+      });
+    }
+
+    /* Primera señal: 5 s después de cargar la página */
+    setTimeout(_sendHeartbeat, 5000);
+    /* Señales periódicas cada 30 s */
+    setInterval(_sendHeartbeat, 30000);
+  })();
+  </script>
+  {% endif %}
+
+</body>
+
+</html>
