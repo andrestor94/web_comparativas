@@ -395,7 +395,7 @@ h4 {
   border-radius: var(--radius);
   box-shadow: var(--shadow-1);
   padding: 1.25rem;
-  height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
   transition: box-shadow 0.2s;
@@ -521,14 +521,13 @@ h4 {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
-  /* <- horizontal aquí */
   overflow-y: auto;
-  /* y vertical aquí */
   max-height: 66vh;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable both-edges;
-  contain: content;
+  contain: layout paint style;
   isolation: isolate;
+  overscroll-behavior: contain;
 }
 
 /* La tabla puede ser más ancha que el contenedor, pero NO ensancha la página */
@@ -541,10 +540,30 @@ h4 {
 }
 
 /* Evita desbordes horizontales del layout externo */
-#fitContainer,
 body,
 .main {
   overflow-x: hidden;
+}
+
+/* fitContainer: clip horizontal overflow sin crear scroll container implícito.
+   overflow-x:hidden + overflow-y:visible → spec fuerza overflow-y:auto (scroll container oculto).
+   Con overflow-y:clip se previene ese efecto secundario y se evita que el
+   desborde vertical de hijos inflados acumule altura extra en .main. */
+@media (min-width: 769px) {
+  /* Dashboard desktop: el shell global fija .main en 100vh; en este tablero
+     eso deja scroll externo sobrante debajo de la tabla. Usamos alto natural
+     solo aqui para no alterar el comportamiento mobile ni otros modulos. */
+  body.dashboard-page .app > .sidebar + .main,
+  body.dashboard-page .app.sidebar-collapsed > .sidebar + .main {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: visible;
+  }
+}
+
+#fitContainer {
+  overflow-x: clip;
+  overflow-y: clip;
 }
 
 /* Cabezal doble sticky */
@@ -904,13 +923,8 @@ body,
   background: #fafcff
 }
 
-/* “Fit to screen” */
-#fitContainer {
-  transform-origin: top left
-}
-
+/* “Fit to screen” — escala via zoom (no transform, para que el espacio de layout colapse) */
 #fitContainer.scaled {
-  transform: scale(var(--fit-scale, 1));
   width: calc(100%/var(--fit-scale, 1))
 }
 
