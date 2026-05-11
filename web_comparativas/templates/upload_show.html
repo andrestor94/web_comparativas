@@ -305,10 +305,20 @@
   </div>
   {% endif %}
 
-  <div id="errorBanner" class="alert alert-danger d-flex align-items-center gap-3 shadow-sm border-0 d-none"
+  <div id="errorBanner" class="alert alert-danger shadow-sm border-0 d-none"
     style="border-radius:12px;">
-    <i class="bi bi-x-circle-fill fs-4"></i>
-    <div>Ocurrió un error. Revisá el diagnóstico abajo o reintentá.</div>
+    <div class="d-flex align-items-start gap-3">
+      <i class="bi bi-x-circle-fill fs-4 flex-shrink-0 mt-1"></i>
+      <div class="flex-grow-1">
+        <strong>Error en el procesamiento del archivo.</strong>
+        <div id="errorBannerMsg" class="mt-1 small" style="white-space:pre-wrap;"></div>
+        <details id="errorTraceDetails" class="mt-2 d-none">
+          <summary class="small text-muted" style="cursor:pointer;">Ver detalle técnico</summary>
+          <pre id="errorTracePre" class="mt-1 p-2 bg-white rounded border small"
+            style="font-size:0.72rem; white-space:pre-wrap; max-height:160px; overflow:auto;"></pre>
+        </details>
+      </div>
+    </div>
   </div>
 
   {# 👇 Stepper Section #}
@@ -564,7 +574,7 @@
     if (btnPrev) btnPrev.disabled = (idx <= 0);
     if (btnNext) btnNext.disabled = (idx >= stepCount - 1);
 
-    toggleError(isError);
+    toggleError(isError, lastState.error_details);
     setLastUpd();
   }
 
@@ -584,7 +594,35 @@
     return `${(m / 60) | 0}h`;
   }
   setInterval(() => { if (lastUpdateTs) lastUpdRel.textContent = `(${fmtRel(lastUpdateTs)})`; }, 5000);
-  function toggleError(show) { errorBanner.classList.toggle("d-none", !show); }
+  const errorBannerMsg = document.getElementById("errorBannerMsg");
+  const errorTraceDetails = document.getElementById("errorTraceDetails");
+  const errorTracePre = document.getElementById("errorTracePre");
+
+  function toggleError(show, errorDetails) {
+    errorBanner.classList.toggle("d-none", !show);
+    if (!show) return;
+
+    const ed = errorDetails || lastState.error_details || {};
+    const msg = ed.message || "Ocurrió un error. Revisá el diagnóstico técnico o restaurá el archivo.";
+    const stage = ed.stage || "";
+    const fileName = ed.file_name || "";
+    const adapterTried = ed.adapter_tried || "";
+
+    let humanMsg = msg;
+    if (stage) humanMsg += `\nEtapa donde falló: ${stage}`;
+    if (adapterTried) humanMsg += `\nAdapter utilizado: ${adapterTried}`;
+    if (fileName) humanMsg += `\nArchivo: ${fileName}`;
+
+    errorBannerMsg.textContent = humanMsg;
+
+    const tb = (ed.traceback || "").trim();
+    if (tb) {
+      errorTracePre.textContent = tb;
+      errorTraceDetails.classList.remove("d-none");
+    } else {
+      errorTraceDetails.classList.add("d-none");
+    }
+  }
 
   /* ===================== Notificaciones (Fix Duplicate) ===================== */
   let currentBanner = null;
@@ -617,13 +655,17 @@
 
     // 2) Error
     if (s === "error") {
-      notifiedDone = false; // Reset if error occurs after done (weird but possible)
+      notifiedDone = false;
+      const ed = data.error_details || {};
+      const errMsg = ed.message
+        ? ed.message.substring(0, 120) + (ed.message.length > 120 ? "…" : "")
+        : "Hubo un problema procesando el archivo. Revisá el diagnóstico técnico.";
       window.Notify.toast({
         type: "error",
-        title: "Error Detectado",
-        message: "Hubo un problema procesando el archivo.",
-        actionText: "Reintentar",
-        onAction: () => location.reload()
+        title: "Error en el procesamiento",
+        message: errMsg,
+        actionText: "Restaurar archivo",
+        onAction: () => document.getElementById("btnRestore")?.click()
       });
       return;
     }
@@ -670,10 +712,36 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 
   // Admin Controls
+  let isAdvancing = false;
+
   async function move(action) {
-    const fd = new FormData(); fd.append("action", action);
-    await fetch(`/api/cargas/${uploadId}/avance`, { method: "POST", body: fd });
-    tick();
+    if (isAdvancing) return;
+    isAdvancing = true;
+    if (btnPrev) btnPrev.disabled = true;
+    if (btnNext) btnNext.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append("action", action);
+      const r = await fetch(`/api/cargas/${uploadId}/avance`, { method: "POST", body: fd });
+      if (!r.ok) {
+        let json = {};
+        try { json = await r.json(); } catch { }
+        if (r.status === 409) {
+          showBanner(
+            json.msg || "El estado cambió mientras procesábamos. Actualizando información de la carga...",
+            "warning", false
+          );
+        } else {
+          showBanner(json.msg || `No se pudo avanzar (error ${r.status}).`, "danger", false);
+        }
+      }
+    } catch (e) {
+      console.error("[move] Error de conexión:", e);
+      showBanner("Error de conexión al intentar avanzar. Verificá tu red e intentá de nuevo.", "danger", false);
+    } finally {
+      isAdvancing = false;
+      tick();
+    }
   }
   if (btnPrev) btnPrev.addEventListener("click", () => move("prev"));
   if (btnNext) btnNext.addEventListener("click", () => move("next"));

@@ -135,7 +135,7 @@ def _commit_safe():
         raise exc
 
 def _set_status_by_id(upload_id: int, status_key: str):
-    if status_key not in STEP_KEYS:
+    if status_key not in STEP_KEYS and status_key != "error":
         status_key = "processing"
     up = _get_upload(upload_id)
     up.status = status_key
@@ -432,18 +432,22 @@ def advance_status(upload_id: int, *, force: bool = False) -> str:
 # ------------------------------------------------------------
 def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool = False):
     up = _get_upload(upload_id)
-    
-    # --- DEBUG LOG ---
-    try:
-        debug_log = PROJECT_ROOT / "debug_services.log"
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"\n--- [START] classify_and_process id={upload_id} ---\n")
-            f.write(f"Upload: {up}\n")
-            f.write(f"Original: {up.original_path}\n")
-            f.write(f"BaseDir (DB): {up.base_dir}\n")
-    except:
-        pass
-    # -----------------
+    _fname = getattr(up, "original_filename", None) or f"upload_{upload_id}"
+    logger.info("[upload %d] Iniciando classify_and_process | archivo: %s", upload_id, _fname)
+
+    # Log de respaldo en disco (útil en Render donde stdout puede no verse fácil)
+    debug_log = PROJECT_ROOT / "debug_services.log"
+    def _dlog(msg: str):
+        try:
+            with open(debug_log, "a", encoding="utf-8") as _f:
+                _f.write(msg + "\n")
+        except Exception:
+            pass
+
+    _dlog(f"\n--- [START] classify_and_process id={upload_id} ---")
+    _dlog(f"  archivo: {_fname}")
+    _dlog(f"  original_path: {up.original_path}")
+    _dlog(f"  base_dir (DB): {up.base_dir}")
 
     # NUEVO: asegurar snapshot del cargador al entrar al pipeline
     _ensure_uploader_snapshot(up)
@@ -463,7 +467,12 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
 
     try:
         if touch_status:
-            _set_status_by_id(upload_id, "classifying")
+            # Solo retrocedemos a "classifying" si aún no llegamos a "processing".
+            # Evita revertir el estado cuando el endpoint /avance ya lo fijó en "processing".
+            _current_st = (getattr(up, "status", None) or "pending").lower().strip()
+            _idx_current = step_index(_current_st) if _current_st in STEP_KEYS else 0
+            if _idx_current < step_index("processing"):
+                _set_status_by_id(upload_id, "classifying")
 
         # === Validación temprana del archivo ===
         file_path = _resolve_original_path(up, base_dir_abs)
@@ -508,28 +517,25 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
 
         href, script_id = _pick_handler(meta_eff)
 
-        try:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                f.write(f"Selected handler: {script_id} -> {href.module}:{href.func}\n")
-        except: pass
-        
+        logger.info("[upload %d] Handler seleccionado: %s → %s:%s", upload_id, script_id, href.module, href.func)
+        _dlog(f"  handler: {script_id} → {href.module}:{href.func}")
+
         if touch_status:
             _set_status_by_id(upload_id, "processing")
-        handler = getattr(importlib.import_module(href.module), href.func)
 
+        handler = getattr(importlib.import_module(href.module), href.func)
+        logger.info("[upload %d] Ejecutando handler...", upload_id)
         result = handler(Path(file_path), meta_eff, out_dir)
-        
-        try:
-            with open(debug_log, "a", encoding="utf-8") as f:
-                if isinstance(result, dict):
-                    summ = result.get("summary", {})
-                elif isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
-                    summ = result[1]
-                else:
-                    summ = {}
-                f.write(f"Function result summary keys: {list(summ.keys())}\n")
-                f.write(f"Total Offers: {summ.get('total_offers')}\n")
-        except: pass
+
+        if isinstance(result, dict):
+            summ_log = result.get("summary", {})
+        elif isinstance(result, tuple) and len(result) > 1 and isinstance(result[1], dict):
+            summ_log = result[1]
+        else:
+            summ_log = {}
+        _dlog(f"  result summary keys: {list(summ_log.keys())}")
+        _dlog(f"  total_offers: {summ_log.get('total_offers')}")
+        logger.info("[upload %d] Handler finalizado | total_offers=%s", upload_id, summ_log.get("total_offers"))
 
         if isinstance(result, tuple):
             df, summary = result
@@ -540,7 +546,21 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
             df, summary = result, {}
 
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-            raise RuntimeError("El resultado del procesamiento está vacío o no es un DataFrame válido.")
+            # Extraer diagnóstico del adapter si lo devolvió en el summary
+            _diag = summary.get("__diag__", {}) if isinstance(summary, dict) else {}
+            _stage = _diag.get("failed_stage", "empty_result")
+            _cols = _diag.get("columns_detected", [])
+            _sheet = _diag.get("sheet_selected", "—")
+            _hrow = _diag.get("header_row_detected")
+            _diag_msg = (
+                f"No se encontró la estructura de tabla de comparativa en el archivo. "
+                f"Etapa: {_stage} | Hoja: {_sheet!r} | "
+                f"Fila cabecera: {_hrow} | "
+                f"Columnas detectadas: {_cols[:10] if _cols else 'ninguna'}"
+            )
+            logger.warning("[upload %d] DataFrame vacío. %s", upload_id, _diag_msg)
+            _dlog(f"  DataFrame vacío: {_diag_msg}")
+            raise RuntimeError(_diag_msg)
 
         normalized_path = out_dir / "normalized.xlsx"
         df.to_excel(normalized_path, index=False, engine="openpyxl")
@@ -568,9 +588,10 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         try:
             up.normalized_content = normalized_path.read_bytes()
             up.dashboard_json = dashboard_json_str
-            logger.info(f"Upload {upload_id}: contenido guardado en DB ({len(up.normalized_content)} bytes).")
+            logger.info("[upload %d] normalized.xlsx guardado en DB (%d bytes).", upload_id, len(up.normalized_content))
+            _dlog(f"  normalized_content guardado en DB: {len(up.normalized_content)} bytes")
         except Exception as persist_err:
-            logger.warning(f"Upload {upload_id}: no se pudo guardar en DB – {persist_err}")
+            logger.warning("[upload %d] No se pudo guardar en DB: %s", upload_id, persist_err)
 
         # --- NUEVO: Persistir metadatos ricos en la DB para el Header del Dashboard ---
         try:
@@ -689,13 +710,45 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
         return {"normalized_path": str(normalized_path), "summary": summary}
 
     except Exception as e:
-        # --- BLOQUE DE ALERTA ---
+        import traceback as _tb
+        import datetime as _dt_err
         err_msg = f"Error al procesar upload {upload_id}: {e}"
+        err_tb = _tb.format_exc()
+        logger.error("[upload %d] %s", upload_id, err_msg)
+        _dlog(f"  ERROR: {err_msg}")
+        _dlog(f"  TRACEBACK:\n{err_tb}")
+
         try:
-            (out_dir / "error.log").write_text(err_msg, encoding="utf-8")
+            (out_dir / "error.log").write_text(f"{err_msg}\n\n{err_tb}", encoding="utf-8")
         except Exception:
             pass
-        logger.error(err_msg)
+
+        # Persistir error estructurado en dashboard_json para que el endpoint de status lo devuelva
+        _error_payload = {
+            "__error__": True,
+            "error_message": str(e),
+            "error_type": type(e).__name__,
+            "error_traceback": err_tb[-2000:],  # últimos 2000 chars
+            "failed_stage": "classify_and_process",
+            "file_name": getattr(up, "original_filename", None),
+            "adapter_tried": getattr(up, "detected_source", None),
+            "timestamp": _dt_err.datetime.utcnow().isoformat(),
+        }
+
+        # Marcar el estado como error para que la UI no quede trabada en "processing"
+        try:
+            db_session.rollback()
+            _set_status_by_id(upload_id, "error")
+        except Exception as _se:
+            logger.error("No se pudo actualizar status a 'error': %s", _se)
+
+        # Guardar detalles del error en dashboard_json (sin sobrescribir la sesión si está rota)
+        try:
+            _up_err = _get_upload(upload_id)
+            _up_err.dashboard_json = json.dumps(_error_payload, ensure_ascii=False)
+            _commit_safe()
+        except Exception as _pe:
+            logger.warning("No se pudo persistir error en dashboard_json: %s", _pe)
 
         # Notificación in-app a admins + log de respaldo
         try:
