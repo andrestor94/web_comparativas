@@ -564,7 +564,7 @@
 
 <!-- Librerías principales -->
 <script defer src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js"></script>
+<script defer src="{{ url_for('static', path='vendor/chartjs-chart-treemap.min.js') }}"></script>
 <script>
   // Fix for Chart.js v4 + Treemap v3: Manually register if needed
   window.addEventListener('load', () => {
@@ -1028,6 +1028,62 @@
   </div>
 </div>
 <!-- ===== /MODAL VISTAS ===== -->
+
+{% if user and (user.role or user.rol or '')|lower == 'admin' %}
+<!-- ===== DIAGNÓSTICO ADMIN ===== -->
+<details id="admin-diag-panel" style="margin:16px;font-size:12px;color:#6b7280;">
+  <summary style="cursor:pointer;font-weight:600;color:#374151;">
+    🔧 Diagnóstico dashboard (admin) — modo: <code>{{ dashboard_mode }}</code>
+  </summary>
+  <div style="margin-top:8px;display:grid;gap:8px;">
+    {% if dash_diag %}
+    <div>
+      <strong>Columnas detectadas:</strong>
+      <ul style="margin:4px 0 0 16px;">
+        {% for k, v in dash_diag.col_detection.items() %}
+        <li><code>{{ k }}</code>: <b>{{ v or '—' }}</b></li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <strong>Shape normalizado:</strong> {{ dash_diag.normalized_shape }}
+    </div>
+    <div>
+      <strong>Columnas normalizadas:</strong> {{ dash_diag.normalized_columns | join(', ') }}
+    </div>
+    <div>
+      <strong>Resumen numérico:</strong>
+      <table style="border-collapse:collapse;font-size:11px;margin-top:4px;">
+        <thead><tr style="background:#f3f4f6;">
+          <th style="padding:2px 8px;text-align:left;">Campo</th>
+          <th style="padding:2px 8px;">Filas válidas</th>
+          <th style="padding:2px 8px;">Filas en cero</th>
+          <th style="padding:2px 8px;">Suma</th>
+          <th style="padding:2px 8px;text-align:left;">Muestra</th>
+        </tr></thead>
+        <tbody>
+        {% for k, v in dash_diag.numeric_summary.items() %}
+        <tr style="border-top:1px solid #e5e7eb;">
+          <td style="padding:2px 8px;"><code>{{ k }}</code></td>
+          <td style="padding:2px 8px;text-align:center;">{{ v.valid_rows }}</td>
+          <td style="padding:2px 8px;text-align:center;">{{ v.zero_rows }}</td>
+          <td style="padding:2px 8px;text-align:right;">{{ v.sum }}</td>
+          <td style="padding:2px 8px;font-size:10px;">{{ v.sample }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if dash_diag.warnings %}
+    <div style="color:#b45309;"><strong>Advertencias:</strong> {{ dash_diag.warnings | join('; ') }}</div>
+    {% endif %}
+    {% else %}
+    <p>Sin datos de diagnóstico (normalized.xlsx no cargado).</p>
+    {% endif %}
+  </div>
+</details>
+<!-- ===== /DIAGNÓSTICO ADMIN ===== -->
+{% endif %}
 
 <!-- Panel / botón de comentarios -->
 <button id="wc-comments-toggle" class="wc-comments-btn" aria-expanded="false" title="Comentarios">
@@ -1549,7 +1605,7 @@
 
     function refreshTreemapFromData(data) {
       if (typeof window.updateTreemap === 'function') {
-        window.updateTreemap(data);
+        Promise.resolve(window.updateTreemap(data)).catch(err => console.warn('[Treemap] update error:', err));
         const total = (data || []).reduce((s, x) => s + (+x.value || 0), 0);
         colorTreemapTotal(total);
       }
@@ -2982,9 +3038,9 @@
     };
 
     if (Array.isArray(window.CHART_PROV)) {
-      window.updateTreemap(window.CHART_PROV);
+      Promise.resolve(window.updateTreemap(window.CHART_PROV)).catch(err => console.warn('[Treemap] init error:', err));
     } else {
-      ensureChart();
+      ensureChart().catch(err => console.warn('[Treemap] ensureChart error:', err));
     }
   })();
 </script>

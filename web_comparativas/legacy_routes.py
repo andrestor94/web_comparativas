@@ -4398,12 +4398,30 @@ def api_carga_status(
         "steps": steps,
         "index": cur_idx,
         "total": len(PROCESS_STEPS),
-        "adapter": enriched.get("adapter") or getattr(up, "adapter_name", None),
+        "adapter": enriched.get("adapter") or getattr(up, "detected_source", None) or getattr(up, "adapter_name", None),
         "normalized_ready": normalized_ready,
         "can_open_dashboard": can_open_dashboard,
         "can_download_normalized": can_download_normalized,
         "dashboard_url": f"/tablero/{up.id}",
     }
+
+    # Cuando el estado es "error", leer los detalles persistidos en dashboard_json
+    if st == "error":
+        try:
+            _stored = json.loads(getattr(up, "dashboard_json", None) or "{}")
+            if _stored.get("__error__"):
+                data["error_details"] = {
+                    "message": _stored.get("error_message", "Error desconocido"),
+                    "type": _stored.get("error_type", ""),
+                    "stage": _stored.get("failed_stage", ""),
+                    "file_name": _stored.get("file_name", ""),
+                    "adapter_tried": _stored.get("adapter_tried", ""),
+                    "timestamp": _stored.get("timestamp", ""),
+                    "traceback": _stored.get("error_traceback", ""),
+                }
+        except Exception:
+            pass
+
     return JSONResponse(data)
 
 
@@ -4757,6 +4775,7 @@ def api_carga_avance(
                 threading.Thread(
                     target=classify_and_process,
                     args=(up.id, {}),
+                    kwargs={"touch_status": True},
                     daemon=True,
                 ).start()
     except Exception as e:
@@ -5028,13 +5047,17 @@ def api_tablero_ranking(
     # 1. Item
     item_col = _find_norm(["nro", "numero", "item", "renglon", "no", "id"])
     
-    # 2. Desc
-    # Buscamos algo que empiece con desc
+    # 2. Desc — "desc" prefix, but also "espec" (especificacion tecnica), "observ", "detalle"
     desc_col = None
     for k, v in dict_cols.items():
-        if k.startswith("desc"):
+        if k.startswith("desc") or "espec" in k or "detalle" in k:
             desc_col = v
             break
+    if not desc_col:
+        for k, v in dict_cols.items():
+            if "observ" in k:
+                desc_col = v
+                break
             
     # 3. Proveedor (prov, oferente, empresa)
     prov_col = None
@@ -5082,6 +5105,15 @@ def api_tablero_ranking(
     # rubro
     rubro_col = _find_norm(["rubro", "clase", "ramo"])
 
+    # total por renglon (fallback para calcular monto cuando qty=0)
+    total_col_rank = None
+    for k, v in dict_cols.items():
+        if "total" in k and "renglon" in k:
+            total_col_rank = v
+            break
+    if not total_col_rank:
+        total_col_rank = _find_norm(["total", "importe", "amount"])
+
     def _to_num_local(x):
         try:
             if isinstance(x, str):
@@ -5094,39 +5126,48 @@ def api_tablero_ranking(
         except Exception:
             return 0.0
 
-    if not (item_col and desc_col and prov_col and price_col):
+    # desc_col is optional — ranking works without description
+    if not (item_col and prov_col and price_col):
         missing = []
-        if not item_col: missing.append("item")
-        if not desc_col: missing.append("desc")
+        if not item_col: missing.append("item/renglon")
         if not prov_col: missing.append("prov")
         if not price_col: missing.append("price")
-        
-        print(f"[API Ranking] {upload_id} -> FAILED mandatory column check. Missing: {missing}")
+
+        print(f"[API Ranking] {upload_id} -> columnas faltantes: {missing} | disponibles: {cols}")
         return JSONResponse(
             {
-                "ok": True, 
-                "rows": [], 
-                "max_pos": 0, 
-                "total_rows": 0, 
+                "ok": True,
+                "rows": [],
+                "max_pos": 0,
+                "total_rows": 0,
                 "debug_error": f"Columnas no detectadas: {', '.join(missing)}",
-                "available_cols": cols
+                "available_cols": cols,
             }
         )
+    print(f"[API Ranking] {upload_id} -> item={item_col} desc={desc_col} prov={prov_col} price={price_col} total={total_col_rank}")
 
     # recorrer filas
     rows_map: Dict[str, Dict[str, Any]] = {}  # item -> datos
 
     for rec in df.to_dict(orient="records"):
-        nro = str(rec.get(item_col, "")).strip()
-        if not nro:
+        _nro_raw = rec.get(item_col, "")
+        try:
+            nro = str(int(float(_nro_raw)))  # "1.0" → "1", 1 → "1"
+        except (TypeError, ValueError):
+            nro = str(_nro_raw).strip()
+        if not nro or nro.lower() in ("nan", "none", ""):
             continue
-        desc = str(rec.get(desc_col, "")).strip()
+        desc = str(rec.get(desc_col, "")).strip() if desc_col else ""
         prov = str(rec.get(prov_col, "")).strip()
-        if not prov:
+        if not prov or prov.lower() == "nan":
             continue
         unit = _to_num_local(rec.get(price_col))
         if unit <= 0:
-            continue
+            # fallback: try total_col / 1 as unit price
+            if total_col_rank:
+                unit = _to_num_local(rec.get(total_col_rank))
+            if unit <= 0:
+                continue
         qty_req = _to_num_local(rec.get(qty_req_col)) if qty_req_col else 0.0
         qty_off = _to_num_local(rec.get(qty_off_col)) if qty_off_col else 0.0
         if qty_off <= 0 and qty_req > 0:
@@ -5311,10 +5352,17 @@ def compute_kpis_and_charts(df: pd.DataFrame):
 
         if price_col and (qty_off_col or qty_req_col):
             qcol = qty_off_col or qty_req_col
-            tot_series = (
-                pd.to_numeric(df[price_col], errors="coerce").fillna(0)
-                * pd.to_numeric(df[qcol], errors="coerce").fillna(0)
-            )
+            qty_s = pd.to_numeric(df[qcol], errors="coerce").fillna(0)
+            if qty_s.sum() > 0:
+                tot_series = (
+                    pd.to_numeric(df[price_col], errors="coerce").fillna(0)
+                    * qty_s
+                )
+            elif total_col:
+                # qty column exists but is all-zero/empty → use pre-computed total
+                tot_series = pd.to_numeric(df[total_col], errors="coerce").fillna(0)
+            else:
+                tot_series = pd.to_numeric(df[price_col], errors="coerce").fillna(0)
         elif total_col:
             tot_series = (
                 pd.to_numeric(df[total_col], errors="coerce")
@@ -5594,10 +5642,13 @@ def summarize_general(
 
         if price_col and (qty_off_col or qty_req_col):
             qcol = qty_off_col or qty_req_col
-            tot_series = (
-                pd.to_numeric(df[price_col], errors="coerce").fillna(0)
-                * pd.to_numeric(df[qcol], errors="coerce").fillna(0)
-            )
+            qty_s = pd.to_numeric(df[qcol], errors="coerce").fillna(0)
+            if qty_s.sum() > 0:
+                tot_series = pd.to_numeric(df[price_col], errors="coerce").fillna(0) * qty_s
+            elif total_col:
+                tot_series = pd.to_numeric(df[total_col], errors="coerce").fillna(0)
+            else:
+                tot_series = pd.to_numeric(df[price_col], errors="coerce").fillna(0)
         elif total_col:
             tot_series = pd.to_numeric(
                 df[total_col], errors="coerce"
@@ -5748,10 +5799,13 @@ def compute_suizo_effectiveness(df: Optional[pd.DataFrame]) -> Dict[str, Any]:
 
     if price_col and (qty_off_col or qty_req_col):
         qcol = qty_off_col or qty_req_col
-        tot_series = (
-            pd.to_numeric(df[price_col], errors="coerce").fillna(0)
-            * pd.to_numeric(df[qcol], errors="coerce").fillna(0)
-        )
+        qty_s = pd.to_numeric(df[qcol], errors="coerce").fillna(0)
+        if qty_s.sum() > 0:
+            tot_series = pd.to_numeric(df[price_col], errors="coerce").fillna(0) * qty_s
+        elif total_col:
+            tot_series = pd.to_numeric(df[total_col], errors="coerce").fillna(0)
+        else:
+            tot_series = pd.to_numeric(df[price_col], errors="coerce").fillna(0)
     elif total_col:
         tot_series = (
             pd.to_numeric(df[total_col], errors="coerce").fillna(0)
@@ -5878,14 +5932,58 @@ def tablero_show(
     # Leer dashboard.json: disco primero, DB como fallback
     summary = services.get_dashboard_data(up)
 
+    # Detectar modo de dashboard desde diagnóstico del adapter
+    _adap_diag = {}
+    if isinstance(summary, dict):
+        _adap_diag = summary.get("__diag__", {}) or {}
+    dashboard_mode = _adap_diag.get("parser_mode", "legacy_blocks")
+
     df = _load_processed_df(up)
 
+    # Diagnóstico de columnas para debugging
+    _dash_diag: dict = {
+        "dashboard_mode": dashboard_mode,
+        "normalized_shape": list(df.shape) if df is not None else None,
+        "normalized_columns": list(df.columns) if df is not None else [],
+        "col_detection": {},
+        "numeric_summary": {},
+        "warnings": [],
+    }
+
     if df is not None and not df.empty:
+        # Populate diagnostic col detection
+        _dash_diag["col_detection"] = {
+            "proveedor": _pick(df, ["Proveedor", "Oferente", "Empresa"]),
+            "precio_unitario": _pick(df, ["Precio unitario", "Precio Unitario", "Precio", "PU"]),
+            "cantidad_ofertada": _pick(df, ["Cantidad ofertada", "Cant. ofertada"]),
+            "total_renglon": _pick(df, ["Total por rengl├│n", "Total por renglon", "Total", "Importe"]),
+            "renglon": _pick(df, ["Rengl├│n", "Renglon", "Item", "Nro"]),
+            "posicion": _pick(df, ["Posici├│n", "Posicion"]),
+            "descripcion": next((c for c in df.columns if str(c).lower().startswith("descrip")), None),
+        }
+        # Numeric summaries only for financial columns (not text like proveedor)
+        for _cn in ("precio_unitario", "cantidad_ofertada", "total_renglon"):
+            _cc = _dash_diag["col_detection"].get(_cn)
+            if _cc:
+                _s = pd.to_numeric(df[_cc], errors="coerce")
+                _dash_diag["numeric_summary"][_cn] = {
+                    "valid_rows": int(_s.notna().sum()),
+                    "zero_rows": int((_s.fillna(0) == 0).sum()),
+                    "sum": round(float(_s.fillna(0).sum()), 2),
+                    "sample": [round(v, 2) for v in _s.dropna().head(5).tolist()],
+                }
+        print(f"[tablero/{upload_id}] mode={dashboard_mode} shape={df.shape} cols={list(df.columns)}")
+        price_diag = _dash_diag["numeric_summary"].get("precio_unitario", {})
+        qty_diag   = _dash_diag["numeric_summary"].get("cantidad_ofertada", {})
+        tot_diag   = _dash_diag["numeric_summary"].get("total_renglon", {})
+        print(f"[tablero/{upload_id}] precio sum={price_diag.get('sum')} qty sum={qty_diag.get('sum')} total sum={tot_diag.get('sum')}")
+
         kpis, chart_sup, chart_pos = compute_kpis_and_charts(df)
         df_en, col_map = enrich_df_for_dashboard(df)
         chart_sup_adj, donut_pos, donut_suizo = compute_extra_charts(
             df_en, col_map
         )
+        print(f"[tablero/{upload_id}] kpis={kpis} chart_sup_adj_labels={chart_sup_adj.get('labels','?')[:3]}")
     else:
         # usar lo que venga de dashboard.json
         kpis = summary.get(
@@ -6046,7 +6144,9 @@ def tablero_show(
             "rows_total": rows_total,
             "rank_api_url": rank_api_url,
             "pdf_url": pdf_url,
-            "rich_data": summary, 
+            "rich_data": summary,
+            "dashboard_mode": dashboard_mode,
+            "dash_diag": _dash_diag,
             # DEBUG INFO
             "debug_version": f"v2.DEBUG.{int(dt.datetime.now().timestamp())}",
             "debug_base_dir": str(getattr(up, "base_dir", "MISSING")),
