@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block body_class %}dashboard-page{% endblock %}
 
 {% block title %}Tablero – Web Comparativas{% endblock %}
 
@@ -54,11 +55,11 @@
   /* CONTENEDOR AJUSTABLE (para zoom/fit) */
   .fit-container {
     --fit-scale: 1;
-    transform-origin: top left;
   }
 
+  /* zoom colapsa el layout igual que el visual, sin espacio vacío residual */
   .fit-container.scaled {
-    transform: scale(var(--fit-scale));
+    zoom: var(--fit-scale);
   }
 
   /* Controles (toolbar arriba) - Tech Style */
@@ -589,7 +590,7 @@
 {% endblock %}
 
 {% block page_skin %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=mobile-ranktable-v1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=dashboard-height-fix-v1">
 {% endblock %}
 
 {% block toolbar_actions %}
@@ -1433,8 +1434,11 @@
 
     function computeFitScale() {
       if (!fitContainer) return 1;
+      // Reset all scaling before measuring natural dimensions
       fitContainer.classList.remove('scaled');
       fitContainer.style.setProperty('--fit-scale', '1');
+      fitContainer.style.zoom = '';
+      fitContainer.style.height = '';
       const natW = fitContainer.scrollWidth || 1,
         natH = fitContainer.scrollHeight || 1;
       const vw = window.innerWidth || 1,
@@ -1448,9 +1452,14 @@
         const s = computeFitScale();
         fitContainer.style.setProperty('--fit-scale', String(s || 1));
         fitContainer.classList.add('scaled');
+        // zoom afecta el layout (a diferencia de transform), por lo que
+        // el espacio en el scroll colapsa al tamaño visual real
+        fitContainer.style.zoom = String(s || 1);
       } else {
         fitContainer.classList.remove('scaled');
         fitContainer.style.setProperty('--fit-scale', '1');
+        fitContainer.style.zoom = '';
+        fitContainer.style.height = '';
       }
     }
 
