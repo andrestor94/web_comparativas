@@ -435,6 +435,19 @@
   .fc-modal-subneg-growth { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: 0.8rem; color: #64748B; border-bottom: 1px solid #F1F5F9; }
   .fc-modal-subneg-growth input[type=number] { width: 80px; padding: 3px 6px; border: 1px solid #E2E8F0; border-radius: 4px; font-size: 0.8rem; font-family: inherit; outline: none; text-align: right; }
 
+  /* Effective-month banner — shows when changes apply */
+  .fc-modal-effective-notice {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    padding: 8px 14px; margin-bottom: 12px;
+    background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px;
+    font-size: 0.8rem; color: #92400E;
+  }
+  .fc-modal-effective-notice strong { color: #78350F; font-size: 0.85rem; }
+  .fc-modal-effective-rule { color: #B45309; font-size: 0.75rem; }
+
+  /* Blocked (past-cutoff) month columns in ag-Grid — visual indicator */
+  .fc-cell-blocked { background: #F8FAFC !important; color: #94A3B8 !important; cursor: not-allowed !important; }
+
   /* Modal ag-grid */
   .fc-modal-grid { padding: 10px 12px 14px; }
   /* Fixed height so the horizontal scrollbar is always visible at the bottom
@@ -1551,8 +1564,8 @@ function renderChart(data) {
     traces.push({
       x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_User_Adj||0),
       name:'Proyección ajustada (usuario)', mode:'lines+markers',
-      line:{color:'#F59E0B', width:2.8, dash:'solid', shape:'spline', smoothing:0.95},
-      marker:{size:5, symbol:'diamond', opacity:0.9},
+      line:{color:'#7C3AED', width:2.8, dash:'solid', shape:'spline', smoothing:0.95},
+      marker:{size:5, symbol:'diamond', color:'#7C3AED', opacity:0.9},
       hovertemplate:`<b>Proyección ajustada</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
     });
   }
@@ -1947,15 +1960,18 @@ function _collectOverrides() {
   const overrides = [];
   const data = STATE.modalClientData;
   if (!data) return overrides;
-  const dates        = data.dates || [];
-  const maxHistDate  = data.max_hist_date || null;
+  const dates          = data.dates || [];
+  const maxHistDate    = data.max_hist_date || null;
+  // Frontend filter mirrors backend enforcement: only send months >= effectiveMonth
+  const effectiveMonth = data.effective_from_month || null;
 
   Object.entries(_modalGridApis).forEach(([, api]) => {
     api.forEachNode(node => {
       const row = node.data;
       if (!row || !row.articulo) return;
       dates.forEach(ds => {
-        if (maxHistDate && ds <= maxHistDate) return;  // skip history
+        if (maxHistDate && ds <= maxHistDate) return;          // skip history
+        if (effectiveMonth && ds < effectiveMonth) return;     // skip blocked months
         const pct = row[ds + ' (%)'];
         if (pct != null) {
           // Always send all future-date pct values (including 0) so the backend
@@ -2030,6 +2046,13 @@ function undoModalChanges() {
   _setModalDirty(false);
 }
 
+/* Format "YYYY-MM" → "01/MM/YYYY" for display */
+function _fmtEffectiveMonth(ym) {
+  if (!ym) return '';
+  const [y, m] = ym.split('-');
+  return `01/${m}/${y}`;
+}
+
 function renderModalBody(data) {
   const body = document.getElementById('fcModalBody');
   const perfil = data.perfil || 'N/A';
@@ -2038,6 +2061,8 @@ function renderModalBody(data) {
   const dates = data.dates || [];
   const maxHistDate = data.max_hist_date || null;
   const apiSubnegGrowths = data.subneg_growths || {};
+  // effective_from_month comes from the backend (source of truth for the cutoff rule)
+  const effectiveMonth = data.effective_from_month || null;
 
   // Inicializar crecimiento general del cliente si no fue seteado en esta sesión
   if (STATE.modalClientGrowth == null) STATE.modalClientGrowth = growthPct;
@@ -2076,7 +2101,18 @@ function renderModalBody(data) {
     <div class="fc-modal-info">
       <div class="fc-modal-info-box"><strong>Perfil:</strong> ${perfil}</div>
       <div class="fc-modal-info-box"><strong>Negocio:</strong> ${negVal}</div>
-    </div>
+    </div>`;
+
+  // ── Effective-month banner ────────────────────────────────────────────────
+  if (effectiveMonth) {
+    html += `
+    <div class="fc-modal-effective-notice">
+      ⏰ <span>Cambios aplicables desde: <strong>${_fmtEffectiveMonth(effectiveMonth)}</strong></span>
+      <span class="fc-modal-effective-rule">Hasta el día 20 → impactan el mes siguiente · Después del día 20 → impactan el mes subsiguiente</span>
+    </div>`;
+  }
+
+  html += `
     <div class="fc-modal-client-growth">
       <label>🎯 Expectativa de Crecimiento:</label>
       <input type="number" id="client-growth-input"
@@ -2113,7 +2149,7 @@ function renderModalBody(data) {
   // Build grids for each subneg
   (data.negocios || []).forEach((negSection, ni) => {
     negSection.subnegs.forEach((subSection, si) => {
-      buildModalGrid(`modal-grid-${ni}-${si}`, subSection.subneg, subSection.products, dates, maxHistDate, data.growth_pct || 0);
+      buildModalGrid(`modal-grid-${ni}-${si}`, subSection.subneg, subSection.products, dates, maxHistDate, data.growth_pct || 0, true, effectiveMonth);
     });
   });
 
@@ -2193,7 +2229,8 @@ function onSubnegGrowthChange(subKey, val, ni, si) {
   if (!negSection) return;
   const sub = negSection.subnegs[si];
   if (!sub) return;
-  buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false);
+  const effectiveMonth = data.effective_from_month || null;
+  buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false, effectiveMonth);
 }
 
 /* Aplica un crecimiento general a TODOS los negocios/subnegocios del cliente.
@@ -2203,6 +2240,7 @@ function onClientGrowthChange(val) {
   STATE.modalClientGrowth = v;
   if (!STATE.modalClientData) return;
   const data = STATE.modalClientData;
+  const effectiveMonth = data.effective_from_month || null;
   (data.negocios || []).forEach((neg, ni) => {
     (neg.subnegs || []).forEach((sub, si) => {
       STATE.modalSubnegGrowths[sub.subneg] = v;
@@ -2213,8 +2251,8 @@ function onClientGrowthChange(val) {
         const strongEl = inp.closest('.fc-modal-subneg-growth')?.querySelector('strong');
         if (strongEl) strongEl.textContent = v.toFixed(1) + '%';
       }
-      // Recalcular el grid del subneg con el nuevo crecimiento
-      buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false);
+      // Recalcular el grid del subneg con el nuevo crecimiento (solo meses >= effectiveMonth)
+      buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false, effectiveMonth);
     });
   });
   _setModalDirty(true);
@@ -2223,10 +2261,11 @@ function onClientGrowthChange(val) {
 let _modalGridApis = {};
 /**
  * Build (or rebuild) a modal ag-Grid for a subneg.
- * useApiValues=true  → usa m.pct / m.nuevo de la API (carga inicial, muestra overrides guardados)
- * useApiValues=false → recalcula desde growthPct (cuando el usuario cambia el % del subneg)
+ * useApiValues=true    → usa m.pct / m.nuevo de la API (carga inicial, muestra overrides guardados)
+ * useApiValues=false   → recalcula desde growthPct (cuando el usuario cambia el % del subneg)
+ * effectiveMonth       → "YYYY-MM" primer mes editable; meses anteriores son solo lectura
  */
-function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growthPct, useApiValues = true) {
+function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growthPct, useApiValues = true, effectiveMonth = null) {
   const el = document.getElementById(gridId);
   if (!el) return;
 
@@ -2244,8 +2283,15 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
       const orig = m.orig != null ? m.orig : 0;
       let adj = orig, pct = 0;
 
+      // Is this month blocked by the effective-month rule?
+      const isBeforeEffective = effectiveMonth && ds < effectiveMonth;
+
       if (useApiValues) {
         // La API ya resolvió la prioridad: override guardado > growthPct global
+        pct = m.pct   != null ? m.pct   : 0;
+        adj = m.nuevo != null ? m.nuevo : orig;
+      } else if (isBeforeEffective) {
+        // Mes bloqueado: conservar valores originales de la API — no recalcular
         pct = m.pct   != null ? m.pct   : 0;
         adj = m.nuevo != null ? m.nuevo : orig;
       } else if (maxHistDate && ds > maxHistDate && growthPct !== 0) {
@@ -2284,11 +2330,17 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
     const [year, month] = ds.split('-').map(Number);
     const monthLabel = `${MONTHS_ES[month]||ds} ${year}`;
     const isHist = maxHistDate && ds <= maxHistDate;
+    // A month is editable only if it's not historical AND it's >= effectiveMonth
+    const isBeforeEffective = effectiveMonth && ds < effectiveMonth;
+    const canEdit = !isHist && !isBeforeEffective;
     const palBg = di % 2 === 0 ? '#F1F5F9' : '#FFFFFF';
-    const palHdr = di % 2 === 0 ? '#E2E8F0' : '#F8FAFC';
+    // Blocked months get a muted background to signal they are locked
+    const pctCellStyle = (isHist || isBeforeEffective)
+      ? { backgroundColor: palBg, color: '#94A3B8', cursor: 'not-allowed' }
+      : { backgroundColor: palBg };
     const children = [
       {field:`${ds} (Orig)`, headerName:'🔒 Orig', editable:false, width:120, minWidth:120, resizable:true, cellStyle:{textAlign:'right',color:'#64748B',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
-      {field:`${ds} (%)`,    headerName:'📈 %',    editable:!isHist, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:-99,max:500,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle:{backgroundColor:palBg}},
+      {field:`${ds} (%)`,    headerName: canEdit ? '📈 %' : '🔒 %', editable:canEdit, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:-99,max:500,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle: pctCellStyle},
       {field:`${ds} (Nuevo)`,headerName:'✏️ Nuevo',editable:false, width:120, minWidth:120, resizable:true, cellStyle:{fontWeight:'bold',textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
       {field:`${ds} ($)`,    headerName:'💰 $',    editable:false, width:130, minWidth:130, resizable:true, cellStyle:{textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtMoney(p.value):'')},
     ];
@@ -2307,6 +2359,11 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
       const field = params.column.getColId();
       if (!field.endsWith(' (%)')) return;
       const ds = field.replace(' (%)', '');
+      // Double-check: if the month is before effectiveMonth, revert and warn
+      if (effectiveMonth && ds < effectiveMonth) {
+        params.node.setDataValue(field, params.oldValue);
+        return;
+      }
       const newPct = parseFloat(params.newValue) || 0;
       const orig = params.data[ds + ' (Orig)'] || 0;
       const ra = newPct / 100;

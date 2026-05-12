@@ -305,6 +305,51 @@ def api_debug_schema(request: Request, _user: User = Depends(_require_user)):
         raise HTTPException(500, str(exc))
 
 
+@router.get("/api/debug-overrides")
+def api_debug_overrides(request: Request, _user: User = Depends(_require_user)):
+    """Inspect ForecastUserOverride records for the current user — for debugging only."""
+    from web_comparativas.models import SessionLocal, ForecastUserOverride
+    from web_comparativas import forecast_service as _svc
+    if SessionLocal is None or ForecastUserOverride is None:
+        return {"error": "ORM not available", "records": []}
+    try:
+        with SessionLocal() as session:
+            rows = (
+                session.query(ForecastUserOverride)
+                .filter(ForecastUserOverride.user_id == int(_user.id))
+                .filter(ForecastUserOverride.source_module == _svc.FORECAST_OVERRIDE_SOURCE)
+                .order_by(ForecastUserOverride.updated_at.desc())
+                .limit(50)
+                .all()
+            )
+            records = []
+            for r in rows:
+                records.append({
+                    "id": getattr(r, "id", None),
+                    "user_id": getattr(r, "user_id", None),
+                    "client_selector": getattr(r, "client_selector", None),
+                    "override_scope": getattr(r, "override_scope", None),
+                    "subneg": getattr(r, "subneg", None),
+                    "codigo_serie": getattr(r, "codigo_serie", None),
+                    "forecast_month": getattr(r, "forecast_month", None),
+                    "override_growth_pct": getattr(r, "override_growth_pct", None),
+                    "effective_monthly_pct": getattr(r, "effective_monthly_pct", None),
+                    "effective_from_month": getattr(r, "effective_from_month", None),
+                    "is_active": getattr(r, "is_active", None),
+                    "updated_at": str(getattr(r, "updated_at", None)),
+                })
+        efm_now = _svc.get_forecast_effective_month()
+        return {
+            "user_id": _user.id,
+            "effective_from_month_now": efm_now,
+            "total_records": len(records),
+            "records": records,
+        }
+    except Exception as exc:
+        import traceback as _tb
+        return {"error": str(exc), "traceback": _tb.format_exc(), "records": []}
+
+
 @router.post("/api/reload")
 def api_reload(request: Request, _user: User = Depends(_require_user)):
     if (getattr(_user, "role", "") or "").lower() not in ("admin", "auditor"):

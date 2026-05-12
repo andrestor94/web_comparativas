@@ -1387,3 +1387,25 @@ def ensure_dimensionamiento_valorizacion_columns():
     )
 
     print("[MIGRATION] SUCCESS: valorizacion columns schema checks done.", flush=True)
+
+
+def ensure_forecast_effective_month_column():
+    """
+    Agrega la columna effective_from_month a forecast_user_overrides.
+
+    Almacena el primer mes desde el cual un override es vigente ("YYYY-MM"),
+    calculado con la regla de corte día 20:
+      - Guardado el día <=20 → vigente desde el mes siguiente.
+      - Guardado el día  >20 → vigente desde el mes subsiguiente.
+
+    NULL en registros anteriores = sin restricción temporal (compatible hacia atrás).
+    Idempotente: ignora si la columna ya existe.
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE forecast_user_overrides ADD COLUMN effective_from_month VARCHAR(7)",
+            "forecast_user_overrides.effective_from_month",
+        )
+    print("[MIGRATION] Columna forecast_user_overrides.effective_from_month verificada/creada.", flush=True)
+

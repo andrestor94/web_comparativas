@@ -253,6 +253,30 @@ def _annual_growth_from_monthly_pct(monthly_pct: float) -> float:
     return (((1.0 + monthly_pct / 100.0) ** 12) - 1.0) * 100.0
 
 
+def get_forecast_effective_month(today: dt.date | None = None, cutoff_day: int = 20) -> str:
+    """Return the first month ("YYYY-MM") from which a forecast change takes effect.
+
+    Rule (cutoff = day 20, inclusive):
+      - today.day <= cutoff_day  → effective from NEXT month
+      - today.day  > cutoff_day  → effective from the month AFTER next
+
+    Examples:
+      2026-05-12 → "2026-06"   (day 12 <= 20)
+      2026-05-20 → "2026-06"   (day 20 <= 20)
+      2026-05-21 → "2026-07"   (day 21 > 20)
+      2026-12-20 → "2027-01"
+      2026-12-21 → "2027-02"
+    """
+    if today is None:
+        today = dt.date.today()
+    offset = 1 if today.day <= cutoff_day else 2
+    # Advance by `offset` months (handles year wrap)
+    m = today.month + offset
+    y = today.year + (m - 1) // 12
+    m = ((m - 1) % 12) + 1
+    return f"{y}-{m:02d}"
+
+
 def _is_effective_override_pct(pct: float, growth_pct: float, tol: float = _OVERRIDE_PCT_TOL) -> bool:
     """Return True only when an override differs materially from the current default growth."""
     pct = float(pct)
@@ -406,10 +430,12 @@ def _fetch_override_records(
 
 
 def _build_override_maps(records: list[Any]) -> dict[str, Any]:
-    subneg_map: dict[tuple[str, str], dict[str, float]] = {}
-    product_map: dict[tuple[str, str], dict[str, float]] = {}
-    cell_map: dict[tuple[str, str, str], dict[str, float]] = {}
+    subneg_map: dict[tuple[str, str], dict[str, Any]] = {}
+    product_map: dict[tuple[str, str], dict[str, Any]] = {}
+    cell_map: dict[tuple[str, str, str], dict[str, Any]] = {}
     subneg_growths: dict[str, dict[str, float]] = {}
+    # effective_from_month per subneg: used to apply subneg growth only from the valid month
+    subneg_effective_months: dict[str, dict[str, str | None]] = {}
 
     for rec in records:
         selector = _clean_override_text(getattr(rec, "client_selector", ""))
@@ -421,17 +447,21 @@ def _build_override_maps(records: list[Any]) -> dict[str, Any]:
         month = _normalize_month_key(getattr(rec, "forecast_month", ""))
         monthly = getattr(rec, "effective_monthly_pct", None)
         annual = getattr(rec, "override_growth_pct", None)
+        efm: str | None = getattr(rec, "effective_from_month", None)  # "YYYY-MM" or None
         if monthly is None and annual is not None:
             monthly = _monthly_pct_from_annual_growth(float(annual))
         if annual is None and monthly is not None:
             annual = _annual_growth_from_monthly_pct(float(monthly))
         monthly = float(monthly or 0.0)
         annual = float(annual or 0.0)
-        payload = {"monthly_pct": monthly, "annual_pct": annual}
+        # effective_from_month is carried in the payload so _resolve_override_for_row
+        # can check temporal validity before applying the override.
+        payload: dict[str, Any] = {"monthly_pct": monthly, "annual_pct": annual, "effective_from_month": efm}
 
         if scope == FORECAST_SCOPE_SUBNEG:
             subneg_map[(selector, subneg)] = payload
             subneg_growths.setdefault(selector, {})[subneg] = annual
+            subneg_effective_months.setdefault(selector, {})[subneg] = efm
         elif scope == FORECAST_SCOPE_PRODUCT:
             product_map[(selector, codigo)] = payload
         elif scope == FORECAST_SCOPE_CELL and month:
@@ -447,6 +477,7 @@ def _build_override_maps(records: list[Any]) -> dict[str, Any]:
         "product": product_map,
         "cell": cell_map,
         "subneg_growths": subneg_growths,
+        "subneg_effective_months": subneg_effective_months,
         "selectors": selectors,
     }
 
@@ -476,22 +507,33 @@ def _resolve_override_for_row(
     month_key = _normalize_month_key(forecast_month)
     code_key = _clean_override_text(codigo_serie)
     subneg_key = _clean_override_text(subneg)
+
+    # Cell-level: highest priority. Respect effective_from_month if set.
     for selector in selector_candidates:
         payload = maps["cell"].get((selector, code_key, month_key))
         if payload is not None:
-            return {"scope": FORECAST_SCOPE_CELL, **payload}
+            efm = payload.get("effective_from_month")
+            if efm is None or month_key >= efm:
+                return {"scope": FORECAST_SCOPE_CELL, **payload}
+    # Product-level (no effective_from_month restriction — kept for legacy compat)
     for selector in selector_candidates:
         payload = maps["product"].get((selector, code_key))
         if payload is not None:
-            return {"scope": FORECAST_SCOPE_PRODUCT, **payload}
+            efm = payload.get("effective_from_month")
+            if efm is None or month_key >= efm:
+                return {"scope": FORECAST_SCOPE_PRODUCT, **payload}
+    # Subneg-level: apply only if forecast_month >= effective_from_month
     for selector in selector_candidates:
         payload = maps["subneg"].get((selector, subneg_key))
         if payload is not None:
-            return {"scope": FORECAST_SCOPE_SUBNEG, **payload}
+            efm = payload.get("effective_from_month")
+            if efm is None or month_key >= efm:
+                return {"scope": FORECAST_SCOPE_SUBNEG, **payload}
     return {
         "scope": "base",
         "monthly_pct": _monthly_pct_from_annual_growth(base_growth_pct),
         "annual_pct": float(base_growth_pct or 0.0),
+        "effective_from_month": None,
     }
 
 
@@ -519,23 +561,15 @@ def _apply_override_effects_to_dataframe(
         return df if df is not None else pd.DataFrame(), {"subneg_growths": {}, "selectors": []}
 
     if _records is not None:
-        # Caller already fetched records; filter to relevant selectors in Python
-        selectors = _selector_candidates_for_df(df)
-        selector_set = {_clean_override_text(s) for s in selectors}
-        records = [
-            r for r in _records
-            if _clean_override_text(getattr(r, "client_selector", "")) in selector_set
-        ] if selector_set else list(_records)
+        # Caller pre-fetched records scoped to this client; _resolve_override_for_row
+        # handles selector/subneg matching per-row — no extra filter needed here.
+        records = list(_records)
     else:
         selectors = _selector_candidates_for_df(df)
         records = _fetch_override_records(user_id, client_selectors=selectors if selectors else None)
     maps = _build_override_maps(records)
 
     out = df.copy()
-    if "fecha" in out.columns:
-        out["_month_key"] = out["fecha"].dt.strftime("%Y-%m")
-    else:
-        out["_month_key"] = ""
 
     if not records:
         out["_override_scope"] = "base"
@@ -544,12 +578,58 @@ def _apply_override_effects_to_dataframe(
         out["_has_override"] = False
         return out, maps
 
+    # Pre-compute month keys as a plain list to avoid itertuples column-rename issues
+    # (pandas renames columns starting with "_" to positional names in namedtuples).
+    if "fecha" in out.columns:
+        month_keys: list[str] = [
+            ts.strftime("%Y-%m") if pd.notna(ts) else ""
+            for ts in out["fecha"]
+        ]
+    else:
+        month_keys = [""] * len(out)
+
+    # Pre-compute fantasia column values (avoid itertuples underscore-rename for _cliente)
+    fantasia_vals: list[str] = (
+        [_clean_override_text(v) for v in out["fantasia"]]
+        if "fantasia" in out.columns
+        else [""] * len(out)
+    )
+    cliente_id_vals: list[str] = (
+        [_clean_override_text(v) for v in out["cliente_id"]]
+        if "cliente_id" in out.columns
+        else [""] * len(out)
+    )
+    # "_cliente" column starts with "_" — access directly from df, not via itertuples
+    _cliente_vals: list[str] = (
+        [_clean_override_text(v) for v in out["_cliente"]]
+        if "_cliente" in out.columns
+        else [""] * len(out)
+    )
+    Cliente_vals: list[str] = (
+        [_clean_override_text(v) for v in out["Cliente"]]
+        if "Cliente" in out.columns
+        else [""] * len(out)
+    )
+    subneg_vals: list[str] = (
+        [_clean_override_text(v) for v in out["subneg"]]
+        if "subneg" in out.columns
+        else [""] * len(out)
+    )
+    codigo_vals: list[str] = (
+        [
+            _clean_override_text(v)
+            for v in (
+                out.get("codigo_serie", out.get("articulo", out.get("descripcion", pd.Series([""] * len(out)))))
+            )
+        ]
+    )
+
     scopes: list[str] = []
     monthlies: list[float] = []
     annual_effects: list[float] = []
     flags: list[bool] = []
 
-    for row in out.itertuples(index=False):
+    for i, row in enumerate(out.itertuples(index=False)):
         row_date = getattr(row, "fecha", None)
         if max_hist_date is not None and pd.notna(row_date) and row_date <= max_hist_date:
             scopes.append("base")
@@ -559,26 +639,15 @@ def _apply_override_effects_to_dataframe(
             continue
 
         selector_candidates = []
-        for raw in (
-            getattr(row, "fantasia", None),
-            getattr(row, "cliente_id", None),
-            getattr(row, "_cliente", None),
-            getattr(row, "Cliente", None),
-        ):
-            val = _clean_override_text(raw)
+        for val in (fantasia_vals[i], cliente_id_vals[i], _cliente_vals[i], Cliente_vals[i]):
             if val and val not in selector_candidates:
                 selector_candidates.append(val)
 
         resolved = _resolve_override_for_row(
             selector_candidates=selector_candidates,
-            subneg=getattr(row, "subneg", ""),
-            codigo_serie=(
-                getattr(row, "codigo_serie", None)
-                or getattr(row, "articulo", None)
-                or getattr(row, "descripcion", None)
-                or ""
-            ),
-            forecast_month=getattr(row, "_month_key", ""),
+            subneg=subneg_vals[i],
+            codigo_serie=codigo_vals[i],
+            forecast_month=month_keys[i],
             maps=maps,
             base_growth_pct=base_growth_pct,
         )
@@ -610,6 +679,7 @@ def _upsert_override_record(
     forecast_month: str = "",
     perfil: str | None = None,
     neg: str | None = None,
+    effective_from_month: str | None = None,
 ) -> None:
     identity = _override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month)
     rec = existing_map.get(identity)
@@ -637,6 +707,11 @@ def _upsert_override_record(
     rec.is_active = True
     rec.updated_by = user_email
     rec.updated_at = dt.datetime.utcnow()
+    # Store the effective_from_month so the rule can be enforced on load
+    try:
+        rec.effective_from_month = effective_from_month
+    except AttributeError:
+        pass  # Column not yet migrated — safe to skip
 
 
 def _deactivate_override(
@@ -665,13 +740,24 @@ def save_client_overrides(
     cell_overrides: list[dict] | None = None,
     subneg_overrides: list[dict] | None = None,
 ) -> None:
-    """Persist Forecast overrides in SQL without mutating forecast_main / forecast_valorizado."""
+    """Persist Forecast overrides in SQL without mutating forecast_main / forecast_valorizado.
+
+    Temporal rule (cutoff day 20):
+      - Changes saved on or before day 20 take effect from the NEXT month.
+      - Changes saved after day 20 take effect from the month AFTER next.
+    Cell overrides for months before effective_from_month are silently skipped.
+    Subneg overrides store effective_from_month so the display/chart logic can
+    respect it when applying the rate to individual months.
+    """
     if SessionLocal is None or ForecastUserOverride is None:
         raise RuntimeError("Forecast override storage is not available")
 
     cell_overrides = cell_overrides or []
     subneg_overrides = subneg_overrides or []
     client_key = _clean_override_text(client_id)
+
+    # Backend is the source of truth for the effective month cutoff
+    effective_from_month = get_forecast_effective_month()
 
     with SessionLocal() as session:
         existing = (
@@ -710,6 +796,7 @@ def save_client_overrides(
                     override_growth_pct=annual_growth,
                     effective_monthly_pct=monthly_growth,
                     user_email=user_email,
+                    effective_from_month=effective_from_month,
                 )
                 subneg_monthly_lookup[subneg] = monthly_growth
             else:
@@ -729,12 +816,20 @@ def save_client_overrides(
             month = _normalize_month_key(item.get("date"))
             if not codigo or not month:
                 continue
+            # Backend enforcement: silently reject overrides for months before effective_from_month
+            if month < effective_from_month:
+                logger.debug(
+                    "[FORECAST] save_client_overrides: skipping cell override %s/%s (month %s < effective %s)",
+                    codigo, month, month, effective_from_month,
+                )
+                continue
             monthly_pct = float(item.get("pct") or 0.0)
             reference_maps = {
                 "subneg": current_client_maps.get("subneg", {}),
                 "product": current_client_maps.get("product", {}),
                 "cell": dict(current_client_maps.get("cell", {})),
                 "subneg_growths": current_client_maps.get("subneg_growths", {}),
+                "subneg_effective_months": current_client_maps.get("subneg_effective_months", {}),
                 "selectors": current_client_maps.get("selectors", []),
             }
             reference_maps["cell"].pop((client_key, codigo, month), None)
@@ -771,6 +866,7 @@ def save_client_overrides(
                 override_growth_pct=_annual_growth_from_monthly_pct(monthly_pct),
                 effective_monthly_pct=monthly_pct,
                 user_email=user_email,
+                effective_from_month=effective_from_month,
             )
 
         session.commit()
@@ -1649,119 +1745,36 @@ def _pg_get_chart_data_inner(
             flush=True,
         )
         df_fcst["Total_User_Adj"] = df_fcst["Total_Adj"].copy()
-        if _ovr_active:
-            with _overrides_lock:
-                overrides_snapshot = _build_overrides_snapshot_locked(growth_pct)
-            _n_ovr = sum(len(v) for v in overrides_snapshot.values())
-            print(
-                f"[FORECAST INNER] ETAPA 7 — applying overrides "
-                f"n_clients={len(overrides_snapshot)} total_overrides={_n_ovr}",
-                flush=True,
-            )
-            if overrides_snapshot:
-                cli_col = "fantasia"
-                # forecast_valorizado has no 'articulo' column — use codigo_serie.
-                # Overrides are stored with art = codigo_serie (set by _pg_get_client_detail).
-                art_col = "codigo_serie"
-                val_col = "monto_yhat" if view_money else "yhat_cliente"
 
-                # Build a lookup map and a VALUES list for the CTE.
-                # STRATEGY: instead of (fantasia=X AND codigo_serie=Y AND month=M) OR ...
-                # (which creates a SQL string proportional to n_overrides and causes
-                # "SSL SYSCALL EOF" on large override sets), we use a single CTE with
-                # a VALUES clause and JOIN.  The query size is O(n_overrides rows × ~50 chars)
-                # but the WHERE clause stays constant — PostgreSQL can index-join efficiently.
-                params_map: dict = {}
-                cte_rows: list = []
-                for client_id, store in overrides_snapshot.items():
-                    for (articulo, date_str), pct in store.items():
-                        try:
-                            month_ts = pd.Timestamp(date_str + "-01")
-                        except Exception:
-                            continue
-                        safe_cid = str(client_id).replace("'", "''")
-                        safe_art = str(articulo).replace("'", "''")
-                        safe_dt  = month_ts.strftime("%Y-%m-%d")
-                        cte_rows.append(f"('{safe_cid}','{safe_art}','{safe_dt}'::date)")
-                        params_map[(str(client_id), str(articulo), date_str)] = pct
-
-                print(
-                    f"[FORECAST INNER] ETAPA 7b — CTE rows={len(cte_rows)} "
-                    f"params_map_sample={list(params_map.keys())[:3]}",
-                    flush=True,
-                )
-                if cte_rows:
-                    _values = ",\n        ".join(cte_rows)
-                    _ovr_sql = f"""
-                        WITH override_keys(fantasia, codigo_serie, mes) AS (
-                            VALUES
-                            {_values}
-                        )
-                        SELECT fv.fecha,
-                               fv.{cli_col},
-                               fv.{art_col},
-                               SUM(COALESCE(fv.{val_col}, 0)) AS orig_val
-                        FROM forecast_valorizado fv
-                        JOIN override_keys ok
-                          ON fv.{cli_col} = ok.fantasia
-                         AND fv.{art_col} = ok.codigo_serie
-                         AND DATE_TRUNC('month', fv.fecha) = ok.mes
-                        GROUP BY fv.fecha, fv.{cli_col}, fv.{art_col}
-                    """
-                    df_orig = _query_agg(_ovr_sql)
-                    print(
-                        f"[FORECAST INNER] ETAPA 7c — df_orig rows={len(df_orig)} "
-                        f"cols={list(df_orig.columns) if not df_orig.empty else []}",
-                        flush=True,
-                    )
-                    if not df_orig.empty:
-                        df_orig["_ds"] = df_orig["fecha"].dt.strftime("%Y-%m")
-                        df_orig["_override_pct"] = df_orig.apply(
-                            lambda r: params_map.get(
-                                (str(r[cli_col]), str(r[art_col]), str(r["_ds"])), None
-                            ), axis=1,
-                        )
-                        df_orig = df_orig[df_orig["_override_pct"].notna()]
-                        # stored pct is a MONTHLY rate (e.g. 3.4074 for 50% annual).
-                        # Recover annual multiplier: (1 + monthly/100)^12, then compute
-                        # delta vs the standard growth multiplier (1 + growth_pct/100).
-                        # Example: monthly=3.4074 → annual_eff=1.50; growth_pct=25 → std=1.25
-                        #          delta = orig × (1.50 − 1.25) = orig × 0.25  → clearly visible
-                        _std_eff = 1.0 + growth_pct / 100.0
-                        df_orig["_annual_eff"] = (1.0 + df_orig["_override_pct"] / 100.0) ** 12
-                        df_orig["_delta"] = df_orig["orig_val"] * (
-                            df_orig["_annual_eff"] - _std_eff
-                        )
-                        df_delta = df_orig.groupby("fecha")["_delta"].sum().reset_index()
-                        df_delta.rename(columns={"_delta": "User_Delta"}, inplace=True)
-                        print(
-                            f"[FORECAST INNER] ETAPA 7d — delta computed "
-                            f"df_delta rows={len(df_delta)} "
-                            f"df_fcst_before_merge cols={list(df_fcst.columns)}",
-                            flush=True,
-                        )
-                        df_fcst = df_fcst.merge(df_delta, on="fecha", how="left")
-                        df_fcst["User_Delta"] = df_fcst["User_Delta"].fillna(0)
-                        # Apply delta only to forecast months (bridge point stays at hist value)
-                        future_mask = df_fcst["fecha"] > max_hist
-                        df_fcst.loc[future_mask, "Total_User_Adj"] = (
-                            df_fcst.loc[future_mask, "Total_Adj"]
-                            + df_fcst.loc[future_mask, "User_Delta"]
-                        )
-                        df_fcst.drop(columns=["User_Delta"], inplace=True)
-                        print(
-                            f"[FORECAST INNER] ETAPA 7e — after merge "
-                            f"df_fcst cols={list(df_fcst.columns)} rows={len(df_fcst)} "
-                            f"Total_User_Adj_nulls={df_fcst['Total_User_Adj'].isna().sum() if 'Total_User_Adj' in df_fcst.columns else 'MISSING'}",
-                            flush=True,
-                        )
-
-    print(f"[FORECAST INNER] ETAPA 8 — bridge df_fcst_rows={len(df_fcst)} df_hist_rows={len(df_hist)}", flush=True)
+    # ── DIAGNOSTIC: log all override records to confirm they exist and what they contain ─
+    _ovr_record_summary = []
+    for _r in _ovr_records[:10]:  # cap at 10 to avoid log spam
+        _ovr_record_summary.append({
+            "sel": getattr(_r, "client_selector", "?"),
+            "scope": getattr(_r, "override_scope", "?"),
+            "subneg": getattr(_r, "subneg", "?"),
+            "annual_pct": getattr(_r, "override_growth_pct", "?"),
+            "efm": getattr(_r, "effective_from_month", "?"),
+            "active": getattr(_r, "is_active", "?"),
+        })
+    print(
+        f"[FORECAST INNER] ETAPA 8 — override application "
+        f"df_fcst_rows={len(df_fcst)} df_hist_rows={len(df_hist)} "
+        f"ovr_active={_ovr_active} ovr_records={len(_ovr_records)} "
+        f"records_sample={_ovr_record_summary}",
+        flush=True,
+    )
     if _ovr_active:
         _override_rows = _query_agg(
             f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
             f"COALESCE({val_col}, 0) AS base_val "
             f"FROM forecast_valorizado WHERE {val_where}"
+        )
+        print(
+            f"[FORECAST INNER] ETAPA 8 override_rows_raw={len(_override_rows)} "
+            f"override_rows_cols={list(_override_rows.columns) if not _override_rows.empty else []} "
+            f"fantasia_sample={_override_rows['fantasia'].dropna().unique()[:5].tolist() if not _override_rows.empty and 'fantasia' in _override_rows.columns else []}",
+            flush=True,
         )
         if not _override_rows.empty:
             _override_rows, _ovr_maps = _apply_override_effects_to_dataframe(
@@ -1772,6 +1785,26 @@ def _pg_get_chart_data_inner(
                 _records=_ovr_records,
             )
             _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
+            _n_overridden = int(_override_rows["_has_override"].sum()) if "_has_override" in _override_rows.columns else -1
+            _n_base = len(_override_rows) - _n_overridden if _n_overridden >= 0 else -1
+            # Log any rows that actually got a non-base override
+            if "_has_override" in _override_rows.columns:
+                _ovr_detail = _override_rows[_override_rows["_has_override"] == True]
+                if not _ovr_detail.empty:
+                    _sample = _ovr_detail[["fantasia", "subneg", "_override_scope", "_annual_eff"]].drop_duplicates().head(5)
+                    print(f"[FORECAST INNER] ETAPA 8 overridden_rows_sample=\n{_sample.to_string()}", flush=True)
+                else:
+                    # Log WHY no rows got overridden — check selector matching
+                    _rec_selectors = {_clean_override_text(getattr(r, "client_selector", "")) for r in _ovr_records}
+                    _df_selectors = set(_override_rows["fantasia"].dropna().apply(_clean_override_text).unique()[:20].tolist()) if "fantasia" in _override_rows.columns else set()
+                    _matching = _rec_selectors & _df_selectors
+                    print(
+                        f"[FORECAST USER ADJ DEBUG] NO OVERRIDES APPLIED — "
+                        f"rec_selectors={_rec_selectors} "
+                        f"df_selectors_sample={list(_df_selectors)[:5]} "
+                        f"matching={_matching}",
+                        flush=True,
+                    )
             _ua_sql = (
                 _override_rows.groupby("fecha")["_ua_sql"].sum()
                 .reset_index()
@@ -1782,6 +1815,23 @@ def _pg_get_chart_data_inner(
                 df_fcst["Total_User_Adj"]
             )
             df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
+            _future_mask = df_fcst["fecha"] > max_hist
+            _adj_diff = (df_fcst.loc[_future_mask, "Total_User_Adj"] - df_fcst.loc[_future_mask, "Total_Adj"]).abs().sum()
+            print(
+                f"[FORECAST INNER] ETAPA 8 done — overridden_rows={_n_overridden} base_rows={_n_base} "
+                f"future_months={_future_mask.sum()} total_adj_diff={_adj_diff:,.0f}",
+                flush=True,
+            )
+            # Per-month breakdown for future months
+            for _, _mr in df_fcst[_future_mask].sort_values("fecha").iterrows():
+                _m = _mr["fecha"].strftime("%Y-%m") if pd.notna(_mr.get("fecha")) else "?"
+                _ta = _mr.get("Total_Adj", 0)
+                _tu = _mr.get("Total_User_Adj", 0)
+                _diff = _tu - _ta
+                if abs(_diff) > 1:
+                    print(f"[FORECAST USER ADJ DEBUG] month={_m} total_adj={_ta:,.0f} total_user_adj={_tu:,.0f} diff={_diff:,.0f}", flush=True)
+            if _adj_diff == 0:
+                print(f"[FORECAST USER ADJ SUMMARY] ovr_records={len(_ovr_records)} overridden_rows={_n_overridden} months_with_diff=0 total_abs_diff=0 — INVESTIGATE SELECTOR/SUBNEG MISMATCH", flush=True)
 
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
@@ -2361,7 +2411,16 @@ def _pg_get_client_detail(
         for (selector, codigo, month), payload in _cd_maps["cell"].items()
         if selector == _cd_client_key
     }
+    # Cell override effective_from_month — keyed by (codigo, month) for fast lookup
+    saved_overrides_efm: dict[tuple[str, str], str | None] = {
+        (codigo, month): payload.get("effective_from_month")
+        for (selector, codigo, month), payload in _cd_maps["cell"].items()
+        if selector == _cd_client_key
+    }
     saved_subneg_growths = dict(_cd_maps["subneg_growths"].get(_cd_client_key, {}))
+    saved_subneg_efm = dict(_cd_maps.get("subneg_effective_months", {}).get(_cd_client_key, {}))
+    # Effective month for new changes (used by the frontend to show the banner)
+    effective_from_month = get_forecast_effective_month()
 
     # Ensure required columns — articulo and unidad_medida absent from forecast_valorizado
     if "articulo" not in df_c.columns:
@@ -2411,10 +2470,15 @@ def _pg_get_client_detail(
                     orig  = float(row_d[val_col].sum()) if not row_d.empty else 0.0
                     adj = orig; pct = 0.0
                     saved_pct = saved_overrides.get((art, ds), None)
+                    # Cell override: respect its own effective_from_month
                     if saved_pct is not None:
-                        pct = saved_pct
-                        adj = orig * (1.0 + pct / 100.0)
-                    elif max_hist_date and d > max_hist_date and growth_pct != 0:
+                        cell_efm = saved_overrides_efm.get((art, ds))
+                        if cell_efm is None or ds >= cell_efm:
+                            pct = saved_pct
+                            adj = orig * (1.0 + pct / 100.0)
+                        else:
+                            saved_pct = None  # blocked month — treat as no override
+                    if saved_pct is None and max_hist_date and d > max_hist_date and growth_pct != 0:
                         t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
                         rm = (1 + growth_pct / 100.0) ** (1 / 12.0) - 1
                         adj = orig * (1 + rm) ** t
@@ -2426,12 +2490,15 @@ def _pg_get_client_detail(
                         and d > max_hist_date
                         and str(subneg_name) in saved_subneg_growths
                     ):
-                        scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
-                        if scoped_growth_pct != 0:
-                            t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
-                            rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
-                            adj = orig * (1 + rm) ** t
-                            pct = round(rm * 100, 4)
+                        # Subneg override: apply only from its effective_from_month onwards
+                        subneg_efm = saved_subneg_efm.get(str(subneg_name))
+                        if subneg_efm is None or ds >= subneg_efm:
+                            scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
+                            if scoped_growth_pct != 0:
+                                t  = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
+                                rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
+                                adj = orig * (1 + rm) ** t
+                                pct = round(rm * 100, 4)
                     months_data[ds] = {
                         "orig": round(orig, 2), "pct": round(pct, 4),
                         "nuevo": round(adj, 2), "money": round(adj * precio, 0),
@@ -2456,6 +2523,7 @@ def _pg_get_client_detail(
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
         "subneg_growths": saved_subneg_growths,
+        "effective_from_month": effective_from_month,
     }
 
 
@@ -2672,7 +2740,9 @@ def get_chart_data(
     growth_pct: float = 0.0,
 ) -> dict:
     import pandas as pd
-    if engine is not None and "postgresql" in str(engine.url):
+    _engine_url = str(engine.url) if engine is not None else "NO_ENGINE"
+    _is_pg = engine is not None and "postgresql" in _engine_url
+    if _is_pg:
         return _pg_get_chart_data(
             user_id=user_id,
             start_date=start_date, end_date=end_date,
@@ -2795,54 +2865,17 @@ def get_chart_data(
             # global estándar. Para filas sin override, usa la tasa global.
             # Resultado: SUM(monto_yhat × tasa_efectiva) agrupado por mes.
             _g_base = 1.0 + growth_pct / 100.0
-            if _ovr_active:
-                _cli_col_v = "fantasia" if "fantasia" in df_val_f.columns else "cliente_id"
-                # Support both 'articulo' (CSV) and 'codigo_serie' (PG fallback) columns
-                _art_col_v = (
-                    "articulo"     if "articulo"     in df_val_f.columns else
-                    "codigo_serie" if "codigo_serie" in df_val_f.columns else None
-                )
-                if _cli_col_v in df_val_f.columns and _art_col_v is not None:
-                    with _overrides_lock:
-                        _ovr_snap = _build_overrides_snapshot_locked(growth_pct)
-                    _ovr_lookup = {
-                        (str(cid), str(art), str(ds)): pct
-                        for cid, store in _ovr_snap.items()
-                        for (art, ds), pct in store.items()
-                    }
-                    _df_u = df_val_f[[_cli_col_v, _art_col_v, "fecha", col_y]].copy()
-                    _df_u["_ds"] = _df_u["fecha"].dt.strftime("%Y-%m")
-                    _keys = list(zip(
-                        _df_u[_cli_col_v].astype(str),
-                        _df_u[_art_col_v].astype(str),
-                        _df_u["_ds"].astype(str),
-                    ))
-                    # Stored pct is a MONTHLY compound rate (e.g. 3.4074 for 50% annual).
-                    # To get the correct annual multiplier, convert: (1 + rm)^12.
-                    # This gives 1.50 for 3.4074% monthly — clearly different from g_base=1.25.
-                    _df_u["_eff"] = [
-                        (1.0 + _ovr_lookup[k] / 100.0) ** 12 if k in _ovr_lookup else _g_base
-                        for k in _keys
-                    ]
-                    _df_u["_ua"] = _df_u[col_y] * _df_u["_eff"]
-                    _ua_agg = (
-                        _df_u.groupby("fecha")["_ua"].sum()
-                        .reset_index()
-                        .rename(columns={"_ua": "Total_User_Adj"})
-                    )
-                    df_fcst = df_fcst.merge(_ua_agg, on="fecha", how="left")
-                    df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj"].fillna(
-                        df_fcst["Total_Forecast"] * _g_base
-                    )
-                else:
-                    df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
-            else:
-                df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
+            df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
+            # Pass pre-fetched records to avoid large SQL IN clause (SQLite 999-var limit)
+            _loc_ovr_records = _fetch_override_records(user_id) if user_id else []
             if _ovr_active and not df_val_f.empty:
+                _loc_max_hist = df_hist["fecha"].max() if not df_hist.empty else pd.Timestamp("2000-01-01")
                 _df_u_sql, _ovr_maps_sql = _apply_override_effects_to_dataframe(
                     df_val_f,
                     user_id=user_id,
                     base_growth_pct=growth_pct,
+                    max_hist_date=_loc_max_hist,
+                    _records=_loc_ovr_records,
                 )
                 if not _df_u_sql.empty:
                     _df_u_sql["_ua_sql"] = _df_u_sql[col_y] * _df_u_sql["_annual_eff"]
@@ -3453,6 +3486,17 @@ def get_client_detail(
     # Load any previously saved % overrides for this client
     saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
     saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
+    # Build full maps to get effective_from_month per override
+    _loc_records = _fetch_override_records(user_id, client_selector=client_id)
+    _loc_maps = _build_override_maps(_loc_records)
+    _loc_client_key = _clean_override_text(client_id)
+    _loc_cell_efm: dict[tuple[str, str], str | None] = {
+        (codigo, month): payload.get("effective_from_month")
+        for (selector, codigo, month), payload in _loc_maps["cell"].items()
+        if selector == _loc_client_key
+    }
+    _loc_subneg_efm = dict(_loc_maps.get("subneg_effective_months", {}).get(_loc_client_key, {}))
+    effective_from_month = get_forecast_effective_month()
 
     if df_val.empty:
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
@@ -3564,12 +3608,16 @@ def get_client_detail(
                     orig = float(row_d[val_col].sum()) if not row_d.empty else 0.0
                     adj = orig
                     pct = 0.0
-                    # Saved override takes priority over global growth_pct
+                    # Saved cell override: respect its own effective_from_month
                     saved_pct = saved_overrides.get((art, ds), None)
                     if saved_pct is not None:
-                        pct = saved_pct
-                        adj = orig * (1.0 + pct / 100.0)
-                    elif max_hist_date and d > max_hist_date and growth_pct != 0:
+                        cell_efm = _loc_cell_efm.get((art, ds))
+                        if cell_efm is None or ds >= cell_efm:
+                            pct = saved_pct
+                            adj = orig * (1.0 + pct / 100.0)
+                        else:
+                            saved_pct = None  # blocked — treat as no override
+                    if saved_pct is None and max_hist_date and d > max_hist_date and growth_pct != 0:
                         months_diff = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
                         t = months_diff
                         ra = growth_pct / 100.0
@@ -3583,13 +3631,16 @@ def get_client_detail(
                         and d > max_hist_date
                         and str(subneg_name) in saved_subneg_growths
                     ):
-                        scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
-                        if scoped_growth_pct != 0:
-                            months_diff = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
-                            rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
-                            factor = (1 + rm) ** months_diff
-                            adj = orig * factor
-                            pct = round(rm * 100, 4)
+                        # Subneg override: apply only from its effective_from_month onwards
+                        subneg_efm = _loc_subneg_efm.get(str(subneg_name))
+                        if subneg_efm is None or ds >= subneg_efm:
+                            scoped_growth_pct = float(saved_subneg_growths.get(str(subneg_name)) or 0.0)
+                            if scoped_growth_pct != 0:
+                                months_diff = (d.year - max_hist_date.year) * 12 + (d.month - max_hist_date.month)
+                                rm = (1 + scoped_growth_pct / 100.0) ** (1 / 12.0) - 1
+                                factor = (1 + rm) ** months_diff
+                                adj = orig * factor
+                                pct = round(rm * 100, 4)
                     months_data[ds] = {
                         "orig": round(orig, 2),
                         "pct": round(pct, 4),
@@ -3626,4 +3677,5 @@ def get_client_detail(
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
         "subneg_growths": saved_subneg_growths,
+        "effective_from_month": effective_from_month,
     }
