@@ -286,8 +286,12 @@ def api_client_detail(
             growth_pct=growth_pct,
         )
     except Exception as exc:
-        logger.error("client-detail error: %s", exc, exc_info=True)
-        raise HTTPException(500, str(exc))
+        import traceback as _tb
+        logger.error(
+            "client-detail error — client_id=%r start=%s end=%s: %s\n%s",
+            client_id, start_date, end_date, exc, _tb.format_exc(),
+        )
+        raise HTTPException(500, f"Error al cargar detalle del cliente: {exc}")
 
 
 @router.get("/api/debug-schema")
