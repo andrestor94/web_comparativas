@@ -61,6 +61,7 @@ from web_comparativas.migrations import (
     ensure_original_content_column,
     ensure_normalized_storage_columns,
     ensure_forecast_override_storage,
+    ensure_forecast_effective_month_column,
     backfill_normalized_content,
     backfill_original_content,
     ensure_dimensionamiento_indexes,
@@ -228,6 +229,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: forecast override storage checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning forecast override storage: {e}", flush=True)
+
+    try:
+        ensure_forecast_effective_month_column()
+        print("[MIGRATION] SUCCESS: forecast effective_from_month column checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning forecast effective_from_month column: {e}", flush=True)
 
     try:
         ensure_comparativa_rows_table()

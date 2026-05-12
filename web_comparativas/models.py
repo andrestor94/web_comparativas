@@ -326,6 +326,11 @@ class ForecastUserOverride(Base):
     override_growth_pct = Column(Float, nullable=True)
     effective_monthly_pct = Column(Float, nullable=True)
 
+    # Mes a partir del cual este override es vigente (formato "YYYY-MM").
+    # Calculado con regla de corte día 20: si se guarda el día <=20 → mes siguiente;
+    # si se guarda el día >20 → mes subsiguiente. NULL = sin restricción (registros previos).
+    effective_from_month = Column(String(7), nullable=True)
+
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
     updated_at = Column(
