@@ -237,7 +237,13 @@ def _monthly_pct_from_annual_growth(growth_pct: float) -> float:
     growth_pct = float(growth_pct or 0.0)
     if abs(growth_pct) <= 1e-12:
         return 0.0
-    return ((1.0 + growth_pct / 100.0) ** (1.0 / 12.0) - 1.0) * 100.0
+    base = 1.0 + growth_pct / 100.0
+    if base < 0:
+        # Fractional power of a negative base is undefined in real numbers; treated as invalid.
+        return float("nan")
+    if base == 0:
+        return -100.0  # -100% anual → proyección cero
+    return (base ** (1.0 / 12.0) - 1.0) * 100.0
 
 
 def _annual_growth_from_monthly_pct(monthly_pct: float) -> float:
@@ -3446,6 +3452,7 @@ def get_client_detail(
     price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
     saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
+    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
 
     if df_val.empty:
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}

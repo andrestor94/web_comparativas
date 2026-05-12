@@ -424,6 +424,13 @@
   .fc-modal-tab { padding: 8px 14px; font-size: 0.8rem; font-weight: 500; color: #64748B; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
   .fc-modal-tab.active { color: #2563EB; border-bottom-color: #2563EB; font-weight: 600; }
 
+  /* Modal client general growth */
+  .fc-modal-client-growth { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; margin-bottom: 14px; font-size: 0.875rem; }
+  .fc-modal-client-growth label { margin: 0; font-weight: 600; color: #1E40AF; flex: 1; cursor: default; }
+  .fc-modal-client-growth input[type=number] { width: 80px; padding: 4px 8px; border: 1px solid #93C5FD; border-radius: 4px; font-size: 0.875rem; font-family: inherit; outline: none; text-align: right; background: #fff; }
+  .fc-modal-client-growth input[type=number]:focus { border-color: #3B82F6; box-shadow: 0 0 0 2px #DBEAFE; }
+  .fc-modal-client-growth .fc-client-growth-unit { color: #64748B; font-size: 0.8rem; white-space: nowrap; }
+
   /* Modal subneg growth */
   .fc-modal-subneg-growth { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: 0.8rem; color: #64748B; border-bottom: 1px solid #F1F5F9; }
   .fc-modal-subneg-growth input[type=number] { width: 80px; padding: 3px 6px; border: 1px solid #E2E8F0; border-radius: 4px; font-size: 0.8rem; font-family: inherit; outline: none; text-align: right; }
@@ -888,10 +895,12 @@ const STATE = {
   activeTab: 'analisis',
   modalClientData: null,       // current client detail data
   modalSubnegGrowths: {},      // subneg overrides per modal session
+  modalClientGrowth: null,     // client-level general growth (set-all shortcut)
   // ── Edit session state ────────────────────────────────────────────────
-  _modalSessionSnapshot: null, // deep copy of modalClientData when modal opened (for undo)
-  _modalSnapshotGrowths: {},   // copy of subneg growths when modal opened (for undo)
-  _modalIsDirty: false,        // true when user has made unsaved changes
+  _modalSessionSnapshot: null,      // deep copy of modalClientData when modal opened (for undo)
+  _modalSnapshotGrowths: {},        // copy of subneg growths when modal opened (for undo)
+  _modalSnapshotClientGrowth: null, // copy of client growth when modal opened (for undo)
+  _modalIsDirty: false,             // true when user has made unsaved changes
 };
 
 /* ===================================================================
@@ -1864,8 +1873,10 @@ function updateClientGrid(tableData) {
 function openEditModal(clientId) {
   STATE.modalClientData = null;
   STATE.modalSubnegGrowths = {};
+  STATE.modalClientGrowth = null;
   STATE._modalSessionSnapshot = null;
   STATE._modalSnapshotGrowths = {};
+  STATE._modalSnapshotClientGrowth = null;
   STATE._modalIsDirty = false;
   _setModalDirty(false);
 
@@ -1887,6 +1898,7 @@ function openEditModal(clientId) {
       renderModalBody(data);
       // Capture subneg growth snapshot AFTER renderModalBody initialises STATE.modalSubnegGrowths
       STATE._modalSnapshotGrowths = { ...STATE.modalSubnegGrowths };
+      STATE._modalSnapshotClientGrowth = STATE.modalClientGrowth;
     })
     .catch(err => {
       document.getElementById('fcModalBody').innerHTML = '<p class="text-danger text-center py-3">Error cargando datos del cliente.</p>';
@@ -1898,8 +1910,10 @@ function closeModal() {
   document.getElementById('fcEditOverlay').classList.remove('open');
   STATE.modalClientData = null;
   STATE.modalSubnegGrowths = {};
+  STATE.modalClientGrowth = null;
   STATE._modalSessionSnapshot = null;
   STATE._modalSnapshotGrowths = {};
+  STATE._modalSnapshotClientGrowth = null;
   STATE._modalIsDirty = false;
   // Free memory by destroying ag-Grid instances on modal close
   Object.keys(_modalGridApis).forEach(k => {
@@ -2009,6 +2023,7 @@ function undoModalChanges() {
   if (!STATE._modalSessionSnapshot) return;
   // Restore subneg growths to snapshot
   STATE.modalSubnegGrowths = { ...STATE._modalSnapshotGrowths };
+  STATE.modalClientGrowth = STATE._modalSnapshotClientGrowth;
   // Re-render modal body from the session snapshot (no backend call)
   renderModalBody(STATE._modalSessionSnapshot);
   // After re-render, STATE.modalClientData is still the live data; keep it
@@ -2023,6 +2038,9 @@ function renderModalBody(data) {
   const dates = data.dates || [];
   const maxHistDate = data.max_hist_date || null;
   const apiSubnegGrowths = data.subneg_growths || {};
+
+  // Inicializar crecimiento general del cliente si no fue seteado en esta sesión
+  if (STATE.modalClientGrowth == null) STATE.modalClientGrowth = growthPct;
 
   // ── Pre-poblar STATE.modalSubnegGrowths ANTES de construir el HTML ──
   // Esto garantiza que renderSubnegContent lea el valor correcto (guardado o global)
@@ -2053,16 +2071,25 @@ function renderModalBody(data) {
     });
   });
 
+  const _clientGrowthVal = STATE.modalClientGrowth ?? growthPct;
   let html = `
     <div class="fc-modal-info">
       <div class="fc-modal-info-box"><strong>Perfil:</strong> ${perfil}</div>
       <div class="fc-modal-info-box"><strong>Negocio:</strong> ${negVal}</div>
+    </div>
+    <div class="fc-modal-client-growth">
+      <label>🎯 Expectativa de Crecimiento:</label>
+      <input type="number" id="client-growth-input"
+             value="${_clientGrowthVal.toFixed(1)}" step="1" min="-99" max="500"
+             onchange="onClientGrowthChange(this.value)"
+             title="Aplica este crecimiento a todos los negocios/subnegocios del cliente">
+      <span class="fc-client-growth-unit">% anual</span>
     </div>`;
 
   if (growthPct !== 0) {
     const _ra = growthPct / 100;
     const _rm = (Math.pow(1 + _ra, 1/12) - 1) * 100;
-    html += `<div class="fc-modal-growth-caption">📈 Crecimiento Anual: ${growthPct}% → Tasa Mensual Compuesta: ${_rm.toFixed(4)}%</div>`;
+    html += `<div class="fc-modal-growth-caption">📈 Base del escenario: ${growthPct}% → Tasa Mensual Compuesta: ${_rm.toFixed(4)}%</div>`;
   }
 
   html += '<div id="fcNegSections">';
@@ -2146,7 +2173,7 @@ function renderSubnegContent(ni, si, sub, dates, maxHistDate, growthPct) {
     <div class="fc-modal-subneg-growth">
       <span>📈 Crec. (${subKey}): <strong>${currentGrowth.toFixed(1)}%</strong></span>
       <input type="number" id="subneg-growth-${ni}-${si}"
-             value="${currentGrowth}" step="1" min="-50" max="500"
+             value="${currentGrowth}" step="1" min="-99" max="500"
              onchange="onSubnegGrowthChange('${subKey}', this.value, ${ni}, ${si})"
              title="Expectativa de crecimiento para ${subKey}">
     </div>
@@ -2167,6 +2194,30 @@ function onSubnegGrowthChange(subKey, val, ni, si) {
   const sub = negSection.subnegs[si];
   if (!sub) return;
   buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false);
+}
+
+/* Aplica un crecimiento general a TODOS los negocios/subnegocios del cliente.
+   Reutiliza exactamente la misma lógica que onSubnegGrowthChange, en loop. */
+function onClientGrowthChange(val) {
+  const v = parseFloat(val) || 0;
+  STATE.modalClientGrowth = v;
+  if (!STATE.modalClientData) return;
+  const data = STATE.modalClientData;
+  (data.negocios || []).forEach((neg, ni) => {
+    (neg.subnegs || []).forEach((sub, si) => {
+      STATE.modalSubnegGrowths[sub.subneg] = v;
+      // Actualizar el input y el label del subneg en el DOM
+      const inp = document.getElementById(`subneg-growth-${ni}-${si}`);
+      if (inp) {
+        inp.value = v;
+        const strongEl = inp.closest('.fc-modal-subneg-growth')?.querySelector('strong');
+        if (strongEl) strongEl.textContent = v.toFixed(1) + '%';
+      }
+      // Recalcular el grid del subneg con el nuevo crecimiento
+      buildModalGrid(`modal-grid-${ni}-${si}`, sub.subneg, sub.products, data.dates, data.max_hist_date, v, false);
+    });
+  });
+  _setModalDirty(true);
 }
 
 let _modalGridApis = {};
@@ -2203,7 +2254,10 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
         const [dYear, dMonth] = ds.split('-').map(Number);
         const t = (dYear - origYear) * 12 + (dMonth - origMonth);
         const ra = growthPct / 100;
-        const rm = Math.pow(1 + ra, 1/12) - 1;
+        // Guardia: Math.pow(1+ra, 1/12) requiere base > 0 (growthPct > -100%).
+        // Para -100% la base es 0 (resultado 0). Por debajo de -100% sería NaN.
+        const base = 1 + ra;
+        const rm = base > 0 ? Math.pow(base, 1/12) - 1 : (base === 0 ? -1 : 0);
         adj = orig * Math.pow(1 + rm, t);
         // Guardamos la tasa MENSUAL — el gráfico la reconvierte a anual vía (1+rm)^12
         pct = parseFloat((rm * 100).toFixed(4));
@@ -2234,7 +2288,7 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
     const palHdr = di % 2 === 0 ? '#E2E8F0' : '#F8FAFC';
     const children = [
       {field:`${ds} (Orig)`, headerName:'🔒 Orig', editable:false, width:120, minWidth:120, resizable:true, cellStyle:{textAlign:'right',color:'#64748B',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
-      {field:`${ds} (%)`,    headerName:'📈 %',    editable:!isHist, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:0,max:1000,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle:{backgroundColor:palBg}},
+      {field:`${ds} (%)`,    headerName:'📈 %',    editable:!isHist, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:-99,max:500,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle:{backgroundColor:palBg}},
       {field:`${ds} (Nuevo)`,headerName:'✏️ Nuevo',editable:false, width:120, minWidth:120, resizable:true, cellStyle:{fontWeight:'bold',textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
       {field:`${ds} ($)`,    headerName:'💰 $',    editable:false, width:130, minWidth:130, resizable:true, cellStyle:{textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtMoney(p.value):'')},
     ];
