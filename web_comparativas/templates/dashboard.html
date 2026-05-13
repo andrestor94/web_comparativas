@@ -304,6 +304,165 @@
     margin-top: 0.25rem;
   }
 
+  .kpi-alert-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    width: fit-content;
+    margin-top: 0.45rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .kpi-alert-badge.critical {
+    border-color: #dc2626;
+    background: #fef2f2;
+    color: #991b1b;
+  }
+
+  .kpi-grid .kpi-card.has-alert {
+    border-color: #f59e0b;
+    background: #fffdf7;
+  }
+
+  .kpi-grid .kpi-card.has-alert-critical {
+    border-color: #dc2626;
+    background: #fffafa;
+  }
+
+  .consistency-alerts {
+    background: #fff;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .consistency-alerts[data-level="critical"] {
+    border-color: #dc2626;
+    box-shadow: inset 4px 0 0 #dc2626;
+  }
+
+  .consistency-alerts[data-level="warning"] {
+    border-color: #f59e0b;
+    box-shadow: inset 4px 0 0 #f59e0b;
+  }
+
+  .ca-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .ca-title {
+    margin: 0;
+    color: var(--ink-900);
+    font-size: 0.95rem;
+    font-weight: 800;
+  }
+
+  .ca-summary {
+    margin: 0.25rem 0 0;
+    color: var(--ink-700);
+    font-size: 0.82rem;
+  }
+
+  .ca-quality {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--ink-050);
+    color: var(--ink-800);
+    font-size: 0.72rem;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .ca-list {
+    margin-top: 0.85rem;
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .ca-item {
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    background: #fdfdfd;
+  }
+
+  .ca-item.critical {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+
+  .ca-item.warning {
+    border-color: #fde68a;
+    background: #fffdf4;
+  }
+
+  .ca-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    background: var(--ink-100);
+    color: var(--ink-700);
+    margin-right: 0.5rem;
+  }
+
+  .ca-label.critical {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  .ca-label.warning {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  .ca-item-title {
+    font-weight: 800;
+    color: var(--ink-900);
+  }
+
+  .ca-message,
+  .ca-reco {
+    margin: 0.45rem 0 0;
+    color: var(--ink-700);
+    font-size: 0.82rem;
+  }
+
+  .line-alert-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.66rem;
+    font-weight: 800;
+  }
+
+  .line-alert-cell.critical {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
   /* Gráficos (Flat Box) */
   .chart-box {
     background: #fff;
@@ -682,15 +841,56 @@
       <div class="loss-hint" id="lossHint"></div>
     </section>
 
+    {% if consistency_alerts and consistency_alerts.alerts %}
+    {% set ca_counts = consistency_alerts.counts %}
+    {% set ca_level = 'critical' if ca_counts.critical else ('warning' if ca_counts.warning else 'info') %}
+    <section class="consistency-alerts" data-level="{{ ca_level }}" aria-labelledby="consistencyTitle">
+      <div class="ca-head">
+        <div>
+          <h2 class="ca-title" id="consistencyTitle">Alertas de consistencia</h2>
+          <p class="ca-summary">
+            Se detectaron posibles inconsistencias en los datos del proceso.
+            El analisis puede seguir visualizandose, pero se recomienda revisar el archivo original antes de tomar decisiones comerciales.
+          </p>
+        </div>
+        <span class="ca-quality">Calidad de datos: {{ consistency_alerts.quality }}</span>
+      </div>
+
+      <details open>
+        <summary class="ca-summary" style="cursor:pointer;font-weight:800;">
+          {{ ca_counts.critical }} criticas, {{ ca_counts.warning }} advertencias y {{ ca_counts.info }} informativas
+        </summary>
+        <div class="ca-list">
+          {% for alert in consistency_alerts.alerts %}
+          <article class="ca-item {{ alert.severity }}">
+            <div>
+              <span class="ca-label {{ alert.severity }}">
+                {{ 'Critica' if alert.severity == 'critical' else ('Advertencia' if alert.severity == 'warning' else 'Info') }}
+              </span>
+              <span class="ca-item-title">{{ alert.title }}</span>
+            </div>
+            <p class="ca-message">{{ alert.message }}</p>
+            <p class="ca-reco"><strong>Recomendacion:</strong> {{ alert.recommendation }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </details>
+    </section>
+    {% endif %}
+
     <div class="dashboard-grid mb-4">
       <!-- Izquierda -->
       <div class="pane pane-left span-6 span-lg-6 span-sm-1">
         <section class="kpi-group" aria-labelledby="kpiGenTitle">
           <h2 class="group-title m-0" id="kpiGenTitle">Datos generales de licitación</h2>
           <div class="kpi-grid">
-            <div class="kpi-card" role="group" aria-label="Presupuesto adjudicado">
+            {% set badge_presupuesto = alert_kpi_badges.get('presupuesto_adjudicado') if alert_kpi_badges else None %}
+            <div class="kpi-card {{ 'has-alert-critical' if badge_presupuesto and badge_presupuesto.severity == 'critical' else ('has-alert' if badge_presupuesto else '') }}" role="group" aria-label="Presupuesto adjudicado">
               <div class="kpi-label">Presupuesto adjudicado</div>
               <div class="kpi-value" id="treemapTotalKpi">{{ kpis.get('awarded', 0) | peso }}</div>
+              {% if badge_presupuesto %}
+              <div class="kpi-alert-badge {{ badge_presupuesto.severity }}" title="{{ badge_presupuesto.message }}">Revisar dato</div>
+              {% endif %}
             </div>
             <div class="kpi-card" role="group" aria-label="Renglones">
               <div class="kpi-label">Renglones</div>
@@ -752,17 +952,29 @@
         <section class="kpi-group" aria-labelledby="kpiSuizoTitle">
           <h2 class="group-title m-0" id="kpiSuizoTitle">Efectividad Suizo</h2>
           <div class="kpi-grid">
-            <div class="kpi-card" role="group" aria-label="Monto ofertado">
+            {% set badge_monto_ofertado = alert_kpi_badges.get('monto_ofertado_suizo') if alert_kpi_badges else None %}
+            <div class="kpi-card {{ 'has-alert-critical' if badge_monto_ofertado and badge_monto_ofertado.severity == 'critical' else ('has-alert' if badge_monto_ofertado else '') }}" role="group" aria-label="Monto ofertado">
               <div class="kpi-label">Monto ofertado</div>
               <div class="kpi-value" id="es_monto_ofertado">{{ 0 | peso }}</div>
+              {% if badge_monto_ofertado %}
+              <div class="kpi-alert-badge {{ badge_monto_ofertado.severity }}" title="{{ badge_monto_ofertado.message }}">{{ badge_monto_ofertado.label }}</div>
+              {% endif %}
             </div>
-            <div class="kpi-card" role="group" aria-label="Monto adjudicado">
+            {% set badge_monto_adjudicado = alert_kpi_badges.get('monto_adjudicado_suizo') if alert_kpi_badges else None %}
+            <div class="kpi-card {{ 'has-alert-critical' if badge_monto_adjudicado and badge_monto_adjudicado.severity == 'critical' else ('has-alert' if badge_monto_adjudicado else '') }}" role="group" aria-label="Monto adjudicado">
               <div class="kpi-label">Monto adjudicado</div>
               <div class="kpi-value" id="es_monto_adjudicado">{{ 0 | peso }}</div>
+              {% if badge_monto_adjudicado %}
+              <div class="kpi-alert-badge {{ badge_monto_adjudicado.severity }}" title="{{ badge_monto_adjudicado.message }}">{{ badge_monto_adjudicado.label }}</div>
+              {% endif %}
             </div>
-            <div class="kpi-card" role="group" aria-label="Efectividad por monto">
+            {% set badge_ef_monto = alert_kpi_badges.get('efectividad_monto_suizo') if alert_kpi_badges else None %}
+            <div class="kpi-card {{ 'has-alert-critical' if badge_ef_monto and badge_ef_monto.severity == 'critical' else ('has-alert' if badge_ef_monto else '') }}" role="group" aria-label="Efectividad por monto">
               <div class="kpi-label">Efectividad por monto</div>
               <div class="kpi-value" id="es_efectividad_monto">0%</div>
+              {% if badge_ef_monto %}
+              <div class="kpi-alert-badge {{ badge_ef_monto.severity }}" title="{{ badge_ef_monto.message }}">{{ badge_ef_monto.label }}</div>
+              {% endif %}
             </div>
             <div class="kpi-card" role="group" aria-label="Renglones ofertados">
               <div class="kpi-label">Renglones ofertados</div>
@@ -783,10 +995,14 @@
         <section class="kpi-group" aria-label="Resumen de competitividad de Suizo">
           <h2 class="group-title m-0">Competitividad Suizo</h2>
           <div class="kpi-grid kpi-grid-2">
-            <div class="kpi-card" role="group" aria-labelledby="ms_oportunidad_label">
+            {% set badge_renglones = alert_kpi_badges.get('renglones_competitivos') if alert_kpi_badges else None %}
+            <div class="kpi-card {{ 'has-alert-critical' if badge_renglones and badge_renglones.severity == 'critical' else ('has-alert' if badge_renglones else '') }}" role="group" aria-labelledby="ms_oportunidad_label">
               <div class="kpi-label" id="ms_oportunidad_label">Renglones competitivos</div>
               <div class="kpi-value" id="ms_oportunidad">—</div>
               <div class="kpi-subtext">Renglones donde la diferencia entre 1° y 2° es ≤ 3,5%.</div>
+              {% if badge_renglones %}
+              <div class="kpi-alert-badge {{ badge_renglones.severity }}" title="{{ badge_renglones.message }}">{{ badge_renglones.label }}</div>
+              {% endif %}
             </div>
 
             <div class="kpi-card" role="group" aria-labelledby="ms_estado_label" id="ms_estado">
@@ -2135,6 +2351,11 @@
 
           const descHit = hasQ && norm(desc).includes(qNorm);
           const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
+          const lineAlerts = Array.isArray(row.alerts) ? row.alerts : [];
+          const lineAlert = lineAlerts[0] || null;
+          const lineAlertHTML = lineAlert
+            ? `<span class="line-alert-cell ${esc(lineAlert.severity || '')}" title="${esc(lineAlert.message || '')}">Revisar dato</span>`
+            : '';
 
           const posByN = {};
           (row.positions || []).forEach(p => {
@@ -2208,6 +2429,7 @@
             `<td class="col-desc${descHit ? ' cell-hit' : ''}">` +
             `<div class="desc-wrap">` +
             `<span class="desc-trunc">${descMarked}</span>` +
+            lineAlertHTML +
             `<div class="desc-tip">${descMarked}</div>` +
             `</div>` +
             `</td>`;
