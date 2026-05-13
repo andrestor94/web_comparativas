@@ -2116,7 +2116,7 @@ function renderModalBody(data) {
     <div class="fc-modal-client-growth">
       <label>🎯 Expectativa de Crecimiento:</label>
       <input type="number" id="client-growth-input"
-             value="${_clientGrowthVal.toFixed(1)}" step="1" min="-99" max="500"
+             value="${_clientGrowthVal.toFixed(1)}" step="1" min="-100" max="500"
              onchange="onClientGrowthChange(this.value)"
              title="Aplica este crecimiento a todos los negocios/subnegocios del cliente">
       <span class="fc-client-growth-unit">% anual</span>
@@ -2209,7 +2209,7 @@ function renderSubnegContent(ni, si, sub, dates, maxHistDate, growthPct) {
     <div class="fc-modal-subneg-growth">
       <span>📈 Crec. (${subKey}): <strong>${currentGrowth.toFixed(1)}%</strong></span>
       <input type="number" id="subneg-growth-${ni}-${si}"
-             value="${currentGrowth}" step="1" min="-99" max="500"
+             value="${currentGrowth}" step="1" min="-100" max="500"
              onchange="onSubnegGrowthChange('${subKey}', this.value, ${ni}, ${si})"
              title="Expectativa de crecimiento para ${subKey}">
     </div>
@@ -2340,7 +2340,7 @@ function buildModalGrid(gridId, subnegName, products, dates, maxHistDate, growth
       : { backgroundColor: palBg };
     const children = [
       {field:`${ds} (Orig)`, headerName:'🔒 Orig', editable:false, width:120, minWidth:120, resizable:true, cellStyle:{textAlign:'right',color:'#64748B',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
-      {field:`${ds} (%)`,    headerName: canEdit ? '📈 %' : '🔒 %', editable:canEdit, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:-99,max:500,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle: pctCellStyle},
+      {field:`${ds} (%)`,    headerName: canEdit ? '📈 %' : '🔒 %', editable:canEdit, width:100, minWidth:100, resizable:true, type:['numericColumn'], cellEditor:'agNumberCellEditor', cellEditorParams:{min:-100,max:500,step:0.1,showStepperButtons:true}, valueFormatter:p=>p.value!=null?p.value.toFixed(1)+'%':'', cellStyle: pctCellStyle},
       {field:`${ds} (Nuevo)`,headerName:'✏️ Nuevo',editable:false, width:120, minWidth:120, resizable:true, cellStyle:{fontWeight:'bold',textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtUnits(p.value):'')},
       {field:`${ds} ($)`,    headerName:'💰 $',    editable:false, width:130, minWidth:130, resizable:true, cellStyle:{textAlign:'right',backgroundColor:palBg}, valueFormatter:p=>(p.value!=null?fmtMoney(p.value):'')},
     ];
