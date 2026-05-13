@@ -5145,6 +5145,7 @@ def api_tablero_ranking(
             }
         )
     print(f"[API Ranking] {upload_id} -> item={item_col} desc={desc_col} prov={prov_col} price={price_col} total={total_col_rank}")
+    line_alert_map = _detect_line_price_alerts(df).get("line_alerts", {})
 
     # recorrer filas
     rows_map: Dict[str, Dict[str, Any]] = {}  # item -> datos
@@ -5233,6 +5234,7 @@ def api_tablero_ranking(
                     r["cantidad"] if r["cantidad"] > 0 else 1.0
                 ),
                 "positions": positions,
+                "alerts": line_alert_map.get(str(r["nro"]), []),
             }
         )
 
@@ -5882,6 +5884,293 @@ def compute_suizo_effectiveness(df: Optional[pd.DataFrame]) -> Dict[str, Any]:
     return out
 
 
+CONSISTENCY_THRESHOLDS = {
+    "amount_ratio_warning": 1.2,
+    "amount_ratio_critical": 2.0,
+    "low_effectiveness_threshold": 0.01,
+    "line_price_diff_warning": 100.0,
+    "line_price_diff_critical": 500.0,
+    "median_outlier_multiplier": 5.0,
+}
+
+
+def _money_compact(value: Any) -> str:
+    try:
+        return "$ " + f"{float(value):,.0f}".replace(",", ".")
+    except Exception:
+        return "$ 0"
+
+
+def _detect_line_price_alerts(
+    df: Optional[pd.DataFrame],
+    thresholds: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """
+    Detecta renglones con precios atipicos sin modificar los datos originales.
+    Devuelve un resumen y un mapa por nro de renglon para que la tabla pueda marcarlos.
+    """
+    thresholds = thresholds or CONSISTENCY_THRESHOLDS
+    result = {
+        "warning_count": 0,
+        "critical_count": 0,
+        "line_alerts": {},
+        "examples": [],
+    }
+    if df is None or df.empty:
+        return result
+
+    item_col = _pick(df, ["Nro", "Numero", "Item", "Renglon", "N°", "Nº"])
+    prov_col = _pick(df, ["Proveedor", "Oferente", "Empresa", "Supplier", "Provider"])
+    price_col = _pick(df, ["Precio unitario", "Precio Unitario", "Precio", "PU", "Unit Price", "Price"])
+    if not (item_col and prov_col and price_col):
+        return result
+
+    def _line_key(v: Any) -> str:
+        try:
+            return str(int(float(v)))
+        except Exception:
+            return str(v or "").strip()
+
+    try:
+        tmp = df[[item_col, prov_col, price_col]].copy()
+        tmp["_item_key"] = tmp[item_col].map(_line_key)
+        tmp["_prov"] = tmp[prov_col].astype(str)
+        tmp["_price"] = pd.to_numeric(tmp[price_col], errors="coerce")
+        tmp = tmp[(tmp["_item_key"] != "") & (tmp["_price"] > 0)]
+    except Exception:
+        return result
+
+    for item_key, grp in tmp.groupby("_item_key"):
+        prices = grp["_price"].dropna()
+        if prices.empty:
+            continue
+        base = float(prices.min())
+        if base <= 0:
+            continue
+
+        suizo_rows = grp[grp["_prov"].str.contains("suizo", case=False, na=False)]
+        if suizo_rows.empty:
+            continue
+
+        suizo_price = float(suizo_rows["_price"].min())
+        diff_pct = ((suizo_price / base) - 1.0) * 100.0 if base else 0.0
+        if diff_pct <= thresholds["line_price_diff_warning"]:
+            continue
+
+        severity = "critical" if diff_pct > thresholds["line_price_diff_critical"] else "warning"
+        if severity == "critical":
+            result["critical_count"] += 1
+        else:
+            result["warning_count"] += 1
+
+        label = (
+            "Diferencia extrema vs ganador"
+            if severity == "critical"
+            else "Precio fuera de escala"
+        )
+        detail = (
+            f"Suizo figura {diff_pct:.0f}% por encima del precio ganador "
+            f"({_money_compact(suizo_price)} vs {_money_compact(base)})."
+        )
+        result["line_alerts"].setdefault(item_key, []).append(
+            {
+                "severity": severity,
+                "type": "line_outlier",
+                "label": label,
+                "message": detail,
+                "values": {
+                    "precio_suizo": suizo_price,
+                    "precio_ganador": base,
+                    "diff_pct": round(diff_pct, 2),
+                },
+            }
+        )
+        if len(result["examples"]) < 5:
+            result["examples"].append({"renglon": item_key, "diff_pct": round(diff_pct, 1)})
+
+    return result
+
+
+def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Capa centralizada de inteligencia comercial para advertir inconsistencias.
+    No corrige datos ni bloquea el tablero: solo contextualiza el analisis.
+    """
+    thresholds = dict(CONSISTENCY_THRESHOLDS)
+    thresholds.update(data.get("thresholds") or {})
+    alerts: List[Dict[str, Any]] = []
+    kpi_badges: Dict[str, Dict[str, str]] = {}
+
+    def add_alert(
+        severity: str,
+        alert_type: str,
+        title: str,
+        message: str,
+        affected_fields: List[str],
+        values: Dict[str, Any],
+        recommendation: str,
+    ) -> None:
+        alert = {
+            "severity": severity,
+            "type": alert_type,
+            "title": title,
+            "message": message,
+            "affectedFields": affected_fields,
+            "values": values,
+            "recommendation": recommendation,
+        }
+        alerts.append(alert)
+        badge_text = "Revisar dato" if severity == "critical" else "Dato atipico"
+        for field in affected_fields:
+            current = kpi_badges.get(field)
+            if current and current.get("severity") == "critical":
+                continue
+            kpi_badges[field] = {
+                "severity": severity,
+                "label": badge_text,
+                "message": message,
+            }
+
+    kpis = data.get("kpis") or {}
+    suizo = data.get("suizo_eff") or {}
+    presupuesto = float(kpis.get("awarded") or data.get("presupuesto_adjudicado") or 0)
+    monto_ofertado_suizo = float(suizo.get("monto_ofertado") or 0)
+    monto_adjudicado_suizo = float(suizo.get("monto_adjudicado") or 0)
+    efectividad_monto = float(suizo.get("efectividad_monto") or 0)
+
+    if presupuesto <= 0:
+        add_alert(
+            "info",
+            "missing_data",
+            "Presupuesto adjudicado no disponible",
+            "No se detecto un presupuesto adjudicado comparable para contrastar los montos ofertados.",
+            ["presupuesto_adjudicado"],
+            {"presupuesto_adjudicado": presupuesto},
+            "Revisar si el archivo original informa presupuesto, monto adjudicado o criterio de adjudicacion.",
+        )
+
+    if presupuesto > 0 and monto_ofertado_suizo > 0:
+        ratio = monto_ofertado_suizo / presupuesto
+        if ratio > thresholds["amount_ratio_critical"]:
+            add_alert(
+                "critical",
+                "amount_outlier",
+                "Monto ofertado fuera de escala",
+                (
+                    f"El monto ofertado por Suizo ({_money_compact(monto_ofertado_suizo)}) "
+                    f"supera {ratio:.1f} veces el presupuesto adjudicado informado "
+                    f"({_money_compact(presupuesto)})."
+                ),
+                ["monto_ofertado_suizo", "presupuesto_adjudicado"],
+                {
+                    "monto_ofertado_suizo": monto_ofertado_suizo,
+                    "presupuesto_adjudicado": presupuesto,
+                    "ratio": round(ratio, 2),
+                },
+                "Revisar archivo original, separadores de miles/decimales, unidad de medida y si el valor corresponde a precio unitario o total.",
+            )
+        elif ratio > thresholds["amount_ratio_warning"]:
+            add_alert(
+                "warning",
+                "amount_outlier",
+                "Monto ofertado elevado frente al presupuesto",
+                (
+                    f"El monto ofertado por Suizo ({_money_compact(monto_ofertado_suizo)}) "
+                    f"supera {ratio:.1f} veces el presupuesto adjudicado informado."
+                ),
+                ["monto_ofertado_suizo", "presupuesto_adjudicado"],
+                {
+                    "monto_ofertado_suizo": monto_ofertado_suizo,
+                    "presupuesto_adjudicado": presupuesto,
+                    "ratio": round(ratio, 2),
+                },
+                "Validar si el presupuesto corresponde al mismo alcance que las ofertas comparadas.",
+            )
+
+    if monto_adjudicado_suizo > 0 and monto_ofertado_suizo > 0 and monto_adjudicado_suizo > monto_ofertado_suizo:
+        add_alert(
+            "critical",
+            "calculation_mismatch",
+            "Monto adjudicado mayor al ofertado",
+            (
+                f"El monto adjudicado a Suizo ({_money_compact(monto_adjudicado_suizo)}) "
+                f"supera el monto ofertado por Suizo ({_money_compact(monto_ofertado_suizo)})."
+            ),
+            ["monto_adjudicado_suizo", "monto_ofertado_suizo"],
+            {
+                "monto_adjudicado_suizo": monto_adjudicado_suizo,
+                "monto_ofertado_suizo": monto_ofertado_suizo,
+            },
+            "Revisar cantidades adjudicadas, precios unitarios y columnas de monto total del archivo original.",
+        )
+
+    if (
+        presupuesto > 0
+        and monto_ofertado_suizo > presupuesto
+        and efectividad_monto < thresholds["low_effectiveness_threshold"]
+    ):
+        add_alert(
+            "warning",
+            "ratio_inconsistency",
+            "Efectividad por monto atipicamente baja",
+            (
+                f"Suizo oferto {_money_compact(monto_ofertado_suizo)}, pero adjudico "
+                f"{_money_compact(monto_adjudicado_suizo)}, equivalente a {efectividad_monto * 100:.1f}%."
+            ),
+            ["monto_ofertado_suizo", "monto_adjudicado_suizo", "efectividad_monto_suizo"],
+            {
+                "monto_ofertado_suizo": monto_ofertado_suizo,
+                "monto_adjudicado_suizo": monto_adjudicado_suizo,
+                "efectividad_monto_suizo": round(efectividad_monto, 4),
+            },
+            "Revisar precios ofertados, renglones perdidos y posibles diferencias de escala o unidad.",
+        )
+
+    line_result = _detect_line_price_alerts(data.get("df"), thresholds)
+    line_total = int(line_result["warning_count"]) + int(line_result["critical_count"])
+    if line_total:
+        severity = "critical" if line_result["critical_count"] else "warning"
+        add_alert(
+            severity,
+            "line_outlier",
+            "Renglones con diferencias extremas de precio",
+            (
+                f"Se detectaron {line_total} renglones con diferencias de precio superiores "
+                f"al umbral configurado frente al ganador."
+            ),
+            ["renglones_competitivos"],
+            {
+                "warning_count": int(line_result["warning_count"]),
+                "critical_count": int(line_result["critical_count"]),
+                "examples": line_result["examples"],
+            },
+            "Revisar posibles errores de carga, escala, unidad de medida o precio unitario/total.",
+        )
+
+    counts = {
+        "critical": sum(1 for a in alerts if a["severity"] == "critical"),
+        "warning": sum(1 for a in alerts if a["severity"] == "warning"),
+        "info": sum(1 for a in alerts if a["severity"] == "info"),
+    }
+    if counts["critical"]:
+        quality = "Critico / revisar archivo original"
+    elif counts["warning"]:
+        quality = "Requiere revision"
+    elif counts["info"]:
+        quality = "Con observaciones menores"
+    else:
+        quality = "Sin alertas relevantes"
+
+    return {
+        "alerts": alerts,
+        "counts": counts,
+        "quality": quality,
+        "kpi_badges": kpi_badges,
+        "line_alerts": line_result["line_alerts"],
+        "thresholds": thresholds,
+    }
+
+
 @router.get("/tablero/{upload_id}", response_class=HTMLResponse)
 def tablero_show(
     request: Request,
@@ -6063,6 +6352,15 @@ def tablero_show(
             "offers": 0,
         }
 
+    consistency_ctx = detectConsistencyAlerts(
+        {
+            "kpis": kpis,
+            "suizo_eff": suizo_eff,
+            "df": df if df is not None and not df.empty else None,
+            "presupuesto_adjudicado": lic_gen.get("awarded", 0),
+        }
+    )
+
     # tabla "preview" del normalized
     if df is not None and not df.empty:
         df_tab = df.fillna("")
@@ -6147,6 +6445,8 @@ def tablero_show(
             "rich_data": summary,
             "dashboard_mode": dashboard_mode,
             "dash_diag": _dash_diag,
+            "consistency_alerts": consistency_ctx,
+            "alert_kpi_badges": consistency_ctx.get("kpi_badges", {}),
             # DEBUG INFO
             "debug_version": f"v2.DEBUG.{int(dt.datetime.now().timestamp())}",
             "debug_base_dir": str(getattr(up, "base_dir", "MISSING")),
