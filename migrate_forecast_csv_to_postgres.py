@@ -181,7 +181,24 @@ def run_migration():
             df_fact_2026 = df_fact_2026[mask_2026].copy()
         if "imp_hist" in df_fact_2026.columns:
             df_fact_2026["imp_hist"] = pd.to_numeric(df_fact_2026["imp_hist"], errors="coerce").fillna(0)
+        if CLIENTES_FILE.exists() and "cliente_id" in df_fact_2026.columns:
+            try:
+                df_cli_map = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False)
+                df_cli_map.columns = [c.lower().strip() for c in df_cli_map.columns]
+                df_cli_map["codigo"] = df_cli_map["codigo"].astype(str).str.strip()
+                df_fact_2026["cliente_id"] = df_fact_2026["cliente_id"].astype(str).str.strip()
+                df_fact_2026 = df_fact_2026.merge(
+                    df_cli_map[["codigo", "tipocli"]].drop_duplicates("codigo"),
+                    left_on="cliente_id", right_on="codigo", how="left",
+                ).drop(columns=["codigo"], errors="ignore")
+                del df_cli_map
+                gc.collect()
+            except Exception as _cli_exc:
+                logger.warning("forecast_fact_2026 tipocli enrichment error: %s", _cli_exc)
         df_fact_2026.to_sql("forecast_fact_2026", engine, if_exists="replace", index=False)
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fc_fact2026_tipocli ON forecast_fact_2026 (tipocli)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fc_fact2026_cliente ON forecast_fact_2026 (cliente_id)"))
         del df_fact_2026
         gc.collect()
 

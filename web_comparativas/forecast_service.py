@@ -1346,6 +1346,25 @@ def _load_all_data() -> dict[str, Any]:
                 before = len(df_fact_2026)
                 df_fact_2026 = df_fact_2026[df_fact_2026["codigo_serie"].isin(_canonical_series)].copy()
                 logger.info("[FORECAST] facturacion_2026: %d → %d rows after canonical series filter", before, len(df_fact_2026))
+            # Enrich with tipocli (real commercial profile) from clientes.csv.
+            # forecast_fact_2026.perfil contains internal codes (e.g. "9 - 1"), NOT the
+            # commercial profile used by the UI.  The correct value is clientes.tipocli,
+            # joined via cliente_id → clientes.codigo.
+            if CLIENTES_FILE.exists() and "cliente_id" in df_fact_2026.columns:
+                try:
+                    df_cli = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False)
+                    df_cli.columns = [c.lower().strip() for c in df_cli.columns]
+                    df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
+                    df_fact_2026["cliente_id"] = df_fact_2026["cliente_id"].astype(str).str.strip()
+                    df_fact_2026 = df_fact_2026.merge(
+                        df_cli[["codigo", "tipocli"]].drop_duplicates("codigo"),
+                        left_on="cliente_id", right_on="codigo", how="left",
+                    ).drop(columns=["codigo"], errors="ignore")
+                    matched = df_fact_2026["tipocli"].notna().sum()
+                    logger.info("[FORECAST] facturacion_2026: tipocli enriched for %d/%d rows", matched, len(df_fact_2026))
+                    del df_cli
+                except Exception as _cli_exc:
+                    logger.warning("facturacion_2026 tipocli enrichment error: %s", _cli_exc)
         except Exception as exc:
             logger.warning("facturacion_real_2026 load error: %s", exc)
     result["df_fact_2026"] = df_fact_2026
@@ -1663,12 +1682,18 @@ def _pg_get_chart_data_inner(
         products_as_codes=val_prod,
         products=None if val_prod is not None else products,
     )
-    # WHERE for forecast_fact_2026: only has perfil + codigo_serie + fecha (no neg/subneg)
-    fact_where = _build_filter_sql(
-        profiles=profiles,
+    # fact_2026 uses two independent subqueries so each dimension resolves correctly:
+    # 1. Profile → client subquery via forecast_valorizado.
+    #    forecast_fact_2026.perfil has internal codes ("9 - 1"); the correct commercial
+    #    profile is stored in forecast_valorizado.perfil.  Both tables share cliente_id.
+    # 2. Neg/subneg/products → series subquery via forecast_main.
+    fact_perfil_where = _build_filter_sql(profiles=profiles) if profiles else None
+    _has_series_filter = bool(neg or subneg or (prod_codes is not None) or products)
+    fact_series_only_where = _build_filter_sql(
+        neg=neg, subneg=subneg,
         products_as_codes=prod_codes,
-        skip_neg=True,
-    )
+        products=None if prod_codes is not None else products,
+    ) if _has_series_filter else None
 
     print(f"[FORECAST INNER] ETAPA 4 — query_hist view_money={view_money}", flush=True)
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
@@ -1854,10 +1879,24 @@ def _pg_get_chart_data_inner(
     # inflating the total: 17.661B (17.7B) instead of 17.618B (17.6B),
     # and accuracy: 91.2% instead of 90.9%.  Mirrors the identical filter on
     # forecast_imp_hist (AND codigo_serie IN (SELECT DISTINCT ... FROM forecast_valorizado)).
+    _fact_parts = ["fecha >= '2026-01-01'"]
+    if fact_perfil_where:
+        _fact_parts.append(
+            f"CAST(cliente_id AS TEXT) IN ("
+            f"  SELECT DISTINCT CAST(fv.cliente_id AS TEXT) "
+            f"  FROM forecast_valorizado fv WHERE {fact_perfil_where}"
+            f")"
+        )
+    if fact_series_only_where:
+        _fact_parts.append(
+            f"codigo_serie IN ("
+            f"  SELECT DISTINCT fm.codigo_serie FROM forecast_main fm WHERE {fact_series_only_where}"
+            f")"
+        )
+    _fact_parts.append("codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado)")
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
-        f"FROM forecast_fact_2026 WHERE {fact_where} AND fecha >= '2026-01-01' "
-        f"AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado) "
+        f"FROM forecast_fact_2026 WHERE {' AND '.join(_fact_parts)} "
         f"GROUP BY fecha ORDER BY fecha"
     )
     # Normalise alias
@@ -2994,13 +3033,27 @@ def get_chart_data(
 
     if not df_fact_2026.empty and "fecha" in df_fact_2026.columns and "imp_hist" in df_fact_2026.columns:
         mask_f2 = pd.Series(True, index=df_fact_2026.index)
-        if profiles and "perfil" in df_fact_2026.columns:
-            mask_f2 &= df_fact_2026["perfil"].isin(profiles)
-        if neg and "neg" in df_fact_2026.columns:
-            mask_f2 &= df_fact_2026["neg"].isin(neg)
-        if subneg and "subneg" in df_fact_2026.columns:
-            mask_f2 &= df_fact_2026["subneg"].isin(subneg)
-        # Filter by selected products via codigo_serie lookup (df_fact_2026 has no descripcion)
+        # Profile filter: use tipocli (real commercial profile from clientes.csv).
+        # forecast_fact_2026.perfil contains internal codes ("9 - 1"), NOT the commercial profile.
+        if profiles:
+            if "tipocli" in df_fact_2026.columns:
+                mask_f2 &= df_fact_2026["tipocli"].isin(profiles)
+            elif "codigo_serie" in df_fact_2026.columns and "codigo_serie" in df.columns:
+                _pfil_mask = pd.Series(True, index=df.index)
+                if "perfil" in df.columns:
+                    _pfil_mask &= df["perfil"].isin(profiles)
+                _pfil_series = set(df.loc[_pfil_mask, "codigo_serie"].astype(str).unique())
+                mask_f2 &= df_fact_2026["codigo_serie"].astype(str).isin(_pfil_series)
+        # Neg/subneg filter: product-level via codigo_serie → df (forecast_main).
+        if (neg or subneg) and "codigo_serie" in df_fact_2026.columns and "codigo_serie" in df.columns:
+            _ns_mask = pd.Series(True, index=df.index)
+            if neg and "neg" in df.columns:
+                _ns_mask &= df["neg"].isin(neg)
+            if subneg and "subneg" in df.columns:
+                _ns_mask &= df["subneg"].isin(subneg)
+            _ns_series = set(df.loc[_ns_mask, "codigo_serie"].astype(str).unique())
+            mask_f2 &= df_fact_2026["codigo_serie"].astype(str).isin(_ns_series)
+        # Products filter: direct codigo_serie lookup.
         if products and "codigo_serie" in df_fact_2026.columns:
             mask_f2 &= df_fact_2026["codigo_serie"].astype(str).isin(_prod_codes_lookup)
         df_f2 = df_fact_2026[mask_f2].copy()
