@@ -446,6 +446,38 @@ ONLINE_USERS: Dict[int, Dict[str, Any]] = {}
 _SESSION_BREAK_MINUTES = 30
 _HEARTBEAT_PERSIST_MINUTES = 2
 _LAST_PERSISTED_HEARTBEAT: Dict[int, Dict[str, Any]] = {}
+_PRESENCE_ONLY_ACTIONS = {"heartbeat", "api_call"}
+_GENERIC_SECTIONS = {"", "home", "inicio", "unknown", "otro", "otros", "undefined", "n/a"}
+
+
+def _is_meaningful_section(section: str | None) -> bool:
+    key = (section or "").strip().lower().replace("-", "_").replace("/", "_").strip("_")
+    return bool(key and key not in _GENERIC_SECTIONS)
+
+
+def _append_nav_step(trail: List[str], section: str | None, *, limit: int = 8) -> None:
+    label = _map_section_name(section or "")
+    if not label:
+        return
+    if trail and trail[-1] == label:
+        return
+    trail.append(label)
+    del trail[:-limit]
+
+
+def _timeline_action_key(action_type: str | None) -> str:
+    action = (action_type or "").lower()
+    if action in {"page_view", "module_visit"}:
+        return "view"
+    if action == "file_upload":
+        return "upload"
+    if action == "export":
+        return "export"
+    if action == "search":
+        return "search"
+    if action in {"form_submit", "admin_password_reset"}:
+        return "edit"
+    return "activity"
 
 
 def update_online_presence(
@@ -469,8 +501,10 @@ def update_online_presence(
     else:
         session_start = now
 
-    # last_action solo se actualiza para acciones significativas (no heartbeat)
-    effective_action = action_type if action_type and action_type != "heartbeat" else ""
+    action_norm = (action_type or "").strip().lower()
+
+    # last_action solo se actualiza para acciones significativas (no heartbeat/API)
+    effective_action = action_type if action_type and action_norm not in _PRESENCE_ONLY_ACTIONS else ""
     if effective_action:
         last_action = effective_action
         last_action_ts = now
@@ -478,10 +512,16 @@ def update_online_presence(
         last_action = existing["last_action_type"] if existing else ""
         last_action_ts = existing.get("last_action_ts", now) if existing else now
 
+    previous_section = existing.get("current_section") if existing else ""
+    if action_norm in _PRESENCE_ONLY_ACTIONS:
+        current_section = previous_section or (section if _is_meaningful_section(section) else "")
+    else:
+        current_section = section or previous_section
+
     ONLINE_USERS[user_id] = {
         "last_heartbeat": now,
         "last_action_ts": last_action_ts,
-        "current_section": section,
+        "current_section": current_section,
         "is_active": is_active,
         "last_action_type": last_action,
         "session_start": session_start,
@@ -679,6 +719,8 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
                 "last_action_ts": None,
                 "last_action_type": "",
                 "current_section": "",
+                "nav_trail": [],
+                "timeline": [],
                 "session_start": ts,
                 "_previous_ts": None,
             },
@@ -688,11 +730,21 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
             snap["session_start"] = ts
         snap["_previous_ts"] = ts
         snap["last_signal"] = ts
-        if event.section:
+        action_norm = (event.action_type or "").lower()
+        if event.section and (action_norm not in _PRESENCE_ONLY_ACTIONS or not snap["current_section"]):
             snap["current_section"] = event.section
-        if (event.action_type or "").lower() != "heartbeat":
+        if action_norm not in _PRESENCE_ONLY_ACTIONS:
             snap["last_action_ts"] = ts
             snap["last_action_type"] = event.action_type or ""
+            _append_nav_step(snap["nav_trail"], event.section)
+            snap["timeline"].append({
+                "time": ts.isoformat() + "Z",
+                "action": _timeline_action_key(event.action_type or ""),
+                "action_type": event.action_type or "",
+                "section": _map_section_name(event.section or ""),
+                "label": _map_action_label(event.action_type or ""),
+            })
+            del snap["timeline"][:-12]
 
     for uid, data in ONLINE_USERS.items():
         if uid not in user_ids:
@@ -704,6 +756,8 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
                 "last_action_ts": None,
                 "last_action_type": "",
                 "current_section": "",
+                "nav_trail": [],
+                "timeline": [],
                 "session_start": data.get("session_start", now),
                 "_previous_ts": None,
             },
@@ -711,14 +765,17 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
         memory_signal = data.get("last_heartbeat")
         if memory_signal and (snap["last_signal"] is None or memory_signal > snap["last_signal"]):
             snap["last_signal"] = memory_signal
-            snap["current_section"] = data.get("current_section") or snap["current_section"]
+            if not snap["current_section"] and _is_meaningful_section(data.get("current_section")):
+                snap["current_section"] = data.get("current_section") or snap["current_section"]
             snap["session_start"] = data.get("session_start") or snap["session_start"]
 
         memory_action_ts = data.get("last_action_ts")
         if memory_action_ts and (snap["last_action_ts"] is None or memory_action_ts > snap["last_action_ts"]):
             snap["last_action_ts"] = memory_action_ts
             snap["last_action_type"] = data.get("last_action_type") or snap["last_action_type"]
-            snap["current_section"] = data.get("current_section") or snap["current_section"]
+            if data.get("current_section"):
+                snap["current_section"] = data.get("current_section") or snap["current_section"]
+                _append_nav_step(snap["nav_trail"], data.get("current_section"))
 
     live_map: Dict[int, Dict[str, Any]] = {}
     for uid, snap in snapshots.items():
@@ -739,6 +796,8 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
             "last_action": _map_action_label(snap.get("last_action_type", "")),
             "activity_type": _get_activity_category(snap.get("last_action_type", "")),
             "current_section": _map_section_name(snap.get("current_section", "")),
+            "nav_trail": snap.get("nav_trail", []),
+            "timeline": snap.get("timeline", []),
             "session_start": session_start.isoformat() + "Z" if session_start else None,
             "minutes_since_activity": round((now - last_action_ts).total_seconds() / 60.0, 1) if last_action_ts else None,
             "minutes_since_signal": status_info["minutes_since_signal"],
@@ -793,6 +852,8 @@ def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
             "minutes_since_signal": presence["minutes_since_signal"],
             "activity_type": presence["activity_type"],
             "session_minutes": presence["session_minutes"],
+            "nav_trail": presence.get("nav_trail", []),
+            "timeline": presence.get("timeline", []),
         })
 
     status_order = {"Activo": 0, "Inactivo": 1, "Ausente": 2}

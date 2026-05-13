@@ -296,6 +296,7 @@ _EXCLUDED_PREFIXES = (
     "/ping",
     "/notifications/unread-count",  # badge poll; no cuenta como page_view
     "/api/heartbeat",          # tiene su propia lógica de tracking
+    "/api/track-activity",     # se auto-registra desde el frontend global
     "/sic/api/track-event",    # se auto-registra
     "/sic/api/usage",          # APIs internas del módulo de tracking
 )

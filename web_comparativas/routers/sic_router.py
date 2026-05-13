@@ -667,9 +667,9 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
                 "last_ping":       live.get("last_signal"),
                 "last_action":     live.get("last_action") or st.get("last_action") or "Sin actividad registrada",
                 "activity_type":   live.get("activity_type") or st.get("activity_type"),
-                "nav_trail":       [],
+                "nav_trail":       live.get("nav_trail") or [],
                 "sessions_detail": [],
-                "timeline":        [],
+                "timeline":        live.get("timeline") or [],
                 "score_history":   [],
             }
             merged.append(entry)

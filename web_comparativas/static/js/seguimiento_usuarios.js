@@ -1178,7 +1178,7 @@
      AUTO-REFRESH LIVE — sincroniza con datos reales del backend
   ═══════════════════════════════════════════════════════ */
   function fetchLiveUsersFromBackend() {
-    fetch('/sic/api/usage/live-users')
+    return fetch('/sic/api/usage/live-users')
       .then(r => r.json())
       .then(resp => {
         if (!resp.ok || !Array.isArray(resp.users)) return;
@@ -1192,6 +1192,8 @@
           if (live.activity_type)           existing.activity_type   = live.activity_type;
           if (live.last_signal)             existing.last_ping       = live.last_signal;
           if (live.session_start)           existing.session_start   = live.session_start;
+          if (Array.isArray(live.nav_trail)) existing.nav_trail       = live.nav_trail;
+          if (Array.isArray(live.timeline))  existing.timeline        = live.timeline;
           // Actualizar estado según señal
           const rawStatus = (live.status || '').toLowerCase();
           const statusMap = { activo: 'active', active: 'active', inactivo: 'idle', inactive: 'idle', ausente: 'idle' };
@@ -1200,6 +1202,7 @@
         // Marcar como offline a quienes no aparecen en live
         const liveIds = new Set(resp.users.map(u => Number(u.id)));
         MOCK_USERS.forEach(u => { if (!liveIds.has(u.id)) u.status = 'offline'; });
+        if (FX_STATE.globe) FX_STATE.globe.syncData();
       })
       .catch(() => { /* red no disponible, mantener datos actuales */ });
   }
@@ -1209,8 +1212,9 @@
     // Primer ciclo: sincronizar datos reales inmediatamente
     fetchLiveUsersFromBackend();
     liveTimer = setInterval(() => {
-      fetchLiveUsersFromBackend();
-      if (currentTab === 'usage-tab-live') renderLiveTable();
+      fetchLiveUsersFromBackend().then(() => {
+        if (currentTab === 'usage-tab-live') renderLiveTable();
+      });
     }, 30000);
   }
 

@@ -783,6 +783,51 @@ async def user_heartbeat(request: Request):
 
     return {"ok": True, "ts": dt.datetime.utcnow().isoformat() + "Z"}
 
+
+@app.post("/api/track-activity")
+async def track_activity(request: Request):
+    """
+    Endpoint liviano para navegación registrada desde el frontend global.
+    Complementa al middleware HTTP y evita depender del heartbeat para saber
+    dónde está realmente el usuario.
+    """
+    user = getattr(request.state, "user", None)
+    if not user:
+        return {"ok": False, "error": "not_authenticated"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    action_type = str(payload.get("action_type") or "page_view").strip()[:50]
+    section = str(payload.get("section") or "").strip()[:100]
+    path = str(payload.get("path") or request.headers.get("referer", "") or "").strip()[:500]
+    title = str(payload.get("title") or "").strip()[:200]
+
+    if action_type in {"heartbeat", "api_call"}:
+        action_type = "page_view"
+    if not section:
+        try:
+            from web_comparativas.middleware.tracking import _detect_section
+            section = _detect_section(path or request.url.path)
+        except Exception:
+            section = "unknown"
+
+    try:
+        from web_comparativas.usage_service import log_usage_event
+        log_usage_event(
+            user=user,
+            action_type=action_type,
+            section=section,
+            request=request,
+            extra_data={"path": path, "title": title, "source": "frontend"},
+        )
+    except Exception as exc:
+        print(f"[TRACK-ACTIVITY] Error: {exc}", flush=True)
+
+    return {"ok": True, "ts": dt.datetime.utcnow().isoformat() + "Z"}
+
 @app.get("/comentarios")
 def comentarios_alias(request: Request):
     return RedirectResponse("/api/comments/ui", 307)
