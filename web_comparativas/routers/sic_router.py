@@ -567,7 +567,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
     tracking_users_json = "[]"
     tracking_summary_json = "{}"
     try:
-        from web_comparativas.usage_service import get_live_users_data as _live
+        from web_comparativas.usage_service import get_live_users_data as _live, is_admin_role as _is_admin_role
         from web_comparativas.visibility_service import get_visible_user_ids as _vis_ids
 
         s = db_session()
@@ -643,6 +643,8 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
                 "username": u.full_name or u.name or u.email.split("@")[0].title(),
                 "email":    u.email or "",
                 "role":     (u.role or "analista").lower(),
+                "is_metric_excluded": _is_admin_role(u.role),
+                "metric_exclusion_reason": "Admin: visible para monitoreo, excluido de métricas" if _is_admin_role(u.role) else "",
                 "unit":     (u.unit_business or "Sin unidad").title(),
                 "group":    group_by_user.get(uid) or st.get("group") or "Sin grupo",
                 "created":  str(getattr(u, "created_at", "") or "")[:10],

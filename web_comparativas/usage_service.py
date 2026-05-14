@@ -585,11 +585,30 @@ def _restore_presence_from_db(session, visible_ids: Set[int]) -> None:
         print(f"[PRESENCE] Error en _restore_presence_from_db: {exc}", flush=True)
 
 
-_NON_ADOPTION_ROLES = {"admin", "administrator", "administrador"}
+_ADMIN_ROLE_ALIASES = {
+    "admin",
+    "administrador",
+    "administrator",
+    "superadmin",
+    "super admin",
+    "super_admin",
+}
 _LIVE_ACTIVE_THRESHOLD = dt.timedelta(minutes=2)
 _LIVE_CONNECTED_THRESHOLD = dt.timedelta(minutes=5)
 _LIVE_ABSENT_THRESHOLD = dt.timedelta(minutes=15)
 _ADOPTION_THRESHOLD = 40
+
+
+def _normalize_role_key(role: str | None) -> str:
+    return re.sub(r"\s+", " ", (role or "").strip().lower().replace("_", " "))
+
+
+def is_admin_role(role: str | None) -> bool:
+    return _normalize_role_key(role) in _ADMIN_ROLE_ALIASES
+
+
+def is_metric_eligible_role(role: str | None) -> bool:
+    return bool(_normalize_role_key(role)) and not is_admin_role(role)
 
 
 def _should_persist_heartbeat(user_id: int, section: str, is_active: bool) -> bool:
@@ -612,16 +631,16 @@ def _is_tracked_role(role: str | None) -> bool:
 
 
 def _is_adoption_eligible_role(role: str | None) -> bool:
-    return (role or "").strip().lower() not in _NON_ADOPTION_ROLES
+    return is_metric_eligible_role(role)
 
 
 def _role_label(role: str | None) -> str:
-    role_norm = (role or "").strip().lower()
+    role_norm = _normalize_role_key(role)
     if role_norm in {"analista", "analyst"}:
         return "Analista"
     if role_norm == "supervisor":
         return "Supervisor"
-    if role_norm in {"admin", "administrator"}:
+    if is_admin_role(role_norm):
         return "Admin"
     if role_norm == "auditor":
         return "Auditor"
@@ -632,7 +651,7 @@ def _available_role_options(users: List[User], groups_by_user: Dict[int, List[st
     team_norm = (team_filter or "").strip().lower()
     counter: Counter[str] = Counter()
     for user in users:
-        role_norm = (user.role or "").strip().lower()
+        role_norm = _normalize_role_key(user.role)
         if not role_norm:
             continue
         group_names = groups_by_user.get(int(user.id), [])
@@ -836,6 +855,9 @@ def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
             "email": user.email,
             "name": user.full_name or user.name or user.email.split("@")[0].title(),
             "role": _role_label(user.role),
+            "role_raw": _normalize_role_key(user.role),
+            "is_metric_excluded": is_admin_role(user.role),
+            "metric_exclusion_reason": "Admin: visible para monitoreo, excluido de métricas" if is_admin_role(user.role) else "",
             "unit_business": (user.unit_business or "Sin unidad").title(),
             "group": _primary_group(group_names) or "Sin grupo",
             "group_names": group_names,
@@ -862,8 +884,8 @@ def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
 
 
 def _matches_role_filter(role: str | None, role_filter: str | None) -> bool:
-    role_norm = (role or "").strip().lower()
-    rf = (role_filter or "").strip().lower()
+    role_norm = _normalize_role_key(role)
+    rf = _normalize_role_key(role_filter)
     if rf in {"", "todos", "todos_los_roles"}:
         return bool(role_norm)
     if rf == "analistas_y_supervisores":
@@ -872,8 +894,8 @@ def _matches_role_filter(role: str | None, role_filter: str | None) -> bool:
         return role_norm in {"analista", "analyst"}
     if rf in {"supervisor", "supervisores"}:
         return role_norm == "supervisor"
-    if rf in {"admin", "administrator", "administrador"}:
-        return role_norm in {"admin", "administrator", "administrador"}
+    if is_admin_role(rf):
+        return is_admin_role(role_norm)
     return role_norm == rf
 
 
@@ -1017,10 +1039,14 @@ def _eligible_users_scope(session, current_user: User, role_filter: str | None, 
     users = session.query(User).filter(User.id.in_(visible_ids)).all()
     groups_by_user = _query_groups_by_user(session, [int(user.id) for user in users])
     team_norm = (team_filter or "").strip().lower()
+    role_filter_norm = _normalize_role_key(role_filter)
+    admin_filter_selected = is_admin_role(role_filter_norm)
 
     eligible = []
     for user in users:
         if not _matches_role_filter(user.role, role_filter):
+            continue
+        if not admin_filter_selected and is_admin_role(user.role):
             continue
         group_names = groups_by_user.get(int(user.id), [])
         if team_norm and team_norm not in {group.lower() for group in group_names}:
@@ -1092,10 +1118,12 @@ def _get_usage_summary_impl(
     previous_start_dt = start_dt - (end_dt - start_dt)
     period_days = max((end_date - start_date).days + 1, 1)
     has_filters = bool((role_filter or "").strip() or (team_filter or "").strip())
+    admin_filter_selected = is_admin_role(role_filter)
 
     try:
         visible_ids = visible_user_ids(s, current_user)
         visible_users = s.query(User).filter(User.id.in_(visible_ids)).all() if visible_ids else []
+        visible_admin_count = sum(1 for user in visible_users if is_admin_role(user.role))
         visible_groups = _query_groups_by_user(s, [int(user.id) for user in visible_users])
         available_roles = _available_role_options(visible_users, visible_groups, team_filter)
         eligible_users, eligible_groups = _eligible_users_scope(
@@ -1107,7 +1135,7 @@ def _get_usage_summary_impl(
             return {
                 "filters": {"date_from": start_date.isoformat(), "date_to": end_date.isoformat(), "role_filter": role_filter or "", "team_filter": team_filter or "", "view": view},
                 "kpis": {"connected_now": 0, "eligible_users": 0, "active_users": 0, "uploads": 0, "active_hours": 0.0, "avg_productivity_index": 0.0, "adoption_rate": 0.0, "inactive_7d_count": 0},
-                "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "adoption_threshold": _ADOPTION_THRESHOLD, "states": _summary_states(0, 0, 0, has_filters)},
+                "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "admin_filter_selected": admin_filter_selected, "metric_scope": "admin_observed" if admin_filter_selected else "operational", "admin_users_visible": visible_admin_count, "adoption_threshold": _ADOPTION_THRESHOLD, "states": _summary_states(0, 0, 0, has_filters)},
                 "charts": {"by_weekday": [], "users_vs_users": [], "heatmap": [], "sections": []},
                 "per_user": [],
                 "alerts": [],
@@ -1224,6 +1252,7 @@ def _get_usage_summary_impl(
             last_seen_days = (dt.datetime.utcnow() - last_seen).days if last_seen else 999
             live_info = live_by_user.get(uid)
             role_raw = (user.role or "").strip().lower()
+            metric_excluded = is_admin_role(role_raw)
             current_status = live_info["status"] if live_info else ("Fuera de monitoreo" if last_seen else "Sin acceso")
             risk_level = "alto" if last_seen_days >= 7 or current_status == "Sin acceso" else ("medio" if adoption_score < _ADOPTION_THRESHOLD or trend_direction == "down" else "bajo")
             groups = eligible_groups.get(uid, [])
@@ -1234,6 +1263,8 @@ def _get_usage_summary_impl(
                 "email": user.email,
                 "role_raw": role_raw,
                 "role": _role_label(user.role),
+                "is_metric_excluded": metric_excluded,
+                "metric_exclusion_reason": "Admin: visible para monitoreo, excluido de métricas" if metric_excluded else "",
                 "unit_business": (user.unit_business or "Sin unidad").title(),
                 "group": _primary_group(groups),
                 "group_names": groups,
@@ -1273,7 +1304,7 @@ def _get_usage_summary_impl(
 
         per_user_rows.sort(key=lambda row: (row["adoption_score"], row["events"], row["active_hours"], row["name"].lower()), reverse=True)
         active_users = sum(1 for row in per_user_rows if row["events"] > 0)
-        alerts = _build_usage_alerts(per_user_rows)
+        alerts = [] if admin_filter_selected else _build_usage_alerts(per_user_rows)
         states = _summary_states(len(eligible_ids), active_users, len(alerts), has_filters)
         connected_now = sum(1 for row in live_by_user.values() if row["status"] in {"Activo", "Inactivo"})
         inactive_7d_count = sum(1 for row in per_user_rows if row["is_inactive_7d"])
@@ -1289,7 +1320,7 @@ def _get_usage_summary_impl(
         return {
             "filters": {"date_from": start_date.isoformat(), "date_to": end_date.isoformat(), "role_filter": role_filter or "", "team_filter": team_filter or "", "view": view},
             "kpis": {"connected_now": connected_now, "eligible_users": len(eligible_ids), "adoption_eligible_users": len(adoption_rows), "active_users": active_users, "uploads": uploads_total, "active_hours": total_active_hours, "avg_productivity_index": avg_productivity, "adoption_rate": adoption_rate, "inactive_7d_count": inactive_7d_count},
-            "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "adoption_threshold": _ADOPTION_THRESHOLD, "states": states},
+            "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "admin_filter_selected": admin_filter_selected, "metric_scope": "admin_observed" if admin_filter_selected else "operational", "admin_users_visible": visible_admin_count, "adoption_threshold": _ADOPTION_THRESHOLD, "states": states},
             "charts": {
                 "by_weekday": [{"weekday_index": idx, "weekday_label": weekday_labels[idx], "events": int(weekday_stats[idx]["events"]), "users": len(weekday_stats[idx]["user_ids"]), "uploads": int(weekday_stats[idx]["uploads"]), "sessions": int(weekday_stats[idx]["sessions"]), "active_hours": round(float(weekday_stats[idx]["active_minutes"]) / 60.0, 1)} for idx in range(7)],
                 "users_vs_users": [{"user_label": row["name"], "events": row["events"], "active_hours": row["active_hours"], "sessions": row["sessions"], "uploads": row["uploads"]} for row in [r for r in per_user_rows if r["events"] > 0][:15]],

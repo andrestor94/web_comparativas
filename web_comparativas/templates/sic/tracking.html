@@ -26,35 +26,59 @@
   --t-glow-g:   rgba(16,185,129,.15);
   --t-glow-r:   rgba(239,68,68,.15);
   --t-glow-y:   rgba(245,158,11,.15);
-  --radius-lg:  16px;
-  --radius-md:  12px;
-  --radius-sm:  8px;
+  --radius-xl:  28px;
+  --radius-lg:  24px;
+  --radius-md:  18px;
+  --radius-sm:  14px;
   --transition: 220ms cubic-bezier(.4,0,.2,1);
 }
 
 /* ═══════════════════════════════════════════════════
    LAYOUT
 ═══════════════════════════════════════════════════ */
-.trk-page { font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif; }
+body:has(.trk-page) > .container-fluid {
+  width: 100%;
+  max-width: none;
+  margin-top: 68px !important;
+  padding: 0 !important;
+}
+
+.trk-page {
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  width: 100%;
+  max-width: none;
+  min-height: calc(100vh - 68px);
+  margin: 0;
+  padding: clamp(22px, 2vw, 34px);
+  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(59,130,246,.11), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(16,185,129,.10), transparent 30%),
+    linear-gradient(180deg, rgba(7,18,33,.28), rgba(10,15,26,.82));
+  overflow-x: hidden;
+}
+.trk-page,
+.trk-page * { box-sizing: border-box; }
 
 .trk-header {
   display: flex; align-items: flex-start;
   justify-content: space-between; gap: 16px;
-  margin-bottom: 28px; flex-wrap: wrap;
+  margin-bottom: 26px; flex-wrap: wrap;
 }
-.trk-title { font-size: 22px; font-weight: 800; color: #f1f5f9; letter-spacing: -.02em; margin: 0; }
-.trk-subtitle { font-size: 13px; color: var(--t-muted2); margin: 4px 0 0; }
+.trk-title { font-size: clamp(24px, 1.65vw, 32px); font-weight: 800; color: #f1f5f9; letter-spacing: -.02em; margin: 0; }
+.trk-subtitle { font-size: 14px; color: var(--t-muted2); margin: 6px 0 0; }
 
 /* ═══════════════════════════════════════════════════
    FILTERS BAR
 ═══════════════════════════════════════════════════ */
 .trk-filters {
-  background: var(--t-surface);
-  border: 1px solid var(--t-border);
+  background: rgba(15,23,41,.72);
+  border: 1px solid rgba(87,112,176,.22);
   border-radius: var(--radius-lg);
-  padding: 18px 22px;
-  margin-bottom: 24px;
-  backdrop-filter: blur(12px);
+  padding: 24px 26px;
+  margin-bottom: 28px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 45px rgba(0,0,0,.16);
 }
 .trk-filters .form-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--t-muted); font-weight: 600; margin-bottom: 5px; }
 .trk-filters .form-control,
@@ -64,6 +88,7 @@
   color: var(--t-text);
   border-radius: var(--radius-sm);
   font-size: 13px;
+  min-height: 36px;
   transition: border-color var(--transition), box-shadow var(--transition);
 }
 .trk-filters .form-control:focus,
@@ -88,18 +113,19 @@
 /* ═══════════════════════════════════════════════════
    KPI BAR
 ═══════════════════════════════════════════════════ */
-.kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 18px; margin-bottom: 28px; }
 @media (max-width: 1399px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } }
 @media (max-width: 767px)  { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
 
 .kpi-card {
-  background: var(--t-surface);
-  border: 1px solid var(--t-border);
+  background: rgba(15,23,41,.76);
+  border: 1px solid rgba(87,112,176,.20);
   border-radius: var(--radius-lg);
-  padding: 16px 18px;
+  padding: 20px 22px;
   position: relative; overflow: hidden;
   transition: border-color var(--transition), transform var(--transition);
   cursor: default;
+  box-shadow: 0 16px 40px rgba(0,0,0,.14);
 }
 .kpi-card::after {
   content: ''; position: absolute; inset: 0;
@@ -156,14 +182,16 @@
    TABS
 ═══════════════════════════════════════════════════ */
 .trk-tabs {
-  display: flex; gap: 4px; margin-bottom: 20px;
-  background: var(--t-surface);
-  border: 1px solid var(--t-border);
-  border-radius: var(--radius-md);
-  padding: 4px; width: fit-content; flex-wrap: wrap;
+  display: flex; gap: 6px; margin-bottom: 28px;
+  background: rgba(15,23,41,.66);
+  border: 1px solid rgba(87,112,176,.18);
+  border-radius: var(--radius-lg);
+  padding: 6px; width: fit-content; max-width: 100%; flex-wrap: wrap;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 14px 34px rgba(0,0,0,.12);
 }
 .trk-tab {
-  padding: 9px 18px; border-radius: 9px;
+  padding: 10px 20px; border-radius: 16px;
   font-size: 13px; font-weight: 600;
   color: var(--t-muted); cursor: pointer;
   transition: all var(--transition); white-space: nowrap;
@@ -189,12 +217,14 @@
    PANEL CARD
 ═══════════════════════════════════════════════════ */
 .trk-card {
-  background: var(--t-surface);
-  border: 1px solid var(--t-border);
+  background: rgba(15,23,41,.78);
+  border: 1px solid rgba(87,112,176,.20);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  min-width: 0;
+  box-shadow: 0 18px 48px rgba(0,0,0,.16);
 }
-.trk-card-body { padding: 20px 22px; }
+.trk-card-body { padding: 26px; min-width: 0; }
 #usage-tab-summary .row.g-3 > [class*="col-"] { display: flex; }
 #usage-tab-summary .trk-card { width: 100%; display: flex; flex-direction: column; }
 #usage-tab-summary .trk-card-body { min-height: 410px; display: flex; flex-direction: column; width: 100%; }
@@ -229,15 +259,26 @@
 /* ═══════════════════════════════════════════════════
    TABLE STYLES
 ═══════════════════════════════════════════════════ */
-.trk-table-wrap { overflow-x: auto; }
+.trk-table-wrap {
+  overflow-x: auto;
+  border-radius: inherit;
+  padding: 4px;
+  scrollbar-color: rgba(59,130,246,.45) rgba(15,23,42,.65);
+  scrollbar-width: thin;
+}
+.trk-table-wrap::-webkit-scrollbar { height: 10px; }
+.trk-table-wrap::-webkit-scrollbar-track { background: rgba(15,23,42,.65); border-radius: 999px; }
+.trk-table-wrap::-webkit-scrollbar-thumb { background: rgba(59,130,246,.45); border-radius: 999px; border: 2px solid rgba(15,23,42,.65); }
 .trk-table {
-  width: 100%; border-collapse: separate; border-spacing: 0;
+  width: 100%; min-width: 1180px; border-collapse: separate; border-spacing: 0;
   font-size: 12.5px; color: var(--t-text);
+  overflow: hidden;
+  border-radius: calc(var(--radius-lg) - 4px);
 }
 .trk-table thead th {
   position: sticky; top: 0; z-index: 2;
-  background: var(--t-surface2);
-  padding: 12px 14px;
+  background: rgba(19,30,53,.96);
+  padding: 14px 16px;
   font-size: 10px; font-weight: 700; letter-spacing: .6px;
   text-transform: uppercase; color: var(--t-muted);
   border-bottom: 1px solid var(--t-border);
@@ -246,7 +287,7 @@
 .trk-table thead th.sortable { cursor: pointer; user-select: none; }
 .trk-table thead th.sortable:hover { color: var(--t-text); }
 .trk-table tbody td {
-  padding: 11px 14px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--t-border);
   vertical-align: middle;
 }
@@ -703,13 +744,13 @@
 .trk-scanlines{position:fixed;inset:0;pointer-events:none;z-index:9998;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.015) 2px,rgba(0,0,0,.015) 4px)}
 
 /* Live interface twin */
-.globe-section{display:flex;gap:16px;align-items:flex-start;border-radius:var(--radius-lg);background:var(--t-surface);border:1px solid var(--t-border);padding:16px;overflow:hidden;min-height:440px;margin-bottom:16px}
-.globe-wrap{flex:0 0 60%;position:relative;border-radius:var(--radius-md);overflow:hidden;background:linear-gradient(180deg,#050c18,#081426)}
-#globe-canvas{display:block;width:100%!important;min-height:320px;transition:height .25s ease}
+.globe-section{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(340px,.78fr);gap:28px;align-items:stretch;border-radius:var(--radius-xl);background:rgba(15,23,41,.78);border:1px solid rgba(87,112,176,.22);padding:28px;overflow:hidden;min-height:560px;margin-bottom:34px;box-shadow:0 24px 64px rgba(0,0,0,.18)}
+.globe-wrap{min-width:0;position:relative;border-radius:22px;overflow:hidden;background:linear-gradient(180deg,#050c18,#081426);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+#globe-canvas{display:block;width:100%!important;min-height:430px;transition:height .25s ease}
 .globe-tooltip{position:absolute;pointer-events:none;background:rgba(10,15,26,.95);border:1px solid var(--t-border);border-radius:8px;padding:8px 12px;font-size:11.5px;color:var(--t-text);white-space:nowrap;z-index:20;backdrop-filter:blur(8px);box-shadow:0 4px 20px rgba(0,0,0,.4);display:none}
-.globe-online-list{flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:440px}
+.globe-online-list{min-width:0;display:flex;flex-direction:column;gap:12px;overflow-y:auto;max-height:560px;padding:4px 4px 4px 0}
 .globe-list-hd{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;color:var(--t-muted);margin-bottom:6px;display:flex;align-items:center;gap:6px}
-.globe-user-item{padding:10px 12px;border-radius:var(--radius-sm);background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.1);cursor:pointer;transition:all var(--transition)}
+.globe-user-item{padding:12px 14px;border-radius:16px;background:rgba(59,130,246,.055);border:1px solid rgba(59,130,246,.12);cursor:pointer;transition:all var(--transition)}
 .globe-user-item:hover,.globe-user-item.selected{background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.25)}
 .globe-user-item.dimmed{opacity:.38}
 .globe-u-name{font-weight:600;color:#e2e8f0;font-size:12px;margin-bottom:4px;display:flex;align-items:center;gap:5px}
@@ -719,8 +760,8 @@
 .nav-map-title strong{display:block;color:#e2e8f0;font-size:14px}
 .nav-map-title span{display:block;color:var(--t-muted);font-size:11px;margin-top:2px}
 .nav-map-legend{position:absolute;left:14px;bottom:12px;z-index:4;display:flex;flex-wrap:wrap;gap:8px;pointer-events:none}
-.nav-map-legend span{font-size:10px;color:var(--t-muted);background:rgba(10,15,26,.72);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:3px 7px;backdrop-filter:blur(8px)}
-@media(max-width:991px){.globe-section{flex-direction:column}.globe-wrap{flex:none}}
+.nav-map-legend span{font-size:10px;color:var(--t-muted);background:rgba(10,15,26,.72);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:4px 9px;backdrop-filter:blur(8px)}
+@media(max-width:1100px){.globe-section{grid-template-columns:1fr}.globe-online-list{max-height:340px}}
 
 /* Radar */
 .radar-wrap{width:72px;height:72px;flex-shrink:0}
@@ -776,6 +817,55 @@
 @media (prefers-reduced-motion: reduce){
   .trk-page *,.trk-scanlines,.radar-ring-a,.radar-sweep,.alert-card.sev-alta{animation:none!important;transition:none!important}
   .trk-cursor,.trk-cursor-ring{display:none!important}
+}
+/* Layout breathing room for the tracking console */
+.trk-page > #usage-kpi-state {
+  margin: 4px 0 26px !important;
+  padding: 13px 16px;
+  border: 1px solid rgba(59,130,246,.14);
+  border-radius: 18px;
+  background: rgba(15,23,42,.58);
+  backdrop-filter: blur(14px);
+}
+.trk-page > .tab-content {
+  min-height: calc(100vh - 280px) !important;
+  min-width: 0;
+}
+[data-usage-tab-panel] { min-width: 0; }
+#usage-tab-live > .trk-card {
+  margin-top: 34px;
+  border-radius: var(--radius-xl);
+}
+#usage-tab-live .trk-table-wrap {
+  max-width: 100%;
+  padding: 6px 6px 10px;
+  background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(10,15,26,.88));
+}
+#usage-tab-live .refresh-bar {
+  margin-bottom: 20px;
+  padding: 0 4px;
+}
+@media (min-width: 1280px) {
+  .trk-page { padding: 30px 34px 38px; }
+  .trk-filters { padding: 28px 30px; }
+  .kpi-card { padding: 22px 24px; }
+  .trk-card-body { padding: 30px; }
+}
+@media (min-width: 1440px) {
+  .globe-section {
+    grid-template-columns: minmax(0,2fr) minmax(360px,.78fr);
+    min-height: 620px;
+    padding: 32px;
+  }
+  #globe-canvas { min-height: 500px; }
+  .globe-online-list { max-height: 620px; }
+}
+@media (max-width: 991px) {
+  body:has(.trk-page) > .container-fluid { margin-top: 56px !important; }
+  .trk-page { padding: 18px 14px 28px; min-height: calc(100vh - 56px); }
+  .kpi-grid { gap: 12px; }
+  .globe-section { padding: 20px; min-height: 0; border-radius: 22px; }
+  #globe-canvas { min-height: 360px; }
 }
 </style>
 {% endblock %}
@@ -857,7 +947,7 @@
       <div class="kpi-label">
         <i class="bi bi-broadcast"></i> Conectados ahora
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Usuarios con actividad registrada en los últimos 5 minutos. Se actualiza en tiempo real cada 30 segundos.">?</span>
+          data-bs-title="Usuarios operativos con actividad registrada en los últimos 5 minutos. Los Admin se muestran en vivo, pero no impactan esta métrica.">?</span>
       </div>
       <div class="kpi-value kpi-green count-anim" id="card-live-users">0</div>
       <div class="kpi-footer">
@@ -871,7 +961,7 @@
       <div class="kpi-label">
         <i class="bi bi-graph-up-arrow"></i> Tasa de adopción
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Porcentaje de usuarios con score de adopción ≥ 30/100. Fórmula: días activos (20) + cargas (40) + búsquedas (20) + exportaciones (20), normalizado a 100.">?</span>
+          data-bs-title="Porcentaje de usuarios operativos con score de adopción ≥ 30/100. Los Admin se muestran en vivo, pero no impactan esta métrica.">?</span>
       </div>
       <div class="kpi-value kpi-blue count-anim" id="card-adoption-val">0<span style="font-size:16px;font-weight:500;">%</span></div>
       <div class="kpi-footer">
@@ -885,7 +975,7 @@
       <div class="kpi-label">
         <i class="bi bi-moon-stars"></i> Inactivos
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Usuarios cuyo último acceso supera los 7 días. Señal de riesgo de abandono del sistema.">?</span>
+          data-bs-title="Usuarios operativos cuyo último acceso supera los 7 días. Los Admin no disparan alertas estadísticas de bajo uso o inactividad.">?</span>
       </div>
       <div class="kpi-value kpi-yellow count-anim" id="card-inactive-users">0</div>
       <div class="kpi-footer">
@@ -899,7 +989,7 @@
       <div class="kpi-label">
         <i class="bi bi-people"></i> Usuarios activos
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Usuarios únicos con al menos un evento registrado en el período seleccionado.">?</span>
+          data-bs-title="Usuarios operativos únicos con al menos un evento registrado en el período seleccionado. Los Admin quedan excluidos.">?</span>
       </div>
       <div class="kpi-value kpi-white count-anim" id="card-active-users">0</div>
       <div class="kpi-footer">
@@ -913,7 +1003,7 @@
       <div class="kpi-label">
         <i class="bi bi-clock-history"></i> Horas activas
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Suma estimada del tiempo efectivo en el sistema, calculada a partir de sesiones reconstruidas.">?</span>
+          data-bs-title="Suma estimada del tiempo efectivo de usuarios operativos, calculada a partir de sesiones reconstruidas. Los Admin quedan excluidos.">?</span>
       </div>
       <div class="kpi-value kpi-white count-anim" id="card-active-hours">0</div>
       <div class="kpi-footer">
@@ -927,7 +1017,7 @@
       <div class="kpi-label">
         <i class="bi bi-lightning-charge"></i> Productividad
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Promedio de cargas por sesión. Actúa como proxy del uso orientado a trabajo productivo real.">?</span>
+          data-bs-title="Promedio operativo de cargas por sesión. Los Admin se muestran para monitoreo, pero no impactan productividad.">?</span>
       </div>
       <div class="kpi-value kpi-white count-anim" id="card-prod-index">0,0</div>
       <div class="kpi-footer">
@@ -1384,7 +1474,7 @@
 window.TRACKING_USERS_DB = {{ tracking_users_json | safe }};
 window.TRACKING_USAGE_SUMMARY = {{ tracking_summary_json | safe }};
 </script>
-<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2032a"></script>
+<script src="{{ url_for('static', path='js/seguimiento_usuarios.js') }}?v=sic2033-admin-metrics"></script>
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
