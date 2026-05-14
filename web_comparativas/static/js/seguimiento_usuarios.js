@@ -255,6 +255,31 @@
   const fmtDate = d => new Date(d).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
   const fmtTime = d => new Date(d).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
   const fmtDT   = d => new Date(d).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const ADMIN_ROLES = new Set(['admin', 'administrador', 'administrator', 'superadmin', 'super admin', 'super_admin']);
+
+  function normalizeRoleKey(role) {
+    return String(role || '').trim().toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
+  }
+
+  function isAdminUser(user) {
+    return ADMIN_ROLES.has(normalizeRoleKey(user?.role || user?.role_raw));
+  }
+
+  function isMetricExcludedUser(user) {
+    return Boolean(user?.is_metric_excluded) || isAdminUser(user);
+  }
+
+  function metricVisibleUsers() {
+    const meta = latestUsageSummary?.meta || {};
+    if (meta.metric_scope === 'admin_observed' || meta.admin_filter_selected) {
+      return MOCK_USERS.filter(isMetricExcludedUser);
+    }
+    return MOCK_USERS.filter(u => !isMetricExcludedUser(u));
+  }
+
+  function metricExclusionBadge() {
+    return '<span class="chip chip-yellow" title="Visible para monitoreo; no impacta KPIs, gráficos ni alertas." style="font-size:9.5px;"><i class="bi bi-eye"></i> Admin · no computa</span>';
+  }
 
   function fmtRelative(dateStr) {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -498,6 +523,8 @@
         username:       r.username || r.name || (r.email || '').split('@')[0],
         email:          r.email || '',
         role:           r.role || r.role_raw || 'analista',
+        is_metric_excluded: Boolean(r.is_metric_excluded) || isAdminUser(r),
+        metric_exclusion_reason: r.metric_exclusion_reason || '',
         unit:           r.unit || r.unit_business || 'Sin unidad',
         group:          r.group || 'Sin grupo',
         created:        (r.created || r.created_at || '').slice(0, 10),
@@ -701,6 +728,8 @@
       username: row.name || row.username || existing.username || (row.email || '').split('@')[0],
       email: row.email || existing.email || '',
       role: row.role_raw || row.role || existing.role || 'analista',
+      is_metric_excluded: Boolean(row.is_metric_excluded) || Boolean(existing.is_metric_excluded) || isAdminUser(row) || isAdminUser(existing),
+      metric_exclusion_reason: row.metric_exclusion_reason || existing.metric_exclusion_reason || '',
       unit: row.unit_business || row.unit || existing.unit || 'Sin unidad',
       group: row.group || existing.group || 'Sin grupo',
       created: String(row.created_at || existing.created || '').slice(0, 10),
@@ -741,8 +770,12 @@
         return normalizeSummaryUser(row, existingById.get(uid) || {});
       }).filter(u => u.id);
       if (nextUsers.length) {
+        const preservedExcluded = MOCK_USERS.filter(existing =>
+          isMetricExcludedUser(existing) && !nextUsers.some(next => Number(next.id) === Number(existing.id))
+        );
         MOCK_USERS.length = 0;
         nextUsers.forEach(u => MOCK_USERS.push(u));
+        preservedExcluded.forEach(u => MOCK_USERS.push(u));
       }
     }
 
@@ -937,18 +970,19 @@
   }
 
   function renderKPIs() {
-    const liveCount = MOCK_USERS.filter(u => u.status === 'active' || u.status === 'idle').length;
-    const activeUsers = MOCK_USERS.filter(u => Number(u.active_days || 0) > 0);
-    const inactiveUsers = MOCK_USERS.filter(u => {
+    const kpiUsers = metricVisibleUsers();
+    const liveCount = kpiUsers.filter(u => u.status === 'active' || u.status === 'idle').length;
+    const activeUsers = kpiUsers.filter(u => Number(u.active_days || 0) > 0);
+    const inactiveUsers = kpiUsers.filter(u => {
       if (!u.last_access) return true;
       return ((Date.now() - new Date(u.last_access).getTime()) / 86400000) > 7;
     });
-    const totalHours = MOCK_USERS.reduce((s, u) => s + Number(u.active_hours || 0), 0);
-    const totalSessions = MOCK_USERS.reduce((s, u) => s + Number(u.sessions || 0), 0);
-    const totalUploads = MOCK_USERS.reduce((s, u) => s + Number(u.uploads || 0), 0);
+    const totalHours = kpiUsers.reduce((s, u) => s + Number(u.active_hours || 0), 0);
+    const totalSessions = kpiUsers.reduce((s, u) => s + Number(u.sessions || 0), 0);
+    const totalUploads = kpiUsers.reduce((s, u) => s + Number(u.uploads || 0), 0);
     const adoptionRate = latestUsageSummary?.kpis?.adoption_rate != null
       ? Number(latestUsageSummary.kpis.adoption_rate)
-      : (MOCK_USERS.length ? Math.round(MOCK_USERS.filter(u => Number(u.score || 0) >= 30).length / MOCK_USERS.length * 100) : 0);
+      : (kpiUsers.length ? Math.round(kpiUsers.filter(u => Number(u.score || 0) >= 30).length / kpiUsers.length * 100) : 0);
     const productivity = latestUsageSummary?.kpis?.avg_productivity_index != null
       ? Number(latestUsageSummary.kpis.avg_productivity_index)
       : (totalSessions > 0 ? totalUploads / totalSessions : 0);
@@ -964,9 +998,13 @@
     animateNumber('live-count-badge', latestUsageSummary?.kpis?.connected_now ?? liveCount);
 
     // KPI state text
+    const meta = latestUsageSummary?.meta || {};
+    const adminText = meta.metric_scope === 'admin_observed' || meta.admin_filter_selected
+      ? 'Vista administrativa: estos usuarios no computan en las métricas generales de adopción.'
+      : 'Métricas calculadas sin actividad Admin para reflejar adopción real de usuarios operativos.';
     setEl('usage-kpi-state', `
       <i class="bi bi-check-circle me-1" style="color:#10b981;"></i>
-      Indicadores actualizados · ${new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
+      ${adminText} · Actualizado ${new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
     `);
 
     // Trends
@@ -1090,6 +1128,7 @@
 
   function buildLiveRow(u) {
     const trail = (u.nav_trail || []).slice(-3);
+    const adminBadge = isMetricExcludedUser(u) ? metricExclusionBadge() : '';
     const trailHtml = trail.length
       ? trail.map((s, i) => `
           <span class="nav-trail-item${i === trail.length - 1 ? ' current' : ''}">${esc(sectionLabel(s))}</span>
@@ -1113,7 +1152,7 @@
             </div>
           </div>
         </td>
-        <td><span class="chip chip-gray" style="text-transform:capitalize;">${esc(u.role)}</span></td>
+        <td><div style="display:flex;gap:4px;flex-wrap:wrap;"><span class="chip chip-gray" style="text-transform:capitalize;">${esc(u.role)}</span>${adminBadge}</div></td>
         <td style="font-size:11.5px;color:var(--t-muted2);max-width:120px;overflow:hidden;text-overflow:ellipsis;">${esc(u.unit)}</td>
         <td style="font-size:11.5px;color:var(--t-muted2);">${esc(u.group)}</td>
         <td>
@@ -1190,6 +1229,9 @@
           if (live.current_section != null) existing.current_section = live.current_section;
           if (live.last_action)             existing.last_action     = live.last_action;
           if (live.activity_type)           existing.activity_type   = live.activity_type;
+          if (live.role_raw || live.role)   existing.role            = live.role_raw || live.role;
+          existing.is_metric_excluded = Boolean(live.is_metric_excluded) || isAdminUser(live);
+          existing.metric_exclusion_reason = live.metric_exclusion_reason || existing.metric_exclusion_reason || '';
           if (live.last_signal)             existing.last_ping       = live.last_signal;
           if (live.session_start)           existing.session_start   = live.session_start;
           if (Array.isArray(live.nav_trail)) existing.nav_trail       = live.nav_trail;
@@ -1269,7 +1311,7 @@
     // 2. Top usuarios (barras horizontales)
     const rolesEl = document.getElementById('usage-chart-roles');
     if (rolesEl && !rolesEl._chart) {
-      const sorted = [...MOCK_USERS].sort((a, b) => metricValue(b) - metricValue(a)).slice(0, 15);
+      const sorted = metricVisibleUsers().sort((a, b) => metricValue(b) - metricValue(a)).slice(0, 15);
       const c = new ApexCharts(rolesEl, {
         ...CHART_DEFAULTS,
         chart: { ...CHART_DEFAULTS.chart, type: 'bar', height: 310, toolbar: { show: false } },
@@ -1443,7 +1485,7 @@
     const tbody = document.getElementById('su-users-byuser-tbody');
     if (!tbody) return;
 
-    const users = sortUsers([...MOCK_USERS]);
+    const users = sortUsers(metricVisibleUsers());
     tbody.innerHTML = users.map(u => buildUserRow(u)).join('');
 
     tbody.querySelectorAll('tr').forEach(row => {
@@ -1488,6 +1530,7 @@
     const topModules = (u.modules || []).slice(0, 3);
     const riskClass = { alto: 'chip-red', medio: 'chip-yellow', baixo: 'chip-green', bajo: 'chip-green' }[u.risk] || 'chip-gray';
     const riskLabel = { alto: 'Alto', medio: 'Medio', bajo: 'Bajo' }[u.risk] || '—';
+    const adminBadge = isMetricExcludedUser(u) ? metricExclusionBadge() : '';
 
     return `
       <tr data-uid="${u.id}" style="cursor:pointer;">
@@ -1510,7 +1553,7 @@
             </div>
           </div>
         </td>
-        <td><span class="chip chip-gray" style="text-transform:capitalize;">${esc(u.role)}</span></td>
+        <td><div style="display:flex;gap:4px;flex-wrap:wrap;"><span class="chip chip-gray" style="text-transform:capitalize;">${esc(u.role)}</span>${adminBadge}</div></td>
         <td style="font-size:11px;color:var(--t-muted2);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(u.unit)}">${esc(u.unit)}</td>
         <td style="font-size:11px;color:var(--t-muted2);">${esc(u.group)}</td>
         <td>${statusPill(u.status)}</td>
@@ -1996,6 +2039,7 @@
     const chips = document.getElementById('prof-chips');
     if (chips) chips.innerHTML = `
       <span class="chip chip-blue" style="text-transform:capitalize;">${esc(u.role)}</span>
+      ${isMetricExcludedUser(u) ? metricExclusionBadge() : ''}
       <span class="chip chip-gray">${esc(u.unit)}</span>
       <span class="chip chip-purple">${esc(u.group)}</span>
       ${trackedUsers.has(Number(u.id)) ? '<span class="chip chip-yellow"><i class="bi bi-flag-fill"></i> En seguimiento</span>' : ''}
@@ -2936,7 +2980,7 @@
         <div class="globe-u-name"><span class="sdot ${sdotCls}"></span>${esc(u.username)}</div>
         <div class="globe-u-sec">${esc(userBreadcrumb(u) || sectionLabel(u.current_section))}</div>
         <div class="globe-u-meta">
-          <span>${esc(u.role)}</span><span>${statusLabel}</span>
+          <span>${esc(u.role)}${isMetricExcludedUser(u) ? ' · no computa' : ''}</span><span>${statusLabel}</span>
           <span>${esc(u.unit)}</span><span>${esc(timeInCurrentSection(u))}</span>
           <span style="grid-column:1 / -1;">${esc(u.last_action || 'Sin acción registrada')}</span>
         </div>
@@ -3042,9 +3086,10 @@
     let W       = wrap.clientWidth || 640;
     let CANVAS_H, CW, CH, OX, OY;
 
+    const minCanvasHeight = () => W >= 1280 ? 500 : (W >= 900 ? 430 : 360);
     canvas.width  = W * DPR;
-    canvas.height = 420 * DPR;
-    canvas.style.height = '420px';
+    canvas.height = minCanvasHeight() * DPR;
+    canvas.style.height = minCanvasHeight() + 'px';
     const ctx = canvas.getContext('2d');
     ctx.scale(DPR, DPR);
 
@@ -3052,14 +3097,14 @@
       if (drillDown === null) {
         const maxGx = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gx + r.sw), 6);
         const maxGy = CAMPUS_ROOMS.reduce((m, r) => Math.max(m, r.gy + r.sd), 3);
-        CANVAS_H = Math.max(260, 80 + (maxGx + maxGy + 1) * 28);
+        CANVAS_H = Math.max(minCanvasHeight(), 80 + (maxGx + maxGy + 1) * 28);
         CW = Math.max(30, Math.min(56, W / (maxGx + 2)));
         OY = 52;
       } else {
         const subs = LEVEL2_SUBS[drillDown] || [];
         const maxGx = subs.reduce((m, s) => Math.max(m, s.gx + s.sw), 6);
         const maxGy = subs.reduce((m, s) => Math.max(m, s.gy + s.sd), 2);
-        CANVAS_H = Math.max(260, 80 + (maxGx + maxGy + 1) * 26);
+        CANVAS_H = Math.max(minCanvasHeight(), 80 + (maxGx + maxGy + 1) * 26);
         CW = Math.max(34, Math.min(58, W / (maxGx + 3)));
         OY = 52;
       }
@@ -3493,7 +3538,7 @@
           const u = hit.user;
           ttEl.innerHTML =
             `<strong>${esc(u.username)}</strong><br>` +
-            `${esc(u.role)} · ${esc(u.unit)}<br>` +
+            `${esc(u.role)} · ${esc(u.unit)}${isMetricExcludedUser(u) ? ' · Admin no computa' : ''}<br>` +
             `<span style="color:#94a3b8">📍 ${esc(userBreadcrumb(u) || sectionLabel(u.current_section))}</span><br>` +
             `<span style="color:#94a3b8">⚡ ${esc(u.last_action)}</span><br>` +
             `<span style="color:#94a3b8">⏱ ${esc(timeInCurrentSection(u))}</span>`;
