@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Request, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
-from sqlalchemy.orm import Session
 
 from web_comparativas.models import User
 from web_comparativas.notifications_service import (
@@ -37,6 +36,13 @@ def api_unread_count(request: Request, user: User = Depends(login_required)):
     except Exception as e:
         import logging
         logging.getLogger("wc.notifications").warning("unread-count error: %s", e)
+        # Hacer rollback para que el middleware pueda cerrar la sesión limpiamente.
+        # Sin esto, la sesión queda en estado "needs rollback" y el commit del
+        # middleware falla con 500.
+        try:
+            _db(request).rollback()
+        except Exception:
+            pass
         return {"count": 0}
 
 @router.get("/", response_class=HTMLResponse)

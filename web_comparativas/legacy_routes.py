@@ -5885,12 +5885,13 @@ def compute_suizo_effectiveness(df: Optional[pd.DataFrame]) -> Dict[str, Any]:
 
 
 CONSISTENCY_THRESHOLDS = {
-    "amount_ratio_warning": 1.2,
-    "amount_ratio_critical": 2.0,
+    "amount_ratio_warning": 2.0,
+    "amount_ratio_critical": 4.0,
     "low_effectiveness_threshold": 0.01,
     "line_price_diff_warning": 100.0,
     "line_price_diff_critical": 500.0,
     "median_outlier_multiplier": 5.0,
+    "median_deviation_threshold": 100.0,
 }
 
 
@@ -5906,8 +5907,9 @@ def _detect_line_price_alerts(
     thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
-    Detecta renglones con precios atipicos sin modificar los datos originales.
-    Devuelve un resumen y un mapa por nro de renglon para que la tabla pueda marcarlos.
+    Detecta renglones con precios atipicos comparando Suizo contra la mediana
+    de los competidores. Alerta cuando el desvio porcentual supera el umbral
+    (por encima o por debajo).
     """
     thresholds = thresholds or CONSISTENCY_THRESHOLDS
     result = {
@@ -5925,6 +5927,11 @@ def _detect_line_price_alerts(
     if not (item_col and prov_col and price_col):
         return result
 
+    desc_col = next(
+        (c for c in df.columns if str(c).lower().startswith("desc")), None
+    )
+    threshold = float(thresholds.get("median_deviation_threshold", 100.0))
+
     def _line_key(v: Any) -> str:
         try:
             return str(int(float(v)))
@@ -5932,7 +5939,10 @@ def _detect_line_price_alerts(
             return str(v or "").strip()
 
     try:
-        tmp = df[[item_col, prov_col, price_col]].copy()
+        cols_to_use = [item_col, prov_col, price_col]
+        if desc_col:
+            cols_to_use.append(desc_col)
+        tmp = df[cols_to_use].copy()
         tmp["_item_key"] = tmp[item_col].map(_line_key)
         tmp["_prov"] = tmp[prov_col].astype(str)
         tmp["_price"] = pd.to_numeric(tmp[price_col], errors="coerce")
@@ -5941,52 +5951,79 @@ def _detect_line_price_alerts(
         return result
 
     for item_key, grp in tmp.groupby("_item_key"):
-        prices = grp["_price"].dropna()
-        if prices.empty:
-            continue
-        base = float(prices.min())
-        if base <= 0:
-            continue
-
         suizo_rows = grp[grp["_prov"].str.contains("suizo", case=False, na=False)]
         if suizo_rows.empty:
             continue
 
-        suizo_price = float(suizo_rows["_price"].min())
-        diff_pct = ((suizo_price / base) - 1.0) * 100.0 if base else 0.0
-        if diff_pct <= thresholds["line_price_diff_warning"]:
+        competitor_rows = grp[~grp["_prov"].str.contains("suizo", case=False, na=False)]
+        competitor_prices = competitor_rows["_price"].dropna()
+        if len(competitor_prices) == 0:
             continue
 
-        severity = "critical" if diff_pct > thresholds["line_price_diff_critical"] else "warning"
-        if severity == "critical":
-            result["critical_count"] += 1
-        else:
-            result["warning_count"] += 1
+        median_price = float(competitor_prices.median())
+        if median_price <= 0:
+            continue
 
-        label = (
-            "Diferencia extrema vs ganador"
-            if severity == "critical"
-            else "Precio fuera de escala"
-        )
-        detail = (
-            f"Suizo figura {diff_pct:.0f}% por encima del precio ganador "
-            f"({_money_compact(suizo_price)} vs {_money_compact(base)})."
-        )
+        suizo_price = float(suizo_rows["_price"].min())
+        dev_pct = ((suizo_price - median_price) / median_price) * 100.0
+
+        if abs(dev_pct) <= threshold:
+            continue
+
+        desc = ""
+        if desc_col:
+            desc_vals = grp[desc_col].dropna()
+            if not desc_vals.empty:
+                desc = str(desc_vals.iloc[0]).strip()
+
+        result["warning_count"] += 1
+
+        if dev_pct > 0:
+            title = "Precio de Suizo muy por encima de la mediana competitiva"
+            message = (
+                f"En el renglón {item_key}{': ' + desc[:60] if desc else ''}, "
+                f"el precio de Suizo está {dev_pct:.0f}% por encima de la mediana de los competidores."
+            )
+            tooltip = f"Dato atípico: Suizo está +{dev_pct:.0f}% sobre la mediana de competidores."
+            recommendation = (
+                "Revisar precio unitario, presentación, unidad de medida, escala y posible error de carga."
+            )
+        else:
+            title = "Precio de Suizo muy por debajo de la mediana competitiva"
+            message = (
+                f"En el renglón {item_key}{': ' + desc[:60] if desc else ''}, "
+                f"el precio de Suizo está {abs(dev_pct):.0f}% por debajo de la mediana de los competidores."
+            )
+            tooltip = f"Dato atípico: Suizo está {dev_pct:.0f}% bajo la mediana de competidores."
+            recommendation = (
+                "Revisar si existe error de carga, diferencia de unidad, precio incompleto o condición comercial distinta."
+            )
+
         result["line_alerts"].setdefault(item_key, []).append(
             {
-                "severity": severity,
+                "severity": "warning",
                 "type": "line_outlier",
-                "label": label,
-                "message": detail,
+                "label": "Dato atípico",
+                "title": title,
+                "message": message,
+                "tooltip": tooltip,
+                "description": desc,
                 "values": {
                     "precio_suizo": suizo_price,
-                    "precio_ganador": base,
-                    "diff_pct": round(diff_pct, 2),
+                    "mediana_competidores": median_price,
+                    "dev_pct": round(dev_pct, 2),
+                    "renglon": item_key,
+                    "descripcion": desc,
                 },
+                "recommendation": recommendation,
             }
         )
         if len(result["examples"]) < 5:
-            result["examples"].append({"renglon": item_key, "diff_pct": round(diff_pct, 1)})
+            result["examples"].append({
+                "renglon": item_key,
+                "dev_pct": round(dev_pct, 1),
+                "descripcion": desc,
+            })
 
     return result
 
@@ -6036,7 +6073,6 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
     presupuesto = float(kpis.get("awarded") or data.get("presupuesto_adjudicado") or 0)
     monto_ofertado_suizo = float(suizo.get("monto_ofertado") or 0)
     monto_adjudicado_suizo = float(suizo.get("monto_adjudicado") or 0)
-    efectividad_monto = float(suizo.get("efectividad_monto") or 0)
 
     if presupuesto <= 0:
         add_alert(
@@ -6051,14 +6087,14 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
 
     if presupuesto > 0 and monto_ofertado_suizo > 0:
         ratio = monto_ofertado_suizo / presupuesto
-        if ratio > thresholds["amount_ratio_critical"]:
+        if ratio >= thresholds["amount_ratio_critical"]:
             add_alert(
                 "critical",
                 "amount_outlier",
-                "Monto ofertado fuera de escala",
+                "Monto ofertado muy por encima del presupuesto",
                 (
                     f"El monto ofertado por Suizo ({_money_compact(monto_ofertado_suizo)}) "
-                    f"supera {ratio:.1f} veces el presupuesto adjudicado informado "
+                    f"supera {ratio:.1f} veces el presupuesto informado del proceso "
                     f"({_money_compact(presupuesto)})."
                 ),
                 ["monto_ofertado_suizo", "presupuesto_adjudicado"],
@@ -6067,16 +6103,17 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
                     "presupuesto_adjudicado": presupuesto,
                     "ratio": round(ratio, 2),
                 },
-                "Revisar archivo original, separadores de miles/decimales, unidad de medida y si el valor corresponde a precio unitario o total.",
+                "Revisar si el valor corresponde a precio unitario o total, separadores de miles/decimales, unidad de medida o error de carga.",
             )
-        elif ratio > thresholds["amount_ratio_warning"]:
+        elif ratio >= thresholds["amount_ratio_warning"]:
             add_alert(
                 "warning",
                 "amount_outlier",
-                "Monto ofertado elevado frente al presupuesto",
+                "Monto ofertado por encima del presupuesto",
                 (
                     f"El monto ofertado por Suizo ({_money_compact(monto_ofertado_suizo)}) "
-                    f"supera {ratio:.1f} veces el presupuesto adjudicado informado."
+                    f"supera {ratio:.1f} veces el presupuesto informado del proceso "
+                    f"({_money_compact(presupuesto)})."
                 ),
                 ["monto_ofertado_suizo", "presupuesto_adjudicado"],
                 {
@@ -6084,7 +6121,7 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
                     "presupuesto_adjudicado": presupuesto,
                     "ratio": round(ratio, 2),
                 },
-                "Validar si el presupuesto corresponde al mismo alcance que las ofertas comparadas.",
+                "Validar si el monto cargado corresponde a precio unitario o total y revisar posibles diferencias de escala.",
             )
 
     if monto_adjudicado_suizo > 0 and monto_ofertado_suizo > 0 and monto_adjudicado_suizo > monto_ofertado_suizo:
@@ -6104,28 +6141,6 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
             "Revisar cantidades adjudicadas, precios unitarios y columnas de monto total del archivo original.",
         )
 
-    if (
-        presupuesto > 0
-        and monto_ofertado_suizo > presupuesto
-        and efectividad_monto < thresholds["low_effectiveness_threshold"]
-    ):
-        add_alert(
-            "warning",
-            "ratio_inconsistency",
-            "Efectividad por monto atipicamente baja",
-            (
-                f"Suizo oferto {_money_compact(monto_ofertado_suizo)}, pero adjudico "
-                f"{_money_compact(monto_adjudicado_suizo)}, equivalente a {efectividad_monto * 100:.1f}%."
-            ),
-            ["monto_ofertado_suizo", "monto_adjudicado_suizo", "efectividad_monto_suizo"],
-            {
-                "monto_ofertado_suizo": monto_ofertado_suizo,
-                "monto_adjudicado_suizo": monto_adjudicado_suizo,
-                "efectividad_monto_suizo": round(efectividad_monto, 4),
-            },
-            "Revisar precios ofertados, renglones perdidos y posibles diferencias de escala o unidad.",
-        )
-
     line_result = _detect_line_price_alerts(data.get("df"), thresholds)
     line_total = int(line_result["warning_count"]) + int(line_result["critical_count"])
     if line_total:
@@ -6133,10 +6148,10 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
         add_alert(
             severity,
             "line_outlier",
-            "Renglones con diferencias extremas de precio",
+            "Renglones con desvíos atípicos vs mediana competitiva",
             (
-                f"Se detectaron {line_total} renglones con diferencias de precio superiores "
-                f"al umbral configurado frente al ganador."
+                f"Se detectaron {line_total} renglón{'es' if line_total != 1 else ''} donde el precio "
+                f"de Suizo se desvía más del 100% respecto a la mediana de los competidores."
             ),
             ["renglones_competitivos"],
             {
@@ -6144,7 +6159,7 @@ def detectConsistencyAlerts(data: Dict[str, Any]) -> Dict[str, Any]:
                 "critical_count": int(line_result["critical_count"]),
                 "examples": line_result["examples"],
             },
-            "Revisar posibles errores de carga, escala, unidad de medida o precio unitario/total.",
+            "Revisar precio unitario, presentación, unidad de medida, escala y posibles errores de carga en los renglones indicados.",
         )
 
     counts = {
@@ -6352,14 +6367,19 @@ def tablero_show(
             "offers": 0,
         }
 
-    consistency_ctx = detectConsistencyAlerts(
-        {
-            "kpis": kpis,
-            "suizo_eff": suizo_eff,
-            "df": df if df is not None and not df.empty else None,
-            "presupuesto_adjudicado": lic_gen.get("awarded", 0),
-        }
-    )
+    try:
+        consistency_ctx = detectConsistencyAlerts(
+            {
+                "kpis": kpis,
+                "suizo_eff": suizo_eff,
+                "df": df if df is not None and not df.empty else None,
+                "presupuesto_adjudicado": lic_gen.get("awarded", 0),
+            }
+        )
+    except Exception as _alert_err:
+        import logging as _log
+        _log.getLogger("wc.tablero").error("detectConsistencyAlerts falló: %s", _alert_err, exc_info=True)
+        consistency_ctx = {"alerts": [], "counts": {"critical": 0, "warning": 0, "info": 0}, "kpi_badges": {}}
 
     # tabla "preview" del normalized
     if df is not None and not df.empty:
@@ -6445,8 +6465,9 @@ def tablero_show(
             "rich_data": summary,
             "dashboard_mode": dashboard_mode,
             "dash_diag": _dash_diag,
+            "is_admin": is_admin,
             "consistency_alerts": consistency_ctx,
-            "alert_kpi_badges": consistency_ctx.get("kpi_badges", {}),
+            "alert_kpi_badges": consistency_ctx.get("kpi_badges", {}) if is_admin else {},
             # DEBUG INFO
             "debug_version": f"v2.DEBUG.{int(dt.datetime.now().timestamp())}",
             "debug_base_dir": str(getattr(up, "base_dir", "MISSING")),

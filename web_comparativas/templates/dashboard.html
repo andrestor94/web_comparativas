@@ -103,24 +103,20 @@
   .process-header {
     background: #fff;
     border-radius: var(--radius-md);
-    box-shadow: none;
-    /* Removed */
     border: 1px solid var(--ink-200);
     padding: 1rem 1.25rem;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 1rem;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
   }
 
-  @media (max-width:992px) {
-    .process-header {
-      grid-template-columns: 1fr
-    }
-  }
-
-  .ph-left {
-    min-width: 0;
+  /* Fila superior: título a la izquierda, acciones a la derecha */
+  .ph-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2rem;
   }
 
   .ph-title {
@@ -129,6 +125,8 @@
     gap: 0.6rem;
     flex-wrap: wrap;
     color: var(--primary-500);
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .ph-title .label {
@@ -144,12 +142,24 @@
     font-family: 'Outfit', monospace;
   }
 
-  /* Metadatos - Tech Grid */
+  /* Acciones: grupo de botones pegado al borde derecho del header */
+  .ph-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  /* Metadatos - Tech Grid, debajo del top-bar */
   .ph-meta-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 0.5rem 1rem;
-    margin-top: 0.5rem;
+    padding-top: 0.375rem;
+    border-top: 1px solid var(--ink-100);
   }
 
   .ph-kv {
@@ -171,17 +181,13 @@
     color: var(--ink-900);
   }
 
-  .ph-actions {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: nowrap;
-  }
-
   @media (max-width: 768px) {
-    .ph-actions {
+    .ph-top-bar {
       flex-wrap: wrap;
+    }
+    .ph-actions {
+      width: 100%;
+      justify-content: flex-start;
     }
   }
 
@@ -336,113 +342,206 @@
     background: #fffafa;
   }
 
-  .consistency-alerts {
-    background: #fff;
-    border: 1px solid var(--ink-200);
-    border-radius: var(--radius-md);
-    padding: 1rem;
-    margin-bottom: 1rem;
-  }
-
-  .consistency-alerts[data-level="critical"] {
-    border-color: #dc2626;
-    box-shadow: inset 4px 0 0 #dc2626;
-  }
-
-  .consistency-alerts[data-level="warning"] {
-    border-color: #f59e0b;
-    box-shadow: inset 4px 0 0 #f59e0b;
-  }
-
-  .ca-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .ca-title {
-    margin: 0;
-    color: var(--ink-900);
-    font-size: 0.95rem;
-    font-weight: 800;
-  }
-
-  .ca-summary {
-    margin: 0.25rem 0 0;
-    color: var(--ink-700);
-    font-size: 0.82rem;
-  }
-
-  .ca-quality {
+  /* ===== Botón burbuja de alertas ===== */
+  .alerts-bubble-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: var(--ink-050);
-    color: var(--ink-800);
-    font-size: 0.72rem;
-    font-weight: 800;
-    white-space: nowrap;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 4px 12px 4px 10px;
+    border: 1.5px solid #d1d5db;
+    background: #fff;
+    color: var(--ink-700);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
   }
-
-  .ca-list {
-    margin-top: 0.85rem;
-    display: grid;
-    gap: 0.6rem;
+  .alerts-bubble-btn:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
   }
-
-  .ca-item {
-    border: 1px solid var(--ink-200);
-    border-radius: var(--radius-sm);
-    padding: 0.75rem;
-    background: #fdfdfd;
-  }
-
-  .ca-item.critical {
-    border-color: #fecaca;
+  .alerts-bubble-btn.alerts-level-critical {
+    border-color: #fca5a5;
+    color: #991b1b;
     background: #fff7f7;
   }
-
-  .ca-item.warning {
-    border-color: #fde68a;
+  .alerts-bubble-btn.alerts-level-critical:hover { background: #fee2e2; }
+  .alerts-bubble-btn.alerts-level-warning {
+    border-color: #fcd34d;
+    color: #92400e;
     background: #fffdf4;
   }
+  .alerts-bubble-btn.alerts-level-warning:hover { background: #fef3c7; }
 
-  .ca-label {
+  .alerts-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 800;
+    background: #e5e7eb;
+    color: var(--ink-800);
+  }
+  .alerts-level-critical .alerts-badge {
+    background: #fecaca;
+    color: #991b1b;
+  }
+  .alerts-level-warning .alerts-badge {
+    background: #fde68a;
+    color: #92400e;
+  }
+
+  /* ===== Modal de alertas ===== */
+  .alerts-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 1080;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 3rem 1rem 1rem;
+    overflow-y: auto;
+  }
+  .alerts-modal-overlay[hidden] { display: none; }
+
+  .alerts-modal {
+    background: #fff;
+    border-radius: var(--radius-md);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
+    width: 100%;
+    max-width: 680px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .alerts-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .alerts-modal-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--ink-900);
+  }
+  .alerts-modal-subtitle {
+    margin: 0.25rem 0 0;
+    font-size: 0.78rem;
+    color: var(--ink-500);
+  }
+  .alerts-modal-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    color: var(--ink-400);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  .alerts-modal-close:hover { color: var(--ink-800); }
+
+  .alerts-modal-summary {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .alerts-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: var(--ink-100);
+    color: var(--ink-700);
+  }
+  .alerts-count.critical { background: #fee2e2; color: #991b1b; }
+  .alerts-count.warning  { background: #fef3c7; color: #92400e; }
+  .alerts-count.info     { background: #dbeafe; color: #1e40af; }
+
+  .alerts-modal-list {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  /* Tarjetas de alerta en el modal */
+  .alert-card {
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    padding: 0.85rem 1rem;
+    background: #fafafa;
+  }
+  .alert-card.critical { border-color: #fecaca; background: #fff7f7; }
+  .alert-card.warning  { border-color: #fde68a; background: #fffdf4; }
+  .alert-card.info     { border-color: #bfdbfe; background: #eff6ff; }
+
+  .alert-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .alert-card-badge {
     display: inline-flex;
     align-items: center;
     padding: 2px 7px;
     border-radius: 4px;
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     font-weight: 800;
     text-transform: uppercase;
     background: var(--ink-100);
     color: var(--ink-700);
-    margin-right: 0.5rem;
+    flex-shrink: 0;
   }
+  .alert-card-badge.critical { background: #fee2e2; color: #991b1b; }
+  .alert-card-badge.warning  { background: #fef3c7; color: #92400e; }
+  .alert-card-badge.info     { background: #dbeafe; color: #1e40af; }
 
-  .ca-label.critical {
-    background: #fee2e2;
-    color: #991b1b;
-  }
-
-  .ca-label.warning {
-    background: #fef3c7;
-    color: #92400e;
-  }
-
-  .ca-item-title {
-    font-weight: 800;
+  .alert-card-title {
+    font-size: 0.85rem;
+    font-weight: 700;
     color: var(--ink-900);
   }
-
-  .ca-message,
-  .ca-reco {
-    margin: 0.45rem 0 0;
-    color: var(--ink-700);
+  .alert-card-msg {
+    margin: 0.4rem 0 0;
     font-size: 0.82rem;
+    color: var(--ink-700);
+  }
+  .alert-card-values {
+    margin: 0.5rem 0 0;
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.8rem;
+    background: rgba(0,0,0,0.025);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+  }
+  .av-label { color: var(--ink-500); margin-right: 0.25rem; }
+  .av-val   { font-weight: 700; color: var(--ink-800); }
+  .av-examples { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+  .av-ex-item {
+    background: var(--ink-100);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 0.72rem;
+    color: var(--ink-700);
+  }
+  .alert-card-reco {
+    margin: 0.45rem 0 0;
+    font-size: 0.78rem;
+    color: var(--ink-600);
   }
 
   .line-alert-cell {
@@ -782,42 +881,33 @@
   <div class="dash-v2">
     <!-- Encabezado -->
     <section id="processHeader" class="process-header mb-3" aria-labelledby="phTitle">
-      <div class="ph-left">
+      <!-- Fila 1: título del proceso + barra de acciones -->
+      <div class="ph-top-bar">
         <div class="ph-title">
           <span class="label">Proceso</span>
           <h1 id="phTitle" class="nro m-0">{{ upload.proceso_nro }}</h1>
-
           <!-- contexto que lee comments.js -->
           <div id="comments-context" data-upload-id="{{ upload_id }}"
             data-process-code="{{ upload.proceso_nro or upload.proceso or upload.proceso_code }}" hidden></div>
         </div>
 
-        <div class="ph-meta-grid" role="list" aria-label="Metadatos del proceso">
-          <div class="ph-kv" role="listitem">
-            <div class="k">Apertura</div>
-            <div class="v" id="ph_apertura">{{ upload.apertura_fecha or "—" }}</div>
-          </div>
-          <div class="ph-kv" role="listitem">
-            <div class="k">Cuenta</div>
-            <div class="v">{{ upload.cuenta_nro or "—" }}</div>
-          </div>
-          <div class="ph-kv" role="listitem">
-            <div class="k">Plataforma</div>
-            <div class="v">{{ upload.platform or upload.platform_hint or "—" }}</div>
-          </div>
-          <div class="ph-kv" role="listitem">
-            <div class="k">Comprador</div>
-            <div class="v">{{ upload.buyer or upload.comprador or upload.buyer_hint or "—" }}</div>
-          </div>
-          <div class="ph-kv" role="listitem">
-            <div class="k">Provincia/Municipio</div>
-            <div class="v">{{ upload.province or upload.municipio or upload.province_hint or "—" }}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="ph-right">
         <div class="ph-actions">
+          {% if is_admin and consistency_alerts and consistency_alerts.alerts %}
+          {% set ca_counts = consistency_alerts.counts %}
+          {% set ca_total = (ca_counts.critical or 0) + (ca_counts.warning or 0) + (ca_counts.info or 0) %}
+          {% if ca_total > 0 %}
+          {% set ca_level = 'critical' if ca_counts.critical else ('warning' if ca_counts.warning else 'info') %}
+          <button id="btnAlerts" class="alerts-bubble-btn alerts-level-{{ ca_level }}" type="button"
+            aria-haspopup="dialog" aria-controls="alertsModal">
+            <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+            </svg>
+            Alertas de datos
+            <span class="alerts-badge">{{ ca_total }}</span>
+          </button>
+          {% endif %}
+          {% endif %}
+
           <button class="btn btn-outline-secondary btn-sm" id="btnViews" type="button" aria-haspopup="dialog"
             aria-controls="viewsModal">
             Vistas
@@ -828,6 +918,30 @@
             aria-label="Descargar normalized.xlsx del proceso {{ upload.proceso_nro }}">
             Descargar normalized.xlsx
           </button>
+        </div>
+      </div>
+
+      <!-- Fila 2: metadatos del proceso -->
+      <div class="ph-meta-grid" role="list" aria-label="Metadatos del proceso">
+        <div class="ph-kv" role="listitem">
+          <div class="k">Apertura</div>
+          <div class="v" id="ph_apertura">{{ upload.apertura_fecha or "—" }}</div>
+        </div>
+        <div class="ph-kv" role="listitem">
+          <div class="k">Cuenta</div>
+          <div class="v">{{ upload.cuenta_nro or "—" }}</div>
+        </div>
+        <div class="ph-kv" role="listitem">
+          <div class="k">Plataforma</div>
+          <div class="v">{{ upload.platform or upload.platform_hint or "—" }}</div>
+        </div>
+        <div class="ph-kv" role="listitem">
+          <div class="k">Comprador</div>
+          <div class="v">{{ upload.buyer or upload.comprador or upload.buyer_hint or "—" }}</div>
+        </div>
+        <div class="ph-kv" role="listitem">
+          <div class="k">Provincia/Municipio</div>
+          <div class="v">{{ upload.province or upload.municipio or upload.province_hint or "—" }}</div>
         </div>
       </div>
     </section>
@@ -841,42 +955,6 @@
       <div class="loss-hint" id="lossHint"></div>
     </section>
 
-    {% if consistency_alerts and consistency_alerts.alerts %}
-    {% set ca_counts = consistency_alerts.counts %}
-    {% set ca_level = 'critical' if ca_counts.critical else ('warning' if ca_counts.warning else 'info') %}
-    <section class="consistency-alerts" data-level="{{ ca_level }}" aria-labelledby="consistencyTitle">
-      <div class="ca-head">
-        <div>
-          <h2 class="ca-title" id="consistencyTitle">Alertas de consistencia</h2>
-          <p class="ca-summary">
-            Se detectaron posibles inconsistencias en los datos del proceso.
-            El analisis puede seguir visualizandose, pero se recomienda revisar el archivo original antes de tomar decisiones comerciales.
-          </p>
-        </div>
-        <span class="ca-quality">Calidad de datos: {{ consistency_alerts.quality }}</span>
-      </div>
-
-      <details open>
-        <summary class="ca-summary" style="cursor:pointer;font-weight:800;">
-          {{ ca_counts.critical }} criticas, {{ ca_counts.warning }} advertencias y {{ ca_counts.info }} informativas
-        </summary>
-        <div class="ca-list">
-          {% for alert in consistency_alerts.alerts %}
-          <article class="ca-item {{ alert.severity }}">
-            <div>
-              <span class="ca-label {{ alert.severity }}">
-                {{ 'Critica' if alert.severity == 'critical' else ('Advertencia' if alert.severity == 'warning' else 'Info') }}
-              </span>
-              <span class="ca-item-title">{{ alert.title }}</span>
-            </div>
-            <p class="ca-message">{{ alert.message }}</p>
-            <p class="ca-reco"><strong>Recomendacion:</strong> {{ alert.recommendation }}</p>
-          </article>
-          {% endfor %}
-        </div>
-      </details>
-    </section>
-    {% endif %}
 
     <div class="dashboard-grid mb-4">
       <!-- Izquierda -->
@@ -1246,6 +1324,89 @@
 </div>
 <!-- ===== /MODAL VISTAS ===== -->
 
+{% if is_admin %}
+<!-- ===== MODAL ALERTAS DE DATOS ===== -->
+<div id="alertsModal" class="alerts-modal-overlay" role="dialog" aria-modal="true"
+  aria-labelledby="alertsModalTitle" hidden>
+  <div class="alerts-modal">
+    <div class="alerts-modal-head">
+      <div>
+        <h2 id="alertsModalTitle" class="alerts-modal-title">Alertas de consistencia</h2>
+        <p class="alerts-modal-subtitle">Visibles solo para administradores. Ayudan a detectar posibles errores de carga, escala o interpretación comercial.</p>
+      </div>
+      <button id="alertsModalClose" class="alerts-modal-close" aria-label="Cerrar alertas">✕</button>
+    </div>
+
+    {% if consistency_alerts and consistency_alerts.counts %}
+    {% set ca_counts = consistency_alerts.counts %}
+    <div class="alerts-modal-summary">
+      {% if ca_counts.critical %}<span class="alerts-count critical">{{ ca_counts.critical }} crítica{{ 's' if ca_counts.critical != 1 else '' }}</span>{% endif %}
+      {% if ca_counts.warning %}<span class="alerts-count warning">{{ ca_counts.warning }} advertencia{{ 's' if ca_counts.warning != 1 else '' }}</span>{% endif %}
+      {% if ca_counts.info %}<span class="alerts-count info">{{ ca_counts.info }} informativa{{ 's' if ca_counts.info != 1 else '' }}</span>{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="alerts-modal-list">
+      {% if consistency_alerts and consistency_alerts.alerts %}
+        {% for alert in consistency_alerts.alerts %}
+        <article class="alert-card {{ alert.severity }}">
+          <div class="alert-card-header">
+            <span class="alert-card-badge {{ alert.severity }}">
+              {{ 'Crítica' if alert.severity == 'critical' else ('Advertencia' if alert.severity == 'warning' else 'Informativa') }}
+            </span>
+            <span class="alert-card-title">{{ alert.title }}</span>
+          </div>
+          <p class="alert-card-msg">{{ alert.message }}</p>
+          {% set v = alert['values'] if alert is mapping else {} %}
+          {% if v %}
+          <div class="alert-card-values">
+            {% if v.get('monto_ofertado_suizo') %}
+            <div>
+              <span class="av-label">Monto ofertado Suizo:</span>
+              <span class="av-val">$ {{ "{:,.0f}".format(v.monto_ofertado_suizo | float).replace(",", ".") }}</span>
+            </div>
+            {% endif %}
+            {% if v.get('presupuesto_adjudicado') %}
+            <div>
+              <span class="av-label">Presupuesto informado:</span>
+              <span class="av-val">$ {{ "{:,.0f}".format(v.presupuesto_adjudicado | float).replace(",", ".") }}</span>
+            </div>
+            {% endif %}
+            {% if v.get('ratio') %}
+            <div><span class="av-label">Relación:</span> <span class="av-val">{{ v.ratio }} veces</span></div>
+            {% endif %}
+            {% if v.get('monto_adjudicado_suizo') %}
+            <div>
+              <span class="av-label">Monto adjudicado Suizo:</span>
+              <span class="av-val">$ {{ "{:,.0f}".format(v.monto_adjudicado_suizo | float).replace(",", ".") }}</span>
+            </div>
+            {% endif %}
+            {% if v.get('examples') %}
+            <div class="av-examples">
+              <span class="av-label">Renglones:</span>
+              {% for ex in v.examples %}
+              <span class="av-ex-item">Reng. {{ ex.renglon }} ({{ '+' if ex.dev_pct > 0 else '' }}{{ ex.dev_pct }}%)</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if alert.recommendation %}
+          <p class="alert-card-reco"><strong>Recomendación:</strong> {{ alert.recommendation }}</p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      {% else %}
+        <p style="color:#6b7280;font-size:0.85rem;text-align:center;padding:2rem 0;">
+          No hay alertas para este proceso.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+<!-- ===== /MODAL ALERTAS DE DATOS ===== -->
+{% endif %}
+
 {% if user and (user.role or user.rol or '')|lower == 'admin' %}
 <!-- ===== DIAGNÓSTICO ADMIN ===== -->
 <details id="admin-diag-panel" style="margin:16px;font-size:12px;color:#6b7280;">
@@ -1349,6 +1510,26 @@
   const $$ = document.querySelectorAll.bind(document);
   window.__DASH_VERSION__ = 'dashboard-exjs v2025-10-26-b-fix';
   console.info('[dashboard] bundle', window.__DASH_VERSION__);
+  const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+</script>
+
+<script>
+  /* ===== Modal de alertas de datos (solo admin) ===== */
+  (() => {
+    if (!IS_ADMIN) return;
+    const btnAlerts = document.getElementById('btnAlerts');
+    const modal     = document.getElementById('alertsModal');
+    const btnClose  = document.getElementById('alertsModalClose');
+    if (!btnAlerts || !modal) return;
+
+    const open  = () => { modal.hidden = false; document.body.style.overflow = 'hidden'; };
+    const close = () => { modal.hidden = true;  document.body.style.overflow = ''; };
+
+    btnAlerts.addEventListener('click', open);
+    btnClose && btnClose.addEventListener('click', close);
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', e => { if (!modal.hidden && e.key === 'Escape') close(); });
+  })();
 </script>
 
 <!-- 1) Datos iniciales para el treemap (fallback si no hay chart_prov directo) -->
@@ -2352,9 +2533,12 @@
           const descHit = hasQ && norm(desc).includes(qNorm);
           const descMarked = hasQ ? highlightText(desc, QUERY) : esc(desc);
           const lineAlerts = Array.isArray(row.alerts) ? row.alerts : [];
-          const lineAlert = lineAlerts[0] || null;
+          const lineAlert = (IS_ADMIN && lineAlerts[0]) || null;
+          const lineAlertTooltip = lineAlert
+            ? (lineAlert.tooltip || lineAlert.message || '')
+            : '';
           const lineAlertHTML = lineAlert
-            ? `<span class="line-alert-cell ${esc(lineAlert.severity || '')}" title="${esc(lineAlert.message || '')}">Revisar dato</span>`
+            ? `<span class="line-alert-cell ${esc(lineAlert.severity || '')}" title="${esc(lineAlertTooltip)}">⚠ Dato atípico</span>`
             : '';
 
           const posByN = {};

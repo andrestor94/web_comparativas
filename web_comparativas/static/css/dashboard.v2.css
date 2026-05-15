@@ -164,39 +164,39 @@ h4 {
   background: var(--sa-gris-100);
 }
 
-/* ===== Encabezado del proceso (compacto) ===== */
-/* ===== Encabezado del proceso (compacto & clean) ===== */
+/* ===== Encabezado del proceso ===== */
 .process-header {
-  position: relative;
   background: var(--sa-blanco);
   border: 1px solid var(--sa-gris-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow-1);
   padding: .75rem 1rem;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: .75rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: .625rem;
   margin-top: .5rem;
   transition: box-shadow .2s;
-
-  /* Reservo espacio a la derecha para Vistas/Descargar */
-  padding-right: 230px;
 }
 
 .process-header:hover {
   box-shadow: var(--shadow-2);
 }
 
-.ph-left {
-  min-width: 0
+/* Fila 1: título a la izquierda, acciones pegadas a la derecha */
+.ph-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
 }
 
 .ph-title {
   display: flex;
   align-items: center;
   gap: .5rem;
-  flex-wrap: wrap
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .ph-title .label {
@@ -213,41 +213,31 @@ h4 {
   color: var(--sa-text)
 }
 
-/* Botonera, centrada verticalmente al costado derecho */
-.ph-right {
-  position: absolute;
-  right: .5rem;
-  top: 50%;
-  transform: translateY(-50%);
+/* Grupo de botones: siempre pegado al borde derecho */
+.ph-actions {
   display: flex;
+  align-items: center;
   gap: .5rem;
-}
-
-@media (max-width: 768px) {
-  .process-header {
-    padding-right: 1rem;
-  }
-
-  .ph-right {
-    position: static;
-    transform: none;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    margin-top: .5rem;
-  }
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .ph-actions .btn {
   padding: .28rem .55rem;
   font-size: .8rem;
-  border-radius: 999px
+  border-radius: 999px;
 }
 
+/* Fila 2: metadatos del proceso */
 .ph-meta-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: .2rem .5rem;
-  margin-top: .15rem;
+  padding-top: .375rem;
+  border-top: 1px solid var(--sa-gris-200);
+  margin-top: 0;
 }
 
 @media (max-width:1200px) {
@@ -256,7 +246,15 @@ h4 {
   }
 }
 
-@media (max-width:768px) {
+@media (max-width: 768px) {
+  .ph-top-bar {
+    flex-wrap: wrap;
+  }
+  .ph-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
   .ph-meta-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr))
   }

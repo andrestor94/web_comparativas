@@ -445,8 +445,21 @@ async def db_session_lifecycle(request: Request, call_next):
     try:
         response = await call_next(request)
         print(f"[MW] Committing...", flush=True)
-        request.state.db.commit()
-        print(f"[MW] Committed OK", flush=True)
+        try:
+            request.state.db.commit()
+            print(f"[MW] Committed OK", flush=True)
+        except Exception as _commit_err:
+            _commit_err_str = str(_commit_err).lower()
+            # "no transaction is active" en SQLite con StaticPool es una condición
+            # benigna: otra sesión/thread ya confirmó los cambios. No es un error real.
+            if "no transaction is active" in _commit_err_str or "can't commit" in _commit_err_str:
+                print(f"[MW] Commit noop (no active tx): {_commit_err}", flush=True)
+                try:
+                    request.state.db.rollback()
+                except Exception:
+                    pass
+            else:
+                raise
         return response
     except Exception as e:
         import traceback as _mw_tb

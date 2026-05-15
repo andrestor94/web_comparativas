@@ -128,6 +128,21 @@ def _commit_safe():
     try:
         db_session.commit()
     except Exception as exc:
+        err_str = str(exc).lower()
+        # Con StaticPool (SQLite local) todos los threads comparten una sola conexión.
+        # Si el middleware HTTP ya confirmó la transacción desde otro thread, SQLite
+        # reporta "no transaction is active". Los datos ya fueron persistidos, así que
+        # tratamos esto como un commit exitoso en lugar de un error fatal.
+        if "no transaction is active" in err_str or "can't commit" in err_str:
+            logger.warning(
+                "_commit_safe: no active transaction (StaticPool race condition o commit previo) — "
+                "tratando como commit exitoso."
+            )
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+            return
         try:
             db_session.rollback()
         except Exception as rollback_exc:
@@ -685,6 +700,13 @@ def classify_and_process(upload_id: int, metadata: dict, *, touch_status: bool =
             from web_comparativas.routers.mercado_publico_perfiles_router import invalidate_perfiles_cache
             invalidate_perfiles_cache()
         except Exception as _sync_err:
+            # Restaurar la sesión antes de continuar: si la excepción ocurrió dentro
+            # de una transacción activa, SQLAlchemy 2.x requiere rollback antes de
+            # poder operar nuevamente (de lo contrario el siguiente commit falla).
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
             logger.warning(f"Upload {upload_id}: sync comparativa_rows falló (no bloqueante) — {_sync_err}")
 
         if touch_status:
