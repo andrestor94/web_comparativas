@@ -1900,14 +1900,10 @@ def _pg_get_chart_data_inner(
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
     print(f"[FORECAST INNER] ETAPA 9 — query_fact2026", flush=True)
-    # Facturación real 2026
-    # CANONICAL SERIES FILTER: restrict fact_2026 to the series that exist in
-    # forecast_valorizado (same inner-join the original app.py applied at load time).
-    # Without this filter, extra rows from series not in the model are included,
-    # inflating the total: 17.661B (17.7B) instead of 17.618B (17.6B),
-    # and accuracy: 91.2% instead of 90.9%.  Mirrors the identical filter on
-    # forecast_imp_hist (AND codigo_serie IN (SELECT DISTINCT ... FROM forecast_valorizado)).
-    _fact_parts = ["fecha >= '2026-01-01'"]
+    # Facturación real 2026 — fuente única: forecast_fact_2026 (Jan–Apr 2026)
+    # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
+    # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
+    _fact_parts = ["fecha >= '2026-01-01'", "fecha < '2026-05-01'"]
     if fact_perfil_where:
         _fact_parts.append(
             f"CAST(cliente_id AS TEXT) IN ("
@@ -1921,7 +1917,6 @@ def _pg_get_chart_data_inner(
             f"  SELECT DISTINCT fm.codigo_serie FROM forecast_main fm WHERE {fact_series_only_where}"
             f")"
         )
-    _fact_parts.append("codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado)")
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
         f"FROM forecast_fact_2026 WHERE {' AND '.join(_fact_parts)} "
@@ -1934,7 +1929,7 @@ def _pg_get_chart_data_inner(
     fact_2026_sum = 0.0
     if not df_fact_raw.empty:
         fact_2026_sum = float(df_fact_raw["Total_Venta"].sum())
-        df_v2026_chart = df_fact_raw[df_fact_raw["fecha"] < pd.Timestamp("2026-03-01")].copy()
+        df_v2026_chart = df_fact_raw[df_fact_raw["fecha"] < pd.Timestamp("2026-05-01")].copy()
         if not df_hist.empty and not df_v2026_chart.empty:
             hist_last = df_hist.sort_values("fecha").iloc[-1]
             brow = pd.DataFrame([{"fecha": hist_last["fecha"],
@@ -3089,12 +3084,12 @@ def get_chart_data(
         # All months aggregated (analytical layer: Jan+Feb+Mar)
         df_v2026_all = df_f2.groupby("fecha").agg(Total_Venta=("imp_hist", "sum")).reset_index()
 
-        # fact_2026_sum = ALL available months (Jan+Feb+Mar) — matches original KPI 7
+        # fact_2026_sum = ALL available months (Jan–Apr) — matches KPI 7
         fact_2026_sum = float(df_f2["imp_hist"].sum())
         meta_completeness = (fact_2026_sum / total_proyectado_2026_annual * 100) if total_proyectado_2026_annual > 0 else 0.0
 
-        # Chart line: Jan+Feb only (March hidden from line, same as original df_v_line filter)
-        df_v2026_chart = df_v2026_all[df_v2026_all["fecha"] < pd.Timestamp("2026-03-01")].copy()
+        # Chart line: Jan–Apr (cutoff at 2026-05-01 so all 4 months render)
+        df_v2026_chart = df_v2026_all[df_v2026_all["fecha"] < pd.Timestamp("2026-05-01")].copy()
 
         # Bridge: connect chart line to end of history
         if not df_hist.empty and not df_v2026_chart.empty:
