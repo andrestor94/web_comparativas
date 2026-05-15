@@ -4,6 +4,7 @@ Pure Python/pandas, zero Streamlit dependencies.
 """
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import threading
@@ -55,7 +56,7 @@ ARTICULOS_FILE  = FORECAST_DIR / "Articulos 1.csv"
 VALORIZADO_FILE = FORECAST_DIR / "forecast_valorizado_v2.csv"
 CLIENTES_FILE   = FORECAST_DIR / "clientes.csv"
 IMP_HIST_FILE   = FORECAST_DIR / "importe_historico.csv"
-FACT_2026_FILE  = FORECAST_DIR / "facturacion_real_2026.csv"
+FACT_2026_FILE  = FORECAST_DIR / "facturacion_real_2026_sin_neg2.csv"
 
 _cache_lock = threading.Lock()
 _data_cache: dict[str, Any] = {}
@@ -1116,6 +1117,36 @@ def _apply_prices(df: pd.DataFrame, price_lookup: dict) -> pd.DataFrame:
 # Main loader
 # ---------------------------------------------------------------------------
 
+def _read_fact_2026_csv_robust(path: Path) -> pd.DataFrame:
+    """Read facturacion_real_2026 CSV recovering rows with embedded double-quotes.
+
+    Some rows have fields like ``"AGUJA DESCARTABLE 13X3  30GX1/2"" (DISC)"``
+    where the standard C-engine treats the escaped quote as a field boundary,
+    producing a mis-parsed row whose entire content lands in the first column.
+    The csv.reader approach handles RFC-4180 double-quote escaping correctly and
+    recovers all 206 246 rows without any dropna.
+    """
+    rows: list[list[str]] = []
+    with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        n_cols = len(header)
+        for row in reader:
+            if len(row) == n_cols:
+                rows.append(row)
+            elif len(row) == 1 and "," in row[0]:
+                reparsed = next(csv.reader([row[0]]))
+                if len(reparsed) == n_cols:
+                    rows.append(reparsed)
+                else:
+                    logger.debug("[FORECAST] fact_2026 skip unresolvable row: cols=%d", len(reparsed))
+            else:
+                logger.debug("[FORECAST] fact_2026 skip unresolvable row: cols=%d", len(row))
+    df = pd.DataFrame(rows, columns=header)
+    df.columns = [c.lower().strip() for c in df.columns]
+    return df
+
+
 def _load_all_data() -> dict[str, Any]:
     result: dict[str, Any] = {}
 
@@ -1321,52 +1352,49 @@ def _load_all_data() -> dict[str, Any]:
     result["df_imp_hist"] = df_imp_hist
 
     # ── Facturación real 2026 (actual billing Jan+Feb+Mar 2026) ──────────
-    # Original: uses fact_history.csv val rows which include ALL available months (Jan/Feb/Mar).
-    # March IS included in the analytical layer (KPI 7) but hidden from the chart line.
-    # Cross-filtered to canonical series (same as original agg_trends['val'] filter).
+    # Source: facturacion_real_2026_sin_neg2.csv (consolidated Jan–Apr 2026)
+    # Robust parser recovers all rows including those with embedded double-quotes.
+    # No canonical-series cross-filter here — the full CSV total must be preserved
+    # for the "Todos" view; per-filter reduction happens at chart-query time.
     df_fact_2026 = pd.DataFrame()
     if FACT_2026_FILE.exists():
         try:
-            df_fact_2026 = pd.read_csv(str(FACT_2026_FILE), sep=",", encoding="utf-8")
-            df_fact_2026.columns = [c.lower().strip() for c in df_fact_2026.columns]
-            df_fact_2026["tipo"] = "val"
+            df_fact_2026 = _read_fact_2026_csv_robust(FACT_2026_FILE)
             if "fecha" in df_fact_2026.columns:
                 df_fact_2026["fecha"] = pd.to_datetime(df_fact_2026["fecha"], errors="coerce")
-                # Round daily dates to month start
+                df_fact_2026 = df_fact_2026[df_fact_2026["fecha"].notna()].copy()
                 df_fact_2026["fecha"] = df_fact_2026["fecha"].dt.to_period("M").dt.to_timestamp()
-                # Keep ALL available 2026 months (Jan+Feb+Mar) — March included in KPI 7,
-                # only hidden from chart (that filtering happens in get_chart_data)
-                mask_2026 = df_fact_2026["fecha"] >= "2026-01-01"
-                df_fact_2026 = df_fact_2026[mask_2026].copy()
+                df_fact_2026 = df_fact_2026[df_fact_2026["fecha"] >= pd.Timestamp("2026-01-01")].copy()
+            df_fact_2026["tipo"] = "val"
             if "imp_hist" in df_fact_2026.columns:
                 df_fact_2026["imp_hist"] = pd.to_numeric(df_fact_2026["imp_hist"], errors="coerce").fillna(0)
-            # Cross-filter to canonical series
-            if _canonical_series and "codigo_serie" in df_fact_2026.columns:
-                df_fact_2026["codigo_serie"] = df_fact_2026["codigo_serie"].astype(str)
-                before = len(df_fact_2026)
-                df_fact_2026 = df_fact_2026[df_fact_2026["codigo_serie"].isin(_canonical_series)].copy()
-                logger.info("[FORECAST] facturacion_2026: %d → %d rows after canonical series filter", before, len(df_fact_2026))
-            # Enrich with tipocli (real commercial profile) from clientes.csv.
-            # forecast_fact_2026.perfil contains internal codes (e.g. "9 - 1"), NOT the
-            # commercial profile used by the UI.  The correct value is clientes.tipocli,
-            # joined via cliente_id → clientes.codigo.
-            if CLIENTES_FILE.exists() and "cliente_id" in df_fact_2026.columns:
-                try:
-                    df_cli = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False)
-                    df_cli.columns = [c.lower().strip() for c in df_cli.columns]
-                    df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
-                    df_fact_2026["cliente_id"] = df_fact_2026["cliente_id"].astype(str).str.strip()
-                    df_fact_2026 = df_fact_2026.merge(
-                        df_cli[["codigo", "tipocli"]].drop_duplicates("codigo"),
-                        left_on="cliente_id", right_on="codigo", how="left",
-                    ).drop(columns=["codigo"], errors="ignore")
-                    matched = df_fact_2026["tipocli"].notna().sum()
-                    logger.info("[FORECAST] facturacion_2026: tipocli enriched for %d/%d rows", matched, len(df_fact_2026))
-                    del df_cli
-                except Exception as _cli_exc:
-                    logger.warning("facturacion_2026 tipocli enrichment error: %s", _cli_exc)
-        except Exception as exc:
-            logger.warning("facturacion_real_2026 load error: %s", exc)
+            # Monthly validation log
+            _f26_months = df_fact_2026.groupby(df_fact_2026["fecha"].dt.to_period("M"))["imp_hist"].agg(["count", "sum"])
+            for _m, _mr in _f26_months.iterrows():
+                logger.info("[FORECAST] facturacion_2026 %s: %d rows | imp_hist $%.0f", _m, _mr["count"], _mr["sum"])
+            logger.info("[FORECAST] facturacion_real CSV (Jan–Apr): %d rows loaded", len(df_fact_2026))
+        except Exception as _csv_exc:
+            logger.warning("facturacion_real_2026 CSV load error: %s", _csv_exc)
+    if not df_fact_2026.empty:
+        # Enrich with tipocli (real commercial profile) from clientes.csv.
+        # forecast_fact_2026.perfil contains internal codes (e.g. "9 - 1"), NOT the
+        # commercial profile used by the UI.  The correct value is clientes.tipocli,
+        # joined via cliente_id → clientes.codigo.
+        if CLIENTES_FILE.exists() and "cliente_id" in df_fact_2026.columns:
+            try:
+                df_cli = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False)
+                df_cli.columns = [c.lower().strip() for c in df_cli.columns]
+                df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
+                df_fact_2026["cliente_id"] = df_fact_2026["cliente_id"].astype(str).str.strip()
+                df_fact_2026 = df_fact_2026.merge(
+                    df_cli[["codigo", "tipocli"]].drop_duplicates("codigo"),
+                    left_on="cliente_id", right_on="codigo", how="left",
+                ).drop(columns=["codigo"], errors="ignore")
+                matched = df_fact_2026["tipocli"].notna().sum()
+                logger.info("[FORECAST] facturacion_2026: tipocli enriched for %d/%d rows", matched, len(df_fact_2026))
+                del df_cli
+            except Exception as _cli_exc:
+                logger.warning("facturacion_2026 tipocli enrichment error: %s", _cli_exc)
     result["df_fact_2026"] = df_fact_2026
 
     logger.info("[FORECAST] All data loaded. Main rows: %d, Valorizado rows: %d, ImpHist rows: %d, Fact2026 rows: %d",
