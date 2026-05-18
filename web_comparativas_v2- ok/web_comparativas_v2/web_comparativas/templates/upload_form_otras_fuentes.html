@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+{% block title %}Nueva carga – Web Comparativas{% endblock %}
+{% block header_title %}Nueva carga{% endblock %}
+{% block extra_head %}
+<style>
+  .otras-fuentes-form-shell {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .is-readonly {
+    background-color: #f8fafc;
+    cursor: default;
+  }
+  .campo-error {
+    display: none;
+    color: #dc3545;
+    font-size: 0.82em;
+    margin-top: 0.3rem;
+    font-weight: 500;
+  }
+  .campo-error.visible { display: block; }
+  .form-control.campo-invalido,
+  .form-select.campo-invalido {
+    border-color: #dc3545 !important;
+    box-shadow: 0 0 0 0.2rem rgba(220,53,69,.15);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ======= PAGE HEADER ======= -->
+<div class="h-page-header">
+  <div>
+    <span class="h-page-header__eyebrow">Mercado Público</span>
+    <h1 class="h-page-header__title">Nueva carga</h1>
+    <p class="h-page-header__subtitle">Subí un archivo de cuadro comparativo para procesarlo</p>
+  </div>
+  <div class="h-page-header__actions">
+    <a class="btn btn-outline-secondary btn-sm" href="/cargas/historial">
+      <i class="bi bi-clock-history me-1"></i> Historial
+    </a>
+  </div>
+</div>
+
+<div class="otras-fuentes-form-shell">
+  <div class="h-panel">
+
+    {% if error %}
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+      <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+      <div>{{ error }}</div>
+    </div>
+    {% endif %}
+
+    <h3 style="font-size:1.1rem;font-weight:600;color:#06486f;margin-bottom:1.5rem;">Datos del proceso</h3>
+
+    <form action="/otras-fuentes" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm" novalidate>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">N° de proceso <span class="text-danger">*</span></label>
+        <input name="proceso_nro" id="proceso_nro" class="form-control"
+               placeholder="Ej. 45/356" required autocomplete="off"
+               value="{{ proceso_nro | default('') }}" />
+        <div class="campo-error" id="err-proceso">Ingresá el N° de proceso.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Fecha de apertura <span class="text-danger">*</span></label>
+        <input name="apertura_fecha" id="apertura_fecha" type="date" class="form-control"
+               required value="{{ apertura_fecha | default('') }}" />
+        <div class="campo-error" id="err-fecha">Ingresá la fecha de apertura.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">N° de cuenta <span class="text-danger">*</span></label>
+        <input name="cuenta_nro" id="n_cuenta" class="form-control"
+               placeholder="Ej. 10884" required autocomplete="off"
+               value="{{ cuenta_nro | default('') }}" />
+        <div class="campo-error" id="err-cuenta">Ingresá el N° de cuenta.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Plataforma <span class="text-danger">*</span></label>
+        <select name="plataforma" id="plataformaSel" class="form-select" required>
+          <option value="" disabled selected>— Seleccionar —</option>
+          <option value="BAC">BAC</option>
+          <option value="COMPRAR">COMPRAR</option>
+          <option value="PBAC">PBAC</option>
+          <option value="LA_PAMPA">LA PAMPA</option>
+          <option value="SIPROSA">SIPROSA</option>
+        </select>
+        <div class="campo-error" id="err-plataforma">Seleccioná la plataforma.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Comprador <span class="text-danger">*</span></label>
+        <input name="comprador" id="compradorInp" class="form-control is-readonly"
+               placeholder="Ingresá el N° de cuenta para autocompletar"
+               readonly aria-readonly="true" tabindex="-1"
+               value="{{ comprador | default('') }}" />
+        <div class="campo-error" id="err-comprador">El N° de cuenta no encontró un comprador. Verificá el número.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Provincia/Municipio <span class="text-danger">*</span></label>
+        <input name="provincia" id="provinciaInp" class="form-control is-readonly"
+               placeholder="Ingresá el N° de cuenta para autocompletar"
+               readonly aria-readonly="true" tabindex="-1"
+               value="{{ provincia | default('') }}" />
+        <div class="campo-error" id="err-provincia">El N° de cuenta no encontró la provincia. Verificá el número.</div>
+      </div>
+
+      <!-- Archivo genérico -->
+      <div class="col-12" id="genericFileSection">
+        <label class="form-label fw-semibold">Archivo <span class="text-danger">*</span></label>
+        <input type="file" name="file" id="fileInput" class="form-control"
+               accept=".pdf,.xls,.xlsx,.zip" />
+        <div class="form-text">Formatos admitidos: PDF, Excel o ZIP.</div>
+        <div class="campo-error" id="err-archivo">Seleccioná un archivo para subir.</div>
+      </div>
+
+      <!-- La Pampa (2 archivos) -->
+      <div class="col-12 d-none" id="laPampaFilesSection">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Archivo Comparativa (PDF) <span class="text-danger">*</span></label>
+            <input type="file" name="file_comparativa" id="fileInputComparativa"
+                   class="form-control" accept=".pdf" />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold">Archivo Pliego (PDF) <span class="text-danger">*</span></label>
+            <input type="file" name="file_pliego" id="fileInputPliego"
+                   class="form-control" accept=".pdf" />
+          </div>
+        </div>
+        <div class="form-text mt-2">Para La Pampa se requieren ambos PDFs por separado. El sistema los unirá internamente.</div>
+      </div>
+
+      <!-- Siprosa (3 archivos) -->
+      <div class="col-12 d-none" id="siprosaFilesSection">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Archivo 1 (Excel) <span class="text-danger">*</span></label>
+            <input type="file" name="file_siprosa_1" id="fileSiprosa1"
+                   class="form-control" accept=".xls,.xlsx,.xlsm" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Archivo 2 (Excel) <span class="text-danger">*</span></label>
+            <input type="file" name="file_siprosa_2" id="fileSiprosa2"
+                   class="form-control" accept=".xls,.xlsx,.xlsm" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Archivo 3 (Excel) <span class="text-danger">*</span></label>
+            <input type="file" name="file_siprosa_3" id="fileSiprosa3"
+                   class="form-control" accept=".xls,.xlsx,.xlsm" />
+          </div>
+        </div>
+        <div class="form-text mt-2">Para Siprosa se requieren 3 archivos Excel (Ranking). El sistema los procesará en conjunto.</div>
+      </div>
+
+      <input type="hidden" name="platform_hint" id="platform_hint" />
+      <input type="hidden" name="buyer_hint" id="buyer_hint" />
+      <input type="hidden" name="province_hint" id="province_hint" />
+
+      <div class="col-12 mt-4">
+        <button class="btn btn-primary d-inline-flex align-items-center gap-2" type="submit"
+                style="padding: 0.6rem 1.5rem; font-weight: 600;">
+          <i class="bi bi-upload"></i> Subir archivo
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+    var form        = document.getElementById('uploadForm');
+    var plataforma  = document.getElementById('plataformaSel');
+    var comprador   = document.getElementById('compradorInp');
+    var provincia   = document.getElementById('provinciaInp');
+    var cuenta      = document.getElementById('n_cuenta');
+    var fileInput   = document.getElementById('fileInput');
+
+    var genericSection  = document.getElementById('genericFileSection');
+    var pampaSection    = document.getElementById('laPampaFilesSection');
+    var inputComp       = document.getElementById('fileInputComparativa');
+    var inputPlie       = document.getElementById('fileInputPliego');
+    var siprosaSection  = document.getElementById('siprosaFilesSection');
+    var inputSip1       = document.getElementById('fileSiprosa1');
+    var inputSip2       = document.getElementById('fileSiprosa2');
+    var inputSip3       = document.getElementById('fileSiprosa3');
+
+    var hPlatform  = document.getElementById('platform_hint');
+    var hBuyer     = document.getElementById('buyer_hint');
+    var hProvince  = document.getElementById('province_hint');
+
+    var INVALIDOS = [
+        '', '—', '-', '--', 'null', 'none', 'undefined',
+        'seleccionar', '— seleccionar —', '-- seleccionar --',
+        'se completa automáticamente', 'se completa automaticamente',
+        'ingresá el n° de cuenta para autocompletar',
+        'ingresa el n° de cuenta para autocompletar',
+        'opcional',
+    ];
+
+    function blank(v) {
+        return INVALIDOS.indexOf((v || '').trim().toLowerCase()) !== -1;
+    }
+
+    function showErr(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.add('visible');
+    }
+    function hideErr(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.remove('visible');
+    }
+    function markInvalid(el) { if (el) el.classList.add('campo-invalido'); }
+    function markValid(el)   { if (el) el.classList.remove('campo-invalido'); }
+
+    function lockAutoFields() {
+        [comprador, provincia].forEach(function (el) {
+            if (!el) return;
+            el.readOnly = true;
+            el.setAttribute('readonly', 'readonly');
+            el.setAttribute('aria-readonly', 'true');
+            el.setAttribute('tabindex', '-1');
+            el.classList.add('is-readonly');
+        });
+    }
+
+    function preventManualEdit(ev) {
+        var el = ev.currentTarget;
+        if (!el || el.readOnly !== true) return;
+        if (ev.type === 'keydown') {
+            var allowed = ['Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape'];
+            if (allowed.indexOf(ev.key) !== -1 || ev.ctrlKey || ev.metaKey) return;
+        }
+        ev.preventDefault();
+    }
+
+    [comprador, provincia].forEach(function (el) {
+        if (!el) return;
+        ['beforeinput', 'paste', 'drop'].forEach(function (eventName) {
+            el.addEventListener(eventName, preventManualEdit);
+        });
+        el.addEventListener('keydown', preventManualEdit);
+    });
+    lockAutoFields();
+
+    function syncHints() {
+        if (hPlatform) hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
+        if (hBuyer)    hBuyer.value    = (comprador  && comprador.value  ? comprador.value  : '').trim();
+        if (hProvince) hProvince.value = (provincia  && provincia.value  ? provincia.value  : '').trim();
+        lockAutoFields();
+    }
+
+    function handlePlatformChange() {
+        var val = (plataforma && plataforma.value) ? plataforma.value : '';
+
+        if (genericSection) genericSection.classList.add('d-none');
+        if (pampaSection)   pampaSection.classList.add('d-none');
+        if (siprosaSection) siprosaSection.classList.add('d-none');
+
+        [fileInput, inputComp, inputPlie, inputSip1, inputSip2, inputSip3].forEach(function(el) {
+            if (el) el.removeAttribute('required');
+        });
+
+        if (val === 'LA_PAMPA') {
+            if (pampaSection) pampaSection.classList.remove('d-none');
+            if (inputComp) inputComp.setAttribute('required', 'required');
+            if (inputPlie) inputPlie.setAttribute('required', 'required');
+        } else if (val === 'SIPROSA') {
+            if (siprosaSection) siprosaSection.classList.remove('d-none');
+            if (inputSip1) inputSip1.setAttribute('required', 'required');
+            if (inputSip2) inputSip2.setAttribute('required', 'required');
+            if (inputSip3) inputSip3.setAttribute('required', 'required');
+        } else {
+            if (genericSection) genericSection.classList.remove('d-none');
+            if (fileInput) fileInput.setAttribute('required', 'required');
+        }
+
+        syncHints();
+    }
+
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            var ok = true;
+            var pVal = (plataforma && plataforma.value) ? plataforma.value : '';
+
+            // N° de proceso
+            var procesoEl = document.getElementById('proceso_nro');
+            if (blank(procesoEl && procesoEl.value)) {
+                markInvalid(procesoEl); showErr('err-proceso'); ok = false;
+            } else { markValid(procesoEl); hideErr('err-proceso'); }
+
+            // Fecha de apertura
+            var fechaEl = document.getElementById('apertura_fecha');
+            if (blank(fechaEl && fechaEl.value)) {
+                markInvalid(fechaEl); showErr('err-fecha'); ok = false;
+            } else { markValid(fechaEl); hideErr('err-fecha'); }
+
+            // N° de cuenta
+            if (blank(cuenta && cuenta.value)) {
+                markInvalid(cuenta); showErr('err-cuenta'); ok = false;
+            } else { markValid(cuenta); hideErr('err-cuenta'); }
+
+            // Plataforma
+            if (blank(pVal)) {
+                markInvalid(plataforma); showErr('err-plataforma'); ok = false;
+            } else { markValid(plataforma); hideErr('err-plataforma'); }
+
+            // Comprador (readonly, llenado por autocomplete)
+            if (blank(comprador && comprador.value)) {
+                markInvalid(comprador); showErr('err-comprador'); ok = false;
+            } else { markValid(comprador); hideErr('err-comprador'); }
+
+            // Provincia/Municipio (readonly, llenado por autocomplete)
+            if (blank(provincia && provincia.value)) {
+                markInvalid(provincia); showErr('err-provincia'); ok = false;
+            } else { markValid(provincia); hideErr('err-provincia'); }
+
+            // Archivo según plataforma
+            if (pVal === 'LA_PAMPA') {
+                if (!inputComp || !inputComp.files[0] || !inputPlie || !inputPlie.files[0]) {
+                    showErr('err-archivo'); ok = false;
+                } else {
+                    var f1 = inputComp.files[0].name.toLowerCase();
+                    var f2 = inputPlie.files[0].name.toLowerCase();
+                    if (!f1.endsWith('.pdf') || !f2.endsWith('.pdf')) {
+                        alert('Para La Pampa ambos archivos deben ser PDF.');
+                        ok = false;
+                    } else { hideErr('err-archivo'); }
+                }
+            } else if (pVal === 'SIPROSA') {
+                if (!inputSip1 || !inputSip1.files[0] || !inputSip2 || !inputSip2.files[0] || !inputSip3 || !inputSip3.files[0]) {
+                    showErr('err-archivo'); ok = false;
+                } else {
+                    var validExcel = ['.xls', '.xlsx', '.xlsm'];
+                    var isExcel = function(n) { return validExcel.some(function(ext) { return n.toLowerCase().endsWith(ext); }); };
+                    if (!isExcel(inputSip1.files[0].name) || !isExcel(inputSip2.files[0].name) || !isExcel(inputSip3.files[0].name)) {
+                        alert('Para Siprosa todos los archivos deben ser Excel (.xls, .xlsx, .xlsm).');
+                        ok = false;
+                    } else { hideErr('err-archivo'); }
+                }
+            } else {
+                var file = fileInput && fileInput.files[0];
+                if (!file) {
+                    markInvalid(fileInput); showErr('err-archivo'); ok = false;
+                } else {
+                    markValid(fileInput); hideErr('err-archivo');
+                    var validExt = ['pdf', 'xls', 'xlsx', 'zip'];
+                    var ext = file.name.split('.').pop().toLowerCase();
+                    if (validExt.indexOf(ext) === -1) {
+                        alert('⚠️ Archivo no permitido: "' + file.name + '".\n\nSolo se admiten PDF, Excel (.xls/.xlsx) o ZIP.');
+                        if (fileInput) fileInput.value = '';
+                        ok = false;
+                    }
+                    if (ok && file.size > 25 * 1024 * 1024) {
+                        alert('⚠️ El archivo supera el tamaño máximo permitido (25 MB).');
+                        if (fileInput) fileInput.value = '';
+                        ok = false;
+                    }
+                }
+            }
+
+            if (!ok) {
+                e.preventDefault();
+                var firstErr = form.querySelector('.campo-error.visible');
+                if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return false;
+            }
+
+            syncHints();
+        });
+    }
+
+    if (plataforma) plataforma.addEventListener('change', handlePlatformChange);
+    if (comprador) comprador.addEventListener('input', syncHints);
+    if (provincia) provincia.addEventListener('input', syncHints);
+
+    window.addEventListener('DOMContentLoaded', function () {
+        syncHints();
+        handlePlatformChange();
+    });
+
+    // --- Autocompletar por N° de cuenta ---
+    if (cuenta) {
+        var ultimoBuscado = '';
+
+        function buscarCliente(nro) {
+            return fetch('/api/clientes/' + encodeURIComponent(nro))
+                .then(function(resp) { return resp.ok ? resp.json() : { ok: false }; })
+                .catch(function() { return { ok: false }; });
+        }
+
+        function rellenarCampos(data) {
+            if (!data) return;
+            if (comprador && data.comprador) comprador.value = data.comprador;
+            if (provincia && data.provincia) provincia.value = data.provincia;
+            lockAutoFields();
+            syncHints();
+        }
+
+        function limpiarCamposAutocompletados() {
+            if (comprador) comprador.value = '';
+            if (provincia) provincia.value = '';
+            lockAutoFields();
+            syncHints();
+        }
+
+        function manejarCuenta() {
+            var valor = (cuenta.value || '').trim();
+            if (!valor) { limpiarCamposAutocompletados(); ultimoBuscado = ''; return; }
+            if (valor === ultimoBuscado) return;
+            ultimoBuscado = valor;
+            buscarCliente(valor).then(function(res) {
+                if (res && res.ok && res.data) {
+                    rellenarCampos(res.data);
+                } else {
+                    limpiarCamposAutocompletados();
+                }
+            });
+        }
+
+        cuenta.addEventListener('blur', manejarCuenta);
+        cuenta.addEventListener('change', manejarCuenta);
+        cuenta.addEventListener('keyup', function (ev) {
+            var valor = (cuenta.value || '').trim();
+            if (ev.key === 'Enter') manejarCuenta();
+            else if (valor.length >= 4) manejarCuenta();
+        });
+    }
+
+})();
+</script>
+{% endblock %}
