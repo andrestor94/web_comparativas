@@ -124,6 +124,7 @@ def api_chart_data(
             products=products,
             view_money=view_money,
             growth_pct=growth_pct,
+            is_admin=_user.is_admin(),
         )
         print(
             f"[FORECAST ROUTER] chart-data GOT RESULT — "
@@ -209,6 +210,7 @@ def api_client_table(
             view_money=view_money,
             growth_pct=growth_pct,
             lab_products=lab_products,
+            is_admin=_user.is_admin(),
         )
         print(f"[FORECAST ROUTER] client-table OK rows={len(result.get('rows', [])) if isinstance(result, dict) else '?'}", flush=True)
         return result
@@ -250,6 +252,7 @@ def api_treemap_data(
             products=products,
             view_money=view_money,
             period_date=period_date,
+            is_admin=_user.is_admin(),
         )
         print(f"[FORECAST ROUTER] treemap-data OK ids={len(result.get('ids', [])) if isinstance(result, dict) else '?'}", flush=True)
         return result
@@ -284,6 +287,7 @@ def api_client_detail(
             subneg=subneg,
             products=products,
             growth_pct=growth_pct,
+            is_admin=_user.is_admin(),
         )
     except Exception as exc:
         import traceback as _tb
@@ -314,14 +318,14 @@ def api_debug_overrides(request: Request, _user: User = Depends(_require_user)):
         return {"error": "ORM not available", "records": []}
     try:
         with SessionLocal() as session:
-            rows = (
+            q = (
                 session.query(ForecastUserOverride)
-                .filter(ForecastUserOverride.user_id == int(_user.id))
                 .filter(ForecastUserOverride.source_module == _svc.FORECAST_OVERRIDE_SOURCE)
-                .order_by(ForecastUserOverride.updated_at.desc())
-                .limit(50)
-                .all()
             )
+            if not _user.is_admin():
+                q = q.filter(ForecastUserOverride.user_id == int(_user.id))
+            
+            rows = q.order_by(ForecastUserOverride.updated_at.desc()).limit(50).all()
             records = []
             for r in rows:
                 records.append({
