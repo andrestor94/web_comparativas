@@ -289,6 +289,15 @@ def _clean_override_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def clean_group_key(value: Any) -> str:
+    import re
+
+    text = _clean_override_text(value)
+    text = re.sub(r"\(\s*\d+\s*c?\s*\)$", "", text, flags=re.I).strip()
+    text = re.sub(r"\s+\d+\s*cuentas?$", "", text, flags=re.I).strip()
+    return text
+
+
 def _normalize_scope(scope: str | None) -> str:
     raw = _clean_override_text(scope).lower()
     aliases = {
@@ -461,6 +470,14 @@ def _resolve_override_for_row(
             efm = payload.get("effective_from_month")
             if efm is None or month_key >= efm:
                 return {"scope": FORECAST_SCOPE_SUBNEG, **payload}
+    # Wildcard subneg (subneg=""): group-level override that applies to all subnegs of a client
+    if subneg_key:
+        for selector in selector_candidates:
+            payload = maps["subneg"].get((selector, ""))
+            if payload is not None:
+                efm = payload.get("effective_from_month")
+                if efm is None or month_key >= efm:
+                    return {"scope": FORECAST_SCOPE_SUBNEG, **payload}
     return {
         "scope": "base",
         "monthly_pct": _monthly_pct_from_annual_growth(base_growth_pct),
@@ -812,6 +829,224 @@ def save_client_overrides(
     clear_response_cache()
 
 
+def save_group_expectations(
+    *,
+    user_id: int,
+    group_name: str,
+    client_ids: list[str],
+    growth_pct: float,
+    base_growth_pct: float = 0.0,
+    user_email: str | None = None,
+) -> dict:
+    """Save a uniform growth expectation override for all clients in a group.
+
+    growth_pct      — the NEW target rate to save for every subneg of every client.
+    base_growth_pct — the current GLOBAL dashboard growth rate (STATE.growthPct).
+                      Used as the "baseline" for the effectiveness check so that
+                      _is_effective_override_pct(monthly(growth_pct), base_growth_pct)
+                      is True whenever growth_pct != base_growth_pct.
+    Returns {"saved_clients": N, "skipped_clients": [...]}.
+    """
+    print(f"[SAVE_GROUP SERVICE] start — group={group_name!r} clients={len(client_ids)} "
+          f"target={growth_pct}% base={base_growth_pct}% user={user_id}", flush=True)
+    group_name = clean_group_key(group_name)
+    client_ids = [_clean_override_text(c) for c in (client_ids or []) if _clean_override_text(c)]
+    effective_from_month = get_forecast_effective_month()
+    storage = "postgresql" if (engine is not None and "postgresql" in str(engine.url)) else "sqlite"
+    print(f"[SAVE_GROUP] group={group_name}", flush=True)
+    print(f"[SAVE_GROUP SERVICE] client_ids received: {client_ids}", flush=True)
+
+    if not client_ids:
+        # Frontend sent empty client_ids — try to resolve from group_name in DB
+        clean_group = clean_group_key(group_name).replace("'", "''")
+        print(f"[SAVE_GROUP SERVICE] client_ids EMPTY — resolving from DB for group={clean_group!r}", flush=True)
+        if clean_group:
+            if storage == "sqlite":
+                _df_val = get_data().get("df_valorizado", pd.DataFrame())
+                if _df_val is not None and not _df_val.empty and {"fantasia", "nombre_grupo"}.issubset(_df_val.columns):
+                    _mask_group = _df_val["nombre_grupo"].astype(str).map(clean_group_key) == group_name
+                    df_group = pd.DataFrame({"fantasia": sorted(_df_val.loc[_mask_group, "fantasia"].dropna().astype(str).str.strip().unique())})
+                else:
+                    df_group = pd.DataFrame(columns=["fantasia"])
+            else:
+                df_group = _query_agg(
+                    f"SELECT DISTINCT TRIM(fantasia) AS fantasia FROM forecast_valorizado "
+                    f"WHERE TRIM(nombre_grupo) = '{clean_group}'"
+                )
+            if not df_group.empty:
+                client_ids = df_group["fantasia"].dropna().tolist()
+                print(f"[SAVE_GROUP SERVICE] resolved {len(client_ids)} clients from DB: {client_ids}", flush=True)
+        if not client_ids:
+            print("[SAVE_GROUP SERVICE] could not resolve clients — returning early", flush=True)
+            return {
+                "saved_clients": 0,
+                "saved_overrides": 0,
+                "skipped_clients": [],
+                "storage": storage,
+                "effective_from_month": effective_from_month,
+                "sample": [],
+                "error": f"No se encontraron cuentas hijas para el grupo {group_name}",
+            }
+
+    clean_ids = [_clean_override_text(c) for c in client_ids if c]
+    if not clean_ids:
+        print("[SAVE_GROUP SERVICE] clean_ids is EMPTY after cleaning — returning early", flush=True)
+        return {"saved_clients": 0, "saved_overrides": 0, "skipped_clients": [],
+                "storage": storage, "effective_from_month": effective_from_month, "sample": [],
+                "error": "Lista de cuentas inválida tras normalización"}
+
+    print(f"[SAVE_GROUP SERVICE] clean_ids: {clean_ids}", flush=True)
+
+    # Query distinct (fantasia, subneg) pairs — use TRIM() for reliable matching
+    if storage == "sqlite":
+        _df_val = get_data().get("df_valorizado", pd.DataFrame())
+        if _df_val is not None and not _df_val.empty and {"fantasia", "subneg"}.issubset(_df_val.columns):
+            _df_sub_src = _df_val[
+                _df_val["fantasia"].astype(str).str.strip().isin(set(clean_ids))
+                & _df_val["subneg"].notna()
+                & (_df_val["subneg"].astype(str).str.strip() != "")
+            ].copy()
+            df_sub = (
+                _df_sub_src.assign(
+                    fantasia=_df_sub_src["fantasia"].astype(str).str.strip(),
+                    subneg=_df_sub_src["subneg"].astype(str).str.strip(),
+                )[["fantasia", "subneg"]]
+                .drop_duplicates()
+            )
+        else:
+            df_sub = pd.DataFrame(columns=["fantasia", "subneg"])
+    else:
+        where_clause = _safe_in("TRIM(fantasia)", clean_ids)
+        df_sub = _query_agg(
+            f"SELECT DISTINCT TRIM(fantasia) AS fantasia, TRIM(subneg) AS subneg "
+            f"FROM forecast_valorizado "
+            f"WHERE {where_clause} AND subneg IS NOT NULL AND TRIM(subneg) <> ''"
+        )
+    print(f"[SAVE_GROUP SERVICE] _query_agg returned {len(df_sub)} rows "
+          f"(empty means SQLite or DB error)", flush=True)
+    logger.info(
+        "[SAVE_GROUP] group=%r clients=%d df_sub rows=%d",
+        group_name, len(clean_ids), len(df_sub),
+    )
+
+    client_subnegs: dict[str, list[str]] = {}
+    if not df_sub.empty:
+        for _, row in df_sub.iterrows():
+            client = str(row.get("fantasia", "")).strip()
+            sub = str(row.get("subneg", "")).strip()
+            if client and sub:
+                client_subnegs.setdefault(client, [])
+                if sub not in client_subnegs[client]:
+                    client_subnegs[client].append(sub)
+        print(f"[SAVE_GROUP SERVICE] client_subnegs built: {dict((k, len(v)) for k, v in client_subnegs.items())}", flush=True)
+    else:
+        print("[SAVE_GROUP SERVICE] df_sub empty — all clients will use wildcard subneg='' path", flush=True)
+
+    effective_from_month = get_forecast_effective_month()
+    print(f"[SAVE_GROUP SERVICE] effective_from_month={effective_from_month!r}", flush=True)
+    saved = 0
+    saved_overrides = 0
+    sample: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for client_id in client_ids:
+        clean_id = _clean_override_text(client_id)
+        subnegs = client_subnegs.get(client_id) or client_subnegs.get(clean_id) or []
+        print(f"[SAVE_GROUP SERVICE] processing client={clean_id!r} subnegs={subnegs}", flush=True)
+
+        # Always clear existing overrides so group save fully replaces individual ones
+        clear_client_overrides(user_id=user_id, client_id=client_id, user_email=user_email)
+        print(f"[SAVE_GROUP SERVICE] cleared overrides for {clean_id!r}", flush=True)
+
+        if subnegs:
+            # Same mechanism as individual modal save:
+            # growth_pct = base/global rate (for effectiveness check)
+            # subneg_overrides[i].growth_pct = target rate per subneg
+            subneg_overrides = [{"subneg": s, "growth_pct": growth_pct} for s in subnegs]
+            save_client_overrides(
+                user_id=user_id,
+                client_id=client_id,
+                growth_pct=base_growth_pct,   # ← base/global rate, NOT the target
+                user_email=user_email,
+                subneg_overrides=subneg_overrides,
+            )
+            print(f"[SAVE_GROUP SERVICE] SAVED {len(subnegs)} subneg overrides for {clean_id!r} "
+                  f"base={base_growth_pct}% target={growth_pct}%", flush=True)
+            saved_overrides += len(subnegs)
+            if len(sample) < 5:
+                for sub in subnegs[: 5 - len(sample)]:
+                    sample.append({
+                        "client": clean_id,
+                        "subneg": sub,
+                        "growth_pct": float(growth_pct),
+                        "base_growth_pct": float(base_growth_pct or 0.0),
+                    })
+            logger.info("[SAVE_GROUP] client=%r subnegs=%d saved with base=%.1f%% target=%.1f%%",
+                        clean_id, len(subnegs), base_growth_pct, growth_pct)
+        else:
+            # Fallback: no subnegs in DB — save wildcard override (subneg="")
+            monthly_pct = _monthly_pct_from_annual_growth(growth_pct)
+            if SessionLocal is not None and ForecastUserOverride is not None:
+                with SessionLocal() as session:
+                    existing = (
+                        session.query(ForecastUserOverride)
+                        .filter(ForecastUserOverride.user_id == int(user_id))
+                        .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
+                        .filter(ForecastUserOverride.client_selector == clean_id)
+                        .all()
+                    )
+                    existing_map = {
+                        _override_identity(
+                            getattr(r, "override_scope", None),
+                            subneg=getattr(r, "subneg", ""),
+                            codigo_serie=getattr(r, "codigo_serie", ""),
+                            forecast_month=getattr(r, "forecast_month", ""),
+                        ): r
+                        for r in existing
+                    }
+                    _upsert_override_record(
+                        session, existing_map,
+                        user_id=user_id, client_id=clean_id,
+                        scope=FORECAST_SCOPE_SUBNEG, subneg="",
+                        base_growth_pct=float(base_growth_pct),
+                        override_growth_pct=float(growth_pct),
+                        effective_monthly_pct=float(monthly_pct),
+                        user_email=user_email,
+                        effective_from_month=effective_from_month,
+                    )
+                    session.commit()
+                clear_response_cache()
+            print(f"[SAVE_GROUP SERVICE] SAVED wildcard override for {clean_id!r} "
+                  f"base={base_growth_pct}% target={growth_pct}% efm={effective_from_month!r}", flush=True)
+            logger.info("[SAVE_GROUP] client=%r no subnegs — wildcard override saved base=%.1f%% target=%.1f%%",
+                        clean_id, base_growth_pct, growth_pct)
+
+        if not subnegs:
+            saved_overrides += 1
+            if len(sample) < 5:
+                sample.append({
+                    "client": clean_id,
+                    "subneg": "",
+                    "growth_pct": float(growth_pct),
+                    "base_growth_pct": float(base_growth_pct or 0.0),
+                })
+
+        saved += 1
+
+    print(f"[SAVE_GROUP SERVICE] complete — saved_clients={saved} skipped={len(skipped)}", flush=True)
+    logger.info("[SAVE_GROUP] done — saved=%d skipped=%d", saved, len(skipped))
+    print(f"[SAVE_GROUP] clients={saved}", flush=True)
+    print(f"[SAVE_GROUP] saved_overrides={saved_overrides}", flush=True)
+    print(f"[SAVE_GROUP] effective_from_month={effective_from_month}", flush=True)
+    return {
+        "saved_clients": saved,
+        "saved_overrides": saved_overrides,
+        "skipped_clients": skipped,
+        "storage": storage,
+        "effective_from_month": effective_from_month,
+        "sample": sample,
+    }
+
+
 def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | None = None) -> None:
     if SessionLocal is None or ForecastUserOverride is None:
         return
@@ -960,7 +1195,11 @@ def _get_patched_df_val(user_id: int | None = None, df_source=None, *, is_admin:
         future_mask = patched["_has_override"]
         for col in ("yhat_cliente", "monto_yhat", "li_cliente", "ls_cliente", "monto_li", "monto_ls"):
             if col in patched.columns:
-                patched.loc[future_mask, col] = patched.loc[future_mask, col] * patched.loc[future_mask, "_annual_eff"]
+                patched[col] = pd.to_numeric(patched[col], errors="coerce").fillna(0).astype(float)
+                patched.loc[future_mask, col] = (
+                    patched.loc[future_mask, col].astype(float)
+                    * patched.loc[future_mask, "_annual_eff"].astype(float)
+                )
     patched.drop(columns=["_month_key"], inplace=True, errors="ignore")
     return patched
 
@@ -2155,6 +2394,8 @@ def _pg_get_client_table_inner(
 
     _ovr_records_ct = _fetch_override_records(user_id, all_users=is_admin)
     overrides_active = bool(_ovr_records_ct)
+    print(f"[CLIENT_TABLE] user={user_id} overrides_active={overrides_active} "
+          f"override_count={len(_ovr_records_ct)} is_admin={is_admin}", flush=True)
     if overrides_active:
         if view_money:
             df_rows = _query_agg(
@@ -3285,6 +3526,8 @@ def get_client_table(
     is_admin: bool = False,
 ) -> dict:
     import pandas as pd
+    _db_path = "postgresql" if (engine is not None and "postgresql" in str(engine.url)) else "sqlite"
+    print(f"[CLIENT_TABLE] get_client_table called — db={_db_path} user={user_id} growth_pct={growth_pct}", flush=True)
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_client_table(
             user_id=user_id,
@@ -3297,6 +3540,9 @@ def get_client_table(
 
     data = get_data()
     df_val = _get_patched_df_val(user_id=user_id, is_admin=is_admin)
+    print(f"[CLIENT_TABLE] sqlite path — df_val rows={len(df_val)} "
+          f"has_override_rows={int(df_val['_has_override'].sum()) if not df_val.empty and '_has_override' in df_val.columns else 'N/A'}",
+          flush=True)
     df_main = data.get("df_main", pd.DataFrame())
 
     if df_val.empty:
@@ -3321,6 +3567,39 @@ def get_client_table(
     if df_c.empty:
         return {"months": [], "rows": [], "totals": [], "min_val": 0, "max_val": 0, "total_projected": 0}
 
+    if "fantasia" in df_c.columns:
+        _match_test = df_c[df_c["fantasia"].astype(str).str.contains("MINISTERIO DE SALUD PCIA DE BS AS", case=False, na=False)].copy()
+        if not _match_test.empty:
+            if "_has_override" in _match_test.columns and _match_test["_has_override"].fillna(False).any():
+                _row = _match_test[_match_test["_has_override"].fillna(False)].sort_values("fecha").iloc[0]
+            else:
+                _row = _match_test.sort_values("fecha").iloc[0]
+            _has_override = bool(_row.get("_has_override", False))
+            _annual_eff = float(_row.get("_annual_eff", 1.0) or 1.0)
+            _applied_growth_pct = round((_annual_eff - 1.0) * 100.0, 4) if _has_override else float(growth_pct or 0.0)
+            _scope = str(_row.get("_override_scope", "base"))
+            _efm = ""
+            try:
+                _records = _fetch_override_records(user_id, client_selector=str(_row.get("fantasia", "")), all_users=is_admin)
+                _maps = _build_override_maps(_records)
+                _client_key = _clean_override_text(_row.get("fantasia", ""))
+                _subneg_key = _clean_override_text(_row.get("subneg", ""))
+                _efm = (
+                    _maps.get("subneg_effective_months", {})
+                    .get(_client_key, {})
+                    .get(_subneg_key, "")
+                )
+            except Exception:
+                _efm = ""
+            print("[CLIENT_TABLE MATCH TEST] fantasia=", _row.get("fantasia", ""), flush=True)
+            print("[CLIENT_TABLE MATCH TEST] grupo=", _row.get("nombre_grupo", ""), flush=True)
+            print("[CLIENT_TABLE MATCH TEST] negocio=", _row.get("neg", ""), flush=True)
+            print("[CLIENT_TABLE MATCH TEST] subneg=", _row.get("subneg", ""), flush=True)
+            print("[CLIENT_TABLE MATCH TEST] has_override=", _has_override, flush=True)
+            print("[CLIENT_TABLE MATCH TEST] applied_growth_pct=", _applied_growth_pct, flush=True)
+            print("[CLIENT_TABLE MATCH TEST] effective_from_month=", _efm, flush=True)
+            print("[CLIENT_TABLE MATCH TEST] scope=", _scope, flush=True)
+
     # Value column
     val_col = "monto_yhat" if (view_money and "monto_yhat" in df_c.columns) else "yhat_cliente"
     if val_col not in df_c.columns:
@@ -3342,22 +3621,29 @@ def get_client_table(
         df_c["_cliente"] = df_c.get("cliente_id", "")
         df_c["_grupo"] = ""
 
+    # Apply growth only to non-overridden future rows BEFORE pivoting.
+    # _get_patched_df_val already multiplied overridden rows by their override factor,
+    # so applying global growth again to those rows would double-count.
+    if growth_pct != 0 and not df_main.empty and "tipo" in df_main.columns and "fecha" in df_main.columns:
+        _max_hist = df_main[df_main["tipo"] == "hist"]["fecha"].max()
+        if pd.notna(_max_hist):
+            _future_dates_pre = sorted(df_c.loc[df_c["fecha"] > _max_hist, "fecha"].unique())
+            if _future_dates_pre:
+                _start_proj = _future_dates_pre[0]
+                _has_ov_col = "_has_override" in df_c.columns
+                for _fd in _future_dates_pre:
+                    _months_diff = (_fd.year - _start_proj.year) * 12 + (_fd.month - _start_proj.month)
+                    _quarters = (_months_diff // 3) + 1
+                    _factor = 1.0 + (growth_pct * _quarters / 100.0)
+                    _dm = df_c["fecha"] == _fd
+                    if _has_ov_col:
+                        _dm = _dm & (~df_c["_has_override"].fillna(False))
+                    df_c.loc[_dm, val_col] = df_c.loc[_dm, val_col].astype(float) * _factor
+
     # Pivot
     grp = df_c.groupby(["_cliente", "_grupo", "fecha"])[val_col].sum().reset_index()
     pivot = grp.set_index(["_cliente", "_grupo", "fecha"])[val_col].unstack("fecha").fillna(0)
     pivot = pivot.sort_index(axis=1)
-
-    # Growth adjustment on future columns
-    if growth_pct != 0 and not df_main.empty and "tipo" in df_main.columns:
-        max_hist_date = df_main[df_main["tipo"] == "hist"]["fecha"].max()
-        future_cols = sorted([c for c in pivot.columns if c > max_hist_date])
-        if future_cols:
-            start_proj = future_cols[0]
-            for col_date in future_cols:
-                months_diff = (col_date.year - start_proj.year) * 12 + (col_date.month - start_proj.month)
-                quarters = (months_diff // 3) + 1
-                factor = 1.0 + (growth_pct * quarters / 100.0)
-                pivot[col_date] = pivot[col_date] * factor
 
     # Sort by total desc
     pivot["_total"] = pivot.sum(axis=1)

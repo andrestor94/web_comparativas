@@ -1340,6 +1340,127 @@
   }
   @keyframes fc-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
+  /* == Group selection bar (compact) == */
+  .fc-group-sel-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #f0f4ff;
+    border: 1px solid #c5d5f5;
+    border-radius: 8px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    animation: fc-sel-bar-in 0.18s ease;
+  }
+  @keyframes fc-sel-bar-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .fc-group-sel-count {
+    font-weight: 500;
+    color: var(--g-blue-dark);
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .fc-group-sel-actions { display: flex; gap: 6px; align-items: center; }
+  .fc-group-sel-apply { font-size: 0.78rem; padding: 2px 10px; }
+
+  /* == Group adj icon (inside Cliente cell — subtle, no pill) == */
+  .fc-group-adj-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    font-size: 0.7rem;
+    color: #94A3B8;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.12s, background 0.12s;
+    flex-shrink: 0;
+    pointer-events: all;
+    padding: 0;
+    line-height: 1;
+  }
+  .fc-group-adj-ico:hover {
+    color: var(--g-blue);
+    background: #e8f0fe;
+  }
+
+  /* == Group checkbox (inside _edit cell) — subtle == */
+  .fc-group-check {
+    width: 13px;
+    height: 13px;
+    cursor: pointer;
+    accent-color: var(--g-blue);
+    flex-shrink: 0;
+    pointer-events: all;
+    opacity: 0.55;
+  }
+  .fc-group-check:hover, .fc-group-check:checked { opacity: 1; }
+
+  /* == Group modal (narrower than full client modal) == */
+  .fc-group-modal { max-width: 520px !important; }
+  .fc-group-modal-info {
+    background: #e8f0fe;
+    border: 1px solid #a8c7fa;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    font-size: 0.85rem;
+    color: #1a3a6e;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .fc-group-modal-info i { color: var(--g-blue); font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+  .fc-group-modal-warn {
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 0.82rem;
+    color: #5d4037;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .fc-group-modal-warn i { color: #f9a825; font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .fc-group-modal-growth {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 8px;
+  }
+  .fc-group-modal-growth label {
+    font-weight: 600;
+    color: var(--g-blue-dark);
+    margin: 0;
+    white-space: nowrap;
+  }
+  .fc-group-modal-growth input[type=number] {
+    width: 90px;
+    text-align: right;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--g-blue-dark);
+    border: 2px solid #a8c7fa;
+    border-radius: 8px;
+    padding: 6px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+    background: #fff;
+  }
+  .fc-group-modal-growth input[type=number]:focus { border-color: var(--g-blue); box-shadow: 0 0 0 3px rgba(26,115,232,0.15); }
+  .fc-group-modal-growth .fc-unit { color: #5b74b8; font-weight: 600; font-size: 0.9rem; }
+
   /* == Modal Overlay & Modern Container == */
   .fc-modal-overlay {
     display: none; 
@@ -1993,6 +2114,18 @@
           </div>
         </div>
       </div>
+      <!-- ── Group selection action bar (compact) ────────────────────────── -->
+      <div id="fcGroupSelBar" class="fc-group-sel-bar" style="display:none;">
+        <span class="fc-group-sel-count">
+          <i class="bi bi-check2-square"></i>&nbsp;<span id="fcGroupSelCount">0</span> grupo(s) seleccionado(s)
+        </span>
+        <div class="fc-group-sel-actions">
+          <button class="btn btn-sm btn-primary fc-group-sel-apply" onclick="openGroupBatchModal()">
+            <i class="bi bi-percent"></i> Aplicar %
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" style="font-size:0.75rem;padding:2px 8px;" onclick="clearGroupSelection()">Limpiar</button>
+        </div>
+      </div>
       <div style="position:relative;">
         <div id="clientGrid" class="ag-theme-alpine" style="height:680px;"></div>
         <div class="fc-loading" id="tableLoader" style="display:none;"><div class="fc-spinner"></div></div>
@@ -2038,9 +2171,38 @@
 </div>
 
 <!-- ================================================================= -->
+<!-- GROUP EXPECTATION MODAL                                            -->
+<!-- ================================================================= -->
+<div class="fc-modal-overlay" id="fcGroupEditOverlay">
+  <div class="fc-modal fc-group-modal">
+    <div class="fc-modal__header">
+      <h5 class="fc-modal__title" id="fcGroupModalTitle">
+        <i class="bi bi-graph-up-arrow me-2" style="color:var(--g-blue);"></i>
+        Expectativa de crecimiento del grupo
+      </h5>
+      <button class="fc-modal__close" onclick="closeGroupModal()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="fc-modal__body" id="fcGroupModalBody">
+      <!-- filled by openGroupEditModal / openGroupBatchModal -->
+    </div>
+    <div class="fc-modal__footer">
+      <div class="fc-modal__footer-actions">
+        <button type="button" id="fcGroupBtnSave" class="btn btn-sm btn-primary" onclick="saveGroupExpectation()">
+          <i class="bi bi-check-lg me-1"></i> Guardar
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeGroupModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================= -->
 <!-- JAVASCRIPT                                                          -->
 <!-- ================================================================= -->
 <script>
+/* version: forecast-group-expectations-v1 */
+console.log('[FORECAST] group-expectations UI v1 loaded — checkbox + pill button activos');
+
 /* ===================================================================
    VIEW TABS — switch between Análisis General and Detalle Operativo
    =================================================================== */
@@ -3223,6 +3385,26 @@ let _clientRawRows    = [];   // flat rows from API (with Grupo field)
 let _clientMonths     = [];   // current month column names
 const _groupExpanded  = {};   // groupName → boolean (undefined = collapsed by default)
 let _clientSearchTerm = '';   // current search filter (lowercase)
+const _selectedGroups = new Map(); // clean groupKey -> { groupName, clientIds }
+
+function cleanGroupKey(value) {
+  return String(value || '')
+    .replace(/\(\s*\d+\s*c?\s*\)$/i, '')
+    .replace(/\s+\d+\s*cuentas?$/i, '')
+    .trim();
+}
+
+function _escapeJsSingle(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function getChildClientIdsForGroup(groupName) {
+  const cleanGroupName = cleanGroupKey(groupName);
+  return (_clientRawRows || [])
+    .filter(r => cleanGroupKey(r.Grupo || r.grupo || r.nombre_grupo || '') === cleanGroupName)
+    .map(r => String(r.Cliente || r.cliente || r.fantasia || '').trim())
+    .filter(Boolean);
+}
 
 /** Build interleaved rows: group-header rows + client rows (respects _groupExpanded + _clientSearchTerm). */
 function _buildGroupedRows(rawRows, months) {
@@ -3231,7 +3413,7 @@ function _buildGroupedRows(rawRows, months) {
   const term      = _clientSearchTerm.trim().toLowerCase();
 
   rawRows.forEach(r => {
-    const g = (r.Grupo || '').trim();
+    const g = cleanGroupKey(r.Grupo || '');
     if (g) {
       if (!grouped.has(g)) grouped.set(g, []);
       grouped.get(g).push(r);
@@ -3281,7 +3463,8 @@ function _buildGroupedRows(rawRows, months) {
 
 /** Toggle expand/collapse of a group and redraw. */
 function _toggleClientGroup(groupKey) {
-  _groupExpanded[groupKey] = (_groupExpanded[groupKey] === true) ? false : true;
+  const cleanKey = cleanGroupKey(groupKey);
+  _groupExpanded[cleanKey] = (_groupExpanded[cleanKey] === true) ? false : true;
   if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
   _persistForecastView();
 }
@@ -3295,6 +3478,268 @@ function _applyClientSearch(term) {
   _persistForecastView();
 }
 
+/* ===================================================================
+   GROUP EXPECTATION — selection helpers
+   =================================================================== */
+
+/** Toggle selection of a group and update the action bar. */
+function _toggleGroupSelection(groupKey) {
+  const cleanKey = cleanGroupKey(groupKey);
+  if (_selectedGroups.has(cleanKey)) {
+    _selectedGroups.delete(cleanKey);
+  } else {
+    _selectedGroups.set(cleanKey, {
+      groupName: cleanKey,
+      clientIds: getChildClientIdsForGroup(cleanKey),
+    });
+  }
+  _updateGroupSelBar();
+  // Redraw only the _edit column so checkboxes reflect state
+  if (clientGridApi) clientGridApi.refreshCells({ columns: ['_edit'], force: true });
+}
+
+/** Update the floating group selection action bar. */
+function _updateGroupSelBar() {
+  const bar   = document.getElementById('fcGroupSelBar');
+  const count = document.getElementById('fcGroupSelCount');
+  if (!bar) return;
+  const n = _selectedGroups.size;
+  if (n === 0) {
+    bar.style.display = 'none';
+  } else {
+    bar.style.display = 'flex';
+    if (count) count.textContent = n;
+  }
+}
+
+/** Clear all group selections and hide bar. */
+function clearGroupSelection() {
+  _selectedGroups.clear();
+  _updateGroupSelBar();
+  if (clientGridApi) clientGridApi.refreshCells({ columns: ['_edit'], force: true });
+}
+
+/* ===================================================================
+   GROUP EXPECTATION — single group modal
+   =================================================================== */
+
+/** State for the group edit modal. */
+const _groupModalState = { groupName: null, clientIds: [], isBatch: false, batchGroups: [] };
+
+/** Open the group edit modal for a single group. */
+function openGroupEditModal(groupName) {
+  // Collect all client_ids that belong to this group from the current raw rows.
+  // Try multiple field names for robustness across API versions.
+  const cleanGroupName = cleanGroupKey(groupName);
+  const clientIds = getChildClientIdsForGroup(cleanGroupName);
+  groupName = cleanGroupName;
+
+  console.log('[GROUP MODAL] opening single —', groupName,
+    '| clientIds:', clientIds.length, clientIds.slice(0, 5));
+
+  // Reset ALL state — never inherit isBatch from a previous batch open
+  _groupModalState.groupName   = cleanGroupName;
+  _groupModalState.clientIds   = clientIds;
+  _groupModalState.isBatch     = false;
+  _groupModalState.batchGroups = [];
+
+  document.getElementById('fcGroupModalTitle').innerHTML =
+    '<i class="bi bi-graph-up-arrow me-2" style="color:var(--g-blue);"></i>' +
+    'Expectativa de crecimiento — ' +
+    `<span style="font-weight:800;color:var(--g-blue-dark);">${cleanGroupName}</span>`;
+
+  _renderGroupModalBody(cleanGroupName, clientIds.length, false);
+  document.getElementById('fcGroupEditOverlay').classList.add('open');
+}
+
+/** Open the group edit modal for multiple selected groups. */
+function openGroupBatchModal() {
+  if (_selectedGroups.size === 0) return;
+
+  const batchGroups = [];
+  _selectedGroups.forEach((selected, gk) => {
+    const cleanKey = cleanGroupKey(selected.groupName || gk);
+    const clientIds = (selected.clientIds && selected.clientIds.length)
+      ? selected.clientIds
+      : getChildClientIdsForGroup(cleanKey);
+    console.log('[GROUP BATCH MODAL] group=', gk, 'clientIds found=', clientIds.length, clientIds.slice(0,3));
+    batchGroups.push({ group_name: cleanKey, client_ids: clientIds });
+  });
+
+  const totalClients = batchGroups.reduce((s, g) => s + g.client_ids.length, 0);
+
+  _groupModalState.groupName   = null;
+  _groupModalState.clientIds   = [];
+  _groupModalState.isBatch     = true;
+  _groupModalState.batchGroups = batchGroups;
+
+  const n = _selectedGroups.size;
+  document.getElementById('fcGroupModalTitle').innerHTML =
+    '<i class="bi bi-graph-up-arrow me-2" style="color:var(--g-blue);"></i>' +
+    `Expectativa de crecimiento — <span style="font-weight:800;color:var(--g-blue-dark);">${n} grupo(s) seleccionado(s)</span>`;
+
+  _renderGroupModalBody(null, totalClients, true, n);
+  document.getElementById('fcGroupEditOverlay').classList.add('open');
+}
+
+/** Render the body of the group edit modal. */
+function _renderGroupModalBody(groupName, clientCount, isBatch, groupCount) {
+  const body = document.getElementById('fcGroupModalBody');
+  if (!body) return;
+
+  const scopeText = isBatch
+    ? `los <strong>${groupCount} grupos seleccionados</strong> (${clientCount} cuenta${clientCount !== 1 ? 's' : ''} en total)`
+    : `el grupo <strong>${groupName}</strong> (${clientCount} cuenta${clientCount !== 1 ? 's' : ''})`;
+
+  body.innerHTML = `
+    <div class="fc-group-modal-info">
+      <i class="bi bi-info-circle-fill"></i>
+      <div>
+        Este cambio aplicará a <em>todas las cuentas, negocios y subnegocios</em> de ${scopeText},
+        reemplazando cualquier ajuste individual existente.
+      </div>
+    </div>
+    <div class="fc-group-modal-warn">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <div>
+        Si alguna cuenta tenía ajustes individuales previos, serán reemplazados por el nuevo porcentaje de grupo.
+        Esta acción no se puede deshacer desde aquí.
+      </div>
+    </div>
+    <div class="fc-group-modal-growth">
+      <label for="fcGroupGrowthInput">Expectativa de crecimiento:</label>
+      <input type="number" id="fcGroupGrowthInput" value="0" step="1" min="-100" max="500" autocomplete="off">
+      <span class="fc-unit">% anual</span>
+    </div>
+    <div style="font-size:0.76rem;color:var(--text-muted);padding:0 4px;">
+      La tasa mensual compuesta se calculará automáticamente. Aplica desde el próximo mes efectivo según la regla del día 20.
+    </div>`;
+
+  // Focus the input after render
+  setTimeout(() => {
+    const inp = document.getElementById('fcGroupGrowthInput');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 80);
+}
+
+/** Close the group edit modal. */
+function closeGroupModal() {
+  document.getElementById('fcGroupEditOverlay').classList.remove('open');
+  _groupModalState.groupName   = null;
+  _groupModalState.clientIds   = [];
+  _groupModalState.isBatch     = false;
+  _groupModalState.batchGroups = [];
+  const btn = document.getElementById('fcGroupBtnSave');
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar'; }
+}
+
+// Close group modal on overlay click
+document.getElementById('fcGroupEditOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeGroupModal();
+});
+
+/* ===================================================================
+   GROUP EXPECTATION — save
+   =================================================================== */
+
+async function saveGroupExpectation() {
+  console.log('[GROUP SAVE] clicked');
+  const inp = document.getElementById('fcGroupGrowthInput');
+  if (!inp) { console.error('[GROUP SAVE] ERROR: fcGroupGrowthInput not found — modal not rendered?'); return; }
+  const growthPct = parseFloat(String(inp.value).replace(',', '.'));
+  console.log('[GROUP SAVE] input value raw=', inp.value, 'parsed=', growthPct);
+  if (!Number.isFinite(growthPct)) {
+    alert('Por favor ingrese un porcentaje válido.');
+    return;
+  }
+
+  console.log('[GROUP SAVE] STATE.growthPct=', STATE.growthPct, 'isBatch=', _groupModalState.isBatch);
+  console.log('[GROUP SAVE] modalState=', JSON.stringify({
+    groupName: _groupModalState.groupName,
+    clientIds: _groupModalState.clientIds,
+    isBatch: _groupModalState.isBatch,
+    batchGroupCount: _groupModalState.batchGroups ? _groupModalState.batchGroups.length : 0,
+  }));
+
+  const btn = document.getElementById('fcGroupBtnSave');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="fc-spinner" style="width:14px;height:14px;border-width:2px;"></span>'; }
+
+  try {
+    let data;
+    if (_groupModalState.isBatch) {
+      if (!_groupModalState.batchGroups || _groupModalState.batchGroups.length === 0) {
+        throw new Error('No hay grupos seleccionados para aplicar expectativa.');
+      }
+      const payload = {
+        groups: _groupModalState.batchGroups.map(g => ({
+          group_name: cleanGroupKey(g.group_name),
+          client_ids: Array.isArray(g.client_ids) ? g.client_ids : [],
+        })),
+        growth_pct: growthPct,
+        base_growth_pct: STATE.growthPct,
+      };
+      // Log payload in detail (not just "Object")
+      console.log('[GROUP SAVE] batch payload — groups:', payload.groups.length,
+        payload.groups.map(g => g.group_name + '(' + (g.client_ids||[]).length + 'c)'),
+        'growth_pct:', payload.growth_pct, 'base:', payload.base_growth_pct);
+      const resp = await fetch('/forecast/api/save-group-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      console.log('[GROUP SAVE] response status', resp.status);
+      data = await resp.json();
+      console.log('[GROUP SAVE] response json — saved_clients:', data.saved_clients, 'ok:', data.ok, 'error:', data.error);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + (data.error ? ': ' + data.error : ''));
+      clearGroupSelection();
+    } else {
+      if (!_groupModalState.groupName) {
+        throw new Error('No se pudo identificar el grupo a modificar. Cerrá y volvé a abrir el modal.');
+      }
+      const payload = {
+        group_name: cleanGroupKey(_groupModalState.groupName),
+        client_ids: _groupModalState.clientIds,
+        growth_pct: growthPct,
+        base_growth_pct: STATE.growthPct,
+      };
+      console.log('[GROUP SAVE] single payload — group:', payload.group_name,
+        '| clientIds:', payload.client_ids.length, payload.client_ids.slice(0, 5),
+        '| growth_pct:', payload.growth_pct, '| base:', payload.base_growth_pct);
+      const resp = await fetch('/forecast/api/save-group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      console.log('[GROUP SAVE] response status', resp.status);
+      data = await resp.json();
+      console.log('[GROUP SAVE] response json — saved_clients:', data.saved_clients, 'ok:', data.ok, 'error:', data.error);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + (data.error ? ': ' + data.error : ''));
+    }
+
+    if (!data.ok || (data.saved_clients || 0) === 0 || (data.saved_overrides || 0) === 0) {
+      throw new Error(data.error || 'No se guardó ningún cliente. Verificá que el grupo tenga cuentas hijas y volvé a intentar.');
+    }
+
+    closeGroupModal();
+    console.log('[GROUP SAVE] refreshing dashboard...');
+    _fcClear();
+    await _refreshAfterSave();
+    // Force table reload if already on detalle tab (stale flag alone won't trigger it)
+    if (STATE.activeTab === 'detalle') {
+      console.log('[GROUP SAVE] on detalle tab — forcing table reload');
+      _tableIsStale = false;
+      await loadTable();
+    }
+  } catch (err) {
+    console.error('[GROUP SAVE] error', err);
+    alert('Error al guardar: ' + err.message);
+  } finally {
+    // Always restore button — whether success (closeGroupModal already reset it) or error
+    const b = document.getElementById('fcGroupBtnSave');
+    if (b) { b.disabled = false; b.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar'; }
+  }
+}
+
 function buildClientGrid() {
   clientGridApi = agGrid.createGrid(document.getElementById('clientGrid'), {
     columnDefs: [], rowData: [],
@@ -3302,12 +3747,36 @@ function buildClientGrid() {
     rowHeight: 46, headerHeight: 46, animateRows: true,
     suppressCellFocus: true, pinnedBottomRowData: [],
     onCellClicked: params => {
-      // Click anywhere on a group row → toggle expand/collapse
       if (params.data && params.data._isGroup) {
+        const t = params.event && params.event.target;
+        if (t) {
+          const groupBtn = t.closest?.('.fc-group-adj-ico');
+          if (groupBtn) {
+            params.event.preventDefault();
+            params.event.stopPropagation();
+            const groupName =
+              groupBtn.dataset.groupName ||
+              params.data?._groupKey ||
+              params.data?.Grupo ||
+              params.node?.key;
+            openGroupEditModal(groupName);
+            return;
+          }
+          // Checkbox: handled by its own onclick, nothing more to do
+          if (t.classList.contains('fc-group-check') || t.type === 'checkbox') return;
+          // % icon button OR the <i> inside it — open individual group modal
+          const adjBtn = t.classList.contains('fc-group-adj-ico')
+            ? t
+            : t.closest?.('.fc-group-adj-ico');
+          if (adjBtn) {
+            openGroupEditModal(params.data._groupKey);
+            return;
+          }
+        }
         _toggleClientGroup(params.data._groupKey);
         return;
       }
-      // Pencil icon → open edit modal
+      // Pencil icon → open edit modal for account row
       if (params.column.getColId() === '_edit') {
         const row = params.data;
         if (row && row.Cliente && !String(row.Cliente).includes('TOTAL')) openEditModal(row.Cliente);
@@ -3353,40 +3822,51 @@ function updateClientGrid(tableData) {
   };
 
   const colDefs = [
-    // ── Pencil: hidden for group rows ────────────────────────────────────────
+    // ── Edit/Select: pencil for account rows, checkbox for group rows ────────
     {
-      field: '_edit', headerName: '', width: 44, pinned: 'left', sortable: false,
+      field: '_edit', headerName: '', width: 54, pinned: 'left', sortable: false,
       cellRenderer: params => {
-        if (params.data && params.data._isGroup) return '';
+        if (params.data && params.data._isGroup) {
+          const groupKey = cleanGroupKey(params.data._groupKey);
+          const checked = _selectedGroups.has(groupKey) ? 'checked' : '';
+          const gk = _escapeJsSingle(groupKey);
+          return `<input type="checkbox" class="fc-group-check" ${checked} title="Seleccionar grupo" onclick="event.stopPropagation();_toggleGroupSelection('${gk}')">`;
+        }
         return '<span class="fc-edit-icon-cell" title="Editar"><i class="bi bi-pencil-square"></i></span>';
       },
       cellStyle: params => {
-        const bg = (params.data && params.data._isGroup) ? '#f8fafc' : '#ffffff';
-        return {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:bg, borderRight:'1px solid #f1f4f8', borderBottom: (params.data && params.data._isGroup) ? '1px solid #eef1f6' : '1px solid #f1f4f8'};
+        if (params.data && params.data._isGroup)
+          return {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:'#F8FAFC', borderRight:'1px solid #F1F5F9'};
+        return {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:'#ffffff', borderRight:'1px solid #F1F5F9'};
       },
     },
-    // ── Cliente: shows group header (expandable) or client name (indented) ──
+    // ── Cliente: group header (expandable + adj pill) or account name (indented) ──
     {
       field: 'Cliente', headerName: 'Cliente', pinned: 'left', minWidth: 320, width: 320, sortable: false,
       cellRenderer: params => {
         if (!params.data) return '';
         if (params.data._isGroup) {
-          const icon = params.data._expanded !== false
-            ? '<i class="bi bi-chevron-down" style="font-size:0.7rem;color:var(--text-muted);"></i>'
-            : '<i class="bi bi-chevron-right" style="font-size:0.7rem;color:var(--text-muted);"></i>';
+          const icon  = params.data._expanded !== false ? '▾' : '▸';
           const count = params.data._childCount || 0;
-          const titleText = count === 1 ? 'Contiene 1 registro asociado' : `Contiene ${count} registros asociados`;
-          return `<span style="display:flex;align-items:center;cursor:pointer;width:100%;font-family:inherit;" title="${titleText}">` +
-            `<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-right:6px;">${icon}</span>` +
-            `<span style="font-weight:600;color:var(--text-primary);font-size:0.85rem;">${params.value || ''}</span>` +
+          const groupKey = cleanGroupKey(params.data._groupKey);
+          const gk    = _escapeJsSingle(groupKey);
+          // Two-zone layout: left = icon+name+count (can shrink), right = small icon (fixed)
+          return `<span style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:4px;cursor:pointer;">` +
+            `<span style="display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden;">` +
+            `<span style="font-size:0.8rem;color:#94A3B8;user-select:none;flex-shrink:0;">${icon}</span>` +
+            `<span style="font-weight:600;color:#1E293B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.83rem;">${params.value || ''}</span>` +
+            `<span style="font-size:0.65rem;color:#CBD5E1;font-weight:400;flex-shrink:0;">(${count})</span>` +
+            `</span>` +
+            `<button class="fc-group-adj-ico" data-group-name="${groupKey.replace(/"/g, '&quot;')}" onclick="event.stopPropagation();openGroupEditModal('${gk}')" title="Editar expectativa de crecimiento del grupo">` +
+            `<i class="bi bi-percent"></i></button>` +
             `</span>`;
         }
-        return `<span style="padding-left:24px;font-weight:400;color:var(--text-secondary);font-size:0.85rem;">${params.value || ''}</span>`;
+        return `<span style="padding-left:24px;font-weight:500;color:#334155;">${params.value || ''}</span>`;
       },
       cellStyle: params => {
         if (params.data && params.data._isGroup)
-          return {display:'flex', alignItems:'center', background:'#f8fafc', cursor:'pointer', borderBottom:'1px solid #eef1f6'};
-        return {display:'flex', alignItems:'center', borderBottom:'1px solid #f1f4f8'};
+          return {display:'flex', alignItems:'center', background:'#F8FAFC', cursor:'pointer', borderBottom:'1px solid #E2E8F0'};
+        return {display:'flex', alignItems:'center'};
       },
     },
   ];

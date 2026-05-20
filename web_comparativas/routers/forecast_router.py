@@ -477,6 +477,95 @@ def api_save_client(
         raise HTTPException(500, str(exc))
 
 
+class _GroupSavePayload(BaseModel):
+    group_name: str
+    client_ids: List[str]
+    growth_pct: float
+    base_growth_pct: float = 0.0
+
+
+@router.post("/api/save-group")
+def api_save_group(
+    payload: _GroupSavePayload,
+    _request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Save a uniform growth expectation for all clients in a group."""
+    print(f"[SAVE_GROUP ROUTER] endpoint reached — user={_user.id} group={payload.group_name!r} "
+          f"clients={len(payload.client_ids)} growth_pct={payload.growth_pct} "
+          f"base_growth_pct={payload.base_growth_pct} client_ids={payload.client_ids}", flush=True)
+    try:
+        result = svc.save_group_expectations(
+            user_id=_user.id,
+            group_name=payload.group_name,
+            client_ids=payload.client_ids,
+            growth_pct=payload.growth_pct,
+            base_growth_pct=payload.base_growth_pct,
+            user_email=_user.email,
+        )
+        print(f"[SAVE_GROUP ROUTER] done — result={result}", flush=True)
+        saved_ok = result.get("saved_clients", 0) > 0 and result.get("saved_overrides", 0) > 0
+        return {"ok": saved_ok, "group_name": payload.group_name, **result}
+    except Exception as exc:
+        import traceback as _tb
+        print(f"[SAVE_GROUP ROUTER] EXCEPTION: {exc}\n{_tb.format_exc()}", flush=True)
+        logger.error("save-group error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+class _GroupBatchSavePayload(BaseModel):
+    groups: List[dict]
+    growth_pct: float
+    base_growth_pct: float = 0.0
+
+
+@router.post("/api/save-group-batch")
+def api_save_group_batch(
+    payload: _GroupBatchSavePayload,
+    _request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Save a uniform growth expectation across multiple groups at once."""
+    print(f"[SAVE_GROUP_BATCH ROUTER] endpoint reached — user={_user.id} "
+          f"groups={len(payload.groups)} growth_pct={payload.growth_pct} "
+          f"base_growth_pct={payload.base_growth_pct}", flush=True)
+    try:
+        total_saved = 0
+        total_overrides = 0
+        total_skipped: list[str] = []
+        sample: list[dict] = []
+        storage = None
+        effective_from_month = None
+        for grp in payload.groups:
+            result = svc.save_group_expectations(
+                user_id=_user.id,
+                group_name=str(grp.get("group_name", "")),
+                client_ids=list(grp.get("client_ids", [])),
+                growth_pct=payload.growth_pct,
+                base_growth_pct=payload.base_growth_pct,
+                user_email=_user.email,
+            )
+            total_saved   += result.get("saved_clients", 0)
+            total_overrides += result.get("saved_overrides", 0)
+            total_skipped += result.get("skipped_clients", [])
+            storage = storage or result.get("storage")
+            effective_from_month = effective_from_month or result.get("effective_from_month")
+            sample.extend(result.get("sample", [])[: max(0, 5 - len(sample))])
+        batch_ok = total_saved > 0 and total_overrides > 0
+        return {
+            "ok": batch_ok,
+            "saved_clients": total_saved,
+            "saved_overrides": total_overrides,
+            "skipped_clients": total_skipped,
+            "storage": storage,
+            "effective_from_month": effective_from_month,
+            "sample": sample[:5],
+        }
+    except Exception as exc:
+        logger.error("save-group-batch error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
 @router.delete("/api/clear-client/{client_id}")
 def api_clear_client(
     client_id: str,
