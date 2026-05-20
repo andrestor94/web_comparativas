@@ -492,6 +492,50 @@ def _fetch_override_records(
         return list(q.all())
 
 
+def _override_record_user_ids(records: list[Any], limit: int = 20) -> list[int]:
+    ids: list[int] = []
+    for rec in records or []:
+        try:
+            value = int(getattr(rec, "user_id"))
+        except Exception:
+            continue
+        if value not in ids:
+            ids.append(value)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
+def _forecast_adjustment_summary(records: list[dict]) -> dict[str, Any]:
+    if not records:
+        return {
+            "has_adjusted_series": False,
+            "adjusted_diff_sum": 0.0,
+            "first_total_adj": None,
+            "first_total_user_adj": None,
+            "last_total_adj": None,
+            "last_total_user_adj": None,
+        }
+
+    diff_sum = 0.0
+    for row in records:
+        try:
+            diff_sum += abs(float(row.get("Total_User_Adj") or 0) - float(row.get("Total_Adj") or 0))
+        except Exception:
+            continue
+
+    first = records[0]
+    last = records[-1]
+    return {
+        "has_adjusted_series": diff_sum > 0.5,
+        "adjusted_diff_sum": round(diff_sum, 2),
+        "first_total_adj": first.get("Total_Adj"),
+        "first_total_user_adj": first.get("Total_User_Adj"),
+        "last_total_adj": last.get("Total_Adj"),
+        "last_total_user_adj": last.get("Total_User_Adj"),
+    }
+
+
 def _build_override_maps(records: list[Any]) -> dict[str, Any]:
     subneg_map: dict[tuple[str, str], dict[str, Any]] = {}
     product_map: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2507,12 +2551,23 @@ def _pg_get_chart_data_inner(
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
     # Single override fetch — reused throughout this function to avoid multiple DB roundtrips
-    _ovr_records = _fetch_override_records(user_id, all_users=is_admin)
+    global_overrides = bool(is_admin)
+    _ovr_records = _fetch_override_records(user_id, all_users=global_overrides)
     _ovr_active = bool(_ovr_records)
+    _ovr_user_ids = _override_record_user_ids(_ovr_records)
 
-    logger.debug(
-        "[FORECAST INNER] chart start=%s end=%s growth_pct=%s profiles=%s neg=%s subneg=%s has_overrides=%s",
-        start_date, end_date, growth_pct, profiles, neg, subneg, _ovr_active,
+    logger.info(
+        "[FORECAST INNER] chart user_id=%s override_scope=%s override_count=%s override_user_ids=%s start=%s end=%s growth_pct=%s profiles=%s neg=%s subneg=%s",
+        user_id,
+        "global" if global_overrides else "user",
+        len(_ovr_records),
+        _ovr_user_ids,
+        start_date,
+        end_date,
+        growth_pct,
+        profiles,
+        neg,
+        subneg,
     )
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
@@ -2695,7 +2750,7 @@ def _pg_get_chart_data_inner(
                 base_growth_pct=growth_pct,
                 max_hist_date=max_hist,
                 _records=_ovr_records,
-                is_admin=is_admin,
+                is_admin=global_overrides,
             )
             _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
             _n_overridden = int(_override_rows["_has_override"].sum()) if "_has_override" in _override_rows.columns else -1
@@ -2839,15 +2894,33 @@ def _pg_get_chart_data_inner(
             out.append(rec)
         return out
 
+    forecast_payload = _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]) if not df_fcst.empty else []
+    _adjustment_summary = _forecast_adjustment_summary(forecast_payload)
+
     logger.info(
-        "[FORECAST] chart-data: total_adj=%.0f total_hist=%.0f n_products=%s",
-        total_adj, total_hist, n_products,
+        "[FORECAST] chart-data: user_id=%s override_scope=%s override_count=%s adjusted=%s adjusted_diff_sum=%.2f total_adj=%.0f total_hist=%.0f n_products=%s",
+        user_id,
+        "global" if global_overrides else "user",
+        len(_ovr_records),
+        _adjustment_summary["has_adjusted_series"],
+        _adjustment_summary["adjusted_diff_sum"],
+        total_adj,
+        total_hist,
+        n_products,
     )
     return {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
-        "forecast": _fmt(df_fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]) if not df_fcst.empty else [],
+        "forecast": forecast_payload,
         "val_2026": val_2026_records,
         "has_overrides": _ovr_active,
+        "override_debug": {
+            "scope": "global" if global_overrides else "user",
+            "all_users": global_overrides,
+            "requested_user_id": int(user_id) if user_id is not None else None,
+            "override_count": len(_ovr_records),
+            "override_user_ids": _ovr_user_ids,
+            **_adjustment_summary,
+        },
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             "total_proyeccion_2026":    round(total_adj, 0),
@@ -3838,6 +3911,7 @@ def get_chart_data(
     is_admin: bool = False,
 ) -> dict:
     import pandas as pd
+    global_overrides = bool(is_admin)
     _engine_url = str(engine.url) if engine is not None else "NO_ENGINE"
     _is_pg = engine is not None and "postgresql" in _engine_url
     if _is_pg:
@@ -3846,10 +3920,19 @@ def get_chart_data(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, growth_pct=growth_pct,
-            is_admin=is_admin,
+            is_admin=global_overrides,
         )
 
-    _ovr_active = _has_overrides(user_id, growth_pct, is_admin=is_admin)
+    _loc_ovr_records_for_debug = _fetch_override_records(user_id, all_users=global_overrides)
+    _ovr_active = bool(_loc_ovr_records_for_debug)
+    _loc_ovr_user_ids = _override_record_user_ids(_loc_ovr_records_for_debug)
+    logger.info(
+        "[FORECAST LOCAL] chart user_id=%s override_scope=%s override_count=%s override_user_ids=%s",
+        user_id,
+        "global" if global_overrides else "user",
+        len(_loc_ovr_records_for_debug),
+        _loc_ovr_user_ids,
+    )
     if not _data_cache and not _ovr_active:
         light = _local_get_chart_data_light(
             user_id=user_id,
@@ -3982,7 +4065,7 @@ def get_chart_data(
             _g_base = 1.0 + growth_pct / 100.0
             df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
             # Pass pre-fetched records to avoid large SQL IN clause (SQLite 999-var limit)
-            _loc_ovr_records = _fetch_override_records(user_id, all_users=is_admin) if (user_id or is_admin) else []
+            _loc_ovr_records = list(_loc_ovr_records_for_debug) if (user_id or global_overrides) else []
             if _ovr_active and not df_val_f.empty:
                 _loc_max_hist = df_hist["fecha"].max() if not df_hist.empty else pd.Timestamp("2000-01-01")
                 _df_u_sql, _ovr_maps_sql = _apply_override_effects_to_dataframe(
@@ -3991,7 +4074,7 @@ def get_chart_data(
                     base_growth_pct=growth_pct,
                     max_hist_date=_loc_max_hist,
                     _records=_loc_ovr_records,
-                    is_admin=is_admin,
+                    is_admin=global_overrides,
                 )
                 if not _df_u_sql.empty:
                     _df_u_sql["_ua_sql"] = _df_u_sql[col_y] * _df_u_sql["_annual_eff"]
@@ -4066,6 +4149,15 @@ def get_chart_data(
     forecast_records = to_records_safe(
         df_fcst.sort_values("fecha"),
         ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"],
+    )
+    _adjustment_summary = _forecast_adjustment_summary(forecast_records)
+    logger.info(
+        "[FORECAST LOCAL] chart-data: user_id=%s override_scope=%s override_count=%s adjusted=%s adjusted_diff_sum=%.2f",
+        user_id,
+        "global" if global_overrides else "user",
+        len(_loc_ovr_records_for_debug),
+        _adjustment_summary["has_adjusted_series"],
+        _adjustment_summary["adjusted_diff_sum"],
     )
 
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0
@@ -4184,6 +4276,14 @@ def get_chart_data(
         "forecast": forecast_records,
         "val_2026": val_2026_records,
         "has_overrides": _ovr_active,
+        "override_debug": {
+            "scope": "global" if global_overrides else "user",
+            "all_users": global_overrides,
+            "requested_user_id": int(user_id) if user_id is not None else None,
+            "override_count": len(_loc_ovr_records_for_debug),
+            "override_user_ids": _loc_ovr_user_ids,
+            **_adjustment_summary,
+        },
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             # KPI 1 - Monto Total Proyectado Anual 2026

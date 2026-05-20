@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -11,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from web_comparativas import forecast_service as svc
 from web_comparativas.migrations import ensure_forecast_override_storage
 from web_comparativas.models import ForecastUserOverride, SessionLocal, User
+from web_comparativas.routers import forecast_router
+from web_comparativas.routers.forecast_router import _can_view_global_forecast_adjustments
 
 
 def _create_user() -> int:
@@ -281,3 +285,143 @@ def test_overrides_are_isolated_by_user_and_clear_soft_deactivates_rows():
     finally:
         _delete_user(user_a)
         _delete_user(user_b)
+
+
+def test_forecast_global_viewer_roles_include_admin_and_auditor_only():
+    assert _can_view_global_forecast_adjustments(User(role="admin"))
+    assert _can_view_global_forecast_adjustments(User(role="auditor"))
+    assert _can_view_global_forecast_adjustments(User(role="Auditor"))
+    assert _can_view_global_forecast_adjustments(User(role="ROLE_AUDITOR"))
+    assert _can_view_global_forecast_adjustments(User(role="Auditor SIEM"))
+    assert _can_view_global_forecast_adjustments(User(role="audit"))
+    assert _can_view_global_forecast_adjustments(User(role="aud"))
+    assert not _can_view_global_forecast_adjustments(User(role="visor"))
+    assert not _can_view_global_forecast_adjustments(User(role="analista"))
+
+
+def test_chart_data_uses_global_override_scope_for_admin_and_auditor(monkeypatch):
+    calls = []
+
+    def fake_get_chart_data(**kwargs):
+        calls.append(kwargs)
+        return {"history": [], "forecast": [], "val_2026": [], "kpis": {}, "has_overrides": kwargs["is_admin"]}
+
+    monkeypatch.setattr(forecast_router.svc, "get_chart_data", fake_get_chart_data)
+    monkeypatch.setattr(forecast_router.svc, "get_lab_product_codes", lambda _lab: [])
+
+    admin = User(id=1, email="admin@test.local", role="admin")
+    auditor = User(id=2, email="auditor@test.local", role="Auditor SIEM")
+    analyst = User(id=3, email="analyst@test.local", role="analista")
+
+    admin_response = forecast_router.api_chart_data(request=None, _user=admin)
+    auditor_response = forecast_router.api_chart_data(request=None, _user=auditor)
+    analyst_response = forecast_router.api_chart_data(request=None, _user=analyst)
+
+    assert [call["is_admin"] for call in calls] == [True, True, False]
+    assert admin_response["has_overrides"] is True
+    assert auditor_response["has_overrides"] is True
+    assert analyst_response["has_overrides"] is False
+
+
+def test_chart_data_final_adjusted_series_matches_for_admin_and_auditor(monkeypatch):
+    other_user_id = 99
+    admin_user_id = 1
+    auditor_user_id = 2
+    analyst_user_id = 3
+
+    override = SimpleNamespace(
+        user_id=other_user_id,
+        client_selector="Cliente A",
+        override_scope=svc.FORECAST_SCOPE_SUBNEG,
+        subneg="Sub A",
+        codigo_serie="",
+        forecast_month="",
+        override_growth_pct=50.0,
+        effective_monthly_pct=svc._monthly_pct_from_annual_growth(50.0),
+        effective_from_month="2026-01",
+        is_active=True,
+    )
+
+    def fake_fetch_override_records(user_id, client_selector=None, client_selectors=None, *, all_users=False):
+        if all_users:
+            return [override]
+        return [override] if int(user_id or 0) == other_user_id else []
+
+    data = {
+        "df_main": pd.DataFrame(
+            [
+                {
+                    "fecha": pd.Timestamp("2025-12-01"),
+                    "tipo": "hist",
+                    "perfil": "FAR",
+                    "neg": "Neg A",
+                    "subneg": "Sub A",
+                    "descripcion": "SKU-1",
+                    "codigo_serie": "SKU-1",
+                    "y": 10.0,
+                    "yhat": 10.0,
+                    "li": 9.0,
+                    "ls": 11.0,
+                    "precio": 10.0,
+                }
+            ]
+        ),
+        "df_valorizado": pd.DataFrame(
+            [
+                {
+                    "fecha": pd.Timestamp("2026-01-01"),
+                    "perfil": "FAR",
+                    "neg": "Neg A",
+                    "subneg": "Sub A",
+                    "descripcion": "SKU-1",
+                    "codigo_serie": "SKU-1",
+                    "fantasia": "Cliente A",
+                    "cliente_id": "C1",
+                    "monto_yhat": 100.0,
+                    "monto_li": 90.0,
+                    "monto_ls": 110.0,
+                }
+            ]
+        ),
+        "df_imp_hist": pd.DataFrame(
+            [
+                {
+                    "fecha": pd.Timestamp("2025-12-01"),
+                    "perfil": "FAR",
+                    "neg": "Neg A",
+                    "subneg": "Sub A",
+                    "codigo_serie": "SKU-1",
+                    "imp_hist": 100.0,
+                }
+            ]
+        ),
+        "df_fact_2026": pd.DataFrame(columns=["fecha", "imp_hist"]),
+    }
+
+    monkeypatch.setattr(svc, "_fetch_override_records", fake_fetch_override_records)
+    monkeypatch.setattr(svc, "get_data", lambda: data)
+    monkeypatch.setattr(svc, "_data_cache", {"loaded": True})
+
+    def chart_for(user_id, global_viewer):
+        return svc.get_chart_data.__wrapped__(
+            user_id=user_id,
+            growth_pct=25.0,
+            view_money=True,
+            is_admin=global_viewer,
+        )
+
+    admin = chart_for(admin_user_id, True)
+    auditor = chart_for(auditor_user_id, True)
+    analyst = chart_for(analyst_user_id, False)
+
+    assert admin["override_debug"]["scope"] == "global"
+    assert auditor["override_debug"]["scope"] == "global"
+    assert admin["override_debug"]["override_count"] == auditor["override_debug"]["override_count"] == 1
+    assert admin["forecast"] == auditor["forecast"]
+    assert admin["override_debug"]["has_adjusted_series"]
+    assert auditor["override_debug"]["has_adjusted_series"]
+
+    analyst_debug = analyst["override_debug"]
+    assert analyst_debug["scope"] == "user"
+    assert analyst_debug["override_count"] == 0
+    assert not analyst_debug["has_adjusted_series"]

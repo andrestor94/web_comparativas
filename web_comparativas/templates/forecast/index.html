@@ -2291,7 +2291,8 @@ const STATE = {
    Versioned prefix (_FC_V) forces a clean slate after each deploy.
    =================================================================== */
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
-const _FC_PFX        = 'fc_' + _FC_V + '_';
+const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}';
+const _FC_PFX        = 'fc_' + _FC_V + '_' + _FC_USER_KEY + '_';
 const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
 const _FC_TTL_STATIC = 30 * 60 * 1000;   // 30 min — filter-options
 const _FC_TTL_VIEW   = 30 * 60 * 1000;   // 30 min — UI state + last active tab
@@ -2300,7 +2301,6 @@ const LOCKED_MAIN_GROWTH_PCT = 25;
 const _fcInFlight    = new Map();
 const _fcControllers = new Map();
 const _fcReqSeq      = { filters: 0, products: 0, chart: 0, treemap: 0, table: 0 };
-
 function _fcGet(url) {
   try {
     const raw = sessionStorage.getItem(_FC_PFX + url);
@@ -2969,7 +2969,12 @@ function renderChart(data) {
   }
 
   // ── Línea 4: Proyección comercial ajustada por usuario ────────────────
-  if (data.has_overrides) {
+  const hasAdjustedSeries = Boolean(data.has_overrides) || fcst.some(d => {
+    const userAdj = Number(d.Total_User_Adj || 0);
+    const standardAdj = Number(d.Total_Adj || 0);
+    return Math.abs(userAdj - standardAdj) > 0.5;
+  });
+  if (hasAdjustedSeries) {
     traces.push({
       x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_User_Adj||0),
       customdata: getHoverTexts(fcst.map(d=>d.fecha), fcst.map(d=>d.Total_User_Adj||0), 'Proyección ajustada'),

@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import json as _json
 import logging
+import re
 import time
 from typing import List, Optional
 
@@ -79,6 +80,26 @@ def _require_user(request: Request) -> User:
         )
         raise HTTPException(status_code=401, detail="No autenticado")
     return user
+
+
+def _forecast_role_key(user: User) -> str:
+    role = (getattr(user, "role", "") or getattr(user, "rol", "") or "").strip().lower()
+    role = role.removeprefix("role_")
+    return re.sub(r"[^a-z0-9]+", "_", role).strip("_")
+
+
+def _can_view_global_forecast_adjustments(user: User) -> bool:
+    """Admin and Auditor can read consolidated Forecast overrides from all users."""
+    role_key = _forecast_role_key(user)
+    return role_key in {
+        "admin",
+        "administrator",
+        "administrador",
+        "auditor",
+        "audit",
+        "aud",
+        "auditor_siem",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +171,14 @@ def api_chart_data(
     )
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
+        can_view_global = _can_view_global_forecast_adjustments(_user)
+        logger.info(
+            "[FORECAST API] chart-data user_id=%s role=%r role_key=%s global_overrides=%s",
+            getattr(_user, "id", None),
+            getattr(_user, "role", None),
+            _forecast_role_key(_user),
+            can_view_global,
+        )
         result = svc.get_chart_data(
             user_id=_user.id,
             start_date=start_date,
@@ -160,7 +189,7 @@ def api_chart_data(
             products=resolved_products,
             view_money=view_money,
             growth_pct=growth_pct,
-            is_admin=_user.is_admin(),
+            is_admin=can_view_global,
         )
         logger.debug(
             "chart-data result history=%s forecast=%s has_overrides=%s",
@@ -225,6 +254,7 @@ def api_client_table(
     logger.debug("client-table start=%s end=%s profiles=%s neg=%s", start_date, end_date, profiles, neg)
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
+        can_view_global = _can_view_global_forecast_adjustments(_user)
         result = svc.get_client_table(
             user_id=_user.id,
             start_date=start_date,
@@ -236,7 +266,7 @@ def api_client_table(
             view_money=view_money,
             growth_pct=growth_pct,
             lab_products=lab_products,
-            is_admin=_user.is_admin(),
+            is_admin=can_view_global,
         )
         _log_api_perf("client-table", started, result)
         return result
@@ -263,6 +293,7 @@ def api_treemap_data(
     logger.debug("treemap-data start=%s end=%s profiles=%s neg=%s period=%s", start_date, end_date, profiles, neg, period_date)
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
+        can_view_global = _can_view_global_forecast_adjustments(_user)
         result = svc.get_treemap_data(
             user_id=_user.id,
             start_date=start_date,
@@ -273,7 +304,7 @@ def api_treemap_data(
             products=resolved_products,
             view_money=view_money,
             period_date=period_date,
-            is_admin=_user.is_admin(),
+            is_admin=can_view_global,
         )
         _log_api_perf("treemap-data", started, result)
         return result
@@ -297,6 +328,7 @@ def api_client_detail(
 ):
     started = time.perf_counter()
     try:
+        can_view_global = _can_view_global_forecast_adjustments(_user)
         result = svc.get_client_detail(
             user_id=_user.id,
             client_id=client_id,
@@ -307,7 +339,7 @@ def api_client_detail(
             subneg=subneg,
             products=products,
             growth_pct=growth_pct,
-            is_admin=_user.is_admin(),
+            is_admin=can_view_global,
         )
         _log_api_perf("client-detail", started, result)
         return result
@@ -344,7 +376,7 @@ def api_debug_overrides(request: Request, _user: User = Depends(_require_user)):
                 session.query(ForecastUserOverride)
                 .filter(ForecastUserOverride.source_module == _svc.FORECAST_OVERRIDE_SOURCE)
             )
-            if not _user.is_admin():
+            if not _can_view_global_forecast_adjustments(_user):
                 q = q.filter(ForecastUserOverride.user_id == int(_user.id))
             
             rows = q.order_by(ForecastUserOverride.updated_at.desc()).limit(50).all()
