@@ -236,7 +236,7 @@ def api_client_table(
             view_money=view_money,
             growth_pct=growth_pct,
             lab_products=lab_products,
-            is_admin=_is_admin(_user),
+            is_admin=_user.is_admin(),
         )
         _log_api_perf("client-table", started, result)
         return result
