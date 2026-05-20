@@ -972,6 +972,46 @@ def ensure_forecast_perf_indexes():
             "forecast_valorizado",
             "(cliente_id)",
         ),
+        (
+            "ix_fc_val_codigo_fecha",
+            "forecast_valorizado",
+            "(codigo_serie, fecha)",
+        ),
+        (
+            "ix_fc_val_filters_fecha",
+            "forecast_valorizado",
+            "(perfil, neg, subneg, fecha)",
+        ),
+        (
+            "ix_fc_val_fantasia",
+            "forecast_valorizado",
+            "(fantasia)",
+        ),
+        (
+            "ix_fc_imp_hist_codigo_fecha",
+            "forecast_imp_hist",
+            "(codigo_serie, fecha)",
+        ),
+        (
+            "ix_fc_imp_hist_perfil_fecha",
+            "forecast_imp_hist",
+            "(perfil, fecha)",
+        ),
+        (
+            "ix_fc_fact2026_codigo_fecha",
+            "forecast_fact_2026",
+            "(codigo_serie, fecha)",
+        ),
+        (
+            "ix_fc_fact2026_cliente_fecha",
+            "forecast_fact_2026",
+            "(cliente_id, fecha)",
+        ),
+        (
+            "ix_fc_labs_codigo",
+            "forecast_product_labs",
+            "(codigo_serie)",
+        ),
     ]
 
     for idx_name, table_name, expr in indexes:

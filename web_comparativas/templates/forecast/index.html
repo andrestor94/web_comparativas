@@ -2126,6 +2126,21 @@
           <button class="btn btn-sm btn-outline-secondary" style="font-size:0.75rem;padding:2px 8px;" onclick="clearGroupSelection()">Limpiar</button>
         </div>
       </div>
+      <!-- ── Group selection action bar ───────────────────────────────────── -->
+      <div id="fcGroupSelBar" class="fc-group-sel-bar" style="display:none;">
+        <span class="fc-group-sel-count">
+          <i class="bi bi-check2-square me-1"></i>
+          <span id="fcGroupSelCount">0</span> cliente(s) seleccionado(s)
+        </span>
+        <div class="fc-group-sel-actions">
+          <button class="btn btn-sm btn-primary fc-group-sel-apply" onclick="openGroupBatchModal()">
+            <i class="bi bi-percent me-1"></i> Aplicar expectativa %
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="clearGroupSelection()">
+            <i class="bi bi-x me-1"></i> Limpiar
+          </button>
+        </div>
+      </div>
       <div style="position:relative;">
         <div id="clientGrid" class="ag-theme-alpine" style="height:680px;"></div>
         <div class="fc-loading" id="tableLoader" style="display:none;"><div class="fc-spinner"></div></div>
@@ -2277,12 +2292,13 @@ const STATE = {
    =================================================================== */
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
 const _FC_PFX        = 'fc_' + _FC_V + '_';
-const _FC_TTL_DATA   = 5  * 60 * 1000;   // 5 min — chart, table, treemap, products
-const _FC_TTL_STATIC = 15 * 60 * 1000;   // 15 min — filter-options
+const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
+const _FC_TTL_STATIC = 30 * 60 * 1000;   // 30 min — filter-options
 const _FC_TTL_VIEW   = 30 * 60 * 1000;   // 30 min — UI state + last active tab
 const _FC_VIEW_KEY   = _FC_PFX + '__view_state';
 const LOCKED_MAIN_GROWTH_PCT = 25;
 const _fcInFlight    = new Map();
+const _fcControllers = new Map();
 const _fcReqSeq      = { filters: 0, products: 0, chart: 0, treemap: 0, table: 0 };
 
 function _fcGet(url) {
@@ -2312,14 +2328,29 @@ function _fcClear() {
   } catch {}
 }
 
-function _fcFetchJson(url) {
+function _fcFetchJson(url, requestKey = null) {
   if (_fcInFlight.has(url)) return _fcInFlight.get(url);
-  const req = fetch(url)
+  let signal;
+  if (requestKey) {
+    const prev = _fcControllers.get(requestKey);
+    if (prev) {
+      try { prev.abort(); } catch {}
+    }
+    const controller = new AbortController();
+    _fcControllers.set(requestKey, controller);
+    signal = controller.signal;
+  }
+  const req = fetch(url, signal ? { signal } : undefined)
     .then(resp => {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.json();
     })
-    .finally(() => _fcInFlight.delete(url));
+    .finally(() => {
+      _fcInFlight.delete(url);
+      if (requestKey && _fcControllers.get(requestKey)?.signal === signal) {
+        _fcControllers.delete(requestKey);
+      }
+    });
   _fcInFlight.set(url, req);
   return req;
 }
@@ -2422,7 +2453,7 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
     _persistForecastView();
 
     if (background) {
-      _fcFetchJson(url)
+      _fcFetchJson(url, requestKey)
         .then(fresh => {
           _fcSet(url, fresh, cacheTtl);
           if (_fcReqSeq[requestKey] === reqId) {
@@ -2430,7 +2461,9 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
             _persistForecastView();
           }
         })
-        .catch(err => console.error(requestKey + ' refresh error', err));
+        .catch(err => {
+          if (err?.name !== 'AbortError') console.error(requestKey + ' refresh error', err);
+        });
     }
     return cached;
   }
@@ -2438,7 +2471,7 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
   const loader = loaderId ? document.getElementById(loaderId) : null;
   if (loader) loader.style.display = 'flex';
   try {
-    const fresh = await _fcFetchJson(url);
+    const fresh = await _fcFetchJson(url, requestKey);
     _fcSet(url, fresh, cacheTtl);
     if (_fcReqSeq[requestKey] === reqId) {
       applyData(fresh, { source: 'network' });
@@ -2453,8 +2486,11 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
 // Hard refresh: wipe cache first, then reload everything from the server
 async function _fcHardRefresh() {
   _fcClear();
-  await loadFilterOptions();
+  // Fire filter-options and chart in parallel; products+treemap also parallel
+  const filterP = loadFilterOptions();
   await refreshAll();
+  // Ensure filter dropdowns are current after the parallel refresh
+  filterP.catch(e => { if (e?.name !== 'AbortError') console.warn('[forecast] filter-options hard-refresh:', e); });
 }
 
 /* ===================================================================
@@ -2493,7 +2529,11 @@ function buildQS(extra = {}) {
     STATE.selected.neg.forEach(v => p.append('neg[]', v));
   if (STATE.selected.subneg.length > 0 && STATE.selected.subneg.length < _aSubneg.length)
     STATE.selected.subneg.forEach(v => p.append('subneg[]', v));
-  STATE.selectedProducts.forEach(v => p.append('products[]', v));
+  if (STATE.labFilter && STATE.selectedLab) {
+    p.append('lab_name', STATE.selectedLab);
+  } else {
+    STATE.selectedProducts.forEach(v => p.append('products[]', v));
+  }
   p.append('view_money', STATE.viewMoney ? 'true' : 'false');
   p.append('growth_pct', STATE.growthPct);
   Object.entries(extra).forEach(([k, v]) => p.append(k, v));
@@ -2677,6 +2717,7 @@ document.addEventListener('click', e => {
    PRODUCT SIDEBAR GRID
    =================================================================== */
 let prodGridApi;
+const _FC_PRODUCT_RENDER_LIMIT = 600;
 // Guard flag: set to true while updateProdGrid is doing programmatic selection.
 // Prevents onSelectionChanged from wiping STATE.selectedProducts when ag-Grid
 // clears its internal selection model during setGridOption('rowData', ...).
@@ -2725,7 +2766,9 @@ function updateProdGrid(products) {
   let filtered = products;
   if (STATE.labFilter && STATE.selectedLab) filtered = filtered.filter(p => p.labs && p.labs.includes(STATE.selectedLab));
   if (search) filtered = filtered.filter(p => p.descripcion.toLowerCase().includes(search));
-  const rows = filtered.map(p => ({
+  const totalFiltered = filtered.length;
+  const visibleProducts = filtered.slice(0, _FC_PRODUCT_RENDER_LIMIT);
+  const rows = visibleProducts.map(p => ({
     descripcion: p.descripcion, neg: p.neg, vol_venta: p.vol_venta, labs: p.labs,
     _isLab: !!(STATE.selectedLab && p.labs && p.labs.includes(STATE.selectedLab)),
   }));
@@ -2738,7 +2781,10 @@ function updateProdGrid(products) {
   });
   // Clear on next tick — after ag-Grid finishes any async event dispatch
   setTimeout(() => { _suppressProdSelection = false; }, 0);
-  document.getElementById('prodCaption').textContent = 'Total mostrados: ' + rows.length;
+  document.getElementById('prodCaption').textContent =
+    totalFiltered > rows.length
+      ? `Mostrando ${rows.length} de ${totalFiltered}`
+      : 'Total mostrados: ' + rows.length;
   _persistForecastView();
 }
 
@@ -3534,9 +3580,6 @@ function openGroupEditModal(groupName) {
   const clientIds = getChildClientIdsForGroup(cleanGroupName);
   groupName = cleanGroupName;
 
-  console.log('[GROUP MODAL] opening single —', groupName,
-    '| clientIds:', clientIds.length, clientIds.slice(0, 5));
-
   // Reset ALL state — never inherit isBatch from a previous batch open
   _groupModalState.groupName   = cleanGroupName;
   _groupModalState.clientIds   = clientIds;
@@ -3562,7 +3605,6 @@ function openGroupBatchModal() {
     const clientIds = (selected.clientIds && selected.clientIds.length)
       ? selected.clientIds
       : getChildClientIdsForGroup(cleanKey);
-    console.log('[GROUP BATCH MODAL] group=', gk, 'clientIds found=', clientIds.length, clientIds.slice(0,3));
     batchGroups.push({ group_name: cleanKey, client_ids: clientIds });
   });
 
@@ -3643,23 +3685,13 @@ document.getElementById('fcGroupEditOverlay').addEventListener('click', function
    =================================================================== */
 
 async function saveGroupExpectation() {
-  console.log('[GROUP SAVE] clicked');
   const inp = document.getElementById('fcGroupGrowthInput');
-  if (!inp) { console.error('[GROUP SAVE] ERROR: fcGroupGrowthInput not found — modal not rendered?'); return; }
+  if (!inp) return;
   const growthPct = parseFloat(String(inp.value).replace(',', '.'));
-  console.log('[GROUP SAVE] input value raw=', inp.value, 'parsed=', growthPct);
   if (!Number.isFinite(growthPct)) {
     alert('Por favor ingrese un porcentaje válido.');
     return;
   }
-
-  console.log('[GROUP SAVE] STATE.growthPct=', STATE.growthPct, 'isBatch=', _groupModalState.isBatch);
-  console.log('[GROUP SAVE] modalState=', JSON.stringify({
-    groupName: _groupModalState.groupName,
-    clientIds: _groupModalState.clientIds,
-    isBatch: _groupModalState.isBatch,
-    batchGroupCount: _groupModalState.batchGroups ? _groupModalState.batchGroups.length : 0,
-  }));
 
   const btn = document.getElementById('fcGroupBtnSave');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="fc-spinner" style="width:14px;height:14px;border-width:2px;"></span>'; }
@@ -3678,18 +3710,12 @@ async function saveGroupExpectation() {
         growth_pct: growthPct,
         base_growth_pct: STATE.growthPct,
       };
-      // Log payload in detail (not just "Object")
-      console.log('[GROUP SAVE] batch payload — groups:', payload.groups.length,
-        payload.groups.map(g => g.group_name + '(' + (g.client_ids||[]).length + 'c)'),
-        'growth_pct:', payload.growth_pct, 'base:', payload.base_growth_pct);
       const resp = await fetch('/forecast/api/save-group-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      console.log('[GROUP SAVE] response status', resp.status);
       data = await resp.json();
-      console.log('[GROUP SAVE] response json — saved_clients:', data.saved_clients, 'ok:', data.ok, 'error:', data.error);
       if (!resp.ok) throw new Error('HTTP ' + resp.status + (data.error ? ': ' + data.error : ''));
       clearGroupSelection();
     } else {
@@ -3702,17 +3728,12 @@ async function saveGroupExpectation() {
         growth_pct: growthPct,
         base_growth_pct: STATE.growthPct,
       };
-      console.log('[GROUP SAVE] single payload — group:', payload.group_name,
-        '| clientIds:', payload.client_ids.length, payload.client_ids.slice(0, 5),
-        '| growth_pct:', payload.growth_pct, '| base:', payload.base_growth_pct);
       const resp = await fetch('/forecast/api/save-group', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      console.log('[GROUP SAVE] response status', resp.status);
       data = await resp.json();
-      console.log('[GROUP SAVE] response json — saved_clients:', data.saved_clients, 'ok:', data.ok, 'error:', data.error);
       if (!resp.ok) throw new Error('HTTP ' + resp.status + (data.error ? ': ' + data.error : ''));
     }
 
@@ -3721,12 +3742,10 @@ async function saveGroupExpectation() {
     }
 
     closeGroupModal();
-    console.log('[GROUP SAVE] refreshing dashboard...');
     _fcClear();
     await _refreshAfterSave();
     // Force table reload if already on detalle tab (stale flag alone won't trigger it)
     if (STATE.activeTab === 'detalle') {
-      console.log('[GROUP SAVE] on detalle tab — forcing table reload');
       _tableIsStale = false;
       await loadTable();
     }
@@ -4739,7 +4758,7 @@ async function loadTreemap() {
 
 async function loadTable() {
   const params = new URLSearchParams(buildQS());
-  if (STATE.labFilter && STATE.selectedLab) {
+  if (!STATE.labFilter && STATE.selectedLab) {
     STATE.allProducts
       .filter(prod => prod.labs && prod.labs.includes(STATE.selectedLab))
       .forEach(prod => params.append('lab_products[]', prod.descripcion));
@@ -4762,15 +4781,27 @@ async function loadTable() {
 
 async function refreshAll() {
   const isDetalleActivo = STATE.activeTab === 'detalle' || document.getElementById('tab-detalle')?.classList.contains('active');
-  const productsTask = loadProducts();
-  const tasks = [productsTask, loadChart(), loadTreemap()];
+
+  // Fire chart (critical), products and treemap in parallel.
+  // Each component has its own loading indicator so they render independently.
+  // Chart resolves first — makes the screen usable immediately.
+  const chartP    = loadChart();
+  const productsP = loadProducts();
+  const treemapP  = loadTreemap();
+
+  // Wait for chart first — it renders KPIs and the main graph
+  await chartP;
+
+  // Products and treemap continue loading in background; absorb errors
+  productsP.catch(e => { if (e?.name !== 'AbortError') console.warn('[forecast] products load:', e); });
+  treemapP.catch(e  => { if (e?.name !== 'AbortError') console.warn('[forecast] treemap load:',  e); });
+
   if (isDetalleActivo) {
-    tasks.push(productsTask.then(() => loadTable()));
+    await loadTable();
     _tableIsStale = false;
   } else {
     _tableIsStale = true;
   }
-  await Promise.all(tasks);
 }
 
 async function _refreshAfterSave() {
@@ -4851,8 +4882,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   switchTab(STATE.activeTab);
 
   try {
-    await loadFilterOptions();
-    await refreshAll();
+    // Fire filter-options AND chart in parallel:
+    //   - filter-options populates dropdowns (fast after backend fix)
+    //   - chart uses restored/default STATE immediately (default = "Todos")
+    // This saves the full sequential wait filter-options → chart on cold load.
+    const filterP = loadFilterOptions();
+    const chartP  = loadChart();
+
+    // Products and treemap start in background — don't block first paint
+    const productsP = loadProducts();
+    const treemapP  = loadTreemap();
+
+    // Wait for filter-options so dropdowns are populated before user interacts
+    await filterP;
+
+    // Wait for chart — the critical above-fold content
+    await chartP;
+
+    // Detalle tab loads on demand; mark stale so it fetches when opened
+    _tableIsStale = true;
+
+    // Background loads — absorb errors, they update the UI when ready
+    productsP.catch(e => { if (e?.name !== 'AbortError') console.warn('[forecast] products init:', e); });
+    treemapP.catch(e  => { if (e?.name !== 'AbortError') console.warn('[forecast] treemap init:',  e); });
   } finally {
     const contentEl = document.querySelector('.fc-content');
     const savedScroll = window.__fcRestoredView?.scrollTop || 0;

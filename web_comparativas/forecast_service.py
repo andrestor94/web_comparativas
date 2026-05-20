@@ -4,12 +4,14 @@ Pure Python/pandas, zero Streamlit dependencies.
 """
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import logging
 import threading
 import time
 import datetime as dt
+from collections import OrderedDict
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -82,18 +84,45 @@ _client_overrides: dict[str, dict[tuple, float]] = {}
 # TTL: 5 min for data, 15 min for filter-options (rarely changes mid-session).
 # Cleared on: a) reload_data(), b) save_client_overrides() (overrides alter data).
 # ---------------------------------------------------------------------------
-_resp_cache: dict[str, tuple[float, Any]] = {}
+_resp_cache: "OrderedDict[str, tuple[float, Any, int]]" = OrderedDict()
 _resp_cache_lock = threading.Lock()
-_RESP_TTL_DATA   = 300   # 5 min — chart, table, treemap, product-list
-_RESP_TTL_STATIC = 900   # 15 min — filter-options
+_resp_inflight: dict[str, threading.Event] = {}
+_RESP_TTL_DATA   = 600   # 10 min — chart, table, treemap, product-list
+_RESP_TTL_STATIC = 1800  # 30 min — filter-options
+_RESP_CACHE_MAX_ITEMS = 128
+_RESP_CACHE_MAX_ENTRY_BYTES = 1_500_000
+_RESP_CACHE_MAX_TOTAL_BYTES = 32_000_000
 _OVERRIDE_PCT_TOL = 5e-4
 
 
+def _is_all_marker(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"", "all", "todos", "todo", "__all__", "none", "null"}
+
+
+def _norm_filter_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        value = [value]
+    normalized = {
+        str(v).strip()
+        for v in value
+        if v is not None and not _is_all_marker(v)
+    }
+    return sorted(normalized)
+
+
 def _resp_key(fn_name: str, *args, **kwargs) -> str:
-    """Stable JSON key from fn name + args (lists normalised to sorted for consistency)."""
+    """Stable JSON key from fn name + args.
+
+    Empty filters, "Todos" markers and None collapse to the same key so the
+    cache is reused after Limpiar, reloads and restored UI state.
+    """
     def _norm(v):
-        if isinstance(v, list):
-            return sorted(str(x) for x in v if x is not None)
+        if isinstance(v, (list, tuple, set)):
+            return _norm_filter_list(v)
+        if isinstance(v, str) and _is_all_marker(v):
+            return ""
         return v
     return json.dumps(
         [fn_name, [_norm(a) for a in args], {k: _norm(v) for k, v in sorted(kwargs.items())}],
@@ -106,19 +135,49 @@ def _resp_get(key: str, ttl: float) -> "Any | None":
         entry = _resp_cache.get(key)
     if entry is None:
         return None
-    ts, value = entry
-    return value if (time.monotonic() - ts) < ttl else None
+    ts, value, _size = entry
+    if (time.monotonic() - ts) >= ttl:
+        with _resp_cache_lock:
+            _resp_cache.pop(key, None)
+        return None
+    with _resp_cache_lock:
+        _resp_cache.move_to_end(key)
+    return copy.deepcopy(value)
 
 
 def _resp_set(key: str, value: Any) -> None:
+    try:
+        approx_size = len(json.dumps(value, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        approx_size = 0
+    if approx_size > _RESP_CACHE_MAX_ENTRY_BYTES:
+        logger.info("[FORECAST cache] SKIP oversized entry bytes=%s key=%.120s", approx_size, key)
+        return
     with _resp_cache_lock:
-        _resp_cache[key] = (time.monotonic(), value)
+        _resp_cache[key] = (time.monotonic(), copy.deepcopy(value), approx_size)
+        _resp_cache.move_to_end(key)
+        total = sum(entry[2] for entry in _resp_cache.values())
+        while (
+            len(_resp_cache) > _RESP_CACHE_MAX_ITEMS
+            or total > _RESP_CACHE_MAX_TOTAL_BYTES
+        ) and _resp_cache:
+            _, (_, _, dropped_size) = _resp_cache.popitem(last=False)
+            total -= dropped_size
 
 
 def clear_response_cache() -> None:
     """Flush the service-level response cache (after reload or client-save)."""
     with _resp_cache_lock:
         _resp_cache.clear()
+        _resp_inflight.clear()
+    with _PROD_CODE_CACHE_LOCK:
+        _PROD_CODE_CACHE.clear()
+    with _LAB_CODE_CACHE_LOCK:
+        _LAB_CODE_CACHE.clear()
+    # Also clear canonical series cache so it refreshes with new data
+    global _CANONICAL_SERIES_CACHE
+    with _CANONICAL_SERIES_LOCK:
+        _CANONICAL_SERIES_CACHE = None
     logger.info("[FORECAST cache] Response cache cleared.")
 
 
@@ -192,6 +251,19 @@ def _get_precio_map_cached() -> dict:
 _FORECAST_PERIODS_CACHE: "tuple[float, list] | None" = None
 _FORECAST_PERIODS_TTL = 600  # 10 min
 _FORECAST_PERIODS_LOCK = threading.Lock()
+_PROD_CODE_CACHE: "OrderedDict[str, tuple[float, list]]" = OrderedDict()
+_PROD_CODE_CACHE_TTL = 600
+_PROD_CODE_CACHE_LOCK = threading.Lock()
+_LAB_CODE_CACHE: "OrderedDict[str, tuple[float, list]]" = OrderedDict()
+_LAB_CODE_CACHE_TTL = 900
+_LAB_CODE_CACHE_LOCK = threading.Lock()
+
+# Cache for canonical series codes from forecast_valorizado.
+# Used to replace the expensive IN(SELECT DISTINCT...) subquery in hist queries.
+# TTL=1h — series set changes only when data is reloaded.
+_CANONICAL_SERIES_CACHE: "tuple[float, list[str]] | None" = None
+_CANONICAL_SERIES_TTL = 3600
+_CANONICAL_SERIES_LOCK = threading.Lock()
 
 
 def _get_forecast_periods_cached() -> list:
@@ -215,6 +287,37 @@ def _get_forecast_periods_cached() -> list:
         return result
 
 
+def _get_canonical_series_cached() -> list[str]:
+    """Return list of distinct codigo_serie from forecast_valorizado, cached for 1 hour.
+
+    Used to replace the expensive correlated subquery
+    ``AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado)``
+    with a pre-resolved literal list via _safe_in()/ANY(ARRAY[...]).
+    Returns [] on any error (caller falls back to original subquery).
+    """
+    global _CANONICAL_SERIES_CACHE
+    with _CANONICAL_SERIES_LOCK:
+        if _CANONICAL_SERIES_CACHE is not None:
+            ts, val = _CANONICAL_SERIES_CACHE
+            if time.monotonic() - ts < _CANONICAL_SERIES_TTL:
+                return val
+        df = _query_agg(
+            "SELECT DISTINCT codigo_serie FROM forecast_valorizado WHERE codigo_serie IS NOT NULL"
+        )
+        result: list[str] = []
+        if not df.empty and "codigo_serie" in df.columns:
+            result = sorted({str(c).strip() for c in df["codigo_serie"].tolist() if c is not None and str(c).strip()})
+        _CANONICAL_SERIES_CACHE = (time.monotonic(), result)
+        logger.info("[FORECAST cache] canonical_series refreshed — %d series.", len(result))
+        return result
+
+
+def _clear_canonical_series_cache() -> None:
+    global _CANONICAL_SERIES_CACHE
+    with _CANONICAL_SERIES_LOCK:
+        _CANONICAL_SERIES_CACHE = None
+
+
 def _with_resp_cache(ttl: float):
     """Decorator: transparently cache the return value of a public get_* function."""
     def decorator(fn):
@@ -225,10 +328,30 @@ def _with_resp_cache(ttl: float):
             if cached is not None:
                 logger.debug("[FORECAST cache] HIT  %s", fn.__name__)
                 return cached
+            owner = False
+            with _resp_cache_lock:
+                event = _resp_inflight.get(key)
+                if event is None:
+                    event = threading.Event()
+                    _resp_inflight[key] = event
+                    owner = True
+            if not owner:
+                logger.debug("[FORECAST cache] WAIT %s", fn.__name__)
+                event.wait(timeout=55)
+                cached = _resp_get(key, ttl)
+                if cached is not None:
+                    return cached
             logger.debug("[FORECAST cache] MISS %s", fn.__name__)
-            result = fn(*args, **kwargs)
-            _resp_set(key, result)
-            return result
+            try:
+                result = fn(*args, **kwargs)
+                _resp_set(key, result)
+                return result
+            finally:
+                if owner:
+                    with _resp_cache_lock:
+                        done_event = _resp_inflight.pop(key, None)
+                    if done_event is not None:
+                        done_event.set()
         return wrapper
     return decorator
 
@@ -847,19 +970,14 @@ def save_group_expectations(
                       is True whenever growth_pct != base_growth_pct.
     Returns {"saved_clients": N, "skipped_clients": [...]}.
     """
-    print(f"[SAVE_GROUP SERVICE] start — group={group_name!r} clients={len(client_ids)} "
-          f"target={growth_pct}% base={base_growth_pct}% user={user_id}", flush=True)
     group_name = clean_group_key(group_name)
     client_ids = [_clean_override_text(c) for c in (client_ids or []) if _clean_override_text(c)]
     effective_from_month = get_forecast_effective_month()
     storage = "postgresql" if (engine is not None and "postgresql" in str(engine.url)) else "sqlite"
-    print(f"[SAVE_GROUP] group={group_name}", flush=True)
-    print(f"[SAVE_GROUP SERVICE] client_ids received: {client_ids}", flush=True)
 
     if not client_ids:
         # Frontend sent empty client_ids — try to resolve from group_name in DB
         clean_group = clean_group_key(group_name).replace("'", "''")
-        print(f"[SAVE_GROUP SERVICE] client_ids EMPTY — resolving from DB for group={clean_group!r}", flush=True)
         if clean_group:
             if storage == "sqlite":
                 _df_val = get_data().get("df_valorizado", pd.DataFrame())
@@ -875,9 +993,7 @@ def save_group_expectations(
                 )
             if not df_group.empty:
                 client_ids = df_group["fantasia"].dropna().tolist()
-                print(f"[SAVE_GROUP SERVICE] resolved {len(client_ids)} clients from DB: {client_ids}", flush=True)
         if not client_ids:
-            print("[SAVE_GROUP SERVICE] could not resolve clients — returning early", flush=True)
             return {
                 "saved_clients": 0,
                 "saved_overrides": 0,
@@ -890,12 +1006,9 @@ def save_group_expectations(
 
     clean_ids = [_clean_override_text(c) for c in client_ids if c]
     if not clean_ids:
-        print("[SAVE_GROUP SERVICE] clean_ids is EMPTY after cleaning — returning early", flush=True)
         return {"saved_clients": 0, "saved_overrides": 0, "skipped_clients": [],
                 "storage": storage, "effective_from_month": effective_from_month, "sample": [],
                 "error": "Lista de cuentas inválida tras normalización"}
-
-    print(f"[SAVE_GROUP SERVICE] clean_ids: {clean_ids}", flush=True)
 
     # Query distinct (fantasia, subneg) pairs — use TRIM() for reliable matching
     if storage == "sqlite":
@@ -922,8 +1035,6 @@ def save_group_expectations(
             f"FROM forecast_valorizado "
             f"WHERE {where_clause} AND subneg IS NOT NULL AND TRIM(subneg) <> ''"
         )
-    print(f"[SAVE_GROUP SERVICE] _query_agg returned {len(df_sub)} rows "
-          f"(empty means SQLite or DB error)", flush=True)
     logger.info(
         "[SAVE_GROUP] group=%r clients=%d df_sub rows=%d",
         group_name, len(clean_ids), len(df_sub),
@@ -938,12 +1049,8 @@ def save_group_expectations(
                 client_subnegs.setdefault(client, [])
                 if sub not in client_subnegs[client]:
                     client_subnegs[client].append(sub)
-        print(f"[SAVE_GROUP SERVICE] client_subnegs built: {dict((k, len(v)) for k, v in client_subnegs.items())}", flush=True)
-    else:
-        print("[SAVE_GROUP SERVICE] df_sub empty — all clients will use wildcard subneg='' path", flush=True)
 
     effective_from_month = get_forecast_effective_month()
-    print(f"[SAVE_GROUP SERVICE] effective_from_month={effective_from_month!r}", flush=True)
     saved = 0
     saved_overrides = 0
     sample: list[dict[str, Any]] = []
@@ -951,11 +1058,9 @@ def save_group_expectations(
     for client_id in client_ids:
         clean_id = _clean_override_text(client_id)
         subnegs = client_subnegs.get(client_id) or client_subnegs.get(clean_id) or []
-        print(f"[SAVE_GROUP SERVICE] processing client={clean_id!r} subnegs={subnegs}", flush=True)
 
         # Always clear existing overrides so group save fully replaces individual ones
         clear_client_overrides(user_id=user_id, client_id=client_id, user_email=user_email)
-        print(f"[SAVE_GROUP SERVICE] cleared overrides for {clean_id!r}", flush=True)
 
         if subnegs:
             # Same mechanism as individual modal save:
@@ -969,8 +1074,6 @@ def save_group_expectations(
                 user_email=user_email,
                 subneg_overrides=subneg_overrides,
             )
-            print(f"[SAVE_GROUP SERVICE] SAVED {len(subnegs)} subneg overrides for {clean_id!r} "
-                  f"base={base_growth_pct}% target={growth_pct}%", flush=True)
             saved_overrides += len(subnegs)
             if len(sample) < 5:
                 for sub in subnegs[: 5 - len(sample)]:
@@ -1015,8 +1118,6 @@ def save_group_expectations(
                     )
                     session.commit()
                 clear_response_cache()
-            print(f"[SAVE_GROUP SERVICE] SAVED wildcard override for {clean_id!r} "
-                  f"base={base_growth_pct}% target={growth_pct}% efm={effective_from_month!r}", flush=True)
             logger.info("[SAVE_GROUP] client=%r no subnegs — wildcard override saved base=%.1f%% target=%.1f%%",
                         clean_id, base_growth_pct, growth_pct)
 
@@ -1032,11 +1133,7 @@ def save_group_expectations(
 
         saved += 1
 
-    print(f"[SAVE_GROUP SERVICE] complete — saved_clients={saved} skipped={len(skipped)}", flush=True)
     logger.info("[SAVE_GROUP] done — saved=%d skipped=%d", saved, len(skipped))
-    print(f"[SAVE_GROUP] clients={saved}", flush=True)
-    print(f"[SAVE_GROUP] saved_overrides={saved_overrides}", flush=True)
-    print(f"[SAVE_GROUP] effective_from_month={effective_from_month}", flush=True)
     return {
         "saved_clients": saved,
         "saved_overrides": saved_overrides,
@@ -1684,8 +1781,12 @@ def _load_all_data() -> dict[str, Any]:
 
 
 def _safe_in(col: str, vals: list) -> str:
-    if not vals: return ""
+    vals = _norm_filter_list(vals)
+    if not vals:
+        return ""
     clean_vals = ["'" + str(v).replace("'", "''") + "'" for v in vals]
+    if len(clean_vals) > 20 and engine is not None and "postgresql" in str(engine.url):
+        return f"{col} = ANY(ARRAY[{','.join(clean_vals)}])"
     return f"{col} IN ({','.join(clean_vals)})"
 
 def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=None, subneg=None, products=None, extra_where=None) -> "pd.DataFrame":
@@ -1733,6 +1834,11 @@ def _build_filter_sql(
     skip_neg=False,          # True for tables without neg/subneg cols (imp_hist, fact_2026)
 ) -> str:
     """Build a SQL WHERE clause from dashboard filter params."""
+    profiles = _norm_filter_list(profiles)
+    neg = _norm_filter_list(neg)
+    subneg = _norm_filter_list(subneg)
+    products = _norm_filter_list(products)
+    products_as_codes = _norm_filter_list(products_as_codes) if products_as_codes is not None else None
     parts = ["1=1"]
     if start_date:
         parts.append(f"fecha >= '{start_date}'")
@@ -1775,6 +1881,7 @@ def _query_agg(sql: str, _conn=None) -> "pd.DataFrame":
     Pass _conn to reuse an existing engine connection (avoids pool exhaustion when
     multiple queries are needed in the same request).
     """
+    t0 = time.perf_counter()
     try:
         if engine is None or "sqlite" in str(engine.url):
             return pd.DataFrame()
@@ -1788,20 +1895,481 @@ def _query_agg(sql: str, _conn=None) -> "pd.DataFrame":
                 df = pd.DataFrame(result.mappings().all())
         if not df.empty and "fecha" in df.columns:
             df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        approx_mem = int(df.memory_usage(deep=True).sum()) if not df.empty else 0
+        logger.info(
+            "[FORECAST SQL] %.1f ms rows=%d mem=%d sql=%.220s",
+            elapsed_ms,
+            len(df),
+            approx_mem,
+            " ".join(sql.split()),
+        )
         return df
     except Exception as exc:
-        logger.error("DB agg query error: %s | SQL (first 300 chars): %.300s", exc, sql)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.error("DB agg query error after %.1f ms: %s | SQL (first 300 chars): %.300s", elapsed_ms, exc, sql)
         return pd.DataFrame()
 
 
 def _pg_resolve_prod_codes(products: list, _conn=None) -> "list | None":
     """Return codigo_serie list for given product names/codes, or None if no product filter.
-    Uses only codigo_serie filter — forecast_main has no descripcion column."""
+    Queries both forecast_main and forecast_valorizado to ensure all products are resolved."""
+    products = _norm_filter_list(products)
     if not products:
         return None
+    cache_key = json.dumps(products, ensure_ascii=False)
+    if _conn is None:
+        with _PROD_CODE_CACHE_LOCK:
+            entry = _PROD_CODE_CACHE.get(cache_key)
+            if entry and (time.monotonic() - entry[0]) < _PROD_CODE_CACHE_TTL:
+                _PROD_CODE_CACHE.move_to_end(cache_key)
+                return list(entry[1])
     where = _safe_in("codigo_serie", products)
-    df = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}", _conn)
-    return df["codigo_serie"].tolist() if not df.empty else []
+    df_main = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_main WHERE {where}", _conn)
+    codes = df_main["codigo_serie"].tolist() if not df_main.empty else []
+
+    if _pg_valorizado_has_codigo_serie():
+        df_val = _query_agg(f"SELECT DISTINCT codigo_serie FROM forecast_valorizado WHERE {where}", _conn)
+        if not df_val.empty:
+            codes = list(set(codes + df_val["codigo_serie"].tolist()))
+    codes = sorted({str(c) for c in codes if c is not None and str(c).strip()})
+    if _conn is None:
+        with _PROD_CODE_CACHE_LOCK:
+            _PROD_CODE_CACHE[cache_key] = (time.monotonic(), list(codes))
+            _PROD_CODE_CACHE.move_to_end(cache_key)
+            while len(_PROD_CODE_CACHE) > 64:
+                _PROD_CODE_CACHE.popitem(last=False)
+    return codes
+
+
+def get_lab_product_codes(lab_name: str | None) -> list[str]:
+    lab = str(lab_name or "").strip()
+    if not lab:
+        return []
+    cache_key = lab.lower()
+    with _LAB_CODE_CACHE_LOCK:
+        entry = _LAB_CODE_CACHE.get(cache_key)
+        if entry and (time.monotonic() - entry[0]) < _LAB_CODE_CACHE_TTL:
+            _LAB_CODE_CACHE.move_to_end(cache_key)
+            return list(entry[1])
+
+    codes: list[str] = []
+    if engine is not None and "postgresql" in str(engine.url):
+        safe_lab = lab.replace("'", "''").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        df_labs = _query_agg(
+            "SELECT codigo_serie, laboratorios FROM forecast_product_labs "
+            f"WHERE laboratorios ILIKE '%\"{safe_lab}\"%' ESCAPE '\\'"
+        )
+        for _, row in df_labs.iterrows():
+            try:
+                labs = json.loads(row.get("laboratorios") or "[]")
+            except Exception:
+                labs = []
+            if lab in labs:
+                codes.append(str(row.get("codigo_serie") or "").strip())
+    else:
+        for code, labs in _build_local_product_lab_map_light().items():
+            if lab in (labs or []):
+                codes.append(str(code).strip())
+
+    codes = sorted({c for c in codes if c})
+    with _LAB_CODE_CACHE_LOCK:
+        _LAB_CODE_CACHE[cache_key] = (time.monotonic(), list(codes))
+        _LAB_CODE_CACHE.move_to_end(cache_key)
+        while len(_LAB_CODE_CACHE) > 64:
+            _LAB_CODE_CACHE.popitem(last=False)
+    return codes
+
+
+def _build_local_product_lab_map_light() -> dict[str, list]:
+    product_lab_map: dict[str, list] = {}
+    if not (SERIES_FILE.exists() and ARTICULOS_FILE.exists()):
+        return product_lab_map
+    try:
+        df_s = pd.read_csv(str(SERIES_FILE), sep=",", encoding="utf-8", dtype=str)
+        df_s.columns = [c.strip() for c in df_s.columns]
+        df_a = pd.read_csv(str(ARTICULOS_FILE), sep=",", encoding="latin-1", dtype=str)
+        df_a.columns = [c.strip() for c in df_a.columns]
+        col_lab = _get_col_ci(df_a, "laboratorio_descrip")
+        col_fam_a = _get_col_ci(df_a, "familia")
+        col_desc_a = _get_col_ci(df_a, "descrip")
+        col_serie = _get_col_ci(df_s, "codigo_serie")
+        col_nivel = _get_col_ci(df_s, "nivel_agregacion")
+        if not (col_lab and col_serie and col_nivel):
+            return product_lab_map
+        df_slim = df_s[[col_serie, col_nivel]].dropna().copy()
+        df_slim[col_serie] = df_slim[col_serie].astype(str).str.strip()
+        df_slim["_nivel"] = df_slim[col_nivel].astype(str).str.strip().str.upper()
+        lab_pairs: list[pd.DataFrame] = []
+        if col_fam_a:
+            fam_src = df_slim[df_slim["_nivel"].eq("FAMILIA")][[col_serie]].drop_duplicates()
+            fam_labs = df_a[[col_fam_a, col_lab]].dropna().drop_duplicates()
+            fam_labs[col_fam_a] = fam_labs[col_fam_a].astype(str).str.strip()
+            lab_pairs.append(
+                fam_src.merge(fam_labs, left_on=col_serie, right_on=col_fam_a, how="left")[[col_serie, col_lab]]
+            )
+        if col_desc_a:
+            art_src = df_slim[df_slim["_nivel"].isin(["ARTICULO", "ITEM"])][[col_serie]].drop_duplicates()
+            desc_labs = df_a[[col_desc_a, col_lab]].dropna().drop_duplicates()
+            desc_labs[col_desc_a] = desc_labs[col_desc_a].astype(str).str.strip()
+            lab_pairs.append(
+                art_src.merge(desc_labs, left_on=col_serie, right_on=col_desc_a, how="left")[[col_serie, col_lab]]
+            )
+        if lab_pairs:
+            lab_df = pd.concat(lab_pairs, ignore_index=True).dropna()
+            lab_df[col_lab] = lab_df[col_lab].astype(str).str.strip()
+            product_lab_map = (
+                lab_df[lab_df[col_lab] != ""]
+                .groupby(col_serie)[col_lab]
+                .apply(lambda s: sorted(set(s)))
+                .to_dict()
+            )
+    except Exception as exc:
+        logger.warning("Local product lab light map failed: %s", exc)
+    return product_lab_map
+
+
+def _local_get_product_list_light(profiles: list | None = None, neg: list | None = None) -> list[dict]:
+    profiles = _norm_filter_list(profiles)
+    neg = _norm_filter_list(neg)
+    try:
+        main_cols = {"neg", "codigo_serie", "perfil", "descripcion"}
+        if not FORECAST_FILE.exists():
+            return []
+        df_main = pd.read_csv(
+            str(FORECAST_FILE),
+            sep=";",
+            decimal=",",
+            encoding="utf-8-sig",
+            low_memory=False,
+            usecols=lambda c: str(c).strip().lower() in main_cols,
+        )
+        df_main.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+        if profiles and "perfil" in df_main.columns:
+            df_main = df_main[df_main["perfil"].isin(profiles)]
+        if neg and "neg" in df_main.columns:
+            df_main = df_main[df_main["neg"].isin(neg)]
+        keep_cols = [c for c in ["neg", "codigo_serie", "perfil", "descripcion"] if c in df_main.columns]
+        df = df_main[keep_cols].drop_duplicates()
+
+        val_path = _VALORIZADO_PARQUET if _VALORIZADO_PARQUET.exists() else _VALORIZADO_PREPARED
+        df_vol = pd.DataFrame(columns=["codigo_serie", "vol_venta"])
+        if val_path.exists():
+            if val_path.suffix.lower() == ".parquet":
+                df_val = pd.read_parquet(str(val_path), columns=["codigo_serie", "perfil", "monto_yhat"])
+            else:
+                df_val = pd.read_csv(
+                    str(val_path),
+                    encoding="utf-8-sig",
+                    low_memory=False,
+                    usecols=lambda c: str(c).strip() in {"codigo_serie", "perfil", "monto_yhat"},
+                )
+            if profiles and "perfil" in df_val.columns:
+                df_val = df_val[df_val["perfil"].isin(profiles)]
+            if neg and "codigo_serie" in df.columns:
+                allowed_codes = set(df["codigo_serie"].dropna().astype(str))
+                df_val = df_val[df_val["codigo_serie"].astype(str).isin(allowed_codes)]
+            if not df_val.empty:
+                df_vol = (
+                    df_val.groupby("codigo_serie", dropna=False)["monto_yhat"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"monto_yhat": "vol_venta"})
+                )
+        if not df_vol.empty:
+            df = pd.merge(df, df_vol, on="codigo_serie", how="left")
+        else:
+            df["vol_venta"] = 0.0
+        df["vol_venta"] = df["vol_venta"].fillna(0.0)
+        if "descripcion" not in df.columns:
+            df["descripcion"] = df["codigo_serie"]
+        lab_map = _build_local_product_lab_map_light()
+        ranking = (
+            df.groupby(["neg", "descripcion"], dropna=False)["vol_venta"]
+            .sum()
+            .reset_index()
+            .sort_values(["neg", "vol_venta"], ascending=[True, False])
+        )
+        ranking["labs"] = ranking["descripcion"].apply(lambda x: lab_map.get(str(x), []))
+        return ranking.to_dict(orient="records")
+    except Exception as exc:
+        logger.warning("Local product-list light path failed, falling back to full load: %s", exc)
+        return []
+
+
+def _local_allowed_codes_for_filters(profiles=None, neg=None, subneg=None, products=None) -> set[str] | None:
+    profiles = _norm_filter_list(profiles)
+    neg = _norm_filter_list(neg)
+    subneg = _norm_filter_list(subneg)
+    products = _norm_filter_list(products)
+    if not (profiles or neg or subneg or products):
+        return None
+    cols = {"codigo_serie", "perfil", "neg", "subneg"}
+    df = pd.read_csv(
+        str(FORECAST_FILE),
+        sep=";",
+        decimal=",",
+        encoding="utf-8-sig",
+        low_memory=False,
+        usecols=lambda c: str(c).strip().lower() in cols,
+    )
+    df.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+    if profiles and "perfil" in df.columns:
+        df = df[df["perfil"].isin(profiles)]
+    if neg and "neg" in df.columns:
+        df = df[df["neg"].isin(neg)]
+    if subneg and "subneg" in df.columns:
+        df = df[df["subneg"].isin(subneg)]
+    if products:
+        df = df[df["codigo_serie"].astype(str).isin(products)]
+    return set(df["codigo_serie"].dropna().astype(str))
+
+
+def _local_get_chart_data_light(
+    user_id: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    profiles: list | None = None,
+    neg: list | None = None,
+    subneg: list | None = None,
+    products: list | None = None,
+    view_money: bool = True,
+    growth_pct: float = 0.0,
+) -> dict:
+    try:
+        profiles = _norm_filter_list(profiles)
+        allowed_codes = _local_allowed_codes_for_filters(profiles, neg, subneg, products)
+        start_ts = pd.to_datetime(start_date) if start_date else None
+        end_ts = pd.to_datetime(end_date) if end_date else None
+
+        df_hist = pd.read_csv(
+            str(IMP_HIST_FILE),
+            encoding="utf-8-sig",
+            low_memory=False,
+            usecols=lambda c: str(c).strip() in {"periodo", "codigo_serie", "perfil", "imp_hist"},
+        )
+        df_hist["fecha"] = pd.to_datetime(df_hist["periodo"], errors="coerce")
+        df_hist["imp_hist"] = pd.to_numeric(
+            df_hist["imp_hist"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+            errors="coerce",
+        ).fillna(0)
+        if start_ts is not None:
+            df_hist = df_hist[df_hist["fecha"] >= start_ts]
+        if end_ts is not None:
+            df_hist = df_hist[df_hist["fecha"] <= end_ts]
+        if profiles and "perfil" in df_hist.columns:
+            df_hist = df_hist[df_hist["perfil"].isin(profiles)]
+        if allowed_codes is not None:
+            df_hist = df_hist[df_hist["codigo_serie"].astype(str).isin(allowed_codes)]
+        hist_agg = df_hist.groupby("fecha", dropna=True)["imp_hist"].sum().reset_index(name="Total_Venta")
+
+        val_cols = ["fecha", "codigo_serie", "perfil", "monto_yhat", "monto_li", "monto_ls", "yhat_cliente", "li_cliente", "ls_cliente"]
+        df_val = pd.read_parquet(str(_VALORIZADO_PARQUET), columns=val_cols)
+        if start_ts is not None:
+            df_val = df_val[df_val["fecha"] >= start_ts]
+        if end_ts is not None:
+            df_val = df_val[df_val["fecha"] <= end_ts]
+        if profiles and "perfil" in df_val.columns:
+            df_val = df_val[df_val["perfil"].isin(profiles)]
+        if allowed_codes is not None:
+            df_val = df_val[df_val["codigo_serie"].astype(str).isin(allowed_codes)]
+        val_col = "monto_yhat" if view_money else "yhat_cliente"
+        li_col = "monto_li" if view_money else "li_cliente"
+        ls_col = "monto_ls" if view_money else "ls_cliente"
+        fcst = (
+            df_val.groupby("fecha", dropna=True)
+            .agg(Total_Forecast=(val_col, "sum"), Total_Li=(li_col, "sum"), Total_Ls=(ls_col, "sum"))
+            .reset_index()
+            .sort_values("fecha")
+        )
+        if fcst.empty:
+            return {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
+        max_hist = hist_agg["fecha"].max() if not hist_agg.empty else pd.Timestamp("2000-01-01")
+        fcst["Total_Adj"] = fcst["Total_Forecast"]
+        if growth_pct:
+            fcst.loc[fcst["fecha"] > max_hist, "Total_Adj"] *= (1.0 + float(growth_pct) / 100.0)
+        fcst["Total_User_Adj"] = fcst["Total_Adj"]
+
+        if not hist_agg.empty:
+            hist_last = hist_agg.sort_values("fecha").iloc[-1]
+            bridge = pd.DataFrame([{
+                "fecha": hist_last["fecha"],
+                "Total_Forecast": float(hist_last["Total_Venta"]),
+                "Total_Li": float(hist_last["Total_Venta"]),
+                "Total_Ls": float(hist_last["Total_Venta"]),
+                "Total_Adj": float(hist_last["Total_Venta"]),
+                "Total_User_Adj": float(hist_last["Total_Venta"]),
+            }])
+            fcst = pd.concat([bridge, fcst], ignore_index=True)
+
+        fact_records: list[dict] = []
+        fact_2026_sum = 0.0
+        if FACT_2026_FILE.exists() and view_money:
+            df_fact = pd.read_csv(
+                str(FACT_2026_FILE),
+                sep=";",
+                encoding="utf-8-sig",
+                low_memory=False,
+                usecols=lambda c: str(c).strip() in {"fecha", "codigo_serie", "perfil", "imp_hist"},
+            )
+            df_fact["fecha"] = pd.to_datetime(df_fact["fecha"], errors="coerce", dayfirst=True)
+            df_fact["imp_hist"] = pd.to_numeric(
+                df_fact["imp_hist"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+                errors="coerce",
+            ).fillna(0)
+            df_fact = df_fact[(df_fact["fecha"] >= "2026-01-01") & (df_fact["fecha"] < "2026-05-01")]
+            if profiles and "perfil" in df_fact.columns:
+                df_fact = df_fact[df_fact["perfil"].isin(profiles)]
+            if allowed_codes is not None:
+                df_fact = df_fact[df_fact["codigo_serie"].astype(str).isin(allowed_codes)]
+            fact_agg = df_fact.groupby("fecha", dropna=True)["imp_hist"].sum().reset_index(name="Total_Venta")
+            fact_2026_sum = float(fact_agg["Total_Venta"].sum()) if not fact_agg.empty else 0.0
+            for _, row in fact_agg.sort_values("fecha").iterrows():
+                fact_records.append({"fecha": row["fecha"].strftime("%Y-%m-%d"), "Total_Venta": round(float(row["Total_Venta"]), 0)})
+
+        def _fmt(dfs: pd.DataFrame, cols: list[str]) -> list[dict]:
+            out = []
+            for _, row in dfs.sort_values("fecha").iterrows():
+                rec = {"fecha": row["fecha"].strftime("%Y-%m-%d") if pd.notna(row["fecha"]) else None}
+                for c in cols:
+                    rec[c] = round(float(row.get(c, 0) or 0), 0)
+                out.append(rec)
+            return out
+
+        total_hist = float(hist_agg["Total_Venta"].sum()) if not hist_agg.empty else 0.0
+        total_real_2025 = float(hist_agg.loc[hist_agg["fecha"].dt.year == 2025, "Total_Venta"].sum()) if not hist_agg.empty else 0.0
+        total_fcst = float(fcst.loc[fcst["fecha"].dt.year == 2026, "Total_Forecast"].sum()) if not fcst.empty else 0.0
+        total_adj = float(fcst.loc[fcst["fecha"].dt.year == 2026, "Total_Adj"].sum()) if not fcst.empty else 0.0
+        inflation_mo = 2.9
+        inflation_pct = ((1 + inflation_mo / 100) ** 12 - 1) * 100
+        return {
+            "history": _fmt(hist_agg, ["Total_Venta"]) if not hist_agg.empty else [],
+            "forecast": _fmt(fcst, ["Total_Forecast", "Total_Li", "Total_Ls", "Total_Adj", "Total_User_Adj"]),
+            "val_2026": fact_records,
+            "has_overrides": False,
+            "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
+            "kpis": {
+                "total_proyeccion_2026": round(total_adj, 0),
+                "var_nominal_2025": round(((total_adj / total_real_2025) - 1) * 100, 2) if total_real_2025 > 0 else 0.0,
+                "inflation_pct": round(inflation_pct, 1),
+                "inflation_mo_pct": inflation_mo,
+                "var_real_2025": round(((total_adj / (1 + inflation_pct / 100) / total_real_2025) - 1) * 100, 2) if total_real_2025 > 0 else 0.0,
+                "accuracy_val": 0.0,
+                "expectation_accuracy_val": 0.0,
+                "fact_2026": round(fact_2026_sum, 0),
+                "meta_completeness": round((fact_2026_sum / total_adj * 100), 1) if total_adj > 0 else 0.0,
+                "total_historia": round(total_hist, 0),
+                "total_proyeccion": round(total_fcst, 0),
+                "total_proyeccion_adj": round(total_adj, 0),
+                "total_real_2025": round(total_real_2025, 0),
+                "n_products": int(df_val["codigo_serie"].nunique()) if not df_val.empty else 0,
+            },
+        }
+    except Exception as exc:
+        logger.warning("Local chart-data light path failed, falling back to full load: %s", exc)
+        return {}
+
+
+def _local_get_treemap_data_light(
+    user_id: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    profiles: list | None = None,
+    neg: list | None = None,
+    subneg: list | None = None,
+    products: list | None = None,
+    view_money: bool = True,
+    period_date: str | None = None,
+) -> dict:
+    _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
+    try:
+        profiles = _norm_filter_list(profiles)
+        allowed_codes = _local_allowed_codes_for_filters(profiles, neg, subneg, products)
+        val_col = "monto_yhat" if view_money else "yhat_cliente"
+        cols = ["fecha", "codigo_serie", "perfil", "cliente_id", val_col]
+        df_val = pd.read_parquet(str(_VALORIZADO_PARQUET), columns=cols)
+        periods = [str(d)[:10] for d in sorted(df_val["fecha"].dropna().unique())]
+        if period_date:
+            target = pd.to_datetime(period_date).replace(day=1)
+            df_val = df_val[df_val["fecha"] == target]
+        else:
+            if start_date:
+                df_val = df_val[df_val["fecha"] >= pd.to_datetime(start_date)]
+            if end_date:
+                df_val = df_val[df_val["fecha"] <= pd.to_datetime(end_date)]
+        if profiles and "perfil" in df_val.columns:
+            df_val = df_val[df_val["perfil"].isin(profiles)]
+        if allowed_codes is not None:
+            df_val = df_val[df_val["codigo_serie"].astype(str).isin(allowed_codes)]
+        if df_val.empty:
+            return {**_EMPTY, "periods": periods}
+        df_tree = (
+            df_val.groupby(["perfil", "cliente_id"], dropna=False)[val_col]
+            .sum()
+            .reset_index()
+            .rename(columns={val_col: "Monto"})
+        )
+        if CLIENTES_FILE.exists():
+            df_cli = pd.read_csv(
+                str(CLIENTES_FILE),
+                encoding="latin-1",
+                dtype=str,
+                usecols=lambda c: str(c).strip() in {"codigo", "fantasia", "nombre_grupo"},
+            )
+            df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
+            df_tree["cliente_id"] = df_tree["cliente_id"].astype(str).str.strip()
+            df_tree = df_tree.merge(df_cli.drop_duplicates("codigo"), left_on="cliente_id", right_on="codigo", how="left")
+        if "fantasia" not in df_tree.columns:
+            df_tree["fantasia"] = df_tree["cliente_id"]
+        if "nombre_grupo" not in df_tree.columns:
+            df_tree["nombre_grupo"] = df_tree["fantasia"]
+        df_tree["Canal"] = df_tree["perfil"].astype(str).str.upper().str.strip().replace(
+            {"NO_ASIGNADO": "POTENCIAL", "NO_ASIGNADA": "POTENCIAL", "SIN ASIGNAR": "POTENCIAL"}
+        )
+        df_tree["Cliente"] = df_tree["fantasia"].fillna(df_tree["cliente_id"]).astype(str).str.strip()
+        grp = df_tree["nombre_grupo"].fillna("").astype(str).str.strip()
+        sin_mask = grp.str.upper().isin({"SIN GRUPO", "SIN GRUPO / OTROS", "", "NAN", "NONE"})
+        df_tree["Grupo"] = grp
+        df_tree.loc[sin_mask, "Grupo"] = df_tree.loc[sin_mask, "Cliente"]
+        tree_df = df_tree.groupby(["Canal", "Grupo", "Cliente"], dropna=False)["Monto"].sum().reset_index()
+        tree_df = tree_df[tree_df["Monto"] > 0]
+        if tree_df.empty:
+            return {**_EMPTY, "periods": periods}
+
+        ids: list[str] = []
+        labels: list[str] = []
+        parents: list[str] = []
+        values: list[float] = []
+        colors: list[str] = []
+
+        def add(nid: str, label: str, parent: str, value: float, color: str) -> None:
+            ids.append(nid); labels.append(label); parents.append(parent); values.append(float(value)); colors.append(color)
+
+        add("total", "Total", "", float(tree_df["Monto"].sum()), "#EAF0F5")
+        canals = [{"name": c, "color": _get_segment_color(c)} for c in sorted(tree_df["Canal"].unique())]
+        for canal, canal_df in tree_df.groupby("Canal", sort=False):
+            base = _get_segment_color(str(canal))
+            cid = f"canal::{canal}"
+            add(cid, str(canal), "total", float(canal_df["Monto"].sum()), _blend_with_white(base, 0.22))
+            group_totals = canal_df.groupby("Grupo", as_index=False)["Monto"].sum().sort_values("Monto", ascending=False)
+            keep_groups = set(group_totals.head(8)["Grupo"])
+            for _, grow in group_totals.iterrows():
+                group_name = str(grow["Grupo"])
+                parent = cid
+                if group_name not in keep_groups:
+                    parent = f"{cid}::otras_grupos"
+                    if parent not in ids:
+                        small_total = float(group_totals[~group_totals["Grupo"].isin(keep_groups)]["Monto"].sum())
+                        add(parent, "Otras", cid, small_total, _blend_with_white(base, 0.14))
+                gid = f"{cid}::grupo::{group_name}"
+                add(gid, group_name, parent, float(grow["Monto"]), _blend_with_white(base, 0.33))
+                clients = canal_df[canal_df["Grupo"] == grow["Grupo"]].sort_values("Monto", ascending=False).head(6)
+                for _, crow in clients.iterrows():
+                    add(f"{gid}::cliente::{crow['Cliente']}", str(crow["Cliente"]), gid, float(crow["Monto"]), _blend_with_white(base, 0.50))
+        return {"ids": ids, "labels": labels, "parents": parents, "values": values, "colors": colors, "periods": periods, "canals": canals}
+    except Exception as exc:
+        logger.warning("Local treemap-data light path failed, falling back to full load: %s", exc)
+        return {}
 
 
 # Cache for schema check — checked once per process lifetime.
@@ -1865,12 +2433,17 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     """
     import json
     neg_where = _build_filter_sql(profiles=profiles, neg=neg)
-    # Query 1: channel mapping — only distinct text columns, no numeric aggregation
+    # Query 1: channel mapping — only distinct text columns, from both main and valorizado
     df_neg = _query_agg(
-        f"SELECT DISTINCT neg, codigo_serie FROM forecast_main WHERE {neg_where}"
+        f"SELECT DISTINCT COALESCE(neg, 'Varios') AS neg, codigo_serie FROM ("
+        f"  SELECT neg, codigo_serie, perfil FROM forecast_main"
+        f"  UNION"
+        f"  SELECT neg, codigo_serie, perfil FROM forecast_valorizado"
+        f") AS combined WHERE {neg_where}"
     )
     if df_neg.empty:
         return []
+    df_neg["neg"] = df_neg["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
 
     # Query 2: monetary volume from forecast_valorizado (monto_yhat is FLOAT)
     vol_where = _build_filter_sql(profiles=profiles, neg=neg)
@@ -1924,7 +2497,6 @@ def _pg_get_chart_data(
         import traceback
         _tb_str = traceback.format_exc()
         logger.error("[FORECAST] _pg_get_chart_data FAILED at step=%s: %s\n%s", _step, exc, _tb_str)
-        print(f"[FORECAST] _pg_get_chart_data FAILED step={_step}: {exc}\n{_tb_str}", flush=True)
         return _EMPTY
 
 
@@ -1938,19 +2510,16 @@ def _pg_get_chart_data_inner(
     _ovr_records = _fetch_override_records(user_id, all_users=is_admin)
     _ovr_active = bool(_ovr_records)
 
-    print(
-        f"[FORECAST INNER] ETAPA 1 — resolve_prod_codes "
-        f"start={start_date} end={end_date} growth_pct={growth_pct} "
-        f"view_money={view_money} profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"has_overrides={_ovr_active}",
-        flush=True,
+    logger.debug(
+        "[FORECAST INNER] chart start=%s end=%s growth_pct=%s profiles=%s neg=%s subneg=%s has_overrides=%s",
+        start_date, end_date, growth_pct, profiles, neg, subneg, _ovr_active,
     )
     # Resolve product descriptions → codigo_serie (avoids cross-table joins in Python)
     prod_codes = _pg_resolve_prod_codes(products)
     # val_prod: None when forecast_valorizado lacks the column (graceful degradation)
     val_prod   = _val_prod_filter(prod_codes)
 
-    print(f"[FORECAST INNER] ETAPA 2 — build_where prod_codes_count={len(prod_codes) if prod_codes is not None else 'None'}", flush=True)
+    logger.debug("[FORECAST INNER] prod_codes_count=%s", len(prod_codes) if prod_codes is not None else "None")
     # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
     main_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
@@ -1958,20 +2527,31 @@ def _pg_get_chart_data_inner(
         products_as_codes=prod_codes,
         products=None if prod_codes is not None else products,
     )
-    print(f"[FORECAST INNER] ETAPA 3 — query_meta main_where_len={len(main_where)}", flush=True)
+    logger.debug("[FORECAST INNER] main_where_len=%s", len(main_where))
     # Lightweight metadata: only n_products varies by filter; max_hist_date is global
-    # forecast_main has no descripcion — count by codigo_serie
-    df_meta = _query_agg(
-        f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
-        f"FROM forecast_main WHERE {main_where}"
-    )
+    if _pg_valorizado_has_codigo_serie():
+        val_where_meta = _build_filter_sql(
+            start_date=start_date, end_date=end_date,
+            profiles=profiles, neg=neg, subneg=subneg,
+            products_as_codes=val_prod,
+            products=None if val_prod is not None else products,
+        )
+        df_meta = _query_agg(
+            f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
+            f"FROM forecast_valorizado WHERE {val_where_meta}"
+        )
+    else:
+        df_meta = _query_agg(
+            f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
+            f"FROM forecast_main WHERE {main_where}"
+        )
     if df_meta.empty:
-        print(f"[FORECAST INNER] df_meta empty — returning _EMPTY", flush=True)
+        logger.debug("[FORECAST INNER] df_meta empty — returning _EMPTY")
         return _EMPTY
     n_products = int(df_meta["n_products"].iloc[0] or 0)
     _cached_mhd = _get_max_hist_date_cached()
     max_hist = _cached_mhd if _cached_mhd is not None else pd.Timestamp("2000-01-01")
-    print(f"[FORECAST INNER] meta OK — n_products={n_products} max_hist={max_hist}", flush=True)
+    logger.debug("[FORECAST INNER] meta n_products=%s max_hist=%s", n_products, max_hist)
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
     # hist/fact tables always have codigo_serie — use prod_codes (not val_prod) here.
@@ -2001,7 +2581,7 @@ def _pg_get_chart_data_inner(
         products=None if prod_codes is not None else products,
     ) if _has_series_filter else None
 
-    print(f"[FORECAST INNER] ETAPA 4 — query_hist view_money={view_money}", flush=True)
+    logger.debug("[FORECAST INNER] query_hist view_money=%s", view_money)
     # History: from imp_hist (real billing, already in money) or forecast_main y×precio
     # NOTE: PostgreSQL returns column aliases in lowercase regardless of AS casing.
     # All queries use lowercase aliases; rename to Title-Case after each query so the
@@ -2011,11 +2591,19 @@ def _pg_get_chart_data_inner(
         # forecast_valorizado (same inner-join the original app.py applied at load time).
         # Without this filter forecast_imp_hist returns 44 861 rows / $109.1B (all series).
         # With it: 38 758 rows / $98.0B — the correct real-2025 baseline.
+        # Use cached canonical series list to avoid correlated IN(SELECT DISTINCT...) subquery
+        # which is expensive on 702K-row forecast_valorizado.
+        _canonical = _get_canonical_series_cached()
+        if _canonical:
+            _canon_filter = _safe_in("codigo_serie", _canonical)
+            _canon_clause = f" AND {_canon_filter}" if _canon_filter else ""
+        else:
+            # Fallback to original subquery when cache miss / empty result
+            _canon_clause = " AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado)"
         df_hist = _query_agg(
             f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
             f"FROM forecast_imp_hist "
-            f"WHERE {hist_where} "
-            f"AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado) "
+            f"WHERE {hist_where}{_canon_clause} "
             f"GROUP BY fecha ORDER BY fecha"
         )
         # forecast_main fallback intentionally omitted: y/yhat are TEXT in production,
@@ -2031,7 +2619,7 @@ def _pg_get_chart_data_inner(
     if not df_hist.empty and "total_venta" in df_hist.columns:
         df_hist.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
 
-    print(f"[FORECAST INNER] ETAPA 5 — query_fcst df_hist_rows={len(df_hist)} hist_cols={list(df_hist.columns) if not df_hist.empty else []}", flush=True)
+    logger.debug("[FORECAST INNER] hist_rows=%s — querying forecast", len(df_hist))
     # Forecast: from valorizado (monto_yhat=money, yhat_cliente=units; monto_li/monto_ls=band)
     val_col    = "monto_yhat"    if view_money else "yhat_cliente"
     val_col_li = "monto_li"      if view_money else "li_cliente"
@@ -2070,42 +2658,35 @@ def _pg_get_chart_data_inner(
         # Parte de Total_Adj (crecimiento estándar) y aplica un delta por producto/mes
         # donde el usuario editó la tasa: delta = orig × (override_pct − growth_pct) / 100.
         # Rows sin override contribuyen igual a Total_Adj → solo los editados difieren.
-        print(
-            f"[FORECAST INNER] ETAPA 6 — df_fcst base OK "
-            f"df_fcst_rows={len(df_fcst)} df_fcst_cols={list(df_fcst.columns)}",
-            flush=True,
-        )
+        logger.debug("[FORECAST INNER] df_fcst_rows=%s", len(df_fcst))
         df_fcst["Total_User_Adj"] = df_fcst["Total_Adj"].copy()
 
-    # ── DIAGNOSTIC: log all override records to confirm they exist and what they contain ─
-    _ovr_record_summary = []
-    for _r in _ovr_records[:10]:  # cap at 10 to avoid log spam
-        _ovr_record_summary.append({
-            "sel": getattr(_r, "client_selector", "?"),
-            "scope": getattr(_r, "override_scope", "?"),
-            "subneg": getattr(_r, "subneg", "?"),
-            "annual_pct": getattr(_r, "override_growth_pct", "?"),
-            "efm": getattr(_r, "effective_from_month", "?"),
-            "active": getattr(_r, "is_active", "?"),
-        })
-    print(
-        f"[FORECAST INNER] ETAPA 8 — override application "
-        f"df_fcst_rows={len(df_fcst)} df_hist_rows={len(df_hist)} "
-        f"ovr_active={_ovr_active} ovr_records={len(_ovr_records)} "
-        f"records_sample={_ovr_record_summary}",
-        flush=True,
-    )
+    # ── DIAGNOSTIC: log override records at debug level only ─────────────
+    if _ovr_active and logger.isEnabledFor(logging.DEBUG):
+        _ovr_record_summary = [
+            {
+                "sel": getattr(_r, "client_selector", "?"),
+                "scope": getattr(_r, "override_scope", "?"),
+                "subneg": getattr(_r, "subneg", "?"),
+                "annual_pct": getattr(_r, "override_growth_pct", "?"),
+                "efm": getattr(_r, "effective_from_month", "?"),
+                "active": getattr(_r, "is_active", "?"),
+            }
+            for _r in _ovr_records[:5]
+        ]
+        logger.debug(
+            "[FORECAST INNER] override application fcst_rows=%s hist_rows=%s ovr_records=%s sample=%s",
+            len(df_fcst), len(df_hist), len(_ovr_records), _ovr_record_summary,
+        )
     if _ovr_active:
         _override_rows = _query_agg(
             f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
             f"COALESCE({val_col}, 0) AS base_val "
             f"FROM forecast_valorizado WHERE {val_where}"
         )
-        print(
-            f"[FORECAST INNER] ETAPA 8 override_rows_raw={len(_override_rows)} "
-            f"override_rows_cols={list(_override_rows.columns) if not _override_rows.empty else []} "
-            f"fantasia_sample={_override_rows['fantasia'].dropna().unique()[:5].tolist() if not _override_rows.empty and 'fantasia' in _override_rows.columns else []}",
-            flush=True,
+        logger.debug(
+            "[FORECAST INNER] override_rows_raw=%s",
+            len(_override_rows),
         )
         if not _override_rows.empty:
             _override_rows, _ovr_maps = _apply_override_effects_to_dataframe(
@@ -2123,19 +2704,18 @@ def _pg_get_chart_data_inner(
             if "_has_override" in _override_rows.columns:
                 _ovr_detail = _override_rows[_override_rows["_has_override"] == True]
                 if not _ovr_detail.empty:
-                    _sample = _ovr_detail[["fantasia", "subneg", "_override_scope", "_annual_eff"]].drop_duplicates().head(5)
-                    print(f"[FORECAST INNER] ETAPA 8 overridden_rows_sample=\n{_sample.to_string()}", flush=True)
+                    logger.debug(
+                        "[FORECAST INNER] overridden_rows_sample=%s",
+                        _ovr_detail[["fantasia", "subneg", "_override_scope", "_annual_eff"]].drop_duplicates().head(5).to_dict("records"),
+                    )
                 else:
                     # Log WHY no rows got overridden — check selector matching
                     _rec_selectors = {_clean_override_text(getattr(r, "client_selector", "")) for r in _ovr_records}
                     _df_selectors = set(_override_rows["fantasia"].dropna().apply(_clean_override_text).unique()[:20].tolist()) if "fantasia" in _override_rows.columns else set()
                     _matching = _rec_selectors & _df_selectors
-                    print(
-                        f"[FORECAST USER ADJ DEBUG] NO OVERRIDES APPLIED — "
-                        f"rec_selectors={_rec_selectors} "
-                        f"df_selectors_sample={list(_df_selectors)[:5]} "
-                        f"matching={_matching}",
-                        flush=True,
+                    logger.info(
+                        "[FORECAST USER ADJ] NO OVERRIDES APPLIED rec_selectors=%s df_selectors_sample=%s matching=%s",
+                        _rec_selectors, list(_df_selectors)[:5], _matching,
                     )
             _ua_sql = (
                 _override_rows.groupby("fecha")["_ua_sql"].sum()
@@ -2149,21 +2729,15 @@ def _pg_get_chart_data_inner(
             df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
             _future_mask = df_fcst["fecha"] > max_hist
             _adj_diff = (df_fcst.loc[_future_mask, "Total_User_Adj"] - df_fcst.loc[_future_mask, "Total_Adj"]).abs().sum()
-            print(
-                f"[FORECAST INNER] ETAPA 8 done — overridden_rows={_n_overridden} base_rows={_n_base} "
-                f"future_months={_future_mask.sum()} total_adj_diff={_adj_diff:,.0f}",
-                flush=True,
+            logger.debug(
+                "[FORECAST INNER] overrides applied: overridden=%s future_months=%s adj_diff=%.0f",
+                _n_overridden, _future_mask.sum(), _adj_diff,
             )
-            # Per-month breakdown for future months
-            for _, _mr in df_fcst[_future_mask].sort_values("fecha").iterrows():
-                _m = _mr["fecha"].strftime("%Y-%m") if pd.notna(_mr.get("fecha")) else "?"
-                _ta = _mr.get("Total_Adj", 0)
-                _tu = _mr.get("Total_User_Adj", 0)
-                _diff = _tu - _ta
-                if abs(_diff) > 1:
-                    print(f"[FORECAST USER ADJ DEBUG] month={_m} total_adj={_ta:,.0f} total_user_adj={_tu:,.0f} diff={_diff:,.0f}", flush=True)
             if _adj_diff == 0:
-                print(f"[FORECAST USER ADJ SUMMARY] ovr_records={len(_ovr_records)} overridden_rows={_n_overridden} months_with_diff=0 total_abs_diff=0 — INVESTIGATE SELECTOR/SUBNEG MISMATCH", flush=True)
+                logger.info(
+                    "[FORECAST USER ADJ] zero diff after apply — ovr_records=%s overridden=%s",
+                    len(_ovr_records), _n_overridden,
+                )
 
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
@@ -2178,7 +2752,7 @@ def _pg_get_chart_data_inner(
         }])
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
-    print(f"[FORECAST INNER] ETAPA 9 — query_fact2026", flush=True)
+    logger.debug("[FORECAST INNER] querying fact2026")
     # Facturación real 2026 — fuente única: forecast_fact_2026 (Jan–Apr 2026)
     # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
     # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
@@ -2220,7 +2794,7 @@ def _pg_get_chart_data_inner(
                 "Total_Venta": round(float(row.get("Total_Venta", 0)), 0),
             })
 
-    print(f"[FORECAST INNER] ETAPA 10 — kpis df_fact_raw_rows={len(df_fact_raw)}", flush=True)
+    logger.debug("[FORECAST INNER] fact2026_rows=%s — computing kpis", len(df_fact_raw))
     # KPIs
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0.0
     total_real_2025 = 0.0
@@ -2265,12 +2839,9 @@ def _pg_get_chart_data_inner(
             out.append(rec)
         return out
 
-    print(
-        f"[FORECAST INNER] ETAPA 11 — serialize "
-        f"total_adj={round(total_adj, 0)} total_hist={round(total_hist, 0)} "
-        f"total_fcst={round(total_fcst, 0)} n_products={n_products} "
-        f"forecast_cols={list(df_fcst.columns) if not df_fcst.empty else []}",
-        flush=True,
+    logger.info(
+        "[FORECAST] chart-data: total_adj=%.0f total_hist=%.0f n_products=%s",
+        total_adj, total_hist, n_products,
     )
     return {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
@@ -2974,45 +3545,74 @@ def get_filter_options() -> dict:
         # ── Core filters: profiles, neg, subneg, dates ────────────────────
         # Isolated in their own try/except so a labs table absence does NOT
         # wipe out the core filter options (critical for Problem 2).
-        perfiles_set = set()
-        negs_set = set()
-        subnegs_set = set()
+        # OPTIMIZED: replaced 9 separate pd.read_sql() calls with 4 combined
+        # UNION queries in a single connection — saves ~6 DB round-trips.
+        perfiles_set: set = set()
+        negs_set: set = set()
+        subnegs_set: set = set()
         min_dates = []
         max_dates = []
         try:
             with engine.connect() as conn:
-                # Query forecast_main
-                df_main_p = pd.read_sql("SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn)
-                perfiles_set.update(df_main_p["perfil"].tolist())
-                df_main_n = pd.read_sql("SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn)
-                negs_set.update(df_main_n["neg"].tolist())
-                df_main_s = pd.read_sql("SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn)
-                subnegs_set.update(df_main_s["subneg"].tolist())
+                # 1. Combined distinct perfil from both tables (1 query vs 2)
+                df_perfiles = pd.read_sql(
+                    "SELECT DISTINCT perfil AS v FROM forecast_main WHERE perfil IS NOT NULL"
+                    " UNION "
+                    "SELECT DISTINCT perfil FROM forecast_valorizado WHERE perfil IS NOT NULL",
+                    conn,
+                )
+                if not df_perfiles.empty:
+                    perfiles_set.update(df_perfiles["v"].tolist())
 
-                valid_dates_main = pd.read_sql("SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_main", conn)
-                if not valid_dates_main.empty:
-                    if pd.notnull(valid_dates_main["min_d"].iloc[0]):
-                        min_dates.append(pd.to_datetime(valid_dates_main["min_d"].iloc[0]))
-                    if pd.notnull(valid_dates_main["max_d"].iloc[0]):
-                        max_dates.append(pd.to_datetime(valid_dates_main["max_d"].iloc[0]))
+                # 2. Combined distinct neg
+                df_negs = pd.read_sql(
+                    "SELECT DISTINCT neg AS v FROM forecast_main WHERE neg IS NOT NULL"
+                    " UNION "
+                    "SELECT DISTINCT neg FROM forecast_valorizado WHERE neg IS NOT NULL",
+                    conn,
+                )
+                if not df_negs.empty:
+                    negs_set.update(df_negs["v"].tolist())
 
-                # Query forecast_valorizado if it exists
+                # 3. Combined distinct subneg
+                df_subnegs = pd.read_sql(
+                    "SELECT DISTINCT subneg AS v FROM forecast_main WHERE subneg IS NOT NULL"
+                    " UNION "
+                    "SELECT DISTINCT subneg FROM forecast_valorizado WHERE subneg IS NOT NULL",
+                    conn,
+                )
+                if not df_subnegs.empty:
+                    subnegs_set.update(df_subnegs["v"].tolist())
+
+                # 4. Date range from both tables in one query
+                df_dates = pd.read_sql(
+                    "SELECT MIN(fecha) AS min_d, MAX(fecha) AS max_d FROM ("
+                    "  SELECT fecha FROM forecast_main"
+                    "  UNION ALL"
+                    "  SELECT fecha FROM forecast_valorizado"
+                    ") t",
+                    conn,
+                )
+                if not df_dates.empty:
+                    if pd.notnull(df_dates["min_d"].iloc[0]):
+                        min_dates.append(pd.to_datetime(df_dates["min_d"].iloc[0]))
+                    if pd.notnull(df_dates["max_d"].iloc[0]):
+                        max_dates.append(pd.to_datetime(df_dates["max_d"].iloc[0]))
+
+                # 5. Labs (optional — must NOT affect core filters if absent)
+                all_labs: set = set()
                 try:
-                    df_val_p = pd.read_sql("SELECT DISTINCT perfil FROM forecast_valorizado WHERE perfil IS NOT NULL", conn)
-                    perfiles_set.update(df_val_p["perfil"].tolist())
-                    df_val_n = pd.read_sql("SELECT DISTINCT neg FROM forecast_valorizado WHERE neg IS NOT NULL", conn)
-                    negs_set.update(df_val_n["neg"].tolist())
-                    df_val_s = pd.read_sql("SELECT DISTINCT subneg FROM forecast_valorizado WHERE subneg IS NOT NULL", conn)
-                    subnegs_set.update(df_val_s["subneg"].tolist())
-
-                    valid_dates_val = pd.read_sql("SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_valorizado", conn)
-                    if not valid_dates_val.empty:
-                        if pd.notnull(valid_dates_val["min_d"].iloc[0]):
-                            min_dates.append(pd.to_datetime(valid_dates_val["min_d"].iloc[0]))
-                        if pd.notnull(valid_dates_val["max_d"].iloc[0]):
-                            max_dates.append(pd.to_datetime(valid_dates_val["max_d"].iloc[0]))
-                except Exception as val_exc:
-                    logger.warning("get_filter_options: could not query forecast_valorizado (%s)", val_exc)
+                    labs_df = pd.read_sql(
+                        "SELECT laboratorios FROM forecast_product_labs", conn
+                    )
+                    if not labs_df.empty:
+                        for _, row in labs_df.iterrows():
+                            try:
+                                all_labs.update(json.loads(row["laboratorios"]))
+                            except Exception:
+                                pass
+                except Exception as labs_exc:
+                    logger.warning("Filter options: forecast_product_labs not available (%s)", labs_exc)
 
             def sanitize_list(s):
                 return sorted(list({str(x).strip() for x in s if x is not None and pd.notna(x) and str(x).strip() != "" and str(x).lower().strip() != "nan" and str(x).lower().strip() != "none"}))
@@ -3028,22 +3628,6 @@ def get_filter_options() -> dict:
             logger.error("Filter options DB error (core): %s", exc, exc_info=True)
             return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
 
-        # ── Labs: optional — failure here must NOT affect core filters ────
-        all_labs: set = set()
-        try:
-            with engine.connect() as conn:
-                labs_df = pd.read_sql(
-                    "SELECT codigo_serie, laboratorios FROM forecast_product_labs", conn
-                )
-                if not labs_df.empty:
-                    for _, row in labs_df.iterrows():
-                        try:
-                            all_labs.update(json.loads(row["laboratorios"]))
-                        except Exception:
-                            pass
-        except Exception as exc:
-            logger.warning("Filter options: forecast_product_labs not available (%s)", exc)
-
         return {
             "profiles": perfiles,
             "neg": negs,
@@ -3053,32 +3637,77 @@ def get_filter_options() -> dict:
             "max_date": max_date,
         }
     else:
-        data = get_data()
-        df_main = data.get("df_main", pd.DataFrame())
-        df_val = data.get("df_valorizado", pd.DataFrame())
         all_labs: set = set()
-        for labs in data.get("product_lab_map", {}).values():
-            all_labs.update(labs)
-
         perfiles_set = set()
         negs_set = set()
         subnegs_set = set()
         min_dates = []
         max_dates = []
 
-        for df in (df_main, df_val):
-            if df is not None and not df.empty:
-                if "perfil" in df.columns:
-                    perfiles_set.update(df["perfil"].dropna().tolist())
-                if "neg" in df.columns:
-                    negs_set.update(df["neg"].dropna().tolist())
-                if "subneg" in df.columns:
-                    subnegs_set.update(df["subneg"].dropna().tolist())
-                if "fecha" in df.columns:
-                    valid = df["fecha"].dropna()
-                    if not valid.empty:
-                        min_dates.append(valid.min())
-                        max_dates.append(valid.max())
+        def _consume_filter_df(df: pd.DataFrame) -> None:
+            if df is None or df.empty:
+                return
+            if "perfil" in df.columns:
+                perfiles_set.update(df["perfil"].dropna().tolist())
+            if "neg" in df.columns:
+                negs_set.update(df["neg"].dropna().tolist())
+            if "subneg" in df.columns:
+                subnegs_set.update(df["subneg"].dropna().tolist())
+            if "fecha" in df.columns:
+                valid = pd.to_datetime(df["fecha"], errors="coerce").dropna()
+                if not valid.empty:
+                    min_dates.append(valid.min())
+                    max_dates.append(valid.max())
+
+        needed = {"perfil", "neg", "subneg", "fecha"}
+        try:
+            if FORECAST_FILE.exists():
+                df_main_opts = pd.read_csv(
+                    str(FORECAST_FILE),
+                    sep=";",
+                    decimal=",",
+                    encoding="utf-8-sig",
+                    low_memory=False,
+                    usecols=lambda c: str(c).strip().lower() in needed,
+                )
+                df_main_opts.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+                _consume_filter_df(df_main_opts)
+        except Exception as exc:
+            logger.warning("Filter options local forecast_main light read failed: %s", exc)
+
+        try:
+            val_path = _VALORIZADO_PARQUET if _VALORIZADO_PARQUET.exists() else _VALORIZADO_PREPARED
+            if val_path.exists() and val_path.suffix.lower() == ".parquet":
+                import pyarrow.parquet as _pq
+                available = set(_pq.read_schema(str(val_path)).names)
+                df_val_opts = pd.read_parquet(str(val_path), columns=[c for c in needed if c in available])
+            elif val_path.exists():
+                df_val_opts = pd.read_csv(
+                    str(val_path),
+                    encoding="utf-8-sig",
+                    low_memory=False,
+                    usecols=lambda c: str(c).strip() in needed,
+                )
+            else:
+                df_val_opts = pd.DataFrame()
+            _consume_filter_df(df_val_opts)
+        except Exception as exc:
+            logger.warning("Filter options local valorizado light read failed: %s", exc)
+
+        try:
+            if ARTICULOS_FILE.exists():
+                df_labs = pd.read_csv(
+                    str(ARTICULOS_FILE),
+                    sep=",",
+                    encoding="latin-1",
+                    dtype=str,
+                    low_memory=False,
+                    usecols=lambda c: str(c).strip().lower() == "laboratorio_descrip",
+                )
+                if not df_labs.empty:
+                    all_labs.update(df_labs.iloc[:, 0].dropna().astype(str).str.strip().tolist())
+        except Exception as exc:
+            logger.warning("Filter options local labs light read failed: %s", exc)
 
         def sanitize_list(s):
             return sorted(list({str(x).strip() for x in s if x is not None and pd.notna(x) and str(x).strip() != "" and str(x).lower().strip() != "nan" and str(x).lower().strip() != "none"}))
@@ -3102,28 +3731,87 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_product_list(profiles=profiles, neg=neg)
     else:
+        if not _data_cache:
+            light = _local_get_product_list_light(profiles=profiles, neg=neg)
+            if light:
+                return light
         data = get_data()
-        df = data.get("df_main", pd.DataFrame())
+        df_main = data.get("df_main", pd.DataFrame())
+        df_val = data.get("df_valorizado", pd.DataFrame())
         lab_map = data.get("product_lab_map", {})
-    if df.empty:
+
+    p_list = []
+    if df_main is not None and not df_main.empty:
+        cols = [c for c in ["neg", "codigo_serie", "perfil", "descripcion"] if c in df_main.columns]
+        p_list.append(df_main[cols])
+    if df_val is not None and not df_val.empty:
+        cols = [c for c in ["neg", "codigo_serie", "perfil", "descripcion"] if c in df_val.columns]
+        p_list.append(df_val[cols])
+
+    if not p_list:
         return []
 
-    mask = pd.Series(True, index=df.index)
+    df_comb = pd.concat(p_list, ignore_index=True)
+    if "codigo_serie" in df_comb.columns and "descripcion" not in df_comb.columns:
+        df_comb["descripcion"] = df_comb["codigo_serie"]
+    elif "descripcion" in df_comb.columns and "codigo_serie" not in df_comb.columns:
+        df_comb["codigo_serie"] = df_comb["descripcion"]
+    
+    if "codigo_serie" not in df_comb.columns:
+        return []
+
+    df_neg = df_comb.drop_duplicates(["neg", "codigo_serie"]).copy()
+    df_neg["neg"] = df_neg["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
+
+    # Filter df_neg by profiles and neg
+    mask_neg = pd.Series(True, index=df_neg.index)
     if profiles:
-        mask &= df["perfil"].isin(profiles) if "perfil" in df.columns else mask
+        mask_neg &= df_neg["perfil"].isin(profiles) if "perfil" in df_neg.columns else mask_neg
     if neg:
-        mask &= df["neg"].isin(neg) if "neg" in df.columns else mask
+        mask_neg &= df_neg["neg"].isin(neg) if "neg" in df_neg.columns else mask_neg
+    df_neg = df_neg[mask_neg].copy()
 
-    df_f = df[mask].copy()
-    if "precio" not in df_f.columns:
-        df_f["precio"] = 1500
+    if df_neg.empty:
+        return []
 
-    df_f["vol_venta"] = (
-        df_f["y"].fillna(0) + df_f["yhat"].fillna(0)
-    ) * df_f["precio"].fillna(0)
+    df_vol = pd.DataFrame()
+    if df_val is not None and not df_val.empty:
+        mask_v = pd.Series(True, index=df_val.index)
+        if profiles:
+            mask_v &= df_val["perfil"].isin(profiles) if "perfil" in df_val.columns else mask_v
+        if neg:
+            mask_v &= df_val["neg"].isin(neg) if "neg" in df_val.columns else mask_v
+        
+        df_val_f = df_val[mask_v]
+        if not df_val_f.empty and "codigo_serie" in df_val_f.columns:
+            df_vol = df_val_f.groupby("codigo_serie")["monto_yhat"].sum().reset_index().rename(columns={"monto_yhat": "vol_venta"})
 
-    if "neg" not in df_f.columns:
-        df_f["neg"] = "Varios"
+    if (df_vol.empty or df_vol["vol_venta"].sum() == 0) and df_main is not None and not df_main.empty:
+        mask_m = pd.Series(True, index=df_main.index)
+        if profiles:
+            mask_m &= df_main["perfil"].isin(profiles) if "perfil" in df_main.columns else mask_m
+        if neg:
+            mask_m &= df_main["neg"].isin(neg) if "neg" in df_main.columns else mask_m
+        
+        df_main_f = df_main[mask_m].copy()
+        if not df_main_f.empty and "codigo_serie" in df_main_f.columns:
+            if "precio" not in df_main_f.columns:
+                df_main_f["precio"] = 1500
+            df_main_f["vol_venta"] = (
+                df_main_f["y"].fillna(0) + df_main_f["yhat"].fillna(0)
+            ) * df_main_f["precio"].fillna(0)
+            df_vol = df_main_f.groupby("codigo_serie")["vol_venta"].sum().reset_index()
+
+    # Merge df_neg and df_vol
+    if df_vol.empty:
+        df_f = df_neg.copy()
+        df_f["vol_venta"] = 0.0
+    else:
+        df_f = pd.merge(df_neg, df_vol, on="codigo_serie", how="left")
+        df_f["vol_venta"] = df_f["vol_venta"].fillna(0.0)
+
+    if "descripcion" not in df_f.columns:
+        df_f["descripcion"] = df_f["codigo_serie"]
 
     ranking = (
         df_f.groupby(["neg", "descripcion"])["vol_venta"]
@@ -3132,10 +3820,7 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
         .sort_values(["neg", "vol_venta"], ascending=[True, False])
     )
 
-    # Add lab info
-    # lab_map already acquired via DB overlay
-    ranking["labs"] = ranking["codigo_serie" if "codigo_serie" in ranking.columns else "descripcion"].apply(lambda x: lab_map.get(x, []))
-
+    ranking["labs"] = ranking["descripcion"].apply(lambda x: lab_map.get(str(x), []))
     return ranking.to_dict(orient="records")
 
 
@@ -3164,13 +3849,29 @@ def get_chart_data(
             is_admin=is_admin,
         )
 
+    _ovr_active = _has_overrides(user_id, growth_pct, is_admin=is_admin)
+    if not _data_cache and not _ovr_active:
+        light = _local_get_chart_data_light(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            profiles=profiles,
+            neg=neg,
+            subneg=subneg,
+            products=products,
+            view_money=view_money,
+            growth_pct=growth_pct,
+        )
+        if light:
+            return light
+
     data = get_data()
     df = data.get("df_main", pd.DataFrame())
-    _ovr_active = _has_overrides(user_id, growth_pct, is_admin=is_admin)
     # Use unpatched base for all chart lines — overrides are reflected in Total_User_Adj (Line 4)
     df_val = data.get("df_valorizado", pd.DataFrame())
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
     df_fact_2026 = data.get("df_fact_2026", pd.DataFrame())
+    df_val_f = pd.DataFrame()
 
     if df.empty:
         return {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
@@ -3506,7 +4207,7 @@ def get_chart_data(
             "total_proyeccion": round(total_fcst, 0),
             "total_proyeccion_adj": round(total_adj, 0),
             "total_real_2025": round(total_real_2025, 0),
-            "n_products": int(df_filt["descripcion"].nunique()) if "descripcion" in df_filt.columns else 0,
+            "n_products": int(df_val_f["descripcion"].nunique()) if (not df_val_f.empty and "descripcion" in df_val_f.columns) else (int(df_filt["descripcion"].nunique()) if "descripcion" in df_filt.columns else 0),
         },
     }
 
@@ -3760,6 +4461,22 @@ def get_treemap_data(
             products=products, view_money=view_money, period_date=period_date,
             is_admin=is_admin,
         )
+
+    _ovr_active = _has_overrides(user_id, is_admin=is_admin)
+    if not _data_cache and not _ovr_active:
+        light = _local_get_treemap_data_light(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            profiles=profiles,
+            neg=neg,
+            subneg=subneg,
+            products=products,
+            view_money=view_money,
+            period_date=period_date,
+        )
+        if light:
+            return light
 
     df_val = _get_patched_df_val(user_id=user_id, is_admin=is_admin)
     if df_val.empty:

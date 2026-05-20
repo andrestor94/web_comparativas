@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import json as _json
 import logging
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -32,6 +33,35 @@ BASE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
+
+
+def _approx_json_bytes(payload) -> int:
+    try:
+        return len(_json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        return -1
+
+
+def _result_rows(payload) -> int:
+    if isinstance(payload, list):
+        return len(payload)
+    if not isinstance(payload, dict):
+        return -1
+    for key in ("rows", "forecast", "ids", "history", "records"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return -1
+
+
+def _log_api_perf(endpoint: str, started: float, payload) -> None:
+    logger.info(
+        "[FORECAST API] endpoint=%s total_ms=%.1f rows=%s json_bytes=%s",
+        endpoint,
+        (time.perf_counter() - started) * 1000,
+        _result_rows(payload),
+        _approx_json_bytes(payload),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +100,11 @@ def forecast_home(request: Request, user: User = Depends(_require_user)):
 
 @router.get("/api/filter-options")
 def api_filter_options(request: Request, _user: User = Depends(_require_user)):
+    started = time.perf_counter()
     try:
-        return svc.get_filter_options()
+        result = svc.get_filter_options()
+        _log_api_perf("filter-options", started, result)
+        return result
     except Exception as exc:
         logger.error("filter-options error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -84,8 +117,11 @@ def api_product_list(
     neg: Optional[List[str]] = Query(default=None, alias="neg[]"),
     _user: User = Depends(_require_user),
 ):
+    started = time.perf_counter()
     try:
-        return svc.get_product_list(profiles=profiles, neg=neg)
+        result = svc.get_product_list(profiles=profiles, neg=neg)
+        _log_api_perf("product-list", started, result)
+        return result
     except Exception as exc:
         logger.error("product-list error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -100,20 +136,20 @@ def api_chart_data(
     neg: Optional[List[str]] = Query(default=None, alias="neg[]"),
     subneg: Optional[List[str]] = Query(default=None, alias="subneg[]"),
     products: Optional[List[str]] = Query(default=None, alias="products[]"),
+    lab_name: Optional[str] = Query(default=None),
     view_money: bool = Query(default=True),
     growth_pct: float = Query(default=0.0),
     _user: User = Depends(_require_user),
 ):
     import traceback as _tb
     import json as _json
-    print(
-        f"[FORECAST ROUTER] chart-data START — start_date={start_date} end_date={end_date} "
-        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"view_money={view_money} growth_pct={growth_pct} "
-        f"user={getattr(_user, 'email', '?')}",
-        flush=True,
+    started = time.perf_counter()
+    logger.debug(
+        "chart-data start_date=%s end_date=%s profiles=%s neg=%s view_money=%s growth_pct=%s",
+        start_date, end_date, profiles, neg, view_money, growth_pct,
     )
     try:
+        resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         result = svc.get_chart_data(
             user_id=_user.id,
             start_date=start_date,
@@ -121,31 +157,24 @@ def api_chart_data(
             profiles=profiles,
             neg=neg,
             subneg=subneg,
-            products=products,
+            products=resolved_products,
             view_money=view_money,
             growth_pct=growth_pct,
             is_admin=_user.is_admin(),
         )
-        print(
-            f"[FORECAST ROUTER] chart-data GOT RESULT — "
-            f"type={type(result).__name__} "
-            f"keys={list(result.keys()) if isinstance(result, dict) else '?'} "
-            f"history_len={len(result.get('history', [])) if isinstance(result, dict) else '?'} "
-            f"forecast_len={len(result.get('forecast', [])) if isinstance(result, dict) else '?'} "
-            f"has_overrides={result.get('has_overrides') if isinstance(result, dict) else '?'}",
-            flush=True,
+        logger.debug(
+            "chart-data result history=%s forecast=%s has_overrides=%s",
+            len(result.get("history", [])) if isinstance(result, dict) else "?",
+            len(result.get("forecast", [])) if isinstance(result, dict) else "?",
+            result.get("has_overrides") if isinstance(result, dict) else "?",
         )
         # Validate JSON serializability BEFORE FastAPI tries to serialize it.
         # If this fails, we get the traceback here — not silently in the middleware.
         try:
             _json.dumps(result)
-            print(f"[FORECAST ROUTER] chart-data JSON OK — returning 200", flush=True)
         except Exception as _json_exc:
             _tb_str2 = _tb.format_exc()
-            print(
-                f"[FORECAST ROUTER] chart-data JSON SERIALIZATION FAILED: {_json_exc}\n{_tb_str2}",
-                flush=True,
-            )
+            logger.error("chart-data JSON serialization failed: %s\n%s", _json_exc, _tb_str2)
             # Sanitize: replace non-serializable scalars in-place and retry
             import math as _math
             def _sanitize(obj):
@@ -168,11 +197,10 @@ def api_chart_data(
                     pass
                 return obj
             result = _sanitize(result)
-            print(f"[FORECAST ROUTER] chart-data sanitized — retrying JSON", flush=True)
+            logger.debug("chart-data sanitized — retrying JSON")
+        _log_api_perf("chart-data", started, result)
         return result
     except Exception as exc:
-        _tb_str = _tb.format_exc()
-        print(f"[FORECAST ROUTER] chart-data EXCEPTION: {type(exc).__name__}: {exc}\n{_tb_str}", flush=True)
         logger.error("chart-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
@@ -189,16 +217,14 @@ def api_client_table(
     view_money: bool = Query(default=True),
     growth_pct: float = Query(default=0.0),
     lab_products: Optional[List[str]] = Query(default=None, alias="lab_products[]"),
+    lab_name: Optional[str] = Query(default=None),
     _user: User = Depends(_require_user),
 ):
     import traceback as _tb
-    print(
-        f"[FORECAST ROUTER] client-table start_date={start_date} end_date={end_date} "
-        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"view_money={view_money} growth_pct={growth_pct} lab_products={lab_products}",
-        flush=True,
-    )
+    started = time.perf_counter()
+    logger.debug("client-table start=%s end=%s profiles=%s neg=%s", start_date, end_date, profiles, neg)
     try:
+        resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         result = svc.get_client_table(
             user_id=_user.id,
             start_date=start_date,
@@ -206,17 +232,15 @@ def api_client_table(
             profiles=profiles,
             neg=neg,
             subneg=subneg,
-            products=products,
+            products=resolved_products,
             view_money=view_money,
             growth_pct=growth_pct,
             lab_products=lab_products,
-            is_admin=_user.is_admin(),
+            is_admin=_is_admin(_user),
         )
-        print(f"[FORECAST ROUTER] client-table OK rows={len(result.get('rows', [])) if isinstance(result, dict) else '?'}", flush=True)
+        _log_api_perf("client-table", started, result)
         return result
     except Exception as exc:
-        _tb_str = _tb.format_exc()
-        print(f"[FORECAST ROUTER] client-table EXCEPTION: {exc}\n{_tb_str}", flush=True)
         logger.error("client-table error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
@@ -232,16 +256,13 @@ def api_treemap_data(
     products: Optional[List[str]] = Query(default=None, alias="products[]"),
     view_money: bool = Query(default=True),
     period_date: Optional[str] = Query(default=None),
+    lab_name: Optional[str] = Query(default=None),
     _user: User = Depends(_require_user),
 ):
-    import traceback as _tb
-    print(
-        f"[FORECAST ROUTER] treemap-data start_date={start_date} end_date={end_date} "
-        f"profiles={profiles} neg={neg} subneg={subneg} products={products} "
-        f"view_money={view_money} period_date={period_date}",
-        flush=True,
-    )
+    started = time.perf_counter()
+    logger.debug("treemap-data start=%s end=%s profiles=%s neg=%s period=%s", start_date, end_date, profiles, neg, period_date)
     try:
+        resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         result = svc.get_treemap_data(
             user_id=_user.id,
             start_date=start_date,
@@ -249,16 +270,14 @@ def api_treemap_data(
             profiles=profiles,
             neg=neg,
             subneg=subneg,
-            products=products,
+            products=resolved_products,
             view_money=view_money,
             period_date=period_date,
             is_admin=_user.is_admin(),
         )
-        print(f"[FORECAST ROUTER] treemap-data OK ids={len(result.get('ids', [])) if isinstance(result, dict) else '?'}", flush=True)
+        _log_api_perf("treemap-data", started, result)
         return result
     except Exception as exc:
-        _tb_str = _tb.format_exc()
-        print(f"[FORECAST ROUTER] treemap-data EXCEPTION: {exc}\n{_tb_str}", flush=True)
         logger.error("treemap-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
@@ -276,8 +295,9 @@ def api_client_detail(
     growth_pct: float = Query(default=0.0),
     _user: User = Depends(_require_user),
 ):
+    started = time.perf_counter()
     try:
-        return svc.get_client_detail(
+        result = svc.get_client_detail(
             user_id=_user.id,
             client_id=client_id,
             start_date=start_date,
@@ -289,6 +309,8 @@ def api_client_detail(
             growth_pct=growth_pct,
             is_admin=_user.is_admin(),
         )
+        _log_api_perf("client-detail", started, result)
+        return result
     except Exception as exc:
         import traceback as _tb
         logger.error(
@@ -491,9 +513,6 @@ def api_save_group(
     _user: User = Depends(_require_user),
 ):
     """Save a uniform growth expectation for all clients in a group."""
-    print(f"[SAVE_GROUP ROUTER] endpoint reached — user={_user.id} group={payload.group_name!r} "
-          f"clients={len(payload.client_ids)} growth_pct={payload.growth_pct} "
-          f"base_growth_pct={payload.base_growth_pct} client_ids={payload.client_ids}", flush=True)
     try:
         result = svc.save_group_expectations(
             user_id=_user.id,
@@ -503,18 +522,15 @@ def api_save_group(
             base_growth_pct=payload.base_growth_pct,
             user_email=_user.email,
         )
-        print(f"[SAVE_GROUP ROUTER] done — result={result}", flush=True)
         saved_ok = result.get("saved_clients", 0) > 0 and result.get("saved_overrides", 0) > 0
         return {"ok": saved_ok, "group_name": payload.group_name, **result}
     except Exception as exc:
-        import traceback as _tb
-        print(f"[SAVE_GROUP ROUTER] EXCEPTION: {exc}\n{_tb.format_exc()}", flush=True)
         logger.error("save-group error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
 
 class _GroupBatchSavePayload(BaseModel):
-    groups: List[dict]
+    groups: List[dict]   # [{group_name: str, client_ids: [str]}]
     growth_pct: float
     base_growth_pct: float = 0.0
 
@@ -526,9 +542,6 @@ def api_save_group_batch(
     _user: User = Depends(_require_user),
 ):
     """Save a uniform growth expectation across multiple groups at once."""
-    print(f"[SAVE_GROUP_BATCH ROUTER] endpoint reached — user={_user.id} "
-          f"groups={len(payload.groups)} growth_pct={payload.growth_pct} "
-          f"base_growth_pct={payload.base_growth_pct}", flush=True)
     try:
         total_saved = 0
         total_overrides = 0
