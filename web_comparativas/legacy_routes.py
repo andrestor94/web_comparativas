@@ -3642,17 +3642,71 @@ async def crear_carga_otras_fuentes(
     """
     Maneja la carga de 'Principales'.
     Auditor excluido: solo lectura (policy.can_create_upload = False para auditor).
-    Por ahora guarda el archivo y crea el registro, pero NO dispara la normalizaci├│n est├índar
-    ya que requiere scripts espec├¡ficos.
+    Por ahora guarda el archivo y crea el registro, pero NO dispara la normalizacion estandar
+    ya que requiere scripts especificos.
     """
-    # Fallback: si los hints ocultos vienen vac├¡os, usar los visibles
-    platform_hint = (platform_hint or plataforma).strip()
-    buyer_hint = (buyer_hint or comprador).strip()
-    province_hint = (province_hint or provincia).strip()
+    import logging as _logof
+
+    # ----------------------------------------------------------------
+    # VALIDACION DE CAMPOS OBLIGATORIOS (campos visibles, NO hints)
+    # ----------------------------------------------------------------
+    _INVALIDOS_OF = {
+        "", "—", "-", "--", "null", "none", "undefined",
+        "seleccionar", "— seleccionar —", "-- seleccionar --",
+        "se completa automaticamente", "se completa automáticamente",
+        "ingresá el n° de cuenta para autocompletar",
+        "ingresa el n° de cuenta para autocompletar",
+        "opcional",
+    }
+
+    def _blank_of(v):
+        return (v or "").strip().lower() in _INVALIDOS_OF
+
+    _plat = plataforma.strip()
+    _comp = comprador.strip()
+    _prov = provincia.strip()
+
+    _missing = []
+    if _blank_of(proceso_nro):    _missing.append("N° de proceso")
+    if _blank_of(apertura_fecha): _missing.append("Fecha de apertura")
+    if _blank_of(cuenta_nro):     _missing.append("N° de cuenta")
+    if _blank_of(_plat):          _missing.append("Plataforma")
+    if _blank_of(_comp):          _missing.append("Comprador")
+    if _blank_of(_prov):          _missing.append("Provincia/Municipio")
+
+    if _missing:
+        _logof.getLogger(__name__).warning(
+            "POST /otras-fuentes rechazado - faltantes: %s | plataforma=%r comprador=%r provincia=%r cuenta=%r",
+            _missing, _plat, _comp, _prov, cuenta_nro,
+        )
+        _err_msg = (
+            "Completá todos los campos obligatorios antes de subir el archivo. "
+            f"Faltan: {', '.join(_missing)}."
+        )
+        return templates.TemplateResponse(
+            "upload_form_otras_fuentes.html",
+            {
+                "request": request,
+                "user": user,
+                "error": _err_msg,
+                "proceso_nro": proceso_nro,
+                "apertura_fecha": apertura_fecha,
+                "cuenta_nro": cuenta_nro,
+                "comprador": _comp,
+                "provincia": _prov,
+            },
+            status_code=400,
+        )
+
+    # Asignar hints con la plataforma validada + auto-completado de cuenta
+    platform_hint = _plat
     auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
     if (cuenta_nro or "").strip():
-        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
-        province_hint = (auto_hints or {}).get("provincia", "").strip()
+        buyer_hint    = (auto_hints or {}).get("comprador", _comp).strip() or _comp
+        province_hint = (auto_hints or {}).get("provincia", _prov).strip() or _prov
+    else:
+        buyer_hint    = _comp
+        province_hint = _prov
 
     # Caso especial: LA_PAMPA
     if platform_hint == "LA_PAMPA":

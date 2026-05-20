@@ -57,6 +57,7 @@ def test_cell_override_persists_in_sql_and_is_removed_when_returned_to_default()
     user_id = _create_user()
     growth_pct = 25.0
     default_monthly_pct = round(svc._monthly_pct_from_annual_growth(growth_pct), 4)
+    target_month = svc.get_forecast_effective_month()
 
     try:
         svc.save_client_overrides(
@@ -64,7 +65,7 @@ def test_cell_override_persists_in_sql_and_is_removed_when_returned_to_default()
             client_id="Cliente A",
             growth_pct=growth_pct,
             cell_overrides=[
-                {"articulo": "SKU-1", "subneg": "Sub A", "date": "2026-01", "pct": 3.5}
+                {"articulo": "SKU-1", "subneg": "Sub A", "date": target_month, "pct": 3.5}
             ],
         )
 
@@ -73,7 +74,7 @@ def test_cell_override_persists_in_sql_and_is_removed_when_returned_to_default()
             user_id=user_id,
             client_id="Cliente A",
             growth_pct=growth_pct,
-        ) == {("SKU-1", "2026-01"): 3.5}
+        ) == {("SKU-1", target_month): 3.5}
 
         active_rows = _active_overrides(user_id)
         assert len(active_rows) == 1
@@ -87,7 +88,7 @@ def test_cell_override_persists_in_sql_and_is_removed_when_returned_to_default()
                 {
                     "articulo": "SKU-1",
                     "subneg": "Sub A",
-                    "date": "2026-01",
+                    "date": target_month,
                     "pct": default_monthly_pct,
                 }
             ],
@@ -140,6 +141,76 @@ def test_subneg_override_persists_and_rehydrates_modal_growths():
         _delete_user(user_id)
 
 
+def test_client_growth_pct_rehydrates_from_uniform_visible_subneg_overrides():
+    negocios = [
+        {
+            "neg": "Negocio A",
+            "subnegs": [
+                {"subneg": "Sub A", "products": [{"articulo": "SKU-1"}]},
+                {"subneg": "Sub B", "products": [{"articulo": "SKU-2"}]},
+            ],
+        }
+    ]
+
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": 38.0, "Sub B": 38.0}, 25.0
+    ) == pytest.approx(38.0)
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": -30.0, "Sub B": -30.0}, 25.0
+    ) == pytest.approx(-30.0)
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": 60.0, "Sub B": 60.0}, 25.0
+    ) == pytest.approx(60.0)
+
+
+def test_client_growth_pct_falls_back_when_subneg_overrides_are_partial_or_mixed():
+    negocios = [
+        {
+            "neg": "Negocio A",
+            "subnegs": [
+                {"subneg": "Sub A", "products": [{"articulo": "SKU-1"}]},
+                {"subneg": "Sub B", "products": [{"articulo": "SKU-2"}]},
+            ],
+        }
+    ]
+
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": 38.0}, 25.0
+    ) == pytest.approx(25.0)
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": 38.0, "Sub B": -30.0}, 25.0
+    ) == pytest.approx(25.0)
+    assert svc._derive_visible_client_growth_pct(
+        negocios, {"Sub A": 25.0, "Sub B": 25.0}, 25.0
+    ) == pytest.approx(25.0)
+
+    mixed_state = svc._derive_visible_client_growth_state(
+        negocios, {"Sub A": 38.0, "Sub B": -30.0}, 25.0
+    )
+    assert mixed_state["value"] is None
+    assert mixed_state["source"] == "mixed"
+    assert mixed_state["mixed"] is True
+
+
+def test_client_growth_pct_ignores_empty_visible_subnegs():
+    negocios = [
+        {
+            "neg": "Negocio A",
+            "subnegs": [
+                {"subneg": "Sub A", "products": [{"articulo": "SKU-1"}]},
+                {"subneg": "Sub sin articulos", "products": []},
+            ],
+        }
+    ]
+
+    state = svc._derive_visible_client_growth_state(
+        negocios, {"Sub A": 50.0}, 25.0
+    )
+    assert state["value"] == pytest.approx(50.0)
+    assert state["source"] == "uniform_subneg"
+    assert state["mixed"] is False
+
+
 def test_cell_override_equal_to_subneg_growth_is_not_persisted_twice():
     user_id = _create_user()
     scoped_monthly_pct = round(svc._monthly_pct_from_annual_growth(50.0), 4)
@@ -154,7 +225,7 @@ def test_cell_override_equal_to_subneg_growth_is_not_persisted_twice():
                 {
                     "articulo": "SKU-1",
                     "subneg": "Sub A",
-                    "date": "2026-01",
+                    "date": svc.get_forecast_effective_month(),
                     "pct": scoped_monthly_pct,
                 }
             ],
@@ -185,7 +256,7 @@ def test_overrides_are_isolated_by_user_and_clear_soft_deactivates_rows():
             growth_pct=25.0,
             subneg_overrides=[{"subneg": "Sub A", "growth_pct": 40.0}],
             cell_overrides=[
-                {"articulo": "SKU-1", "subneg": "Sub A", "date": "2026-02", "pct": 2.9}
+                {"articulo": "SKU-1", "subneg": "Sub A", "date": svc.get_forecast_effective_month(), "pct": 2.9}
             ],
         )
 

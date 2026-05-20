@@ -302,84 +302,6 @@ def _normalize_scope(scope: str | None) -> str:
     return aliases.get(raw, raw or FORECAST_SCOPE_CELL)
 
 
-def save_client_overrides(client_id: str, overrides: list[dict], growth_pct: float = 0.0) -> None:
-    """Persist per-product % adjustments for a client.
-    Each override: {articulo: str, date: 'YYYY-MM', pct: float}
-    """
-    with _overrides_lock:
-        store = dict(_client_overrides.get(client_id, {}))
-        for ov in overrides:
-            try:
-                key = (str(ov["articulo"]), str(ov["date"]))
-                pct = float(ov["pct"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            # Replace the current visible value for this cell. If the user brought it
-            # back to the standard scenario, we remove the stored override entirely.
-            store.pop(key, None)
-            if _is_effective_override_pct(pct, growth_pct):
-                store[key] = pct
-        if store:
-            _client_overrides[str(client_id)] = store
-        else:
-            _client_overrides.pop(str(client_id), None)
-        _cleanup_override_store_locked()
-    # Overrides alter the projected data — flush cached responses so the next
-    # request reflects the change rather than serving stale aggregates.
-    clear_response_cache()
-
-
-def clear_client_overrides(client_id: str) -> None:
-    """Remove all overrides for a client (full undo to CSV baseline)."""
-    with _overrides_lock:
-        _client_overrides.pop(client_id, None)
-    clear_response_cache()
-
-
-def _get_client_overrides_snapshot(client_id: str, growth_pct: float | None = None) -> dict:
-    """Return the stored pct overrides for a specific client (read-only copy)."""
-    with _overrides_lock:
-        return dict(_build_overrides_snapshot_locked(growth_pct).get(str(client_id), {}))
-
-
-def _get_patched_df_val(df_source=None) -> "pd.DataFrame":
-    """Return df_valorizado with all saved overrides applied (copy — never mutates cache)."""
-    if df_source is not None:
-        df = df_source
-    else:
-        data = get_data()
-        df = data.get("df_valorizado", None)
-    if df is None or df.empty:
-        return df if df is not None else __import__("pandas").DataFrame()
-    with _overrides_lock:
-        overrides_snapshot = _build_overrides_snapshot_locked()
-        has_overrides = bool(overrides_snapshot)
-    if not has_overrides:
-        return df  # No copy needed — all callers only read or filter/copy filtered subsets
-
-    df = df.copy()
-    cli_col = "fantasia" if "fantasia" in df.columns else "cliente_id"
-    if cli_col not in df.columns or "articulo" not in df.columns:
-        return df
-
-    df["_ds"] = df["fecha"].dt.strftime("%Y-%m")
-    for client_id, store in overrides_snapshot.items():
-        if not store:
-            continue
-        cli_mask = df[cli_col] == client_id
-        for (articulo, date_str), pct in store.items():
-            factor = 1.0 + pct / 100.0
-            mask = cli_mask & (df["articulo"] == articulo) & (df["_ds"] == date_str)
-            if not mask.any():
-                continue
-            df.loc[mask, "yhat_cliente"] = df.loc[mask, "yhat_cliente"] * factor
-            if "monto_yhat" in df.columns:
-                df.loc[mask, "monto_yhat"] = df.loc[mask, "monto_yhat"] * factor
-
-    df.drop(columns=["_ds"], inplace=True, errors="ignore")
-    return df
-
-
 # ---------------------------------------------------------------------------
 # SQL override helpers
 # ---------------------------------------------------------------------------
@@ -409,16 +331,21 @@ def _fetch_override_records(
     user_id: int | None,
     client_selector: str | None = None,
     client_selectors: list[str] | None = None,
+    *,
+    all_users: bool = False,
 ) -> list[Any]:
-    if not user_id or SessionLocal is None or ForecastUserOverride is None:
+    if SessionLocal is None or ForecastUserOverride is None:
+        return []
+    if not all_users and not user_id:
         return []
     with SessionLocal() as session:
         q = (
             session.query(ForecastUserOverride)
-            .filter(ForecastUserOverride.user_id == int(user_id))
             .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
             .filter(ForecastUserOverride.is_active.is_(True))
         )
+        if not all_users:
+            q = q.filter(ForecastUserOverride.user_id == int(user_id))
         if client_selector is not None:
             q = q.filter(ForecastUserOverride.client_selector == _clean_override_text(client_selector))
         elif client_selectors:
@@ -427,6 +354,9 @@ def _fetch_override_records(
                     [_clean_override_text(v) for v in client_selectors if _clean_override_text(v)]
                 )
             )
+        # When querying all users, sort by updated_at ascending so later saves win on conflict
+        if all_users:
+            q = q.order_by(ForecastUserOverride.updated_at.asc())
         return list(q.all())
 
 
@@ -488,8 +418,9 @@ def _build_overrides_snapshot_locked(
     *,
     user_id: int | None = None,
     client_selector: str | None = None,
+    is_admin: bool = False,
 ) -> dict[str, dict[tuple[str, str], float]]:
-    records = _fetch_override_records(user_id, client_selector=client_selector)
+    records = _fetch_override_records(user_id, client_selector=client_selector, all_users=is_admin)
     maps = _build_override_maps(records)
     snapshot: dict[str, dict[tuple[str, str], float]] = {}
     for (selector, codigo, month), payload in maps["cell"].items():
@@ -557,6 +488,7 @@ def _apply_override_effects_to_dataframe(
     max_hist_date: pd.Timestamp | None = None,
     *,
     _records=None,  # pre-fetched override records — avoids extra DB roundtrip
+    is_admin: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     if df is None or df.empty:
         return df if df is not None else pd.DataFrame(), {"subneg_growths": {}, "selectors": []}
@@ -567,7 +499,11 @@ def _apply_override_effects_to_dataframe(
         records = list(_records)
     else:
         selectors = _selector_candidates_for_df(df)
-        records = _fetch_override_records(user_id, client_selectors=selectors if selectors else None)
+        records = _fetch_override_records(
+            user_id,
+            client_selectors=selectors if selectors else None,
+            all_users=is_admin,
+        )
     maps = _build_override_maps(records)
 
     out = df.copy()
@@ -872,7 +808,8 @@ def save_client_overrides(
 
         session.commit()
 
-    clear_user_cache(user_id)
+    # Flush ALL cached responses — any user's save must be visible to the admin view too
+    clear_response_cache()
 
 
 def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | None = None) -> None:
@@ -893,11 +830,18 @@ def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | No
             rec.updated_by = user_email
             rec.updated_at = dt.datetime.utcnow()
         session.commit()
-    clear_user_cache(user_id)
+    # Flush ALL cached responses — any user's clear must be visible to the admin view too
+    clear_response_cache()
 
 
-def _get_client_overrides_snapshot(*, user_id: int | None, client_id: str, growth_pct: float | None = None) -> dict[tuple[str, str], float]:
-    records = _fetch_override_records(user_id, client_selector=client_id)
+def _get_client_overrides_snapshot(
+    *,
+    user_id: int | None,
+    client_id: str,
+    growth_pct: float | None = None,
+    is_admin: bool = False,
+) -> dict[tuple[str, str], float]:
+    records = _fetch_override_records(user_id, client_selector=client_id, all_users=is_admin)
     maps = _build_override_maps(records)
     snapshot: dict[tuple[str, str], float] = {}
     for (selector, codigo, month), payload in maps["cell"].items():
@@ -906,13 +850,90 @@ def _get_client_overrides_snapshot(*, user_id: int | None, client_id: str, growt
     return snapshot
 
 
-def _get_client_subneg_growths(user_id: int | None, client_id: str) -> dict[str, float]:
-    records = _fetch_override_records(user_id, client_selector=client_id)
+def _get_client_subneg_growths(user_id: int | None, client_id: str, *, is_admin: bool = False) -> dict[str, float]:
+    records = _fetch_override_records(user_id, client_selector=client_id, all_users=is_admin)
     maps = _build_override_maps(records)
     return dict(maps["subneg_growths"].get(_clean_override_text(client_id), {}))
 
 
-def _get_patched_df_val(user_id: int | None = None, df_source=None) -> "pd.DataFrame":
+def _derive_visible_client_growth_pct(
+    negocios: list[dict[str, Any]] | None,
+    saved_subneg_growths: dict[str, float] | None,
+    base_growth_pct: float,
+) -> float:
+    """Infer the modal's client-level growth from visible saved subneg rates."""
+    state = _derive_visible_client_growth_state(negocios, saved_subneg_growths, base_growth_pct)
+    value = state.get("value")
+    return float(base_growth_pct or 0.0) if value is None else float(value)
+
+
+def _derive_visible_client_growth_state(
+    negocios: list[dict[str, Any]] | None,
+    saved_subneg_growths: dict[str, float] | None,
+    base_growth_pct: float,
+) -> dict[str, Any]:
+    """Return the value/source used to rehydrate the modal's top growth input."""
+    base = float(base_growth_pct or 0.0)
+    saved = {
+        _clean_override_text(k): float(v)
+        for k, v in (saved_subneg_growths or {}).items()
+        if _clean_override_text(k)
+    }
+    visible_subnegs: list[str] = []
+    seen: set[str] = set()
+    for neg in negocios or []:
+        for sub in (neg or {}).get("subnegs", []) or []:
+            if not ((sub or {}).get("products") or []):
+                continue
+            key = _clean_override_text((sub or {}).get("subneg", ""))
+            if key and key not in seen:
+                seen.add(key)
+                visible_subnegs.append(key)
+
+    if not visible_subnegs:
+        return {"value": base, "source": "base", "mixed": False, "visible_subnegs": []}
+
+    common: float | None = None
+    found_saved = False
+    missing_saved = False
+    for key in visible_subnegs:
+        if key not in saved:
+            missing_saved = True
+            continue
+        value = saved[key]
+        found_saved = True
+        if common is None:
+            common = value
+        elif abs(common - value) > _OVERRIDE_PCT_TOL:
+            return {
+                "value": None,
+                "source": "mixed",
+                "mixed": True,
+                "visible_subnegs": visible_subnegs,
+            }
+    if not found_saved:
+        return {
+            "value": base,
+            "source": "base",
+            "mixed": False,
+            "visible_subnegs": visible_subnegs,
+        }
+    if missing_saved:
+        return {
+            "value": None,
+            "source": "mixed",
+            "mixed": True,
+            "visible_subnegs": visible_subnegs,
+        }
+    return {
+        "value": common if common is not None else base,
+        "source": "uniform_subneg" if common is not None else "base",
+        "mixed": False,
+        "visible_subnegs": visible_subnegs,
+    }
+
+
+def _get_patched_df_val(user_id: int | None = None, df_source=None, *, is_admin: bool = False) -> "pd.DataFrame":
     """Return df_valorizado with SQL overrides applied (copy — never mutates cache)."""
     if df_source is not None:
         df = df_source
@@ -933,6 +954,7 @@ def _get_patched_df_val(user_id: int | None = None, df_source=None) -> "pd.DataF
         user_id=user_id,
         base_growth_pct=0.0,
         max_hist_date=max_hist_date,
+        is_admin=is_admin,
     )
     if not patched.empty:
         future_mask = patched["_has_override"]
@@ -1120,21 +1142,31 @@ def _apply_prices(df: pd.DataFrame, price_lookup: dict) -> pd.DataFrame:
 def _read_fact_2026_csv_robust(path: Path) -> pd.DataFrame:
     """Read facturacion_real_2026 CSV recovering rows with embedded double-quotes.
 
-    Some rows have fields like ``"AGUJA DESCARTABLE 13X3  30GX1/2"" (DISC)"``
-    where the standard C-engine treats the escaped quote as a field boundary,
-    producing a mis-parsed row whose entire content lands in the first column.
-    The csv.reader approach handles RFC-4180 double-quote escaping correctly and
-    recovers all 206 246 rows without any dropna.
+    Supports both comma-delimited (legacy format) and semicolon-delimited (new
+    format: UTF-8 BOM, decimal comma, trailing delimiter) by auto-detecting the
+    separator from the header row.  RFC-4180 double-quote escaping is handled
+    via csv.reader to recover all rows without dropna.
     """
+    # Detect delimiter from first non-empty byte sequence
+    with open(path, "r", encoding="utf-8-sig", errors="replace") as _probe:
+        first_line = _probe.readline()
+    delimiter = ";" if ";" in first_line else ","
+
     rows: list[list[str]] = []
     with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as fh:
-        reader = csv.reader(fh)
+        reader = csv.reader(fh, delimiter=delimiter)
         header = next(reader)
+        # Strip empty trailing columns produced by a trailing delimiter in the header
+        header = [h for h in header if h.strip()]
         n_cols = len(header)
         for row in reader:
+            # Trim trailing empty fields produced by a trailing delimiter per row
+            while row and not row[-1].strip():
+                row = row[:-1]
             if len(row) == n_cols:
                 rows.append(row)
-            elif len(row) == 1 and "," in row[0]:
+            elif len(row) == 1 and delimiter == "," and "," in row[0]:
+                # Fallback for comma-delimited files with embedded RFC-4180 quotes
                 reparsed = next(csv.reader([row[0]]))
                 if len(reparsed) == n_cols:
                     rows.append(reparsed)
@@ -1361,13 +1393,17 @@ def _load_all_data() -> dict[str, Any]:
         try:
             df_fact_2026 = _read_fact_2026_csv_robust(FACT_2026_FILE)
             if "fecha" in df_fact_2026.columns:
-                df_fact_2026["fecha"] = pd.to_datetime(df_fact_2026["fecha"], errors="coerce")
+                df_fact_2026["fecha"] = pd.to_datetime(df_fact_2026["fecha"], dayfirst=True, errors="coerce")
                 df_fact_2026 = df_fact_2026[df_fact_2026["fecha"].notna()].copy()
                 df_fact_2026["fecha"] = df_fact_2026["fecha"].dt.to_period("M").dt.to_timestamp()
                 df_fact_2026 = df_fact_2026[df_fact_2026["fecha"] >= pd.Timestamp("2026-01-01")].copy()
             df_fact_2026["tipo"] = "val"
             if "imp_hist" in df_fact_2026.columns:
-                df_fact_2026["imp_hist"] = pd.to_numeric(df_fact_2026["imp_hist"], errors="coerce").fillna(0)
+                # Handle European decimal comma (e.g. "16320,75") from semicolon-delimited export
+                df_fact_2026["imp_hist"] = pd.to_numeric(
+                    df_fact_2026["imp_hist"].astype(str).str.replace(",", ".", regex=False),
+                    errors="coerce",
+                ).fillna(0)
             # Monthly validation log
             _f26_months = df_fact_2026.groupby(df_fact_2026["fecha"].dt.to_period("M"))["imp_hist"].agg(["count", "sum"])
             for _m, _mr in _f26_months.iterrows():
@@ -1442,8 +1478,8 @@ def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=Non
 # PostgreSQL aggregation helpers — avoid loading full tables into RAM
 # ---------------------------------------------------------------------------
 
-def _has_overrides(user_id: int | None = None, growth_pct: float | None = None) -> bool:
-    return bool(_fetch_override_records(user_id))
+def _has_overrides(user_id: int | None = None, growth_pct: float | None = None, *, is_admin: bool = False) -> bool:
+    return bool(_fetch_override_records(user_id, all_users=is_admin))
 
 
 def _build_filter_sql(
@@ -1634,14 +1670,16 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
 
 
 def _pg_get_chart_data(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
+    is_admin=False,
 ) -> dict:
     """Memory-safe PostgreSQL chart data: all heavy aggregation runs in SQL."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
     _step = "init"
     try:
         return _pg_get_chart_data_inner(
-            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
+            is_admin=is_admin,
         )
     except Exception as exc:
         import traceback
@@ -1652,12 +1690,13 @@ def _pg_get_chart_data(
 
 
 def _pg_get_chart_data_inner(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
+    is_admin=False,
 ) -> dict:
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
     # Single override fetch — reused throughout this function to avoid multiple DB roundtrips
-    _ovr_records = _fetch_override_records(user_id)
+    _ovr_records = _fetch_override_records(user_id, all_users=is_admin)
     _ovr_active = bool(_ovr_records)
 
     print(
@@ -1836,6 +1875,7 @@ def _pg_get_chart_data_inner(
                 base_growth_pct=growth_pct,
                 max_hist_date=max_hist,
                 _records=_ovr_records,
+                is_admin=is_admin,
             )
             _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
             _n_overridden = int(_override_rows["_has_override"].sum()) if "_has_override" in _override_rows.columns else -1
@@ -2019,13 +2059,15 @@ def _pg_get_chart_data_inner(
 
 
 def _pg_get_client_table(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
+    is_admin=False,
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
     try:
         return _pg_get_client_table_inner(
-            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
+            is_admin=is_admin,
         )
     except Exception as exc:
         import traceback as _tb
@@ -2037,7 +2079,8 @@ def _pg_get_client_table(
 
 
 def _pg_get_client_table_inner(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
+    is_admin=False,
 ) -> dict:
     """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha).
 
@@ -2110,7 +2153,7 @@ def _pg_get_client_table_inner(
     # Max hist date for growth adjustment — shared across all filter combinations
     max_hist_date = _get_max_hist_date_cached()
 
-    _ovr_records_ct = _fetch_override_records(user_id)
+    _ovr_records_ct = _fetch_override_records(user_id, all_users=is_admin)
     overrides_active = bool(_ovr_records_ct)
     if overrides_active:
         if view_money:
@@ -2148,6 +2191,7 @@ def _pg_get_client_table_inner(
                 base_growth_pct=growth_pct,
                 max_hist_date=max_hist_date,
                 _records=_ovr_records_ct,
+                is_admin=is_admin,
             )
             df_rows["val"] = df_rows["base_val"]
             if max_hist_date is not None and "fecha" in df_rows.columns:
@@ -2233,13 +2277,15 @@ def _pg_get_client_table_inner(
 
 
 def _pg_get_treemap_data(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+    is_admin=False,
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
     try:
         return _pg_get_treemap_data_inner(
-            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+            is_admin=is_admin,
         )
     except Exception as exc:
         import traceback as _tb
@@ -2251,7 +2297,8 @@ def _pg_get_treemap_data(
 
 
 def _pg_get_treemap_data_inner(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+    is_admin=False,
 ) -> dict:
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
@@ -2287,7 +2334,7 @@ def _pg_get_treemap_data_inner(
 
     max_hist_date = _get_max_hist_date_cached()
 
-    _ovr_records_tm = _fetch_override_records(user_id)
+    _ovr_records_tm = _fetch_override_records(user_id, all_users=is_admin)
     if bool(_ovr_records_tm):
         if view_money:
             df_rows = _query_agg(
@@ -2324,6 +2371,7 @@ def _pg_get_treemap_data_inner(
                 base_growth_pct=0.0,
                 max_hist_date=max_hist_date,
                 _records=_ovr_records_tm,
+                is_admin=is_admin,
             )
             df_rows["monto"] = df_rows["base_val"]
             if max_hist_date is not None and "fecha" in df_rows.columns:
@@ -2431,7 +2479,8 @@ def _pg_get_treemap_data_inner(
 
 
 def _pg_get_client_detail(
-    user_id, client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct
+    user_id, client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct,
+    is_admin=False,
 ) -> dict:
     """Memory-safe PostgreSQL client detail: loads only single client's rows."""
     _EMPTY = {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
@@ -2465,7 +2514,7 @@ def _pg_get_client_detail(
 
     # Single override fetch — replaces 3 separate DB calls (_get_client_overrides_snapshot
     # + 2× _get_client_subneg_growths, the second of which was a duplicate bug)
-    _cd_records = _fetch_override_records(user_id, client_selector=client_id)
+    _cd_records = _fetch_override_records(user_id, client_selector=client_id, all_users=is_admin)
     _cd_maps = _build_override_maps(_cd_records)
     _cd_client_key = _clean_override_text(client_id)
     saved_overrides = {
@@ -2579,11 +2628,24 @@ def _pg_get_client_detail(
             subnegs_out.append({"subneg": str(subneg_name), "products": products_out})
         negocios_out.append({"neg": str(neg_name), "subnegs": subnegs_out})
 
+    _client_growth_state = _derive_visible_client_growth_state(
+        negocios_out, saved_subneg_growths, growth_pct
+    )
+    logger.debug(
+        "[FORECAST client-detail growth] client=%s base=%s client_growth=%s subneg_growths=%s",
+        client_id,
+        growth_pct,
+        _client_growth_state,
+        saved_subneg_growths,
+    )
     return {
         "client_id": client_id, "perfil": perfil, "neg": neg_val,
         "negocios": negocios_out, "dates": date_strs,
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
+        "client_growth_pct": _client_growth_state["value"],
+        "client_growth_source": _client_growth_state["source"],
+        "client_growth_mixed": _client_growth_state["mixed"],
         "subneg_growths": saved_subneg_growths,
         "effective_from_month": effective_from_month,
     }
@@ -2800,6 +2862,7 @@ def get_chart_data(
     products: list | None = None,
     view_money: bool = True,
     growth_pct: float = 0.0,
+    is_admin: bool = False,
 ) -> dict:
     import pandas as pd
     _engine_url = str(engine.url) if engine is not None else "NO_ENGINE"
@@ -2810,11 +2873,12 @@ def get_chart_data(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, growth_pct=growth_pct,
+            is_admin=is_admin,
         )
 
     data = get_data()
     df = data.get("df_main", pd.DataFrame())
-    _ovr_active = _has_overrides(user_id, growth_pct)
+    _ovr_active = _has_overrides(user_id, growth_pct, is_admin=is_admin)
     # Use unpatched base for all chart lines — overrides are reflected in Total_User_Adj (Line 4)
     df_val = data.get("df_valorizado", pd.DataFrame())
     df_imp_hist = data.get("df_imp_hist", pd.DataFrame())
@@ -2929,7 +2993,7 @@ def get_chart_data(
             _g_base = 1.0 + growth_pct / 100.0
             df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * _g_base
             # Pass pre-fetched records to avoid large SQL IN clause (SQLite 999-var limit)
-            _loc_ovr_records = _fetch_override_records(user_id) if user_id else []
+            _loc_ovr_records = _fetch_override_records(user_id, all_users=is_admin) if (user_id or is_admin) else []
             if _ovr_active and not df_val_f.empty:
                 _loc_max_hist = df_hist["fecha"].max() if not df_hist.empty else pd.Timestamp("2000-01-01")
                 _df_u_sql, _ovr_maps_sql = _apply_override_effects_to_dataframe(
@@ -2938,6 +3002,7 @@ def get_chart_data(
                     base_growth_pct=growth_pct,
                     max_hist_date=_loc_max_hist,
                     _records=_loc_ovr_records,
+                    is_admin=is_admin,
                 )
                 if not _df_u_sql.empty:
                     _df_u_sql["_ua_sql"] = _df_u_sql[col_y] * _df_u_sql["_annual_eff"]
@@ -3170,6 +3235,7 @@ def get_client_table(
     view_money: bool = True,
     growth_pct: float = 0.0,
     lab_products: list | None = None,
+    is_admin: bool = False,
 ) -> dict:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
@@ -3179,10 +3245,11 @@ def get_client_table(
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money,
             growth_pct=growth_pct, lab_products=lab_products,
+            is_admin=is_admin,
         )
 
     data = get_data()
-    df_val = _get_patched_df_val(user_id=user_id)
+    df_val = _get_patched_df_val(user_id=user_id, is_admin=is_admin)
     df_main = data.get("df_main", pd.DataFrame())
 
     if df_val.empty:
@@ -3296,29 +3363,27 @@ def get_client_table(
 
 
 def _get_segment_color(canal_code: str) -> str:
-    """Color function identical to the original Streamlit get_segment_color()."""
+    """Color function mapped to a professional SIEM palette."""
     c = str(canal_code).upper().strip()
     if "PROYECCIÓN TOTAL" in c:
-        return "#DCEAF2"
+        return "#D1E3F0"
     if "FAR" in c:
-        return "#6FC9E2"
+        return "#3CA9C4"  # Celeste suave
     if "DRO" in c:
-        return "#6A6A6A"
+        return "#26A69A"  # Verde menta
     if "IPR" in c or "SAN" in c:
-        return "#E291C1"
-    if "IPU" in c or "PUB" in c or "LAN" in c or "PER" in c:
-        return "#A576FF"
-    if "HOS" in c:
-        return "#A576FF"
+        return "#5A738E"  # Azul acero
+    if "IPU" in c or "PUB" in c or "LAN" in c or "PER" in c or "HOS" in c:
+        return "#7057BE"  # Violeta controlado
     if "COM" in c or "PRO" in c:
-        return "#5770B0"
+        return "#64748B"  # Gris azulado
     if any(x in c for x in ("OSP", "OSU", "OES")):
-        return "#00A487"
+        return "#14929E"  # Verde teal
     if "DPM" in c or "FIN" in c:
-        return "#06486F"
+        return "#1E3E62"  # Azul petróleo
     if "POTENCIAL" in c or "SIN" in c:
-        return "#C9D6E2"
-    return "#C9D6E2"
+        return "#90A4AE"  # Gris claro azulado
+    return "#90A4AE"
 
 
 def _blend_with_white(hex_color: str, weight: float) -> str:
@@ -3340,6 +3405,7 @@ def get_treemap_data(
     products: list | None = None,
     view_money: bool = True,
     period_date: str | None = None,
+    is_admin: bool = False,
 ) -> dict:
     """Return Plotly treemap: Canal (perfil) → Grupo → Cliente hierarchy.
 
@@ -3359,9 +3425,10 @@ def get_treemap_data(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, period_date=period_date,
+            is_admin=is_admin,
         )
 
-    df_val = _get_patched_df_val(user_id=user_id)
+    df_val = _get_patched_df_val(user_id=user_id, is_admin=is_admin)
     if df_val.empty:
         return _EMPTY
 
@@ -3539,6 +3606,7 @@ def get_client_detail(
     subneg: list | None = None,
     products: list | None = None,
     growth_pct: float = 0.0,
+    is_admin: bool = False,
 ) -> dict:
     """Return per-product detail for a client, pivoted by month, grouped by neg/subneg.
     Used by the modal edit dialog.
@@ -3553,6 +3621,7 @@ def get_client_detail(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, growth_pct=growth_pct,
+            is_admin=is_admin,
         )
 
     data = get_data()
@@ -3560,10 +3629,10 @@ def get_client_detail(
     df_main = data.get("df_main", pd.DataFrame())
     price_lookup = data.get("price_lookup", {})
     # Load any previously saved % overrides for this client
-    saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct)
-    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id)
+    saved_overrides = _get_client_overrides_snapshot(user_id=user_id, client_id=client_id, growth_pct=growth_pct, is_admin=is_admin)
+    saved_subneg_growths = _get_client_subneg_growths(user_id, client_id, is_admin=is_admin)
     # Build full maps to get effective_from_month per override
-    _loc_records = _fetch_override_records(user_id, client_selector=client_id)
+    _loc_records = _fetch_override_records(user_id, client_selector=client_id, all_users=is_admin)
     _loc_maps = _build_override_maps(_loc_records)
     _loc_client_key = _clean_override_text(client_id)
     _loc_cell_efm: dict[tuple[str, str], str | None] = {
@@ -3744,6 +3813,16 @@ def get_client_detail(
 
         negocios_out.append({"neg": str(neg_name), "subnegs": subnegs_out})
 
+    _client_growth_state = _derive_visible_client_growth_state(
+        negocios_out, saved_subneg_growths, growth_pct
+    )
+    logger.debug(
+        "[FORECAST client-detail growth] client=%s base=%s client_growth=%s subneg_growths=%s",
+        client_id,
+        growth_pct,
+        _client_growth_state,
+        saved_subneg_growths,
+    )
     return {
         "client_id": client_id,
         "perfil": perfil,
@@ -3752,6 +3831,9 @@ def get_client_detail(
         "dates": date_strs,
         "max_hist_date": max_hist_date.strftime("%Y-%m") if max_hist_date else None,
         "growth_pct": growth_pct,
+        "client_growth_pct": _client_growth_state["value"],
+        "client_growth_source": _client_growth_state["source"],
+        "client_growth_mixed": _client_growth_state["mixed"],
         "subneg_growths": saved_subneg_growths,
         "effective_from_month": effective_from_month,
     }

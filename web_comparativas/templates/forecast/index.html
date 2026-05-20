@@ -3,6 +3,10 @@
 {% block header_title %}Forecast{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts (Inter & Outfit) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <!-- Plotly.js (local) -->
 <script src="{{ url_for('static', path='vendor/plotly/plotly.min.js') }}"></script>
 <!-- ag-Grid Community (local) -->
@@ -12,29 +16,67 @@
 <!-- Flatpickr (local) -->
 <link rel="stylesheet" href="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.css') }}">
 <script src="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.js') }}"></script>
-
 <style>
-    /* ── Layout ──────────────────────────────────────────────────────────── */
-  .fc-wrap {
-    display: flex;
-    height: calc(100vh - 70px);
-    overflow: hidden;
-    font-family: Outfit, system-ui, -apple-system, sans-serif;
-    background: #F8FAFC;
-    color: #0F172A;
+  /* == Design Tokens & System Variables (Google-inspired SaaS theme) == */
+  :root {
+    --g-blue: #1a73e8;
+    --g-blue-light: #e8f0fe;
+    --g-blue-hover: #f1f6fe;
+    --g-blue-dark: #1557b0;
+    
+    --g-green: #0f9d58;
+    --g-green-light: #e6f4ea;
+    --g-green-hover: #eaf8f0;
+    
+    --g-red: #d93025;
+    --g-red-light: #fce8e6;
+    
+    --g-yellow: #f4b400;
+    --g-yellow-light: #fef7e0;
+    
+    --bg-primary: #f8fafc;
+    --bg-card: #ffffff;
+    --text-primary: #1f1f1f;
+    --text-secondary: #3c4043;
+    --text-muted: #5f6368;
+    
+    --border-color: #e3e6eb;
+    --border-hover: #bdc1c6;
+    --border-active: #1a73e8;
+    
+    --shadow-soft: 0 1px 3px rgba(60,64,67,0.12), 0 1px 2px rgba(60,64,67,0.24);
+    --shadow-hover: 0 10px 20px rgba(0,0,0,0.08), 0 6px 6px rgba(0,0,0,0.04);
+    --shadow-card: 0 1px 3px rgba(60,64,67,0.05), 0 4px 12px rgba(60,64,67,0.03);
+    --shadow-dropdown: 0 4px 16px 0 rgba(60,64,67,0.15);
+    
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --radius-pill: 9999px;
+    
+    --font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --transition-smooth: 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* ── Left Sidebar — oculto (contenido migrado al dashboard) ─────────── */
-  .fc-sidebar { display: none; }
+  /* == Layout Override == */
+  .fc-wrap {
+    display: flex;
+    height: auto;
+    min-height: calc(100vh - 70px);
+    overflow: visible;
+    font-family: var(--font-family);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
 
-  /* ── Section title (reutilizado en explorador inline) ───────────────── */
+  /* Section Title */
   .fc-section-title {
-    color: #64748B;
-    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
     font-weight: 700;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    margin: 0 0 8px;
+    margin: 0 0 12px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -43,64 +85,74 @@
     content: '';
     flex: 1;
     height: 1px;
-    background: #E2E8F0;
+    background: var(--border-color);
   }
 
-  /* ── Scroll único: evitar scroll del body (Fix C) ───────────────────── */
-  body:has(#fcApp) { overflow: hidden; }
+  /* Prevent scrolling body */
+  body:has(#fcApp) { overflow-y: auto; }
 
-  /* ── Date inputs inline en filter bar ───────────────────────────────── */
+  /* == Date inputs inline in filter bar == */
   .fc-date-inline {
     display: flex;
-    align-items: center;       /* alineación vertical correcta de todos los hijos */
-    gap: 6px;
-    background: #F8FAFC;
-    border: 1px solid #E2E8F0;
-    border-radius: 6px;
-    padding: 0 10px;
-    height: 32px;              /* misma altura que .fc-filter-btn */
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    padding: 0 16px;
+    height: 38px;
     white-space: nowrap;
     box-sizing: border-box;
+    transition: var(--transition-smooth);
+  }
+  .fc-date-inline:hover {
+    border-color: var(--border-hover);
   }
   .fc-date-inline-label {
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: #475569;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
     white-space: nowrap;
     line-height: 1;
     margin: 0;
   }
+  .fc-date-inline-label i {
+    color: var(--g-blue);
+    font-size: 0.9rem;
+  }
   .fc-date-inline-sep {
-    color: #CBD5E1;
-    font-size: 0.75rem;
+    color: var(--text-muted);
+    opacity: 0.5;
+    font-size: 0.85rem;
     line-height: 1;
   }
   .fc-date-group-inline {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     height: 100%;
   }
   .fc-date-group-inline label {
-    font-size: 0.7rem;
-    color: #94A3B8;
-    font-weight: 500;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
     white-space: nowrap;
     line-height: 1;
     margin: 0;
   }
-  /* Flatpickr oculta el input original y añade un altInput hermano.
-     Ambos heredan estos estilos; el original queda hidden, el altInput visible. */
   .fc-date-group-inline input,
   .fc-date-group-inline .flatpickr-input {
     background: transparent;
     border: none;
     outline: none;
-    font-size: 0.78rem;
-    color: #0F172A;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-primary);
     font-family: inherit;
     cursor: pointer;
-    width: 84px;
+    width: 80px;
     padding: 0;
     margin: 0;
     line-height: 1;
@@ -108,457 +160,1547 @@
     display: inline-block;
   }
 
-  /* ── Lab row + Search (en explorador inline) ────────────────────────── */
-  .fc-lab-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  /* == Products Explorer Sidebar & Controls == */
+  .fc-lab-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .fc-lab-row select {
-    flex: 1; background: #F8FAFC; border: 1px solid #E2E8F0;
-    border-radius: 6px; padding: 5px 8px; font-size: 0.78rem;
-    color: #0F172A; font-family: inherit; outline: none;
+    flex: 1; 
+    background: var(--bg-card); 
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm); 
+    padding: 6px 10px; 
+    font-size: 0.8rem;
+    color: var(--text-primary); 
+    font-family: inherit; 
+    outline: none;
+    transition: var(--transition-smooth);
   }
-  .fc-lab-row label { font-size: 0.72rem; color: #64748B; white-space: nowrap; display: flex; align-items: center; gap: 4px; cursor: pointer; }
-  .fc-search-wrap { position: relative; margin-bottom: 8px; }
+  .fc-lab-row select:focus {
+    border-color: var(--border-active);
+  }
+  .fc-lab-row label { 
+    font-size: 0.75rem; 
+    color: var(--text-secondary); 
+    white-space: nowrap; 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+    cursor: pointer; 
+    font-weight: 500;
+  }
+  .fc-search-wrap { position: relative; margin-bottom: 12px; }
   .fc-search {
-    width: 100%; background: #F8FAFC; border: 1px solid #E2E8F0;
-    border-radius: 6px; padding: 6px 10px 6px 28px; font-size: 0.78rem;
-    color: #0F172A; font-family: inherit; outline: none;
-    transition: border-color .15s; box-sizing: border-box;
-  }
-  .fc-search:focus { border-color: #94A3B8; background: #fff; }
-  .fc-search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #94A3B8; font-size: 0.82rem; pointer-events: none; }
-  #prodGrid .ag-root-wrapper { border-radius: 6px; border: 1px solid #E2E8F0 !important; font-family: Outfit, system-ui, sans-serif !important; font-size: 12px !important; }
-  #prodGrid .ag-header { display: none; }
-  #prodGrid .ag-row { border-bottom: 1px solid #F1F5F9; }
-  #prodGrid.ag-theme-alpine { --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; --ag-row-hover-color: #F8FAFC; --ag-selected-row-background-color: #EFF6FF; --ag-font-size: 12px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; }
-  .fc-prod-caption { font-size: 0.68rem; color: #94A3B8; margin-top: 5px; text-align: right; }
-
-  /* Sombreado elegante para productos destacados por laboratorio */
-  .fc-lab-highlight { background-color: #FFF9C4 !important; }
-  .fc-lab-highlight:hover { background-color: #FEF08A !important; }
-
-  /* ── Chart + Explorer horizontal layout ─────────────────────────────── */
-  .fc-chart-explorer-row {
-    display: flex;
-    gap: 16px;
-    align-items: stretch;   /* ambas columnas tienen la misma altura */
-  }
-  .fc-chart-col {
-    flex: 1 1 0;
-    min-width: 0;
-    position: relative;
-  }
-  .fc-explorer-col {
-    width: 270px;
-    min-width: 240px;
-    max-width: 290px;
-    min-height: 420px;         /* garantiza altura al inicializar ag-Grid (antes de Plotly) */
-    flex-shrink: 0;
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
-    border-radius: 10px;
-    padding: 14px 12px 10px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;          /* el prodGrid maneja su propio scroll interno */
+    width: 100%; 
+    background: var(--bg-card); 
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill); 
+    padding: 8px 12px 8px 36px; 
+    font-size: 0.82rem;
+    color: var(--text-primary); 
+    font-family: inherit; 
+    outline: none;
+    transition: var(--transition-smooth); 
     box-sizing: border-box;
   }
-  /* prodGrid llena el espacio restante dentro del explorador */
-  .fc-explorer-col #prodGrid {
-    flex: 1;
-    min-height: 0;             /* clave para que flex respete el límite del padre */
+  .fc-search:focus { 
+    border-color: var(--border-active); 
+    box-shadow: 0 0 0 2px rgba(26,115,232,0.15);
   }
+  .fc-search-icon { 
+    position: absolute; 
+    left: 14px; 
+    top: 50%; 
+    transform: translateY(-50%); 
+    color: var(--text-muted); 
+    font-size: 0.9rem; 
+    pointer-events: none; 
+  }
+  #prodGrid .ag-root-wrapper { 
+    border-radius: var(--radius-sm); 
+    border: 1px solid var(--border-color) !important; 
+    font-family: var(--font-family) !important; 
+    font-size: 12px !important; 
+  }
+  #prodGrid .ag-header { display: none; }
+  #prodGrid .ag-row { border-bottom: 1px solid var(--bg-primary); }
+  #prodGrid.ag-theme-alpine { 
+    --ag-background-color: var(--bg-card); 
+    --ag-odd-row-background-color: var(--bg-card); 
+    --ag-row-hover-color: var(--bg-primary); 
+    --ag-selected-row-background-color: var(--g-blue-light); 
+    --ag-font-size: 12px; 
+    --ag-font-family: var(--font-family); 
+    --ag-border-color: var(--border-color); 
+  }
+  .fc-prod-caption { font-size: 0.7rem; color: var(--text-muted); margin-top: 6px; text-align: right; }
 
-  /* ── Main ────────────────────────────────────────────────────────────── */
-  .fc-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .fc-main__header {
-    padding: 16px 24px 14px;
-    border-bottom: 1px solid #E2E8F0;
-    background: #FFFFFF;
+  /* Lab highlight inside explorer */
+  .fc-lab-highlight { background-color: #fffde7 !important; }
+  .fc-lab-highlight:hover { background-color: #fff9c4 !important; }
+
+  /* == Layout for main charts == */
+  .fc-chart-explorer-row {
+    display: flex;
+    gap: 24px;
+    align-items: stretch;
+    margin-bottom: 32px;
+  }
+  .fc-chart-col {
+    flex: 3 1 0;
+    min-width: 0;
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    box-shadow: var(--shadow-card);
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+  }
+  .fc-chart-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 12px;
+  }
+  .fc-chart-title-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .fc-chart-title-wrap h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0;
+    letter-spacing: -0.02em;
+    font-family: 'Outfit', sans-serif;
+  }
+  .fc-chart-subtitle {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 400;
+    font-family: 'Outfit', sans-serif;
+  }
+  .fc-growth-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .fc-growth-wrap:focus-within {
+    border-color: #7c3aed;
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  }
+  .fc-growth-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+  .fc-growth-input-pill {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .fc-growth-input {
+    width: 32px;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #0f172a;
+    text-align: right;
+    outline: none;
+  }
+  .fc-growth-input::-webkit-outer-spin-button,
+  .fc-growth-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .fc-growth-input[type=number] {
+    -moz-appearance: textfield;
+  }
+  .fc-growth-input:disabled {
+    background: transparent;
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .fc-growth-pct-sign {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #64748b;
+  }
+  .fc-custom-legend-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px 4px;
+    scrollbar-width: none;
+  }
+  .fc-custom-legend-row::-webkit-scrollbar {
+    display: none;
+  }
+  .fc-legend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    white-space: nowrap;
     flex-shrink: 0;
   }
-  .fc-main__header h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; color: #0F172A; margin: 0; }
-  .fc-main__header p { color: #64748B; font-size: 0.9rem; margin: 0; }
-
-  /* Filter bar */
-  .fc-filter-bar {
-    padding: 10px 24px;
-    border-bottom: 1px solid #E2E8F0;
-    background: #FFFFFF;
+  .fc-legend-chip:hover {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  }
+  .fc-legend-chip.inactive {
+    opacity: 0.4;
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    text-decoration: line-through;
+    transform: none;
+    box-shadow: none;
+  }
+  .fc-legend-indicator {
     display: flex;
-    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 20px;
+    height: 12px;
+  }
+  .fc-chart-insight-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.72rem;
+    color: #475569;
+    font-family: 'Outfit', sans-serif;
+    margin-top: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  }
+  .fc-insight-icon {
+    width: 14px;
+    height: 14px;
+    color: #3b82f6;
+    flex-shrink: 0;
+  }
+  .fc-explorer-col {
+    flex: 1;
+    min-width: 290px;
+    max-width: 350px;
+    min-height: 480px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-sizing: border-box;
+  }
+  .fc-explorer-col #prodGrid {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* == Main Panel & Header == */
+  .fc-main { flex: 1; display: flex; flex-direction: column; overflow: visible; background: var(--bg-primary); }
+  .fc-main__header {
+    padding: 32px 24px 12px;
+    background: transparent;
+    border-bottom: none;
+    flex-shrink: 0;
+  }
+  .fc-main__header h1 { 
+    font-size: 1.8rem; 
+    font-weight: 700; 
+    letter-spacing: -0.02em; 
+    color: var(--text-primary); 
+    margin: 0 0 6px; 
+    font-family: 'Outfit', sans-serif;
+  }
+  .fc-main__header p { color: var(--text-muted); font-size: 0.88rem; font-weight: 500; margin: 0; }
+
+  /* Buttons Outlined style */
+  .btn-outline-secondary {
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-secondary) !important;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
+    font-size: 0.8rem !important;
+    padding: 8px 16px !important;
+    transition: var(--transition-smooth);
+    background: var(--bg-card) !important;
+  }
+  .btn-outline-secondary:hover {
+    background: var(--bg-primary) !important;
+    border-color: var(--border-hover) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 1px 3px rgba(60,64,67,0.08);
+  }
+
+  /* Filter bar container */
+  .fc-filter-bar {
+    padding: 12px 24px;
+    margin: 0 48px 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    display: flex;
+    gap: 12px;
     align-items: center;
     flex-shrink: 0;
     flex-wrap: wrap;
   }
   .fc-filter-pill { position: relative; display: inline-block; }
   .fc-filter-btn {
-    background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;
-    padding: 6px 12px; font-size: 0.8rem; font-weight: 500; color: #475569;
-    cursor: pointer; white-space: nowrap; font-family: inherit;
-    transition: border-color .15s, background .15s;
+    background: var(--bg-card); 
+    border: 1px solid var(--border-color); 
+    border-radius: var(--radius-pill);
+    padding: 8px 16px; 
+    font-size: 0.82rem; 
+    font-weight: 600; 
+    color: var(--text-secondary);
+    cursor: pointer; 
+    white-space: nowrap; 
+    font-family: inherit;
+    transition: var(--transition-smooth);
+    display: flex;
+    align-items: center;
+    height: 38px;
+    box-sizing: border-box;
   }
-  .fc-filter-btn:hover, .fc-filter-btn.active { border-color: #94A3B8; background: #fff; }
-  .fc-filter-btn.has-selection { border-color: #3B82F6; color: #1D4ED8; background: #EFF6FF; }
+  .fc-filter-btn:hover { 
+    border-color: var(--border-hover); 
+    background: var(--g-blue-hover); 
+    color: var(--text-primary);
+  }
+  .fc-filter-btn.active {
+    border-color: var(--border-active);
+  }
+  .fc-filter-btn.has-selection { 
+    border-color: transparent; 
+    color: var(--g-blue); 
+    background: var(--g-blue-light); 
+    font-weight: 700;
+  }
   .fc-dropdown {
-    position: absolute; top: calc(100% + 4px); left: 0; z-index: 999;
-    background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.1); min-width: 260px; max-height: 380px;
-    overflow: hidden; display: none; flex-direction: column;
+    position: absolute; 
+    top: calc(100% + 8px); 
+    left: 0; 
+    z-index: 999;
+    background: var(--bg-card); 
+    border: 1px solid var(--border-color); 
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-dropdown); 
+    min-width: 280px; 
+    max-height: 400px;
+    overflow: hidden; 
+    display: none; 
+    flex-direction: column;
+    animation: fc-fade-in 150ms cubic-bezier(0, 0, 0.2, 1);
+  }
+  @keyframes fc-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
   }
   .fc-dropdown.open { display: flex; }
-  .fc-dropdown__actions { display: flex; gap: 6px; padding: 10px 12px 8px; border-bottom: 1px solid #F1F5F9; flex-shrink: 0; }
-  .fc-dropdown__actions button { flex: 1; padding: 4px 0; font-size: 0.72rem; font-weight: 600; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC; cursor: pointer; font-family: inherit; color: #475569; }
-  .fc-dropdown__actions button.apply { background: #3B82F6; color: #fff; border-color: #3B82F6; }
-  .fc-dropdown__list { overflow-y: auto; padding: 8px 4px; flex: 1; scrollbar-width: thin; }
-  .fc-dropdown__item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer; border-radius: 4px; color: #334155; transition: background .1s; }
-  .fc-dropdown__item:hover { background: #F8FAFC; }
-  .fc-dropdown__item input[type=checkbox] { cursor: pointer; accent-color: #3B82F6; }
+  .fc-dropdown__actions { 
+    display: flex; 
+    gap: 8px; 
+    padding: 12px; 
+    border-bottom: 1px solid var(--border-color); 
+    flex-shrink: 0; 
+  }
+  .fc-dropdown__actions button { 
+    flex: 1; 
+    padding: 6px 0; 
+    font-size: 0.78rem; 
+    font-weight: 600; 
+    border-radius: var(--radius-sm); 
+    border: 1px solid var(--border-color); 
+    background: var(--bg-primary); 
+    cursor: pointer; 
+    font-family: inherit; 
+    color: var(--text-secondary); 
+    transition: var(--transition-smooth);
+  }
+  .fc-dropdown__actions button:hover {
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+  }
+  .fc-dropdown__actions button.apply { 
+    background: var(--g-blue); 
+    color: var(--bg-card); 
+    border-color: transparent; 
+  }
+  .fc-dropdown__actions button.apply:hover {
+    background: var(--g-blue-dark);
+  }
+  .fc-dropdown__list { 
+    overflow-y: auto; 
+    padding: 8px; 
+    flex: 1; 
+    scrollbar-width: thin; 
+  }
+  .fc-dropdown__item { 
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+    padding: 7px 12px; 
+    font-size: 0.82rem; 
+    cursor: pointer; 
+    border-radius: var(--radius-sm); 
+    color: var(--text-secondary); 
+    transition: var(--transition-smooth);
+  }
+  .fc-dropdown__item:hover { background: var(--bg-primary); color: var(--text-primary); }
+  .fc-dropdown__item input[type=checkbox] { 
+    cursor: pointer; 
+    accent-color: var(--g-blue); 
+    width: 15px;
+    height: 15px;
+  }
 
-  /* ── Parámetros Financieros chip (en filter bar) ────────────────────── */
+  /* Inflation Parameters chip */
   .fc-param-chip {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-left: auto;            /* empuja el chip hacia la derecha */
-    background: #F0FDF4;
-    border: 1px solid #BBF7D0;
-    border-radius: 6px;
-    padding: 0 10px;
-    height: 32px;
+    gap: 8px;
+    margin-left: auto;
+    background: var(--g-green-light);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 0 16px;
+    height: 38px;
     white-space: nowrap;
-    font-size: 0.75rem;
-    color: #166534;
-    font-weight: 500;
+    font-size: 0.8rem;
+    color: var(--g-green);
+    font-weight: 600;
   }
-  .fc-param-chip i { color: #16A34A; }
+  .fc-param-chip i { color: var(--g-green); font-size: 0.9rem; }
   .fc-param-chip strong { font-weight: 700; }
 
-  /* ── Lab filter mejorado dentro del explorador ──────────────────────── */
+  /* Lab filter within explorer */
   .fc-lab-filter-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 12px;
     flex-wrap: wrap;
   }
   .fc-lab-filter-row select {
     flex: 1;
     min-width: 0;
-    background: #F8FAFC;
-    border: 1px solid #E2E8F0;
-    border-radius: 6px;
-    padding: 5px 8px;
-    font-size: 0.78rem;
-    color: #0F172A;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    color: var(--text-primary);
     font-family: inherit;
     outline: none;
+    transition: var(--transition-smooth);
+  }
+  .fc-lab-filter-row select:focus {
+    border-color: var(--border-active);
   }
   .fc-lab-filter-row select:disabled { opacity: 0.5; cursor: not-allowed; }
   .fc-lab-checkbox-label {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 0.72rem;
-    color: #475569;
-    font-weight: 500;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    padding: 4px 7px;
-    border: 1px solid #E2E8F0;
-    border-radius: 5px;
-    background: #F8FAFC;
-    transition: background .15s, border-color .15s;
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    background: var(--bg-card);
+    transition: var(--transition-smooth);
     user-select: none;
   }
-  .fc-lab-checkbox-label:hover { background: #EFF6FF; border-color: #93C5FD; }
-  .fc-lab-checkbox-label input[type=checkbox] { accent-color: #3B82F6; cursor: pointer; margin: 0; }
+  .fc-lab-checkbox-label:hover { 
+    background: var(--g-blue-hover); 
+    border-color: var(--g-blue); 
+    color: var(--g-blue);
+  }
+  .fc-lab-checkbox-label input[type=checkbox] { accent-color: var(--g-blue); cursor: pointer; margin: 0; }
   .fc-lab-active-badge {
     display: none;
-    font-size: 0.62rem;
+    font-size: 0.65rem;
     font-weight: 700;
-    background: #DBEAFE;
-    color: #1D4ED8;
-    border-radius: 999px;
-    padding: 1px 6px;
+    text-transform: uppercase;
+    background: var(--g-blue-light);
+    color: var(--g-blue);
+    padding: 2px 6px;
+    border-radius: 4px;
     margin-left: 2px;
   }
-  .fc-lab-active .fc-lab-active-badge { display: inline; }
-  .fc-lab-active .fc-lab-checkbox-label { border-color: #3B82F6; background: #EFF6FF; color: #1D4ED8; }
 
-  /* ── Scrollable content ──────────────────────────────────────────────── */
-  .fc-content { flex: 1; overflow-y: auto; padding: 20px 24px 40px; scrollbar-width: thin; scrollbar-color: #E2E8F0 transparent; }
-
-  /* ── KPI Cards ───────────────────────────────────────────────────────── */
-  .fc-kpi-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 20px; }
-  .kpi-card {
-    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
-    border-radius: 14px;
-    padding: 14px 16px;
-    border: 1px solid #E2E8F0;
-    box-shadow: 0 6px 20px rgba(6,72,111,0.06);
-    display: flex;
-    flex-direction: column;
-    height: 100%;
+  /* == Content Scroll Container == */
+  .fc-content { 
+    flex: 1; 
+    overflow-y: visible; 
+    padding: 0 24px 32px; 
   }
-  .kpi-title { color: #5E7388; font-size: clamp(0.62rem, 0.15vw + 0.6rem, 0.72rem); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-  .kpi-value { color: #06486F; font-size: clamp(1.1rem, 0.8vw + 0.85rem, 1.55rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1; }
-  .kpi-trend { display: flex; align-items: center; gap: 5px; margin-top: auto; padding-top: 8px; font-size: clamp(0.62rem, 0.12vw + 0.6rem, 0.72rem); font-weight: 600; }
-  .trend-up { color: #2C8E67; }
-  .trend-down { color: #D66D6D; }
-  .trend-neutral { color: #5E7388; }
 
-  /* ── Chart ───────────────────────────────────────────────────────────── */
-  .fc-chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .fc-chart-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; }
-  .fc-growth-wrap { display: flex; align-items: center; gap: 8px; }
-  .fc-growth-wrap label { font-size: 0.75rem; color: #64748B; font-weight: 500; white-space: nowrap; }
-  .fc-growth-input {
-    width: 90px; background: #F8FAFC; border: 1px solid #E2E8F0;
-    border-radius: 6px; padding: 5px 8px; font-size: 0.8rem;
-    color: #0F172A; font-family: inherit; outline: none; text-align: right;
-  }
-  .fc-growth-input:focus { border-color: #94A3B8; }
-  .fc-growth-input:disabled {
-    opacity: 1;
-    cursor: not-allowed;
-    color: #0F172A;
-  }
-  #forecastChart { width: 100%; border-radius: 8px; background: #FFFFFF; border: 1px solid #E2E8F0; }
-  .fc-divider { height: 1px; background: #E2E8F0; margin: 20px 0; }
-
-  /* ── Treemap ─────────────────────────────────────────────────────────── */
-  .fc-treemap-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; gap: 16px; }
-  .fc-treemap-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; flex-shrink: 0; }
-  .fc-treemap-controls { display: flex; align-items: flex-start; gap: 12px; }
-  .fc-period-label { font-size: 0.7rem; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
-  .fc-period-select { font-size: 0.82rem; color: #1E293B; background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; padding: 4px 8px; cursor: pointer; min-width: 140px; }
-  .fc-treemap-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 10px; }
-  .fc-treemap-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 0.75rem; color: #475569; white-space: nowrap; }
-  .fc-treemap-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-  .fc-treemap-caption { font-size: 0.78rem; color: #64748B; margin-top: 6px; }
-  #treemapChart { width: 100%; border-radius: 8px; background: #FFFFFF; border: 1px solid #E2E8F0; }
-
-  /* ── Table ───────────────────────────────────────────────────────────── */
-  .fc-table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .fc-table-header h3 { font-size: 1rem; font-weight: 600; color: #1E293B; letter-spacing: -0.01em; margin: 0; }
-  .fc-toggle-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #475569; }
-  .fc-toggle { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
-  .fc-toggle input { display: none; }
-  .fc-toggle-slider { position: absolute; inset: 0; background: #CBD5E1; border-radius: 10px; cursor: pointer; transition: background .2s; }
-  .fc-toggle-slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform .2s; }
-  .fc-toggle input:checked + .fc-toggle-slider { background: #3B82F6; }
-  .fc-toggle input:checked + .fc-toggle-slider::before { transform: translateX(18px); }
-
-  #clientGrid.ag-theme-alpine { --ag-background-color: #FFFFFF; --ag-odd-row-background-color: #FFFFFF; --ag-row-hover-color: #F8FAFC; --ag-font-size: 13px; --ag-font-family: Outfit, system-ui, sans-serif; --ag-border-color: #E2E8F0; --ag-header-background-color: #F8FAFC; --ag-header-foreground-color: #475569; }
-  #clientGrid .ag-root-wrapper { border-radius: 8px; border: 1px solid #E2E8F0 !important; }
-  #clientGrid .ag-header-cell { font-weight: 600 !important; font-size: 12px !important; text-transform: uppercase; letter-spacing: 0.04em; }
-  .fc-total-caption { font-size: 0.8rem; color: #64748B; margin-top: 8px; text-align: right; }
-  /* ── Client search bar ─────────────────────────────────────────────── */
-  .fc-client-search-wrap { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px 12px; max-width: 380px; }
-  .fc-client-search-icon { font-size: 0.9rem; color: #94A3B8; line-height: 1; }
-  .fc-client-search-input { flex: 1; border: none; background: transparent; outline: none; font-size: 0.85rem; color: #334155; font-family: inherit; }
-  .fc-client-search-input::placeholder { color: #94A3B8; }
-  .fc-client-search-clear { border: none; background: transparent; cursor: pointer; color: #94A3B8; font-size: 0.85rem; padding: 0; line-height: 1; }
-  .fc-client-search-clear:hover { color: #475569; }
-
-  /* ── Loaders ─────────────────────────────────────────────────────────── */
-  .fc-loading { position: absolute; inset: 0; background: rgba(248,250,252,0.75); display: flex; align-items: center; justify-content: center; z-index: 50; backdrop-filter: blur(2px); border-radius: 8px; }
-  .fc-spinner { width: 32px; height: 32px; border: 3px solid #E2E8F0; border-top-color: #3B82F6; border-radius: 50%; animation: fc-spin 0.7s linear infinite; }
-  @keyframes fc-spin { to { transform: rotate(360deg); } }
-
-  /* ── Modal overlay ───────────────────────────────────────────────────── */
-  .fc-modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.45);
-    z-index: 1050; align-items: center; justify-content: center;
-    padding: 20px; box-sizing: border-box;
-  }
-  .fc-modal-overlay.open { display: flex; }
-  .fc-modal {
-    background: #FFFFFF; border-radius: 12px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-    width: 100%; max-width: min(1400px, 96vw);
-    max-height: 92vh; display: flex; flex-direction: column;
-    font-family: Outfit, system-ui, sans-serif;
-  }
-  .fc-modal__header {
-    padding: 16px 24px 14px;
-    border-bottom: 1px solid #E2E8F0;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-shrink: 0;
-  }
-  .fc-modal__title { font-size: 1.05rem; font-weight: 700; color: #0F172A; margin: 0; }
-  .fc-modal__close { background: none; border: none; font-size: 1.4rem; color: #94A3B8; cursor: pointer; line-height: 1; padding: 0; }
-  .fc-modal__close:hover { color: #475569; }
-  /* Modal body: the ag-Grid within handles its own vertical scroll (domLayout:normal),
-     so the modal body itself only scrolls when there are multiple neg sections. */
-  .fc-modal__body { flex: 1; overflow-y: auto; padding: 16px 20px; min-height: 0; }
-  .fc-modal__footer {
-    padding: 14px 24px; border-top: 1px solid #E2E8F0;
-    display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-shrink: 0;
-  }
-  .fc-modal__footer-actions { display: flex; gap: 8px; align-items: center; }
-  /* Visual indicator when modal has unsaved changes */
-  .fc-modal--dirty .fc-modal__title::after { content: ' •'; color: #F59E0B; font-size: 1rem; }
-
-  /* Modal info boxes */
-  .fc-modal-info { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-  .fc-modal-info-box { background: #F1F5F9; padding: 10px 14px; border-radius: 6px; font-size: 0.875rem; }
-  .fc-modal-info-box strong { color: #0F172A; }
-  .fc-modal-growth-caption { font-size: 0.8rem; color: #64748B; margin-bottom: 14px; }
-
-  /* Modal section expander */
-  .fc-modal-neg { margin-bottom: 10px; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; }
-  .fc-modal-neg__header {
-    background: #F8FAFC; padding: 10px 16px;
-    font-size: 0.85rem; font-weight: 600; color: #334155;
-    cursor: pointer; display: flex; align-items: center; justify-content: space-between;
-    user-select: none;
-  }
-  .fc-modal-neg__header:hover { background: #F1F5F9; }
-  .fc-modal-neg__arrow { transition: transform .2s; font-size: 0.8rem; color: #94A3B8; }
-  .fc-modal-neg__arrow.open { transform: rotate(90deg); }
-  .fc-modal-neg__body { display: none; }
-  .fc-modal-neg__body.open { display: block; }
-
-  /* Modal tabs */
-  .fc-modal-tabs { display: flex; border-bottom: 2px solid #E2E8F0; margin: 10px 0 0; padding: 0 12px; }
-  .fc-modal-tab { padding: 8px 14px; font-size: 0.8rem; font-weight: 500; color: #64748B; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
-  .fc-modal-tab.active { color: #2563EB; border-bottom-color: #2563EB; font-weight: 600; }
-
-  /* Modal client general growth */
-  .fc-modal-client-growth { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; margin-bottom: 14px; font-size: 0.875rem; }
-  .fc-modal-client-growth label { margin: 0; font-weight: 600; color: #1E40AF; flex: 1; cursor: default; }
-  .fc-modal-client-growth input[type=number] { width: 80px; padding: 4px 8px; border: 1px solid #93C5FD; border-radius: 4px; font-size: 0.875rem; font-family: inherit; outline: none; text-align: right; background: #fff; }
-  .fc-modal-client-growth input[type=number]:focus { border-color: #3B82F6; box-shadow: 0 0 0 2px #DBEAFE; }
-  .fc-modal-client-growth .fc-client-growth-unit { color: #64748B; font-size: 0.8rem; white-space: nowrap; }
-
-  /* Modal subneg growth */
-  .fc-modal-subneg-growth { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: 0.8rem; color: #64748B; border-bottom: 1px solid #F1F5F9; }
-  .fc-modal-subneg-growth input[type=number] { width: 80px; padding: 3px 6px; border: 1px solid #E2E8F0; border-radius: 4px; font-size: 0.8rem; font-family: inherit; outline: none; text-align: right; }
-
-  /* Effective-month banner — shows when changes apply */
-  .fc-modal-effective-notice {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-    padding: 8px 14px; margin-bottom: 12px;
-    background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px;
-    font-size: 0.8rem; color: #92400E;
-  }
-  .fc-modal-effective-notice strong { color: #78350F; font-size: 0.85rem; }
-  .fc-modal-effective-rule { color: #B45309; font-size: 0.75rem; }
-
-  /* Blocked (past-cutoff) month columns in ag-Grid — visual indicator */
-  .fc-cell-blocked { background: #F8FAFC !important; color: #94A3B8 !important; cursor: not-allowed !important; }
-
-  /* Modal ag-grid */
-  .fc-modal-grid { padding: 10px 12px 14px; }
-  /* Fixed height so the horizontal scrollbar is always visible at the bottom
-     of the grid, regardless of how many products are listed. Uses domLayout:'normal'
-     (ag-Grid internal scroll), so the user never needs to scroll the whole modal
-     just to reach the horizontal scrollbar. */
-  .fc-modal-grid .ag-theme-alpine {
-    height: clamp(220px, 44vh, 500px);
-    width: 100%;
-    --ag-font-size: 12px;
-    --ag-font-family: Outfit, system-ui, sans-serif;
-    --ag-border-color: #E2E8F0;
-    --ag-header-background-color: #F8FAFC;
-    --ag-background-color: #FFFFFF;
-    --ag-odd-row-background-color: #FFFFFF;
-  }
-  .fc-modal-grid .ag-root-wrapper { border: 1px solid #E2E8F0 !important; border-radius: 6px; }
-  .fc-modal-grid .ag-header-group-cell { background: #F1F5F9 !important; font-weight: 600; font-size: 11px; text-align: center; border-right: 1px solid #E2E8F0; }
-  .fc-modal-grid .ag-header-cell { font-weight: 600 !important; font-size: 11px; border-right: 1px solid #E2E8F0; }
-
-  /* ── View Tabs ───────────────────────────────────────────────────────── */
+  /* == Switch view tabs (Material Design Tabs) == */
   .fc-view-tabs {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 10px 24px 0;
-    background: #FFFFFF;
-    border-bottom: 1px solid #E2E8F0;
+    gap: 28px;
+    padding: 0 24px;
+    background: transparent;
+    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+    margin-bottom: 24px;
+    align-self: stretch;
+    box-shadow: none;
   }
   .fc-view-tab {
-    padding: 9px 20px;
-    font-size: 0.82rem;
+    padding: 10px 4px 12px 4px;
+    font-size: 0.85rem;
     font-weight: 500;
-    color: #64748B;
+    color: var(--text-muted);
     cursor: pointer;
     border: none;
-    background: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    background: transparent;
+    border-radius: 0;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
     font-family: inherit;
     display: flex;
     align-items: center;
-    gap: 7px;
-    transition: color .15s;
+    gap: 8px;
+    transition: all 0.2s ease;
     white-space: nowrap;
+    outline: none;
   }
-  .fc-view-tab:hover { color: #334155; }
+  .fc-view-tab:hover {
+    color: var(--text-primary);
+    border-bottom-color: rgba(26, 115, 232, 0.3);
+  }
   .fc-view-tab.active {
-    color: #1D4ED8;
-    border-bottom-color: #3B82F6;
+    color: var(--border-active);
+    border-bottom-color: var(--border-active);
     font-weight: 600;
   }
   .fc-view-tab .fc-tab-badge {
-    font-size: 0.68rem;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: #F1F5F9;
-    color: #64748B;
+    font-size: 0.65rem;
     font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(15, 23, 42, 0.05);
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+    margin-left: 2px;
   }
   .fc-view-tab.active .fc-tab-badge {
-    background: #DBEAFE;
-    color: #1D4ED8;
+    background: var(--g-blue-light);
+    color: var(--border-active);
+  }
+  .fc-view-tab i {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+    transition: all 0.2s ease;
+  }
+  .fc-view-tab.active i {
+    color: var(--border-active);
+    opacity: 1;
   }
 
-  /* Tab panels */
+  /* Tab Panel visibility toggles */
   .fc-tab-panel { display: none; }
   .fc-tab-panel.active { display: block; }
 
-  /* ── Responsive ──────────────────────────────────────────────────────── */
-  @media (max-width: 1400px) { .fc-kpi-row { grid-template-columns: repeat(4, 1fr); } }
-  @media (max-width: 1100px) { .fc-kpi-row { grid-template-columns: repeat(3, 1fr); } }
+  /* == KPI Cards (Google Executive style) == */
+  .fc-kpi-row { 
+    display: grid; 
+    grid-template-columns: repeat(7, minmax(0, 1fr)); 
+    gap: 12px; 
+    margin-bottom: 24px; 
+    align-items: stretch;
+  }
+  .kpi-card {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 108px;
+    height: 100%;
+    transition: var(--transition-smooth);
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(60,64,67,0.08);
+    border-color: var(--border-hover);
+  }
+
+  /* Key KPI Highlights */
+  #kpi-fcst2026 {
+    background: linear-gradient(180deg, var(--bg-card) 0%, rgba(26,115,232,0.01) 100%);
+    border-top: 3px solid var(--g-blue);
+    border-left: 1px solid var(--border-color);
+  }
+  #kpi-fact2026 {
+    background: linear-gradient(180deg, var(--bg-card) 0%, rgba(52,168,83,0.01) 100%);
+    border-top: 3px solid var(--g-green);
+    border-left: 1px solid var(--border-color);
+  }
+
+  .kpi-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+    line-height: 1.25;
+    min-height: 24px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .kpi-value {
+    font-size: clamp(1.2rem, 1.4vw, 1.45rem);
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+    font-family: 'Outfit', sans-serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .kpi-trend {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--g-green);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .kpi-trend.trend-down { color: var(--g-red); }
+  .kpi-trend.trend-neutral { color: var(--text-muted); font-weight: 500; }
+
+  /* == Card for charts and sections == */
+  .fc-treemap-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 24px;
+    margin-bottom: 32px;
+  }
+
+
+
+
+  .fc-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 8px 0 32px;
+  }
+
+  /* == Treemap headers and captions == */
+  .fc-treemap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .fc-treemap-header h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .fc-treemap-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fc-period-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .fc-period-select {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    font-family: inherit;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
+    background: var(--bg-card);
+    transition: var(--transition-smooth);
+    font-weight: 500;
+  }
+  .fc-period-select:focus {
+    border-color: var(--border-active);
+  }
+  .fc-treemap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+  }
+  .fc-treemap-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+  .fc-treemap-legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .fc-treemap-caption {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 12px;
+    font-weight: 500;
+  }
+
+  /* == Custom Navigation for Treemap == */
+  .fc-treemap-nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: -4px 0 16px 0;
+    min-height: 36px;
+    padding: 0 4px;
+  }
+  .fc-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .fc-back-btn:hover {
+    background-color: var(--border-color);
+    color: var(--text-primary);
+    border-color: var(--border-active);
+    transform: translateX(-2px);
+  }
+  .fc-back-btn-icon {
+    display: block;
+    transition: transform 0.2s ease;
+  }
+  .fc-back-btn:hover .fc-back-btn-icon {
+    transform: translateX(-2px);
+  }
+  
+  .fc-breadcrumbs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .fc-breadcrumb-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.15s ease;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .fc-breadcrumb-link:hover {
+    color: var(--border-active);
+    background-color: var(--g-blue-light);
+  }
+  .fc-breadcrumb-separator {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    user-select: none;
+    margin: 0 2px;
+  }
+  .fc-breadcrumb-current {
+    color: var(--text-primary);
+    font-weight: 600;
+    padding: 2px 6px;
+  }
+
+  .fc-treemap-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 24px;
+    margin-bottom: 32px;
+    transition: box-shadow var(--transition-smooth);
+  }
+  .fc-treemap-card:hover {
+    box-shadow: var(--shadow-hover);
+  }
+
+  .fc-treemap-header h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.01em;
+    padding-left: 12px;
+    border-left: 3px solid var(--g-blue);
+    line-height: 1.25;
+  }
+
+  .fc-treemap-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+  }
+  .fc-treemap-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+  .fc-treemap-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
+  #treemapChart rect {
+    cursor: pointer !important;
+  }
+  #treemapChart text {
+    cursor: pointer !important;
+    user-select: none !important;
+  }
+
+  /* == ag-Grid Theme overrides (Alpine SaaS Style) == */
+  .ag-theme-alpine {
+    --ag-background-color: var(--bg-card);
+    --ag-odd-row-background-color: var(--bg-card);
+    --ag-row-hover-color: var(--g-blue-hover);
+    --ag-selected-row-background-color: var(--g-blue-light);
+    --ag-border-color: #f1f3f4;
+    --ag-header-background-color: #f8f9fa;
+    --ag-header-foreground-color: var(--text-secondary);
+    --ag-row-border-color: #f1f3f4;
+    --ag-font-family: var(--font-family);
+    --ag-font-size: 13px;
+    --ag-borders: none;
+    --ag-cell-horizontal-border: none;
+    --ag-row-height: 48px;
+    --ag-header-height: 44px;
+  }
+  #clientGrid .ag-root-wrapper {
+    border-radius: var(--radius-lg) !important;
+    border: 1px solid var(--border-color) !important;
+    overflow: hidden;
+  }
+  .ag-header-cell-label {
+    font-weight: 700 !important;
+    color: var(--text-secondary) !important;
+  }
+  .ag-pinned-left-cols-container {
+    border-right: 1.5px solid var(--border-color) !important;
+  }
+  .ag-pinned-left-header {
+    border-right: 1.5px solid var(--border-color) !important;
+  }
+  .ag-row {
+    transition: background-color 150ms;
+  }
+  
+  /* Pinned Bottom totals row */
+  .ag-row-pinned {
+    background-color: #f8f9fa !important;
+    font-weight: 700 !important;
+    border-top: 2px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+  /* == Vista 2 Header, Search & Card elements == */
+  .fc-table-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    transition: box-shadow var(--transition-smooth);
+  }
+  .fc-table-card:hover {
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.06), 0 8px 16px -6px rgba(15, 23, 42, 0.04);
+  }  .fc-table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .fc-table-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .fc-table-header-left h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .fc-table-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .fc-table-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .fc-header-control-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border-color);
+  }
+  .fc-toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .fc-toggle {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 18px;
+  }
+  .fc-toggle input { opacity: 0; width: 0; height: 0; }
+  .fc-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background-color: rgba(15, 23, 42, 0.1);
+    border-radius: 100px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .fc-toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 12px;
+    width: 12px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+  .fc-toggle input:checked + .fc-toggle-slider {
+    background-color: var(--g-blue);
+  }
+  .fc-toggle input:checked + .fc-toggle-slider:before {
+    transform: translateX(14px);
+  }
+  .fc-client-search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 220px;
+  }
+  .fc-client-search-input {
+    width: 100%;
+    padding: 6px 12px 6px 30px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    outline: none;
+    transition: all 0.2s ease;
+    background: var(--bg-card);
+    box-sizing: border-box;
+  }
+  .fc-client-search-input:focus {
+    border-color: var(--border-active);
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.08);
+  }
+  .fc-client-search-icon {
+    position: absolute;
+    left: 10px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+  }
+  .fc-client-search-clear {
+    position: absolute;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0;
+    transition: color 0.15s ease;
+  }
+  .fc-client-search-clear:hover {
+    color: var(--text-primary);
+  }
+  .fc-total-caption {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-top: 14px;
+    font-weight: 500;
+    display: block;
+  }
+  
+  /* == clientGrid ag-Grid Custom Overrides == */
+  #clientGrid.ag-theme-alpine {
+    --ag-grid-size: 6px;
+    --ag-row-height: 46px;
+    --ag-header-height: 46px;
+    --ag-font-size: 13px;
+    --ag-background-color: #ffffff;
+    --ag-odd-row-background-color: #ffffff; /* keep all rows uniform background */
+    --ag-row-hover-color: #f8fafc; /* very soft clean grey hover */
+    --ag-selected-row-background-color: rgba(26, 115, 232, 0.04);
+    --ag-header-background-color: #ffffff; /* flat design */
+    --ag-header-foreground-color: var(--text-secondary);
+    --ag-border-color: #f1f4f8; /* very thin clean line */
+    --ag-row-border-color: #f1f4f8;
+  }
+  
+  #clientGrid .ag-root-wrapper {
+    border-radius: 8px !important;
+    border: 1px solid #eef1f6 !important;
+    box-shadow: none !important; /* no nested box shadows */
+    overflow: hidden;
+  }
+  
+  #clientGrid .ag-header-cell-text {
+    font-weight: 600 !important;
+    color: var(--text-secondary) !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.01em;
+    text-transform: none !important;
+  }
+  
+  #clientGrid .ag-pinned-left-cols-container {
+    border-right: 1px solid #e2e8f0 !important;
+    background: #ffffff;
+  }
+  #clientGrid .ag-pinned-left-header {
+    border-right: 1px solid #e2e8f0 !important;
+    background: #ffffff;
+  }
+  
+  #clientGrid .ag-row {
+    transition: background-color 0.15s ease;
+  }
+  
+  #clientGrid .ag-row-level-0.ag-row-group {
+    background-color: #f8fafc !important;
+    border-bottom: 1px solid #eef1f6 !important;
+  }
+  
+  #clientGrid .ag-body-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 23, 42, 0.12) transparent;
+  }
+  #clientGrid .ag-body-viewport::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  #clientGrid .ag-body-viewport::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  #clientGrid .ag-body-viewport::-webkit-scrollbar-thumb {
+    background-color: rgba(15, 23, 42, 0.12);
+    border-radius: 3px;
+  }
+  #clientGrid .ag-body-viewport::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(15, 23, 42, 0.25);
+  }
+  
+  #clientGrid .ag-row-pinned {
+    background-color: #f8fbff !important;
+    font-weight: 700 !important;
+    border-top: 1px solid #e2e8f0 !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 -2px 6px rgba(15, 23, 42, 0.02) !important;
+  }
+} }
+
+  /* == Loading and Spinner == */
+  .fc-loading {
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    background: rgba(255,255,255,0.7); 
+    z-index: 10;
+    border-radius: var(--radius-lg);
+  }
+  .fc-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid #e8eaed;
+    border-top: 3px solid var(--g-blue);
+    border-radius: 50%;
+    animation: fc-spin 0.8s linear infinite;
+  }
+  @keyframes fc-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  /* == Modal Overlay & Modern Container == */
+  .fc-modal-overlay {
+    display: none; 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(32,33,36,0.6);
+    z-index: 1050; 
+    align-items: center; 
+    justify-content: center;
+    padding: 20px; 
+    box-sizing: border-box;
+    backdrop-filter: blur(4px);
+    animation: fc-fade-in 200ms ease-out;
+  }
+  .fc-modal-overlay.open { display: flex; }
+  .fc-modal {
+    background: var(--bg-card); 
+    border-radius: var(--radius-lg);
+    box-shadow: 0 24px 64px 0 rgba(0,0,0,0.18);
+    width: 100%; 
+    max-width: min(1360px, 95vw);
+    max-height: 90vh; 
+    display: flex; 
+    flex-direction: column;
+    font-family: var(--font-family);
+    border: none;
+    overflow: hidden;
+  }
+  .fc-modal__header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: var(--bg-card);
+  }
+  .fc-modal__title { font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px; font-family: 'Outfit', sans-serif; }
+  .fc-modal__close { 
+    background: none; 
+    border: none; 
+    font-size: 1.6rem; 
+    color: var(--text-muted); 
+    cursor: pointer; 
+    line-height: 1; 
+    padding: 0; 
+    transition: var(--transition-smooth);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .fc-modal__close:hover { 
+    color: var(--text-primary); 
+    background: var(--bg-primary);
+  }
+  .fc-modal__body { flex: 1; overflow-y: auto; padding: 24px 28px; min-height: 0; background: var(--bg-primary); }
+  .fc-modal__footer {
+    padding: 16px 24px; 
+    border-top: 1px solid var(--border-color);
+    display: flex; 
+    align-items: center; 
+    gap: 12px; 
+    justify-content: space-between; 
+    flex-shrink: 0;
+    background: var(--bg-card);
+  }
+  .fc-modal__footer-actions { display: flex; gap: 10px; align-items: center; }
+  
+  /* Dirty indicator dot */
+  .fc-modal--dirty .fc-modal__title::after { 
+    content: ''; 
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--g-yellow); 
+    display: inline-block;
+    margin-left: 8px;
+  }
+
+  /* Info containers in modal */
+  .fc-modal-info { display: flex; gap: 16px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+  .fc-modal-info-box { 
+    background: transparent; 
+    padding: 0; 
+    border-radius: 0; 
+    font-size: 0.88rem; 
+    border: none;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .fc-modal-info-box strong { 
+    color: var(--g-blue); 
+    font-weight: 600; 
+    background: var(--g-blue-light);
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    font-size: 0.82rem;
+  }
+  .fc-modal-growth-caption { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 18px; font-weight: 500; }
+
+  /* Subneg collapsible containers */
+  .fc-modal-neg { 
+    margin-bottom: 16px; 
+    border: 1px solid var(--border-color); 
+    border-radius: var(--radius-md); 
+    overflow: hidden; 
+    background: var(--bg-card);
+    box-shadow: 0 1px 3px rgba(60,64,67,0.05);
+    transition: var(--transition-smooth);
+  }
+  .fc-modal-neg:hover {
+    border-color: var(--border-hover);
+    box-shadow: 0 2px 8px rgba(60,64,67,0.08);
+  }
+  .fc-modal-neg__header {
+    background: var(--bg-card); 
+    padding: 16px 20px;
+    font-size: 0.92rem; 
+    font-weight: 600; 
+    color: var(--text-primary);
+    cursor: pointer; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between;
+    user-select: none;
+    transition: var(--transition-smooth);
+  }
+  .fc-modal-neg__header:hover { background: var(--g-blue-hover); color: var(--g-blue); }
+  .fc-modal-neg__arrow { transition: transform .2s; font-size: 0.85rem; color: var(--text-muted); display: inline-block; }
+  .fc-modal-neg__arrow.open { transform: rotate(90deg); color: var(--text-primary); }
+  .fc-modal-neg__body { display: none; }
+  .fc-modal-neg__body.open { display: block; border-top: 1px solid var(--border-color); }
+
+  /* Modal tabs */
+  .fc-modal-tabs { display: flex; border-bottom: 2px solid var(--border-color); margin: 12px 0 0; padding: 0 12px; }
+  .fc-modal-tab { padding: 10px 16px; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: var(--transition-smooth); }
+  .fc-modal-tab:hover { color: var(--text-primary); }
+  .fc-modal-tab.active { color: var(--g-blue); border-bottom-color: var(--g-blue); font-weight: 600; }
+
+  /* Modal client growth override panel */
+  .fc-modal-client-growth { 
+    display: flex; 
+    align-items: center; 
+    gap: 12px; 
+    padding: 14px 20px; 
+    background: var(--g-blue-light); 
+    border: 1px solid transparent; 
+    border-radius: var(--radius-md); 
+    margin-bottom: 20px; 
+    font-size: 0.9rem; 
+  }
+  .fc-modal-client-growth label { margin: 0; font-weight: 600; color: var(--g-blue-dark); flex: 1; cursor: default; }
+  .fc-modal-client-growth input[type=number] { 
+    width: 90px; 
+    padding: 6px 12px; 
+    border: 1px solid #93c5fd; 
+    border-radius: var(--radius-md); 
+    font-size: 0.88rem; 
+    font-family: inherit; 
+    outline: none; 
+    text-align: right; 
+    background: var(--bg-card); 
+    font-weight: 600;
+  }
+  .fc-modal-client-growth input[type=number]:focus { border-color: var(--g-blue); box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }
+  .fc-modal-client-growth .fc-client-growth-unit { color: #5b74b8; font-size: 0.82rem; font-weight: 600; }
+
+  /* Modal subneg growth row */
+  .fc-modal-subneg-growth { 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    padding: 10px 20px; 
+    font-size: 0.85rem; 
+    color: var(--text-secondary); 
+    border-bottom: 1px solid var(--border-color); 
+    background: var(--bg-primary);
+  }
+  .fc-modal-subneg-growth span { font-weight: 600; color: var(--text-primary); }
+  .fc-modal-subneg-growth input[type=number] { 
+    width: 80px; 
+    padding: 6px 10px; 
+    border: 1px solid var(--border-color); 
+    border-radius: var(--radius-sm); 
+    font-size: 0.82rem; 
+    font-family: inherit; 
+    outline: none; 
+    text-align: right; 
+    transition: var(--transition-smooth);
+    background: var(--bg-card);
+  }
+  .fc-modal-subneg-growth input[type=number]:focus {
+    border-color: var(--border-active);
+  }
+
+  /* Effective cutoff notice banner */
+  .fc-modal-effective-notice {
+    display: flex; 
+    align-items: center; 
+    flex-wrap: wrap; 
+    gap: 8px;
+    padding: 12px 18px; 
+    margin-bottom: 20px;
+    background: #fff8e1; 
+    border-left: 4px solid #ffb300; 
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem; 
+    color: #5d4037;
+  }
+  .fc-modal-effective-notice strong { color: #4e342e; font-size: 0.88rem; }
+  .fc-modal-effective-rule { color: #795548; font-size: 0.78rem; font-weight: 600; }
+
+  /* Blocked/Locked column cells diagonal patterns for clarity */
+  .fc-cell-blocked { 
+    background-color: #f1f3f4 !important; 
+    background-image: linear-gradient(45deg, #e8eaed 25%, transparent 25%, transparent 50%, #e8eaed 50%, #e8eaed 75%, transparent 75%, transparent) !important;
+    background-size: 16px 16px !important;
+    color: var(--text-muted) !important; 
+    cursor: not-allowed !important; 
+  }
+
+  /* Modal grids inside subnegs */
+  .fc-modal-grid { padding: 14px 20px 20px; }
+  .fc-modal-grid .ag-theme-alpine {
+    height: 320px;
+    width: 100%;
+    --ag-font-size: 12px;
+    --ag-font-family: var(--font-family);
+    --ag-border-color: var(--border-color);
+    --ag-header-background-color: var(--bg-primary);
+    --ag-background-color: var(--bg-card);
+    --ag-odd-row-background-color: var(--bg-card);
+    --ag-row-hover-color: var(--bg-primary);
+  }
+  .fc-modal-grid .ag-root-wrapper { border: 1px solid var(--border-color) !important; border-radius: var(--radius-md); }
+  .fc-modal-grid .ag-header-group-cell { background: var(--bg-primary) !important; font-weight: 700; font-size: 11px; text-align: center; border-right: 1px solid var(--border-color); }
+  .fc-modal-grid .ag-header-cell { font-weight: 700 !important; font-size: 11px; border-right: 1px solid var(--border-color); }
+
+  /* Float widget override */
+  #forecast-widget-root .fc-widget-btn {
+    box-shadow: var(--shadow-hover) !important;
+    transition: var(--transition-smooth) !important;
+  }
+  #forecast-widget-root .fc-widget-btn:hover {
+    transform: scale(1.05) !important;
+  }
+
+  /* Responsive Styling */
   @media (max-width: 900px)  {
-    .fc-kpi-row { grid-template-columns: repeat(2, 1fr); }
     .fc-chart-explorer-row { flex-direction: column; }
     .fc-explorer-col { width: 100%; max-width: 100%; }
-    .fc-date-inline { flex-wrap: wrap; }
+    .fc-date-inline { flex-wrap: wrap; height: auto; padding: 8px 16px; border-radius: var(--radius-md); }
   }
   @media (max-width: 700px) {
     .fc-wrap { flex-direction: column; height: auto; overflow: visible; }
     .fc-main { min-height: unset; overflow: visible; }
-    .fc-content { overflow-y: visible; flex: none; }
-    /* Devuelve scroll al body cuando fc-wrap ya no tiene alto fijo */
+    .fc-content { overflow-y: visible; flex: none; padding: 16px 16px 32px; }
     body:has(#fcApp) { overflow: auto; }
-    .fc-kpi-row { grid-template-columns: 1fr 1fr; }
-    .fc-view-tabs { padding: 8px 12px 0; overflow-x: auto; flex-wrap: nowrap; }
-    .fc-view-tab { padding: 8px 14px; font-size: 0.78rem; flex-shrink: 0; }
-    .fc-filter-bar { padding: 10px 12px; }
-    .fc-main__header { padding: 12px 14px 10px; }
-    .fc-content { padding: 14px 12px 30px; }
-
-    /*
-     * FIX: en desktop, #prodGrid usa flex:1 para llenarse del alto de su padre,
-     * que a su vez recibe alto definido desde fc-wrap {height: calc(100vh - 70px)}.
-     * En mobile, fc-wrap pasa a height:auto → la cadena de alto se rompe →
-     * fc-explorer-col solo tiene min-height:420px pero ningún hijo sabe el alto real →
-     * #prodGrid (flex:1; min-height:0) mide 0px → ag-Grid no renderiza filas.
-     * Solución: dar altura explícita al grid en mobile para que ag-Grid pueda renderizar.
-     */
-    .fc-explorer-col {
-      min-height: 0;        /* ya no necesita el mínimo de 420px — el grid tiene su propio alto */
+    .fc-kpi-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .fc-view-tabs {
+      padding: 0 16px;
+      margin-bottom: 16px;
+      gap: 16px;
+      justify-content: flex-start;
+      border: none;
+      border-bottom: 1px solid var(--border-color);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
     }
-    .fc-explorer-col #prodGrid {
+    .fc-view-tab {
+      padding: 8px 2px 10px 2px;
+      font-size: 0.78rem;
+      border-radius: 0;
       flex: none;
-      height: 380px;        /* alto fijo: ag-Grid domLayout:'normal' requiere alto explícito */
+      justify-content: flex-start;
+      gap: 6px;
     }
+    .fc-view-tab .fc-tab-badge {
+      font-size: 0.62rem;
+      padding: 1px 4px;
+    }
+
+    .fc-filter-bar { padding: 10px 12px; gap: 8px; }
+    .fc-main__header { padding: 12px 14px 10px; }
+    .fc-explorer-col { min-height: 0; }
+    .fc-explorer-col #prodGrid { flex: none; height: 380px; }
   }
   @media (max-width: 480px) {
     .fc-kpi-row { grid-template-columns: 1fr; }
-    .fc-param-chip { margin-left: 0; }
+    .fc-param-chip { margin-left: 0; width: 100%; justify-content: center; }
+  }
+
+  /* Edit icon cell micro-animations */
+  .fc-edit-icon-cell {
+    color: var(--g-blue) !important;
+    font-size: 1.05rem;
+    transition: var(--transition-smooth);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .fc-edit-icon-cell:hover {
+    color: var(--g-blue-dark) !important;
+    background: var(--g-blue-light) !important;
+    transform: scale(1.15);
+  }
+  /*   ─ Responsive Styling ──────────────────────────────────────────────── */
+  @media (max-width: 1200px) { .fc-kpi-row { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 900px)  {
+    .fc-kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .fc-chart-explorer-row { flex-direction: column; }
+    .fc-explorer-col { width: 100%; max-width: 100%; }
+    .fc-date-inline { flex-wrap: wrap; height: auto; padding: 8px 16px; border-radius: var(--radius-md); }
+  }
+  @media (max-width: 700px) {
+    .fc-wrap { flex-direction: column; height: auto; overflow: visible; }
+    .fc-main { min-height: unset; overflow: visible; }
+    .fc-content { overflow-y: visible; flex: none; padding: 16px 16px 32px; }
+    body:has(#fcApp) { overflow: auto; }
+    .fc-kpi-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .fc-view-tabs {
+      padding: 0 16px;
+      margin-bottom: 16px;
+      gap: 16px;
+      justify-content: flex-start;
+      border: none;
+      border-bottom: 1px solid var(--border-color);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .fc-view-tab {
+      padding: 8px 2px 10px 2px;
+      font-size: 0.78rem;
+      border-radius: 0;
+      flex: none;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+    .fc-view-tab .fc-tab-badge {
+      font-size: 0.62rem;
+      padding: 1px 4px;
+    }
+    .fc-filter-bar { padding: 10px 12px; gap: 8px; }
+    .fc-main__header { padding: 12px 14px 10px; }
+    .fc-explorer-col { min-height: 0; }
+    .fc-explorer-col #prodGrid { flex: none; height: 380px; }
+  }
+  @media (max-width: 480px) {
+    .fc-kpi-row { grid-template-columns: 1fr; }
+    .fc-param-chip { margin-left: 0; width: 100%; justify-content: center; }
   }
 </style>
 {% endblock %}
@@ -719,21 +1861,40 @@
       </div>
 
       <!-- ── Chart + Explorador de Productos ─────────────────────── -->
-      <div class="fc-chart-header">
-        <h3 id="chartTitle">Evolución y proyección de venta ($)</h3>
-        <div class="fc-growth-wrap">
-          <label for="growthInput">Expect. crec. (%):</label>
-          <input type="number" id="growthInput" class="fc-growth-input"
-                 value="25" step="1" min="-50" max="500" placeholder="25" disabled>
-        </div>
-      </div>
-
       <div class="fc-chart-explorer-row">
 
         <!-- Gráfico principal -->
         <div class="fc-chart-col">
-          <div id="forecastChart" style="height:420px;"></div>
-          <div class="fc-loading" id="chartLoader" style="display:none;position:absolute;inset:0;"><div class="fc-spinner"></div></div>
+          <div class="fc-chart-card-header">
+            <div class="fc-chart-title-wrap">
+              <h3 id="chartTitle">Evolución y proyección de venta ($)</h3>
+              <span class="fc-chart-subtitle">Histórico, facturación real y escenarios proyectados</span>
+            </div>
+            <div class="fc-growth-wrap">
+              <span class="fc-growth-label">Expect. crec.</span>
+              <div class="fc-growth-input-pill">
+                <input type="number" id="growthInput" class="fc-growth-input"
+                       value="25" step="1" min="-50" max="500" placeholder="25" disabled>
+                <span class="fc-growth-pct-sign">%</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="customChartLegend" class="fc-custom-legend-row"></div>
+
+          <div class="fc-chart-canvas-container" style="position: relative; flex: 1; min-height: 320px;">
+            <div id="forecastChart" style="height:320px; width: 100%;"></div>
+            <div class="fc-loading" id="chartLoader" style="display:none;position:absolute;inset:0;"><div class="fc-spinner"></div></div>
+          </div>
+
+          <div class="fc-chart-insight-chip">
+            <svg class="fc-insight-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            <span>Las proyecciones consideran inflación mensual fija del 2.9%.</span>
+          </div>
         </div>
 
         <!-- Explorador de Productos (panel lateral derecho del gráfico) -->
@@ -766,6 +1927,7 @@
       <div class="fc-divider"></div>
 
       <!-- ── Treemap ────────────────────────────────────────────────── -->
+      <div class="fc-treemap-card">
       <div class="fc-treemap-header">
         <h3>Composición ponderada de proyección ($)</h3>
         <div class="fc-treemap-controls">
@@ -775,12 +1937,28 @@
           </div>
         </div>
       </div>
+      
+      <!-- Custom Navigation (Breadcrumbs & Back button) -->
+      <div class="fc-treemap-nav" id="treemapNavRow">
+        <button id="treemapBackBtn" class="fc-back-btn" style="display:none;" data-target="total">
+          <svg class="fc-back-btn-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <span class="fc-back-btn-text">Volver</span>
+        </button>
+        <div id="treemapBreadcrumb" class="fc-breadcrumbs">
+          <span class="fc-breadcrumb-current">Canales</span>
+        </div>
+      </div>
+
       <div id="treemapLegend" class="fc-treemap-legend"></div>
       <div style="position:relative;">
         <div id="treemapChart" style="height:420px;"></div>
         <div class="fc-loading" id="treemapLoader" style="display:none;"><div class="fc-spinner"></div></div>
       </div>
       <div class="fc-treemap-caption">Haz clic en un canal o en 'Otras' para ver los grupos y cuentas que lo componen.</div>
+      </div>
 
       </div><!-- /panel-analisis -->
 
@@ -790,27 +1968,37 @@
       <div class="fc-tab-panel" id="panel-detalle">
 
       <!-- ── Client table ───────────────────────────────────────────── -->
+      <div class="fc-table-card">
       <div class="fc-table-header">
-        <h3>Proyección más expectativa de crecimiento</h3>
-        <div class="fc-toggle-wrap">
-          Ver en Montos ($)
-          <label class="fc-toggle">
-            <input type="checkbox" id="toggleMoney" checked>
-            <span class="fc-toggle-slider"></span>
-          </label>
+        <div class="fc-table-header-left">
+          <h3>Proyección más expectativa de crecimiento</h3>
+          <p class="fc-table-subtitle">Consolidado operativo detallado por cliente y mes</p>
+        </div>
+        <div class="fc-table-header-right">
+          <!-- Search input -->
+          <div class="fc-client-search-wrap">
+            <span class="fc-client-search-icon"><i class="bi bi-search"></i></span>
+            <input type="text" id="clientSearchInput" class="fc-client-search-input" placeholder="Buscar cliente..." autocomplete="off">
+            <button class="fc-client-search-clear" id="clientSearchClear" title="Limpiar búsqueda" style="display:none;">✕</button>
+          </div>
+          <!-- Divider -->
+          <div class="fc-header-control-divider"></div>
+          <!-- Toggle -->
+          <div class="fc-toggle-wrap">
+            <span>Ver en Montos ($)</span>
+            <label class="fc-toggle">
+              <input type="checkbox" id="toggleMoney" checked>
+              <span class="fc-toggle-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
-      <!-- ── Search bar ─────────────────────────────────────────────── -->
-      <div class="fc-client-search-wrap">
-        <span class="fc-client-search-icon">🔍</span>
-        <input type="text" id="clientSearchInput" class="fc-client-search-input" placeholder="Buscar cliente..." autocomplete="off">
-        <button class="fc-client-search-clear" id="clientSearchClear" title="Limpiar búsqueda" style="display:none;">✕</button>
-      </div>
       <div style="position:relative;">
-        <div id="clientGrid" class="ag-theme-alpine" style="height:550px;"></div>
+        <div id="clientGrid" class="ag-theme-alpine" style="height:680px;"></div>
         <div class="fc-loading" id="tableLoader" style="display:none;"><div class="fc-spinner"></div></div>
       </div>
       <div class="fc-total-caption" id="totalCaption"></div>
+      </div>
 
       </div><!-- /panel-detalle -->
 
@@ -825,7 +2013,7 @@
   <div class="fc-modal">
     <div class="fc-modal__header">
       <h5 class="fc-modal__title" id="fcModalTitle">Editar Proyección</h5>
-      <button class="fc-modal__close" onclick="closeModal()">×</button>
+      <button class="fc-modal__close" onclick="closeModal()"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="fc-modal__body" id="fcModalBody">
       <div class="d-flex justify-content-center py-4">
@@ -909,10 +2097,12 @@ const STATE = {
   modalClientData: null,       // current client detail data
   modalSubnegGrowths: {},      // subneg overrides per modal session
   modalClientGrowth: null,     // client-level general growth (set-all shortcut)
+  modalClientGrowthMixed: false,
   // ── Edit session state ────────────────────────────────────────────────
   _modalSessionSnapshot: null,      // deep copy of modalClientData when modal opened (for undo)
   _modalSnapshotGrowths: {},        // copy of subneg growths when modal opened (for undo)
   _modalSnapshotClientGrowth: null, // copy of client growth when modal opened (for undo)
+  _modalSnapshotClientGrowthMixed: false,
   _modalIsDirty: false,             // true when user has made unsaved changes
 };
 
@@ -1521,6 +2711,21 @@ function renderChart(data) {
   const val2026 = data.val_2026 || [];
   STATE.maxHistDate = data.max_hist_date || null;
 
+  const _vPrefix = STATE.viewMoney ? '$' : '';
+  const _vSuffix = STATE.viewMoney ? '' : ' u';
+
+  // Helper to format values for tooltip to full format (without abbreviations)
+  function getHoverTexts(dates, values, traceName) {
+    return values.map(val => {
+      if (val === 0) return STATE.viewMoney ? '$ 0' : '0';
+      const formatted = Number(val).toLocaleString('es-AR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: (val % 1 !== 0) ? 2 : 0
+      });
+      return STATE.viewMoney ? `$ ${formatted}` : `${formatted} u`;
+    });
+  }
+
   // ── Confidence band (purple, matches original rgba(165,118,255,0.16)) ──
   const traceUpper = {
     x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Ls||0),
@@ -1530,78 +2735,68 @@ function renderChart(data) {
   const traceLower = {
     x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Li||0),
     mode:'lines', line:{width:0, shape:'spline', smoothing:1.0},
-    fill:'tonexty', fillcolor:'rgba(165,118,255,0.16)',
+    fill:'tonexty', fillcolor:'rgba(124, 58, 237, 0.03)', // Extremely subtle lavender transparency
     showlegend:false, hoverinfo:'skip', name:'Lower Bound',
   };
 
   // ── Línea 2: Forecast base / modelo (sin overrides, sin crecimiento) ──
-  const _vSym = STATE.viewMoney ? '$' : 'u';
   const traceFcst = {
     x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Forecast||0),
-    name:'Proyección (Base)', mode:'lines+markers',
-    line:{color:'#5770B0', width:2.5, dash:'dash', shape:'spline', smoothing:0.95},
-    marker:{size:6, opacity:1.0, symbol:'circle'},
-    hovertemplate:`<b>Proyección (Base)</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
+    customdata: getHoverTexts(fcst.map(d=>d.fecha), fcst.map(d=>d.Total_Forecast||0), 'Proyección (Base)'),
+    name:'Proyección (Base)', mode:'lines',
+    line:{color:'#5770B0', width:2.3, dash:'dash', shape:'spline', smoothing:0.95},
+    hovertemplate:`Proyección (Base): <b>%{customdata}</b><extra></extra>`,
   };
   const traces = [traceUpper, traceLower, traceFcst];
 
   // ── Línea 3: Proyección comercial estándar (+X%) ──────────────────────
-  // Crecimiento uniforme global aplicado sobre el modelo base.
   if (STATE.growthPct !== 0) {
     traces.push({
       x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_Adj||0),
+      customdata: getHoverTexts(fcst.map(d=>d.fecha), fcst.map(d=>d.Total_Adj||0), `Proyección (+${STATE.growthPct.toFixed(1)}%)`),
       name:`Proyección (+${STATE.growthPct.toFixed(1)}%)`, mode:'lines',
-      line:{color:'#10B981', width:2.5, dash:'dot', shape:'spline', smoothing:1.3},
-      hovertemplate:`<b>Proyección (+${STATE.growthPct.toFixed(1)}%)</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
+      line:{color:'#10B981', width:2.3, dash:'dot', shape:'spline', smoothing:1.3},
+      hovertemplate:`Proyección (+${STATE.growthPct.toFixed(1)}%): <b>%{customdata}</b><extra></extra>`,
     });
   }
 
   // ── Línea 4: Proyección comercial ajustada por usuario ────────────────
-  // Misma arquitectura que la línea "+X%", pero aplicando la tasa de crecimiento
-  // editada por el usuario en "Proyección más expectativa de crecimiento".
-  // Se muestra solo cuando hay overrides guardados; convive con la línea estándar.
   if (data.has_overrides) {
     traces.push({
       x: fcst.map(d=>d.fecha), y: fcst.map(d=>d.Total_User_Adj||0),
+      customdata: getHoverTexts(fcst.map(d=>d.fecha), fcst.map(d=>d.Total_User_Adj||0), 'Proyección ajustada'),
       name:'Proyección ajustada (usuario)', mode:'lines+markers',
-      line:{color:'#7C3AED', width:2.8, dash:'solid', shape:'spline', smoothing:0.95},
-      marker:{size:5, symbol:'diamond', color:'#7C3AED', opacity:0.9},
-      hovertemplate:`<b>Proyección ajustada</b><br>%{x|%b %Y}<br>${_vSym}%{y:,.0f}<extra></extra>`,
+      line:{color:'#7C3AED', width:3.0, shape:'spline', smoothing:0.95},
+      marker:{size:6, symbol:'diamond', color:'#7C3AED', line:{color:'#FFFFFF', width:1.2}, opacity:1.0},
+      hovertemplate:`Proyección ajustada: <b>%{customdata}</b><extra></extra>`,
     });
   }
 
   // ── Facturación 2025 (Historia) — dark blue #06486F ──────────────────
   traces.push({
     x: hist.map(d=>d.fecha), y: hist.map(d=>d.Total_Venta||0),
-    name:'Facturación 2025', mode:'lines+markers',
-    line:{color:'#06486F', width:3, shape:'spline', smoothing:1.3},
-    marker:{size:4},
-    hovertemplate:'<b>Facturación 2025</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+    customdata: getHoverTexts(hist.map(d=>d.fecha), hist.map(d=>d.Total_Venta||0), 'Facturación 2025'),
+    name:'Facturación 2025', mode:'lines',
+    line:{color:'#06486F', width:2.8, shape:'spline', smoothing:1.3},
+    hovertemplate:`Facturación 2025: <b>%{customdata}</b><extra></extra>`,
   });
 
-  // ── Facturación 2026 (real billing Jan-Feb) — orange #E07A2F ─────────
+  // ── Facturación 2026 (real billing Jan-Feb) — orange #F97316 ─────────
   if (val2026.length > 0) {
     traces.push({
       x: val2026.map(d=>d.fecha), y: val2026.map(d=>d.Total_Venta||0),
+      customdata: getHoverTexts(val2026.map(d=>d.fecha), val2026.map(d=>d.Total_Venta||0), 'Facturación 2026'),
       name:'Facturación 2026', mode:'lines+markers',
-      line:{color:'#E07A2F', width:3.2, shape:'spline', smoothing:0.85},
-      marker:{size:9, symbol:'diamond', color:'#E07A2F', line:{color:'#FFFFFF', width:0.8}},
-      hovertemplate:'<b>Facturación 2026</b><br>%{x|%b %Y}<br>$%{y:,.0f}<extra></extra>',
+      line:{color:'#F97316', width:2.5, shape:'spline', smoothing:0.85},
+      marker:{size:6, symbol:'circle', color:'#F97316', line:{color:'#FFFFFF', width:1.2}, opacity:1.0},
+      hovertemplate:`Facturación 2026: <b>%{customdata}</b><extra></extra>`,
     });
   }
 
   // ── Vertical separator Actual / Forecast ──────────────────────────────
   const shapes=[], annotations=[];
-  if (STATE.maxHistDate) {
-    shapes.push({type:'line', x0:STATE.maxHistDate, x1:STATE.maxHistDate, y0:0, y1:1, yref:'paper', line:{color:'#CBD5E1', width:1, dash:'dot'}});
-    annotations.push(
-      {x:STATE.maxHistDate, y:1, yref:'paper', text:'Actual', showarrow:false, font:{size:10,color:'#5E7388'}, xanchor:'right', xshift:-5},
-      {x:STATE.maxHistDate, y:1, yref:'paper', text:'Forecast', showarrow:false, font:{size:10,color:'#A576FF'}, xanchor:'left', xshift:5},
-    );
-  }
-
-  // ── Eje X: rango exacto + ticks en español ────────────────────────────
-  // Recopilar todas las fechas de todas las series para calcular el dominio real
+  
+  // Calculate dynamic axis domains
   const _allX = [
     ...hist.map(d => d.fecha),
     ...fcst.map(d => d.fecha),
@@ -1610,36 +2805,206 @@ function renderChart(data) {
   const xStart = _allX[0]                   || STATE.startDate;
   const xEnd   = _allX[_allX.length - 1]   || STATE.endDate;
 
-  // Generar ticks trimestrales con nombres de mes en español
+  if (STATE.maxHistDate) {
+    // 1. Forecast background rectangle zone
+    shapes.push({
+      type: 'rect', xref: 'x', yref: 'paper',
+      x0: STATE.maxHistDate, x1: xEnd, y0: 0, y1: 1,
+      fillcolor: 'rgba(124, 58, 237, 0.008)',
+      line: {width: 0}, layer: 'below'
+    });
+
+    // 2. Vertical dotted line cut
+    shapes.push({
+      type:'line', x0:STATE.maxHistDate, x1:STATE.maxHistDate, y0:0, y1:1, yref:'paper',
+      line:{color:'#cbd5e1', width:1, dash:'dot'}
+    });
+
+    // 3. Top labels
+    annotations.push(
+      {
+        x: STATE.maxHistDate, y: 1.02, yref: 'paper', text: 'ACTUAL', showarrow: false,
+        font: {size: 9, color: '#64748B', family: 'Outfit, sans-serif', weight: '700'},
+        xanchor: 'right', xshift: -6, yanchor: 'bottom'
+      },
+      {
+        x: STATE.maxHistDate, y: 1.02, yref: 'paper', text: 'FORECAST', showarrow: false,
+        font: {size: 9, color: '#7C3AED', family: 'Outfit, sans-serif', weight: '700'},
+        xanchor: 'left', xshift: 6, yanchor: 'bottom'
+      }
+    );
+  }
+
+  // ── Eje X ticks en español ────────────────────────────────────────────
   const _MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
   const _tickvals = [], _ticktext = [];
   const _tStart = new Date(xStart + 'T00:00:00Z');
   const _tEnd   = new Date(xEnd   + 'T00:00:00Z');
-  // Primer tick en el mes del primer dato
   let _tc = new Date(Date.UTC(_tStart.getUTCFullYear(), _tStart.getUTCMonth(), 1));
   while (_tc <= _tEnd) {
-    _tickvals.push(_tc.toISOString().slice(0, 10));   // 'YYYY-MM-01'
+    _tickvals.push(_tc.toISOString().slice(0, 10));
     _ticktext.push(_MESES_ES[_tc.getUTCMonth()] + ' ' + _tc.getUTCFullYear());
-    _tc = new Date(Date.UTC(_tc.getUTCFullYear(), _tc.getUTCMonth() + 3, 1)); // cada trimestre
+    _tc = new Date(Date.UTC(_tc.getUTCFullYear(), _tc.getUTCMonth() + 3, 1));
   }
 
+  // Calculate clean rounded tick values for Y-axis
+  const _allY = [
+    ...hist.map(d => d.Total_Venta || 0),
+    ...fcst.map(d => d.Total_Forecast || 0),
+    ...fcst.map(d => d.Total_Ls || 0),
+    ...val2026.map(d => d.Total_Venta || 0),
+    1e9
+  ];
+  const yMax = Math.max(..._allY);
+  const rawStep = yMax / 5;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalizedStep = rawStep / magnitude;
+  let cleanStep = magnitude;
+  if (normalizedStep < 1.5) cleanStep = 1 * magnitude;
+  else if (normalizedStep < 2.5) cleanStep = 2 * magnitude;
+  else if (normalizedStep < 4.0) cleanStep = 4 * magnitude;
+  else if (normalizedStep < 7.5) cleanStep = 5 * magnitude;
+  else cleanStep = 10 * magnitude;
+
+  const yTickVals = [];
+  for (let val = 0; val <= yMax + cleanStep; val += cleanStep) {
+    yTickVals.push(val);
+  }
+  const yTickText = yTickVals.map(val => {
+    if (val === 0) return STATE.viewMoney ? '$0' : '0';
+    const absVal = Math.abs(val);
+    let formatted = '';
+    if (absVal >= 1e9) {
+      const divided = val / 1e9;
+      formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'B';
+    } else if (absVal >= 1e6) {
+      const divided = val / 1e6;
+      formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'M';
+    } else if (absVal >= 1e3) {
+      const divided = val / 1e3;
+      formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'K';
+    } else {
+      formatted = val.toString();
+    }
+    return (STATE.viewMoney ? '$' : '') + formatted + (STATE.viewMoney ? '' : ' u');
+  });
+
   Plotly.react(chartEl, traces, {
-    height:420, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
-    hovermode:'x unified', separators:'.,', margin:{t:40,l:0,r:20,b:40},
-    font:{family:'Outfit, Inter, sans-serif', color:'#475569', size:12},
-    legend:{orientation:'h', yanchor:'bottom', y:1.05, xanchor:'left', x:0, bgcolor:'rgba(0,0,0,0)', font:{size:12,color:'#0F172A'}},
+    height:320, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)',
+    hovermode:'x unified', separators:'.,', margin:{t:30,l:52,r:20,b:42},
+    font:{family:'Outfit, Inter, sans-serif', color:'#475569', size:11},
+    showlegend:false, // Hide native legend to use custom chips
     xaxis:{
       showgrid:false, zeroline:false, showline:true, linecolor:'#E2E8F0', title:'',
-      tickfont:{color:'#94A3B8'},
+      tickfont:{color:'#64748B', size:10, family:'Outfit, sans-serif'},
       type:'date',
-      range:[xStart, xEnd],   // dominio exacto: sin padding automático de Plotly
+      range:[xStart, xEnd],
       autorange:false,
-      tickvals:_tickvals,      // posiciones en español (trimestral)
+      tickvals:_tickvals,
       ticktext:_ticktext,
     },
-    yaxis:{showgrid:true, gridcolor:'#F1F5F9', gridwidth:1, zeroline:false, showline:false, title:'', tickfont:{color:'#94A3B8'}, tickformat:',.0f'},
+    yaxis:{
+      showgrid:true, gridcolor:'#F1F5F9', gridwidth:1, zeroline:false, showline:false, title:'',
+      tickfont:{color:'#64748B', size:10, family:'Outfit, sans-serif'},
+      tickvals:yTickVals,
+      ticktext:yTickText
+    },
+    hoverlabel:{
+      bgcolor:'#ffffff',
+      bordercolor:'#e2e8f0',
+      font:{family:'Outfit, sans-serif', size:12, color:'#0f172a'}
+    },
     shapes, annotations,
   }, {responsive:true, displayModeBar:false, displaylogo:false});
+
+  // Render HTML custom chips legend dynamically
+  const legendEl = document.getElementById('customChartLegend');
+  if (legendEl) {
+    legendEl.innerHTML = '';
+    
+    const orderedNames = [
+      'Facturación 2025',
+      'Facturación 2026',
+      'Proyección ajustada (usuario)',
+      `Proyección (+${STATE.growthPct.toFixed(1)}%)`,
+      'Proyección (Base)'
+    ];
+
+    orderedNames.forEach(traceName => {
+      const traceIdx = traces.findIndex(t => t.name === traceName);
+      if (traceIdx === -1) return;
+
+      const trace = traces[traceIdx];
+
+      const chip = document.createElement('div');
+      chip.className = 'fc-legend-chip';
+      if (trace.visible === 'legendonly') {
+        chip.classList.add('inactive');
+      }
+
+      let indicatorHtml = '';
+      if (traceName === 'Facturación 2025') {
+        indicatorHtml = `<div class="fc-legend-indicator"><span style="width:100%; height:3px; background-color:#06486F; border-radius:1px;"></span></div>`;
+      } else if (traceName === 'Facturación 2026') {
+        indicatorHtml = `
+          <div class="fc-legend-indicator">
+            <span style="width:100%; height:3.5px; background-color:#F97316; border-radius:1px; position:absolute;"></span>
+            <span style="width:6px; height:6px; background-color:#F97316; border:1px solid #FFFFFF; border-radius:50%; position:absolute; z-index:1;"></span>
+          </div>`;
+      } else if (traceName === 'Proyección ajustada (usuario)') {
+        indicatorHtml = `
+          <div class="fc-legend-indicator">
+            <span style="width:100%; height:3px; background-color:#7C3AED; border-radius:1px; position:absolute;"></span>
+            <span style="width:6px; height:6px; background-color:#7C3AED; border:1px solid #FFFFFF; transform:rotate(45deg); position:absolute; z-index:1;"></span>
+          </div>`;
+      } else if (traceName.startsWith('Proyección (+')) {
+        indicatorHtml = `
+          <div class="fc-legend-indicator">
+            <span style="width:100%; border-top:3.5px dotted #10B981;"></span>
+          </div>`;
+      } else if (traceName === 'Proyección (Base)') {
+        indicatorHtml = `
+          <div class="fc-legend-indicator">
+            <span style="width:100%; border-top:3.5px dashed #5770B0;"></span>
+          </div>`;
+      }
+
+      let displayGrowth = `+${STATE.growthPct.toFixed(1)}%`;
+      if (STATE.growthPct % 1 === 0) {
+        displayGrowth = `+${STATE.growthPct.toFixed(0)}%`;
+      }
+      
+      let visualName = traceName;
+      if (traceName === 'Facturación 2025') visualName = 'Fact. 2025';
+      else if (traceName === 'Facturación 2026') visualName = 'Fact. 2026';
+      else if (traceName === 'Proyección ajustada (usuario)') visualName = 'Ajustada';
+      else if (traceName.startsWith('Proyección (+')) visualName = displayGrowth;
+      else if (traceName === 'Proyección (Base)') visualName = 'Base';
+
+      chip.innerHTML = `${indicatorHtml}<span class="fc-legend-text">${visualName}</span>`;
+
+      chip.addEventListener('click', () => {
+        const isCurrentlyVisible = trace.visible !== 'legendonly';
+        const nextVisible = isCurrentlyVisible ? 'legendonly' : true;
+        trace.visible = nextVisible;
+        Plotly.restyle(chartEl, { visible: nextVisible }, [traceIdx]);
+
+        if (traceName === 'Proyección (Base)') {
+          traces[0].visible = nextVisible;
+          traces[1].visible = nextVisible;
+          Plotly.restyle(chartEl, { visible: nextVisible }, [0, 1]);
+        }
+
+        if (nextVisible === 'legendonly') {
+          chip.classList.add('inactive');
+        } else {
+          chip.classList.remove('inactive');
+        }
+      });
+
+      legendEl.appendChild(chip);
+    });
+  }
 
   // Update chart header title
   const chartTitleEl = document.getElementById('chartTitle');
@@ -1652,6 +3017,93 @@ function renderChart(data) {
 /* ===================================================================
    PLOTLY TREEMAP
    =================================================================== */
+// Format numbers as abbreviated currency, e.g. $ 53,2M
+function formatTreemapAbbr(num, isMoney) {
+  if (num === 0) return isMoney ? '$ 0' : '0';
+  const prefix = isMoney ? '$ ' : '';
+  const absNum = Math.abs(num);
+  if (absNum >= 1e9) return `${prefix}${(num / 1e9).toFixed(1).replace('.', ',')}B`;
+  if (absNum >= 1e6) return `${prefix}${(num / 1e6).toFixed(1).replace('.', ',')}M`;
+  if (absNum >= 1e3) return `${prefix}${(num / 1e3).toFixed(1).replace('.', ',')}K`;
+  return `${prefix}${num.toFixed(0)}`;
+}
+
+// Format numbers as full currency, e.g. $ 53.245.100
+function formatTreemapFull(num, isMoney) {
+  const prefix = isMoney ? '$ ' : '';
+  return prefix + Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+// Reconstruct path to root for breadcrumbs
+function getPathToRoot(levelId, data) {
+  let path = [];
+  let currentId = levelId;
+  while (currentId && currentId !== '' && currentId !== 'total') {
+    const idx = data.ids.indexOf(currentId);
+    if (idx === -1) break;
+    path.unshift({
+      id: currentId,
+      label: data.labels[idx]
+    });
+    currentId = data.parents[idx];
+  }
+  path.unshift({
+    id: 'total',
+    label: 'Canales'
+  });
+  return path;
+}
+
+// Update the breadcrumbs and back button UI
+function updateTreemapUI(levelId) {
+  const backBtn = document.getElementById('treemapBackBtn');
+  const breadcrumb = document.getElementById('treemapBreadcrumb');
+  const data = STATE.currentTreemapData;
+  
+  if (!levelId || levelId === 'total' || !data) {
+    if (backBtn) backBtn.style.display = 'none';
+    if (breadcrumb) {
+      breadcrumb.innerHTML = '<span class="fc-breadcrumb-current">Canales</span>';
+    }
+    return;
+  }
+  
+  if (backBtn) backBtn.style.display = 'inline-flex';
+  
+  const path = getPathToRoot(levelId, data);
+  
+  if (breadcrumb && path.length) {
+    breadcrumb.innerHTML = path.map((p, idx) => {
+      if (idx === path.length - 1) {
+        return `<span class="fc-breadcrumb-current">${p.label}</span>`;
+      } else {
+        return `<a href="#" class="fc-breadcrumb-link" data-level="${p.id}">${p.label}</a>`;
+      }
+    }).join(' <span class="fc-breadcrumb-separator">›</span> ');
+    
+    breadcrumb.querySelectorAll('.fc-breadcrumb-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetLevel = link.getAttribute('data-level');
+        const el = document.getElementById('treemapChart');
+        if (el) {
+          Plotly.restyle(el, {level: targetLevel}, [0]);
+          updateTreemapUI(targetLevel);
+        }
+      });
+    });
+  }
+  
+  if (backBtn && path.length > 1) {
+    const parentNode = path[path.length - 2];
+    backBtn.setAttribute('data-target', parentNode.id);
+    const backBtnText = backBtn.querySelector('.fc-back-btn-text');
+    if (backBtnText) {
+      backBtnText.textContent = `Volver a ${parentNode.label.toLowerCase()}`;
+    }
+  }
+}
+
 function renderTreemap(data) {
   const el = document.getElementById('treemapChart');
   if (!data.ids || data.ids.length === 0) {
@@ -1659,8 +3111,49 @@ function renderTreemap(data) {
     el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94A3B8;font-size:0.9rem;">Sin datos para el período/filtros seleccionados</div>';
     return;
   }
+  
+  // Store globally in STATE
+  STATE.currentTreemapData = data;
+  
   const isMoney = document.getElementById('toggleMoney')?.checked !== false;
-  const unitSym = isMoney ? '$ ' : '';
+  
+  // Generate custom data for each cell
+  const customdata = [];
+  for (let i = 0; i < data.ids.length; i++) {
+    const id = data.ids[i];
+    const val = data.values[i] || 0;
+    
+    let levelName = 'Canal';
+    let isLeaf = false;
+    
+    if (id === 'total') {
+      levelName = 'Total';
+    } else if (id.includes('::cliente::')) {
+      levelName = 'Cliente';
+      isLeaf = true;
+    } else if (id.includes('::otras_clientes')) {
+      levelName = 'Otras (Clientes)';
+      isLeaf = true;
+    } else if (id.includes('::grupo::')) {
+      levelName = 'Grupo';
+    } else if (id.includes('::otras_grupos')) {
+      levelName = 'Otras (Grupos)';
+    }
+    
+    const valAbbr = formatTreemapAbbr(val, isMoney);
+    const valFull = formatTreemapFull(val, isMoney);
+    const drillAction = isLeaf ? '' : '<br><span style="color:#38BDF8; font-size:11px; font-weight:600; margin-top:4px; display:inline-block;">⚡ Click para explorar</span>';
+    const drillIndicator = isLeaf ? '' : ' ↳';
+    
+    customdata.push([
+      valAbbr,       // [0]
+      valFull,       // [1]
+      levelName,     // [2]
+      drillAction,   // [3]
+      drillIndicator // [4]
+    ]);
+  }
+  
   Plotly.react(el, [{
     type: 'treemap',
     ids: data.ids,
@@ -1669,16 +3162,32 @@ function renderTreemap(data) {
     values: data.values,
     branchvalues: 'total',
     maxdepth: 2,
-    textinfo: 'label+percent root',
-    hovertemplate: '<b>%{label}</b><br>Valor: ' + unitSym + '%{value:,.0f}<br>% Total: %{percentRoot:.1%}<extra></extra>',
+    customdata: customdata,
+    texttemplate: '<b>%{label}%{customdata[4]}</b><br>%{percentRoot:.0%} · %{customdata[0]}',
+    hovertemplate: 
+      '<span style="font-size:11px; color:#94A3B8;">%{customdata[2]}</span><br>' +
+      '<span style="font-size:14px; font-weight:bold; color:#FFFFFF;">%{label}</span><br>' +
+      'Proyección: <b>%{customdata[1]}</b><br>' +
+      'Participación: <b>%{percentRoot:.1%}</b>' +
+      '%{customdata[3]}<extra></extra>',
     marker: {
       colors: data.colors,
-      line: {color: 'rgba(255,255,255,0.88)', width: 1.0},
-      pad: {t: 2, l: 2, r: 2, b: 2},
+      line: {color: '#FFFFFF', width: 1.5},
+      pad: {t: 3, l: 3, r: 3, b: 3},
     },
-    textfont: {size: 13, color: '#1C3550', family: 'Outfit, Inter, sans-serif'},
-    pathbar: {visible: true, textfont: {size: 12, color: '#5E7388', family: 'Outfit, Inter, sans-serif'}},
-    root_color: '#EAF0F5',
+    textfont: {size: 13, color: '#1E293B', family: 'Outfit, Inter, sans-serif'},
+    pathbar: {visible: false},
+    root_color: '#F8FAFC',
+    hoverlabel: {
+      bgcolor: '#0F172A',
+      bordercolor: '#334155',
+      font: {
+        family: 'Outfit, Inter, sans-serif',
+        size: 13,
+        color: '#FFFFFF'
+      },
+      align: 'left'
+    }
   }], {
     height: 420,
     paper_bgcolor: 'rgba(0,0,0,0)',
@@ -1686,8 +3195,23 @@ function renderTreemap(data) {
     margin: {t: 8, l: 0, r: 0, b: 10},
     font: {family: 'Outfit, Inter, sans-serif'},
     separators: '.,',
-    uniformtext: {minsize: 11, mode: 'hide'},
+    uniformtext: {minsize: 10, mode: 'hide'},
   }, {responsive: true, displayModeBar: false});
+  
+  // Bind click event to sync custom navigation UI
+  if (el.removeAllListeners) {
+    try { el.removeAllListeners('plotly_treemapclick'); } catch(e) {}
+  }
+  el.on('plotly_treemapclick', function(ev) {
+    if (ev.nextLevel !== undefined) {
+      updateTreemapUI(ev.nextLevel);
+    }
+  });
+  
+  // Reset navigation UI to root on re-render
+  updateTreemapUI('total');
+  
+  Plotly.Plots.resize(el);
 }
 
 /* ===================================================================
@@ -1775,7 +3299,7 @@ function buildClientGrid() {
   clientGridApi = agGrid.createGrid(document.getElementById('clientGrid'), {
     columnDefs: [], rowData: [],
     defaultColDef: {resizable:true, sortable:false, filter:false, suppressHeaderMenuButton:true},
-    rowHeight: 38, headerHeight: 40, animateRows: true,
+    rowHeight: 46, headerHeight: 46, animateRows: true,
     suppressCellFocus: true, pinnedBottomRowData: [],
     onCellClicked: params => {
       // Click anywhere on a group row → toggle expand/collapse
@@ -1809,18 +3333,18 @@ function updateClientGrid(tableData) {
 
   const heatmap = (params) => {
     if (params.node.rowPinned === 'bottom')
-      return {backgroundColor:'#F8FAFC', fontWeight:'700', color:'#475569', borderTop:'2px solid #CBD5E1', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', fontSize:'13px'};
+      return {backgroundColor:'#f8fbff', fontWeight:'700', color:'#1e293b', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'16px', fontSize:'13px', fontVariantNumeric:'tabular-nums', borderTop:'1px solid #e2e8f0'};
     // Group rows: neutral background, no heatmap tinting
     if (params.data && params.data._isGroup)
-      return {backgroundColor:'#F1F5F9', fontWeight:'600', color:'#334155', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', borderBottom:'1px solid #E2E8F0'};
+      return {backgroundColor:'#f8fafc', fontWeight:'600', color:'#1e293b', display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'16px', borderBottom:'1px solid #eef1f6'};
     const x = parseFloat(params.value) || 0;
     let bg = '#ffffff', color = '#334155';
-    if (x === 0) { color = '#CBD5E1'; }
+    if (x === 0) { color = '#cbd5e1'; }
     else if (max_val > min_val) {
       const norm = (x - min_val) / (max_val - min_val);
-      bg = `rgb(${Math.floor(255+(110-255)*norm)},${Math.floor(255+(231-255)*norm)},${Math.floor(255+(183-255)*norm)})`;
+      bg = `rgba(26, 115, 232, ${Math.min(0.12, 0.01 + 0.11 * norm)})`;
     }
-    return {backgroundColor:bg, color, display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'12px', borderBottom:'1px solid #F1F5F9', fontSize:'13px'};
+    return {backgroundColor:bg, color, display:'flex', alignItems:'center', justifyContent:'flex-end', paddingRight:'16px', borderBottom:'1px solid #f1f4f8', fontSize:'13px', fontVariantNumeric:'tabular-nums'};
   };
 
   const vf = (params) => {
@@ -1831,37 +3355,42 @@ function updateClientGrid(tableData) {
   const colDefs = [
     // ── Pencil: hidden for group rows ────────────────────────────────────────
     {
-      field: '_edit', headerName: '', width: 40, pinned: 'left', sortable: false,
+      field: '_edit', headerName: '', width: 44, pinned: 'left', sortable: false,
       cellRenderer: params => {
         if (params.data && params.data._isGroup) return '';
-        return '<span style="cursor:pointer;color:#94A3B8;font-size:1.1rem;">✎</span>';
+        return '<span class="fc-edit-icon-cell" title="Editar"><i class="bi bi-pencil-square"></i></span>';
       },
-      cellStyle: {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:'#ffffff', borderRight:'1px solid #F1F5F9'},
+      cellStyle: params => {
+        const bg = (params.data && params.data._isGroup) ? '#f8fafc' : '#ffffff';
+        return {display:'flex', alignItems:'center', justifyContent:'center', backgroundColor:bg, borderRight:'1px solid #f1f4f8', borderBottom: (params.data && params.data._isGroup) ? '1px solid #eef1f6' : '1px solid #f1f4f8'};
+      },
     },
     // ── Cliente: shows group header (expandable) or client name (indented) ──
     {
-      field: 'Cliente', headerName: 'Cliente', pinned: 'left', minWidth: 300, width: 300, sortable: false,
+      field: 'Cliente', headerName: 'Cliente', pinned: 'left', minWidth: 320, width: 320, sortable: false,
       cellRenderer: params => {
         if (!params.data) return '';
         if (params.data._isGroup) {
-          const icon  = params.data._expanded !== false ? '▾' : '▸';
+          const icon = params.data._expanded !== false
+            ? '<i class="bi bi-chevron-down" style="font-size:0.7rem;color:var(--text-muted);"></i>'
+            : '<i class="bi bi-chevron-right" style="font-size:0.7rem;color:var(--text-muted);"></i>';
           const count = params.data._childCount || 0;
-          return `<span style="display:flex;align-items:center;gap:6px;cursor:pointer;width:100%;">` +
-            `<span style="font-size:0.9rem;color:#64748B;user-select:none;">${icon}</span>` +
-            `<span style="font-weight:700;color:#1E293B;">${params.value || ''}</span>` +
-            `<span style="font-size:0.68rem;color:#94A3B8;font-weight:400;">(${count})</span>` +
+          const titleText = count === 1 ? 'Contiene 1 registro asociado' : `Contiene ${count} registros asociados`;
+          return `<span style="display:flex;align-items:center;cursor:pointer;width:100%;font-family:inherit;" title="${titleText}">` +
+            `<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-right:6px;">${icon}</span>` +
+            `<span style="font-weight:600;color:var(--text-primary);font-size:0.85rem;">${params.value || ''}</span>` +
             `</span>`;
         }
-        return `<span style="padding-left:24px;font-weight:500;color:#334155;">${params.value || ''}</span>`;
+        return `<span style="padding-left:24px;font-weight:400;color:var(--text-secondary);font-size:0.85rem;">${params.value || ''}</span>`;
       },
       cellStyle: params => {
         if (params.data && params.data._isGroup)
-          return {display:'flex', alignItems:'center', background:'#F8FAFC', cursor:'pointer', borderBottom:'1px solid #E2E8F0'};
-        return {display:'flex', alignItems:'center'};
+          return {display:'flex', alignItems:'center', background:'#f8fafc', cursor:'pointer', borderBottom:'1px solid #eef1f6'};
+        return {display:'flex', alignItems:'center', borderBottom:'1px solid #f1f4f8'};
       },
     },
   ];
-  months.forEach(m => colDefs.push({field:m, headerName:m, type:'numericColumn', minWidth:115, width:115, valueFormatter:vf, cellStyle:heatmap, headerClass:'ag-right-aligned-header'}));
+  months.forEach(m => colDefs.push({field:m, headerName:m, type:'numericColumn', minWidth:125, width:125, valueFormatter:vf, cellStyle:heatmap, headerClass:'ag-right-aligned-header'}));
 
   const totalRow = {Cliente:`TOTAL${STATE.growthPct!==0?' (Aj. +'+STATE.growthPct.toFixed(0)+'%)':''}`, _lab:0, _edit:'', _isGroup:false};
   months.forEach(m => { totalRow[m] = totals[m] || 0; });
@@ -1871,8 +3400,8 @@ function updateClientGrid(tableData) {
   clientGridApi.setGridOption('pinnedBottomRowData', [totalRow]);
   clientGridApi.setGridOption('getRowStyle', params => {
     if (params.node.rowPinned) return null;
-    if (params.data && params.data._isGroup) return {background:'#F8FAFC'};
-    if (params.data && params.data._lab === 1) return {background:'#FFF9C4'};
+    if (params.data && params.data._isGroup) return {background:'#f8fafc'};
+    if (params.data && params.data._lab === 1) return {background:'#FFFDE7'};
     return null;
   });
 
@@ -1887,9 +3416,11 @@ function openEditModal(clientId) {
   STATE.modalClientData = null;
   STATE.modalSubnegGrowths = {};
   STATE.modalClientGrowth = null;
+  STATE.modalClientGrowthMixed = false;
   STATE._modalSessionSnapshot = null;
   STATE._modalSnapshotGrowths = {};
   STATE._modalSnapshotClientGrowth = null;
+  STATE._modalSnapshotClientGrowthMixed = false;
   STATE._modalIsDirty = false;
   _setModalDirty(false);
 
@@ -1906,12 +3437,21 @@ function openEditModal(clientId) {
     .then(r => r.json())
     .then(data => {
       STATE.modalClientData = data;
+      _debugModalGrowth('fetch-response', {
+        client_id: data.client_id,
+        growth_pct: data.growth_pct,
+        client_growth_pct: data.client_growth_pct,
+        client_growth_source: data.client_growth_source,
+        client_growth_mixed: data.client_growth_mixed,
+        subneg_growths: data.subneg_growths,
+      });
       // Snapshot for undo (deep copy)
       STATE._modalSessionSnapshot = JSON.parse(JSON.stringify(data));
       renderModalBody(data);
       // Capture subneg growth snapshot AFTER renderModalBody initialises STATE.modalSubnegGrowths
       STATE._modalSnapshotGrowths = { ...STATE.modalSubnegGrowths };
       STATE._modalSnapshotClientGrowth = STATE.modalClientGrowth;
+      STATE._modalSnapshotClientGrowthMixed = STATE.modalClientGrowthMixed;
     })
     .catch(err => {
       document.getElementById('fcModalBody').innerHTML = '<p class="text-danger text-center py-3">Error cargando datos del cliente.</p>';
@@ -1924,9 +3464,11 @@ function closeModal() {
   STATE.modalClientData = null;
   STATE.modalSubnegGrowths = {};
   STATE.modalClientGrowth = null;
+  STATE.modalClientGrowthMixed = false;
   STATE._modalSessionSnapshot = null;
   STATE._modalSnapshotGrowths = {};
   STATE._modalSnapshotClientGrowth = null;
+  STATE._modalSnapshotClientGrowthMixed = false;
   STATE._modalIsDirty = false;
   // Free memory by destroying ag-Grid instances on modal close
   Object.keys(_modalGridApis).forEach(k => {
@@ -2040,6 +3582,7 @@ function undoModalChanges() {
   // Restore subneg growths to snapshot
   STATE.modalSubnegGrowths = { ...STATE._modalSnapshotGrowths };
   STATE.modalClientGrowth = STATE._modalSnapshotClientGrowth;
+  STATE.modalClientGrowthMixed = STATE._modalSnapshotClientGrowthMixed;
   // Re-render modal body from the session snapshot (no backend call)
   renderModalBody(STATE._modalSessionSnapshot);
   // After re-render, STATE.modalClientData is still the live data; keep it
@@ -2053,19 +3596,124 @@ function _fmtEffectiveMonth(ym) {
   return `01/${m}/${y}`;
 }
 
+function _modalNumberOrNull(value) {
+  const n = Number(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+function _modalSubnegKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function _modalLookupSubnegGrowth(subnegGrowths, subnegName) {
+  if (!subnegGrowths) return null;
+  if (Object.prototype.hasOwnProperty.call(subnegGrowths, subnegName)) {
+    return _modalNumberOrNull(subnegGrowths[subnegName]);
+  }
+  const target = _modalSubnegKey(subnegName);
+  for (const [key, value] of Object.entries(subnegGrowths)) {
+    if (_modalSubnegKey(key) === target) return _modalNumberOrNull(value);
+  }
+  return null;
+}
+
+function _modalMonthlyPctToAnnual(monthlyPct) {
+  const monthly = _modalNumberOrNull(monthlyPct);
+  if (monthly == null) return null;
+  const base = 1 + monthly / 100;
+  if (base < 0) return null;
+  if (base === 0) return -100;
+  return (Math.pow(base, 12) - 1) * 100;
+}
+
+function _modalVisibleSubnegs(data) {
+  const out = [];
+  const seen = new Set();
+  (data?.negocios || []).forEach(neg => {
+    (neg.subnegs || []).forEach(sub => {
+      if (!sub || !(sub.products || []).length) return;
+      const key = String(sub.subneg || '').trim();
+      const norm = _modalSubnegKey(key);
+      if (key && !seen.has(norm)) {
+        seen.add(norm);
+        out.push(sub);
+      }
+    });
+  });
+  return out;
+}
+
+function _deriveModalClientGrowthFromSubnegs(data, fallbackGrowth) {
+  const visible = _modalVisibleSubnegs(data);
+  if (!visible.length) return { value: fallbackGrowth, mixed: false, source: 'base' };
+
+  let common = null;
+  for (const sub of visible) {
+    const value = _modalNumberOrNull(STATE.modalSubnegGrowths[sub.subneg]);
+    if (value == null) return { value: fallbackGrowth, mixed: false, source: 'base' };
+    if (common == null) common = value;
+    else if (Math.abs(common - value) > 0.0005) {
+      return { value: null, mixed: true, source: 'mixed' };
+    }
+  }
+  return { value: common == null ? fallbackGrowth : common, mixed: false, source: common == null ? 'base' : 'uniform_subneg' };
+}
+
+function _debugModalGrowth(stage, payload) {
+  if (window.FC_DEBUG_MODAL_GROWTH) {
+    console.debug('[Forecast modal growth]', stage, payload);
+  }
+}
+
+function _deriveGeneralGrowthFromRenderedSubnegInputs() {
+  const inputs = Array.from(document.querySelectorAll('#fcModalBody input[id^="subneg-growth-"]'));
+  const values = inputs
+    .map(inp => _modalNumberOrNull(inp.value))
+    .filter(v => v != null);
+  if (!values.length) return { value: null, mixed: false, source: 'no-rendered-subnegs', values };
+  const first = values[0];
+  const mixed = values.some(v => Math.abs(v - first) > 0.0005);
+  return { value: mixed ? null : first, mixed, source: mixed ? 'rendered-subnegs-mixed' : 'rendered-subnegs-uniform', values };
+}
+
+function _forceClientGrowthInputFromRenderedSubnegs(reason = 'post-render') {
+  const generalGrowthInput = document.getElementById('client-growth-input');
+  if (!generalGrowthInput) return;
+
+  const data = STATE.modalClientData || {};
+  const baseGrowth = Number(data.growth_pct ?? STATE.growthPct ?? 25) || 0;
+  const derived = _deriveGeneralGrowthFromRenderedSubnegInputs();
+  const fallback = _deriveModalClientGrowthFromSubnegs(data, baseGrowth);
+  const derivedGeneralGrowth = derived.source === 'no-rendered-subnegs'
+    ? fallback.value
+    : derived.value;
+  const isMixed = derived.source === 'no-rendered-subnegs'
+    ? fallback.mixed
+    : derived.mixed;
+
+  if (isMixed || derivedGeneralGrowth == null) {
+    generalGrowthInput.value = '';
+    generalGrowthInput.placeholder = 'Mixto';
+    STATE.modalClientGrowth = null;
+    STATE.modalClientGrowthMixed = true;
+  } else {
+    generalGrowthInput.value = Number(derivedGeneralGrowth).toFixed(1);
+    generalGrowthInput.placeholder = Number(baseGrowth).toFixed(1);
+    STATE.modalClientGrowth = Number(derivedGeneralGrowth);
+    STATE.modalClientGrowthMixed = false;
+  }
+}
+
 function renderModalBody(data) {
   const body = document.getElementById('fcModalBody');
   const perfil = data.perfil || 'N/A';
   const negVal = data.neg || 'N/A';
-  const growthPct = data.growth_pct || 0;
+  const growthPct = Number(data.growth_pct ?? 0) || 0;
   const dates = data.dates || [];
   const maxHistDate = data.max_hist_date || null;
   const apiSubnegGrowths = data.subneg_growths || {};
   // effective_from_month comes from the backend (source of truth for the cutoff rule)
   const effectiveMonth = data.effective_from_month || null;
-
-  // Inicializar crecimiento general del cliente si no fue seteado en esta sesión
-  if (STATE.modalClientGrowth == null) STATE.modalClientGrowth = growthPct;
 
   // ── Pre-poblar STATE.modalSubnegGrowths ANTES de construir el HTML ──
   // Esto garantiza que renderSubnegContent lea el valor correcto (guardado o global)
@@ -2076,27 +3724,55 @@ function renderModalBody(data) {
     neg.subnegs.forEach(sub => {
       // Solo inferir si aún no fue establecido (ej: usuario ya cambió el % en esta sesión)
       if (STATE.modalSubnegGrowths[sub.subneg] == null) {
-        let inferred = apiSubnegGrowths[sub.subneg];
-        if (inferred == null) inferred = growthPct;
+        const savedGrowth = _modalLookupSubnegGrowth(apiSubnegGrowths, sub.subneg);
+        let inferred = savedGrowth;
         // Buscar el pct del primer mes futuro del primer producto del subneg.
         // pct almacenado = tasa mensual compuesta (ej: 3.4074 para 50% anual).
-        if (apiSubnegGrowths[sub.subneg] == null && _futureDates.length > 0 && sub.products && sub.products.length > 0) {
+        if (savedGrowth == null && _futureDates.length > 0 && sub.products && sub.products.length > 0) {
           const firstProd = sub.products[0];
           const m = (firstProd.months || {})[_futureDates[0]];
-          if (m && m.pct != null && m.pct > 0) {
+          const annualFromMonth = m ? _modalMonthlyPctToAnnual(m.pct) : null;
+          if (annualFromMonth != null && Math.abs(annualFromMonth - growthPct) > 0.0005) {
             // m.pct es tasa MENSUAL compuesta (ej: 3.4074 para 50% anual).
             // Reconvertir a tasa anual para mostrar en el encabezado del subneg.
-            const rm = m.pct / 100;
-            const annualRate = (Math.pow(1 + rm, 12) - 1) * 100;
-            inferred = Math.round(annualRate * 10) / 10;  // redondear a 1 decimal
+            inferred = Math.round(annualFromMonth * 10) / 10;  // redondear a 1 decimal
           }
         }
+        if (inferred == null) inferred = growthPct;
         STATE.modalSubnegGrowths[sub.subneg] = inferred;
       }
     });
   });
 
-  const _clientGrowthVal = STATE.modalClientGrowth ?? growthPct;
+  // Inicializar crecimiento general del cliente DESPUES de rehidratar subnegocios.
+  // Si los subnegocios visibles muestran una tasa uniforme, el input general debe
+  // mostrar esa misma tasa aunque client_growth_pct venga ausente o stale.
+  if (STATE.modalClientGrowth == null && !STATE.modalClientGrowthMixed) {
+    const explicit = data.client_growth_source === 'explicit'
+      ? _modalNumberOrNull(data.client_growth_pct)
+      : null;
+    const derived = explicit == null
+      ? _deriveModalClientGrowthFromSubnegs(data, growthPct)
+      : { value: explicit, mixed: false, source: 'explicit' };
+    STATE.modalClientGrowth = derived.value;
+    STATE.modalClientGrowthMixed = derived.mixed;
+    _debugModalGrowth('render-derived', {
+      client_id: data.client_id,
+      growth_pct: growthPct,
+      backend_client_growth_pct: data.client_growth_pct,
+      backend_client_growth_source: data.client_growth_source,
+      backend_client_growth_mixed: data.client_growth_mixed,
+      api_subneg_growths: apiSubnegGrowths,
+      state_subneg_growths: STATE.modalSubnegGrowths,
+      assigned_client_growth: STATE.modalClientGrowth,
+      assigned_client_growth_mixed: STATE.modalClientGrowthMixed,
+      source: derived.source,
+    });
+  }
+
+  const _clientGrowthVal = STATE.modalClientGrowth;
+  const _clientGrowthValueAttr = STATE.modalClientGrowthMixed || _clientGrowthVal == null ? '' : Number(_clientGrowthVal).toFixed(1);
+  const _clientGrowthPlaceholder = STATE.modalClientGrowthMixed ? 'Mixto' : Number(growthPct).toFixed(1);
   let html = `
     <div class="fc-modal-info">
       <div class="fc-modal-info-box"><strong>Perfil:</strong> ${perfil}</div>
@@ -2116,7 +3792,7 @@ function renderModalBody(data) {
     <div class="fc-modal-client-growth">
       <label>🎯 Expectativa de Crecimiento:</label>
       <input type="number" id="client-growth-input"
-             value="${_clientGrowthVal.toFixed(1)}" step="1" min="-100" max="500"
+             value="${_clientGrowthValueAttr}" placeholder="${_clientGrowthPlaceholder}" step="1" min="-100" max="500"
              onchange="onClientGrowthChange(this.value)"
              title="Aplica este crecimiento a todos los negocios/subnegocios del cliente">
       <span class="fc-client-growth-unit">% anual</span>
@@ -2135,7 +3811,7 @@ function renderModalBody(data) {
       <div class="fc-modal-neg">
         <div class="fc-modal-neg__header" onclick="toggleNegSection('${negId}')">
           <span>${negSection.neg} (${countProducts(negSection)} artículos)</span>
-          <span class="fc-modal-neg__arrow" id="arr-${negId}">▶</span>
+          <span class="fc-modal-neg__arrow" id="arr-${negId}"><i class="bi bi-chevron-right"></i></span>
         </div>
         <div class="fc-modal-neg__body" id="${negId}">
           ${renderSubnegs(negSection, negId, dates, maxHistDate, growthPct)}
@@ -2145,6 +3821,7 @@ function renderModalBody(data) {
   html += '</div>';
 
   body.innerHTML = html;
+  _forceClientGrowthInputFromRenderedSubnegs('after-body-render');
 
   // Build grids for each subneg
   (data.negocios || []).forEach((negSection, ni) => {
@@ -2152,6 +3829,8 @@ function renderModalBody(data) {
       buildModalGrid(`modal-grid-${ni}-${si}`, subSection.subneg, subSection.products, dates, maxHistDate, data.growth_pct || 0, true, effectiveMonth);
     });
   });
+  _forceClientGrowthInputFromRenderedSubnegs('after-grid-build');
+  window.requestAnimationFrame(() => _forceClientGrowthInputFromRenderedSubnegs('after-animation-frame'));
 
   // Build download CSV link
   buildDownloadLink(data);
@@ -2166,7 +3845,7 @@ function toggleNegSection(negId) {
   const arr  = document.getElementById('arr-' + negId);
   if (!body) return;
   const isOpen = body.classList.toggle('open');
-  if (arr) { arr.classList.toggle('open', isOpen); arr.textContent = isOpen ? '▼' : '▶'; }
+  if (arr) { arr.classList.toggle('open', isOpen); }
 }
 
 function renderSubnegs(negSection, negId, dates, maxHistDate, growthPct) {
@@ -2218,9 +3897,14 @@ function renderSubnegContent(ni, si, sub, dates, maxHistDate, growthPct) {
     </div>`;
 }
 
+function _syncClientGrowthInputFromSubnegs() {
+  _forceClientGrowthInputFromRenderedSubnegs('sync-from-subneg');
+}
+
 function onSubnegGrowthChange(subKey, val, ni, si) {
   const v = parseFloat(val) || 0;
   STATE.modalSubnegGrowths[subKey] = v;
+  _syncClientGrowthInputFromSubnegs();
   _setModalDirty(true);
   // Rebuild the grid for this subneg with new growth
   if (!STATE.modalClientData) return;
@@ -2238,6 +3922,7 @@ function onSubnegGrowthChange(subKey, val, ni, si) {
 function onClientGrowthChange(val) {
   const v = parseFloat(val) || 0;
   STATE.modalClientGrowth = v;
+  STATE.modalClientGrowthMixed = false;
   if (!STATE.modalClientData) return;
   const data = STATE.modalClientData;
   const effectiveMonth = data.effective_from_month || null;
@@ -2663,6 +4348,18 @@ window.addEventListener('pagehide', _persistForecastView);
 
 document.addEventListener('DOMContentLoaded', async () => {
   _restoreForecastView();
+
+  const backBtn = document.getElementById('treemapBackBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      const targetLevel = backBtn.getAttribute('data-target') || 'total';
+      const el = document.getElementById('treemapChart');
+      if (el) {
+        Plotly.restyle(el, {level: targetLevel}, [0]);
+        updateTreemapUI(targetLevel);
+      }
+    });
+  }
 
   const _labSel = document.getElementById('labSelect');
   if (_labSel) _labSel.disabled = true;

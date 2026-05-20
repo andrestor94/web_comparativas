@@ -5,6 +5,7 @@ import logging
 import os
 import io
 import re
+import time
 import uuid
 import datetime as dt
 import shutil
@@ -320,7 +321,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, version=str(int(time.time())))
 
 
 # === MIDDLEWARES + DEBUG ===

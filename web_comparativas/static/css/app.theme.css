@@ -408,6 +408,32 @@ a:hover {
   padding-top: 0.85rem !important;
 }
 
+.sidebar .signout .sidebar-market-switch {
+  --bs-btn-color: rgba(255, 255, 255, 0.92);
+  --bs-btn-border-color: rgba(255, 255, 255, 0.48);
+  --bs-btn-hover-color: #ffffff;
+  --bs-btn-hover-bg: rgba(255, 255, 255, 0.12);
+  --bs-btn-hover-border-color: rgba(255, 255, 255, 0.82);
+  --bs-btn-active-color: #ffffff;
+  --bs-btn-active-bg: rgba(255, 255, 255, 0.18);
+  --bs-btn-active-border-color: #ffffff;
+  --bs-btn-disabled-color: rgba(255, 255, 255, 0.55);
+  --bs-btn-disabled-border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.48);
+}
+
+.sidebar .signout .sidebar-market-switch:hover,
+.sidebar .signout .sidebar-market-switch:focus {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.82);
+}
+
+.sidebar .signout .sidebar-market-switch:focus-visible {
+  box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.2);
+}
+
 .sidebar .nav-link,
 .sidebar .nav-link i,
 .sidebar .sidebar-brand-container,

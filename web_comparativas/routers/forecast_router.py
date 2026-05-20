@@ -361,6 +361,57 @@ def api_reload(request: Request, _user: User = Depends(_require_user)):
         raise HTTPException(500, str(exc))
 
 
+@router.get("/api/diag")
+def api_diag(_user: User = Depends(_require_user)):
+    """Diagnostic endpoint: reports which CSV file is loaded, row counts, totals and timestamps.
+    Available to all authenticated users for debugging purposes."""
+    import pandas as pd
+    import datetime as _dt
+    import sqlite3
+
+    fact_path = svc.FACT_2026_FILE
+    data = svc.get_data()
+    df_fact = data.get("df_fact_2026", pd.DataFrame())
+
+    per_month: dict = {}
+    total_imp = 0.0
+    if not df_fact.empty and "imp_hist" in df_fact.columns and "fecha" in df_fact.columns:
+        total_imp = float(df_fact["imp_hist"].sum())
+        for m, g in df_fact.groupby(df_fact["fecha"].dt.to_period("M")):
+            per_month[str(m)] = {"rows": len(g), "total": float(g["imp_hist"].sum())}
+
+    # SQLite snapshot info (read-only, not the live data source)
+    sqlite_path = svc.FORECAST_DIR / "forecast_cache.sqlite"
+    sqlite_info: dict = {"path": str(sqlite_path), "exists": sqlite_path.exists()}
+    if sqlite_path.exists():
+        sqlite_info["size_mb"] = round(sqlite_path.stat().st_size / 1_048_576, 2)
+        try:
+            conn = sqlite3.connect(str(sqlite_path))
+            cur = conn.cursor()
+            sqlite_info["df_fact_2026_rows"] = cur.execute("SELECT COUNT(*) FROM df_fact_2026").fetchone()[0]
+            sqlite_info["df_fact_2026_total"] = cur.execute("SELECT SUM(imp_hist) FROM df_fact_2026").fetchone()[0]
+            date_range = cur.execute("SELECT MIN(fecha), MAX(fecha) FROM df_fact_2026").fetchone()
+            sqlite_info["df_fact_2026_date_range"] = list(date_range)
+            conn.close()
+        except Exception as e:
+            sqlite_info["error"] = str(e)
+
+    return {
+        "data_source": "CSV (SQLite snapshot is not read by the service)",
+        "forecast_service_py": str(Path(svc.__file__).resolve()),
+        "forecast_dir": str(svc.FORECAST_DIR.resolve()),
+        "fact_2026_file": str(fact_path.resolve()),
+        "fact_2026_exists": fact_path.exists(),
+        "fact_2026_size_mb": round(fact_path.stat().st_size / 1_048_576, 2) if fact_path.exists() else None,
+        "rows_loaded": len(df_fact),
+        "total_imp_hist": round(total_imp, 2),
+        "per_month": per_month,
+        "cache_populated": bool(data),
+        "sqlite_snapshot": sqlite_info,
+        "server_time": _dt.datetime.now().isoformat(),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Override endpoints (save / clear client projection edits)
 # ---------------------------------------------------------------------------

@@ -3,15 +3,18 @@
 {% block header_title %}Nueva carga{% endblock %}
 {% block extra_head %}
 <style>
-  .upload-form-shell {
-    max-width: 900px;
-    width: 100%;
-    margin: 0 auto;
+  .upload-form-shell { max-width: 900px; width: 100%; margin: 0 auto; }
+  .is-readonly { background-color: #f8fafc; cursor: default; }
+  .campo-error {
+    display: none;
+    color: #dc3545;
+    font-size: 0.82em;
+    margin-top: 0.3rem;
+    font-weight: 500;
   }
-  .is-readonly {
-    background-color: #f8fafc;
-    cursor: default;
-  }
+  .campo-error.visible { display: block; }
+  .form-control.campo-invalido,
+  .form-select.campo-invalido { border-color: #dc3545 !important; box-shadow: 0 0 0 0.2rem rgba(220,53,69,.15); }
 </style>
 {% endblock %}
 
@@ -32,345 +35,514 @@
 
 <div class="upload-form-shell">
 <div class="h-panel">
-      <form action="/cargas" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm">
+
+  {% if error %}
+  <div class="alert alert-danger mb-3" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}
+  </div>
+  {% endif %}
+
+  <div class="alert alert-danger d-none mb-3" id="resumenErrores" role="alert">
+    <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Completá todos los campos obligatorios antes de subir el archivo.</strong>
+    <div id="textoErrores" class="mt-1" style="font-size:0.93em;"></div>
+  </div>
+
+  <form action="/cargas" method="post" enctype="multipart/form-data" class="row g-3" id="uploadForm" novalidate>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        N° DE PROCESO <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input name="proceso_nro" id="proceso_nro" class="form-control"
+             placeholder="Ej. 45/356" required autocomplete="off" />
+      <div class="campo-error" id="err_proceso_nro">El N° de proceso es obligatorio.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        FECHA DE APERTURA <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input name="apertura_fecha" id="apertura_fecha" type="date" class="form-control" required />
+      <div class="campo-error" id="err_apertura_fecha">La fecha de apertura es obligatoria.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        N° DE CUENTA <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input name="cuenta_nro" id="n_cuenta" class="form-control"
+             placeholder="Ej. 10884" required autocomplete="off" />
+      <div class="campo-error" id="err_cuenta_nro">El N° de cuenta es obligatorio.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        PLATAFORMA <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <select name="plataforma" id="plataformaSel" class="form-select" required>
+        <option value="" disabled selected>— Seleccionar —</option>
+        <option value="BAC">BAC</option>
+        <option value="COMPRAR">COMPRAR</option>
+        <option value="PBAC">PBAC</option>
+        <option value="LA_PAMPA">LA PAMPA</option>
+        <option value="SIPROSA">SIPROSA</option>
+      </select>
+      <div class="campo-error" id="err_plataforma">La plataforma es obligatoria.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        COMPRADOR <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input name="comprador" id="compradorInp" class="form-control is-readonly"
+             placeholder="Ingresá el N° de cuenta para autocompletar"
+             required readonly aria-readonly="true" tabindex="-1" />
+      <div class="form-text">Ingresá el N° de cuenta para autocompletar.</div>
+      <div class="campo-error" id="err_comprador">El comprador es obligatorio (ingresá un N° de cuenta válido).</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">
+        PROVINCIA/MUNICIPIO <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input name="provincia" id="provinciaInp" class="form-control is-readonly"
+             placeholder="Ingresá el N° de cuenta para autocompletar"
+             required readonly aria-readonly="true" tabindex="-1" />
+      <div class="form-text">Ingresá el N° de cuenta para autocompletar.</div>
+      <div class="campo-error" id="err_provincia">La provincia/municipio es obligatoria (ingresá un N° de cuenta válido).</div>
+    </div>
+
+    <!-- Archivo genérico (BAC, COMPRAR, PBAC) -->
+    <div class="col-12" id="genericFileSection">
+      <label class="form-label fw-semibold">
+        ARCHIVO <span style="color:#dc3545;font-weight:700;">*</span>
+      </label>
+      <input type="file" name="file" id="fileInput" class="form-control"
+             accept=".pdf,.xls,.xlsx,.zip" />
+      <div class="form-text">Formatos admitidos: PDF, Excel o ZIP.</div>
+      <div class="campo-error" id="err_file">Debe seleccionar un archivo para procesar.</div>
+    </div>
+
+    <!-- Sección específica para LA PAMPA (2 PDFs) -->
+    <div class="col-12 d-none" id="laPampaFilesSection">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">
+            ARCHIVO COMPARATIVA (PDF) <span style="color:#dc3545;font-weight:700;">*</span>
+          </label>
+          <input type="file" name="file_comparativa" id="fileInputComparativa"
+                 class="form-control" accept=".pdf" />
+          <div class="campo-error" id="err_file_comparativa">Debe seleccionar el archivo Comparativa (PDF).</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">
+            ARCHIVO PLIEGO (PDF) <span style="color:#dc3545;font-weight:700;">*</span>
+          </label>
+          <input type="file" name="file_pliego" id="fileInputPliego"
+                 class="form-control" accept=".pdf" />
+          <div class="campo-error" id="err_file_pliego">Debe seleccionar el archivo Pliego (PDF).</div>
+        </div>
+      </div>
+      <div class="form-text mt-2">Para La Pampa se requieren ambos PDFs por separado; el sistema los unirá internamente.</div>
+    </div>
+
+    <!-- Sección específica para SIPROSA (3 Excels) -->
+    <div class="col-12 d-none" id="siprosaFilesSection">
+      <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label fw-semibold">N° de proceso</label>
-          <input name="proceso_nro" class="form-control" placeholder="Ej. 45/356" required />
+          <label class="form-label fw-semibold">
+            ARCHIVO 1 (EXCEL) <span style="color:#dc3545;font-weight:700;">*</span>
+          </label>
+          <input type="file" name="file_siprosa_1" id="fileSiprosa1"
+                 class="form-control" accept=".xls,.xlsx,.xlsm" />
+          <div class="campo-error" id="err_siprosa1">Debe seleccionar el Archivo 1 (Excel).</div>
         </div>
-
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Fecha de apertura</label>
-          <input name="apertura_fecha" type="date" class="form-control" required />
+          <label class="form-label fw-semibold">
+            ARCHIVO 2 (EXCEL) <span style="color:#dc3545;font-weight:700;">*</span>
+          </label>
+          <input type="file" name="file_siprosa_2" id="fileSiprosa2"
+                 class="form-control" accept=".xls,.xlsx,.xlsm" />
+          <div class="campo-error" id="err_siprosa2">Debe seleccionar el Archivo 2 (Excel).</div>
         </div>
-
         <div class="col-md-4">
-          <label class="form-label fw-semibold">N° de cuenta</label>
-          <input name="cuenta_nro" id="n_cuenta" class="form-control" placeholder="Opcional" />
+          <label class="form-label fw-semibold">
+            ARCHIVO 3 (EXCEL) <span style="color:#dc3545;font-weight:700;">*</span>
+          </label>
+          <input type="file" name="file_siprosa_3" id="fileSiprosa3"
+                 class="form-control" accept=".xls,.xlsx,.xlsm" />
+          <div class="campo-error" id="err_siprosa3">Debe seleccionar el Archivo 3 (Excel).</div>
         </div>
+      </div>
+      <div class="form-text mt-2">Para Siprosa se requieren 3 archivos Excel (Ranking). El sistema los procesará en conjunto.</div>
+    </div>
 
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Plataforma</label>
-          <select name="plataforma" id="plataformaSel" class="form-select">
-            <option value="">— Seleccionar —</option>
-            <option value="BAC">BAC</option>
-            <option value="COMPRAR">COMPRAR</option>
-            <option value="PBAC">PBAC</option>
-            <option value="LA_PAMPA">LA PAMPA</option>
-            <option value="SIPROSA">SIPROSA</option>
-          </select>
-        </div>
+    <!-- Campos ocultos para hints -->
+    <input type="hidden" name="platform_hint" id="platform_hint" />
+    <input type="hidden" name="buyer_hint"    id="buyer_hint" />
+    <input type="hidden" name="province_hint" id="province_hint" />
 
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Comprador</label>
-          <input name="comprador" id="compradorInp" class="form-control is-readonly" placeholder="Se completa automáticamente" readonly aria-readonly="true" tabindex="-1" />
-          <div class="form-text">Se autocompleta al ingresar el número de cuenta.</div>
-        </div>
+    <div class="col-12 mt-4">
+      <button type="submit" id="btnSubir" class="btn btn-primary d-inline-flex align-items-center gap-2">
+        <i class="bi bi-upload"></i> Procesar y normalizar
+      </button>
+    </div>
 
-        <div class="col-md-4">
-          <label class="form-label fw-semibold">Provincia/Municipio</label>
-          <input name="provincia" id="provinciaInp" class="form-control is-readonly" placeholder="Se completa automáticamente" readonly aria-readonly="true" tabindex="-1" />
-          <div class="form-text">Se autocompleta al ingresar el número de cuenta.</div>
-        </div>
-
-        <div class="col-12" id="genericFileSection">
-          <label class="form-label fw-semibold">Archivo</label>
-          <input type="file" name="file" id="fileInput" class="form-control" accept=".pdf,.xls,.xlsx,.zip" />
-          <div class="form-text">Formatos admitidos: PDF, Excel o ZIP.</div>
-        </div>
-
-        <!-- Sección específica para LA PAMPA (2 archivos) -->
-        <div class="col-12 d-none" id="laPampaFilesSection">
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Archivo Comparativa (PDF)</label>
-              <input type="file" name="file_comparativa" id="fileInputComparativa" class="form-control" accept=".pdf" />
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Archivo Pliego (PDF)</label>
-              <input type="file" name="file_pliego" id="fileInputPliego" class="form-control" accept=".pdf" />
-            </div>
-          </div>
-          <div class="form-text mt-2">Para La Pampa se requieren ambos PDFs por separado. el sistema los
-            unirán internamente.</div>
-        </div>
-
-        <!-- Sección específica para SIPROSA (3 archivos) -->
-        <div class="col-12 d-none" id="siprosaFilesSection">
-          <div class="row g-3">
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Archivo 1 (Excel)</label>
-              <input type="file" name="file_siprosa_1" id="fileSiprosa1" class="form-control"
-                accept=".xls,.xlsx,.xlsm" />
-            </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Archivo 2 (Excel)</label>
-              <input type="file" name="file_siprosa_2" id="fileSiprosa2" class="form-control"
-                accept=".xls,.xlsx,.xlsm" />
-            </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Archivo 3 (Excel)</label>
-              <input type="file" name="file_siprosa_3" id="fileSiprosa3" class="form-control"
-                accept=".xls,.xlsx,.xlsm" />
-            </div>
-          </div>
-          <div class="form-text mt-2">Para Siprosa se requieren 3 archivos Excel (Ranking). El sistema los
-            procesará en conjunto.</div>
-        </div>
-
-        <input type="hidden" name="platform_hint" id="platform_hint" />
-        <input type="hidden" name="buyer_hint" id="buyer_hint" />
-        <input type="hidden" name="province_hint" id="province_hint" />
-
-        <div class="col-12 mt-4">
-          <button class="btn btn-primary d-inline-flex align-items-center gap-2">
-            <i class="bi bi-upload"></i> Procesar y normalizar
-          </button>
-        </div>
-      </form>
+  </form>
 </div>
 </div>
 
-<!-- Script principal -->
 <script>
-  (function () {
-    const form = document.getElementById('uploadForm');
-    const plataforma = document.getElementById('plataformaSel');
-    const comprador = document.getElementById('compradorInp');
-    const provincia = document.getElementById('provinciaInp');
-    const cuenta = document.getElementById('n_cuenta');
-    const fileInput = document.getElementById('fileInput'); // This is the generic file input
+(function () {
+  /* ── referencias DOM ─────────────────────────────────────────────── */
+  var form           = document.getElementById('uploadForm');
+  var selPlataforma  = document.getElementById('plataformaSel');
+  var inpComprador   = document.getElementById('compradorInp');
+  var inpProvincia   = document.getElementById('provinciaInp');
+  var inpCuenta      = document.getElementById('n_cuenta');
+  var inpProceso     = document.getElementById('proceso_nro');
+  var inpFecha       = document.getElementById('apertura_fecha');
+  var inpFile        = document.getElementById('fileInput');
 
-    // La Pampa elements
-    const genericSection = document.getElementById('genericFileSection');
-    const pampaSection = document.getElementById('laPampaFilesSection');
-    const inputComp = document.getElementById('fileInputComparativa');
-    const inputPlie = document.getElementById('fileInputPliego');
+  var secGenerico    = document.getElementById('genericFileSection');
+  var secPampa       = document.getElementById('laPampaFilesSection');
+  var secSiprosa     = document.getElementById('siprosaFilesSection');
 
-    // Siprosa elements
-    const siprosaSection = document.getElementById('siprosaFilesSection');
-    const inputSip1 = document.getElementById('fileSiprosa1');
-    const inputSip2 = document.getElementById('fileSiprosa2');
-    const inputSip3 = document.getElementById('fileSiprosa3');
+  var inpComp        = document.getElementById('fileInputComparativa');
+  var inpPlie        = document.getElementById('fileInputPliego');
+  var inpSip1        = document.getElementById('fileSiprosa1');
+  var inpSip2        = document.getElementById('fileSiprosa2');
+  var inpSip3        = document.getElementById('fileSiprosa3');
 
-    const hPlatform = document.getElementById('platform_hint');
-    const hBuyer = document.getElementById('buyer_hint');
-    const hProvince = document.getElementById('province_hint');
+  var hPlatform      = document.getElementById('platform_hint');
+  var hBuyer         = document.getElementById('buyer_hint');
+  var hProvince      = document.getElementById('province_hint');
 
-    function lockAutoFields() {
-      [comprador, provincia].forEach(function (el) {
-        if (!el) return;
-        el.readOnly = true;
-        el.setAttribute('readonly', 'readonly');
-        el.setAttribute('aria-readonly', 'true');
-        el.setAttribute('tabindex', '-1');
-        el.classList.add('is-readonly');
-      });
-    }
+  var resumen        = document.getElementById('resumenErrores');
+  var textoResumen   = document.getElementById('textoErrores');
 
-    function preventManualEdit(ev) {
-      const el = ev.currentTarget;
-      if (!el || el.readOnly !== true) return;
-      if (ev.type === 'keydown') {
-        const allowed = ['Tab', 'Shift', 'Control', 'Alt', 'Meta', 'Escape'];
-        if (allowed.includes(ev.key) || ev.ctrlKey || ev.metaKey) return;
+  /* ── valores considerados vacíos/inválidos ────────────────────────── */
+  var INVALIDOS = [
+    '', '—', '-', '--', 'null', 'none', 'undefined',
+    'seleccionar', '— seleccionar —',
+    'se completa automáticamente',
+    'se completa automáticamente al ingresar n° de cuenta',
+    'opcional', 'ingrese n° de cuenta'
+  ];
+
+  function estaVacio(val) {
+    return INVALIDOS.indexOf((val || '').trim().toLowerCase()) !== -1;
+  }
+
+  /* ── helpers de error ─────────────────────────────────────────────── */
+  function mostrarError(errId, msg) {
+    var el = document.getElementById(errId);
+    if (!el) return;
+    if (msg) el.textContent = msg;
+    el.classList.add('visible');
+    /* marcar el input/select asociado */
+    var hermano = el.previousElementSibling;
+    while (hermano) {
+      if (hermano.tagName === 'INPUT' || hermano.tagName === 'SELECT') {
+        hermano.classList.add('campo-invalido');
+        break;
       }
-      ev.preventDefault();
+      hermano = hermano.previousElementSibling;
     }
+  }
 
-    [comprador, provincia].forEach(function (el) {
+  function limpiarError(errId) {
+    var el = document.getElementById(errId);
+    if (!el) return;
+    el.classList.remove('visible');
+    var hermano = el.previousElementSibling;
+    while (hermano) {
+      if (hermano.tagName === 'INPUT' || hermano.tagName === 'SELECT') {
+        hermano.classList.remove('campo-invalido');
+        break;
+      }
+      hermano = hermano.previousElementSibling;
+    }
+  }
+
+  function limpiarTodosLosErrores() {
+    ['err_proceso_nro','err_apertura_fecha','err_cuenta_nro','err_plataforma',
+     'err_comprador','err_provincia','err_file',
+     'err_file_comparativa','err_file_pliego',
+     'err_siprosa1','err_siprosa2','err_siprosa3'].forEach(limpiarError);
+    if (resumen) resumen.classList.add('d-none');
+  }
+
+  /* ── campos bloqueados (readonly) ────────────────────────────────── */
+  function bloquearAutocompletados() {
+    [inpComprador, inpProvincia].forEach(function(el) {
       if (!el) return;
-      ['beforeinput', 'paste', 'drop'].forEach(function (eventName) {
-        el.addEventListener(eventName, preventManualEdit);
-      });
-      el.addEventListener('keydown', preventManualEdit);
+      el.readOnly = true;
+      el.setAttribute('readonly', 'readonly');
+      el.setAttribute('aria-readonly', 'true');
+      el.setAttribute('tabindex', '-1');
+      el.classList.add('is-readonly');
     });
-    lockAutoFields();
+  }
 
-    // --- Lógica de toggle para La Pampa / Siprosa ---
-    function handlePlatformChange() {
-      const val = (plataforma && plataforma.value) ? plataforma.value : "";
+  function bloquearEdicion(ev) {
+    var el = ev.currentTarget;
+    if (!el || !el.readOnly) return;
+    if (ev.type === 'keydown') {
+      var permitidas = ['Tab','Shift','Control','Alt','Meta','Escape'];
+      if (permitidas.indexOf(ev.key) !== -1 || ev.ctrlKey || ev.metaKey) return;
+    }
+    ev.preventDefault();
+  }
 
-      // Reset visibilidad
-      if (genericSection) genericSection.classList.add('d-none');
-      if (pampaSection) pampaSection.classList.add('d-none');
-      if (siprosaSection) siprosaSection.classList.add('d-none');
+  [inpComprador, inpProvincia].forEach(function(el) {
+    if (!el) return;
+    ['beforeinput','paste','drop'].forEach(function(ev) {
+      el.addEventListener(ev, bloquearEdicion);
+    });
+    el.addEventListener('keydown', bloquearEdicion);
+  });
+  bloquearAutocompletados();
 
-      // Reset required
-      if (fileInput) fileInput.removeAttribute('required');
-      if (inputComp) inputComp.removeAttribute('required');
-      if (inputPlie) inputPlie.removeAttribute('required');
-      if (inputSip1) inputSip1.removeAttribute('required');
-      if (inputSip2) inputSip2.removeAttribute('required');
-      if (inputSip3) inputSip3.removeAttribute('required');
+  /* ── sincronizar hints ocultos ───────────────────────────────────── */
+  function sincronizarHints() {
+    if (hPlatform) hPlatform.value = (selPlataforma && selPlataforma.value) ? selPlataforma.value.trim() : '';
+    if (hBuyer)    hBuyer.value    = (inpComprador && inpComprador.value)   ? inpComprador.value.trim()   : '';
+    if (hProvince) hProvince.value = (inpProvincia && inpProvincia.value)   ? inpProvincia.value.trim()   : '';
+    bloquearAutocompletados();
+  }
 
-      if (val === 'LA_PAMPA') {
-        if (pampaSection) pampaSection.classList.remove('d-none');
-        if (inputComp) inputComp.setAttribute('required', 'required');
-        if (inputPlie) inputPlie.setAttribute('required', 'required');
+  /* ── mostrar/ocultar sección de archivos según plataforma ─────────── */
+  function cambiarPlataforma() {
+    var val = selPlataforma ? selPlataforma.value : '';
+    if (secGenerico) secGenerico.classList.add('d-none');
+    if (secPampa)    secPampa.classList.add('d-none');
+    if (secSiprosa)  secSiprosa.classList.add('d-none');
 
-      } else if (val === 'SIPROSA') {
-        if (siprosaSection) siprosaSection.classList.remove('d-none');
-        if (inputSip1) inputSip1.setAttribute('required', 'required');
-        if (inputSip2) inputSip2.setAttribute('required', 'required');
-        if (inputSip3) inputSip3.setAttribute('required', 'required');
+    if (val === 'LA_PAMPA') {
+      if (secPampa) secPampa.classList.remove('d-none');
+    } else if (val === 'SIPROSA') {
+      if (secSiprosa) secSiprosa.classList.remove('d-none');
+    } else {
+      if (secGenerico) secGenerico.classList.remove('d-none');
+    }
+    sincronizarHints();
+  }
 
+  /* ── limpiar error cuando el usuario corrige un campo ────────────── */
+  var mapaLimpiar = [
+    [inpProceso,  'err_proceso_nro'],
+    [inpFecha,    'err_apertura_fecha'],
+    [inpCuenta,   'err_cuenta_nro'],
+    [selPlataforma,'err_plataforma'],
+    [inpFile,     'err_file'],
+    [inpComp,     'err_file_comparativa'],
+    [inpPlie,     'err_file_pliego'],
+    [inpSip1,     'err_siprosa1'],
+    [inpSip2,     'err_siprosa2'],
+    [inpSip3,     'err_siprosa3'],
+  ];
+  mapaLimpiar.forEach(function(par) {
+    if (!par[0]) return;
+    ['input','change'].forEach(function(ev) {
+      par[0].addEventListener(ev, function() { limpiarError(par[1]); });
+    });
+  });
+
+  /* ── validación completa antes del submit ────────────────────────── */
+  function validarFormulario() {
+    limpiarTodosLosErrores();
+    var pVal    = selPlataforma ? selPlataforma.value : '';
+    var faltantes = [];
+    var ok      = true;
+
+    /* N° de proceso */
+    if (estaVacio(inpProceso ? inpProceso.value : '')) {
+      mostrarError('err_proceso_nro');
+      faltantes.push('N° de proceso');
+      ok = false;
+    }
+
+    /* Fecha de apertura */
+    if (estaVacio(inpFecha ? inpFecha.value : '')) {
+      mostrarError('err_apertura_fecha');
+      faltantes.push('Fecha de apertura');
+      ok = false;
+    }
+
+    /* N° de cuenta */
+    if (estaVacio(inpCuenta ? inpCuenta.value : '')) {
+      mostrarError('err_cuenta_nro');
+      faltantes.push('N° de cuenta');
+      ok = false;
+    }
+
+    /* Plataforma */
+    if (estaVacio(pVal)) {
+      mostrarError('err_plataforma');
+      faltantes.push('Plataforma');
+      ok = false;
+    }
+
+    /* Comprador (autocompletado) */
+    if (estaVacio(inpComprador ? inpComprador.value : '')) {
+      mostrarError('err_comprador');
+      faltantes.push('Comprador');
+      ok = false;
+    }
+
+    /* Provincia (autocompletada) */
+    if (estaVacio(inpProvincia ? inpProvincia.value : '')) {
+      mostrarError('err_provincia');
+      faltantes.push('Provincia/Municipio');
+      ok = false;
+    }
+
+    /* Archivo(s) */
+    if (pVal === 'LA_PAMPA') {
+      if (!inpComp || !inpComp.files || !inpComp.files[0]) {
+        mostrarError('err_file_comparativa');
+        faltantes.push('Archivo Comparativa');
+        ok = false;
+      } else if (!inpComp.files[0].name.toLowerCase().endsWith('.pdf')) {
+        mostrarError('err_file_comparativa', 'El archivo Comparativa debe ser PDF.');
+        ok = false;
+      }
+      if (!inpPlie || !inpPlie.files || !inpPlie.files[0]) {
+        mostrarError('err_file_pliego');
+        faltantes.push('Archivo Pliego');
+        ok = false;
+      } else if (!inpPlie.files[0].name.toLowerCase().endsWith('.pdf')) {
+        mostrarError('err_file_pliego', 'El archivo Pliego debe ser PDF.');
+        ok = false;
+      }
+    } else if (pVal === 'SIPROSA') {
+      var extExcel = ['.xls','.xlsx','.xlsm'];
+      function esExcel(nombre) {
+        return extExcel.some(function(e) { return nombre.toLowerCase().endsWith(e); });
+      }
+      [[inpSip1,'err_siprosa1','Archivo 1'],[inpSip2,'err_siprosa2','Archivo 2'],[inpSip3,'err_siprosa3','Archivo 3']].forEach(function(t) {
+        if (!t[0] || !t[0].files || !t[0].files[0]) {
+          mostrarError(t[1]);
+          faltantes.push(t[2]);
+          ok = false;
+        } else if (!esExcel(t[0].files[0].name)) {
+          mostrarError(t[1], t[2] + ' debe ser Excel (.xls, .xlsx, .xlsm).');
+          ok = false;
+        }
+      });
+    } else {
+      /* genérico */
+      if (!inpFile || !inpFile.files || !inpFile.files[0]) {
+        mostrarError('err_file');
+        faltantes.push('Archivo');
+        ok = false;
       } else {
-        // Default: genérico
-        if (genericSection) genericSection.classList.remove('d-none');
-        if (fileInput) fileInput.setAttribute('required', 'required');
+        var f   = inpFile.files[0];
+        var ext = f.name.split('.').pop().toLowerCase();
+        if (['pdf','xls','xlsx','zip'].indexOf(ext) === -1) {
+          mostrarError('err_file', 'Archivo no permitido: "' + f.name + '". Solo PDF, Excel o ZIP.');
+          inpFile.value = '';
+          ok = false;
+        } else if (f.size > 25 * 1024 * 1024) {
+          mostrarError('err_file', 'El archivo supera el tamaño máximo (25 MB).');
+          inpFile.value = '';
+          ok = false;
+        }
       }
-
-      syncHints();
     }
 
-    // --- Validación del archivo antes del envío ---
-    if (form) { // Changed from form && fileInput to just form, as fileInput might not be required
-      form.addEventListener('submit', function (e) {
-        // Validación condicional
-        const pVal = (plataforma && plataforma.value) ? plataforma.value : "";
-
-        if (pVal === 'LA_PAMPA') {
-          // Validar los 2 archivos de La Pampa
-          if (!inputComp || !inputComp.files[0]) {
-            alert("Falta archivo Comparativa.");
-            e.preventDefault(); return false;
-          }
-          if (!inputPlie || !inputPlie.files[0]) {
-            alert("Falta archivo Pliego.");
-            e.preventDefault(); return false;
-          }
-          // Validar extensiones PDF
-          const f1 = inputComp.files[0].name.toLowerCase();
-          const f2 = inputPlie.files[0].name.toLowerCase();
-          if (!f1.endsWith('.pdf') || !f2.endsWith('.pdf')) {
-            alert("Para La Pampa ambos archivos deben ser PDF.");
-            e.preventDefault(); return false;
-          }
-          return; // OK, proceed with submission
-        }
-
-        if (pVal === 'SIPROSA') {
-          // Validar los 3 archivos de Siprosa
-          if (!inputSip1 || !inputSip1.files[0] || !inputSip2 || !inputSip2.files[0] || !inputSip3 || !inputSip3.files[0]) {
-            alert("Faltan archivos de Siprosa (se requieren 3).");
-            e.preventDefault(); return false;
-          }
-          // Validar extensiones Excel
-          const s1 = inputSip1.files[0].name.toLowerCase();
-          const s2 = inputSip2.files[0].name.toLowerCase();
-          const s3 = inputSip3.files[0].name.toLowerCase();
-          const validExcel = ['.xls', '.xlsx', '.xlsm'];
-
-          function isExcel(name) {
-            return validExcel.some(ext => name.endsWith(ext));
-          }
-
-          if (!isExcel(s1) || !isExcel(s2) || !isExcel(s3)) {
-            alert("Para Siprosa todos los archivos deben ser Excel (.xls, .xlsx, .xlsm).");
-            e.preventDefault(); return false;
-          }
-          return; // OK, proceed with submission
-        }
-
-        // Validación estándar (only if generic section is visible and fileInput is present)
-        if (genericSection && !genericSection.classList.contains('d-none') && fileInput) {
-          const file = fileInput.files[0];
-          if (!file) return; // si no seleccionó nada, el required del input ya se encarga
-
-          const validExt = ['pdf', 'xls', 'xlsx', 'zip'];
-          const ext = file.name.split('.').pop().toLowerCase();
-
-          if (!validExt.includes(ext)) {
-            e.preventDefault(); // bloquea el envío
-            alert(`⚠️ Archivo no permitido: "${file.name}".\n\nSolo se admiten formatos PDF, Excel (.xls/.xlsx) o ZIP.`);
-            fileInput.value = ''; // limpia el input
-            return false;
-          }
-
-          // opcional: tamaño máximo (ejemplo 25MB)
-          const maxSizeMB = 25;
-          if (file.size > maxSizeMB * 1024 * 1024) {
-            e.preventDefault();
-            alert(`⚠️ El archivo supera el tamaño máximo permitido (${maxSizeMB} MB).`);
-            fileInput.value = '';
-            return false;
-          }
-        }
-      });
+    /* Banner resumen */
+    if (!ok && resumen && textoResumen) {
+      textoResumen.textContent = faltantes.length
+        ? 'Faltan completar: ' + faltantes.join(', ') + '.'
+        : '';
+      resumen.classList.remove('d-none');
+      resumen.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    // --- Sincronización de hints (igual que antes) ---
-    function syncHints() {
-      hPlatform.value = (plataforma && plataforma.value ? plataforma.value : '').trim();
-      hBuyer.value = (comprador && comprador.value ? comprador.value : '').trim();
-      hProvince.value = (provincia && provincia.value ? provincia.value : '').trim();
-      lockAutoFields();
-    }
+    return ok;
+  }
 
-    if (plataforma) {
-      plataforma.addEventListener('change', handlePlatformChange);
-    }
-    if (comprador) comprador.addEventListener('input', syncHints);
-    if (provincia) provincia.addEventListener('input', syncHints);
-    window.addEventListener('DOMContentLoaded', function () {
-      syncHints();
-      handlePlatformChange();
+  /* ── submit ──────────────────────────────────────────────────────── */
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      sincronizarHints();
+      if (!validarFormulario()) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
     });
-    if (form) form.addEventListener('submit', function () { syncHints(); });
+  }
 
-    // --- Autocompletar por N° de cuenta ---
-    if (cuenta) {
-      let ultimoBuscado = "";
+  /* ── eventos de cambio ───────────────────────────────────────────── */
+  if (selPlataforma) selPlataforma.addEventListener('change', cambiarPlataforma);
 
-      async function buscarCliente(nro) {
-        try {
-          const resp = await fetch(`/api/clientes/${encodeURIComponent(nro)}`);
-          if (!resp.ok) return { ok: false };
-          return await resp.json();
-        } catch (err) {
-          console.warn("Error consultando cliente:", err);
-          return { ok: false };
-        }
+  /* ── autocompletar comprador/provincia por N° de cuenta ──────────── */
+  if (inpCuenta) {
+    var ultimoBuscado = '';
+
+    function buscarCliente(nro) {
+      return fetch('/api/clientes/' + encodeURIComponent(nro))
+        .then(function(r) { return r.ok ? r.json() : { ok: false }; })
+        .catch(function() { return { ok: false }; });
+    }
+
+    function rellenarAutocompletados(data) {
+      if (!data) return;
+      if (inpComprador && data.comprador) {
+        inpComprador.value = data.comprador;
+        limpiarError('err_comprador');
       }
-
-      function rellenarCampos(data) {
-        if (!data) return;
-        if (comprador && data.comprador) comprador.value = data.comprador;
-        if (provincia && data.provincia) provincia.value = data.provincia;
-        lockAutoFields();
-        syncHints();
+      if (inpProvincia && data.provincia) {
+        inpProvincia.value = data.provincia;
+        limpiarError('err_provincia');
       }
+      bloquearAutocompletados();
+      sincronizarHints();
+    }
 
-      function limpiarCamposAutocompletados() {
-        if (comprador) comprador.value = "";
-        if (provincia) provincia.value = "";
-        lockAutoFields();
-        syncHints();
-      }
+    function limpiarAutocompletados() {
+      if (inpComprador) inpComprador.value = '';
+      if (inpProvincia) inpProvincia.value = '';
+      bloquearAutocompletados();
+      sincronizarHints();
+    }
 
-      async function manejarCuenta() {
-        const valor = (cuenta.value || "").trim();
-        if (!valor) { limpiarCamposAutocompletados(); ultimoBuscado = ""; return; }
-        if (valor === ultimoBuscado) return;
-        ultimoBuscado = valor;
-
-        const res = await buscarCliente(valor);
+    function consultarCuenta() {
+      var valor = (inpCuenta.value || '').trim();
+      if (!valor) { limpiarAutocompletados(); ultimoBuscado = ''; return; }
+      if (valor === ultimoBuscado) return;
+      ultimoBuscado = valor;
+      buscarCliente(valor).then(function(res) {
         if (res && res.ok && res.data) {
-          rellenarCampos(res.data);
+          rellenarAutocompletados(res.data);
         } else {
-          limpiarCamposAutocompletados();
+          limpiarAutocompletados();
         }
-      }
-
-      cuenta.addEventListener('blur', manejarCuenta);
-      cuenta.addEventListener('change', manejarCuenta);
-      cuenta.addEventListener('keyup', function (ev) {
-        const valor = (cuenta.value || "").trim();
-        if (ev.key === "Enter") manejarCuenta();
-        else if (valor.length >= 4) manejarCuenta();
       });
     }
 
-  })();
+    inpCuenta.addEventListener('blur',   consultarCuenta);
+    inpCuenta.addEventListener('change', consultarCuenta);
+    inpCuenta.addEventListener('keyup',  function(ev) {
+      var v = (inpCuenta.value || '').trim();
+      if (ev.key === 'Enter' || v.length >= 4) consultarCuenta();
+    });
+  }
+
+  /* ── init ────────────────────────────────────────────────────────── */
+  window.addEventListener('DOMContentLoaded', function() {
+    sincronizarHints();
+    cambiarPlataforma();
+  });
+  /* También ejecutar de inmediato por si DOMContentLoaded ya disparó */
+  if (document.readyState !== 'loading') {
+    sincronizarHints();
+    cambiarPlataforma();
+  }
+
+})();
 </script>
 {% endblock %}
