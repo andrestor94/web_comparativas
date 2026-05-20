@@ -2733,29 +2733,56 @@ def get_filter_options() -> dict:
         # ── Core filters: profiles, neg, subneg, dates ────────────────────
         # Isolated in their own try/except so a labs table absence does NOT
         # wipe out the core filter options (critical for Problem 2).
-        perfiles: list = []
-        negs: list = []
-        subnegs: list = []
-        min_date = max_date = None
+        perfiles_set = set()
+        negs_set = set()
+        subnegs_set = set()
+        min_dates = []
+        max_dates = []
         try:
             with engine.connect() as conn:
-                perfiles = pd.read_sql(
-                    "SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn
-                )["perfil"].tolist()
-                negs = pd.read_sql(
-                    "SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn
-                )["neg"].tolist()
-                subnegs = pd.read_sql(
-                    "SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn
-                )["subneg"].tolist()
-                valid_dates = pd.read_sql(
-                    "SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_main", conn
-                )
-                if not valid_dates.empty:
-                    if pd.notnull(valid_dates["min_d"].iloc[0]):
-                        min_date = valid_dates["min_d"].iloc[0].strftime("%Y-%m-%d")
-                    if pd.notnull(valid_dates["max_d"].iloc[0]):
-                        max_date = valid_dates["max_d"].iloc[0].strftime("%Y-%m-%d")
+                # Query forecast_main
+                df_main_p = pd.read_sql("SELECT DISTINCT perfil FROM forecast_main WHERE perfil IS NOT NULL", conn)
+                perfiles_set.update(df_main_p["perfil"].tolist())
+                df_main_n = pd.read_sql("SELECT DISTINCT neg FROM forecast_main WHERE neg IS NOT NULL", conn)
+                negs_set.update(df_main_n["neg"].tolist())
+                df_main_s = pd.read_sql("SELECT DISTINCT subneg FROM forecast_main WHERE subneg IS NOT NULL", conn)
+                subnegs_set.update(df_main_s["subneg"].tolist())
+
+                valid_dates_main = pd.read_sql("SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_main", conn)
+                if not valid_dates_main.empty:
+                    if pd.notnull(valid_dates_main["min_d"].iloc[0]):
+                        min_dates.append(pd.to_datetime(valid_dates_main["min_d"].iloc[0]))
+                    if pd.notnull(valid_dates_main["max_d"].iloc[0]):
+                        max_dates.append(pd.to_datetime(valid_dates_main["max_d"].iloc[0]))
+
+                # Query forecast_valorizado if it exists
+                try:
+                    df_val_p = pd.read_sql("SELECT DISTINCT perfil FROM forecast_valorizado WHERE perfil IS NOT NULL", conn)
+                    perfiles_set.update(df_val_p["perfil"].tolist())
+                    df_val_n = pd.read_sql("SELECT DISTINCT neg FROM forecast_valorizado WHERE neg IS NOT NULL", conn)
+                    negs_set.update(df_val_n["neg"].tolist())
+                    df_val_s = pd.read_sql("SELECT DISTINCT subneg FROM forecast_valorizado WHERE subneg IS NOT NULL", conn)
+                    subnegs_set.update(df_val_s["subneg"].tolist())
+
+                    valid_dates_val = pd.read_sql("SELECT min(fecha) AS min_d, max(fecha) AS max_d FROM forecast_valorizado", conn)
+                    if not valid_dates_val.empty:
+                        if pd.notnull(valid_dates_val["min_d"].iloc[0]):
+                            min_dates.append(pd.to_datetime(valid_dates_val["min_d"].iloc[0]))
+                        if pd.notnull(valid_dates_val["max_d"].iloc[0]):
+                            max_dates.append(pd.to_datetime(valid_dates_val["max_d"].iloc[0]))
+                except Exception as val_exc:
+                    logger.warning("get_filter_options: could not query forecast_valorizado (%s)", val_exc)
+
+            def sanitize_list(s):
+                return sorted(list({str(x).strip() for x in s if x is not None and pd.notna(x) and str(x).strip() != "" and str(x).lower().strip() != "nan" and str(x).lower().strip() != "none"}))
+
+            perfiles = sanitize_list(perfiles_set)
+            negs = sanitize_list(negs_set)
+            subnegs = sanitize_list(subnegs_set)
+
+            min_date = min(min_dates).strftime("%Y-%m-%d") if min_dates else None
+            max_date = max(max_dates).strftime("%Y-%m-%d") if max_dates else None
+
         except Exception as exc:
             logger.error("Filter options DB error (core): %s", exc, exc_info=True)
             return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
@@ -2777,31 +2804,51 @@ def get_filter_options() -> dict:
             logger.warning("Filter options: forecast_product_labs not available (%s)", exc)
 
         return {
-            "profiles": sorted(perfiles),
-            "neg": sorted(negs),
-            "subneg": sorted(subnegs),
+            "profiles": perfiles,
+            "neg": negs,
+            "subneg": subnegs,
             "labs": sorted(all_labs),
             "min_date": min_date,
             "max_date": max_date,
         }
     else:
         data = get_data()
-        df = data.get("df_main", pd.DataFrame())
+        df_main = data.get("df_main", pd.DataFrame())
+        df_val = data.get("df_valorizado", pd.DataFrame())
         all_labs: set = set()
         for labs in data.get("product_lab_map", {}).values():
             all_labs.update(labs)
 
-        min_date = max_date = None
-        if not df.empty and "fecha" in df.columns:
-            valid = df["fecha"].dropna()
-            if not valid.empty:
-                min_date = valid.min().strftime("%Y-%m-%d")
-                max_date = valid.max().strftime("%Y-%m-%d")
+        perfiles_set = set()
+        negs_set = set()
+        subnegs_set = set()
+        min_dates = []
+        max_dates = []
+
+        for df in (df_main, df_val):
+            if df is not None and not df.empty:
+                if "perfil" in df.columns:
+                    perfiles_set.update(df["perfil"].dropna().tolist())
+                if "neg" in df.columns:
+                    negs_set.update(df["neg"].dropna().tolist())
+                if "subneg" in df.columns:
+                    subnegs_set.update(df["subneg"].dropna().tolist())
+                if "fecha" in df.columns:
+                    valid = df["fecha"].dropna()
+                    if not valid.empty:
+                        min_dates.append(valid.min())
+                        max_dates.append(valid.max())
+
+        def sanitize_list(s):
+            return sorted(list({str(x).strip() for x in s if x is not None and pd.notna(x) and str(x).strip() != "" and str(x).lower().strip() != "nan" and str(x).lower().strip() != "none"}))
+
+        min_date = min(min_dates).strftime("%Y-%m-%d") if min_dates else None
+        max_date = max(max_dates).strftime("%Y-%m-%d") if max_dates else None
 
         return {
-            "profiles": sorted(df["perfil"].dropna().unique().tolist()) if "perfil" in df.columns else [],
-            "neg": sorted(df["neg"].dropna().unique().tolist()) if "neg" in df.columns else [],
-            "subneg": sorted(df["subneg"].dropna().unique().tolist()) if "subneg" in df.columns else [],
+            "profiles": sanitize_list(perfiles_set),
+            "neg": sanitize_list(negs_set),
+            "subneg": sanitize_list(subnegs_set),
             "labs": sorted(all_labs),
             "min_date": min_date,
             "max_date": max_date,
