@@ -57,6 +57,11 @@ web_comparativas/data/uploads/
 Thumbs.db
 desktop.ini
 
+# --- Claude Code / herramientas locales ---
+.claude/
+scratch/
+selenium-profile/
+
 # --- Archivos de construcción de análisis / pruebas ---
 *.csv
 *.json
