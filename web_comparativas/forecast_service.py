@@ -47,6 +47,25 @@ def _forecast_diag_warn(message: str, *args) -> None:
     logger.warning(text)
     print(text, flush=True)
 
+
+def _forecast_payload_bytes(payload: Any) -> int:
+    try:
+        return len(json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        return -1
+
+
+def _forecast_result_rows(payload: Any) -> int:
+    if isinstance(payload, list):
+        return len(payload)
+    if not isinstance(payload, dict):
+        return -1
+    for key in ("rows", "forecast", "ids", "history", "records", "profiles"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return -1
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -337,10 +356,17 @@ def _with_resp_cache(ttl: float):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            _cache_t0 = time.perf_counter()
             key = _resp_key(fn.__name__, *args, **kwargs)
             cached = _resp_get(key, ttl)
             if cached is not None:
-                logger.debug("[FORECAST cache] HIT  %s", fn.__name__)
+                _forecast_diag(
+                    "[FORECAST cache] HIT fn=%s total_ms=%.1f rows=%s json_bytes=%s",
+                    fn.__name__,
+                    (time.perf_counter() - _cache_t0) * 1000,
+                    _forecast_result_rows(cached),
+                    _forecast_payload_bytes(cached),
+                )
                 return cached
             owner = False
             with _resp_cache_lock:
@@ -350,15 +376,29 @@ def _with_resp_cache(ttl: float):
                     _resp_inflight[key] = event
                     owner = True
             if not owner:
-                logger.debug("[FORECAST cache] WAIT %s", fn.__name__)
+                _forecast_diag("[FORECAST cache] WAIT fn=%s", fn.__name__)
                 event.wait(timeout=55)
                 cached = _resp_get(key, ttl)
                 if cached is not None:
+                    _forecast_diag(
+                        "[FORECAST cache] HIT_AFTER_WAIT fn=%s total_ms=%.1f rows=%s json_bytes=%s",
+                        fn.__name__,
+                        (time.perf_counter() - _cache_t0) * 1000,
+                        _forecast_result_rows(cached),
+                        _forecast_payload_bytes(cached),
+                    )
                     return cached
-            logger.debug("[FORECAST cache] MISS %s", fn.__name__)
+            _forecast_diag("[FORECAST cache] MISS fn=%s", fn.__name__)
             try:
                 result = fn(*args, **kwargs)
                 _resp_set(key, result)
+                _forecast_diag(
+                    "[FORECAST cache] STORE fn=%s total_ms=%.1f rows=%s json_bytes=%s",
+                    fn.__name__,
+                    (time.perf_counter() - _cache_t0) * 1000,
+                    _forecast_result_rows(result),
+                    _forecast_payload_bytes(result),
+                )
                 return result
             finally:
                 if owner:
@@ -601,6 +641,38 @@ def _build_override_maps(records: list[Any]) -> dict[str, Any]:
         "subneg_effective_months": subneg_effective_months,
         "selectors": selectors,
     }
+
+
+def _consolidate_override_records(records: list[Any], label: str = "override") -> list[Any]:
+    """Collapse active override records to the same effective map semantics.
+
+    The existing map builder lets later records win for the same selector/scope key.
+    This keeps that behavior while reducing repeated rows before dataframe matching.
+    """
+    latest: dict[tuple[str, str, str, str, str], Any] = {}
+    for rec in records or []:
+        selector = _clean_override_text(getattr(rec, "client_selector", ""))
+        if not selector:
+            continue
+        key = (
+            selector,
+            _normalize_scope(getattr(rec, "override_scope", None)),
+            _clean_override_text(getattr(rec, "subneg", "")),
+            _clean_override_text(getattr(rec, "codigo_serie", "")),
+            _normalize_month_key(getattr(rec, "forecast_month", "")),
+        )
+        latest[key] = rec
+    consolidated = list(latest.values())
+    maps = _build_override_maps(consolidated)
+    _forecast_diag(
+        "[FORECAST overrides] %s original=%s effective=%s selectors=%s reduction=%s",
+        label,
+        len(records or []),
+        len(consolidated),
+        len(maps.get("selectors", [])),
+        len(records or []) - len(consolidated),
+    )
+    return consolidated
 
 
 def _build_overrides_snapshot_locked(
@@ -2490,8 +2562,14 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     Avoids SUM on TEXT columns (y/yhat in forecast_main are TEXT in production).
     """
     import json
+    _pl_total_t0 = time.perf_counter()
+    _pl_mapping_ms = 0.0
+    _pl_volume_ms = 0.0
+    _pl_labs_ms = 0.0
+    _pl_build_ms = 0.0
     neg_where = _build_filter_sql(profiles=profiles, neg=neg)
     # Query 1: channel mapping — only distinct text columns, from both main and valorizado
+    _pl_t0 = time.perf_counter()
     df_neg = _query_agg(
         f"SELECT DISTINCT COALESCE(neg, 'Varios') AS neg, codigo_serie FROM ("
         f"  SELECT neg, codigo_serie, perfil FROM forecast_main"
@@ -2499,18 +2577,21 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
         f"  SELECT neg, codigo_serie, perfil FROM forecast_valorizado"
         f") AS combined WHERE {neg_where}"
     )
+    _pl_mapping_ms = (time.perf_counter() - _pl_t0) * 1000
     if df_neg.empty:
         return []
     df_neg["neg"] = df_neg["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
 
     # Query 2: monetary volume from forecast_valorizado (monto_yhat is FLOAT)
     vol_where = _build_filter_sql(profiles=profiles, neg=neg)
+    _pl_t0 = time.perf_counter()
     df_vol = _query_agg(
         f"SELECT codigo_serie, SUM(COALESCE(monto_yhat, 0)) AS vol_venta "
         f"FROM forecast_valorizado WHERE {vol_where} GROUP BY codigo_serie"
     )
     # vol_venta alias is already lowercase — PostgreSQL preserves it as-is ✓
 
+    _pl_volume_ms = (time.perf_counter() - _pl_t0) * 1000
     # Merge: left join so all products appear even if not in forecast_valorizado
     if df_vol.empty:
         df = df_neg.copy()
@@ -2519,8 +2600,11 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
         df = pd.merge(df_neg, df_vol, on="codigo_serie", how="left")
         df["vol_venta"] = df["vol_venta"].fillna(0.0)
 
+    _pl_t0 = time.perf_counter()
     labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
+    _pl_labs_ms = (time.perf_counter() - _pl_t0) * 1000
     lab_map: dict = {}
+    _pl_t0 = time.perf_counter()
     for _, row in labs_df.iterrows():
         try:
             lab_map[str(row["codigo_serie"])] = json.loads(row["laboratorios"])
@@ -2536,7 +2620,22 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     ranking["labs"] = ranking["codigo_serie"].apply(
         lambda x: lab_map.get(str(x) if pd.notna(x) else "", [])
     )
-    return ranking.to_dict(orient="records")
+    result = ranking.to_dict(orient="records")
+    _pl_build_ms = (time.perf_counter() - _pl_t0) * 1000
+    _forecast_diag(
+        "[PRODUCT_LIST] phases mapping_ms=%.1f volume_ms=%.1f labs_ms=%.1f build_json_ms=%.1f "
+        "total_ms=%.1f rows=%s payload_bytes=%s profiles=%s neg=%s",
+        _pl_mapping_ms,
+        _pl_volume_ms,
+        _pl_labs_ms,
+        _pl_build_ms,
+        (time.perf_counter() - _pl_total_t0) * 1000,
+        len(result),
+        _forecast_payload_bytes(result),
+        len(_norm_filter_list(profiles)),
+        len(_norm_filter_list(neg)),
+    )
+    return result
 
 
 def _pg_get_chart_data(
@@ -2565,8 +2664,21 @@ def _pg_get_chart_data_inner(
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
     # Single override fetch — reused throughout this function to avoid multiple DB roundtrips
+    _ch_total_t0 = time.perf_counter()
+    _ch_override_fetch_ms = 0.0
+    _ch_meta_ms = 0.0
+    _ch_hist_ms = 0.0
+    _ch_forecast_ms = 0.0
+    _ch_override_ms = 0.0
+    _ch_fact_ms = 0.0
+    _ch_build_ms = 0.0
     global_overrides = bool(is_admin)
+    _ch_t0 = time.perf_counter()
     _ovr_records = _fetch_override_records(user_id, all_users=global_overrides)
+    _ch_override_fetch_ms = (time.perf_counter() - _ch_t0) * 1000
+    _ovr_original_count = len(_ovr_records)
+    if _ovr_records:
+        _ovr_records = _consolidate_override_records(_ovr_records, "chart-data")
     _ovr_active = bool(_ovr_records)
     _ovr_user_ids = _override_record_user_ids(_ovr_records)
 
@@ -2574,7 +2686,7 @@ def _pg_get_chart_data_inner(
         "[FORECAST INNER] chart user_id=%s override_scope=%s override_count=%s override_user_ids=%s start=%s end=%s growth_pct=%s profiles=%s neg=%s subneg=%s",
         user_id,
         "global" if global_overrides else "user",
-        len(_ovr_records),
+        _ovr_original_count,
         _ovr_user_ids,
         start_date,
         end_date,
@@ -2605,15 +2717,19 @@ def _pg_get_chart_data_inner(
             products_as_codes=val_prod,
             products=None if val_prod is not None else products,
         )
+        _ch_t0 = time.perf_counter()
         df_meta = _query_agg(
             f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
             f"FROM forecast_valorizado WHERE {val_where_meta}"
         )
+        _ch_meta_ms = (time.perf_counter() - _ch_t0) * 1000
     else:
+        _ch_t0 = time.perf_counter()
         df_meta = _query_agg(
             f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
             f"FROM forecast_main WHERE {main_where}"
         )
+        _ch_meta_ms = (time.perf_counter() - _ch_t0) * 1000
     if df_meta.empty:
         logger.debug("[FORECAST INNER] df_meta empty — returning _EMPTY")
         return _EMPTY
@@ -2669,21 +2785,25 @@ def _pg_get_chart_data_inner(
         else:
             # Fallback to original subquery when cache miss / empty result
             _canon_clause = " AND codigo_serie IN (SELECT DISTINCT codigo_serie FROM forecast_valorizado)"
+        _ch_t0 = time.perf_counter()
         df_hist = _query_agg(
             f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
             f"FROM forecast_imp_hist "
             f"WHERE {hist_where}{_canon_clause} "
             f"GROUP BY fecha ORDER BY fecha"
         )
+        _ch_hist_ms = (time.perf_counter() - _ch_t0) * 1000
         # forecast_main fallback intentionally omitted: y/yhat are TEXT in production,
         # SUM(COALESCE(y,0)) raises a type error caught by _query_agg → empty anyway.
     else:
         # Units path — forecast_main.y is TEXT in production so this will be empty;
         # kept for local/SQLite mode where y is numeric.
+        _ch_t0 = time.perf_counter()
         df_hist = _query_agg(
             f"SELECT fecha, SUM(COALESCE(y::numeric, 0)) AS total_venta "
             f"FROM forecast_main WHERE {main_where} AND tipo = 'hist' GROUP BY fecha ORDER BY fecha"
         )
+        _ch_hist_ms = (time.perf_counter() - _ch_t0) * 1000
     # Normalise alias to Title-Case so downstream code is unchanged
     if not df_hist.empty and "total_venta" in df_hist.columns:
         df_hist.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
@@ -2693,6 +2813,7 @@ def _pg_get_chart_data_inner(
     val_col    = "monto_yhat"    if view_money else "yhat_cliente"
     val_col_li = "monto_li"      if view_money else "li_cliente"
     val_col_ls = "monto_ls"      if view_money else "ls_cliente"
+    _ch_t0 = time.perf_counter()
     df_fcst = _query_agg(
         f"SELECT fecha, "
         f"SUM(COALESCE({val_col}, 0)) AS total_forecast, "
@@ -2700,6 +2821,7 @@ def _pg_get_chart_data_inner(
         f"SUM(COALESCE({val_col_ls}, 0)) AS total_ls "
         f"FROM forecast_valorizado WHERE {val_where} GROUP BY fecha ORDER BY fecha"
     )
+    _ch_forecast_ms = (time.perf_counter() - _ch_t0) * 1000
     # Normalise aliases (PostgreSQL returns lowercase regardless of AS casing)
     if not df_fcst.empty:
         rename_map = {k: v for k, v in {
@@ -2850,6 +2972,7 @@ def _pg_get_chart_data_inner(
             _future_mask = df_fcst["fecha"] > max_hist
             _adj_diff = (df_fcst.loc[_future_mask, "Total_User_Adj"] - df_fcst.loc[_future_mask, "Total_Adj"]).abs().sum()
             _t_ovr_ms = (time.perf_counter() - _t_ovr) * 1000
+            _ch_override_ms = _t_ovr_ms
             logger.info(
                 "[FORECAST INNER] ovr_complete: overridden=%s adj_diff=%.0f elapsed_ms=%.1f delta=%s",
                 _n_overridden, _adj_diff, _t_ovr_ms, _used_delta,
@@ -2859,6 +2982,8 @@ def _pg_get_chart_data_inner(
                     "[FORECAST USER ADJ] zero diff -- ovr_records=%s overridden=%s",
                     len(_ovr_records), _n_overridden,
                 )
+        else:
+            _ch_override_ms = (time.perf_counter() - _t_ovr) * 1000
 
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
@@ -2891,11 +3016,13 @@ def _pg_get_chart_data_inner(
             f"  SELECT DISTINCT fm.codigo_serie FROM forecast_main fm WHERE {fact_series_only_where}"
             f")"
         )
+    _ch_t0 = time.perf_counter()
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
         f"FROM forecast_fact_2026 WHERE {' AND '.join(_fact_parts)} "
         f"GROUP BY fecha ORDER BY fecha"
     )
+    _ch_fact_ms = (time.perf_counter() - _ch_t0) * 1000
     # Normalise alias
     if not df_fact_raw.empty and "total_venta" in df_fact_raw.columns:
         df_fact_raw.rename(columns={"total_venta": "Total_Venta"}, inplace=True)
@@ -2916,6 +3043,7 @@ def _pg_get_chart_data_inner(
             })
 
     logger.debug("[FORECAST INNER] fact2026_rows=%s — computing kpis", len(df_fact_raw))
+    _ch_build_t0 = time.perf_counter()
     # KPIs
     total_hist = float(df_hist["Total_Venta"].sum()) if not df_hist.empty else 0.0
     total_real_2025 = 0.0
@@ -2974,7 +3102,7 @@ def _pg_get_chart_data_inner(
         total_hist,
         n_products,
     )
-    return {
+    result = {
         "history":  _fmt(df_hist, ["Total_Venta"])                                     if not df_hist.empty else [],
         "forecast": forecast_payload,
         "val_2026": val_2026_records,
@@ -3005,6 +3133,25 @@ def _pg_get_chart_data_inner(
             "n_products":               n_products,
         },
     }
+    _ch_build_ms = (time.perf_counter() - _ch_build_t0) * 1000
+    _forecast_diag(
+        "[CHART_DATA] phases override_fetch_ms=%.1f meta_ms=%.1f hist_ms=%.1f forecast_ms=%.1f "
+        "override_ms=%.1f fact_ms=%.1f build_json_ms=%.1f total_ms=%.1f rows=%s payload_bytes=%s "
+        "override_count=%s effective_override_count=%s",
+        _ch_override_fetch_ms,
+        _ch_meta_ms,
+        _ch_hist_ms,
+        _ch_forecast_ms,
+        _ch_override_ms,
+        _ch_fact_ms,
+        _ch_build_ms,
+        (time.perf_counter() - _ch_total_t0) * 1000,
+        len(result.get("forecast", [])),
+        _forecast_payload_bytes(result),
+        _ovr_original_count,
+        len(_ovr_records),
+    )
+    return result
 
 
 def _pg_get_client_table(
@@ -3117,10 +3264,13 @@ def _pg_get_client_table_inner(
     _ct_fetch_t0 = time.perf_counter()
     _ovr_records_ct = _fetch_override_records(user_id, all_users=is_admin)
     _ct_fetch_ovr_ms = (time.perf_counter() - _ct_fetch_t0) * 1000
+    _ct_ovr_original_count = len(_ovr_records_ct)
+    if _ovr_records_ct:
+        _ovr_records_ct = _consolidate_override_records(_ovr_records_ct, "client-table")
     overrides_active = bool(_ovr_records_ct)
     _forecast_diag(
-        "[CLIENT_TABLE] user=%s overrides_active=%s override_count=%s is_admin=%s",
-        user_id, overrides_active, len(_ovr_records_ct), is_admin,
+        "[CLIENT_TABLE] user=%s overrides_active=%s override_count=%s effective_override_count=%s is_admin=%s",
+        user_id, overrides_active, _ct_ovr_original_count, len(_ovr_records_ct), is_admin,
     )
     if overrides_active:
         _t_ct = time.perf_counter()
@@ -3452,9 +3602,12 @@ def _pg_get_treemap_data_inner(
     _tm_fetch_t0 = time.perf_counter()
     _ovr_records_tm = _fetch_override_records(user_id, all_users=is_admin)
     _tm_fetch_ovr_ms = (time.perf_counter() - _tm_fetch_t0) * 1000
+    _tm_ovr_original_count = len(_ovr_records_tm)
+    if _ovr_records_tm:
+        _ovr_records_tm = _consolidate_override_records(_ovr_records_tm, "treemap-data")
     _forecast_diag(
-        "[TREEMAP] user=%s overrides_active=%s override_count=%s is_admin=%s",
-        user_id, bool(_ovr_records_tm), len(_ovr_records_tm), is_admin,
+        "[TREEMAP] user=%s overrides_active=%s override_count=%s effective_override_count=%s is_admin=%s",
+        user_id, bool(_ovr_records_tm), _tm_ovr_original_count, len(_ovr_records_tm), is_admin,
     )
     if bool(_ovr_records_tm):
         _tm_delta_t0 = time.perf_counter()
@@ -3970,6 +4123,13 @@ def get_forecast_schema_info() -> dict:
 @_with_resp_cache(ttl=_RESP_TTL_STATIC)
 def get_filter_options() -> dict:
     import json  # needed in both branches
+    _fo_total_t0 = time.perf_counter()
+    _fo_profiles_ms = 0.0
+    _fo_neg_ms = 0.0
+    _fo_subneg_ms = 0.0
+    _fo_dates_ms = 0.0
+    _fo_labs_ms = 0.0
+    _fo_build_ms = 0.0
     if engine is not None and "postgresql" in str(engine.url):
         # ── Core filters: profiles, neg, subneg, dates ────────────────────
         # Isolated in their own try/except so a labs table absence does NOT
@@ -3984,36 +4144,43 @@ def get_filter_options() -> dict:
         try:
             with engine.connect() as conn:
                 # 1. Combined distinct perfil from both tables (1 query vs 2)
+                _fo_t0 = time.perf_counter()
                 df_perfiles = pd.read_sql(
                     "SELECT DISTINCT perfil AS v FROM forecast_main WHERE perfil IS NOT NULL"
                     " UNION "
                     "SELECT DISTINCT perfil FROM forecast_valorizado WHERE perfil IS NOT NULL",
                     conn,
                 )
+                _fo_profiles_ms = (time.perf_counter() - _fo_t0) * 1000
                 if not df_perfiles.empty:
                     perfiles_set.update(df_perfiles["v"].tolist())
 
                 # 2. Combined distinct neg
+                _fo_t0 = time.perf_counter()
                 df_negs = pd.read_sql(
                     "SELECT DISTINCT neg AS v FROM forecast_main WHERE neg IS NOT NULL"
                     " UNION "
                     "SELECT DISTINCT neg FROM forecast_valorizado WHERE neg IS NOT NULL",
                     conn,
                 )
+                _fo_neg_ms = (time.perf_counter() - _fo_t0) * 1000
                 if not df_negs.empty:
                     negs_set.update(df_negs["v"].tolist())
 
                 # 3. Combined distinct subneg
+                _fo_t0 = time.perf_counter()
                 df_subnegs = pd.read_sql(
                     "SELECT DISTINCT subneg AS v FROM forecast_main WHERE subneg IS NOT NULL"
                     " UNION "
                     "SELECT DISTINCT subneg FROM forecast_valorizado WHERE subneg IS NOT NULL",
                     conn,
                 )
+                _fo_subneg_ms = (time.perf_counter() - _fo_t0) * 1000
                 if not df_subnegs.empty:
                     subnegs_set.update(df_subnegs["v"].tolist())
 
                 # 4. Date range from both tables in one query
+                _fo_t0 = time.perf_counter()
                 df_dates = pd.read_sql(
                     "SELECT MIN(fecha) AS min_d, MAX(fecha) AS max_d FROM ("
                     "  SELECT fecha FROM forecast_main"
@@ -4022,6 +4189,7 @@ def get_filter_options() -> dict:
                     ") t",
                     conn,
                 )
+                _fo_dates_ms = (time.perf_counter() - _fo_t0) * 1000
                 if not df_dates.empty:
                     if pd.notnull(df_dates["min_d"].iloc[0]):
                         min_dates.append(pd.to_datetime(df_dates["min_d"].iloc[0]))
@@ -4031,9 +4199,11 @@ def get_filter_options() -> dict:
                 # 5. Labs (optional — must NOT affect core filters if absent)
                 all_labs: set = set()
                 try:
+                    _fo_t0 = time.perf_counter()
                     labs_df = pd.read_sql(
                         "SELECT laboratorios FROM forecast_product_labs", conn
                     )
+                    _fo_labs_ms = (time.perf_counter() - _fo_t0) * 1000
                     if not labs_df.empty:
                         for _, row in labs_df.iterrows():
                             try:
@@ -4043,6 +4213,7 @@ def get_filter_options() -> dict:
                 except Exception as labs_exc:
                     logger.warning("Filter options: forecast_product_labs not available (%s)", labs_exc)
 
+            _fo_t0 = time.perf_counter()
             def sanitize_list(s):
                 return sorted(list({str(x).strip() for x in s if x is not None and pd.notna(x) and str(x).strip() != "" and str(x).lower().strip() != "nan" and str(x).lower().strip() != "none"}))
 
@@ -4052,12 +4223,13 @@ def get_filter_options() -> dict:
 
             min_date = min(min_dates).strftime("%Y-%m-%d") if min_dates else None
             max_date = max(max_dates).strftime("%Y-%m-%d") if max_dates else None
+            _fo_build_ms = (time.perf_counter() - _fo_t0) * 1000
 
         except Exception as exc:
             logger.error("Filter options DB error (core): %s", exc, exc_info=True)
             return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
 
-        return {
+        result = {
             "profiles": perfiles,
             "neg": negs,
             "subneg": subnegs,
@@ -4065,6 +4237,20 @@ def get_filter_options() -> dict:
             "min_date": min_date,
             "max_date": max_date,
         }
+        _forecast_diag(
+            "[FILTER_OPTIONS] phases profiles_ms=%.1f neg_ms=%.1f subneg_ms=%.1f dates_ms=%.1f "
+            "labs_ms=%.1f build_json_ms=%.1f total_ms=%.1f rows=%s payload_bytes=%s",
+            _fo_profiles_ms,
+            _fo_neg_ms,
+            _fo_subneg_ms,
+            _fo_dates_ms,
+            _fo_labs_ms,
+            _fo_build_ms,
+            (time.perf_counter() - _fo_total_t0) * 1000,
+            len(result.get("profiles", [])),
+            _forecast_payload_bytes(result),
+        )
+        return result
     else:
         all_labs: set = set()
         perfiles_set = set()

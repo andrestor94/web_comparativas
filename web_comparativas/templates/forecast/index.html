@@ -4787,19 +4787,14 @@ async function loadTable() {
 async function refreshAll() {
   const isDetalleActivo = STATE.activeTab === 'detalle' || document.getElementById('tab-detalle')?.classList.contains('active');
 
-  // Fire chart (critical), products and treemap in parallel.
-  // Each component has its own loading indicator so they render independently.
-  // Chart resolves first — makes the screen usable immediately.
-  const chartP    = loadChart();
-  const productsP = loadProducts();
-  const treemapP  = loadTreemap();
+  // Keep heavy Forecast endpoints serialized to avoid DB/CPU contention on cold cache.
+  await loadChart();
+  await loadProducts();
+  await loadTreemap();
 
-  // Wait for chart first — it renders KPIs and the main graph
-  await chartP;
+  // Heavy endpoints are intentionally serialized above.
 
-  // Products and treemap continue loading in background; absorb errors
-  productsP.catch(e => { if (e?.name !== 'AbortError') console.warn('[forecast] products load:', e); });
-  treemapP.catch(e  => { if (e?.name !== 'AbortError') console.warn('[forecast] treemap load:',  e); });
+  // No background heavy fetches here; refreshAll is used after filter changes.
 
   if (isDetalleActivo) {
     await loadTable();
@@ -4887,29 +4882,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   switchTab(STATE.activeTab);
 
   try {
-    // Fire filter-options AND chart in parallel:
-    //   - filter-options populates dropdowns (fast after backend fix)
-    //   - chart uses restored/default STATE immediately (default = "Todos")
-    // This saves the full sequential wait filter-options → chart on cold load.
-    const filterP = loadFilterOptions();
-    const chartP  = loadChart();
+    // Load initial Forecast data in stages to avoid parallel full-table scans.
+    await loadFilterOptions();
+    await loadChart();
 
-    // Products and treemap start in background — don't block first paint
-    const productsP = loadProducts();
-    const treemapP  = loadTreemap();
+    // Product-list loads after chart; treemap is deferred just below.
+    await loadProducts();
 
-    // Wait for filter-options so dropdowns are populated before user interacts
-    await filterP;
+    // Filter options are loaded before chart/products to avoid cold-cache contention.
 
-    // Wait for chart — the critical above-fold content
-    await chartP;
+    // Chart is loaded before product-list and treemap for a faster usable first paint.
 
     // Detalle tab loads on demand; mark stale so it fetches when opened
     _tableIsStale = true;
 
-    // Background loads — absorb errors, they update the UI when ready
-    productsP.catch(e => { if (e?.name !== 'AbortError') console.warn('[forecast] products init:', e); });
-    treemapP.catch(e  => { if (e?.name !== 'AbortError') console.warn('[forecast] treemap init:',  e); });
+    // Treemap starts after the first paint/idle slot and updates its own block when ready.
+    const startTreemap = () => {
+      loadTreemap().catch(e => {
+        if (e?.name !== 'AbortError') console.warn('[forecast] treemap init:', e);
+      });
+    };
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(startTreemap, { timeout: 1200 });
+    } else {
+      setTimeout(startTreemap, 250);
+    }
   } finally {
     const contentEl = document.querySelector('.fc-content');
     const savedScroll = window.__fcRestoredView?.scrollTop || 0;
