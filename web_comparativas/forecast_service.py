@@ -2734,29 +2734,13 @@ def _pg_get_chart_data_inner(
             len(df_fcst), len(df_hist), len(_ovr_records), _ovr_record_summary,
         )
     if _ovr_active:
-        # OPT: Pre-build override maps to get the exact set of client selectors that have
-        # active overrides. Use those selectors to filter the SQL query so we load only
-        # the rows for the affected clients instead of the full valorizado table (700K rows).
-        # Also add GROUP BY to return one pre-aggregated row per (fantasia, cliente_id,
-        # subneg, codigo_serie, fecha) — further shrinks memory footprint.
-        _pre_ovr_maps = _build_override_maps(_ovr_records)
-        _pre_ovr_selectors = _pre_ovr_maps.get("selectors", [])
-        if _pre_ovr_selectors:
-            _sel_in = _safe_in("fantasia", _pre_ovr_selectors)
-            _sel_filter = f"({_sel_in})" if _sel_in else "1=0"
-        else:
-            _sel_filter = "1=0"
         _override_rows = _query_agg(
             f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
             f"SUM(COALESCE({val_col}, 0)) AS base_val "
-            f"FROM forecast_valorizado WHERE {val_where} AND {_sel_filter} "
+            f"FROM forecast_valorizado WHERE {val_where} "
             f"GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie ORDER BY fecha"
         )
-        logger.info(
-            "[FORECAST INNER] override_rows_filtered=%s selectors=%s",
-            len(_override_rows),
-            len(_pre_ovr_selectors),
-        )
+        logger.info("[FORECAST INNER] override_rows=%s", len(_override_rows))
         if not _override_rows.empty:
             _override_rows, _ovr_maps = _apply_override_effects_to_dataframe(
                 _override_rows,
@@ -3057,33 +3041,23 @@ def _pg_get_client_table_inner(
         user_id, overrides_active, len(_ovr_records_ct), is_admin,
     )
     if overrides_active:
-        # OPT: Pre-build override maps to get only the client selectors that have active
-        # overrides. Filter the SQL query to those clients only (not full 700K-row table).
-        # Add GROUP BY so we bring a pre-aggregated frame instead of individual rows.
-        _pre_maps_ct = _build_override_maps(_ovr_records_ct)
-        _pre_sels_ct = _pre_maps_ct.get("selectors", [])
-        if _pre_sels_ct:
-            _sel_in_ct = _safe_in("fantasia", _pre_sels_ct)
-            _sel_filter_ct = f"({_sel_in_ct})" if _sel_in_ct else "1=0"
-        else:
-            _sel_filter_ct = "1=0"
         if view_money:
             df_rows = _query_agg(
                 f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
                 f"SUM(COALESCE(monto_yhat, 0)) AS base_val "
-                f"FROM forecast_valorizado WHERE {val_where} AND {_sel_filter_ct} "
+                f"FROM forecast_valorizado WHERE {val_where} "
                 f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
             )
             if not df_rows.empty and df_rows["base_val"].sum() == 0:
                 logger.warning(
                     "[FORECAST client-table] monto_yhat is all-zero while applying overrides; "
-                    "falling back to yhat_cliente × avg(precio)."
+                    "falling back to yhat_cliente x avg(precio)."
                 )
                 df_rows = _query_agg(
                     f"SELECT v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
                     f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
                     f"FROM (SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
-                    f"      FROM forecast_valorizado WHERE {val_where} AND {_sel_filter_ct}) v "
+                    f"      FROM forecast_valorizado WHERE {val_where}) v "
                     f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
                     f"           FROM forecast_main GROUP BY codigo_serie) m "
                     f"  ON v.codigo_serie = m.codigo_serie "
@@ -3093,13 +3067,11 @@ def _pg_get_client_table_inner(
             df_rows = _query_agg(
                 f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
                 f"SUM(COALESCE(yhat_cliente, 0)) AS base_val "
-                f"FROM forecast_valorizado WHERE {val_where} AND {_sel_filter_ct} "
+                f"FROM forecast_valorizado WHERE {val_where} "
                 f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
             )
-        logger.info(
-            "[CLIENT_TABLE] override_rows_filtered=%s selectors=%s",
-            len(df_rows), len(_pre_sels_ct),
-        )
+        logger.info("[CLIENT_TABLE] override_rows=%s", len(df_rows))
+
 
         if not df_rows.empty:
             df_rows, _override_maps = _apply_override_effects_to_dataframe(
