@@ -495,18 +495,67 @@ app.add_middleware(TrackingMiddleware)
 print("DEBUG: TrackingMiddleware ENABLED (robust mode)", flush=True)
 
 
+# ── Entorno y secretos ────────────────────────────────────────────────────────
+_APP_ENV_MAIN = os.getenv("APP_ENV", "development").strip().lower()
+_IS_PRODUCTION = _APP_ENV_MAIN in {"production", "prod"}
+
+
+def _get_app_secret() -> str:
+    secret = os.getenv("APP_SECRET", "").strip()
+    if _IS_PRODUCTION:
+        if not secret:
+            raise RuntimeError(
+                "CONFIGURACIÓN INVÁLIDA: APP_SECRET es obligatoria en producción. "
+                "Configurala en Render con un valor aleatorio de al menos 32 caracteres."
+            )
+        if len(secret) < 32:
+            raise RuntimeError(
+                "CONFIGURACIÓN INVÁLIDA: APP_SECRET debe tener al menos 32 caracteres en producción."
+            )
+        return secret
+    if not secret:
+        logging.getLogger("security").warning(
+            "[SECURITY] APP_SECRET no definida — usando clave temporal de desarrollo. "
+            "NUNCA usar en producción."
+        )
+        return "local-dev-only-secret-change-me-32ch"
+    return secret
+
+
+_APP_SECRET = _get_app_secret()
+
 # Session
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("APP_SECRET", "dev-secret-123"),
+    secret_key=_APP_SECRET,
     session_cookie="wc_session",
-    https_only=False,
+    https_only=_IS_PRODUCTION,
+    same_site="lax",
     max_age=60*60*24*7,
 )
 
+
 @app.get("/healthz")
 def health_check():
-    return {"status": "ok", "stage": "19_debug"}
+    """Liveness check: la app está viva. No depende de la DB."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readiness_check():
+    """Readiness check: valida conectividad con la base de datos."""
+    from sqlalchemy import text as _text
+    from web_comparativas.models import SessionLocal as _SessionLocal
+    try:
+        with _SessionLocal() as _s:
+            _s.execute(_text("SELECT 1"))
+        return {"status": "ok", "database": "ok"}
+    except Exception:
+        logging.getLogger("healthz").error("[readyz] DB no disponible", exc_info=True)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "database": "error"},
+        )
 
 
 @app.get("/favicon.ico", include_in_schema=False)

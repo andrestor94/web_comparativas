@@ -2,7 +2,15 @@ from fastapi import Depends, HTTPException, Request
 from typing import Optional
 from .models import User, db_session
 from passlib.context import CryptContext
+import logging
+import os
 import re
+
+# Controla el fallback de contraseñas en texto plano (usuarios legacy sin hash).
+# Default: false. Solo habilitar con "true" durante migración controlada.
+# NUNCA dejar en "true" en producción de forma permanente.
+_ALLOW_LEGACY_PLAINTEXT = os.getenv("ALLOW_LEGACY_PLAINTEXT_PASSWORDS", "false").strip().lower() == "true"
+_auth_log = logging.getLogger("auth.security")
 
 # ======================================================================
 # NOMBRE A MOSTRAR DEL USUARIO
@@ -114,6 +122,14 @@ def verify_password(p: str, h) -> bool:
             except Exception:
                 pass
                 
-        # Fallback: Plain text (legacy)
-        return hs == p
+        # Fallback: Plain text (legacy) — deshabilitado por defecto.
+        # Habilitar solo temporalmente con ALLOW_LEGACY_PLAINTEXT_PASSWORDS=true
+        # durante migración de usuarios con contraseñas sin hashear.
+        if _ALLOW_LEGACY_PLAINTEXT and hs == p:
+            _auth_log.warning(
+                "[auth] Login con contraseña en texto plano detectado. "
+                "Migrar urgente. ALLOW_LEGACY_PLAINTEXT_PASSWORDS activo."
+            )
+            return True
+        return False
 

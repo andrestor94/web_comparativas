@@ -51,7 +51,10 @@ RENDER_URL = RENDER_URL.replace("postgres://", "postgresql://")
 # Para psycopg2 necesitamos el esquema "postgresql+psycopg2://"
 SQLALCHEMY_URL = RENDER_URL.replace("postgresql://", "postgresql+psycopg2://")
 
-log.info("Conectando a: %s", RENDER_URL[:60] + "...")
+from urllib.parse import urlsplit as _urlsplit
+_p = _urlsplit(RENDER_URL)
+_safe_url = f"{_p.scheme}://***:***@{_p.hostname or '<host>'}{':' + str(_p.port) if _p.port else ''}{_p.path}"
+log.info("Conectando a: %s", _safe_url)
 
 try:
     engine = create_engine(

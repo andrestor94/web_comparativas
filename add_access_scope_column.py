@@ -14,7 +14,9 @@ DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 if not DATABASE_URL:
     DATABASE_URL = f"sqlite:///{DB_FILE}"
 
-print(f"Connecting to: {DATABASE_URL}")
+from urllib.parse import urlparse as _urlparse
+_parsed_db = _urlparse(DATABASE_URL)
+print(f"Connecting to host: {_parsed_db.hostname} / db: {(_parsed_db.path or '').lstrip('/')}")
 
 engine = create_engine(DATABASE_URL)
 

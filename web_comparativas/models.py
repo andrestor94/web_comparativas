@@ -86,34 +86,43 @@ else:
     _db_host = SQLALCHEMY_DATABASE_URL.split("@")[-1].split("/")[0].split(":")[0]
     _is_internal_render = bool(DATABASE_URL) and ".render.com" not in _db_host
 
+    # DB_SSLMODE: configurable por variable de entorno.
+    # Default en producción (RENDER_MODE o APP_ENV=production): require
+    # Default en conexión interna de Render: prefer (la red privada ya aísla el tráfico)
+    # Puede forzarse con DB_SSLMODE=require para máxima seguridad en cualquier modo.
+    _is_prod_ctx = _is_production_context  # definido arriba por RENDER_MODE o APP_ENV
+    _default_sslmode_internal = "require" if _is_prod_ctx else "prefer"
+    _default_sslmode_external = "require"
+    _DB_SSLMODE_ENV = os.getenv("DB_SSLMODE", "").strip().lower()
+
     if _is_internal_render:
-        # Internal Render connection: no SSL enforcement, shorter keepalive probes,
-        # longer recycle window (internal network is stable — no surprise SSL closes).
+        # Internal Render connection: red privada del datacenter.
+        # sslmode=prefer por defecto (red aislada); configurable con DB_SSLMODE=require.
+        _sslmode = _DB_SSLMODE_ENV or _default_sslmode_internal
         connect_args = {
             "connect_timeout": 10,
-            "sslmode": "prefer",          # SSL if available, but don't fail without it
+            "sslmode": _sslmode,
             "options": "-c statement_timeout=55000",
             "keepalives": 1,
-            "keepalives_idle": 60,        # probe after 60 s idle (was 120 for external)
+            "keepalives_idle": 60,
             "keepalives_interval": 30,
             "keepalives_count": 5,
         }
-        _pool_recycle = 600              # internal connections are stable; 10-min recycle
+        _pool_recycle = 600
         _conn_type = "INTERNAL"
     else:
         # External Render connection (or non-Render Postgres): force SSL, aggressive recycle.
-        # Render's external PG proxy closes idle connections after ~10 min, so we recycle
-        # every 5 min to avoid checking out a dead connection from the pool.
+        _sslmode = _DB_SSLMODE_ENV or _default_sslmode_external
         connect_args = {
             "connect_timeout": 10,
-            "sslmode": "require",
+            "sslmode": _sslmode,
             "options": "-c statement_timeout=55000",
             "keepalives": 1,
             "keepalives_idle": 120,
             "keepalives_interval": 60,
             "keepalives_count": 3,
         }
-        _pool_recycle = 300              # external: recycle every 5 min
+        _pool_recycle = 300
         _conn_type = "EXTERNAL"
 
 # SQLite (local): StaticPool — una sola conexión compartida, evita pool exhaustion
@@ -1204,12 +1213,24 @@ def _bootstrap_admin_from_env():
     """
     Crea un usuario admin si ADMIN_EMAIL y ADMIN_PASSWORD están seteados
     y no existe ya un usuario con ese email.
-    CONTRASEÑA: se guarda en password_hash tal cual.
-    Si tu login usa hash, pasame el handler y adapto la asignación en 1 línea.
+    La contraseña SIEMPRE se hashea antes de guardarse.
     """
     admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
     admin_password = (os.getenv("ADMIN_PASSWORD") or "").strip()
     if not admin_email or not admin_password:
+        return
+    if len(admin_password) < 12:
+        logging.getLogger("bootstrap").error(
+            "[bootstrap] ADMIN_PASSWORD tiene menos de 12 caracteres. "
+            "Abortando creación de admin para evitar contraseña insegura."
+        )
+        return
+    try:
+        from passlib.context import CryptContext as _CryptContext
+        _ctx = _CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+        hashed = _ctx.hash(admin_password)
+    except Exception:
+        logging.getLogger("bootstrap").exception("[bootstrap] No se pudo hashear la contraseña del admin")
         return
     s = db_session()
     try:
@@ -1223,7 +1244,7 @@ def _bootstrap_admin_from_env():
             unit_business=None,
             created_at=dt.datetime.utcnow(),
         )
-        u.password_hash = admin_password  # <-- ajustar si tu login usa hash
+        u.password_hash = hashed
         s.add(u)
         s.commit()
         logging.getLogger("bootstrap").info("[bootstrap] Admin creado: %s", admin_email)

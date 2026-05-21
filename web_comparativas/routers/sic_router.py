@@ -1085,21 +1085,26 @@ def sic_users_create(
     email: str = Form(...),
     name: str = Form(""),
     role: str = Form("analista"),
-    password: str = Form("TuClaveFuerte123"), # Default password logic
+    password: str = Form(""),  # El admin debe ingresar contraseña explícita
     unit_business: str = Form("Otros"),
     access_scope: str = Form("todos"),
     user: User = Depends(sic_access_required),
 ):
-    # Enforce admin?
+    # Enforce admin
     if "admin" not in (user.role or "").lower():
          return RedirectResponse("/sic/users?err=permiso_denegado", status_code=303)
 
     email = (email or "").strip().lower()
     role = (role or "").strip().lower()
+    password = (password or "").strip()
     unit_ok = normalize_unit_business(unit_business)
 
     if not email:
         return RedirectResponse("/sic/users/new?err=email_vacio", status_code=303)
+
+    # Contraseña obligatoria con mínimo de seguridad
+    if len(password) < 12:
+        return RedirectResponse("/sic/users/new?err=password_minimo_12", status_code=303)
 
     try:
         exists = db_session.query(User).filter(func.lower(User.email) == email).first()
@@ -1120,7 +1125,7 @@ def sic_users_create(
         return RedirectResponse("/sic/users?ok=created", status_code=303)
     except Exception as e:
         db_session.rollback()
-        return RedirectResponse(f"/sic/users/new?err={str(e)}", status_code=303)
+        return RedirectResponse("/sic/users/new?err=error_interno", status_code=303)
 
 @router.get("/users/{user_id}/edit", response_class=HTMLResponse)
 def sic_users_edit(
