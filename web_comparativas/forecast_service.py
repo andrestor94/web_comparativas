@@ -32,6 +32,20 @@ except ImportError:
     _sa_text = None  # type: ignore[assignment]
 
 logger = logging.getLogger("wc.forecast")
+logger.setLevel(logging.INFO)
+
+
+def _forecast_diag(message: str, *args) -> None:
+    """Emit critical Forecast diagnostics in Render even when logger config is quiet."""
+    text = message % args if args else message
+    logger.info(text)
+    print(text, flush=True)
+
+
+def _forecast_diag_warn(message: str, *args) -> None:
+    text = message % args if args else message
+    logger.warning(text)
+    print(text, flush=True)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -3027,6 +3041,14 @@ def _pg_get_client_table_inner(
     hasn't been re-run yet with the latest parquet file.
     """
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
+    _ct_total_t0 = time.perf_counter()
+    _ct_base_ms = 0.0
+    _ct_fetch_ovr_ms = 0.0
+    _ct_delta_query_ms = 0.0
+    _ct_apply_ms = 0.0
+    _ct_base_rows = 0
+    _ct_rows_loaded = 0
+    _used_delta_ct = False
 
     prod_codes = _pg_resolve_prod_codes(products)
     val_prod   = _val_prod_filter(prod_codes)
@@ -3037,6 +3059,7 @@ def _pg_get_client_table_inner(
         products=None if val_prod is not None else products,
     )
 
+    _ct_base_t0 = time.perf_counter()
     if view_money:
         # Primary: SUM(monto_yhat) per (fantasia, nombre_grupo, fecha).
         # Does NOT select codigo_serie from forecast_valorizado — backward-compatible
@@ -3086,11 +3109,16 @@ def _pg_get_client_table_inner(
             return _EMPTY
 
     # Max hist date for growth adjustment — shared across all filter combinations
+    _ct_base_ms = (time.perf_counter() - _ct_base_t0) * 1000
+    _ct_base_rows = len(df_agg)
+
     max_hist_date = _get_max_hist_date_cached()
 
+    _ct_fetch_t0 = time.perf_counter()
     _ovr_records_ct = _fetch_override_records(user_id, all_users=is_admin)
+    _ct_fetch_ovr_ms = (time.perf_counter() - _ct_fetch_t0) * 1000
     overrides_active = bool(_ovr_records_ct)
-    logger.info(
+    _forecast_diag(
         "[CLIENT_TABLE] user=%s overrides_active=%s override_count=%s is_admin=%s",
         user_id, overrides_active, len(_ovr_records_ct), is_admin,
     )
@@ -3101,12 +3129,13 @@ def _pg_get_client_table_inner(
         try:
             _ovr_maps_ct = _build_override_maps(_ovr_records_ct)
             _selectors_ct = _ovr_maps_ct.get("selectors", [])
-            logger.info(
+            _forecast_diag(
                 "[CLIENT_TABLE] delta_path selectors=%s ovr_records=%s",
                 len(_selectors_ct), len(_ovr_records_ct),
             )
             if _selectors_ct:
                 _sel_f_ct = f"({_safe_in('fantasia', _selectors_ct)})"
+                _ct_delta_query_t0 = time.perf_counter()
                 if view_money:
                     df_ovr_rows = _query_agg(
                         f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
@@ -3133,9 +3162,11 @@ def _pg_get_client_table_inner(
                         f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f_ct} "
                         f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
                     )
+                _ct_delta_query_ms = (time.perf_counter() - _ct_delta_query_t0) * 1000
                 _ct_rows_loaded = len(df_ovr_rows)
-                logger.info("[CLIENT_TABLE] delta_rows=%s selectors=%s", _ct_rows_loaded, len(_selectors_ct))
+                _forecast_diag("[CLIENT_TABLE] delta_rows=%s selectors=%s", _ct_rows_loaded, len(_selectors_ct))
                 if not df_ovr_rows.empty:
+                    _ct_apply_t0 = time.perf_counter()
                     df_ovr_rows, _override_maps = _apply_override_effects_to_dataframe(
                         df_ovr_rows,
                         user_id=user_id,
@@ -3171,9 +3202,10 @@ def _pg_get_client_table_inner(
                             df_nonovr["val"] = df_nonovr["val"] * (1.0 + growth_pct / 100.0)
                     df_agg = pd.concat([df_nonovr, df_ovr_agg], ignore_index=True)
                     _used_delta_ct = True
+                    _ct_apply_ms = (time.perf_counter() - _ct_apply_t0) * 1000
                 else:
                     # Selector filter returned 0 rows -> cannot apply override -> base growth only.
-                    logger.info("[CLIENT_TABLE] delta_rows empty -- applying base growth to all")
+                    _forecast_diag("[CLIENT_TABLE] delta_rows empty -- applying base growth to all")
                     if growth_pct != 0:
                         if max_hist_date is not None:
                             _fut_ct2 = df_agg["fecha"] > max_hist_date
@@ -3183,7 +3215,7 @@ def _pg_get_client_table_inner(
                     _used_delta_ct = True
             else:
                 # No valid selectors -> no effective overrides -> base growth only.
-                logger.info("[CLIENT_TABLE] no valid selectors -- applying base growth to all")
+                _forecast_diag("[CLIENT_TABLE] no valid selectors -- applying base growth to all")
                 if growth_pct != 0:
                     if max_hist_date is not None:
                         _fut_ct3 = df_agg["fecha"] > max_hist_date
@@ -3192,7 +3224,7 @@ def _pg_get_client_table_inner(
                         df_agg["val"] = df_agg["val"] * (1.0 + growth_pct / 100.0)
                 _used_delta_ct = True
         except Exception as _delta_exc_ct:
-            logger.warning(
+            _forecast_diag_warn(
                 "[CLIENT_TABLE] delta_path FAILED (%s) -- fallback to full table load",
                 _delta_exc_ct,
             )
@@ -3224,8 +3256,9 @@ def _pg_get_client_table_inner(
                     f"FROM forecast_valorizado WHERE {val_where} "
                     f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
                 )
-            logger.warning("[CLIENT_TABLE] FALLBACK full_rows=%s", len(df_rows))
+            _forecast_diag_warn("[CLIENT_TABLE] FALLBACK full_rows=%s", len(df_rows))
             if not df_rows.empty:
+                _ct_apply_t0 = time.perf_counter()
                 df_rows, _override_maps = _apply_override_effects_to_dataframe(
                     df_rows,
                     user_id=user_id,
@@ -3248,14 +3281,17 @@ def _pg_get_client_table_inner(
                     .reset_index()
                     .sort_values("fecha")
                 )
+                _ct_apply_ms = (time.perf_counter() - _ct_apply_t0) * 1000
         _t_ct_ms = (time.perf_counter() - _t_ct) * 1000
-        logger.info(
+        _forecast_diag(
             "[CLIENT_TABLE] ovr_complete: rows_loaded=%s elapsed_ms=%.1f delta=%s",
             _ct_rows_loaded, _t_ct_ms, _used_delta_ct,
         )
     elif growth_pct != 0 and max_hist_date is not None:
         future_mask = df_agg["fecha"] > max_hist_date
         df_agg.loc[future_mask, "val"] = df_agg.loc[future_mask, "val"] * (1.0 + growth_pct / 100.0)
+
+    _ct_build_t0 = time.perf_counter()
 
     # Normalise client/group display names
     df_agg["fantasia"]     = df_agg["fantasia"].fillna("").astype(str).str.strip()
@@ -3316,10 +3352,31 @@ def _pg_get_client_table_inner(
     max_val      = float(max(vals_flat)) if vals_flat else 0
     total_projected = round(sum(totals.values()), 0)
 
-    return {
+    result = {
         "months": col_names, "rows": rows, "totals": totals,
         "min_val": min_val, "max_val": max_val, "total_projected": total_projected,
     }
+    _ct_build_ms = (time.perf_counter() - _ct_build_t0) * 1000
+    try:
+        _ct_payload_bytes = len(json.dumps(result, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        _ct_payload_bytes = -1
+    _forecast_diag(
+        "[CLIENT_TABLE] phases base_ms=%.1f fetch_overrides_ms=%.1f delta_query_ms=%.1f "
+        "apply_ms=%.1f build_json_ms=%.1f total_ms=%.1f base_rows=%s delta_rows=%s "
+        "payload_bytes=%s delta=%s",
+        _ct_base_ms,
+        _ct_fetch_ovr_ms,
+        _ct_delta_query_ms,
+        _ct_apply_ms,
+        _ct_build_ms,
+        (time.perf_counter() - _ct_total_t0) * 1000,
+        _ct_base_rows,
+        _ct_rows_loaded,
+        _ct_payload_bytes,
+        _used_delta_ct,
+    )
+    return result
 
 
 def _pg_get_treemap_data(
@@ -3351,6 +3408,15 @@ def _pg_get_treemap_data_inner(
 
     # All available periods (unfiltered) — cached to avoid repeated full-scan
     periods = _get_forecast_periods_cached()
+    _tm_total_t0 = time.perf_counter()
+    _tm_base_ms = 0.0
+    _tm_fetch_ovr_ms = 0.0
+    _tm_delta_query_ms = 0.0
+    _tm_apply_ms = 0.0
+    _tm_build_ms = 0.0
+    _tm_base_rows = 0
+    _tm_delta_rows = 0
+    _tm_used_delta = False
 
     prod_codes = _pg_resolve_prod_codes(products)
     val_prod   = _val_prod_filter(prod_codes)
@@ -3369,6 +3435,7 @@ def _pg_get_treemap_data_inner(
         products=None if val_prod is not None else products,
         extra=extra,
     )
+    _tm_base_t0 = time.perf_counter()
     df_tree = _query_agg(
         f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
         f"SUM(COALESCE({val_col}, 0)) AS monto "
@@ -3377,11 +3444,100 @@ def _pg_get_treemap_data_inner(
     )
     if df_tree.empty:
         return {**_EMPTY, "periods": periods}
+    _tm_base_ms = (time.perf_counter() - _tm_base_t0) * 1000
+    _tm_base_rows = len(df_tree)
 
     max_hist_date = _get_max_hist_date_cached()
 
+    _tm_fetch_t0 = time.perf_counter()
     _ovr_records_tm = _fetch_override_records(user_id, all_users=is_admin)
+    _tm_fetch_ovr_ms = (time.perf_counter() - _tm_fetch_t0) * 1000
+    _forecast_diag(
+        "[TREEMAP] user=%s overrides_active=%s override_count=%s is_admin=%s",
+        user_id, bool(_ovr_records_tm), len(_ovr_records_tm), is_admin,
+    )
     if bool(_ovr_records_tm):
+        _tm_delta_t0 = time.perf_counter()
+        try:
+            _ovr_maps_tm = _build_override_maps(_ovr_records_tm)
+            _selectors_tm = _ovr_maps_tm.get("selectors", [])
+            _forecast_diag(
+                "[TREEMAP] delta_path selectors=%s ovr_records=%s",
+                len(_selectors_tm), len(_ovr_records_tm),
+            )
+            if _selectors_tm:
+                _sel_f_tm = f"({_safe_in('fantasia', _selectors_tm)})"
+                if view_money:
+                    df_rows = _query_agg(
+                        f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
+                        f"COALESCE(monto_yhat, 0) AS base_val "
+                        f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f_tm}"
+                    )
+                    if not df_rows.empty and df_rows["base_val"].sum() == 0:
+                        _forecast_diag_warn("[TREEMAP] delta monto_yhat all-zero -- fallback to yhat x precio")
+                        df_rows = _query_agg(
+                            f"SELECT v.perfil, v.nombre_grupo, v.fantasia, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
+                            f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
+                            f"FROM (SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
+                            f"      FROM forecast_valorizado WHERE {val_where} AND {_sel_f_tm}) v "
+                            f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                            f"           FROM forecast_main GROUP BY codigo_serie) m "
+                            f"  ON v.codigo_serie = m.codigo_serie "
+                            f"GROUP BY v.perfil, v.nombre_grupo, v.fantasia, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
+                        )
+                else:
+                    df_rows = _query_agg(
+                        f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
+                        f"COALESCE(yhat_cliente, 0) AS base_val "
+                        f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f_tm}"
+                    )
+                _tm_delta_query_ms = (time.perf_counter() - _tm_delta_t0) * 1000
+                _tm_delta_rows = len(df_rows)
+                _forecast_diag("[TREEMAP] delta_rows=%s selectors=%s", _tm_delta_rows, len(_selectors_tm))
+                if not df_rows.empty:
+                    _tm_apply_t0 = time.perf_counter()
+                    df_rows, _override_maps = _apply_override_effects_to_dataframe(
+                        df_rows,
+                        user_id=user_id,
+                        base_growth_pct=0.0,
+                        max_hist_date=max_hist_date,
+                        _records=_ovr_records_tm,
+                        is_admin=is_admin,
+                    )
+                    df_rows["monto"] = df_rows["base_val"]
+                    if max_hist_date is not None and "fecha" in df_rows.columns:
+                        future_mask = df_rows["fecha"] > max_hist_date
+                        df_rows.loc[future_mask, "monto"] = (
+                            df_rows.loc[future_mask, "base_val"] * df_rows.loc[future_mask, "_annual_eff"]
+                        )
+                    else:
+                        df_rows["monto"] = df_rows["base_val"] * df_rows["_annual_eff"]
+                    df_ovr_tree = (
+                        df_rows.groupby(["perfil", "nombre_grupo", "fantasia", "cliente_id"], dropna=False)["monto"]
+                        .sum()
+                        .reset_index()
+                    )
+                    _ovr_fantasias = set(df_ovr_tree["fantasia"].fillna("").astype(str).str.strip())
+                    df_base_no_ovr = df_tree[
+                        ~df_tree["fantasia"].fillna("").astype(str).str.strip().isin(_ovr_fantasias)
+                    ].copy()
+                    df_tree = pd.concat([df_base_no_ovr, df_ovr_tree], ignore_index=True)
+                    _tm_apply_ms = (time.perf_counter() - _tm_apply_t0) * 1000
+                    _tm_used_delta = True
+                else:
+                    _forecast_diag("[TREEMAP] delta_rows empty -- keeping base aggregate")
+                    _tm_used_delta = True
+            else:
+                _forecast_diag("[TREEMAP] no valid selectors -- keeping base aggregate")
+                _tm_delta_query_ms = (time.perf_counter() - _tm_delta_t0) * 1000
+                _tm_used_delta = True
+        except Exception as _delta_exc_tm:
+            _forecast_diag_warn(
+                "[TREEMAP] delta_path FAILED (%s) -- fallback to full table load",
+                _delta_exc_tm,
+            )
+    if bool(_ovr_records_tm) and not _tm_used_delta:
+        _tm_delta_t0 = time.perf_counter()
         if view_money:
             df_rows = _query_agg(
                 f"SELECT perfil, nombre_grupo, fantasia, cliente_id, fecha, subneg, codigo_serie, "
@@ -3410,7 +3566,12 @@ def _pg_get_treemap_data_inner(
                 f"FROM forecast_valorizado WHERE {val_where}"
             )
 
+        _tm_delta_query_ms = (time.perf_counter() - _tm_delta_t0) * 1000
+        _tm_delta_rows = len(df_rows)
+        _forecast_diag_warn("[TREEMAP] FALLBACK full_rows=%s", _tm_delta_rows)
+
         if not df_rows.empty:
+            _tm_apply_t0 = time.perf_counter()
             df_rows, _override_maps = _apply_override_effects_to_dataframe(
                 df_rows,
                 user_id=user_id,
@@ -3434,6 +3595,19 @@ def _pg_get_treemap_data_inner(
             )
 
     # Normalise column name — PostgreSQL always returns lowercase aliases
+    if bool(_ovr_records_tm) and not _tm_used_delta and _tm_delta_rows > 0:
+        _tm_apply_ms = (time.perf_counter() - _tm_apply_t0) * 1000
+
+    if bool(_ovr_records_tm):
+        _forecast_diag(
+            "[TREEMAP] ovr_complete: rows_loaded=%s elapsed_ms=%.1f delta=%s",
+            _tm_delta_rows,
+            _tm_delta_query_ms + _tm_apply_ms,
+            _tm_used_delta,
+        )
+
+    _tm_build_t0 = time.perf_counter()
+
     if "monto" not in df_tree.columns and "Monto" in df_tree.columns:
         df_tree.rename(columns={"Monto": "monto"}, inplace=True)
     if "monto" not in df_tree.columns:
@@ -3520,8 +3694,29 @@ def _pg_get_treemap_data_inner(
                 _add(f"{gid}::cliente::{cr['Cliente']}", str(cr["Cliente"]),
                      c_par, float(cr["Monto"]), _blend_with_white(bc, max(0.10, tone)))
 
-    return {"ids": ids, "labels": labels, "parents": parents, "values": values,
-            "colors": colors, "periods": periods, "canals": canals}
+    result = {"ids": ids, "labels": labels, "parents": parents, "values": values,
+              "colors": colors, "periods": periods, "canals": canals}
+    _tm_build_ms = (time.perf_counter() - _tm_build_t0) * 1000
+    try:
+        _tm_payload_bytes = len(json.dumps(result, default=str, separators=(",", ":")).encode("utf-8"))
+    except Exception:
+        _tm_payload_bytes = -1
+    _forecast_diag(
+        "[TREEMAP] phases base_ms=%.1f fetch_overrides_ms=%.1f delta_query_ms=%.1f "
+        "apply_ms=%.1f build_json_ms=%.1f total_ms=%.1f base_rows=%s delta_rows=%s "
+        "payload_bytes=%s delta=%s",
+        _tm_base_ms,
+        _tm_fetch_ovr_ms,
+        _tm_delta_query_ms,
+        _tm_apply_ms,
+        _tm_build_ms,
+        (time.perf_counter() - _tm_total_t0) * 1000,
+        _tm_base_rows,
+        _tm_delta_rows,
+        _tm_payload_bytes,
+        _tm_used_delta,
+    )
+    return result
 
 
 def _pg_get_client_detail(

@@ -29,6 +29,7 @@ from web_comparativas.models import User, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
 
 logger = logging.getLogger("wc.forecast.router")
+logger.setLevel(logging.INFO)
 
 BASE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -56,12 +57,19 @@ def _result_rows(payload) -> int:
 
 
 def _log_api_perf(endpoint: str, started: float, payload) -> None:
+    total_ms = (time.perf_counter() - started) * 1000
+    rows = _result_rows(payload)
+    json_bytes = _approx_json_bytes(payload)
     logger.info(
         "[FORECAST API] endpoint=%s total_ms=%.1f rows=%s json_bytes=%s",
         endpoint,
-        (time.perf_counter() - started) * 1000,
-        _result_rows(payload),
-        _approx_json_bytes(payload),
+        total_ms,
+        rows,
+        json_bytes,
+    )
+    print(
+        f"[FORECAST API] endpoint={endpoint} total_ms={total_ms:.1f} rows={rows} json_bytes={json_bytes}",
+        flush=True,
     )
 
 
