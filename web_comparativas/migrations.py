@@ -1012,6 +1012,11 @@ def ensure_forecast_perf_indexes():
             "forecast_product_labs",
             "(codigo_serie)",
         ),
+          (
+            "ix_fc_val_fantasia_filters",
+            "forecast_valorizado",
+            "(fantasia, perfil, neg, subneg, fecha)",
+        ),
     ]
 
     for idx_name, table_name, expr in indexes:
@@ -1136,6 +1141,26 @@ def ensure_dimensionamiento_summary_perf_indexes():
             "ix_dim_sum_familia_qty",
             "dimensionamiento_family_monthly_summary",
             "(familia, total_cantidad)",
+        ),
+          (
+            "ix_dim_sum_isclient_family_month",
+            "dimensionamiento_family_monthly_summary",
+            "(is_client, familia, month)",
+        ),
+        (
+            "ix_dim_sum_isclient_province_month",
+            "dimensionamiento_family_monthly_summary",
+            "(is_client, provincia, month)",
+        ),
+        (
+            "ix_dim_sum_isclient_result_month",
+            "dimensionamiento_family_monthly_summary",
+            "(is_client, resultado_participacion, month)",
+        ),
+        (
+            "ix_dim_sum_isclient_unit_month",
+            "dimensionamiento_family_monthly_summary",
+            "(is_client, unidad_negocio, month)",
         ),
     ]
 

@@ -164,6 +164,12 @@ class DimensionamientoFamilyMonthlySummary(Base):
         Index("ix_dim_summary_family_month", "familia", "month"),
         Index("ix_dim_summary_client_month", "cliente_nombre_homologado", "month"),
         Index("ix_dim_summary_visible_month", "cliente_visible", "month"),
+        # Composite indexes for filtered queries: is_client + dimension + month
+        # Helps when the dashboard filters by is_client=True/False alongside other dims.
+        Index("ix_dim_summary_isclient_family_month", "is_client", "familia", "month"),
+        Index("ix_dim_summary_isclient_province_month", "is_client", "provincia", "month"),
+        Index("ix_dim_summary_isclient_result_month", "is_client", "resultado_participacion", "month"),
+        Index("ix_dim_summary_isclient_unit_month", "is_client", "unidad_negocio", "month"),
     )
 
 
