@@ -2734,13 +2734,42 @@ def _pg_get_chart_data_inner(
             len(df_fcst), len(df_hist), len(_ovr_records), _ovr_record_summary,
         )
     if _ovr_active:
-        _override_rows = _query_agg(
-            f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
-            f"SUM(COALESCE({val_col}, 0)) AS base_val "
-            f"FROM forecast_valorizado WHERE {val_where} "
-            f"GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie ORDER BY fecha"
-        )
-        logger.info("[FORECAST INNER] override_rows=%s", len(_override_rows))
+        _t_ovr = time.perf_counter()
+        _used_delta = False
+        _override_rows = pd.DataFrame()
+        try:
+            _ovr_maps_pre = _build_override_maps(_ovr_records)
+            _ovr_selectors = _ovr_maps_pre.get("selectors", [])
+            logger.info(
+                "[FORECAST INNER] delta_path selectors=%s ovr_records=%s",
+                len(_ovr_selectors), len(_ovr_records),
+            )
+            if _ovr_selectors:
+                _sel_f = f"({_safe_in('fantasia', _ovr_selectors)})"
+                _override_rows = _query_agg(
+                    f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
+                    f"SUM(COALESCE({val_col}, 0)) AS base_val "
+                    f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f} "
+                    f"GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie ORDER BY fecha"
+                )
+                logger.info(
+                    "[FORECAST INNER] delta_rows=%s selectors=%s",
+                    len(_override_rows), len(_ovr_selectors),
+                )
+            _used_delta = True
+        except Exception as _delta_exc:
+            logger.warning(
+                "[FORECAST INNER] delta_path FAILED (%s) -- fallback to full table load",
+                _delta_exc,
+            )
+        if not _used_delta:
+            _override_rows = _query_agg(
+                f"SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
+                f"SUM(COALESCE({val_col}, 0)) AS base_val "
+                f"FROM forecast_valorizado WHERE {val_where} "
+                f"GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie ORDER BY fecha"
+            )
+            logger.warning("[FORECAST INNER] FALLBACK full_rows=%s", len(_override_rows))
         if not _override_rows.empty:
             _override_rows, _ovr_maps = _apply_override_effects_to_dataframe(
                 _override_rows,
@@ -2750,10 +2779,8 @@ def _pg_get_chart_data_inner(
                 _records=_ovr_records,
                 is_admin=global_overrides,
             )
-            _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
             _n_overridden = int(_override_rows["_has_override"].sum()) if "_has_override" in _override_rows.columns else -1
             _n_base = len(_override_rows) - _n_overridden if _n_overridden >= 0 else -1
-            # Log any rows that actually got a non-base override
             if "_has_override" in _override_rows.columns:
                 _ovr_detail = _override_rows[_override_rows["_has_override"] == True]
                 if not _ovr_detail.empty:
@@ -2762,7 +2789,6 @@ def _pg_get_chart_data_inner(
                         _ovr_detail[["fantasia", "subneg", "_override_scope", "_annual_eff"]].drop_duplicates().head(5).to_dict("records"),
                     )
                 else:
-                    # Log WHY no rows got overridden — check selector matching
                     _rec_selectors = {_clean_override_text(getattr(r, "client_selector", "")) for r in _ovr_records}
                     _df_selectors = set(_override_rows["fantasia"].dropna().apply(_clean_override_text).unique()[:20].tolist()) if "fantasia" in _override_rows.columns else set()
                     _matching = _rec_selectors & _df_selectors
@@ -2770,25 +2796,53 @@ def _pg_get_chart_data_inner(
                         "[FORECAST USER ADJ] NO OVERRIDES APPLIED rec_selectors=%s df_selectors_sample=%s matching=%s",
                         _rec_selectors, list(_df_selectors)[:5], _matching,
                     )
-            _ua_sql = (
-                _override_rows.groupby("fecha")["_ua_sql"].sum()
-                .reset_index()
-                .rename(columns={"_ua_sql": "Total_User_Adj_SQL"})
-            )
-            df_fcst = df_fcst.merge(_ua_sql, on="fecha", how="left")
-            df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj_SQL"].fillna(
-                df_fcst["Total_User_Adj"]
-            )
-            df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
+            if _used_delta:
+                # DELTA: Total_User_Adj = Total_Adj + sum(base_val * (annual_eff - base_eff))
+                # base_eff = 1.0 for hist dates, 1+growth_pct/100 for future.
+                # Rows without active override get annual_eff == base_eff -> delta 0.
+                _eff_base_scalar = 1.0 + growth_pct / 100.0
+                _override_rows = _override_rows.copy()
+                _override_rows["_eff_base"] = 1.0
+                if growth_pct != 0 and max_hist is not None:
+                    _fut = _override_rows["fecha"] > max_hist
+                    _override_rows.loc[_fut, "_eff_base"] = _eff_base_scalar
+                _override_rows["_delta"] = (
+                    _override_rows["base_val"]
+                    * (_override_rows["_annual_eff"] - _override_rows["_eff_base"])
+                )
+                _delta_by_fecha = (
+                    _override_rows.groupby("fecha")["_delta"].sum()
+                    .reset_index()
+                    .rename(columns={"_delta": "_delta_sum"})
+                )
+                df_fcst = df_fcst.merge(_delta_by_fecha, on="fecha", how="left")
+                df_fcst["Total_User_Adj"] = (
+                    df_fcst["Total_Adj"] + df_fcst["_delta_sum"].fillna(0)
+                )
+                df_fcst.drop(columns=["_delta_sum"], inplace=True)
+            else:
+                # FALLBACK: original merge semantics
+                _override_rows["_ua_sql"] = _override_rows["base_val"] * _override_rows["_annual_eff"]
+                _ua_sql = (
+                    _override_rows.groupby("fecha")["_ua_sql"].sum()
+                    .reset_index()
+                    .rename(columns={"_ua_sql": "Total_User_Adj_SQL"})
+                )
+                df_fcst = df_fcst.merge(_ua_sql, on="fecha", how="left")
+                df_fcst["Total_User_Adj"] = df_fcst["Total_User_Adj_SQL"].fillna(
+                    df_fcst["Total_User_Adj"]
+                )
+                df_fcst.drop(columns=["Total_User_Adj_SQL"], inplace=True)
             _future_mask = df_fcst["fecha"] > max_hist
             _adj_diff = (df_fcst.loc[_future_mask, "Total_User_Adj"] - df_fcst.loc[_future_mask, "Total_Adj"]).abs().sum()
-            logger.debug(
-                "[FORECAST INNER] overrides applied: overridden=%s future_months=%s adj_diff=%.0f",
-                _n_overridden, _future_mask.sum(), _adj_diff,
+            _t_ovr_ms = (time.perf_counter() - _t_ovr) * 1000
+            logger.info(
+                "[FORECAST INNER] ovr_complete: overridden=%s adj_diff=%.0f elapsed_ms=%.1f delta=%s",
+                _n_overridden, _adj_diff, _t_ovr_ms, _used_delta,
             )
             if _adj_diff == 0:
                 logger.info(
-                    "[FORECAST USER ADJ] zero diff after apply — ovr_records=%s overridden=%s",
+                    "[FORECAST USER ADJ] zero diff -- ovr_records=%s overridden=%s",
                     len(_ovr_records), _n_overridden,
                 )
 
@@ -3041,61 +3095,164 @@ def _pg_get_client_table_inner(
         user_id, overrides_active, len(_ovr_records_ct), is_admin,
     )
     if overrides_active:
-        if view_money:
-            df_rows = _query_agg(
-                f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
-                f"SUM(COALESCE(monto_yhat, 0)) AS base_val "
-                f"FROM forecast_valorizado WHERE {val_where} "
-                f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
+        _t_ct = time.perf_counter()
+        _used_delta_ct = False
+        _ct_rows_loaded = 0
+        try:
+            _ovr_maps_ct = _build_override_maps(_ovr_records_ct)
+            _selectors_ct = _ovr_maps_ct.get("selectors", [])
+            logger.info(
+                "[CLIENT_TABLE] delta_path selectors=%s ovr_records=%s",
+                len(_selectors_ct), len(_ovr_records_ct),
             )
-            if not df_rows.empty and df_rows["base_val"].sum() == 0:
-                logger.warning(
-                    "[FORECAST client-table] monto_yhat is all-zero while applying overrides; "
-                    "falling back to yhat_cliente x avg(precio)."
-                )
-                df_rows = _query_agg(
-                    f"SELECT v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
-                    f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
-                    f"FROM (SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
-                    f"      FROM forecast_valorizado WHERE {val_where}) v "
-                    f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
-                    f"           FROM forecast_main GROUP BY codigo_serie) m "
-                    f"  ON v.codigo_serie = m.codigo_serie "
-                    f"GROUP BY v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
-                )
-        else:
-            df_rows = _query_agg(
-                f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
-                f"SUM(COALESCE(yhat_cliente, 0)) AS base_val "
-                f"FROM forecast_valorizado WHERE {val_where} "
-                f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
-            )
-        logger.info("[CLIENT_TABLE] override_rows=%s", len(df_rows))
-
-
-        if not df_rows.empty:
-            df_rows, _override_maps = _apply_override_effects_to_dataframe(
-                df_rows,
-                user_id=user_id,
-                base_growth_pct=growth_pct,
-                max_hist_date=max_hist_date,
-                _records=_ovr_records_ct,
-                is_admin=is_admin,
-            )
-            df_rows["val"] = df_rows["base_val"]
-            if max_hist_date is not None and "fecha" in df_rows.columns:
-                future_mask = df_rows["fecha"] > max_hist_date
-                df_rows.loc[future_mask, "val"] = (
-                    df_rows.loc[future_mask, "base_val"] * df_rows.loc[future_mask, "_annual_eff"]
-                )
+            if _selectors_ct:
+                _sel_f_ct = f"({_safe_in('fantasia', _selectors_ct)})"
+                if view_money:
+                    df_ovr_rows = _query_agg(
+                        f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                        f"SUM(COALESCE(monto_yhat, 0)) AS base_val "
+                        f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f_ct} "
+                        f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
+                    )
+                    if not df_ovr_rows.empty and df_ovr_rows["base_val"].sum() == 0:
+                        logger.warning("[CLIENT_TABLE] delta monto_yhat all-zero -- fallback to yhat x precio")
+                        df_ovr_rows = _query_agg(
+                            f"SELECT v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
+                            f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
+                            f"FROM (SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
+                            f"      FROM forecast_valorizado WHERE {val_where} AND {_sel_f_ct}) v "
+                            f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                            f"           FROM forecast_main GROUP BY codigo_serie) m "
+                            f"  ON v.codigo_serie = m.codigo_serie "
+                            f"GROUP BY v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
+                        )
+                else:
+                    df_ovr_rows = _query_agg(
+                        f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                        f"SUM(COALESCE(yhat_cliente, 0)) AS base_val "
+                        f"FROM forecast_valorizado WHERE {val_where} AND {_sel_f_ct} "
+                        f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
+                    )
+                _ct_rows_loaded = len(df_ovr_rows)
+                logger.info("[CLIENT_TABLE] delta_rows=%s selectors=%s", _ct_rows_loaded, len(_selectors_ct))
+                if not df_ovr_rows.empty:
+                    df_ovr_rows, _override_maps = _apply_override_effects_to_dataframe(
+                        df_ovr_rows,
+                        user_id=user_id,
+                        base_growth_pct=growth_pct,
+                        max_hist_date=max_hist_date,
+                        _records=_ovr_records_ct,
+                        is_admin=is_admin,
+                    )
+                    df_ovr_rows["val"] = df_ovr_rows["base_val"]
+                    if max_hist_date is not None and "fecha" in df_ovr_rows.columns:
+                        _fut_ct = df_ovr_rows["fecha"] > max_hist_date
+                        df_ovr_rows.loc[_fut_ct, "val"] = (
+                            df_ovr_rows.loc[_fut_ct, "base_val"]
+                            * df_ovr_rows.loc[_fut_ct, "_annual_eff"]
+                        )
+                    else:
+                        df_ovr_rows["val"] = df_ovr_rows["base_val"] * df_ovr_rows["_annual_eff"]
+                    df_ovr_agg = (
+                        df_ovr_rows.groupby(["fantasia", "nombre_grupo", "fecha"], dropna=False)["val"]
+                        .sum().reset_index()
+                    )
+                    # fantasias as they appear in the DB; used to split df_agg.
+                    _ovr_fantasias = set(df_ovr_agg["fantasia"].str.strip().unique())
+                    # Non-override clients: keep from initial df_agg, apply base growth.
+                    df_nonovr = df_agg[~df_agg["fantasia"].str.strip().isin(_ovr_fantasias)].copy()
+                    if growth_pct != 0:
+                        if max_hist_date is not None:
+                            _fut_no = df_nonovr["fecha"] > max_hist_date
+                            df_nonovr.loc[_fut_no, "val"] = (
+                                df_nonovr.loc[_fut_no, "val"] * (1.0 + growth_pct / 100.0)
+                            )
+                        else:
+                            df_nonovr["val"] = df_nonovr["val"] * (1.0 + growth_pct / 100.0)
+                    df_agg = pd.concat([df_nonovr, df_ovr_agg], ignore_index=True)
+                    _used_delta_ct = True
+                else:
+                    # Selector filter returned 0 rows -> cannot apply override -> base growth only.
+                    logger.info("[CLIENT_TABLE] delta_rows empty -- applying base growth to all")
+                    if growth_pct != 0:
+                        if max_hist_date is not None:
+                            _fut_ct2 = df_agg["fecha"] > max_hist_date
+                            df_agg.loc[_fut_ct2, "val"] = df_agg.loc[_fut_ct2, "val"] * (1.0 + growth_pct / 100.0)
+                        else:
+                            df_agg["val"] = df_agg["val"] * (1.0 + growth_pct / 100.0)
+                    _used_delta_ct = True
             else:
-                df_rows["val"] = df_rows["base_val"] * df_rows["_annual_eff"]
-            df_agg = (
-                df_rows.groupby(["fantasia", "nombre_grupo", "fecha"], dropna=False)["val"]
-                .sum()
-                .reset_index()
-                .sort_values("fecha")
+                # No valid selectors -> no effective overrides -> base growth only.
+                logger.info("[CLIENT_TABLE] no valid selectors -- applying base growth to all")
+                if growth_pct != 0:
+                    if max_hist_date is not None:
+                        _fut_ct3 = df_agg["fecha"] > max_hist_date
+                        df_agg.loc[_fut_ct3, "val"] = df_agg.loc[_fut_ct3, "val"] * (1.0 + growth_pct / 100.0)
+                    else:
+                        df_agg["val"] = df_agg["val"] * (1.0 + growth_pct / 100.0)
+                _used_delta_ct = True
+        except Exception as _delta_exc_ct:
+            logger.warning(
+                "[CLIENT_TABLE] delta_path FAILED (%s) -- fallback to full table load",
+                _delta_exc_ct,
             )
+        if not _used_delta_ct:
+            # FALLBACK: original full-table behavior (safe but higher RAM).
+            if view_money:
+                df_rows = _query_agg(
+                    f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                    f"SUM(COALESCE(monto_yhat, 0)) AS base_val "
+                    f"FROM forecast_valorizado WHERE {val_where} "
+                    f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
+                )
+                if not df_rows.empty and df_rows["base_val"].sum() == 0:
+                    logger.warning("[CLIENT_TABLE] FALLBACK monto_yhat all-zero -- yhat x precio")
+                    df_rows = _query_agg(
+                        f"SELECT v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie, "
+                        f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS base_val "
+                        f"FROM (SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, yhat_cliente "
+                        f"      FROM forecast_valorizado WHERE {val_where}) v "
+                        f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                        f"           FROM forecast_main GROUP BY codigo_serie) m "
+                        f"  ON v.codigo_serie = m.codigo_serie "
+                        f"GROUP BY v.fantasia, v.nombre_grupo, v.cliente_id, v.fecha, v.subneg, v.codigo_serie"
+                    )
+            else:
+                df_rows = _query_agg(
+                    f"SELECT fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie, "
+                    f"SUM(COALESCE(yhat_cliente, 0)) AS base_val "
+                    f"FROM forecast_valorizado WHERE {val_where} "
+                    f"GROUP BY fantasia, nombre_grupo, cliente_id, fecha, subneg, codigo_serie"
+                )
+            logger.warning("[CLIENT_TABLE] FALLBACK full_rows=%s", len(df_rows))
+            if not df_rows.empty:
+                df_rows, _override_maps = _apply_override_effects_to_dataframe(
+                    df_rows,
+                    user_id=user_id,
+                    base_growth_pct=growth_pct,
+                    max_hist_date=max_hist_date,
+                    _records=_ovr_records_ct,
+                    is_admin=is_admin,
+                )
+                df_rows["val"] = df_rows["base_val"]
+                if max_hist_date is not None and "fecha" in df_rows.columns:
+                    future_mask = df_rows["fecha"] > max_hist_date
+                    df_rows.loc[future_mask, "val"] = (
+                        df_rows.loc[future_mask, "base_val"] * df_rows.loc[future_mask, "_annual_eff"]
+                    )
+                else:
+                    df_rows["val"] = df_rows["base_val"] * df_rows["_annual_eff"]
+                df_agg = (
+                    df_rows.groupby(["fantasia", "nombre_grupo", "fecha"], dropna=False)["val"]
+                    .sum()
+                    .reset_index()
+                    .sort_values("fecha")
+                )
+        _t_ct_ms = (time.perf_counter() - _t_ct) * 1000
+        logger.info(
+            "[CLIENT_TABLE] ovr_complete: rows_loaded=%s elapsed_ms=%.1f delta=%s",
+            _ct_rows_loaded, _t_ct_ms, _used_delta_ct,
+        )
     elif growth_pct != 0 and max_hist_date is not None:
         future_mask = df_agg["fecha"] > max_hist_date
         df_agg.loc[future_mask, "val"] = df_agg.loc[future_mask, "val"] * (1.0 + growth_pct / 100.0)
