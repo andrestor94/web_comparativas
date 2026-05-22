@@ -58,7 +58,7 @@ class DimensionamientoRecord(Base):
     __tablename__ = "dimensionamiento_records"
 
     id = Column(Integer, primary_key=True)
-    id_registro_unico = Column(String(255), nullable=False, unique=True)
+    id_registro_unico = Column(String(255), nullable=False, index=True)
 
     fecha = Column(Date, nullable=False, index=True)
     plataforma = Column(String(40), nullable=False, index=True)
@@ -102,6 +102,7 @@ class DimensionamientoRecord(Base):
     import_run = relationship("DimensionamientoImportRun", back_populates="records")
 
     __table_args__ = (
+        UniqueConstraint("id_registro_unico", "import_run_id", name="uq_dim_records_id_run"),
         Index("ix_dim_records_platform_date", "plataforma", "fecha"),
         Index("ix_dim_records_client_date", "cliente_nombre_homologado", "fecha"),
         Index("ix_dim_records_visible_date", "cliente_visible", "fecha"),
@@ -158,6 +159,7 @@ class DimensionamientoFamilyMonthlySummary(Base):
             "resultado_participacion",
             "is_identified",
             "is_client",
+            "import_run_id",
             name="uq_dim_family_monthly_summary",
         ),
         Index("ix_dim_summary_platform_month", "plataforma", "month"),
@@ -195,7 +197,7 @@ class DimensionamientoDashboardSnapshot(Base):
     __tablename__ = "dimensionamiento_dashboard_snapshots"
 
     id = Column(Integer, primary_key=True)
-    snapshot_key = Column(String(100), nullable=False, unique=True, index=True)
+    snapshot_key = Column(String(100), nullable=False, index=True)
     version = Column(String(20), nullable=False, default="v1", index=True)
     payload = Column(JSON, nullable=False)
     generated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
@@ -207,3 +209,7 @@ class DimensionamientoDashboardSnapshot(Base):
     )
 
     import_run = relationship("DimensionamientoImportRun", back_populates="snapshots")
+
+    __table_args__ = (
+        UniqueConstraint("snapshot_key", "import_run_id", name="uq_dim_dashboard_snapshots_key_run"),
+    )

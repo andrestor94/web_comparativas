@@ -1,0 +1,467 @@
+#!/usr/bin/env python
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+# Add project root to sys.path
+root_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(root_dir))
+
+try:
+    import requests
+except ImportError:
+    print("❌ Error: El paquete 'requests' no está instalado en este entorno.")
+    print("   Por favor, instálelo con:")
+    print("   venv_webcomparativas\\Scripts\\pip install requests")
+    sys.exit(1)
+
+from sqlalchemy import func
+from web_comparativas.models import SessionLocal
+from web_comparativas.dimensionamiento.models import (
+    DimensionamientoImportRun,
+    DimensionamientoRecord,
+    DimensionamientoFamilyMonthlySummary,
+    DimensionamientoDashboardSnapshot
+)
+
+STATE_FILE = root_dir / "scratch" / "upload_state.json"
+
+def load_state() -> dict:
+    if STATE_FILE.exists():
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_state(state: dict):
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+
+def clear_state():
+    if STATE_FILE.exists():
+        try:
+            STATE_FILE.unlink()
+        except Exception:
+            pass
+
+def post_with_retry(url: str, headers: dict, json_data: dict, description: str, max_retries: int = 5) -> dict:
+    """Realiza un POST HTTP con reintentos exponenciales y reporte claro."""
+    retry_delay = 1.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(url, headers=headers, json=json_data, timeout=120)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"  ⚠️  Falló {description} (Intento {attempt}/{max_retries}). HTTP Status: {response.status_code}")
+                try:
+                    err_detail = response.json().get("detail", response.text)
+                    print(f"      Detalle: {err_detail}")
+                except Exception:
+                    print(f"      Respuesta: {response.text[:200]}")
+        except requests.RequestException as e:
+            print(f"  ⚠️  Error de red al enviar {description} (Intento {attempt}/{max_retries}): {e}")
+        
+        if attempt < max_retries:
+            print(f"      Reintentando en {retry_delay:.1f} segundos...")
+            time.sleep(retry_delay)
+            retry_delay *= 2.0
+            
+    raise RuntimeError(f"Error persistente al enviar {description} después de {max_retries} intentos.")
+
+def format_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=40, fill='█'):
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filled_length = int(length * iteration // total)
+    bar = fill * filled_length + '-' * (length - filled_length)
+    return f'\r{prefix} |{bar}| {percent}% {suffix}'
+
+def handle_upload(args):
+    print("🔌 Conectando a la base de datos local SQLite...")
+    session = SessionLocal()
+    
+    try:
+        # 1. Resolver la corrida local
+        if args.run_id:
+            local_run = session.query(DimensionamientoImportRun).filter_by(id=args.run_id).first()
+            if not local_run:
+                print(f"❌ Error: No se encontró la corrida con ID {args.run_id} en la base de datos local.")
+                sys.exit(1)
+        else:
+            local_run = session.query(DimensionamientoImportRun).filter_by(status="success").order_by(
+                DimensionamientoImportRun.finished_at.desc(),
+                DimensionamientoImportRun.id.desc()
+            ).first()
+            if not local_run:
+                print("❌ Error: No se encontró ninguna corrida exitosa ('success') en la base de datos local.")
+                sys.exit(1)
+                
+        print(f"✅ Corrida local seleccionada:")
+        print(f"   - Run ID: {local_run.id}")
+        print(f"   - Modo de importación: {local_run.mode}")
+        print(f"   - Origen: {local_run.source_path}")
+        print(f"   - Hash: {local_run.source_hash}")
+        print(f"   - Finalizada localmente: {local_run.finished_at}")
+        
+        # 2. Contar registros y resúmenes locales
+        total_records = session.query(func.count(DimensionamientoRecord.id)).filter_by(import_run_id=local_run.id).scalar()
+        total_summaries = session.query(func.count(DimensionamientoFamilyMonthlySummary.id)).filter_by(import_run_id=local_run.id).scalar()
+        
+        print(f"   - Registros locales a subir: {total_records:,}")
+        print(f"   - Resúmenes locales a subir: {total_summaries:,}")
+        
+        if total_records == 0:
+            print("❌ Error: La corrida seleccionada no tiene registros asociados en la tabla 'dimensionamiento_records'.")
+            sys.exit(1)
+
+        # 3. Detectar reanudación
+        state = load_state()
+        resume_upload = False
+        if not args.fresh and state:
+            if (state.get("local_run_id") == local_run.id and 
+                state.get("target_url") == args.url and 
+                state.get("status") == "running"):
+                resume_upload = True
+                
+        headers = {
+            "X-Import-Token": args.token,
+            "Content-Type": "application/json"
+        }
+        
+        if resume_upload:
+            remote_run_id = state["remote_run_id"]
+            records_offset = state.get("records_offset", 0)
+            summaries_offset = state.get("summaries_offset", 0)
+            print(f"\n🔄 Detectado progreso anterior en scratch/upload_state.json.")
+            print(f"   - Reanudando corrida remota ID: {remote_run_id}")
+            print(f"   - Registros ya subidos: {records_offset:,} / {total_records:,}")
+            print(f"   - Resúmenes ya subidos: {summaries_offset:,} / {total_summaries:,}")
+        else:
+            print(f"\n🚀 Iniciando nueva corrida remota en {args.url}...")
+            start_payload = {
+                "source_path": local_run.source_path,
+                "source_hash": local_run.source_hash,
+                "source_mtime": local_run.source_mtime.isoformat() if local_run.source_mtime else None,
+                "mode": local_run.mode,
+                "chunk_size": args.chunk_size
+            }
+            start_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/start"
+            res = post_with_retry(start_url, headers, start_payload, "Inicio de corrida")
+            remote_run_id = res["import_run_id"]
+            records_offset = 0
+            summaries_offset = 0
+            
+            # Guardar estado inicial
+            state = {
+                "local_run_id": local_run.id,
+                "remote_run_id": remote_run_id,
+                "target_url": args.url,
+                "token": args.token, # para reanudar con las mismas credenciales si es necesario
+                "records_offset": 0,
+                "summaries_offset": 0,
+                "status": "running"
+            }
+            save_state(state)
+            print(f"✅ Corrida remota creada con ID: {remote_run_id}")
+
+        # 4. Subir registros en chunks
+        records_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/chunk/records"
+        if records_offset < total_records:
+            print(f"\n📦 Subiendo registros ('dimensionamiento_records') en chunks de {args.chunk_size:,}...")
+            
+            while records_offset < total_records:
+                # Consultar chunk de SQLite
+                db_chunk = session.query(DimensionamientoRecord).filter_by(
+                    import_run_id=local_run.id
+                ).order_by(DimensionamientoRecord.id).offset(records_offset).limit(args.chunk_size).all()
+                
+                if not db_chunk:
+                    break
+                
+                # Serializar records
+                records_list = []
+                for r in db_chunk:
+                    records_list.append({
+                        "id_registro_unico": r.id_registro_unico,
+                        "fecha": r.fecha.isoformat() if r.fecha else None,
+                        "plataforma": r.plataforma,
+                        "cliente_nombre_homologado": r.cliente_nombre_homologado,
+                        "cliente_nombre_original": r.cliente_nombre_original,
+                        "cliente_visible": r.cliente_visible,
+                        "cuit": r.cuit,
+                        "provincia": r.provincia,
+                        "cuenta_interna": r.cuenta_interna,
+                        "codigo_articulo": r.codigo_articulo,
+                        "descripcion": r.descripcion,
+                        "clasificacion_suizo": r.clasificacion_suizo,
+                        "descripcion_articulo": r.descripcion_articulo,
+                        "familia": r.familia,
+                        "unidad_negocio": r.unidad_negocio,
+                        "subunidad_negocio": r.subunidad_negocio,
+                        "cantidad_demandada": r.cantidad_demandada,
+                        "valorizacion_estimada": r.valorizacion_estimada,
+                        "resultado_participacion": r.resultado_participacion,
+                        "producto_nombre_original": r.producto_nombre_original,
+                        "fecha_procesamiento": r.fecha_procesamiento.strftime("%Y-%m-%d %H:%M:%S") if r.fecha_procesamiento else None,
+                        "is_identified": bool(r.is_identified),
+                        "is_client": bool(r.is_client),
+                    })
+                
+                chunk_payload = {
+                    "import_run_id": remote_run_id,
+                    "records": records_list
+                }
+                
+                desc = f"chunk registros [{records_offset:,} a {records_offset + len(db_chunk):,}]"
+                post_with_retry(records_url, headers, chunk_payload, desc)
+                
+                records_offset += len(db_chunk)
+                state["records_offset"] = records_offset
+                save_state(state)
+                
+                # Mostrar barra de progreso
+                sys.stdout.write(format_progress_bar(records_offset, total_records, prefix='Registros', suffix='completado'))
+                sys.stdout.flush()
+                
+            print(f"\n✅ Todos los registros subidos correctamente.")
+        else:
+            print("\n⏭️  Registros ya subidos en su totalidad. Saltando paso de registros.")
+
+        # 5. Subir resúmenes mensuales en chunks
+        summaries_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/chunk/summaries"
+        if summaries_offset < total_summaries:
+            print(f"\n📊 Subiendo resúmenes ('dimensionamiento_family_monthly_summary') en chunks de {args.chunk_size:,}...")
+            
+            while summaries_offset < total_summaries:
+                # Consultar chunk de SQLite
+                db_chunk = session.query(DimensionamientoFamilyMonthlySummary).filter_by(
+                    import_run_id=local_run.id
+                ).order_by(DimensionamientoFamilyMonthlySummary.id).offset(summaries_offset).limit(args.chunk_size).all()
+                
+                if not db_chunk:
+                    break
+                
+                # Serializar resúmenes
+                summaries_list = []
+                for s in db_chunk:
+                    summaries_list.append({
+                        "month": s.month.isoformat() if s.month else None,
+                        "plataforma": s.plataforma,
+                        "cliente_nombre_homologado": s.cliente_nombre_homologado,
+                        "cliente_visible": s.cliente_visible,
+                        "provincia": s.provincia,
+                        "familia": s.familia,
+                        "unidad_negocio": s.unidad_negocio,
+                        "subunidad_negocio": s.subunidad_negocio,
+                        "resultado_participacion": s.resultado_participacion,
+                        "is_identified": bool(s.is_identified),
+                        "is_client": bool(s.is_client),
+                        "total_cantidad": s.total_cantidad,
+                        "total_valorizacion": s.total_valorizacion,
+                        "total_registros": s.total_registros,
+                        "clientes_unicos": s.clientes_unicos,
+                    })
+                
+                chunk_payload = {
+                    "import_run_id": remote_run_id,
+                    "summaries": summaries_list
+                }
+                
+                desc = f"chunk resúmenes [{summaries_offset:,} a {summaries_offset + len(db_chunk):,}]"
+                post_with_retry(summaries_url, headers, chunk_payload, desc)
+                
+                summaries_offset += len(db_chunk)
+                state["summaries_offset"] = summaries_offset
+                save_state(state)
+                
+                # Mostrar barra de progreso
+                sys.stdout.write(format_progress_bar(summaries_offset, total_summaries, prefix='Resúmenes', suffix='completado'))
+                sys.stdout.flush()
+                
+            print(f"\n✅ Todos los resúmenes subidos correctamente.")
+        else:
+            print("\n⏭️  Resúmenes ya subidos en su totalidad. Saltando paso de resúmenes.")
+
+        # 6. Recuperar y subir snapshot finalizador
+        print("\n📝 Cargando snapshot de dashboard precalculado localmente...")
+        snap = session.query(DimensionamientoDashboardSnapshot).filter_by(
+            snapshot_key="default_dashboard_bootstrap",
+            import_run_id=local_run.id
+        ).first()
+        
+        snapshot_payload = None
+        if snap:
+            snapshot_payload = snap.payload
+            print(f"✅ Snapshot encontrado localmente. Tamaño en caracteres: {len(json.dumps(snapshot_payload)):,}")
+        else:
+            print("⚠️  Advertencia: No se encontró un snapshot de dashboard en local para esta corrida. Se finalizará sin snapshot precalculado.")
+
+        print("\n🏁 Finalizando corrida de importación en el servidor remoto...")
+        finalize_payload = {
+            "import_run_id": remote_run_id,
+            "snapshot": snapshot_payload,
+            "summary_metadata": local_run.summary
+        }
+        
+        finalize_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/finalize"
+        finalize_res = post_with_retry(finalize_url, headers, finalize_payload, "Finalización de importación")
+        
+        # Limpieza de estado local
+        clear_state()
+        
+        print("\n🎉 ========================================================")
+        print("🎉 ¡ACTUALIZACIÓN COMPLETADA CON ÉXITO!")
+        print(f"🎉 Corrida remota activada: ID {remote_run_id}")
+        print(f"🎉 El dashboard en producción ya está operativo con los nuevos datos.")
+        print("🎉 ========================================================\n")
+        
+    finally:
+        session.close()
+
+def handle_rollback(args):
+    target_run_id = args.remote_run_id
+    if not target_run_id:
+        # Intentar leer desde el estado guardado
+        state = load_state()
+        if state and state.get("remote_run_id") and state.get("target_url") == args.url:
+            target_run_id = state["remote_run_id"]
+            print(f"💡 ID de corrida remota detectado desde el estado: {target_run_id}")
+        else:
+            print("❌ Error: Debe especificar --remote-run-id para poder realizar rollback.")
+            sys.exit(1)
+            
+    print(f"⚠️  Realizando rollback de la corrida remota ID {target_run_id}...")
+    headers = {
+        "X-Import-Token": args.token,
+        "Content-Type": "application/json"
+    }
+    rollback_payload = {
+        "import_run_id": target_run_id,
+        "error_message": args.reason or "Cancelado manualmente por el administrador vía script cliente."
+    }
+    rollback_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/rollback"
+    
+    try:
+        res = post_with_retry(rollback_url, headers, rollback_payload, f"Rollback de corrida {target_run_id}")
+        print(f"✅ Rollback exitoso: {res.get('message')}")
+        clear_state()
+    except Exception as e:
+        print(f"❌ Error al ejecutar rollback: {e}")
+        sys.exit(1)
+
+def handle_cleanup(args):
+    print(f"🧹 Ejecutando limpieza de corridas viejas en {args.url}...")
+    print(f"   (Se mantendrán las últimas {args.keep_runs} corridas exitosas y cualquier corrida en progreso)")
+    headers = {
+        "X-Import-Token": args.token,
+        "Content-Type": "application/json"
+    }
+    cleanup_payload = {
+        "keep_runs": args.keep_runs
+    }
+    cleanup_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/cleanup"
+    
+    try:
+        res = post_with_retry(cleanup_url, headers, cleanup_payload, "Limpieza de base de datos")
+        print(f"✅ Limpieza exitosa: {res.get('message')}")
+        deleted_count = res.get("deleted_runs_count", 0)
+        if deleted_count > 0:
+            print(f"   IDs eliminados físicamente: {res.get('deleted_run_ids')}")
+    except Exception as e:
+        print(f"❌ Error al ejecutar la limpieza: {e}")
+        sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Cliente de sincronización por chunks para el módulo Dimensionamiento en Mercado Privado."
+    )
+    parser.add_argument(
+        "--url",
+        default="http://127.0.0.1:8000",
+        help="URL base de la aplicación (ej: http://127.0.0.1:8000 o https://web-comparativas.onrender.com)."
+    )
+    parser.add_argument(
+        "--token",
+        default="local_dev_token",
+        help="Token de importación secreto (cabecera X-Import-Token)."
+    )
+    
+    subparsers = parser.add_subparsers(dest="action", help="Acciones disponibles")
+    
+    # Subparser para upload
+    upload_parser = subparsers.add_parser("upload", help="Sube los datos locales por chunks en staging.")
+    upload_parser.add_argument(
+        "--run-id",
+        type=int,
+        help="ID de la corrida local SQLite a subir. Si se omite, se subirá la última corrida con éxito ('success')."
+    )
+    upload_parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=20000,
+        help="Cantidad de filas a transmitir por lote HTTP (default: 20000)."
+    )
+    upload_parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignora cualquier estado de subida previo en upload_state.json e inicia desde cero."
+    )
+    
+    # Subparser para rollback
+    rollback_parser = subparsers.add_parser("rollback", help="Cancela una corrida remota poniéndola en 'failed'.")
+    rollback_parser.add_argument(
+        "--remote-run-id",
+        type=int,
+        help="ID de la corrida remota a cancelar. Si se omite, se intentará leer del estado guardado localmente."
+    )
+    rollback_parser.add_argument(
+        "--reason",
+        help="Razón de la cancelación."
+    )
+    
+    # Subparser para cleanup
+    cleanup_parser = subparsers.add_parser("cleanup", help="Elimina registros huérfanos y corridas antiguas en producción.")
+    cleanup_parser.add_argument(
+        "--keep-runs",
+        type=int,
+        default=2,
+        help="Cantidad de corridas exitosas recientes a conservar (default: 2)."
+    )
+    
+    args = parser.parse_args()
+    
+    # Si no se provee acción, por defecto hacemos 'upload'
+    if not args.action:
+        args.action = "upload"
+        args.run_id = None
+        args.chunk_size = 20000
+        args.fresh = False
+        
+    print("======================================================================")
+    print("     🚀  WEB COMPARATIVAS - CLIENTE DE CARGA DE DIMENSIONAMIENTO      ")
+    print("======================================================================")
+    print(f"📍 Servidor destino: {args.url}")
+    print(f"⚙️  Acción a ejecutar: {args.action.upper()}")
+    print("======================================================================\n")
+    
+    # Normalizar la URL (eliminar barra inclinada final)
+    if args.url.endswith("/"):
+        args.url = args.url[:-1]
+        
+    if args.action == "upload":
+        handle_upload(args)
+    elif args.action == "rollback":
+        handle_rollback(args)
+    elif args.action == "cleanup":
+        handle_cleanup(args)
+
+if __name__ == "__main__":
+    main()

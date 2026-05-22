@@ -70,11 +70,11 @@ _QUERY_CACHE_LOCK = threading.Lock()
 _CACHE_MISS = object()          # Sentinel para distinguir cache miss de None
 
 # Micro-cache dedicado al health snapshot (no necesita clave por filtros)
-_SUMMARY_HEALTH_CACHE: dict = {"ts": 0.0, "val": None}
+_SUMMARY_HEALTH_CACHE: dict[int | None, dict] = {}
 
 # Micro-cache para get_status: los conteos globales raramente cambian; 30s evita
 # 3 queries extras en cada carga inicial y cada reload sin invalidar datos útiles.
-_STATUS_CACHE: dict = {"ts": 0.0, "val": None}
+_STATUS_CACHE: dict[int | None, dict] = {}
 _TTL_STATUS = 30.0
 
 
@@ -118,10 +118,8 @@ def invalidate_query_cache() -> None:
         count = len(_QUERY_CACHE)
         _QUERY_CACHE.clear()
     # Resetear también los micro-caches de salud y status
-    _SUMMARY_HEALTH_CACHE["val"] = None
-    _SUMMARY_HEALTH_CACHE["ts"] = 0.0
-    _STATUS_CACHE["val"] = None
-    _STATUS_CACHE["ts"] = 0.0
+    _SUMMARY_HEALTH_CACHE.clear()
+    _STATUS_CACHE.clear()
     logger.info("[DIM][CACHE] Caché invalidado. %d entradas eliminadas.", count)
 
 
@@ -154,6 +152,7 @@ class DimensionamientoFilters:
     is_client: bool | None = None
     # Exclusión de unidades de negocio: proviene de la interacción con la leyenda del gráfico
     unidades_negocio_excluir: list[str] = field(default_factory=list)
+    import_run_id: int | None = None
 
 
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
@@ -169,6 +168,7 @@ def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
         "fecha_desde": filters.fecha_desde.isoformat() if filters.fecha_desde else None,
         "fecha_hasta": filters.fecha_hasta.isoformat() if filters.fecha_hasta else None,
         "is_client": filters.is_client,
+        "import_run_id": filters.import_run_id,
     }
 
 
@@ -198,6 +198,7 @@ def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
         fecha_desde=filters.fecha_desde,
         fecha_hasta=filters.fecha_hasta,
         is_client=filters.is_client,
+        import_run_id=filters.import_run_id,
     )
 
 
@@ -266,15 +267,36 @@ def _table_columns(session: Session, table_name: str) -> set[str]:
         return set()
 
 
-def _summary_health_snapshot(session: Session) -> dict[str, Any]:
+def _summary_health_snapshot(session: Session, import_run_id: int | None = None) -> dict[str, Any]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+
     summary_columns = _table_columns(session, "dimensionamiento_family_monthly_summary")
     missing_columns = sorted(_SUMMARY_REQUIRED_COLUMNS - summary_columns)
+
+    if import_run_id is None:
+        return {
+            "rows": 0,
+            "raw_min_month": None,
+            "raw_max_month": None,
+            "min_month": None,
+            "max_month": None,
+            "missing_columns": missing_columns,
+            "summary_total_valorizacion": 0.0,
+            "records_total_valorizacion": 0.0,
+            "valorizacion_mismatch": False,
+            "usable": False,
+        }
+
     try:
         summary_rows, raw_min_month, raw_max_month, summary_total_valorizacion = session.execute(
             text(
                 "SELECT COUNT(*), MIN(month), MAX(month), COALESCE(SUM(total_valorizacion), 0) "
-                "FROM dimensionamiento_family_monthly_summary"
-            )
+                "FROM dimensionamiento_family_monthly_summary "
+                "WHERE import_run_id = :run_id"
+            ),
+            {"run_id": import_run_id}
         ).one()
     except Exception:
         logger.exception("[DIM][SUMMARY] Could not read dimensionamiento_family_monthly_summary health snapshot")
@@ -297,8 +319,10 @@ def _summary_health_snapshot(session: Session) -> dict[str, Any]:
                 session.execute(
                     text(
                         "SELECT COALESCE(SUM(valorizacion_estimada), 0) "
-                        "FROM dimensionamiento_records"
-                    )
+                        "FROM dimensionamiento_records "
+                        "WHERE import_run_id = :run_id"
+                    ),
+                    {"run_id": import_run_id}
                 ).scalar_one()
                 or 0
             )
@@ -338,48 +362,61 @@ def _summary_health_snapshot(session: Session) -> dict[str, Any]:
     }
 
 
-def _summary_health_snapshot_cached(session: Session) -> dict[str, Any]:
-    """Versión cacheada de _summary_health_snapshot con TTL de 10 segundos.
+def _summary_health_snapshot_cached(session: Session, import_run_id: int | None = None) -> dict[str, Any]:
+    """Versión cacheada de _summary_health_snapshot con TTL de 10 segundos."""
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
 
-    Evita ejecutar SELECT COUNT/MIN/MAX en la tabla resumen 7+ veces por cada
-    cambio de filtro (una vez por cada función de widget que llama a
-    _resolve_aggregate_model). Con caché, solo se ejecuta una vez cada 10s.
-    """
     now = time.perf_counter()
-    cached_val = _SUMMARY_HEALTH_CACHE["val"]
-    if cached_val is not None and now - _SUMMARY_HEALTH_CACHE["ts"] < _TTL_SUMMARY_HEALTH:
-        return cached_val
-    val = _summary_health_snapshot(session)
-    _SUMMARY_HEALTH_CACHE["ts"] = time.perf_counter()
-    _SUMMARY_HEALTH_CACHE["val"] = val
+    cached = _SUMMARY_HEALTH_CACHE.get(import_run_id)
+    if cached is not None and now - cached["ts"] < _TTL_SUMMARY_HEALTH:
+        return cached["val"]
+    val = _summary_health_snapshot(session, import_run_id)
+    _SUMMARY_HEALTH_CACHE[import_run_id] = {"ts": now, "val": val}
     return val
 
 
-def _global_date_bounds(session: Session) -> tuple[dt.date | None, dt.date | None]:
-    summary_state = _summary_health_snapshot_cached(session)
+def _global_date_bounds(session: Session, import_run_id: int | None = None) -> tuple[dt.date | None, dt.date | None]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+
+    summary_state = _summary_health_snapshot_cached(session, import_run_id)
     if summary_state["usable"]:
         return summary_state["min_month"], summary_state["max_month"]
+
+    if import_run_id is None:
+        return None, None
 
     min_date, max_date = session.execute(
         select(
             func.min(DimensionamientoRecord.fecha),
             func.max(DimensionamientoRecord.fecha),
-        )
+        ).where(DimensionamientoRecord.import_run_id == import_run_id)
     ).one()
     return _coerce_date_value(min_date), _coerce_date_value(max_date)
 
 
-def _default_platform_values(session: Session) -> list[str]:
-    cache_key = "dimensionamiento.default_platform_values"
+def _default_platform_values(session: Session, import_run_id: int | None = None) -> list[str]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+
+    cache_key = f"dimensionamiento.default_platform_values.{import_run_id}"
     cached = _cache_get(cache_key, _TTL_FILTER_OPTIONS_DFLT)
     if cached is not _CACHE_MISS:
         return list(cached)
 
-    summary_state = _summary_health_snapshot_cached(session)
+    if import_run_id is None:
+        return []
+
+    summary_state = _summary_health_snapshot_cached(session, import_run_id)
     model = DimensionamientoFamilyMonthlySummary if summary_state["usable"] else DimensionamientoRecord
     stmt = (
         select(distinct(model.plataforma))
         .where(model.plataforma.is_not(None))
+        .where(model.import_run_id == import_run_id)
         .order_by(model.plataforma)
     )
     payload = [value for value in session.execute(stmt).scalars().all() if value not in (None, "")]
@@ -392,24 +429,21 @@ def _normalize_dashboard_filters(
     filters: DimensionamientoFilters,
 ) -> DimensionamientoFilters:
     normalized = _clone_filters(filters)
-    if (
-        not normalized.plataformas
-        and normalized.fecha_desde is None
-        and normalized.fecha_hasta is None
-    ):
-        return normalized
+    if normalized.import_run_id is None:
+        latest = _latest_success_import_run(session)
+        normalized.import_run_id = latest.id if latest else None
 
-    default_platforms = _default_platform_values(session)
+    default_platforms = _default_platform_values(session, normalized.import_run_id)
     if normalized.plataformas and default_platforms:
         requested_platforms = {value.strip().upper() for value in normalized.plataformas if value}
         all_platforms = {value.strip().upper() for value in default_platforms if value}
         if requested_platforms == all_platforms:
             normalized.plataformas = []
 
-    min_date, max_date = _global_date_bounds(session)
-    if min_date is not None and normalized.fecha_desde == min_date:
+    min_date, max_date = _global_date_bounds(session, normalized.import_run_id)
+    if min_date is not None and normalized.fecha_desde is not None and normalized.fecha_desde <= min_date:
         normalized.fecha_desde = None
-    if max_date is not None and normalized.fecha_hasta == max_date:
+    if max_date is not None and normalized.fecha_hasta is not None and normalized.fecha_hasta >= max_date:
         normalized.fecha_hasta = None
     return normalized
 
@@ -417,11 +451,12 @@ def _normalize_dashboard_filters(
 def _resolve_aggregate_model(
     session: Session,
     endpoint_tag: str,
+    import_run_id: int | None = None,
     *,
     summary_message: str = "using summary table",
     base_message: str = "using base table",
 ):
-    summary_state = _summary_health_snapshot_cached(session)
+    summary_state = _summary_health_snapshot_cached(session, import_run_id)
     if summary_state["usable"]:
         logger.info(
             "[DIM][%s] %s rows=%s min_month=%s max_month=%s",
@@ -561,16 +596,22 @@ def _is_sin_dato_sql(column):
     )
 
 
-def _distinct_summary_clients(session: Session) -> list[str]:
+def _distinct_summary_clients(session: Session, import_run_id: int | None = None) -> list[str]:
     """Fast path (sin filtros activos): nombres homologados únicos de clientes reales.
 
     Universo 'Sí': registros con is_client=True.
     Fuente: cliente_nombre_homologado (no cliente_visible, que puede contener originales).
     Excluye variantes de SIN DATO, nulos y vacíos.
     """
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+    if import_run_id is None:
+        return []
     model = DimensionamientoFamilyMonthlySummary
     stmt = (
         select(distinct(model.cliente_nombre_homologado))
+        .where(model.import_run_id == import_run_id)
         .where(model.is_client.is_(True))
         .where(model.cliente_nombre_homologado.isnot(None))
         .where(func.coalesce(model.cliente_nombre_homologado, "") != "")
@@ -583,19 +624,25 @@ def _distinct_summary_clients(session: Session) -> list[str]:
     ]
 
 
-def _distinct_summary_non_clients(session: Session) -> list[str]:
+def _distinct_summary_non_clients(session: Session, import_run_id: int | None = None) -> list[str]:
     """Fast path (sin filtros activos): nombres originales únicos de no-clientes.
 
     Universo 'No': registros donde is_client=False (homologado ausente o SIN DATO).
     Fuente: cliente_nombre_original — NUNCA cliente_visible ni homologado.
     Excluye nulos y vacíos.
     """
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+    if import_run_id is None:
+        return []
     model = DimensionamientoFamilyMonthlySummary
     # cliente_nombre_original no existe en la summary table; usamos cliente_visible
     # de filas con is_client=False (que en ingesta ya fue asignado desde original).
     # Excluimos adicionalmente cualquier residual de SIN DATO proveniente del original.
     stmt = (
         select(distinct(model.cliente_visible))
+        .where(model.import_run_id == import_run_id)
         .where(model.is_client.is_(False))
         .where(model.cliente_visible.isnot(None))
         .where(func.coalesce(model.cliente_visible, "") != "")
@@ -695,6 +742,10 @@ def build_filters(
 
 
 def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
+    if filters.import_run_id is not None:
+        stmt = stmt.where(model.import_run_id == filters.import_run_id)
+        if applied_conditions is not None:
+            applied_conditions.append(f"import_run_id = {filters.import_run_id}")
     use_direct_match = model is DimensionamientoFamilyMonthlySummary
     if filters.clientes:
         if use_direct_match:
@@ -834,9 +885,16 @@ def _distinct_values(session: Session, column, filters: DimensionamientoFilters,
     return [value for value in session.execute(outer_stmt).scalars().all() if value not in (None, "")]
 
 
-def _distinct_summary_values(session: Session, column, order_by=None) -> list[str]:
+def _distinct_summary_values(session: Session, column, import_run_id: int | None = None, order_by=None) -> list[str]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+    if import_run_id is None:
+        return []
+    model = column.class_
     stmt = (
         select(distinct(column.label("_val")))
+        .where(model.import_run_id == import_run_id)
         .where(column.is_not(None))
         .order_by(order_by if order_by is not None else column)
     )
@@ -924,14 +982,18 @@ def _latest_success_import_run(session: Session) -> DimensionamientoImportRun | 
     ).scalar_one_or_none()
 
 
-def _get_dashboard_snapshot(session: Session) -> DimensionamientoDashboardSnapshot | None:
-    # Busca solo por snapshot_key (no filtra por version) para poder actualizar
-    # el snapshot existente aunque tenga una version anterior, evitando el error
-    # de UNIQUE constraint al intentar INSERT de una clave que ya existe.
+def _get_dashboard_snapshot(session: Session, import_run_id: int | None = None) -> DimensionamientoDashboardSnapshot | None:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+    if import_run_id is None:
+        return None
+    # Busca por snapshot_key e import_run_id
     return session.execute(
         select(DimensionamientoDashboardSnapshot)
         .where(
             DimensionamientoDashboardSnapshot.snapshot_key == DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+            DimensionamientoDashboardSnapshot.import_run_id == import_run_id,
         )
         .limit(1)
     ).scalar_one_or_none()
@@ -1049,18 +1111,24 @@ def refresh_default_dashboard_snapshot(
     commit: bool = True,
 ) -> dict[str, Any]:
     started_at = _log_query_start("refresh_default_dashboard_snapshot", import_run_id=import_run_id)
+    latest = _latest_success_import_run(session)
+    target_run_id = import_run_id if import_run_id is not None else (latest.id if latest else None)
+
+    f = build_filters()
+    f.import_run_id = target_run_id
+
     payload = get_dashboard_bootstrap(
         session,
-        build_filters(),
+        f,
         include_status=True,
         bypass_snapshot=True,
     )
-    snapshot = _get_dashboard_snapshot(session)
-    latest = _latest_success_import_run(session)
+    snapshot = _get_dashboard_snapshot(session, target_run_id)
     if snapshot is None:
         snapshot = DimensionamientoDashboardSnapshot(
             snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
             version=DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
+            import_run_id=target_run_id,
         )
     payload["meta"] = {
         **_snapshot_meta_payload(snapshot),
@@ -1068,7 +1136,7 @@ def refresh_default_dashboard_snapshot(
         "stale": False,
     }
     snapshot.version = DEFAULT_DASHBOARD_SNAPSHOT_VERSION
-    snapshot.import_run_id = import_run_id if import_run_id is not None else (latest.id if latest else None)
+    snapshot.import_run_id = target_run_id
     snapshot.generated_at = dt.datetime.utcnow()
     payload["meta"].update(_snapshot_meta_payload(snapshot))
     snapshot.payload = payload
@@ -1087,7 +1155,7 @@ def refresh_default_dashboard_snapshot(
 
 def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None:
     latest = _latest_success_import_run(session)
-    snapshot = _get_dashboard_snapshot(session)
+    snapshot = _get_dashboard_snapshot(session, latest.id if latest else None)
     if latest is None:
         return snapshot.payload if snapshot else None
     if snapshot and snapshot.import_run_id == latest.id and not _snapshot_payload_needs_refresh(snapshot):
@@ -1095,84 +1163,127 @@ def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None
     return refresh_default_dashboard_snapshot(session, import_run_id=latest.id, commit=True)
 
 
-def get_status(session: Session) -> dict[str, Any]:
+def get_status(session: Session, import_run_id: int | None = None) -> dict[str, Any]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+
     now = time.perf_counter()
-    if _STATUS_CACHE["val"] is not None and now - _STATUS_CACHE["ts"] < _TTL_STATUS:
+    cached = _STATUS_CACHE.get(import_run_id)
+    if cached is not None and now - cached["ts"] < _TTL_STATUS:
         logger.debug("[DIM][CACHE] get_status hit")
-        return _STATUS_CACHE["val"]
+        return cached["val"]
 
     started_at = now
-    logger.info("[DIM][QUERY] get_status start")
+    logger.info("[DIM][QUERY] get_status start run_id=%s", import_run_id)
     _apply_local_statement_timeout(session, 50000)
 
-    latest = session.execute(
-        select(DimensionamientoImportRun)
-        .where(DimensionamientoImportRun.status == "success")
-        .order_by(DimensionamientoImportRun.finished_at.desc(), DimensionamientoImportRun.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    if import_run_id is not None:
+        run_obj = session.get(DimensionamientoImportRun, import_run_id)
+    else:
+        run_obj = None
 
-    total_rows = session.execute(
-        select(func.count(DimensionamientoRecord.id))
-    ).scalar_one()
+    if run_obj is None:
+        run_obj = _latest_success_import_run(session)
 
-    platform_rows = session.execute(
-        select(
-            DimensionamientoRecord.plataforma,
-            func.count(DimensionamientoRecord.id),
-        )
-        .group_by(DimensionamientoRecord.plataforma)
-        .order_by(DimensionamientoRecord.plataforma)
-    ).all()
+    if run_obj is not None:
+        total_rows = session.execute(
+            select(func.count(DimensionamientoRecord.id))
+            .where(DimensionamientoRecord.import_run_id == run_obj.id)
+        ).scalar_one()
+
+        platform_rows = session.execute(
+            select(
+                DimensionamientoRecord.plataforma,
+                func.count(DimensionamientoRecord.id),
+            )
+            .where(DimensionamientoRecord.import_run_id == run_obj.id)
+            .group_by(DimensionamientoRecord.plataforma)
+            .order_by(DimensionamientoRecord.plataforma)
+        ).all()
+    else:
+        total_rows = 0
+        platform_rows = []
 
     payload = {
         "has_data": total_rows > 0,
         "total_rows": total_rows,
         "platforms": [{"name": name, "rows": rows} for name, rows in platform_rows],
         "last_import": {
-            "id": latest.id,
-            "source_path": latest.source_path,
-            "source_hash": latest.source_hash,
-            "finished_at": latest.finished_at.isoformat() if latest and latest.finished_at else None,
-            "rows_processed": latest.rows_processed if latest else 0,
-            "rows_inserted": latest.rows_inserted if latest else 0,
-            "rows_updated": latest.rows_updated if latest else 0,
-            "rows_rejected": latest.rows_rejected if latest else 0,
+            "id": run_obj.id,
+            "source_path": run_obj.source_path,
+            "source_hash": run_obj.source_hash,
+            "finished_at": run_obj.finished_at.isoformat() if run_obj.finished_at else None,
+            "rows_processed": run_obj.rows_processed,
+            "rows_inserted": run_obj.rows_inserted,
+            "rows_updated": run_obj.rows_updated,
+            "rows_rejected": run_obj.rows_rejected,
         }
-        if latest
+        if run_obj
         else None,
     }
     _log_query_success("get_status", started_at, total_rows=total_rows, platforms=len(platform_rows))
-    _STATUS_CACHE["ts"] = time.perf_counter()
-    _STATUS_CACHE["val"] = payload
+    _STATUS_CACHE[import_run_id] = {
+        "ts": time.perf_counter(),
+        "val": payload
+    }
     return payload
 
 
-def get_debug_snapshot(session: Session) -> dict[str, Any]:
-    started_at = _log_query_start("get_debug_snapshot")
+def get_debug_snapshot(session: Session, import_run_id: int | None = None) -> dict[str, Any]:
+    if import_run_id is None:
+        latest = _latest_success_import_run(session)
+        import_run_id = latest.id if latest else None
+
+    started_at = _log_query_start("get_debug_snapshot", import_run_id=import_run_id)
     _apply_local_statement_timeout(session, 50000)
 
-    total_rows = session.execute(select(func.count(DimensionamientoRecord.id))).scalar_one()
+    if import_run_id is None:
+        return {
+            "table": DimensionamientoRecord.__tablename__,
+            "summary_table": DimensionamientoFamilyMonthlySummary.__tablename__,
+            "columns": [column.name for column in DimensionamientoRecord.__table__.columns],
+            "total_registros": 0,
+            "count_distinct_plataforma": 0,
+            "count_distinct_cliente_visible": 0,
+            "count_distinct_familia": 0,
+            "count_distinct_provincia": 0,
+            "min_fecha": None,
+            "max_fecha": None,
+            "top_10_resultado_participacion": [],
+            "sample_values": {},
+        }
+
+    total_rows = session.execute(
+        select(func.count(DimensionamientoRecord.id))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
+    ).scalar_one()
     distinct_platforms = session.execute(
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.plataforma))))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
     ).scalar_one()
     distinct_clients = session.execute(
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.cliente_visible))))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
     ).scalar_one()
     distinct_families = session.execute(
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.familia))))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
     ).scalar_one()
     distinct_provinces = session.execute(
         select(func.count(distinct(_sql_normalized_text(DimensionamientoRecord.provincia))))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
     ).scalar_one()
     min_date, max_date = session.execute(
         select(func.min(DimensionamientoRecord.fecha), func.max(DimensionamientoRecord.fecha))
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
     ).one()
     top_results_stmt = (
         select(
             DimensionamientoRecord.resultado_participacion,
             func.count(DimensionamientoRecord.id).label("rows"),
         )
+        .where(DimensionamientoRecord.import_run_id == import_run_id)
         .group_by(DimensionamientoRecord.resultado_participacion)
         .order_by(func.count(DimensionamientoRecord.id).desc(), DimensionamientoRecord.resultado_participacion.asc())
         .limit(10)
@@ -1181,12 +1292,14 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
         {"resultado_participacion": resultado or "Sin resultado", "rows": rows or 0}
         for resultado, rows in session.execute(top_results_stmt).all()
     ]
+    f = build_filters()
+    f.import_run_id = import_run_id
     sample_values = {
-        "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, build_filters())[:10],
-        "familias": _distinct_values(session, DimensionamientoRecord.familia, build_filters())[:10],
-        "provincias": _distinct_values(session, DimensionamientoRecord.provincia, build_filters())[:10],
-        "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, build_filters())[:10],
-        "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, build_filters())[:10],
+        "plataformas": _distinct_values(session, DimensionamientoRecord.plataforma, f)[:10],
+        "familias": _distinct_values(session, DimensionamientoRecord.familia, f)[:10],
+        "provincias": _distinct_values(session, DimensionamientoRecord.provincia, f)[:10],
+        "unidades_negocio": _distinct_values(session, DimensionamientoRecord.unidad_negocio, f)[:10],
+        "subunidades_negocio": _distinct_values(session, DimensionamientoRecord.subunidad_negocio, f)[:10],
     }
     payload = {
         "table": DimensionamientoRecord.__tablename__,
@@ -1212,6 +1325,7 @@ def get_debug_snapshot(session: Session) -> dict[str, Any]:
 
 
 def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters)
     # ── Caché: hit frecuente al limpiar/reutilizar un mismo set de filtros ──
     _ttl = _TTL_FILTER_OPTIONS_DFLT if not _has_active_filters(filters) else _TTL_FILTER_OPTIONS_FILT
     _ck = _make_cache_key("get_filter_options", filters)
@@ -1225,7 +1339,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
     _apply_local_statement_timeout(session, 50000)
 
     try:
-        summary_state = _summary_health_snapshot_cached(session)
+        summary_state = _summary_health_snapshot_cached(session, filters.import_run_id)
         has_active_filters = _has_active_filters(filters)
         if (
             not has_active_filters
@@ -1241,13 +1355,13 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
             # de clientes reales (is_client=True / Homologados). El filtro ¿Cliente?
             # no está activo en este path por definición (has_active_filters=False).
             payload = {
-                "clientes": _distinct_summary_clients(session),
-                "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia),
-                "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia),
-                "plataformas": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.plataforma),
-                "unidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.unidad_negocio),
-                "subunidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.subunidad_negocio),
-                "resultados": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.resultado_participacion),
+                "clientes": _distinct_summary_clients(session, filters.import_run_id),
+                "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia, filters.import_run_id),
+                "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia, filters.import_run_id),
+                "plataformas": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.plataforma, filters.import_run_id),
+                "unidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.unidad_negocio, filters.import_run_id),
+                "subunidades_negocio": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.subunidad_negocio, filters.import_run_id),
+                "resultados": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.resultado_participacion, filters.import_run_id),
                 "date_range": _date_range_payload(
                     summary_state["min_month"],
                     summary_state["max_month"],
@@ -1344,6 +1458,7 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
 
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_kpis", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1353,7 +1468,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
     started_at = _log_query_start("get_kpis", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "KPIS")
+        model = _resolve_aggregate_model(session, "KPIS", filters.import_run_id)
         applied_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
@@ -1424,6 +1539,7 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
 
 
 def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 5) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_series", filters, limit=limit)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1433,7 +1549,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
     started_at = _log_query_start("get_series", filters, limit=limit)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "SERIES")
+        model = _resolve_aggregate_model(session, "SERIES", filters.import_run_id)
         negocio_expr = func.coalesce(model.unidad_negocio, "Sin negocio")
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         val_expr = func.coalesce(
@@ -1504,6 +1620,7 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
 
 
 def get_results_breakdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_results_breakdown", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1513,7 +1630,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
     started_at = _log_query_start("get_results_breakdown", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "RESULTS")
+        model = _resolve_aggregate_model(session, "RESULTS", filters.import_run_id)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         val_expr = func.coalesce(
             func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
@@ -1549,6 +1666,7 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
 
 
 def get_top_families(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_top_families", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1558,7 +1676,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters) -> list
     started_at = _log_query_start("get_top_families", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "TOP_FAMILIES")
+        model = _resolve_aggregate_model(session, "TOP_FAMILIES", filters.import_run_id)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         quantity_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
@@ -1601,6 +1719,7 @@ def get_top_families(session: Session, filters: DimensionamientoFilters) -> list
 
 
 def get_geography_distribution(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_geography_distribution", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1610,7 +1729,7 @@ def get_geography_distribution(session: Session, filters: DimensionamientoFilter
     started_at = _log_query_start("get_geography_distribution", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "GEO")
+        model = _resolve_aggregate_model(session, "GEO", filters.import_run_id)
         count_expr = func.count(model.id) if model is DimensionamientoRecord else func.coalesce(func.sum(model.total_registros), 0)
         val_expr = func.coalesce(
             func.sum(model.valorizacion_estimada if model is DimensionamientoRecord else model.total_valorizacion), 0
@@ -1650,6 +1769,7 @@ def get_clients_by_result(
     filters: DimensionamientoFilters,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_clients_by_result", filters, limit=limit)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1662,6 +1782,7 @@ def get_clients_by_result(
         model = _resolve_aggregate_model(
             session,
             "CLIENTS_BY_RESULT",
+            filters.import_run_id,
             summary_message="using summary path",
             base_message="using base path",
         )
@@ -1757,6 +1878,7 @@ def get_family_consumption_table(
     session: Session,
     filters: DimensionamientoFilters,
 ) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_family_consumption_table", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1766,7 +1888,7 @@ def get_family_consumption_table(
     started_at = _log_query_start("get_family_consumption_table", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
-        model = _resolve_aggregate_model(session, "FAMILY_CONSUMPTION")
+        model = _resolve_aggregate_model(session, "FAMILY_CONSUMPTION", filters.import_run_id)
         total_expr = func.coalesce(
             func.sum(model.cantidad_demandada if model is DimensionamientoRecord else model.total_cantidad),
             0,
@@ -2225,7 +2347,7 @@ def _get_aggregated_dashboard_bootstrap(
     rows = _fetch_summary_rows_for_bootstrap(session, filters)
     payload = _aggregate_bootstrap_from_summary_rows(rows, series_rows=series_rows)
     if include_status:
-        payload["status"] = get_status(session)
+        payload["status"] = get_status(session, filters.import_run_id)
     payload["meta"] = {
         "source": "live",
         "stale": False,
@@ -2254,13 +2376,13 @@ def get_dashboard_bootstrap(
     )
     try:
         _apply_local_statement_timeout(session, 50000)
-        summary_state = _summary_health_snapshot_cached(session)
+        summary_state = _summary_health_snapshot_cached(session, filters.import_run_id)
         if not bypass_snapshot and not _has_active_filters(filters):
-            snapshot = _get_dashboard_snapshot(session)
+            snapshot = _get_dashboard_snapshot(session, filters.import_run_id)
             latest = _latest_success_import_run(session)
             snapshot_compatible = snapshot is not None and not _snapshot_payload_needs_refresh(snapshot)
             skip_snapshot_due_to_summary = summary_state.get("valorizacion_mismatch", False)
-            if snapshot_compatible and not skip_snapshot_due_to_summary and (latest is None or snapshot.import_run_id == latest.id):
+            if snapshot_compatible and not skip_snapshot_due_to_summary and (latest is None or snapshot.import_run_id == latest.id or snapshot.import_run_id == filters.import_run_id):
                 payload = dict(snapshot.payload or {})
                 if _family_consumption_payload_needs_refresh(payload):
                     payload = _refresh_bootstrap_family_consumption(session, payload, filters)

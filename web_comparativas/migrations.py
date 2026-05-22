@@ -1474,3 +1474,78 @@ def ensure_forecast_effective_month_column():
         )
     print("[MIGRATION] Columna forecast_user_overrides.effective_from_month verificada/creada.", flush=True)
 
+
+def ensure_dimensionamiento_composite_constraints():
+    """
+    Actualiza las restricciones unicas en PostgreSQL para incluir import_run_id,
+    permitiendo la convivencia de corridas de staging y produccion sin colisiones.
+    Solo aplica en PostgreSQL (en SQLite se omite).
+    """
+    if IS_SQLITE:
+        print("[MIGRATION] ensure_dimensionamiento_composite_constraints: SQLite, saltando.", flush=True)
+        return
+
+    print("[MIGRATION] Verificando restricciones compuestas de dimensionamiento...", flush=True)
+
+    # 1. dimensionamiento_records
+    try:
+        with engine.begin() as conn:
+            # Dropear la constraint unica vieja si existe
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_records DROP CONSTRAINT IF EXISTS dimensionamiento_records_id_registro_unico_key"
+            ))
+            # Agregar la nueva si no existe
+            # PostgreSQL no tiene ADD CONSTRAINT IF NOT EXISTS, entonces manejamos el error
+            try:
+                conn.execute(text(
+                    "ALTER TABLE dimensionamiento_records ADD CONSTRAINT uq_dim_records_id_run UNIQUE (id_registro_unico, import_run_id)"
+                ))
+                print("[MIGRATION] Restriccion uq_dim_records_id_run creada en dimensionamiento_records.", flush=True)
+            except Exception as e:
+                msg = str(e).lower()
+                if "already exists" in msg:
+                    print("[MIGRATION] Restriccion uq_dim_records_id_run ya existe en dimensionamiento_records. (OK)", flush=True)
+                else:
+                    raise e
+    except Exception as e:
+        print(f"[MIGRATION] Error en records composite constraint: {e}", flush=True)
+
+    # 2. dimensionamiento_family_monthly_summary
+    # La vieja constraint uq_dim_family_monthly_summary no incluia import_run_id.
+    # Vamos a recrearla siempre para asegurar que tenga las columnas correctas.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_family_monthly_summary DROP CONSTRAINT IF EXISTS uq_dim_family_monthly_summary"
+            ))
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_family_monthly_summary ADD CONSTRAINT uq_dim_family_monthly_summary UNIQUE ("
+                "month, plataforma, cliente_nombre_homologado, cliente_visible, provincia, familia, "
+                "unidad_negocio, subunidad_negocio, resultado_participacion, is_identified, is_client, import_run_id"
+                ")"
+            ))
+            print("[MIGRATION] Restriccion uq_dim_family_monthly_summary actualizada en summary.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Error al actualizar uq_dim_family_monthly_summary: {e}", flush=True)
+
+    # 3. dimensionamiento_dashboard_snapshots
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_dashboard_snapshots DROP CONSTRAINT IF EXISTS dimensionamiento_dashboard_snapshots_snapshot_key_key"
+            ))
+            try:
+                conn.execute(text(
+                    "ALTER TABLE dimensionamiento_dashboard_snapshots ADD CONSTRAINT uq_dim_dashboard_snapshots_key_run UNIQUE (snapshot_key, import_run_id)"
+                ))
+                print("[MIGRATION] Restriccion uq_dim_dashboard_snapshots_key_run creada.", flush=True)
+            except Exception as e:
+                msg = str(e).lower()
+                if "already exists" in msg:
+                    print("[MIGRATION] Restriccion uq_dim_dashboard_snapshots_key_run ya existe. (OK)", flush=True)
+                else:
+                    raise e
+    except Exception as e:
+        print(f"[MIGRATION] Error en snapshots composite constraint: {e}", flush=True)
+
+

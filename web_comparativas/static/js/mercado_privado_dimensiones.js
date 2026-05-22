@@ -6,7 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.plugins.tooltip.titleFont = { size: 12, weight: 700, family: "'Outfit', sans-serif" };
     Chart.defaults.plugins.tooltip.bodyFont = { size: 11, family: "'Outfit', sans-serif" };
     Chart.defaults.plugins.tooltip.cornerRadius = 8;
-    const DEFAULT_DATE_FILTER = Object.freeze({ min: '2024-01-01', max: '2026-02-28' });
+    const DEFAULT_DATE_FILTER = Object.freeze({ min: '2025-01-01', max: '2026-12-31' });
 
     // ─────────────────────────────────────────────────────────────────────────
     // Estado global del dashboard

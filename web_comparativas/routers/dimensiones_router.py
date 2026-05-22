@@ -7,9 +7,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from web_comparativas.auth import require_roles
 from web_comparativas.dimensionamiento.query_service import (
@@ -25,11 +26,42 @@ from web_comparativas.dimensionamiento.query_service import (
     get_series,
     get_status,
     get_top_families,
+    invalidate_query_cache,
+    DEFAULT_DASHBOARD_SNAPSHOT_KEY,
 )
-from web_comparativas.models import User
+from web_comparativas.models import User, IS_SQLITE
+from web_comparativas.dimensionamiento.models import (
+    DimensionamientoImportRun,
+    DimensionamientoRecord,
+    DimensionamientoFamilyMonthlySummary,
+    DimensionamientoDashboardSnapshot,
+    DimensionamientoImportError,
+)
 
 router = APIRouter(prefix="/api/mercado-privado/dimensiones", tags=["dimensiones"])
 logger = logging.getLogger("wc.dimensionamiento.api")
+
+
+def verify_import_token(x_import_token: str = Header(..., alias="X-Import-Token")) -> str:
+    """Verifica el token de importación en producción o local."""
+    expected_token = os.getenv("DIMENSIONAMIENTO_IMPORT_TOKEN")
+    if not expected_token:
+        if IS_SQLITE:
+            expected_token = "local_dev_token"
+        else:
+            logger.error("[DIM][IMPORT] DIMENSIONAMIENTO_IMPORT_TOKEN environment variable is not configured.")
+            raise HTTPException(
+                status_code=500,
+                detail="El token de importación no está configurado en el servidor.",
+            )
+    if x_import_token != expected_token:
+        logger.warning("[DIM][IMPORT] Invalid X-Import-Token header received.")
+        raise HTTPException(
+            status_code=403,
+            detail="Token de importación inválido.",
+        )
+    return x_import_token
+
 
 # Ruta al archivo de mapeo de negocios (relativa al package web_comparativas)
 _NEGOCIOS_PATH = Path(__file__).resolve().parent.parent / "data" / "Negocios.xlsx"
@@ -713,3 +745,408 @@ def reload_local_csv(
         "force": force,
         "hint": "Consultá GET /api/mercado-privado/dimensiones/status para ver el progreso.",
     }
+
+
+# ===========================================================================
+# Endpoints Administrativos para Carga por Chunks desde PC Cliente
+# ===========================================================================
+
+class ImportStartPayload(BaseModel):
+    source_path: str
+    source_hash: str | None = None
+    source_mtime: str | None = None
+    mode: str = "replace"
+    chunk_size: int = 20000
+
+
+class RecordItem(BaseModel):
+    id_registro_unico: str
+    fecha: str
+    plataforma: str
+    cliente_nombre_homologado: str | None = None
+    cliente_nombre_original: str | None = None
+    cliente_visible: str | None = None
+    cuit: str | None = None
+    provincia: str | None = None
+    cuenta_interna: str | None = None
+    codigo_articulo: str | None = None
+    descripcion: str | None = None
+    clasificacion_suizo: str | None = None
+    descripcion_articulo: str | None = None
+    familia: str | None = None
+    unidad_negocio: str | None = None
+    subunidad_negocio: str | None = None
+    cantidad_demandada: float
+    valorizacion_estimada: float | None = 0.0
+    resultado_participacion: str | None = None
+    producto_nombre_original: str | None = None
+    fecha_procesamiento: str | None = None
+    is_identified: bool = False
+    is_client: bool = False
+
+
+class RecordChunkPayload(BaseModel):
+    import_run_id: int
+    records: list[RecordItem]
+
+
+class SummaryItem(BaseModel):
+    month: str
+    plataforma: str
+    cliente_nombre_homologado: str | None = None
+    cliente_visible: str | None = None
+    provincia: str | None = None
+    familia: str | None = None
+    unidad_negocio: str | None = None
+    subunidad_negocio: str | None = None
+    resultado_participacion: str | None = None
+    is_identified: bool = False
+    is_client: bool = False
+    total_cantidad: float
+    total_valorizacion: float
+    total_registros: int
+    clientes_unicos: int
+
+
+class SummaryChunkPayload(BaseModel):
+    import_run_id: int
+    summaries: list[SummaryItem]
+
+
+class FinalizePayload(BaseModel):
+    import_run_id: int
+    snapshot: dict[str, Any] | None = None
+    summary_metadata: dict[str, Any] | None = None
+
+
+class RollbackPayload(BaseModel):
+    import_run_id: int
+    error_message: str | None = None
+
+
+class CleanupPayload(BaseModel):
+    keep_runs: int = 2
+
+
+def _parse_date(val: str | None) -> dt.date | None:
+    if not val:
+        return None
+    val = val.strip()[:10]
+    try:
+        return dt.date.fromisoformat(val)
+    except ValueError:
+        return None
+
+
+def _parse_datetime(val: str | None) -> dt.datetime | None:
+    if not val:
+        return None
+    val = val.strip()
+    if val.endswith("Z"):
+        val = val[:-1]
+    val = val.replace("T", " ")
+    if len(val) >= 19:
+        val = val[:19]
+    try:
+        return dt.datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            return dt.datetime.strptime(val[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+
+@router.post("/admin/import/start")
+def admin_import_start(
+    payload: ImportStartPayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Inicia una nueva corrida de importación de dimensionamiento, poniéndola en
+    estado 'running'. Retorna el ID generado.
+    """
+    try:
+        mtime = _parse_datetime(payload.source_mtime)
+        run = DimensionamientoImportRun(
+            source_path=payload.source_path,
+            source_hash=payload.source_hash,
+            source_mtime=mtime,
+            mode=payload.mode,
+            status="running",
+            chunk_size=payload.chunk_size,
+            started_at=dt.datetime.utcnow(),
+            rows_processed=0,
+            rows_inserted=0,
+            rows_updated=0,
+            rows_rejected=0,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        logger.info("[DIM][IMPORT] Started run_id=%d mode=%s", run.id, run.mode)
+        return {"ok": True, "import_run_id": run.id}
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error starting import run")
+        raise HTTPException(status_code=500, detail=f"Error starting import run: {e}")
+
+
+@router.post("/admin/import/chunk/records")
+def admin_import_chunk_records(
+    payload: RecordChunkPayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Recibe un lote de records (hasta 20.000) y los inserta de forma masiva en base de datos.
+    """
+    run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Import run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
+
+    try:
+        mappings = []
+        for r in payload.records:
+            fecha_val = _parse_date(r.fecha)
+            if not fecha_val:
+                raise ValueError(f"Invalid date format: {r.fecha}")
+            mappings.append({
+                "id_registro_unico": r.id_registro_unico,
+                "fecha": fecha_val,
+                "plataforma": r.plataforma,
+                "cliente_nombre_homologado": r.cliente_nombre_homologado,
+                "cliente_nombre_original": r.cliente_nombre_original,
+                "cliente_visible": r.cliente_visible,
+                "cuit": r.cuit,
+                "provincia": r.provincia,
+                "cuenta_interna": r.cuenta_interna,
+                "codigo_articulo": r.codigo_articulo,
+                "descripcion": r.descripcion,
+                "clasificacion_suizo": r.clasificacion_suizo,
+                "descripcion_articulo": r.descripcion_articulo,
+                "familia": r.familia,
+                "unidad_negocio": r.unidad_negocio,
+                "subunidad_negocio": r.subunidad_negocio,
+                "cantidad_demandada": r.cantidad_demandada,
+                "valorizacion_estimada": r.valorizacion_estimada or 0.0,
+                "resultado_participacion": r.resultado_participacion,
+                "producto_nombre_original": r.producto_nombre_original,
+                "fecha_procesamiento": _parse_datetime(r.fecha_procesamiento),
+                "is_identified": r.is_identified,
+                "is_client": r.is_client,
+                "import_run_id": payload.import_run_id,
+            })
+        
+        db.bulk_insert_mappings(DimensionamientoRecord, mappings)
+        
+        run.rows_processed += len(mappings)
+        run.rows_inserted += len(mappings)
+        db.commit()
+        
+        logger.info("[DIM][IMPORT] Run %d: inserted %d records (total: %d)", 
+                    run.id, len(mappings), run.rows_processed)
+        return {"ok": True, "count": len(mappings)}
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error inserting records chunk")
+        raise HTTPException(status_code=500, detail=f"Error inserting records chunk: {e}")
+
+
+@router.post("/admin/import/chunk/summaries")
+def admin_import_chunk_summaries(
+    payload: SummaryChunkPayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Recibe un lote de resúmenes mensuales y los inserta de forma masiva en base de datos.
+    """
+    run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Import run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
+
+    try:
+        mappings = []
+        for s in payload.summaries:
+            month_val = _parse_date(s.month)
+            if not month_val:
+                raise ValueError(f"Invalid month format: {s.month}")
+            mappings.append({
+                "month": month_val,
+                "plataforma": s.plataforma,
+                "cliente_nombre_homologado": s.cliente_nombre_homologado,
+                "cliente_visible": s.cliente_visible,
+                "provincia": s.provincia,
+                "familia": s.familia,
+                "unidad_negocio": s.unidad_negocio,
+                "subunidad_negocio": s.subunidad_negocio,
+                "resultado_participacion": s.resultado_participacion,
+                "is_identified": s.is_identified,
+                "is_client": s.is_client,
+                "total_cantidad": s.total_cantidad,
+                "total_valorizacion": s.total_valorizacion,
+                "total_registros": s.total_registros,
+                "clientes_unicos": s.clientes_unicos,
+                "import_run_id": payload.import_run_id,
+            })
+        
+        db.bulk_insert_mappings(DimensionamientoFamilyMonthlySummary, mappings)
+        db.commit()
+        
+        logger.info("[DIM][IMPORT] Run %d: inserted %d summaries", run.id, len(mappings))
+        return {"ok": True, "count": len(mappings)}
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error inserting summaries chunk")
+        raise HTTPException(status_code=500, detail=f"Error inserting summaries chunk: {e}")
+
+
+@router.post("/admin/import/finalize")
+def admin_import_finalize(
+    payload: FinalizePayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Finaliza la importación, guarda el snapshot precalculado localmente y activa
+    la corrida al poner su estado en 'success'. Además, limpia los cachés del servidor.
+    """
+    run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Import run not found")
+    if run.status != "running":
+        raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
+
+    try:
+        if payload.snapshot:
+            snap = db.query(DimensionamientoDashboardSnapshot).filter_by(
+                snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+                import_run_id=payload.import_run_id
+            ).first()
+            if not snap:
+                snap = DimensionamientoDashboardSnapshot(
+                    snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
+                    import_run_id=payload.import_run_id,
+                    payload=payload.snapshot,
+                    generated_at=dt.datetime.utcnow()
+                )
+                db.add(snap)
+            else:
+                snap.payload = payload.snapshot
+                snap.generated_at = dt.datetime.utcnow()
+        
+        if payload.summary_metadata:
+            run_sum = dict(run.summary or {})
+            run_sum.update(payload.summary_metadata)
+            run.summary = run_sum
+            
+        run.status = "success"
+        run.finished_at = dt.datetime.utcnow()
+        db.commit()
+        
+        invalidate_query_cache()
+        logger.info("[DIM][IMPORT] Finalized run_id=%d successfully.", run.id)
+        return {"ok": True, "message": "Import run finalized successfully."}
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error finalizing import run")
+        raise HTTPException(status_code=500, detail=f"Error finalizing import run: {e}")
+
+
+@router.post("/admin/import/rollback")
+def admin_import_rollback(
+    payload: RollbackPayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Cancela la corrida actual y la marca como 'failed'.
+    """
+    run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Import run not found")
+    
+    try:
+        run.status = "failed"
+        if payload.error_message:
+            run.error_message = payload.error_message
+        run.finished_at = dt.datetime.utcnow()
+        db.commit()
+        
+        invalidate_query_cache()
+        logger.warning("[DIM][IMPORT] Rolled back run_id=%d (marked as failed).", run.id)
+        return {"ok": True, "message": f"Run {run.id} marked as failed."}
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error rolling back import run")
+        raise HTTPException(status_code=500, detail=f"Error rolling back: {e}")
+
+
+@router.post("/admin/import/cleanup")
+def admin_import_cleanup(
+    payload: CleanupPayload,
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Elimina físicamente los registros y resúmenes de corridas viejas o fallidas
+    para liberar espacio de base de datos en producción.
+    """
+    try:
+        success_runs = db.query(DimensionamientoImportRun).filter_by(status="success").order_by(
+            DimensionamientoImportRun.finished_at.desc(),
+            DimensionamientoImportRun.id.desc()
+        ).all()
+        
+        keep_ids = set()
+        for r in success_runs[:payload.keep_runs]:
+            keep_ids.add(r.id)
+            
+        running_runs = db.query(DimensionamientoImportRun).filter_by(status="running").all()
+        for r in running_runs:
+            keep_ids.add(r.id)
+            
+        latest_success = db.query(DimensionamientoImportRun).filter_by(status="success").order_by(
+            DimensionamientoImportRun.finished_at.desc(),
+            DimensionamientoImportRun.id.desc()
+        ).first()
+        if latest_success:
+            keep_ids.add(latest_success.id)
+            
+        if not keep_ids:
+            return {"ok": True, "deleted_runs_count": 0, "message": "No runs to protect, skipping cleanup."}
+            
+        runs_to_delete = db.query(DimensionamientoImportRun).filter(
+            ~DimensionamientoImportRun.id.in_(list(keep_ids))
+        ).all()
+        
+        delete_ids = [r.id for r in runs_to_delete]
+        if not delete_ids:
+            return {"ok": True, "deleted_runs_count": 0, "message": "No runs to clean up."}
+            
+        logger.info("[DIM][IMPORT] Cleaning up runs: %s", delete_ids)
+        
+        db.query(DimensionamientoRecord).filter(DimensionamientoRecord.import_run_id.in_(delete_ids)).delete(synchronize_session=False)
+        db.query(DimensionamientoFamilyMonthlySummary).filter(DimensionamientoFamilyMonthlySummary.import_run_id.in_(delete_ids)).delete(synchronize_session=False)
+        db.query(DimensionamientoDashboardSnapshot).filter(DimensionamientoDashboardSnapshot.import_run_id.in_(delete_ids)).delete(synchronize_session=False)
+        db.query(DimensionamientoImportError).filter(DimensionamientoImportError.import_run_id.in_(delete_ids)).delete(synchronize_session=False)
+        db.query(DimensionamientoImportRun).filter(DimensionamientoImportRun.id.in_(delete_ids)).delete(synchronize_session=False)
+        
+        db.commit()
+        logger.info("[DIM][IMPORT] Cleanup completed successfully. Deleted runs: %d", len(delete_ids))
+        return {
+            "ok": True,
+            "deleted_runs_count": len(delete_ids),
+            "deleted_run_ids": delete_ids,
+            "message": f"Successfully deleted {len(delete_ids)} old runs and their records.",
+        }
+    except Exception as e:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] Error performing cleanup")
+        raise HTTPException(status_code=500, detail=f"Error performing cleanup: {e}")
+
