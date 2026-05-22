@@ -377,6 +377,7 @@
 
 {# Alias de compatibilidad para macros existentes #}
 {% set sfus = namespace(faltante_real=_falt, ambiguo=0, hora_flag=false) %}
+{% set fusion_fields = fusion_ctx.campos_fusion if fusion_ctx and fusion_ctx.campos_fusion else {} %}
 
 {% macro field_value(field, empty_text="Sin dato en pliego") -%}
   {% if not field or field.coverage_status == "FALTANTE_REAL" or not field.display_value -%}
@@ -427,6 +428,12 @@
   {% else %}
     {{ value }}
   {% endif %}
+{%- endmacro %}
+
+{% macro fusion_value(key, empty_text="Sin dato en pliego") -%}
+  {%- set fc = fusion_fields.get(key, {}) -%}
+  {%- set val = fc.valor_normalizado if fc and fc.valor_normalizado else (fc.valor if fc else "") -%}
+  {{ val if val else empty_text }}
 {%- endmacro %}
 
 {# ── Macro: fusion_field_card — renderiza un campo de fusion_ctx.campos_fusion ── #}
@@ -571,10 +578,10 @@
           <span class="erph-data-val">{{ field_value(expediente) }}</span>
         </div>
         {% endif %}
-        {% if field_value(fecha_apertura) and field_value(fecha_apertura) != "Sin dato en pliego" %}
+        {% if fusion_value('fecha_apertura') != "Sin dato en pliego" %}
         <div class="erph-data-row">
           <span class="erph-data-lbl"><i class="bi bi-calendar-event"></i> Apertura</span>
-          <span class="erph-data-val">{{ fecha_apertura_value(fecha_apertura) }}</span>
+          <span class="erph-data-val">{{ fusion_value('fecha_apertura')|replace(' 00:00:00', '') }}</span>
         </div>
         {% endif %}
         {% if field_value(fecha_inicio_consulta) and field_value(fecha_inicio_consulta) != "Sin dato en pliego" %}
@@ -600,13 +607,13 @@
           <span class="erph-data-val">{{ compact_field_value(plazo_mantenimiento, "Sin dato en pliego", 42) }}</span>
         </div>
         {% endif %}
-        {% if field_value(monto) and field_value(monto) != "Sin dato en pliego" %}
+        {% if fusion_value('monto') != "Sin dato en pliego" %}
         <div class="erph-data-row">
           <span class="erph-data-lbl"><i class="bi bi-currency-dollar"></i> Monto</span>
           <span class="erph-data-val erph-data-val--accent">
-            {{ field_value(monto) }}
-            {% if field_value(moneda) and field_value(moneda) != "Sin dato en pliego" %}
-            <span style="font-weight:500;font-size:.85em;opacity:.7;margin-left:.3rem;">{{ field_value(moneda) }}</span>
+            {{ fusion_value('monto') }}
+            {% if fusion_value('moneda') != "Sin dato en pliego" %}
+            <span style="font-weight:500;font-size:.85em;opacity:.7;margin-left:.3rem;">{{ fusion_value('moneda') }}</span>
             {% endif %}
           </span>
         </div>
@@ -669,7 +676,7 @@
     </div>
   </div>
 
-  {# ── Sección 1: Identificación para Fusion ── #}
+  {# ── Sección 1: Identificación del proceso ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
@@ -679,28 +686,22 @@
           Identificación del proceso
         </h2>
       </div>
-      <p class="erp-section-note">Campos clave para identificación del proceso.</p>
+      <p class="erp-section-note">Datos de identificación para carga en Fusión/ERP.</p>
     </div>
     <div class="erp-grid">
-      {# Unidad Ejecutora — campo principal (no "Organismo") #}
-      {{ fusion_field_card("unidad_ejecutora", "Unidad Ejecutora") }}
-      {{ fusion_field_card("numero_proceso", "N° Proceso") }}
-      {{ fusion_field_card("expediente", "Expediente") }}
-      {{ fusion_field_card("procedimiento_seleccion", "Procedimiento Selección") }}
-      {{ fusion_field_card("modalidad", "Modalidad") }}
-
-      {# Etapa — dato complementario desde proceso #}
-      <div class="erp-item {% if _etapa %}erp-item--ok{% else %}erp-item--miss{% endif %}">
-        <div class="erp-item-label">Etapa</div>
-        {% if _etapa %}
-        <div class="erp-item-value">{{ _etapa }}</div>
-        {% else %}
-        <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
-        {% endif %}
+      {# ID Proceso (caso.id interno) #}
+      <div class="erp-item erp-item--ok">
+        <div class="erp-item-label">ID Proceso</div>
+        <div class="erp-item-value">{{ caso.id }}</div>
       </div>
 
+      {{ fusion_field_card("numero_proceso", "N° Procesos") }}
       {{ fusion_field_card("nombre_proceso", "Nombre Proceso") }}
+      {{ fusion_field_card("unidad_ejecutora", "Unidad Ejecutora") }}
       {{ fusion_field_card("objeto_contratacion", "Objeto Contratación", full=true, compact=true) }}
+      {{ fusion_field_card("procedimiento_seleccion", "Procedimiento Selección") }}
+      {{ fusion_field_card("expediente", "Nro Expediente") }}
+      {{ fusion_field_card("modalidad", "Modalidad") }}
     </div>
 
     {# Dato secundario: organismo contratante si existe y es diferente a unidad ejecutora #}
@@ -713,6 +714,30 @@
       <span style="opacity:.5;margin-left:.3rem;">(referencia — se usa Unidad Ejecutora como campo principal)</span>
     </div>
     {% endif %}
+  </section>
+
+  {# ── Sección 2: Configuración de contratación ── #}
+  <section class="erp-section">
+    <div class="erp-section-head">
+      <div>
+        <div class="erp-section-kicker">Configuración de contratación</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-sliders"></i></span>
+          Configuración de contratación
+        </h2>
+      </div>
+      <p class="erp-section-note">Parámetros de cotización, adjudicación y condiciones del proceso.</p>
+    </div>
+    <div class="erp-grid">
+      {{ fusion_field_card("tipo_cotizacion", "Tipo Cotización") }}
+      {{ fusion_field_card("tipo_adjudicacion", "Tipo Adjudicación") }}
+      {{ fusion_field_card("cant_oferta_permitidas", "Cant. Oferta Permitidas") }}
+      {{ fusion_field_card("plazo_mantenimiento_oferta", "Plazo Mantenimiento Oferta") }}
+      {{ fusion_field_card("alternativa", "Alternativa") }}
+      {{ fusion_field_card("ampliacion", "Ampliación") }}
+      {{ fusion_field_card("acepta_prorroga", "Acepta Prórroga") }}
+      {{ fusion_field_card("acepta_redeterminacion", "Acepta Redeterminación") }}
+    </div>
   </section>
 
   {# ── Sección 2: Cronología Fusion ── #}
@@ -732,12 +757,12 @@
       {# Siempre mostrar inicio/fin de consulta — si falta, marcado como faltante crítico #}
       {{ fusion_field_card("fecha_inicio_consulta", "Fecha Inicio Consulta") }}
       {{ fusion_field_card("fecha_final_consulta", "Fecha Final Consulta") }}
-      {{ fusion_field_card("plazo_mantenimiento_oferta", "Plazo Mantenimiento Oferta") }}
       {{ fusion_field_card("duracion_contrato", "Duración Contrato", compact=true) }}
+      {{ fusion_field_card("fecha_limite_muestras", "Fecha limite para presentación de muestras") }}
     </div>
   </section>
 
-  {# ── Sección 3: Condiciones económicas y comerciales ── #}
+  {# ── Sección 4: Condiciones económicas y comerciales ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
@@ -747,20 +772,88 @@
           Condiciones económicas y comerciales
         </h2>
       </div>
-      <p class="erp-section-note">Datos económicos y comerciales del proceso.</p>
+      <p class="erp-section-note">Monto, moneda y condiciones de entrega del proceso.</p>
     </div>
     <div class="erp-grid">
       {{ fusion_field_card("monto", "Monto") }}
       {{ fusion_field_card("moneda", "Moneda") }}
-      {{ fusion_field_card("tipo_cotizacion", "Tipo Cotización") }}
-      {{ fusion_field_card("tipo_adjudicacion", "Tipo Adjudicación") }}
-      {{ fusion_field_card("cant_oferta_permitidas", "Cant. Oferta Permitidas") }}
-      {{ fusion_field_card("acepta_redeterminacion", "Acepta Redeterminación") }}
-      {{ fusion_field_card("acepta_prorroga", "Acepta Prórroga") }}
+      {{ fusion_field_card("lugar_entrega", "Lugar y Cond. De Entrega", full=true, compact=true) }}
     </div>
   </section>
 
-  {# ── Sección 4: Renglones Fusion ── #}
+  {# ── Sección 5: Garantías ── #}
+  <section class="erp-section">
+    <div class="erp-section-head">
+      <div>
+        <div class="erp-section-kicker">Garantías</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-shield-check"></i></span>
+          Garantías
+        </h2>
+      </div>
+      <p class="erp-section-note">
+        Porcentaje o vacío para las primeras cinco. Si/No para Contragarantía.
+        En el Excel de Fusión: porcentaje como texto o celda vacía (nunca "No").
+      </p>
+    </div>
+    <div class="erp-grid">
+      {# Garantías porcentuales: mostrar % o "No aplica" #}
+      {% for g_key, g_label in [
+          ("garantia_mantenimiento_oferta",     "Garantía de Mantenimiento de Oferta"),
+          ("garantia_anticipo_financiero",      "Garantía de Anticipo Financiero"),
+          ("garantia_cumplimiento_contrato",    "Garantía de Cumplimiento de Contrato"),
+          ("garantia_impugnacion_pliego",       "Garantía de Impugnación al Pliego"),
+          ("garantia_impugnacion_preadjudicacion", "Garantía de Impugnación a la Preadjudicación"),
+      ] %}
+        {% set _gf = fusion_ctx.campos_fusion.get(g_key, {}) %}
+        {% set _gv = _gf.get('valor', '') %}
+      <div class="erp-item {% if _gv %}erp-item--ok{% else %}erp-item--miss{% endif %}">
+        <div class="erp-item-label">{{ g_label }}</div>
+        {% if _gv %}
+          <div class="erp-item-value">{{ _gv }}</div>
+          <span class="erp-status-pill erp-status-pill--ok"><i class="bi bi-percent"></i> Porcentaje</span>
+        {% else %}
+          <div class="erp-item-value erp-item-value--empty">No aplica / Sin dato en pliego</div>
+          <span class="erp-status-pill erp-status-pill--miss"><i class="bi bi-dash-circle"></i> Vacío en Excel Fusión</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {# Contragarantía: Si/No #}
+      {% set _gcg = fusion_ctx.campos_fusion.get('garantia_contragarantia', {}) %}
+      {% set _gcgv = _gcg.get('valor', '') %}
+      <div class="erp-item {% if _gcgv %}erp-item--ok{% else %}erp-item--miss{% endif %}">
+        <div class="erp-item-label">Garantía de Incorporar Contragarantía</div>
+        {% if _gcgv %}
+          <div class="erp-item-value">{{ _gcgv }}</div>
+        {% else %}
+          <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
+          <span class="erp-status-pill erp-status-pill--miss"><i class="bi bi-exclamation-circle"></i> Faltante</span>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  {# ── Sección 6: Requisitos adicionales ── #}
+  <section class="erp-section">
+    <div class="erp-section-head">
+      <div>
+        <div class="erp-section-kicker">Requisitos adicionales</div>
+        <h2 class="erp-section-title">
+          <span class="erp-section-icon"><i class="bi bi-clipboard2-check"></i></span>
+          Requisitos adicionales
+        </h2>
+      </div>
+      <p class="erp-section-note">Exigencias especiales, muestras y fechas asociadas.</p>
+    </div>
+    <div class="erp-grid">
+      {{ fusion_field_card("exigencia_desestimacion", "Exigencia con Causal de Desestimación", compact=true) }}
+      {{ fusion_field_card("lleva_muestras", "¿Lleva Muestras?") }}
+      {{ fusion_field_card("fecha_limite_muestras", "Fecha Límite Presentación Muestras") }}
+    </div>
+  </section>
+
+  {# ── Sección 7: Renglones (Detalle) ── #}
   <section class="erp-section">
     <div class="erp-section-head">
       <div>
@@ -822,15 +915,15 @@
     {% endif %}
   </section>
 
-  {# ── Sección 5: Complementarios de pliego (colapsable) ── #}
+  {# ── Sección 8: Información adicional del pliego (colapsable) ── #}
   <details class="erp-section" style="cursor:pointer;">
     <summary style="display:flex;justify-content:space-between;align-items:center;list-style:none;padding:.2rem 0;cursor:pointer;">
       <div class="erp-section-head" style="border-bottom:none;margin-bottom:0;padding-bottom:0;width:100%;">
         <div>
-          <div class="erp-section-kicker">Complementarios · Pliego</div>
+          <div class="erp-section-kicker">Datos adicionales · Pliego</div>
           <h2 class="erp-section-title" style="margin:0;">
             <span class="erp-section-icon"><i class="bi bi-card-checklist"></i></span>
-            Información complementaria de pliego
+            Datos adicionales del pliego
           </h2>
         </div>
         <span style="font-size:.8rem;color:var(--p-text3);font-weight:600;">
@@ -841,19 +934,6 @@
 
     <div style="border-top:1px solid var(--p-border);padding-top:1rem;margin-top:.5rem;">
       <div class="erp-grid">
-        {# Garantías consolidadas #}
-        {% for g in caso.garantias %}
-        <div class="erp-item {% if g.tipo %}erp-item--ok{% else %}erp-item--miss{% endif %}">
-          <div class="erp-item-label">{{ g.tipo or 'Garantía' }}</div>
-          <div class="erp-item-value">
-            {% if g.porcentaje %}{{ g.porcentaje }}{% endif %}
-            {% if g.plazo %} · {{ g.plazo }}{% endif %}
-            {% if not g.porcentaje and not g.plazo %}<span class="erp-item-value--empty">Sin datos</span>{% endif %}
-          </div>
-          {% if g.fuente %}<div style="font-size:.7rem;color:var(--p-text4);">Fuente: {{ g.fuente }}</div>{% endif %}
-        </div>
-        {% endfor %}
-
         {# Condiciones de pago #}
         {% set _pago = resumen.get('pago', '') %}
         {% if _pago %}
@@ -889,12 +969,19 @@
           <div class="erp-item-value erp-item-value--compact">{{ _contacto }}</div>
         </div>
         {% endif %}
+
+        {# Etapa del proceso #}
+        {% if _etapa %}
+        <div class="erp-item erp-item--ok">
+          <div class="erp-item-label">Etapa</div>
+          <div class="erp-item-value">{{ _etapa }}</div>
+        </div>
+        {% endif %}
       </div>
 
-      {# Link a vista ampliada para más detalle #}
       <div style="padding:.8rem 0 0;font-size:.82rem;color:var(--p-text3);">
         <i class="bi bi-info-circle me-1"></i>
-        Ver requisitos, muestras, exigencias y trazabilidad completa en la
+        Ver requisitos, trazabilidad completa, hallazgos y documentos en la
         <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada" style="color:var(--p-accent);font-weight:600;">Detalle completo</a>.
       </div>
     </div>

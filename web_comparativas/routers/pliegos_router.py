@@ -1584,7 +1584,11 @@ def lectura_pliegos_exportar_rp(request: Request, caso_id: int):
     payload = export_fusion_excel_bytes(caso)
     safe_name = _slugify(caso.numero_proceso or caso.titulo or f"caso_{caso.id}")
     filename = f"SIEM_Fusion_{safe_name or caso.id}.xlsx"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store, max-age=0",
+        "Pragma": "no-cache",
+    }
     return StreamingResponse(
         io.BytesIO(payload),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
