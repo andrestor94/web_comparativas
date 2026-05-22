@@ -60,9 +60,22 @@ from web_comparativas.pliegos_fusion import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _jinja_safe_text(value) -> str:
+    """Convierte cualquier valor de Excel a string seguro para slicing/filtros."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    return str(value).strip()
+
+
+templates.env.filters["safe_text"] = _jinja_safe_text
 
 UPLOAD_DIR = BASE_DIR / "static" / "uploads" / "pliegos_solicitudes"
 EXCEL_DIR = BASE_DIR / "static" / "uploads" / "pliegos_excel"
@@ -1081,15 +1094,21 @@ async def lectura_pliegos_cargar_excel(
             f"/mercado-publico/lectura-pliegos/{caso_id}/admin?error=solo_xlsx", 303)
 
     content = await excel_file.read()
+    logger.info("[LP_EXCEL] Archivo recibido: '%s' bytes=%s caso=%s estado=%s usuario=%s",
+                excel_file.filename, len(content) if content else 0, caso_id, caso.estado, user.id)
+
     if not content:
+        logger.warning("[LP_EXCEL] Archivo vacío caso=%s archivo='%s'", caso_id, excel_file.filename)
         return RedirectResponse(
             f"/mercado-publico/lectura-pliegos/{caso_id}/admin?error=archivo_vacio", 303)
 
     # Validar estructura del Excel
     errores, advertencias = _validar_excel(content)
+    logger.info("[LP_EXCEL] Validación caso=%s errores=%s advertencias=%s",
+                caso_id, errores, advertencias)
 
     if errores:
-        # Guardar igual para que admin pueda ver el reporte de errores
+        logger.warning("[LP_EXCEL] Excel rechazado por estructura caso=%s errores=%s", caso_id, errores)
         return RedirectResponse(
             f"/mercado-publico/lectura-pliegos/{caso_id}/validacion?errores={_encode_msgs(errores)}&advertencias={_encode_msgs(advertencias)}&pendiente=1",
             303
@@ -1097,7 +1116,12 @@ async def lectura_pliegos_cargar_excel(
 
     # Guardar Excel en disco
     excel_dir = EXCEL_DIR / str(caso_id)
-    excel_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        excel_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error("[LP_EXCEL] No se pudo crear directorio %s: %s", excel_dir, e)
+        return RedirectResponse(
+            f"/mercado-publico/lectura-pliegos/{caso_id}/admin?error=dir_{str(e)[:40]}", 303)
 
     # Calcular versión
     ultima_version = (
@@ -1107,7 +1131,13 @@ async def lectura_pliegos_cargar_excel(
     )
     nueva_version = ultima_version + 1
     nombre_guardado = f"excel_v{nueva_version}_{uuid.uuid4().hex[:6]}.xlsx"
-    (excel_dir / nombre_guardado).write_bytes(content)
+    try:
+        (excel_dir / nombre_guardado).write_bytes(content)
+        logger.info("[LP_EXCEL] Archivo guardado: %s caso=%s", nombre_guardado, caso_id)
+    except Exception as e:
+        logger.error("[LP_EXCEL] No se pudo escribir archivo %s: %s", nombre_guardado, e)
+        return RedirectResponse(
+            f"/mercado-publico/lectura-pliegos/{caso_id}/admin?error=write_{str(e)[:40]}", 303)
 
     # Desactivar versiones previas
     db.query(PliegoExcelCarga).filter(
@@ -1130,15 +1160,21 @@ async def lectura_pliegos_cargar_excel(
     # Importar datos del Excel a las tablas
     try:
         _importar_excel(db, caso_id, content)
+        logger.info("[LP_EXCEL] Importación exitosa caso=%s v%s", caso_id, nueva_version)
     except Exception as e:
+        logger.exception("[LP_EXCEL] Importación FALLÓ caso=%s: %s", caso_id, e)
         traceback.print_exc()
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception as rb_exc:
+            logger.error("[LP_EXCEL] Rollback falló caso=%s: %s", caso_id, rb_exc)
         return RedirectResponse(
             f"/mercado-publico/lectura-pliegos/{caso_id}/admin?error=import_{str(e)[:50]}", 303)
 
     _cambiar_estado(db, caso, "excel_cargado",
                     f"Excel cargado (v{nueva_version}): {excel_file.filename}", user.id)
     db.commit()
+    logger.info("[LP_EXCEL] Commit OK caso=%s estado=excel_cargado v%s", caso_id, nueva_version)
 
     return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}/validacion", 303)
 
@@ -1269,34 +1305,96 @@ def lectura_pliegos_validacion(
         raise HTTPException(404)
 
     # Resumen de registros cargados
-    resumen = {
-        "cronograma": len(caso.cronograma),
-        "requisitos": len(caso.requisitos),
-        "garantias": len(caso.garantias),
-        "renglones": len(caso.renglones),
-        "documentos": len(caso.documentos_pliego),
-        "actos_admin": len(caso.actos_admin),
-        "hallazgos": len(caso.hallazgos),
-        "faltantes": len(caso.faltantes),
-        "trazabilidad": len(caso.trazabilidad),
-        "proceso": bool(caso.datos_proceso and caso.datos_proceso.datos),
-    }
-
-    criticos = [f for f in caso.faltantes if (f.criticidad or "").lower() in {"alta", "critica", "crítica", "alto"}]
-    rp_output = build_rp_output(caso)
-    resumen_summary = build_resumen_licitacion(caso)
-    completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
-    completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
-    completitud_tecnica = resumen_summary["completitud_tecnica"]
-
-    # Calcular estado Fusion independientemente de LicIA
-    fusion_ctx = calcular_estado_fusion(caso)
+    try:
+        resumen = {
+            "cronograma": len(caso.cronograma),
+            "requisitos": len(caso.requisitos),
+            "garantias": len(caso.garantias),
+            "renglones": len(caso.renglones),
+            "documentos": len(caso.documentos_pliego),
+            "actos_admin": len(caso.actos_admin),
+            "hallazgos": len(caso.hallazgos),
+            "faltantes": len(caso.faltantes),
+            "trazabilidad": len(caso.trazabilidad),
+            "proceso": bool(caso.datos_proceso and caso.datos_proceso.datos),
+        }
+        criticos = [f for f in caso.faltantes if (f.criticidad or "").lower() in {"alta", "critica", "crítica", "alto"}]
+    except Exception as _exc:
+        logger.exception("[LP_VAL] Error cargando resumen caso=%s: %s", caso_id, _exc)
+        resumen = {k: 0 for k in ["cronograma", "requisitos", "garantias", "renglones",
+                                   "documentos", "actos_admin", "hallazgos", "faltantes", "trazabilidad"]}
+        resumen["proceso"] = False
+        criticos = []
 
     errores_list = _decode_msgs(errores) if errores else []
     adv_list = _decode_msgs(advertencias) if advertencias else []
 
-    ctrl_datos = caso.control_carga.datos if caso.control_carga else {}
-    ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
+    # ── build_rp_output ────────────────────────────────────────────────────────
+    _rp_output_default = {
+        "schema": {},
+        "general_fields": [],
+        "detail_fields": [],
+        "detail_rows": [],
+        "matrix_fields": [],
+        "validation": {"total_campos_rp": 0, "completos": 0, "ambiguos": 0,
+                       "requieren_validacion_manual": 0, "faltantes_reales": 0, "porcentaje_completitud": 0},
+        "validation_by_group": {
+            "Datos generales del proceso": {"total_campos_rp": 0, "completos": 0, "ambiguos": 0,
+                                            "requieren_validacion_manual": 0, "faltantes_reales": 0, "porcentaje_completitud": 0},
+            "Detalle": {"total_campos_rp": 0, "completos": 0, "ambiguos": 0,
+                        "requieren_validacion_manual": 0, "faltantes_reales": 0, "porcentaje_completitud": 0},
+            "Matriz Requerimiento del Pliego": {"total_campos_rp": 0, "completos": 0, "ambiguos": 0,
+                                                "requieren_validacion_manual": 0, "faltantes_reales": 0, "porcentaje_completitud": 0},
+        },
+        "mapping_matrix": [],
+        "general_export": {},
+        "detail_export": [],
+        "matrix_export": {},
+        "process_extra_fields": {},
+        "active_excel_sheets": [],
+        "dual_data": {},
+    }
+    try:
+        rp_output = build_rp_output(caso)
+        logger.info("[LP_VAL] build_rp_output OK caso=%s sheets=%s",
+                    caso_id, rp_output.get("active_excel_sheets", []))
+    except Exception as _exc:
+        logger.exception("[LP_VAL] build_rp_output FALLÓ caso=%s: %s", caso_id, _exc)
+        rp_output = _rp_output_default
+        errores_list = [f"Error al calcular cobertura RP: {_exc}"] + errores_list
+
+    # ── build_resumen_licitacion ───────────────────────────────────────────────
+    _completitud_default = {"porcentaje": 0, "items": [], "score": 0.0}
+    try:
+        resumen_summary = build_resumen_licitacion(caso)
+        completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
+        completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
+        completitud_tecnica = resumen_summary["completitud_tecnica"]
+        logger.info("[LP_VAL] build_resumen_licitacion OK caso=%s completitud=%s%%", caso_id, completitud)
+    except Exception as _exc:
+        logger.exception("[LP_VAL] build_resumen_licitacion FALLÓ caso=%s: %s", caso_id, _exc)
+        completitud = 0
+        completitud_ejecutiva = _completitud_default
+        completitud_tecnica = _completitud_default
+        errores_list = [f"Error al calcular completitud: {_exc}"] + errores_list
+
+    # ── calcular_estado_fusion ────────────────────────────────────────────────
+    try:
+        fusion_ctx = calcular_estado_fusion(caso)
+        logger.info("[LP_VAL] calcular_estado_fusion OK caso=%s estado=%s",
+                    caso_id, fusion_ctx.get("estado_fusion") if isinstance(fusion_ctx, dict) else "?")
+    except Exception as _exc:
+        logger.exception("[LP_VAL] calcular_estado_fusion FALLÓ caso=%s: %s", caso_id, _exc)
+        fusion_ctx = None
+        adv_list = [f"Estado Fusión no disponible: {_exc}"] + adv_list
+
+    # ── Control de carga ───────────────────────────────────────────────────────
+    try:
+        ctrl_datos = caso.control_carga.datos if caso.control_carga else {}
+        ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
+    except Exception as _exc:
+        logger.exception("[LP_VAL] Error leyendo control_carga caso=%s: %s", caso_id, _exc)
+        ctrl_row = {}
 
     return templates.TemplateResponse("pliegos/validacion_excel.html", {
         "request": request,
@@ -1740,6 +1838,8 @@ def _validar_excel(content: bytes) -> tuple[list, list]:
 def _importar_excel(db: Session, solicitud_id: int, content: bytes):
     """Importa los datos del Excel a las tablas correspondientes. Reemplaza datos anteriores."""
 
+    logger.info("[LP_IMPORT] Iniciando importación caso=%s bytes=%s", solicitud_id, len(content))
+
     # Limpiar datos anteriores
     for Model in [PliegoCronograma, PliegoRequisito, PliegoGarantia, PliegoRenglon,
                   PliegoDocumento, PliegoActoAdmin, PliegoHallazgo, PliegoFaltante,
@@ -1747,7 +1847,7 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
         db.query(Model).filter(
             getattr(Model, "solicitud_id") == solicitud_id
         ).delete()
-    
+
     for ModelSingle in [PliegoFusionCabecera, PliegoAnalitica, PliegoControlCarga]:
         db.query(ModelSingle).filter(
             getattr(ModelSingle, "solicitud_id") == solicitud_id
@@ -1758,414 +1858,498 @@ def _importar_excel(db: Session, solicitud_id: int, content: bytes):
 
     xl = pd.ExcelFile(io.BytesIO(content))
     sheet_map = _build_sheet_map(xl)
+    logger.info("[LP_IMPORT] Hojas en el Excel: %s", xl.sheet_names)
+    logger.info("[LP_IMPORT] Hojas reconocidas (canónico→real): %s", sheet_map)
+    _import_warnings: list[str] = []
 
     # ── Proceso ──────────────────────────────────────────────────────────────
     if "Proceso" in sheet_map:
-        df = xl.parse(sheet_map["Proceso"], dtype=str).fillna("")
-        datos = _extract_proceso_data(df)
-        if False and not df.empty:
-            if len(df.columns) >= 2:
-                # Formato clave-valor: columna 0 = campo, columna 1 = valor
-                for _, row in df.iterrows():
-                    k = _safe_str(row.iloc[0])
-                    v = _safe_str(row.iloc[1]) if len(row) > 1 else ""
-                    if k:
-                        datos[k] = v
+        try:
+            df = xl.parse(sheet_map["Proceso"], dtype=str).fillna("")
+            datos = _extract_proceso_data(df)
+            logger.info("[LP_IMPORT] Proceso: %s claves extraídas caso=%s columnas=%s",
+                        len(datos), solicitud_id, list(df.columns))
+            if proc_existente:
+                proc_existente.datos = datos
             else:
-                # Formato de fila única
-                datos = {col: _safe_str(df[col].iloc[0]) for col in df.columns if _safe_str(df[col].iloc[0])}
-        if proc_existente:
-            proc_existente.datos = datos
-        else:
-            db.add(PliegoProceso(solicitud_id=solicitud_id, datos=datos))
+                db.add(PliegoProceso(solicitud_id=solicitud_id, datos=datos))
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Proceso caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Proceso: {_exc}")
 
     # ── Cronograma ────────────────────────────────────────────────────────────
     if "Cronograma" in sheet_map:
-        df = xl.parse(sheet_map["Cronograma"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "hito": ["hito", "evento", "item"],
-            "fecha": ["fecha"],
-            "hora": ["hora"],
-            "lugar_medio": ["lugar", "medio", "lugar/medio", "lugar_medio", "observaciones"],
-            "estado_dato": ["estado", "estado_dato"],
-            "fuente": ["fuente"],
-        })
-        for row in _iter_data_rows(df):
-            hito = _safe_str(row.get(col_map.get("hito", ""), ""))
-            if not hito:
-                continue
-            db.add(PliegoCronograma(
-                solicitud_id=solicitud_id,
-                hito=hito,
-                fecha=_safe_str(row.get(col_map.get("fecha", ""), "")),
-                hora=_safe_str(row.get(col_map.get("hora", ""), "")),
-                lugar_medio=_safe_str(row.get(col_map.get("lugar_medio", ""), "")),
-                estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
-                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Cronograma"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "hito": ["hito", "evento", "item"],
+                "fecha": ["fecha"],
+                "hora": ["hora"],
+                "lugar_medio": ["lugar", "medio", "lugar/medio", "lugar_medio", "observaciones"],
+                "estado_dato": ["estado", "estado_dato"],
+                "fuente": ["fuente"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                hito = _safe_str(row.get(col_map.get("hito", ""), ""))
+                if not hito:
+                    continue
+                db.add(PliegoCronograma(
+                    solicitud_id=solicitud_id,
+                    hito=hito,
+                    fecha=_safe_str(row.get(col_map.get("fecha", ""), "")),
+                    hora=_safe_str(row.get(col_map.get("hora", ""), "")),
+                    lugar_medio=_safe_str(row.get(col_map.get("lugar_medio", ""), "")),
+                    estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
+                    fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Cronograma: %s registros caso=%s col_map=%s", _n, solicitud_id, col_map)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Cronograma caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Cronograma: {_exc}")
 
     # ── Requisitos ────────────────────────────────────────────────────────────
     if "Requisitos" in sheet_map:
-        df = xl.parse(sheet_map["Requisitos"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "categoria": ["categoria", "categoría", "tipo"],
-            "descripcion": ["requisito", "descripcion", "descripción", "detalle"],
-            "obligatorio": ["obligatoriedad", "obligatorio", "requerido"],
-            "momento_presentacion": ["momento", "momento_presentacion"],
-            "medio_presentacion": ["medio", "medio_presentacion"],
-            "vigencia": ["vigencia"],
-            "estado_dato": ["estado", "estado_dato"],
-            "fuente": ["fuente"],
-        })
-        for row in _iter_data_rows(df):
-            desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
-            if not desc:
-                continue
-            db.add(PliegoRequisito(
-                solicitud_id=solicitud_id,
-                categoria=_safe_str(row.get(col_map.get("categoria", ""), "")),
-                descripcion=desc,
-                obligatorio=_safe_str(row.get(col_map.get("obligatorio", ""), "")),
-                momento_presentacion=_safe_str(row.get(col_map.get("momento_presentacion", ""), "")),
-                medio_presentacion=_safe_str(row.get(col_map.get("medio_presentacion", ""), "")),
-                vigencia=_safe_str(row.get(col_map.get("vigencia", ""), "")),
-                estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
-                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Requisitos"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "categoria": ["categoria", "categoría", "tipo"],
+                "descripcion": ["requisito", "descripcion", "descripción", "detalle"],
+                "obligatorio": ["obligatoriedad", "obligatorio", "requerido"],
+                "momento_presentacion": ["momento", "momento_presentacion"],
+                "medio_presentacion": ["medio", "medio_presentacion"],
+                "vigencia": ["vigencia"],
+                "estado_dato": ["estado", "estado_dato"],
+                "fuente": ["fuente"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
+                if not desc:
+                    continue
+                db.add(PliegoRequisito(
+                    solicitud_id=solicitud_id,
+                    categoria=_safe_str(row.get(col_map.get("categoria", ""), "")),
+                    descripcion=desc,
+                    obligatorio=_safe_str(row.get(col_map.get("obligatorio", ""), "")),
+                    momento_presentacion=_safe_str(row.get(col_map.get("momento_presentacion", ""), "")),
+                    medio_presentacion=_safe_str(row.get(col_map.get("medio_presentacion", ""), "")),
+                    vigencia=_safe_str(row.get(col_map.get("vigencia", ""), "")),
+                    estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
+                    fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Requisitos: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Requisitos caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Requisitos: {_exc}")
 
     # ── Garantias ─────────────────────────────────────────────────────────────
     if "Garantias" in sheet_map:
-        df = xl.parse(sheet_map["Garantias"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "tipo": ["tipo", "tipo_garantia"],
-            "requerida": ["requerida", "requerido"],
-            "porcentaje": ["porcentaje_o_monto", "porcentaje", "porcentaje_%", "%"],
-            "base_calculo": ["base", "base_calculo"],
-            "plazo": ["momento_exigibilidad", "plazo"],
-            "formas_admitidas": ["formas", "formas_admitidas"],
-            "estado_dato": ["estado", "estado_dato"],
-            "fuente": ["fuente"],
-        })
-        for row in _iter_data_rows(df):
-            tipo = _safe_str(row.get(col_map.get("tipo", ""), ""))
-            if not tipo:
-                continue
-            db.add(PliegoGarantia(
-                solicitud_id=solicitud_id,
-                tipo=tipo,
-                requerida=_safe_str(row.get(col_map.get("requerida", ""), "")),
-                porcentaje=_safe_str(row.get(col_map.get("porcentaje", ""), "")),
-                base_calculo=_safe_str(row.get(col_map.get("base_calculo", ""), "")),
-                plazo=_safe_str(row.get(col_map.get("plazo", ""), "")),
-                formas_admitidas=_safe_str(row.get(col_map.get("formas_admitidas", ""), "")),
-                estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
-                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Garantias"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "tipo": ["tipo", "tipo_garantia"],
+                "requerida": ["requerida", "requerido"],
+                "porcentaje": ["porcentaje_o_monto", "porcentaje", "porcentaje_%", "%"],
+                "base_calculo": ["base", "base_calculo"],
+                "plazo": ["momento_exigibilidad", "plazo"],
+                "formas_admitidas": ["formas", "formas_admitidas"],
+                "estado_dato": ["estado", "estado_dato"],
+                "fuente": ["fuente"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                tipo = _safe_str(row.get(col_map.get("tipo", ""), ""))
+                if not tipo:
+                    continue
+                db.add(PliegoGarantia(
+                    solicitud_id=solicitud_id,
+                    tipo=tipo,
+                    requerida=_safe_str(row.get(col_map.get("requerida", ""), "")),
+                    porcentaje=_safe_str(row.get(col_map.get("porcentaje", ""), "")),
+                    base_calculo=_safe_str(row.get(col_map.get("base_calculo", ""), "")),
+                    plazo=_safe_str(row.get(col_map.get("plazo", ""), "")),
+                    formas_admitidas=_safe_str(row.get(col_map.get("formas_admitidas", ""), "")),
+                    estado_dato=_safe_str(row.get(col_map.get("estado_dato", ""), "")),
+                    fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Garantias: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Garantias caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Garantias: {_exc}")
 
     # ── Renglones ─────────────────────────────────────────────────────────────
     if "Renglones" in sheet_map:
-        df = xl.parse(sheet_map["Renglones"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "orden": ["renglon_orden", "orden", "n°", "nro", "#"],
-            "numero_renglon": ["numero_renglon", "renglón", "renglon", "nro_renglon"],
-            "codigo_item": ["codigo_item", "codigo", "código", "cod"],
-            "descripcion": ["descripcion", "descripción", "detalle"],
-            "cantidad": ["cantidad", "cant"],
-            "unidad": ["unidad_medida", "unidad", "ud", "u.m."],
-            "destino_efector": ["destino_efector", "destino", "efector"],
-            "entrega_parcial": ["entrega_parcial", "entrega parcial"],
-            "obs_tecnicas": ["observaciones", "obs", "obs_tecnicas"],
-            "estado": ["estado"],
-            "fuente": ["fuente"],
-            "marca": ["marca"],
-            "precio_unitario": ["precio_unitario", "precio unitario"],
-            "importe_total": ["importe_total", "importe total"],
-            "lugar_entrega": ["lugar_entrega", "lugar entrega"],
-            "plazo_entrega": ["plazo_entrega", "plazo entrega"],
-            "periodicidad": ["periodicidad"],
-        })
-        for idx, row in enumerate(_iter_data_rows(df)):
-            desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
-            if not desc:
-                continue
-            orden_val = _safe_str(row.get(col_map.get("orden", ""), ""))
-            try:
-                orden_int = int(float(orden_val)) if orden_val else idx + 1
-            except (ValueError, TypeError):
-                orden_int = idx + 1
-            # Capturar todas las columnas del Excel de LicIA
-            extra_data = {
-                "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", "lugar_entrega"), "")),
-                "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", "plazo_entrega"), "")),
-                "periodicidad": _safe_str(row.get(col_map.get("periodicidad", "periodicidad"), "")),
-                "marca": _safe_str(row.get(col_map.get("marca", "marca"), "")),
-                "precio_unitario": _safe_str(row.get(col_map.get("precio_unitario", "precio_unitario"), "")),
-                "importe_total": _safe_str(row.get(col_map.get("importe_total", "importe_total"), "")),
-                "fuente": _safe_str(row.get(col_map.get("fuente", "fuente"), "")),
-                "especificaciones_tecnicas": _safe_str(row.get("especificaciones_tecnicas", "")),
-                "muestras": _safe_str(row.get("muestras", "")),
-            }
-            db.add(PliegoRenglon(
-                solicitud_id=solicitud_id,
-                orden=orden_int,
-                numero_renglon=_safe_str(row.get(col_map.get("numero_renglon", ""), "")),
-                codigo_item=_safe_str(row.get(col_map.get("codigo_item", ""), "")),
-                descripcion=desc,
-                cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
-                unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
-                destino_efector=_safe_str(row.get(col_map.get("destino_efector", ""), "")),
-                entrega_parcial=_safe_str(row.get(col_map.get("entrega_parcial", ""), "")),
-                obs_tecnicas=_safe_str(row.get(col_map.get("obs_tecnicas", ""), "")),
-                estado=_safe_str(row.get(col_map.get("estado", ""), "")),
-                datos_extra={k: v for k, v in extra_data.items() if v},
-            ))
+        try:
+            df = xl.parse(sheet_map["Renglones"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "orden": ["renglon_orden", "orden", "n°", "nro", "#"],
+                "numero_renglon": ["numero_renglon", "renglón", "renglon", "nro_renglon"],
+                "codigo_item": ["codigo_item", "codigo", "código", "cod"],
+                "descripcion": ["descripcion", "descripción", "detalle"],
+                "cantidad": ["cantidad", "cant"],
+                "unidad": ["unidad_medida", "unidad", "ud", "u.m."],
+                "destino_efector": ["destino_efector", "destino", "efector"],
+                "entrega_parcial": ["entrega_parcial", "entrega parcial"],
+                "obs_tecnicas": ["observaciones", "obs", "obs_tecnicas"],
+                "estado": ["estado"],
+                "fuente": ["fuente"],
+                "marca": ["marca"],
+                "precio_unitario": ["precio_unitario", "precio unitario"],
+                "importe_total": ["importe_total", "importe total"],
+                "lugar_entrega": ["lugar_entrega", "lugar entrega"],
+                "plazo_entrega": ["plazo_entrega", "plazo entrega"],
+                "periodicidad": ["periodicidad"],
+            })
+            _n = 0
+            for idx, row in enumerate(_iter_data_rows(df)):
+                desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
+                if not desc:
+                    continue
+                orden_val = _safe_str(row.get(col_map.get("orden", ""), ""))
+                try:
+                    orden_int = int(float(orden_val)) if orden_val else idx + 1
+                except (ValueError, TypeError):
+                    orden_int = idx + 1
+                extra_data = {
+                    "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", "lugar_entrega"), "")),
+                    "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", "plazo_entrega"), "")),
+                    "periodicidad": _safe_str(row.get(col_map.get("periodicidad", "periodicidad"), "")),
+                    "marca": _safe_str(row.get(col_map.get("marca", "marca"), "")),
+                    "precio_unitario": _safe_str(row.get(col_map.get("precio_unitario", "precio_unitario"), "")),
+                    "importe_total": _safe_str(row.get(col_map.get("importe_total", "importe_total"), "")),
+                    "fuente": _safe_str(row.get(col_map.get("fuente", "fuente"), "")),
+                    "especificaciones_tecnicas": _safe_str(row.get("especificaciones_tecnicas", "")),
+                    "muestras": _safe_str(row.get("muestras", "")),
+                }
+                db.add(PliegoRenglon(
+                    solicitud_id=solicitud_id,
+                    orden=orden_int,
+                    numero_renglon=_safe_str(row.get(col_map.get("numero_renglon", ""), "")),
+                    codigo_item=_safe_str(row.get(col_map.get("codigo_item", ""), "")),
+                    descripcion=desc,
+                    cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
+                    unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
+                    destino_efector=_safe_str(row.get(col_map.get("destino_efector", ""), "")),
+                    entrega_parcial=_safe_str(row.get(col_map.get("entrega_parcial", ""), "")),
+                    obs_tecnicas=_safe_str(row.get(col_map.get("obs_tecnicas", ""), "")),
+                    estado=_safe_str(row.get(col_map.get("estado", ""), "")),
+                    datos_extra={k: v for k, v in extra_data.items() if v},
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Renglones: %s registros caso=%s col_map=%s", _n, solicitud_id, col_map)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Renglones caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Renglones: {_exc}")
 
     # ── Documentos ────────────────────────────────────────────────────────────
     if "Documentos" in sheet_map:
-        df = xl.parse(sheet_map["Documentos"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "documento_id": ["documento_id", "id", "id_documento"],
-            "nombre": ["nombre_documento", "nombre", "documento"],
-            "tipo": ["tipo_documento", "tipo"],
-            "rol": ["prioridad_jerarquica", "rol", "prioridad"],
-            "obligatorio": ["obligatorio"],
-            "estado_lectura": ["estado", "estado_lectura"],
-            "fecha": ["fecha"],
-            "observaciones": ["observaciones", "observacion"],
-            "fuente": ["fuente"],
-        })
-        for row in _iter_data_rows(df):
-            nombre = _safe_str(row.get(col_map.get("nombre", ""), ""))
-            if not nombre:
-                continue
-            # Guardar observaciones y fuente en fecha (campo disponible) o en un campo extra
-            # El modelo PliegoDocumento usa fecha para data adicional; usamos el campo existente
-            obs_val = _safe_str(row.get(col_map.get("observaciones", ""), ""))
-            fuente_val = _safe_str(row.get(col_map.get("fuente", ""), ""))
-            doc_id_val = _safe_str(row.get(col_map.get("documento_id", ""), ""))
-            db.add(PliegoDocumento(
-                solicitud_id=solicitud_id,
-                nombre=nombre,
-                tipo=_safe_str(row.get(col_map.get("tipo", ""), "")),
-                rol=_safe_str(row.get(col_map.get("rol", ""), "")),
-                obligatorio=doc_id_val or _safe_str(row.get(col_map.get("obligatorio", ""), "")),
-                estado_lectura=_safe_str(row.get(col_map.get("estado_lectura", ""), "")),
-                fecha=fuente_val or obs_val or _safe_str(row.get(col_map.get("fecha", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Documentos"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "documento_id": ["documento_id", "id", "id_documento"],
+                "nombre": ["nombre_documento", "nombre", "documento"],
+                "tipo": ["tipo_documento", "tipo"],
+                "rol": ["prioridad_jerarquica", "rol", "prioridad"],
+                "obligatorio": ["obligatorio"],
+                "estado_lectura": ["estado", "estado_lectura"],
+                "fecha": ["fecha"],
+                "observaciones": ["observaciones", "observacion"],
+                "fuente": ["fuente"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                nombre = _safe_str(row.get(col_map.get("nombre", ""), ""))
+                if not nombre:
+                    continue
+                obs_val = _safe_str(row.get(col_map.get("observaciones", ""), ""))
+                fuente_val = _safe_str(row.get(col_map.get("fuente", ""), ""))
+                doc_id_val = _safe_str(row.get(col_map.get("documento_id", ""), ""))
+                db.add(PliegoDocumento(
+                    solicitud_id=solicitud_id,
+                    nombre=nombre,
+                    tipo=_safe_str(row.get(col_map.get("tipo", ""), "")),
+                    rol=_safe_str(row.get(col_map.get("rol", ""), "")),
+                    obligatorio=doc_id_val or _safe_str(row.get(col_map.get("obligatorio", ""), "")),
+                    estado_lectura=_safe_str(row.get(col_map.get("estado_lectura", ""), "")),
+                    fecha=fuente_val or obs_val or _safe_str(row.get(col_map.get("fecha", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Documentos: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Documentos caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Documentos: {_exc}")
 
     # ── Actos_Administrativos ─────────────────────────────────────────────────
     if "Actos_Administrativos" in sheet_map:
-        df = xl.parse(sheet_map["Actos_Administrativos"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "tipo_acto": ["tipo", "tipo_acto"],
-            "numero": ["numero", "número", "nro"],
-            "numero_especial": ["numero_especial", "nro_especial"],
-            "fecha": ["fecha"],
-            "organismo_emisor": ["organismo", "organismo_emisor"],
-            "descripcion": ["descripcion", "descripción", "detalle"],
-        })
-        for row in _iter_data_rows(df):
-            tipo = _safe_str(row.get(col_map.get("tipo_acto", ""), ""))
-            if not tipo:
-                continue
-            db.add(PliegoActoAdmin(
-                solicitud_id=solicitud_id,
-                tipo_acto=tipo,
-                numero=_safe_str(row.get(col_map.get("numero", ""), "")),
-                numero_especial=_safe_str(row.get(col_map.get("numero_especial", ""), "")),
-                fecha=_safe_str(row.get(col_map.get("fecha", ""), "")),
-                organismo_emisor=_safe_str(row.get(col_map.get("organismo_emisor", ""), "")),
-                descripcion=_safe_str(row.get(col_map.get("descripcion", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Actos_Administrativos"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "tipo_acto": ["tipo", "tipo_acto"],
+                "numero": ["numero", "número", "nro"],
+                "numero_especial": ["numero_especial", "nro_especial"],
+                "fecha": ["fecha"],
+                "organismo_emisor": ["organismo", "organismo_emisor"],
+                "descripcion": ["descripcion", "descripción", "detalle"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                tipo = _safe_str(row.get(col_map.get("tipo_acto", ""), ""))
+                if not tipo:
+                    continue
+                db.add(PliegoActoAdmin(
+                    solicitud_id=solicitud_id,
+                    tipo_acto=tipo,
+                    numero=_safe_str(row.get(col_map.get("numero", ""), "")),
+                    numero_especial=_safe_str(row.get(col_map.get("numero_especial", ""), "")),
+                    fecha=_safe_str(row.get(col_map.get("fecha", ""), "")),
+                    organismo_emisor=_safe_str(row.get(col_map.get("organismo_emisor", ""), "")),
+                    descripcion=_safe_str(row.get(col_map.get("descripcion", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Actos_Administrativos: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Actos_Administrativos caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Actos_Administrativos: {_exc}")
 
     # ── Hallazgos_Extra ───────────────────────────────────────────────────────
     if "Hallazgos_Extra" in sheet_map:
-        df = xl.parse(sheet_map["Hallazgos_Extra"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "categoria": ["categoria", "categoría"],
-            "titulo": ["titulo", "título"],
-            "hallazgo": ["descripcion", "descripción", "hallazgo", "detalle"],
-            "impacto": ["impacto"],
-            "accion_sugerida": ["accion_sugerida", "accion", "acción"],
-            "fuente": ["fuente"],
-            "campo_dashboard_sugerido": ["campo_dashboard_sugerido", "campo_dashboard"],
-            "valor_sugerido": ["valor_sugerido", "valor sugerido"],
-            "estado": ["estado"],
-        })
-        for row in _iter_data_rows(df):
-            titulo_val = _safe_str(row.get(col_map.get("titulo", ""), ""))
-            hallazgo_val = _safe_str(row.get(col_map.get("hallazgo", ""), ""))
-            # El campo hallazgo del modelo recibe el texto principal; priorizamos título + descripción
-            texto_principal = titulo_val or hallazgo_val
-            if not texto_principal:
-                continue
-            # Enriquecer: concatenar titulo + descripcion si ambos existen
-            if titulo_val and hallazgo_val and titulo_val != hallazgo_val:
-                texto_principal = f"{titulo_val}: {hallazgo_val}"
-            extra = {
-                "campo_dashboard_sugerido": _safe_str(row.get(col_map.get("campo_dashboard_sugerido", ""), "")),
-                "valor_sugerido": _safe_str(row.get(col_map.get("valor_sugerido", ""), "")),
-                "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
-            }
-            db.add(PliegoHallazgo(
-                solicitud_id=solicitud_id,
-                categoria=_safe_str(row.get(col_map.get("categoria", ""), "")),
-                hallazgo=texto_principal,
-                impacto=_safe_str(row.get(col_map.get("impacto", ""), "")),
-                accion_sugerida=_safe_str(row.get(col_map.get("accion_sugerida", ""), "")),
-                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
-                datos_extra={k: v for k, v in extra.items() if v} if extra else None,
-            ))
+        try:
+            df = xl.parse(sheet_map["Hallazgos_Extra"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "categoria": ["categoria", "categoría"],
+                "titulo": ["titulo", "título"],
+                "hallazgo": ["descripcion", "descripción", "hallazgo", "detalle"],
+                "impacto": ["impacto"],
+                "accion_sugerida": ["accion_sugerida", "accion", "acción"],
+                "fuente": ["fuente"],
+                "campo_dashboard_sugerido": ["campo_dashboard_sugerido", "campo_dashboard"],
+                "valor_sugerido": ["valor_sugerido", "valor sugerido"],
+                "estado": ["estado"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                titulo_val = _safe_str(row.get(col_map.get("titulo", ""), ""))
+                hallazgo_val = _safe_str(row.get(col_map.get("hallazgo", ""), ""))
+                texto_principal = titulo_val or hallazgo_val
+                if not texto_principal:
+                    continue
+                if titulo_val and hallazgo_val and titulo_val != hallazgo_val:
+                    texto_principal = f"{titulo_val}: {hallazgo_val}"
+                extra = {
+                    "campo_dashboard_sugerido": _safe_str(row.get(col_map.get("campo_dashboard_sugerido", ""), "")),
+                    "valor_sugerido": _safe_str(row.get(col_map.get("valor_sugerido", ""), "")),
+                    "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
+                }
+                db.add(PliegoHallazgo(
+                    solicitud_id=solicitud_id,
+                    categoria=_safe_str(row.get(col_map.get("categoria", ""), "")),
+                    hallazgo=texto_principal,
+                    impacto=_safe_str(row.get(col_map.get("impacto", ""), "")),
+                    accion_sugerida=_safe_str(row.get(col_map.get("accion_sugerida", ""), "")),
+                    fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                    datos_extra={k: v for k, v in extra.items() if v} if extra else None,
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Hallazgos_Extra: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Hallazgos_Extra caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Hallazgos_Extra: {_exc}")
 
     # ── Faltantes_y_Dudas ─────────────────────────────────────────────────────
     if "Faltantes_y_Dudas" in sheet_map:
-        df = xl.parse(sheet_map["Faltantes_y_Dudas"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "campo_objetivo": ["campo_o_tema", "campo", "campo_objetivo"],
-            "motivo": ["situacion", "situación", "motivo"],
-            "detalle": ["detalle", "descripcion", "descripción"],
-            "criticidad": ["criticidad", "prioridad"],
-            "accion_recomendada": ["accion_recomendada", "accion_sugerida", "accion", "acción"],
-            "fuente": ["fuente"],
-            "estado": ["estado"],
-        })
-        for row in _iter_data_rows(df):
-            campo = _safe_str(row.get(col_map.get("campo_objetivo", ""), ""))
-            if not campo:
-                continue
-            db.add(PliegoFaltante(
-                solicitud_id=solicitud_id,
-                campo_objetivo=campo,
-                motivo=_safe_str(row.get(col_map.get("motivo", ""), "")),
-                detalle=_safe_str(row.get(col_map.get("detalle", ""), "")),
-                criticidad=_safe_str(row.get(col_map.get("criticidad", ""), "")),
-                accion_recomendada=_safe_str(row.get(col_map.get("accion_recomendada", ""), "")),
-                fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
-                estado=_safe_str(row.get(col_map.get("estado", ""), "")),
-            ))
+        try:
+            df = xl.parse(sheet_map["Faltantes_y_Dudas"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "campo_objetivo": ["campo_o_tema", "campo", "campo_objetivo"],
+                "motivo": ["situacion", "situación", "motivo"],
+                "detalle": ["detalle", "descripcion", "descripción"],
+                "criticidad": ["criticidad", "prioridad"],
+                "accion_recomendada": ["accion_recomendada", "accion_sugerida", "accion", "acción"],
+                "fuente": ["fuente"],
+                "estado": ["estado"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                campo = _safe_str(row.get(col_map.get("campo_objetivo", ""), ""))
+                if not campo:
+                    continue
+                db.add(PliegoFaltante(
+                    solicitud_id=solicitud_id,
+                    campo_objetivo=campo,
+                    motivo=_safe_str(row.get(col_map.get("motivo", ""), "")),
+                    detalle=_safe_str(row.get(col_map.get("detalle", ""), "")),
+                    criticidad=_safe_str(row.get(col_map.get("criticidad", ""), "")),
+                    accion_recomendada=_safe_str(row.get(col_map.get("accion_recomendada", ""), "")),
+                    fuente=_safe_str(row.get(col_map.get("fuente", ""), "")),
+                    estado=_safe_str(row.get(col_map.get("estado", ""), "")),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Faltantes_y_Dudas: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Faltantes_y_Dudas caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Faltantes_y_Dudas: {_exc}")
 
     # ── Trazabilidad ──────────────────────────────────────────────────────────
     if "Trazabilidad" in sheet_map:
-        df = xl.parse(sheet_map["Trazabilidad"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "campo": ["campo", "campo_objetivo"],
-            "valor_extraido": ["valor", "valor_extraido"],
-            "documento_fuente": ["documento_origen", "documento", "documento_fuente", "fuente"],
-            "pagina_seccion": ["pagina", "página", "seccion", "sección", "pagina_seccion"],
-            "tipo_evidencia": ["tipo_documento", "tipo_evidencia", "tipo"],
-            "observacion": ["observaciones", "observacion", "observación"],
-            "estado_extraccion": ["estado"],
-            "metodo_extraccion": ["metodo_extraccion"],
-            "texto_evidencia": ["evidencia_breve", "texto_evidencia"],
-            "normalizacion_aplicada": ["normalizacion_aplicada"],
-        })
-        for row in _iter_data_rows(df):
-            campo = _safe_str(row.get(col_map.get("campo", ""), ""))
-            if not campo:
-                continue
-            observaciones = [
-                _safe_str(row.get(col_map.get("observacion", ""), "")),
-                f"Estado: {_safe_str(row.get(col_map.get('estado_extraccion', ''), ''))}" if col_map.get("estado_extraccion") and _safe_str(row.get(col_map.get("estado_extraccion", ""), "")) else "",
-                f"Metodo: {_safe_str(row.get(col_map.get('metodo_extraccion', ''), ''))}" if col_map.get("metodo_extraccion") and _safe_str(row.get(col_map.get("metodo_extraccion", ""), "")) else "",
-                f"Texto evidencia: {_safe_str(row.get(col_map.get('texto_evidencia', ''), ''))}" if col_map.get("texto_evidencia") and _safe_str(row.get(col_map.get("texto_evidencia", ""), "")) else "",
-                f"Normalizacion: {_safe_str(row.get(col_map.get('normalizacion_aplicada', ''), ''))}" if col_map.get("normalizacion_aplicada") and _safe_str(row.get(col_map.get("normalizacion_aplicada", ""), "")) else "",
-            ]
-            db.add(PliegoTrazabilidad(
-                solicitud_id=solicitud_id,
-                campo=campo,
-                valor_extraido=_safe_str(row.get(col_map.get("valor_extraido", ""), "")),
-                documento_fuente=_safe_str(row.get(col_map.get("documento_fuente", ""), "")),
-                pagina_seccion=_safe_str(row.get(col_map.get("pagina_seccion", ""), "")),
-                tipo_evidencia=_safe_str(row.get(col_map.get("tipo_evidencia", ""), "")),
-                observacion="\n".join(part for part in observaciones if part),
-            ))
+        try:
+            df = xl.parse(sheet_map["Trazabilidad"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "campo": ["campo", "campo_objetivo"],
+                "valor_extraido": ["valor", "valor_extraido"],
+                "documento_fuente": ["documento_origen", "documento", "documento_fuente", "fuente"],
+                "pagina_seccion": ["pagina", "página", "seccion", "sección", "pagina_seccion"],
+                "tipo_evidencia": ["tipo_documento", "tipo_evidencia", "tipo"],
+                "observacion": ["observaciones", "observacion", "observación"],
+                "estado_extraccion": ["estado"],
+                "metodo_extraccion": ["metodo_extraccion"],
+                "texto_evidencia": ["evidencia_breve", "texto_evidencia"],
+                "normalizacion_aplicada": ["normalizacion_aplicada"],
+            })
+            _n = 0
+            for row in _iter_data_rows(df):
+                campo = _safe_str(row.get(col_map.get("campo", ""), ""))
+                if not campo:
+                    continue
+                observaciones = [
+                    _safe_str(row.get(col_map.get("observacion", ""), "")),
+                    f"Estado: {_safe_str(row.get(col_map.get('estado_extraccion', ''), ''))}" if col_map.get("estado_extraccion") and _safe_str(row.get(col_map.get("estado_extraccion", ""), "")) else "",
+                    f"Metodo: {_safe_str(row.get(col_map.get('metodo_extraccion', ''), ''))}" if col_map.get("metodo_extraccion") and _safe_str(row.get(col_map.get("metodo_extraccion", ""), "")) else "",
+                    f"Texto evidencia: {_safe_str(row.get(col_map.get('texto_evidencia', ''), ''))}" if col_map.get("texto_evidencia") and _safe_str(row.get(col_map.get("texto_evidencia", ""), "")) else "",
+                    f"Normalizacion: {_safe_str(row.get(col_map.get('normalizacion_aplicada', ''), ''))}" if col_map.get("normalizacion_aplicada") and _safe_str(row.get(col_map.get("normalizacion_aplicada", ""), "")) else "",
+                ]
+                db.add(PliegoTrazabilidad(
+                    solicitud_id=solicitud_id,
+                    campo=campo,
+                    valor_extraido=_safe_str(row.get(col_map.get("valor_extraido", ""), "")),
+                    documento_fuente=_safe_str(row.get(col_map.get("documento_fuente", ""), "")),
+                    pagina_seccion=_safe_str(row.get(col_map.get("pagina_seccion", ""), "")),
+                    tipo_evidencia=_safe_str(row.get(col_map.get("tipo_evidencia", ""), "")),
+                    observacion="\n".join(part for part in observaciones if part),
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Trazabilidad: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Trazabilidad caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Trazabilidad: {_exc}")
 
     # ── Fusion_Cabecera ───────────────────────────────────────────────────────
     if "Fusion_Cabecera" in sheet_map:
-        df = xl.parse(sheet_map["Fusion_Cabecera"], dtype=str).fillna("")
-        datos = _extract_proceso_data(df)
-        db.add(PliegoFusionCabecera(solicitud_id=solicitud_id, datos=datos))
+        try:
+            df = xl.parse(sheet_map["Fusion_Cabecera"], dtype=str).fillna("")
+            datos = _extract_proceso_data(df)
+            if not isinstance(datos, dict):
+                datos = {}
+            db.add(PliegoFusionCabecera(solicitud_id=solicitud_id, datos=datos))
+            logger.info("[LP_IMPORT] Fusion_Cabecera: %s claves caso=%s", len(datos), solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Fusion_Cabecera caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Fusion_Cabecera: {_exc}")
 
     # ── Fusion_Renglones ──────────────────────────────────────────────────────
     if "Fusion_Renglones" in sheet_map:
-        df = xl.parse(sheet_map["Fusion_Renglones"], dtype=str).fillna("")
-        col_map = _col_map(df.columns, {
-            "numero_renglon": ["renglon_orden", "renglón", "renglon", "nro_renglon", "numero_renglon", "n°", "#"],
-            "codigo_item": ["codigo_item", "codigo", "código", "item"],
-            "descripcion": ["descripcion", "descripción", "detalle"],
-            "cantidad": ["cantidad", "cant"],
-            "unidad": ["unidad_medida", "unidad", "ud"],
-            "precio_unitario_estimado": ["precio_unitario", "precio", "estimado", "monto"],
-            "lugar_entrega": ["lugar_entrega", "lugar entrega"],
-            "plazo_entrega": ["plazo_entrega", "plazo entrega"],
-            "periodicidad": ["periodicidad"],
-            "marca": ["marca"],
-            "importe_total": ["importe_total", "importe total"],
-            "destino_efector": ["destino_efector", "destino"],
-            "observaciones": ["observaciones", "obs"],
-            "fuente": ["fuente"],
-            "estado": ["estado"],
-        })
-        for idx, row in enumerate(_iter_data_rows(df)):
-            desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
-            num_ren = _safe_str(row.get(col_map.get("numero_renglon", ""), "")) or str(idx + 1)
-            if not desc and not num_ren:
-                continue
-
-            # Capturar todos los campos del Excel LicIA en datos_extra
-            extra_data = {
-                "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", ""), "")),
-                "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", ""), "")),
-                "periodicidad": _safe_str(row.get(col_map.get("periodicidad", ""), "")),
-                "marca": _safe_str(row.get(col_map.get("marca", ""), "")),
-                "importe_total": _safe_str(row.get(col_map.get("importe_total", ""), "")),
-                "destino_efector": _safe_str(row.get(col_map.get("destino_efector", ""), "")),
-                "observaciones": _safe_str(row.get(col_map.get("observaciones", ""), "")),
-                "fuente": _safe_str(row.get(col_map.get("fuente", ""), "")),
-                "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
-            }
-
-            db.add(PliegoFusionRenglon(
-                solicitud_id=solicitud_id,
-                numero_renglon=num_ren,
-                codigo_item=_safe_str(row.get(col_map.get("codigo_item", ""), "")),
-                descripcion=desc,
-                cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
-                unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
-                precio_unitario_estimado=_safe_str(row.get(col_map.get("precio_unitario_estimado", ""), "")),
-                datos_extra={k: v for k, v in extra_data.items() if v} or None,
-            ))
+        try:
+            df = xl.parse(sheet_map["Fusion_Renglones"], dtype=str).fillna("")
+            col_map = _col_map(df.columns, {
+                "numero_renglon": ["renglon_orden", "renglón", "renglon", "nro_renglon", "numero_renglon", "n°", "#"],
+                "codigo_item": ["codigo_item", "codigo", "código", "item"],
+                "descripcion": ["descripcion", "descripción", "detalle"],
+                "cantidad": ["cantidad", "cant"],
+                "unidad": ["unidad_medida", "unidad", "ud"],
+                "precio_unitario_estimado": ["precio_unitario", "precio", "estimado", "monto"],
+                "lugar_entrega": ["lugar_entrega", "lugar entrega"],
+                "plazo_entrega": ["plazo_entrega", "plazo entrega"],
+                "periodicidad": ["periodicidad"],
+                "marca": ["marca"],
+                "importe_total": ["importe_total", "importe total"],
+                "destino_efector": ["destino_efector", "destino"],
+                "observaciones": ["observaciones", "obs"],
+                "fuente": ["fuente"],
+                "estado": ["estado"],
+            })
+            _n = 0
+            for idx, row in enumerate(_iter_data_rows(df)):
+                desc = _safe_str(row.get(col_map.get("descripcion", ""), ""))
+                num_ren = _safe_str(row.get(col_map.get("numero_renglon", ""), "")) or str(idx + 1)
+                if not desc and not num_ren:
+                    continue
+                extra_data = {
+                    "lugar_entrega": _safe_str(row.get(col_map.get("lugar_entrega", ""), "")),
+                    "plazo_entrega": _safe_str(row.get(col_map.get("plazo_entrega", ""), "")),
+                    "periodicidad": _safe_str(row.get(col_map.get("periodicidad", ""), "")),
+                    "marca": _safe_str(row.get(col_map.get("marca", ""), "")),
+                    "importe_total": _safe_str(row.get(col_map.get("importe_total", ""), "")),
+                    "destino_efector": _safe_str(row.get(col_map.get("destino_efector", ""), "")),
+                    "observaciones": _safe_str(row.get(col_map.get("observaciones", ""), "")),
+                    "fuente": _safe_str(row.get(col_map.get("fuente", ""), "")),
+                    "estado": _safe_str(row.get(col_map.get("estado", ""), "")),
+                }
+                db.add(PliegoFusionRenglon(
+                    solicitud_id=solicitud_id,
+                    numero_renglon=num_ren,
+                    codigo_item=_safe_str(row.get(col_map.get("codigo_item", ""), "")),
+                    descripcion=desc,
+                    cantidad=_safe_str(row.get(col_map.get("cantidad", ""), "")),
+                    unidad=_safe_str(row.get(col_map.get("unidad", ""), "")),
+                    precio_unitario_estimado=_safe_str(row.get(col_map.get("precio_unitario_estimado", ""), "")),
+                    datos_extra={k: v for k, v in extra_data.items() if v} or None,
+                ))
+                _n += 1
+            logger.info("[LP_IMPORT] Fusion_Renglones: %s registros caso=%s", _n, solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Fusion_Renglones caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Fusion_Renglones: {_exc}")
 
     # ── SIEM_Analitica ────────────────────────────────────────────────────────
-    # Parsear como lista de filas (no clave-valor) para que la vista ampliada pueda iterar
     if "SIEM_Analitica" in sheet_map:
-        df = xl.parse(sheet_map["SIEM_Analitica"], dtype=str).fillna("")
-        analitica_rows = []
-        for row in _iter_data_rows(df):
-            row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
-            if any(v for v in row_dict.values()):
-                analitica_rows.append(row_dict)
-        # Si tiene formato clave-valor (menos de 3 columnas) usar dict; sino lista de filas
-        datos_analitica = analitica_rows if len(df.columns) >= 3 else _extract_proceso_data(df)
-        db.add(PliegoAnalitica(solicitud_id=solicitud_id, datos=datos_analitica))
+        try:
+            df = xl.parse(sheet_map["SIEM_Analitica"], dtype=str).fillna("")
+            analitica_rows = []
+            for row in _iter_data_rows(df):
+                row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
+                if any(v for v in row_dict.values()):
+                    analitica_rows.append(row_dict)
+            datos_analitica = analitica_rows if len(df.columns) >= 3 else _extract_proceso_data(df)
+            if not isinstance(datos_analitica, (dict, list)):
+                datos_analitica = {}
+            db.add(PliegoAnalitica(solicitud_id=solicitud_id, datos=datos_analitica))
+            logger.info("[LP_IMPORT] SIEM_Analitica: %s filas caso=%s", len(analitica_rows), solicitud_id)
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja SIEM_Analitica caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja SIEM_Analitica: {_exc}")
 
     # ── Control_Carga ─────────────────────────────────────────────────────────
-    # Parsear como lista de filas para acceso directo; el primer registro es el de control
     if "Control_Carga" in sheet_map:
-        df = xl.parse(sheet_map["Control_Carga"], dtype=str).fillna("")
-        ctrl_rows = []
-        for row in _iter_data_rows(df):
-            row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
-            if any(v for v in row_dict.values()):
-                ctrl_rows.append(row_dict)
-        # Si hay exactamente 1 fila, guardar como dict para compatibilidad; sino lista
-        if len(ctrl_rows) == 1:
-            datos_ctrl = {k.lower().strip(): v for k, v in ctrl_rows[0].items()}
-        elif ctrl_rows:
-            datos_ctrl = [{k.lower().strip(): v for k, v in r.items()} for r in ctrl_rows]
-        else:
-            datos_ctrl = _extract_proceso_data(df)
-        db.add(PliegoControlCarga(solicitud_id=solicitud_id, datos=datos_ctrl))
+        try:
+            df = xl.parse(sheet_map["Control_Carga"], dtype=str).fillna("")
+            ctrl_rows = []
+            for row in _iter_data_rows(df):
+                row_dict = {str(col): _safe_str(row.get(col, "")) for col in df.columns}
+                if any(v for v in row_dict.values()):
+                    ctrl_rows.append(row_dict)
+            if len(ctrl_rows) == 1:
+                datos_ctrl = {k.lower().strip(): v for k, v in ctrl_rows[0].items()}
+            elif ctrl_rows:
+                datos_ctrl = [{k.lower().strip(): v for k, v in r.items()} for r in ctrl_rows]
+            else:
+                datos_ctrl = _extract_proceso_data(df)
+            if not isinstance(datos_ctrl, (dict, list)):
+                datos_ctrl = {}
+            db.add(PliegoControlCarga(solicitud_id=solicitud_id, datos=datos_ctrl))
+            logger.info("[LP_IMPORT] Control_Carga: %s filas caso=%s cols=%s",
+                        len(ctrl_rows), solicitud_id, list(df.columns))
+        except Exception as _exc:
+            logger.error("[LP_IMPORT] Error en hoja Control_Carga caso=%s: %s", solicitud_id, _exc, exc_info=True)
+            _import_warnings.append(f"Hoja Control_Carga: {_exc}")
+
+    if _import_warnings:
+        logger.warning("[LP_IMPORT] Importación completada con advertencias caso=%s: %s",
+                       solicitud_id, _import_warnings)
+    else:
+        logger.info("[LP_IMPORT] Importación completada sin errores caso=%s", solicitud_id)
 
 
 def _col_map(columns, mapping: dict) -> dict:

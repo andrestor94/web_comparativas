@@ -618,7 +618,7 @@
           </span>
         </div>
         {% endif %}
-        {% set _obj_val = fusion_ctx.campos_fusion.get('objeto_contratacion', {}).get('valor', '') %}
+        {% set _obj_val = fusion_ctx.campos_fusion.get('objeto_contratacion', {}).get('valor', '')|safe_text %}
         {% if _obj_val %}
         <div class="erph-data-row erph-data-row--full">
           <span class="erph-data-lbl"><i class="bi bi-file-text"></i> Objeto</span>

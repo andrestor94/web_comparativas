@@ -395,11 +395,11 @@
             <td style="font-family:monospace;font-size:.78rem;font-weight:700;color:var(--siem-text-strong);">{{ campo_key }}</td>
             <td style="font-size:.82rem;">{{ campo.label }}</td>
             <td style="font-size:.8rem;color:var(--siem-text-muted);">
-              {% set val_raw = campo_data.get('valor','') %}
+              {% set val_raw = campo_data.get('valor','')|safe_text %}
               {% if val_raw %}{{ val_raw[:60] }}{% if val_raw|length > 60 %}…{% endif %}{% else %}<span style="color:var(--siem-red);font-style:italic;">Sin dato</span>{% endif %}
             </td>
             <td style="font-size:.8rem;">
-              {% set val_norm = campo_data.get('valor_normalizado','') or campo_data.get('valor','') %}
+              {% set val_norm = (campo_data.get('valor_normalizado','') or campo_data.get('valor',''))|safe_text %}
               {% if val_norm %}
                 <span style="font-weight:600;">{{ val_norm[:50] }}{% if val_norm|length > 50 %}…{% endif %}</span>
               {% else %}
@@ -555,7 +555,7 @@
                 <span style="font-size:.78rem;color:var(--siem-text-muted);">{{ item.estado or '—' }}</span>
               {%- endif -%}
             </td>
-            <td style="font-size:.8rem;color:var(--siem-text-muted);">{{ item.estado_resultado|replace('_',' ') }}</td>
+            <td style="font-size:.8rem;color:var(--siem-text-muted);">{{ item.estado_resultado|safe_text|replace('_',' ') }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -574,7 +574,7 @@
       <div class="integration-grid">
         <div class="integration-box">
           <div class="integration-kicker">RP Fusión</div>
-          {% if control_carga.get('listo_para_fusion','').upper() in ['SI','SÍ','TRUE','YES','1'] %}
+          {% if control_carga.get('listo_para_fusion','')|safe_text|upper in ['SI','SÍ','TRUE','YES','1'] %}
           <div class="integration-status" style="color:var(--siem-green);">
             <i class="bi bi-check-circle-fill"></i> Listo para carga
           </div>
@@ -586,7 +586,7 @@
         </div>
         <div class="integration-box">
           <div class="integration-kicker">SIEM Operativa</div>
-          {% if control_carga.get('listo_para_visualizacion','').lower() in ['sí','si','true','yes','1'] %}
+          {% if control_carga.get('listo_para_visualizacion','')|safe_text|lower in ['sí','si','true','yes','1'] %}
           <div class="integration-status" style="color:var(--siem-green);">
             <i class="bi bi-check-circle-fill"></i> Validado
           </div>
@@ -598,7 +598,7 @@
         </div>
         <div class="integration-box">
           <div class="integration-kicker">SIEM Analítica</div>
-          {% if control_carga.get('requiere_revision_analista','').lower() in ['sí','si','true','yes','1'] %}
+          {% if control_carga.get('requiere_revision_analista','')|safe_text|lower in ['sí','si','true','yes','1'] %}
           <div class="integration-status" style="color:var(--siem-amber);">
             <i class="bi bi-search"></i> Requiere revisión
           </div>
