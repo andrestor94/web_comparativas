@@ -1529,30 +1529,81 @@ def ensure_dimensionamiento_composite_constraints():
         print(f"[MIGRATION] Error al actualizar uq_dim_family_monthly_summary: {e}", flush=True)
 
     # 3. dimensionamiento_dashboard_snapshots
+    # Diagnostico previo: loguear indices y constraints actuales para auditar.
     try:
         with engine.begin() as conn:
-            # Eliminar el indice unico viejo generado por SQLAlchemy (prefijo ix_)
-            # cuando la columna tenia unique=True e index=True combinados.
-            # Este indice bloquea inserts con el mismo snapshot_key de corridas distintas.
-            conn.execute(text(
-                "DROP INDEX IF EXISTS ix_dimensionamiento_dashboard_snapshots_snapshot_key"
-            ))
-            # Por si acaso existe tambien la constraint con nombre convencional de PostgreSQL
-            conn.execute(text(
-                "ALTER TABLE dimensionamiento_dashboard_snapshots DROP CONSTRAINT IF EXISTS dimensionamiento_dashboard_snapshots_snapshot_key_key"
-            ))
-            try:
-                conn.execute(text(
-                    "ALTER TABLE dimensionamiento_dashboard_snapshots ADD CONSTRAINT uq_dim_dashboard_snapshots_key_run UNIQUE (snapshot_key, import_run_id)"
-                ))
-                print("[MIGRATION] Restriccion uq_dim_dashboard_snapshots_key_run creada.", flush=True)
-            except Exception as e:
-                msg = str(e).lower()
-                if "already exists" in msg:
-                    print("[MIGRATION] Restriccion uq_dim_dashboard_snapshots_key_run ya existe. (OK)", flush=True)
-                else:
-                    raise e
+            rows = conn.execute(text(
+                "SELECT indexname, indexdef FROM pg_indexes "
+                "WHERE tablename = 'dimensionamiento_dashboard_snapshots'"
+            )).fetchall()
+            print(f"[MIGRATION][DIAG] Indices actuales en snapshots: {[r[0] for r in rows]}", flush=True)
+            crows = conn.execute(text(
+                "SELECT conname, contype FROM pg_constraint "
+                "WHERE conrelid = 'dimensionamiento_dashboard_snapshots'::regclass"
+            )).fetchall()
+            print(f"[MIGRATION][DIAG] Constraints actuales en snapshots: {[(r[0], r[1]) for r in crows]}", flush=True)
     except Exception as e:
-        print(f"[MIGRATION] Error en snapshots composite constraint: {e}", flush=True)
+        print(f"[MIGRATION][DIAG] Error al diagnosticar snapshots: {e}", flush=True)
+
+    # Paso 3a: eliminar la constraint con su nombre real (ix_ prefix).
+    # DROP INDEX falla si es backing index de una constraint; se necesita DROP CONSTRAINT.
+    # Cada intento en su propia transaccion para que un fallo no aborte los demas.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_dashboard_snapshots "
+                "DROP CONSTRAINT IF EXISTS ix_dimensionamiento_dashboard_snapshots_snapshot_key"
+            ))
+            print("[MIGRATION] DROP CONSTRAINT ix_dimensionamiento_dashboard_snapshots_snapshot_key ejecutado.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Nota DROP CONSTRAINT ix_: {e}", flush=True)
+
+    # Paso 3b: intentar como indice standalone por si no era backing de constraint.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "DROP INDEX IF EXISTS public.ix_dimensionamiento_dashboard_snapshots_snapshot_key"
+            ))
+            print("[MIGRATION] DROP INDEX public.ix_dimensionamiento_dashboard_snapshots_snapshot_key ejecutado.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Nota DROP INDEX public.ix_: {e}", flush=True)
+
+    # Paso 3c: eliminar tambien con nombre convencional PostgreSQL por si acaso.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_dashboard_snapshots "
+                "DROP CONSTRAINT IF EXISTS dimensionamiento_dashboard_snapshots_snapshot_key_key"
+            ))
+            print("[MIGRATION] DROP CONSTRAINT _key_key ejecutado.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Nota DROP CONSTRAINT _key_key: {e}", flush=True)
+
+    # Paso 3d: crear la constraint compuesta correcta si no existe.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE dimensionamiento_dashboard_snapshots "
+                "ADD CONSTRAINT uq_dim_dashboard_snapshots_key_run "
+                "UNIQUE (snapshot_key, import_run_id)"
+            ))
+            print("[MIGRATION] Constraint uq_dim_dashboard_snapshots_key_run creada.", flush=True)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg:
+            print("[MIGRATION] Constraint uq_dim_dashboard_snapshots_key_run ya existe. (OK)", flush=True)
+        else:
+            print(f"[MIGRATION] Error al crear constraint compuesta snapshots: {e}", flush=True)
+
+    # Diagnostico final: confirmar que el indice unico global fue eliminado.
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE tablename = 'dimensionamiento_dashboard_snapshots'"
+            )).fetchall()
+            print(f"[MIGRATION][DIAG] Indices finales en snapshots: {[r[0] for r in rows]}", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION][DIAG] Error diagnostico final snapshots: {e}", flush=True)
 
 
