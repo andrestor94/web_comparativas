@@ -173,6 +173,7 @@
         <tr>
           <th style="width:64px">ID</th>
           <th>Proceso</th>
+          <th>Fecha de apertura</th>
           <th>Archivo</th>
           <th style="width:130px">Estado</th>
           <th class="text-end" style="width:210px">Acciones</th>
@@ -200,6 +201,9 @@
               {{ up.platform_hint or '' }}{% if up.buyer_hint %} · {{ up.buyer_hint }}{% endif %}
             </div>
             {% endif %}
+          </td>
+          <td>
+            {{ up.apertura_fecha or '—' }}
           </td>
           <td style="max-width:220px;" class="text-truncate" title="{{ up.original_filename }}">
             {{ up.original_filename or '—' }}

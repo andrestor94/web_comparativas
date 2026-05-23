@@ -2506,7 +2506,7 @@ function fmtUnits(v) {
 }
 function fmtK(v) {
   if (v == null) return '—';
-  if (Math.abs(v) >= 1e9) return '$ ' + (v / 1e9).toFixed(1) + 'B';
+  if (Math.abs(v) >= 1e9) return '$ ' + (v / 1e9).toFixed(1) + 'MM';
   if (Math.abs(v) >= 1e6) return '$ ' + (v / 1e6).toFixed(1) + 'M';
   if (Math.abs(v) >= 1e3) return '$ ' + (v / 1e3).toFixed(0) + 'K';
   return '$ ' + Math.round(v).toString();
@@ -2850,7 +2850,7 @@ function fmtKpiMoney(v, sym) {
   const neg = v < 0;
   const abs = Math.abs(v);
   let res;
-  if (abs >= 1e9)      res = (abs/1e9).toFixed(1).replace('.', ',') + ' B';
+  if (abs >= 1e9)      res = (abs/1e9).toFixed(1).replace('.', ',') + ' MM';
   else if (abs >= 1e6) res = (abs/1e6).toFixed(1).replace('.', ',') + ' M';
   else if (abs >= 1e3) res = (abs/1e3).toFixed(1).replace('.', ',') + ' K';
   else                 res = Math.round(abs).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -3089,7 +3089,7 @@ function renderChart(data) {
     let formatted = '';
     if (absVal >= 1e9) {
       const divided = val / 1e9;
-      formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'B';
+      formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'MM';
     } else if (absVal >= 1e6) {
       const divided = val / 1e6;
       formatted = (divided % 1 === 0 ? divided.toFixed(0) : divided.toFixed(1)) + 'M';
@@ -3235,7 +3235,7 @@ function formatTreemapAbbr(num, isMoney) {
   if (num === 0) return isMoney ? '$ 0' : '0';
   const prefix = isMoney ? '$ ' : '';
   const absNum = Math.abs(num);
-  if (absNum >= 1e9) return `${prefix}${(num / 1e9).toFixed(1).replace('.', ',')}B`;
+  if (absNum >= 1e9) return `${prefix}${(num / 1e9).toFixed(1).replace('.', ',')}MM`;
   if (absNum >= 1e6) return `${prefix}${(num / 1e6).toFixed(1).replace('.', ',')}M`;
   if (absNum >= 1e3) return `${prefix}${(num / 1e3).toFixed(1).replace('.', ',')}K`;
   return `${prefix}${num.toFixed(0)}`;

@@ -1824,7 +1824,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function formatAbbreviated(value) {
         const n = Number(value) || 0;
-        if (Math.abs(n) >= 1e9) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e9)}B`;
+        if (Math.abs(n) >= 1e9) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e9)}MM`;
         if (Math.abs(n) >= 1e6) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e6)}M`;
         if (Math.abs(n) >= 1e3) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e3)}K`;
         return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);

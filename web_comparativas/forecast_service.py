@@ -2283,9 +2283,9 @@ def _local_get_chart_data_light(
             df_hist["imp_hist"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
             errors="coerce",
         ).fillna(0)
-        if start_ts is not None:
+        if start_ts is not None and start_ts.year <= 2025:
             df_hist = df_hist[df_hist["fecha"] >= start_ts]
-        if end_ts is not None:
+        if end_ts is not None and end_ts.year <= 2025:
             df_hist = df_hist[df_hist["fecha"] <= end_ts]
         if profiles and "perfil" in df_hist.columns:
             df_hist = df_hist[df_hist["perfil"].isin(profiles)]
@@ -2740,8 +2740,23 @@ def _pg_get_chart_data_inner(
 
     # WHERE for forecast_imp_hist: only has perfil + codigo_serie + fecha (no neg/subneg)
     # hist/fact tables always have codigo_serie — use prod_codes (not val_prod) here.
+    hist_start = start_date
+    if start_date:
+        try:
+            if pd.to_datetime(start_date).year >= 2026:
+                hist_start = None
+        except Exception:
+            pass
+    hist_end = end_date
+    if end_date:
+        try:
+            if pd.to_datetime(end_date).year >= 2026:
+                hist_end = None
+        except Exception:
+            pass
+
     hist_where = _build_filter_sql(
-        start_date=start_date, end_date=end_date,
+        start_date=hist_start, end_date=hist_end,
         profiles=profiles,
         products_as_codes=prod_codes,
         skip_neg=True,
@@ -4501,12 +4516,23 @@ def get_chart_data(
     if df.empty:
         return {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
 
-    # Date mask
+    # Date mask (separating history and forecast)
     mask = pd.Series(True, index=df.index)
-    if start_date:
-        mask &= df["fecha"] >= pd.to_datetime(start_date)
-    if end_date:
-        mask &= df["fecha"] <= pd.to_datetime(end_date)
+    start_ts = pd.to_datetime(start_date) if start_date else None
+    end_ts = pd.to_datetime(end_date) if end_date else None
+    if start_ts is not None or end_ts is not None:
+        mask_hist = pd.Series(True, index=df.index)
+        if start_ts is not None and start_ts.year <= 2025:
+            mask_hist &= df["fecha"] >= start_ts
+        if end_ts is not None and end_ts.year <= 2025:
+            mask_hist &= df["fecha"] <= end_ts
+        mask_fcst = pd.Series(True, index=df.index)
+        if start_ts is not None:
+            mask_fcst &= df["fecha"] >= start_ts
+        if end_ts is not None:
+            mask_fcst &= df["fecha"] <= end_ts
+        is_hist = df.get("tipo", pd.Series()) == "hist"
+        mask = (is_hist & mask_hist) | (~is_hist & mask_fcst)
     if profiles and "perfil" in df.columns:
         mask &= df["perfil"].isin(profiles)
     if neg and "neg" in df.columns:
@@ -4542,10 +4568,12 @@ def get_chart_data(
     df_hist = pd.DataFrame()
     if view_money and not df_imp_hist.empty and "imp_hist" in df_imp_hist.columns and "fecha" in df_imp_hist.columns:
         mask_ih = pd.Series(True, index=df_imp_hist.index)
-        if start_date:
-            mask_ih &= df_imp_hist["fecha"] >= pd.to_datetime(start_date)
-        if end_date:
-            mask_ih &= df_imp_hist["fecha"] <= pd.to_datetime(end_date)
+        start_ts = pd.to_datetime(start_date) if start_date else None
+        end_ts = pd.to_datetime(end_date) if end_date else None
+        if start_ts is not None and start_ts.year <= 2025:
+            mask_ih &= df_imp_hist["fecha"] >= start_ts
+        if end_ts is not None and end_ts.year <= 2025:
+            mask_ih &= df_imp_hist["fecha"] <= end_ts
         if profiles and "perfil" in df_imp_hist.columns:
             mask_ih &= df_imp_hist["perfil"].isin(profiles)
         if neg and "neg" in df_imp_hist.columns:
