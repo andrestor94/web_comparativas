@@ -122,6 +122,82 @@ def handle_upload(args):
             print("❌ Error: La corrida seleccionada no tiene registros asociados en la tabla 'dimensionamiento_records'.")
             sys.exit(1)
 
+        if getattr(args, "dry_run", False):
+            print("\n🔍 ========================================================")
+            print("🔍               MODO DRY-RUN: INICIANDO VALIDACIONES      ")
+            print("🔍 ========================================================")
+            
+            # Calcular KPIs locales de DimensionamientoRecord
+            distinct_clients = session.query(func.count(DimensionamientoRecord.cliente_visible.distinct())).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar()
+            
+            distinct_families = session.query(func.count(DimensionamientoRecord.familia.distinct())).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar()
+            
+            distinct_provinces = session.query(func.count(DimensionamientoRecord.provincia.distinct())).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar()
+            
+            min_date = session.query(func.min(DimensionamientoRecord.fecha)).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar()
+            
+            max_date = session.query(func.max(DimensionamientoRecord.fecha)).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar()
+            
+            total_val = session.query(func.sum(DimensionamientoRecord.valorizacion_estimada)).filter(
+                DimensionamientoRecord.import_run_id == local_run.id
+            ).scalar() or 0.0
+            
+            # Validar snapshot
+            snap = session.query(DimensionamientoDashboardSnapshot).filter_by(
+                snapshot_key="default_dashboard_bootstrap",
+                import_run_id=local_run.id
+            ).first()
+            
+            has_snapshot = snap is not None
+            
+            print("\n📋 KPIs Calculados en SQLite local:")
+            print(f"   - Renglones: {total_records:,}")
+            print(f"   - Clientes Homologados (Sí): {distinct_clients:,}")
+            print(f"   - Familias: {distinct_families:,}")
+            print(f"   - Provincias: {distinct_provinces:,}")
+            print(f"   - Fecha Mínima: {min_date}")
+            print(f"   - Fecha Máxima: {max_date}")
+            print(f"   - Valorización Total: {total_val:,.2f} (${total_val / 1e9:.2f}B)")
+            print(f"   - Resúmenes Mensuales: {total_summaries:,}")
+            print(f"   - Snapshot precalculado existente: {'SÍ' if has_snapshot else 'NO'}")
+            
+            # Simular preparación de chunks
+            records_chunks = (total_records + args.chunk_size - 1) // args.chunk_size
+            summaries_chunks = (total_summaries + args.chunk_size - 1) // args.chunk_size
+            print(f"\n📦 Simulación de Chunks (tamaño {args.chunk_size:,}):")
+            print(f"   - Chunks de registros: {records_chunks} lotes")
+            print(f"   - Chunks de resúmenes: {summaries_chunks} lotes")
+            
+            # Validaciones de consistencia interna (no compara contra valores fijos)
+            errors = []
+            if total_summaries == 0:
+                errors.append("No se encontraron resúmenes mensuales asociados a esta corrida.")
+            if not has_snapshot:
+                errors.append("No se encontró el snapshot precalculado 'default_dashboard_bootstrap' para esta corrida.")
+
+            print("\n🛡️  Resultados de la Validación:")
+            if not errors:
+                print("   ✅ Datos consistentes. El archivo local SQLite está listo para ser subido a producción.")
+                print("   ℹ️  (No se realizó ninguna conexión de red al servidor de producción).")
+                print("🔍 ========================================================\n")
+                return
+            else:
+                print("   ❌ SE DETECTARON PROBLEMAS DE CONSISTENCIA:")
+                for err in errors:
+                    print(f"      - {err}")
+                print("🔍 ========================================================\n")
+                sys.exit(1)
+
         # 3. Detectar reanudación
         state = load_state()
         resume_upload = False
@@ -390,7 +466,7 @@ def main():
     )
     parser.add_argument(
         "--token",
-        default="local_dev_token",
+        default=os.getenv("DIMENSIONAMIENTO_IMPORT_TOKEN", "local_dev_token"),
         help="Token de importación secreto (cabecera X-Import-Token)."
     )
     
@@ -413,6 +489,11 @@ def main():
         "--fresh",
         action="store_true",
         help="Ignora cualquier estado de subida previo en upload_state.json e inicia desde cero."
+    )
+    upload_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Realiza validaciones locales sobre los datos sin iniciar la carga ni enviar nada al servidor."
     )
     
     # Subparser para rollback
@@ -444,6 +525,7 @@ def main():
         args.run_id = None
         args.chunk_size = 20000
         args.fresh = False
+        args.dry_run = False
         
     print("======================================================================")
     print("     🚀  WEB COMPARATIVAS - CLIENTE DE CARGA DE DIMENSIONAMIENTO      ")

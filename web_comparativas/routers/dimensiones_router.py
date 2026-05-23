@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.responses import JSONResponse
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -940,8 +941,8 @@ def admin_import_chunk_records(
                 "import_run_id": payload.import_run_id,
             })
         
-        db.bulk_insert_mappings(DimensionamientoRecord, mappings)
-        
+        db.execute(insert(DimensionamientoRecord), mappings)
+
         run.rows_processed += len(mappings)
         run.rows_inserted += len(mappings)
         db.commit()
@@ -995,7 +996,7 @@ def admin_import_chunk_summaries(
                 "import_run_id": payload.import_run_id,
             })
         
-        db.bulk_insert_mappings(DimensionamientoFamilyMonthlySummary, mappings)
+        db.execute(insert(DimensionamientoFamilyMonthlySummary), mappings)
         db.commit()
         
         logger.info("[DIM][IMPORT] Run %d: inserted %d summaries", run.id, len(mappings))
