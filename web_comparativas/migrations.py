@@ -1531,6 +1531,13 @@ def ensure_dimensionamiento_composite_constraints():
     # 3. dimensionamiento_dashboard_snapshots
     try:
         with engine.begin() as conn:
+            # Eliminar el indice unico viejo generado por SQLAlchemy (prefijo ix_)
+            # cuando la columna tenia unique=True e index=True combinados.
+            # Este indice bloquea inserts con el mismo snapshot_key de corridas distintas.
+            conn.execute(text(
+                "DROP INDEX IF EXISTS ix_dimensionamiento_dashboard_snapshots_snapshot_key"
+            ))
+            # Por si acaso existe tambien la constraint con nombre convencional de PostgreSQL
             conn.execute(text(
                 "ALTER TABLE dimensionamiento_dashboard_snapshots DROP CONSTRAINT IF EXISTS dimensionamiento_dashboard_snapshots_snapshot_key_key"
             ))
