@@ -20,7 +20,7 @@ import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -38,6 +38,8 @@ router = APIRouter(prefix="/forecast", tags=["forecast"])
 
 
 def _approx_json_bytes(payload) -> int:
+    if isinstance(payload, (bytes, bytearray)):
+        return len(payload)
     try:
         return len(_json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8"))
     except Exception:
@@ -45,6 +47,8 @@ def _approx_json_bytes(payload) -> int:
 
 
 def _result_rows(payload) -> int:
+    if isinstance(payload, (bytes, bytearray)):
+        return -1
     if isinstance(payload, list):
         return len(payload)
     if not isinstance(payload, dict):
@@ -133,6 +137,8 @@ def api_filter_options(request: Request, _user: User = Depends(_require_user)):
     try:
         result = svc.get_filter_options()
         _log_api_perf("filter-options", started, result)
+        if isinstance(result, bytes):
+            return Response(content=result, media_type="application/json")
         return result
     except Exception as exc:
         logger.error("filter-options error: %s", exc, exc_info=True)
@@ -150,6 +156,8 @@ def api_product_list(
     try:
         result = svc.get_product_list(profiles=profiles, neg=neg)
         _log_api_perf("product-list", started, result)
+        if isinstance(result, bytes):
+            return Response(content=result, media_type="application/json")
         return result
     except Exception as exc:
         logger.error("product-list error: %s", exc, exc_info=True)
@@ -199,6 +207,10 @@ def api_chart_data(
             growth_pct=growth_pct,
             is_admin=can_view_global,
         )
+        # Cache HIT returns pre-serialized bytes — bypass FastAPI encoding entirely.
+        if isinstance(result, bytes):
+            _log_api_perf("chart-data", started, result)
+            return Response(content=result, media_type="application/json")
         logger.debug(
             "chart-data result history=%s forecast=%s has_overrides=%s",
             len(result.get("history", [])) if isinstance(result, dict) else "?",
@@ -277,6 +289,8 @@ def api_client_table(
             is_admin=can_view_global,
         )
         _log_api_perf("client-table", started, result)
+        if isinstance(result, bytes):
+            return Response(content=result, media_type="application/json")
         return result
     except Exception as exc:
         logger.error("client-table error: %s", exc, exc_info=True)
@@ -315,6 +329,8 @@ def api_treemap_data(
             is_admin=can_view_global,
         )
         _log_api_perf("treemap-data", started, result)
+        if isinstance(result, bytes):
+            return Response(content=result, media_type="application/json")
         return result
     except Exception as exc:
         logger.error("treemap-data error: %s", exc, exc_info=True)
@@ -350,6 +366,8 @@ def api_client_detail(
             is_admin=can_view_global,
         )
         _log_api_perf("client-detail", started, result)
+        if isinstance(result, bytes):
+            return Response(content=result, media_type="application/json")
         return result
     except Exception as exc:
         import traceback as _tb

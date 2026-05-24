@@ -2406,7 +2406,8 @@ const STATE = {
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
 const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}';
 const _FC_IS_ADMIN   = {{ 'true' if user.is_admin() else 'false' }};
-const _FC_PFX        = 'fc_' + _FC_V + '_' + _FC_USER_KEY + '_';
+const _FC_CV         = 'c3';  // content version — increment when payload contract changes
+const _FC_PFX        = 'fc_' + _FC_CV + '_' + _FC_V + '_' + _FC_USER_KEY + '_';
 const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
 const _FC_TTL_STATIC = 30 * 60 * 1000;   // 30 min — filter-options
 const _FC_TTL_VIEW   = 30 * 60 * 1000;   // 30 min — UI state + last active tab
@@ -2421,6 +2422,12 @@ function _fcGet(url) {
     if (!raw) return null;
     const { ts, data, ttl } = JSON.parse(raw);
     if (Date.now() - ts > (ttl || _FC_TTL_DATA)) {
+      sessionStorage.removeItem(_FC_PFX + url);
+      return null;
+    }
+    // Evict entries poisoned by bytes-cache double-serialization bug (data stored as string).
+    if (typeof data === 'string') {
+      console.warn('[FORECAST] _fcGet: evicting poisoned cache entry for', url);
       sessionStorage.removeItem(_FC_PFX + url);
       return null;
     }
@@ -2557,6 +2564,15 @@ function _syncForecastControls() {
   }
 }
 
+function _fcNormalize(raw, url) {
+  // If the backend returned a double-encoded JSON string, parse it one more level.
+  if (typeof raw === 'string') {
+    console.warn('[FORECAST] _fcNormalize: received string payload for', url, '— auto-parsing');
+    try { return JSON.parse(raw); } catch { return raw; }
+  }
+  return raw;
+}
+
 async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loaderId = null, applyData, background = true }) {
   const reqId = (_fcReqSeq[requestKey] || 0) + 1;
   _fcReqSeq[requestKey] = reqId;
@@ -2568,7 +2584,8 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
 
     if (background) {
       _fcFetchJson(url, requestKey)
-        .then(fresh => {
+        .then(raw => {
+          const fresh = _fcNormalize(raw, url);
           _fcSet(url, fresh, cacheTtl);
           if (_fcReqSeq[requestKey] === reqId) {
             applyData(fresh, { source: 'network' });
@@ -2585,7 +2602,8 @@ async function _loadWithCache({ url, requestKey, cacheTtl = _FC_TTL_DATA, loader
   const loader = loaderId ? document.getElementById(loaderId) : null;
   if (loader) loader.style.display = 'flex';
   try {
-    const fresh = await _fcFetchJson(url, requestKey);
+    const raw = await _fcFetchJson(url, requestKey);
+    const fresh = _fcNormalize(raw, url);
     _fcSet(url, fresh, cacheTtl);
     if (_fcReqSeq[requestKey] === reqId) {
       applyData(fresh, { source: 'network' });
@@ -2766,6 +2784,7 @@ function buildDropdownList(key, options) {
   const container = document.getElementById('list-' + key);
   if (!container) return;
   container.innerHTML = '';
+  if (!Array.isArray(options)) { console.warn('[FORECAST] buildDropdownList: expected array for', key, ', got', typeof options); return; }
   options.forEach(opt => {
     const div = document.createElement('div');
     div.className = 'fc-dropdown__item';
@@ -3882,7 +3901,7 @@ function buildClientGrid() {
   clientGridApi = agGrid.createGrid(document.getElementById('clientGrid'), {
     columnDefs: [], rowData: [],
     defaultColDef: {resizable:true, sortable:false, filter:false, suppressHeaderMenuButton:true},
-    rowHeight: 46, headerHeight: 46, animateRows: true,
+    rowHeight: 46, headerHeight: 46, animateRows: false,
     suppressCellFocus: true, pinnedBottomRowData: [],
     onCellClicked: params => {
       if (params.data && params.data._isGroup) {
@@ -3925,6 +3944,10 @@ function buildClientGrid() {
 
 function updateClientGrid(tableData) {
   if (!clientGridApi) return;
+  if (!tableData || typeof tableData !== 'object' || Array.isArray(tableData)) {
+    console.error('[FORECAST] updateClientGrid: invalid payload type=' + typeof tableData + '. Grid not updated.');
+    return;
+  }
   const { months, rows, totals, min_val, max_val, total_projected } = tableData;
   if (!months || !months.length) {
     clientGridApi.setGridOption('columnDefs', []);
@@ -4832,6 +4855,10 @@ function debounceRefresh(delay = 350) {
 }
 
 function _applyFilterOptions(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    console.error('[FORECAST] _applyFilterOptions: invalid payload type=' + typeof data + '. Ignoring.');
+    return;
+  }
   STATE.filterOptions = data;
   STATE.selected.perfil = _clampList(STATE.selected.perfil, data.profiles);
   STATE.selected.neg = _clampList(STATE.selected.neg, data.neg);

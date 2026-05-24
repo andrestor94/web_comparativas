@@ -332,6 +332,12 @@ async def lifespan(app: FastAPI):
     # en startup bloqueante sin riesgo de timeout en Render.
     t = Thread(target=_background_dimensionamiento_maintenance, daemon=True)
     t.start()
+    # Pre-warm Forecast data cache in background (SQLite only; no-op on Render/PostgreSQL).
+    try:
+        from web_comparativas import forecast_service as _fcast_svc
+        _fcast_svc.preload_valorizado_parquet()
+    except Exception as _pre_exc:
+        print(f"[STARTUP] forecast preload init error: {_pre_exc}", flush=True)
     yield
 
 

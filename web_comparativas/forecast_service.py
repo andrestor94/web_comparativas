@@ -8,6 +8,7 @@ import copy
 import csv
 import json
 import logging
+import re
 import threading
 import time
 import datetime as dt
@@ -51,6 +52,8 @@ def _forecast_diag_warn(message: str, *args) -> None:
 
 
 def _forecast_payload_bytes(payload: Any) -> int:
+    if isinstance(payload, (bytes, bytearray)):
+        return len(payload)
     try:
         return len(json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8"))
     except Exception:
@@ -58,6 +61,8 @@ def _forecast_payload_bytes(payload: Any) -> int:
 
 
 def _forecast_result_rows(payload: Any) -> int:
+    if isinstance(payload, (bytes, bytearray)):
+        return -1  # bytes are pre-serialized; row count not available without deserialization
     if isinstance(payload, list):
         return len(payload)
     if not isinstance(payload, dict):
@@ -125,8 +130,8 @@ _resp_inflight: dict[str, threading.Event] = {}
 _RESP_TTL_DATA   = 600   # 10 min — chart, table, treemap, product-list
 _RESP_TTL_STATIC = 1800  # 30 min — filter-options
 _RESP_CACHE_MAX_ITEMS = 128
-_RESP_CACHE_MAX_ENTRY_BYTES = 1_500_000
-_RESP_CACHE_MAX_TOTAL_BYTES = 32_000_000
+_RESP_CACHE_MAX_ENTRY_BYTES = 5_000_000   # 5 MB — allows client-table (~1.7 MB) and treemap to cache
+_RESP_CACHE_MAX_TOTAL_BYTES = 64_000_000  # 64 MB total
 _OVERRIDE_PCT_TOL = 5e-4
 
 
@@ -166,30 +171,38 @@ def _resp_key(fn_name: str, *args, **kwargs) -> str:
 
 
 def _resp_get(key: str, ttl: float) -> "Any | None":
+    """Return cached value (deserialized from JSON bytes) or None on miss/expiry."""
     with _resp_cache_lock:
         entry = _resp_cache.get(key)
     if entry is None:
         return None
-    ts, value, _size = entry
+    ts, body, _size = entry
     if (time.monotonic() - ts) >= ttl:
         with _resp_cache_lock:
             _resp_cache.pop(key, None)
         return None
     with _resp_cache_lock:
         _resp_cache.move_to_end(key)
-    return copy.deepcopy(value)
+    try:
+        return json.loads(body)
+    except Exception:
+        return None
 
 
 def _resp_set(key: str, value: Any) -> None:
+    """Serialize value to JSON bytes and store in cache.
+    Stores bytes instead of a Python object to avoid deepcopy overhead on reads.
+    """
     try:
-        approx_size = len(json.dumps(value, default=str, separators=(",", ":")).encode("utf-8"))
+        body = json.dumps(value, default=str, separators=(",", ":")).encode("utf-8")
     except Exception:
-        approx_size = 0
+        return
+    approx_size = len(body)
     if approx_size > _RESP_CACHE_MAX_ENTRY_BYTES:
         logger.info("[FORECAST cache] SKIP oversized entry bytes=%s key=%.120s", approx_size, key)
         return
     with _resp_cache_lock:
-        _resp_cache[key] = (time.monotonic(), copy.deepcopy(value), approx_size)
+        _resp_cache[key] = (time.monotonic(), body, approx_size)
         _resp_cache.move_to_end(key)
         total = sum(entry[2] for entry in _resp_cache.values())
         while (
@@ -210,25 +223,52 @@ def clear_response_cache() -> None:
     with _LAB_CODE_CACHE_LOCK:
         _LAB_CODE_CACHE.clear()
     # Also clear canonical series cache so it refreshes with new data
-    global _CANONICAL_SERIES_CACHE
+    global _CANONICAL_SERIES_CACHE, _FACT_2026_DF_CACHE
     with _CANONICAL_SERIES_LOCK:
         _CANONICAL_SERIES_CACHE = None
+    with _FACT_2026_DF_LOCK:
+        _FACT_2026_DF_CACHE = None
     logger.info("[FORECAST cache] Response cache cleared.")
 
 
 def clear_user_cache(user_id: int) -> None:
     """Flush only the cache entries that belong to a specific user.
 
-    Uses the fact that user_id is embedded as a string in the JSON key produced
-    by _resp_key().  Only entries whose key string contains str(user_id) are
-    removed, so other users' results remain warm.
+    Uses a regex to match the exact JSON token '"user_id": <N>[,}]' so that
+    user_id=2 does NOT accidentally invalidate entries for user_id=12 or user_id=20.
+    The cache key is produced by _resp_key() as a json.dumps array (uncompact separators),
+    so the integer user_id always appears as: "user_id": <N>, or "user_id": <N>}
     """
-    uid_str = str(user_id)
+    uid_pat = re.compile(rf'"user_id": {int(user_id)}[,}}]')
     with _resp_cache_lock:
-        to_delete = [k for k in _resp_cache if uid_str in k]
+        to_delete = [k for k in _resp_cache if uid_pat.search(k)]
         for k in to_delete:
             del _resp_cache[k]
     logger.info("[FORECAST cache] User %s cache cleared (%d keys).", user_id, len(to_delete))
+
+
+def _clear_cache_for_override_save(user_id: int) -> None:
+    """Targeted cache invalidation after an override save.
+
+    Clears two domains that become stale after user_id saves an override:
+      1. The saving user's own cached results (keyed by user_id).
+      2. Admin/all-users view entries (keyed with "is_admin": true) — admins see
+         ALL users' overrides, so their cache must refresh after any user saves.
+
+    Other regular users' cached results are NOT affected (their overrides didn't
+    change), so they keep their warm cache and avoid unnecessary recomputation.
+    """
+    clear_user_cache(user_id)
+    admin_key_count = 0
+    with _resp_cache_lock:
+        admin_keys = [k for k in _resp_cache if '"is_admin": true' in k]
+        for k in admin_keys:
+            del _resp_cache[k]
+        admin_key_count = len(admin_keys)
+    logger.info(
+        "[FORECAST cache] Override save user=%s: cleared user keys + %d admin entries.",
+        user_id, admin_key_count,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +339,51 @@ _LAB_CODE_CACHE_LOCK = threading.Lock()
 _CANONICAL_SERIES_CACHE: "tuple[float, list[str]] | None" = None
 _CANONICAL_SERIES_TTL = 3600
 _CANONICAL_SERIES_LOCK = threading.Lock()
+
+# In-memory cache for the parsed facturacion_real CSV (32 MB, 206K rows).
+# Re-reading + re-parsing this CSV adds 600-700ms to every cold chart-data call
+# in the local light path. Caching the parsed DataFrame avoids this on 2nd+ call.
+# TTL=1h — data changes only with a new CSV file upload / data reload.
+_FACT_2026_DF_CACHE: "tuple[float, Any] | None" = None
+_FACT_2026_DF_TTL = 3600
+_FACT_2026_DF_LOCK = threading.Lock()
+
+
+def _get_fact_2026_df_cached() -> "pd.DataFrame":
+    """Return the parsed facturacion_real_2026 DataFrame, cached in memory for 1 h.
+
+    Only used by the local light path (_local_get_chart_data_light).
+    The full _load_all_data() path still reads the CSV independently and stores
+    it as _data_cache['df_fact_2026'] — this cache is separate and additive.
+    """
+    import pandas as _pd
+    global _FACT_2026_DF_CACHE
+    with _FACT_2026_DF_LOCK:
+        if _FACT_2026_DF_CACHE is not None:
+            ts, val = _FACT_2026_DF_CACHE
+            if time.monotonic() - ts < _FACT_2026_DF_TTL:
+                return val
+        if not FACT_2026_FILE.exists():
+            return _pd.DataFrame()
+        try:
+            df = _pd.read_csv(
+                str(FACT_2026_FILE),
+                sep=";",
+                encoding="utf-8-sig",
+                low_memory=False,
+                usecols=lambda c: str(c).strip() in {"fecha", "codigo_serie", "perfil", "imp_hist"},
+            )
+            df["fecha"] = _pd.to_datetime(df["fecha"], errors="coerce", dayfirst=True)
+            df["imp_hist"] = _pd.to_numeric(
+                df["imp_hist"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+                errors="coerce",
+            ).fillna(0)
+            _FACT_2026_DF_CACHE = (time.monotonic(), df)
+            logger.info("[FORECAST cache] _get_fact_2026_df_cached loaded %d rows from CSV", len(df))
+            return df
+        except Exception as exc:
+            logger.warning("[FORECAST cache] _get_fact_2026_df_cached error: %s", exc)
+            return _pd.DataFrame()
 
 
 def _get_forecast_periods_cached() -> list:
@@ -1080,8 +1165,9 @@ def save_client_overrides(
 
         session.commit()
 
-    # Flush ALL cached responses — any user's save must be visible to the admin view too
-    clear_response_cache()
+    # Invalidate saving user's cache + admin views (admin sees all users' overrides).
+    # Other regular users keep their warm cache — their overrides didn't change.
+    _clear_cache_for_override_save(user_id)
 
 
 def save_group_expectations(
@@ -1249,7 +1335,7 @@ def save_group_expectations(
                         effective_from_month=effective_from_month,
                     )
                     session.commit()
-                clear_response_cache()
+                _clear_cache_for_override_save(user_id)
             logger.info("[SAVE_GROUP] client=%r no subnegs — wildcard override saved base=%.1f%% target=%.1f%%",
                         clean_id, base_growth_pct, growth_pct)
 
@@ -1294,8 +1380,8 @@ def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | No
             rec.updated_by = user_email
             rec.updated_at = dt.datetime.utcnow()
         session.commit()
-    # Flush ALL cached responses — any user's clear must be visible to the admin view too
-    clear_response_cache()
+    # Invalidate saving user's cache + admin views (admin sees all users' overrides).
+    _clear_cache_for_override_save(user_id)
 
 
 def _get_client_overrides_snapshot(
@@ -2337,27 +2423,18 @@ def _local_get_chart_data_light(
         fact_records: list[dict] = []
         fact_2026_sum = 0.0
         if FACT_2026_FILE.exists() and view_money:
-            df_fact = pd.read_csv(
-                str(FACT_2026_FILE),
-                sep=";",
-                encoding="utf-8-sig",
-                low_memory=False,
-                usecols=lambda c: str(c).strip() in {"fecha", "codigo_serie", "perfil", "imp_hist"},
-            )
-            df_fact["fecha"] = pd.to_datetime(df_fact["fecha"], errors="coerce", dayfirst=True)
-            df_fact["imp_hist"] = pd.to_numeric(
-                df_fact["imp_hist"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
-                errors="coerce",
-            ).fillna(0)
-            df_fact = df_fact[(df_fact["fecha"] >= "2026-01-01") & (df_fact["fecha"] < "2026-05-01")]
-            if profiles and "perfil" in df_fact.columns:
-                df_fact = df_fact[df_fact["perfil"].isin(profiles)]
-            if allowed_codes is not None:
-                df_fact = df_fact[df_fact["codigo_serie"].astype(str).isin(allowed_codes)]
-            fact_agg = df_fact.groupby("fecha", dropna=True)["imp_hist"].sum().reset_index(name="Total_Venta")
-            fact_2026_sum = float(fact_agg["Total_Venta"].sum()) if not fact_agg.empty else 0.0
-            for _, row in fact_agg.sort_values("fecha").iterrows():
-                fact_records.append({"fecha": row["fecha"].strftime("%Y-%m-%d"), "Total_Venta": round(float(row["Total_Venta"]), 0)})
+            # Use in-memory cache: avoids re-reading the 32 MB CSV on every cold request
+            df_fact = _get_fact_2026_df_cached().copy()
+            if not df_fact.empty:
+                df_fact = df_fact[(df_fact["fecha"] >= "2026-01-01") & (df_fact["fecha"] < "2026-05-01")]
+                if profiles and "perfil" in df_fact.columns:
+                    df_fact = df_fact[df_fact["perfil"].isin(profiles)]
+                if allowed_codes is not None:
+                    df_fact = df_fact[df_fact["codigo_serie"].astype(str).isin(allowed_codes)]
+                fact_agg = df_fact.groupby("fecha", dropna=True)["imp_hist"].sum().reset_index(name="Total_Venta")
+                fact_2026_sum = float(fact_agg["Total_Venta"].sum()) if not fact_agg.empty else 0.0
+                for _, row in fact_agg.sort_values("fecha").iterrows():
+                    fact_records.append({"fecha": row["fecha"].strftime("%Y-%m-%d"), "Total_Venta": round(float(row["Total_Venta"]), 0)})
 
         def _fmt(dfs: pd.DataFrame, cols: list[str]) -> list[dict]:
             out = []
@@ -3556,22 +3633,20 @@ def _pg_get_client_table_inner(
     pivot_reset = pivot.reset_index()
     pivot_reset.rename(columns={"fantasia": "Cliente", "nombre_grupo": "Grupo"}, inplace=True)
 
-    rows = []
-    for _, row in pivot_reset.iterrows():
-        r = {
-            "Cliente": str(row.get("Cliente", "")),
-            "Grupo":   str(row.get("Grupo", "")),
-            "_lab":    1 if row.get("Cliente") in clients_with_lab else 0,
-        }
-        for mn in col_names:
-            r[mn] = round(float(row.get(mn, 0)), 0)
-        rows.append(r)
-
-    totals       = {mn: round(float(pivot_reset[mn].sum()), 0) for mn in col_names}
-    vals_flat    = [v for r in rows for k, v in r.items() if k in col_names and isinstance(v, (int, float))]
-    min_val      = float(min(vals_flat)) if vals_flat else 0
-    max_val      = float(max(vals_flat)) if vals_flat else 0
+    # Vectorized row build — 40-50x faster than iterrows for 6K+ clients
+    # Totals from unrounded values (matching original behavior: sum then round)
+    totals          = {mn: round(float(pivot_reset[mn].sum()), 0) for mn in col_names}
     total_projected = round(sum(totals.values()), 0)
+    # Round cells after computing totals
+    pivot_reset["_lab"] = pivot_reset["Cliente"].isin(clients_with_lab).astype(int)
+    for mn in col_names:
+        pivot_reset[mn] = pivot_reset[mn].round(0)
+    min_val = float(pivot_reset[col_names].min().min()) if col_names else 0
+    max_val = float(pivot_reset[col_names].max().max()) if col_names else 0
+    rows = [
+        {**r, "Cliente": str(r["Cliente"]), "Grupo": str(r["Grupo"])}
+        for r in pivot_reset[["Cliente", "Grupo", "_lab"] + col_names].to_dict("records")
+    ]
 
     result = {
         "months": col_names, "rows": rows, "totals": totals,
@@ -3910,14 +3985,14 @@ def _pg_get_treemap_data_inner(
             otras_g = f"{canal_id}::otras_grupos"
             _add(otras_g, "Otras", canal_id, float(small_g["Monto"].sum()), _blend_with_white(bc, 0.14))
 
-        for _, gr in cg.iterrows():
-            grupo   = gr["Grupo"]
-            g_par   = canal_id if gr["show_direct"] else otras_g
+        for gr in cg.itertuples(index=False):
+            grupo   = gr.Grupo
+            g_par   = canal_id if gr.show_direct else otras_g
             if g_par is None:
                 continue
             gid = f"{canal_id}::grupo::{grupo}"
-            _add(gid, str(grupo), g_par, float(gr["Monto"]),
-                 _blend_with_white(bc, 0.33 if gr["show_direct"] else 0.43))
+            _add(gid, str(grupo), g_par, float(gr.Monto),
+                 _blend_with_white(bc, 0.33 if gr.show_direct else 0.43))
 
             grp_cli = canal_df[canal_df["Grupo"] == grupo].copy()
             grp_cli = grp_cli.assign(
@@ -3930,13 +4005,13 @@ def _pg_get_treemap_data_inner(
             if not small_c.empty:
                 otras_c = f"{gid}::otras_clientes"
                 _add(otras_c, "Otras", gid, float(small_c["Monto"].sum()), _blend_with_white(bc, 0.24))
-            for _, cr in grp_cli.iterrows():
-                c_par = gid if cr["show_c"] else otras_c
+            for cr in grp_cli.itertuples(index=False):
+                c_par = gid if cr.show_c else otras_c
                 if c_par is None:
                     continue
-                tone = 0.56 - min(float(cr["share_g"]) * 0.35, 0.22)
-                _add(f"{gid}::cliente::{cr['Cliente']}", str(cr["Cliente"]),
-                     c_par, float(cr["Monto"]), _blend_with_white(bc, max(0.10, tone)))
+                tone = 0.56 - min(float(cr.share_g) * 0.35, 0.22)
+                _add(f"{gid}::cliente::{cr.Cliente}", str(cr.Cliente),
+                     c_par, float(cr.Monto), _blend_with_white(bc, max(0.10, tone)))
 
     result = {"ids": ids, "labels": labels, "parents": parents, "values": values,
               "colors": colors, "periods": periods, "canals": canals}
@@ -4152,6 +4227,35 @@ def get_data() -> dict[str, Any]:
             else:
                 _data_cache = _load_all_data()
     return _data_cache
+
+
+def preload_valorizado_parquet() -> None:
+    """Pre-warm _data_cache in a background thread at server startup.
+
+    Calls get_data() which loads the full valorizado parquet + CSV files into
+    _data_cache so the first user request finds data already in memory.
+
+    - On SQLite/local: loads ~10-30s in background; subsequent requests use in-memory data.
+    - On PostgreSQL/Render: get_data() returns {} immediately — this is a no-op.
+    - Thread-safe: get_data() already uses _cache_lock; only one load runs at a time.
+    - Non-blocking: runs as a daemon thread; the server stays responsive.
+    - Failure-safe: any exception is logged and the app continues working normally.
+    """
+    def _load() -> None:
+        if engine is not None and "postgresql" in str(engine.url):
+            logger.info("[FORECAST PRELOAD] skipped (PostgreSQL mode — data lives in DB)")
+            return
+        logger.info("[FORECAST PRELOAD] start")
+        t0 = time.monotonic()
+        try:
+            data = get_data()
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            n_rows = len(data.get("df_valorizado", pd.DataFrame())) if data else 0
+            logger.info("[FORECAST PRELOAD] loaded in %.0f ms — df_valorizado %d rows", elapsed_ms, n_rows)
+        except Exception as exc:
+            logger.error("[FORECAST PRELOAD] failed: %s", exc, exc_info=True)
+
+    threading.Thread(target=_load, name="forecast-preload", daemon=True).start()
 
 
 def reload_data() -> None:
@@ -5177,26 +5281,20 @@ def get_client_table(
     else:
         clients_with_lab = set()
 
-    rows = []
-    for _, row in pivot_reset.iterrows():
-        r: dict = {
-            "Cliente": str(row.get("Cliente", "")),
-            "Grupo": str(row.get("Grupo", "")),
-            "_lab": 1 if row.get("Cliente") in clients_with_lab else 0,
-        }
-        for mn in new_col_names:
-            r[mn] = round(float(row.get(mn, 0)), 0)
-        rows.append(r)
-
-    # Totals row
+    # Vectorized row build — 40-50x faster than iterrows for 6K+ clients
+    # Totals from unrounded values (matching original behavior: sum then round)
     totals = {mn: round(float(pivot_reset[mn].sum()), 0) for mn in new_col_names}
-
-    # Min/max for heatmap
-    vals_flat = [v for r in rows for k, v in r.items() if k in new_col_names and isinstance(v, (int, float))]
-    min_val = float(min(vals_flat)) if vals_flat else 0
-    max_val = float(max(vals_flat)) if vals_flat else 0
-
     total_projected = round(float(sum(totals.values())), 0)
+    # Round cells after computing totals
+    pivot_reset["_lab"] = pivot_reset["Cliente"].isin(clients_with_lab).astype(int)
+    for mn in new_col_names:
+        pivot_reset[mn] = pivot_reset[mn].round(0)
+    min_val = float(pivot_reset[new_col_names].min().min()) if new_col_names else 0
+    max_val = float(pivot_reset[new_col_names].max().max()) if new_col_names else 0
+    rows = [
+        {**r, "Cliente": str(r["Cliente"]), "Grupo": str(r["Grupo"])}
+        for r in pivot_reset[["Cliente", "Grupo", "_lab"] + new_col_names].to_dict("records")
+    ]
 
     base_result = {
         "months": new_col_names,
@@ -5454,14 +5552,14 @@ def get_treemap_data(
             otras_canal_id = f"{canal_id}::otras_grupos"
             add_node(otras_canal_id, "Otras", canal_id, float(small_groups["Monto"].sum()), _blend_with_white(base_color, 0.14))
 
-        for _, grp_row in canal_groups.iterrows():
-            grupo = grp_row["Grupo"]
-            grupo_total = float(grp_row["Monto"])
-            grupo_parent = canal_id if grp_row["show_direct"] else otras_canal_id
+        for grp_row in canal_groups.itertuples(index=False):
+            grupo = grp_row.Grupo
+            grupo_total = float(grp_row.Monto)
+            grupo_parent = canal_id if grp_row.show_direct else otras_canal_id
             if grupo_parent is None:
                 continue
             grupo_id = f"{canal_id}::grupo::{grupo}"
-            blend_g = 0.33 if grp_row["show_direct"] else 0.43
+            blend_g = 0.33 if grp_row.show_direct else 0.43
             add_node(grupo_id, str(grupo), grupo_parent, grupo_total, _blend_with_white(base_color, blend_g))
 
             grp_clients = canal_df[canal_df["Grupo"] == grupo].copy()
@@ -5477,14 +5575,14 @@ def get_treemap_data(
                 otras_cli_id = f"{grupo_id}::otras_clientes"
                 add_node(otras_cli_id, "Otras", grupo_id, float(small_clients["Monto"].sum()), _blend_with_white(base_color, 0.24))
 
-            for _, cli_row in grp_clients.iterrows():
-                cliente = cli_row["Cliente"]
-                cliente_parent = grupo_id if cli_row["show_direct"] else otras_cli_id
+            for cli_row in grp_clients.itertuples(index=False):
+                cliente = cli_row.Cliente
+                cliente_parent = grupo_id if cli_row.show_direct else otras_cli_id
                 if cliente_parent is None:
                     continue
                 cliente_node_id = f"{grupo_id}::cliente::{cliente}"
-                tone = 0.56 - min(float(cli_row["share_grupo"]) * 0.35, 0.22)
-                add_node(cliente_node_id, str(cliente), cliente_parent, float(cli_row["Monto"]), _blend_with_white(base_color, max(0.10, tone)))
+                tone = 0.56 - min(float(cli_row.share_grupo) * 0.35, 0.22)
+                add_node(cliente_node_id, str(cliente), cliente_parent, float(cli_row.Monto), _blend_with_white(base_color, max(0.10, tone)))
 
     return {
         "ids": ids,
