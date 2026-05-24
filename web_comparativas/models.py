@@ -363,6 +363,57 @@ class ForecastUserOverride(Base):
         )
 
 
+# ---------- Clientes manuales de Forecast ----------
+class ForecastManualClient(Base):
+    """Cliente agregado manualmente en el módulo Forecast > Detalle Operativo."""
+    __tablename__ = "forecast_manual_clients"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    nombre_cliente = Column(String(255), nullable=False)
+    grupo = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
+    created_by = Column(String(255), nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(255), nullable=True)
+
+    entries = relationship("ForecastManualEntry", back_populates="client", cascade="all, delete-orphan")
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<ForecastManualClient id={self.id} nombre={self.nombre_cliente!r} grupo={self.grupo!r}>"
+
+
+class ForecastManualEntry(Base):
+    """Línea artículo-mes-importe para un cliente manual de Forecast."""
+    __tablename__ = "forecast_manual_entries"
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(Integer, ForeignKey("forecast_manual_clients.id"), nullable=False, index=True)
+    neg = Column(String(120), nullable=False, default="")
+    subneg = Column(String(255), nullable=False, default="")
+    codigo_serie = Column(String(120), nullable=False)
+    descripcion = Column(String(255), nullable=True)
+    unidad_medida = Column(String(50), nullable=True, default="Unid.")
+    forecast_month = Column(String(7), nullable=False)
+    cantidad = Column(Float, nullable=False, default=0.0)
+    costo_unitario = Column(Float, nullable=False, default=0.0)
+    monto_total = Column(Float, nullable=False, default=0.0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(255), nullable=True)
+
+    client = relationship("ForecastManualClient", back_populates="entries")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ForecastManualEntry id={self.id} client_id={self.client_id} "
+            f"art={self.codigo_serie!r} month={self.forecast_month!r} monto={self.monto_total}>"
+        )
+
+
 # ---------- Solicitudes de restablecimiento de contraseña ----------
 class PasswordResetRequest(Base):
     """
@@ -1299,6 +1350,40 @@ class RevisionSession(Base):
     user = relationship("User")
 
 
+def _ensure_manual_client_columns():
+    """Agrega columnas de eliminación lógica a tablas de clientes manuales si faltan."""
+    _log = logging.getLogger("wc.models.migrate")
+    try:
+        insp = inspect(engine)
+        with engine.connect() as conn:
+            # forecast_manual_clients
+            if "forecast_manual_clients" in insp.get_table_names():
+                existing = {c["name"] for c in insp.get_columns("forecast_manual_clients")}
+                for col, ddl in [
+                    ("deleted_at",  "ALTER TABLE forecast_manual_clients ADD COLUMN deleted_at DATETIME"),
+                    ("deleted_by",  "ALTER TABLE forecast_manual_clients ADD COLUMN deleted_by VARCHAR(255)"),
+                ]:
+                    if col not in existing:
+                        conn.execute(text(ddl))
+                        _log.info("forecast_manual_clients: added column %s", col)
+                conn.commit()
+
+            # forecast_manual_entries
+            if "forecast_manual_entries" in insp.get_table_names():
+                existing = {c["name"] for c in insp.get_columns("forecast_manual_entries")}
+                for col, ddl in [
+                    ("is_active",  "ALTER TABLE forecast_manual_entries ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"),
+                    ("deleted_at", "ALTER TABLE forecast_manual_entries ADD COLUMN deleted_at DATETIME"),
+                    ("deleted_by", "ALTER TABLE forecast_manual_entries ADD COLUMN deleted_by VARCHAR(255)"),
+                ]:
+                    if col not in existing:
+                        conn.execute(text(ddl))
+                        _log.info("forecast_manual_entries: added column %s", col)
+                conn.commit()
+    except Exception as exc:
+        _log.warning("_ensure_manual_client_columns error: %s", exc)
+
+
 def init_db():
     """Crea tablas si no existen y asegura columnas nuevas e índices básicos."""
     Base.metadata.create_all(bind=engine)
@@ -1313,6 +1398,7 @@ def init_db():
     _ensure_email_notifications_indexes()
     _ensure_upload_uploader_snapshot_columns()  # <-- snapshot uploader (nuevo)
     _ensure_usage_indexes()  # <-- índices para métricas de uso
+    _ensure_manual_client_columns()  # <-- eliminación lógica clientes manuales Forecast
     _bootstrap_admin_from_env()  # <-- crea admin si tenés ADMIN_EMAIL/PASSWORD
     _bootstrap_reset_password_from_env()  # <-- configura contraseña RESET si hay RESET_PASSWORD
 

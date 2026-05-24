@@ -250,6 +250,13 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[MIGRATION] Warning comparativa_rows table: {e}", flush=True)
 
+    try:
+        from web_comparativas.models import _ensure_manual_client_columns
+        _ensure_manual_client_columns()
+        print("[MIGRATION] SUCCESS: forecast manual client columns checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning forecast manual client columns: {e}", flush=True)
+
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup
 

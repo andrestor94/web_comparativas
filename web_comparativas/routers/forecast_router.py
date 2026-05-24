@@ -635,6 +635,157 @@ def api_clear_client(
 
 
 # ---------------------------------------------------------------------------
+# Agregar cliente manual (Forecast > Detalle Operativo)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/article-search")
+def api_article_search(
+    request: Request,
+    q: str = Query(default=""),
+    limit: int = Query(default=30, ge=1, le=200),
+    _user: User = Depends(_require_user),
+):
+    """Dynamic article search for the new-client modal."""
+    try:
+        results = svc.search_articles(q=q, limit=limit)
+        return results
+    except Exception as exc:
+        logger.error("article-search error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+@router.get("/api/new-client-catalog")
+def api_new_client_catalog(
+    request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Return catalog data for the new-manual-client form."""
+    started = time.perf_counter()
+    try:
+        result = svc.get_new_client_catalog(user_id=_user.id)
+        _log_api_perf("new-client-catalog", started, result)
+        return result
+    except Exception as exc:
+        logger.error("new-client-catalog error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+class _ManualEntry(BaseModel):
+    neg: str = ""
+    subneg: str = ""
+    codigo_serie: str
+    descripcion: str = ""
+    unidad_medida: str = "Unid."
+    forecast_month: str
+    cantidad: float = 0.0
+    costo_unitario: float = 0.0
+    monto_total: float = 0.0
+
+
+class _CreateManualClientPayload(BaseModel):
+    nombre_cliente: str
+    grupo: Optional[str] = None
+    entries: List[_ManualEntry] = Field(default_factory=list)
+
+
+@router.post("/api/create-manual-client")
+def api_create_manual_client(
+    payload: _CreateManualClientPayload,
+    request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Create a new manual forecast client with article-month entries."""
+    started = time.perf_counter()
+    try:
+        nombre = (payload.nombre_cliente or "").strip()
+        if not nombre:
+            raise HTTPException(400, "nombre_cliente es obligatorio")
+        if not payload.entries:
+            raise HTTPException(400, "Debe agregar al menos un artículo")
+
+        result = svc.create_manual_client(
+            user_id=_user.id,
+            created_by=_user.email or str(_user.id),
+            nombre_cliente=nombre,
+            grupo=payload.grupo,
+            entries=[e.dict() for e in payload.entries],
+        )
+        # Clear this user's cache so the new client appears immediately
+        svc.clear_user_cache(_user.id)
+        _log_api_perf("create-manual-client", started, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("create-manual-client error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Eliminación lógica de clientes/entries manuales (solo Admin)
+# ---------------------------------------------------------------------------
+
+def _require_admin(request: Request, _user: User = Depends(_require_user)) -> User:
+    """Only users with admin role may call delete endpoints."""
+    if not _user.is_admin():
+        raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar clientes manuales")
+    return _user
+
+
+@router.delete("/api/manual-client/{manual_client_id}")
+def api_delete_manual_client(
+    manual_client_id: int,
+    request: Request,
+    _user: User = Depends(_require_admin),
+):
+    """Logical-delete a manual forecast client (admin only)."""
+    started = time.perf_counter()
+    try:
+        result = svc.delete_manual_client(
+            user_id=_user.id,
+            manual_client_id=manual_client_id,
+            deleted_by=_user.email or str(_user.id),
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("error", "No encontrado"))
+        svc.clear_user_cache(_user.id)
+        svc.clear_response_cache()
+        _log_api_perf("delete-manual-client", started, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("delete-manual-client error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+@router.delete("/api/manual-entry/{manual_entry_id}")
+def api_delete_manual_entry(
+    manual_entry_id: int,
+    request: Request,
+    _user: User = Depends(_require_admin),
+):
+    """Logical-delete a single manual forecast entry (admin only)."""
+    started = time.perf_counter()
+    try:
+        result = svc.delete_manual_entry(
+            user_id=_user.id,
+            manual_entry_id=manual_entry_id,
+            deleted_by=_user.email or str(_user.id),
+        )
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("error", "No encontrado"))
+        svc.clear_user_cache(_user.id)
+        _log_api_perf("delete-manual-entry", started, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("delete-manual-entry error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Widget de notas — Mesa de Ayuda integrada con Forecast
 # Mismo patrón que sic_router.py / pliego_widget.js, adaptado al módulo Forecast.
 # ---------------------------------------------------------------------------

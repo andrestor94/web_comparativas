@@ -1532,9 +1532,40 @@
   }
   .fc-modal__footer-actions { display: flex; gap: 10px; align-items: center; }
   
+  /* New client modal specific */
+  .fc-new-client-modal { max-width: min(920px, 95vw); }
+  .fc-add-client-btn { font-size: 0.78rem; white-space: nowrap; }
+  .fc-nc-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .fc-nc-section-title {
+    font-size: 0.83rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 12px;
+  }
+  .fc-nc-label { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block; }
+  .fc-nc-error { color: #dc3545; font-size: 0.75rem; margin-top: 4px; }
+  .fc-nc-art-table { font-size: 0.78rem; margin-bottom: 0; }
+  .fc-nc-art-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 600; padding: 6px 6px; border-bottom: 1px solid var(--border-color); }
+  .fc-nc-art-table td { padding: 5px 5px; vertical-align: middle; border-bottom: 1px solid var(--border-color); }
+  .fc-nc-art-table input, .fc-nc-art-table select { font-size: 0.78rem; padding: 3px 6px; height: 28px; }
+  .fc-nc-del-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 4px; font-size: 0.9rem; }
+  .fc-nc-del-btn:hover { color: #dc3545; background: #ffeaea; }
+  .fc-nc-monto-cell { color: var(--g-green); font-weight: 600; font-size: 0.78rem; }
+  .fc-nc-msg { padding: 6px 10px; border-radius: 6px; }
+  .fc-nc-msg.success { background: #d4edda; color: #155724; }
+  .fc-nc-msg.error { background: #f8d7da; color: #721c24; }
+
   /* Dirty indicator dot */
-  .fc-modal--dirty .fc-modal__title::after { 
-    content: ''; 
+  .fc-modal--dirty .fc-modal__title::after {
+    content: '';
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -2112,6 +2143,12 @@
               <span class="fc-toggle-slider"></span>
             </label>
           </div>
+          <!-- Divider -->
+          <div class="fc-header-control-divider"></div>
+          <!-- Agregar cliente -->
+          <button class="btn btn-sm btn-primary fc-add-client-btn" onclick="openNewClientModal()" title="Agregar nuevo cliente al forecast">
+            <i class="bi bi-person-plus-fill me-1"></i> Agregar cliente
+          </button>
         </div>
       </div>
       <!-- ── Group selection action bar (compact) ────────────────────────── -->
@@ -2212,6 +2249,81 @@
 </div>
 
 <!-- ================================================================= -->
+<!-- MODAL: AGREGAR CLIENTE MANUAL                                       -->
+<!-- ================================================================= -->
+<div class="fc-modal-overlay" id="fcNewClientOverlay" style="display:none;">
+  <div class="fc-modal fc-new-client-modal">
+    <div class="fc-modal__header">
+      <h5 class="fc-modal__title">
+        <i class="bi bi-person-plus-fill me-2" style="color:var(--g-blue);"></i>
+        Agregar cliente al Forecast
+      </h5>
+      <button class="fc-modal__close" onclick="closeNewClientModal()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="fc-modal__body" id="fcNewClientBody">
+
+      <!-- ── Sección 1: Datos del cliente ── -->
+      <div class="fc-nc-section">
+        <h6 class="fc-nc-section-title"><i class="bi bi-person me-1"></i>Datos del cliente</h6>
+        <div class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="fc-nc-label">Nombre del cliente <span class="text-danger">*</span></label>
+            <input type="text" id="ncNombre" class="form-control form-control-sm" placeholder="Ej: Farmacia Central" autocomplete="off">
+            <div class="fc-nc-error" id="ncNombreError" style="display:none;"></div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="fc-nc-label">Grupo (opcional)</label>
+            <input type="text" id="ncGrupo" class="form-control form-control-sm" placeholder="Seleccionar o escribir grupo..." list="ncGrupoList" autocomplete="off">
+            <datalist id="ncGrupoList"></datalist>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Sección 2: Artículos ── -->
+      <div class="fc-nc-section">
+        <h6 class="fc-nc-section-title"><i class="bi bi-box-seam me-1"></i>Artículos a proyectar <span class="text-danger">*</span></h6>
+        <div class="fc-nc-art-hint text-muted mb-2" style="font-size:0.78rem;">
+          Agregue uno o varios artículos. Por cada uno, indique el mes, la cantidad y el costo unitario.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm fc-nc-art-table" id="ncArtTable">
+            <thead>
+              <tr>
+                <th style="min-width:220px;">Artículo</th>
+                <th style="min-width:110px;">Negocio</th>
+                <th style="min-width:110px;">Subnegocio</th>
+                <th style="min-width:110px;">Mes</th>
+                <th style="min-width:90px;">Cantidad</th>
+                <th style="min-width:100px;">Costo unit. ($)</th>
+                <th style="min-width:100px;">Importe ($)</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="ncArtBody">
+              <!-- rows injected by JS -->
+            </tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-primary mt-1" onclick="ncAddArticleLine()">
+          <i class="bi bi-plus-circle me-1"></i> Agregar artículo
+        </button>
+        <div class="fc-nc-error" id="ncArtError" style="display:none;"></div>
+      </div>
+
+    </div><!-- /fc-modal__body -->
+    <div class="fc-modal__footer">
+      <div class="fc-nc-msg" id="fcNcMsg" style="display:none;font-size:0.82rem;"></div>
+      <div class="fc-modal__footer-actions">
+        <button type="button" id="fcNcBtnSave" class="btn btn-sm btn-primary" onclick="saveNewClient()">
+          <i class="bi bi-check-lg me-1"></i> Guardar cliente
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeNewClientModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================= -->
 <!-- JAVASCRIPT                                                          -->
 <!-- ================================================================= -->
 <script>
@@ -2292,6 +2404,7 @@ const STATE = {
    =================================================================== */
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
 const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}';
+const _FC_IS_ADMIN   = {{ 'true' if user.is_admin() else 'false' }};
 const _FC_PFX        = 'fc_' + _FC_V + '_' + _FC_USER_KEY + '_';
 const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
 const _FC_TTL_STATIC = 30 * 60 * 1000;   // 30 min — filter-options
@@ -3856,6 +3969,14 @@ function updateClientGrid(tableData) {
           const gk = _escapeJsSingle(groupKey);
           return `<input type="checkbox" class="fc-group-check" ${checked} title="Seleccionar grupo" onclick="event.stopPropagation();_toggleGroupSelection('${gk}')">`;
         }
+        if (_FC_IS_ADMIN && params.data && params.data._is_manual) {
+          const cid  = (params.data._manual_client_id || '').toString();
+          const name = _escapeJsSingle(params.data.Cliente || '');
+          return `<span style="display:flex;align-items:center;gap:4px;">` +
+            `<span class="fc-edit-icon-cell" title="Editar"><i class="bi bi-pencil-square"></i></span>` +
+            `<span class="fc-del-manual-btn" title="Eliminar cliente manual" style="cursor:pointer;color:#ef4444;padding:2px 4px;" onclick="event.stopPropagation();confirmDeleteManualClient('${cid}','${name}')"><i class="bi bi-trash3"></i></span>` +
+            `</span>`;
+        }
         return '<span class="fc-edit-icon-cell" title="Editar"><i class="bi bi-pencil-square"></i></span>';
       },
       cellStyle: params => {
@@ -4308,6 +4429,18 @@ function renderModalBody(data) {
     html += `<div class="fc-modal-growth-caption">📈 Base del escenario: ${growthPct}% → Tasa Mensual Compuesta: ${_rm.toFixed(4)}%</div>`;
   }
 
+  // Admin-only: "Eliminar cliente" button for manual clients
+  if (data.is_manual && _FC_IS_ADMIN && data.manual_client_id) {
+    const cid  = data.manual_client_id;
+    const name = (data.client_id || '').replace(/'/g, "\\'");
+    html += `<div style="margin:8px 0 4px;display:flex;justify-content:flex-end;">
+      <button class="btn btn-sm btn-outline-danger" style="font-size:.8rem;gap:4px;display:flex;align-items:center;"
+        onclick="confirmDeleteManualClient('${cid}','${name}')">
+        <i class="bi bi-trash3-fill"></i> Eliminar cliente manual
+      </button>
+    </div>`;
+  }
+
   html += '<div id="fcNegSections">';
   (data.negocios || []).forEach((negSection, ni) => {
     const negId = 'neg-section-' + ni;
@@ -4323,6 +4456,51 @@ function renderModalBody(data) {
       </div>`;
   });
   html += '</div>';
+
+  // Admin-only: entry list with per-entry delete for manual clients
+  if (data.is_manual && _FC_IS_ADMIN) {
+    const allEntries = [];
+    (data.negocios || []).forEach(neg => {
+      (neg.subnegs || []).forEach(sub => {
+        (sub.products || []).forEach(prod => {
+          (prod.entries || []).forEach(e => {
+            allEntries.push({ ...e, articulo: prod.articulo, descripcion: prod.descripcion });
+          });
+        });
+      });
+    });
+    if (allEntries.length > 0) {
+      html += `<div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
+        <div style="font-size:.78rem;font-weight:600;color:#64748b;margin-bottom:6px;">
+          <i class="bi bi-list-ul me-1"></i> Entradas manuales (Admin)
+        </div>
+        <table style="width:100%;font-size:.78rem;border-collapse:collapse;">
+          <thead><tr style="background:#f8fafc;color:#64748b;">
+            <th style="padding:4px 8px;text-align:left;">Artículo</th>
+            <th style="padding:4px 8px;text-align:left;">Mes</th>
+            <th style="padding:4px 8px;text-align:right;">Cantidad</th>
+            <th style="padding:4px 8px;text-align:right;">Importe</th>
+            <th style="padding:4px 4px;"></th>
+          </tr></thead><tbody>`;
+      allEntries.forEach(e => {
+        const lbl = `${e.articulo} | ${e.forecast_month}`;
+        const lblEsc = lbl.replace(/'/g, "\\'");
+        html += `<tr style="border-bottom:1px solid #f1f4f8;">
+          <td style="padding:4px 8px;">${e.articulo}${e.descripcion && e.descripcion !== e.articulo ? ' — ' + e.descripcion : ''}</td>
+          <td style="padding:4px 8px;">${e.forecast_month}</td>
+          <td style="padding:4px 8px;text-align:right;">${Number(e.cantidad).toLocaleString('es-AR',{maximumFractionDigits:2})}</td>
+          <td style="padding:4px 8px;text-align:right;">$ ${Number(e.monto_total).toLocaleString('es-AR',{maximumFractionDigits:0})}</td>
+          <td style="padding:4px 4px;text-align:center;">
+            <button class="btn btn-sm btn-outline-danger py-0 px-1" style="font-size:.72rem;" title="Eliminar esta entrada"
+              onclick="confirmDeleteManualEntry(${e.entry_id},'${lblEsc}')">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+  }
 
   body.innerHTML = html;
   _forceClientGrowthInputFromRenderedSubnegs('after-body-render');
@@ -4854,10 +5032,496 @@ document.getElementById('clientSearchClear').addEventListener('click', function(
 window.addEventListener('pagehide', _persistForecastView);
 
 /* ===================================================================
+   AGREGAR CLIENTE MANUAL (Detalle Operativo)
+   =================================================================== */
+
+let _ncCatalog      = null;  // cached catalog { negocios, subnegocios, articulos, grupos }
+let _ncRowIdx       = 0;     // unique row counter
+const _ncSearchTimers = {};  // idx → debounce timer id
+const _ncSelectedArt  = {};  // idx → article object from dynamic search
+
+function openNewClientModal() {
+  document.getElementById('ncNombre').value = '';
+  document.getElementById('ncGrupo').value = '';
+  document.getElementById('ncArtBody').innerHTML = '';
+  document.getElementById('ncNombreError').style.display = 'none';
+  document.getElementById('ncArtError').style.display = 'none';
+  _ncHideMsg();
+  _ncRowIdx = 0;
+  // Clear dynamic-search state
+  Object.keys(_ncSelectedArt).forEach(k => delete _ncSelectedArt[k]);
+  Object.keys(_ncSearchTimers).forEach(k => { clearTimeout(_ncSearchTimers[k]); delete _ncSearchTimers[k]; });
+  clearTimeout(_ncHideTimer);
+  _ncActiveDropIdx = null;
+  const _gd = document.getElementById('nc-global-art-drop');
+  if (_gd) _gd.style.display = 'none';
+
+  const overlay = document.getElementById('fcNewClientOverlay');
+  overlay.style.display = 'flex';
+  overlay.classList.add('open');
+
+  // Load catalog if not cached
+  if (_ncCatalog) {
+    _ncPopulateGroups(_ncCatalog.grupos);
+    ncAddArticleLine();  // add first empty line
+  } else {
+    fetch('/forecast/api/new-client-catalog')
+      .then(r => r.json())
+      .then(data => {
+        _ncCatalog = data;
+        _ncPopulateGroups(data.grupos || []);
+        ncAddArticleLine();
+      })
+      .catch(() => ncAddArticleLine());
+  }
+}
+
+function closeNewClientModal() {
+  const overlay = document.getElementById('fcNewClientOverlay');
+  overlay.style.display = 'none';
+  overlay.classList.remove('open');
+  clearTimeout(_ncHideTimer);
+  _ncActiveDropIdx = null;
+  const _gd = document.getElementById('nc-global-art-drop');
+  if (_gd) _gd.style.display = 'none';
+}
+
+function _ncPopulateGroups(grupos) {
+  const dl = document.getElementById('ncGrupoList');
+  if (!dl) return;
+  dl.innerHTML = '';
+  (grupos || []).forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g;
+    dl.appendChild(opt);
+  });
+}
+
+function _ncFormatMes(ym) {
+  // "YYYY-MM" → "Mmm YYYY"
+  if (!ym) return '';
+  try {
+    const d = new Date(ym + '-02');
+    return d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric' })
+             .replace('.','').replace(/^\w/, c => c.toUpperCase());
+  } catch(e) { return ym; }
+}
+
+function _ncGetMonthOptions() {
+  // Parse "YYYY-MM-DD" or "YYYY-MM" to { year, month } WITHOUT using new Date(isoString).
+  // new Date("YYYY-MM-DD") parses as UTC midnight — in UTC-3 that becomes the previous day (Dec 2025).
+  function _parseYM(s) {
+    const parts = (s || '').split('-').map(Number);
+    return { year: parts[0] || 0, month: parts[1] || 1 };
+  }
+
+  const fromRaw = (STATE && STATE.startDate) ? STATE.startDate : null;
+  const toRaw   = (STATE && STATE.endDate)   ? STATE.endDate   : null;
+
+  const nowLocal = new Date();
+  const from = fromRaw ? _parseYM(fromRaw) : { year: nowLocal.getFullYear(), month: nowLocal.getMonth() + 1 };
+  const to   = toRaw   ? _parseYM(toRaw)   : { year: from.year, month: Math.min(from.month + 11, 12) };
+
+  if (!from.year || !to.year) {
+    const ym = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}`;
+    return [{ value: ym, label: _ncFormatMes(ym) }];
+  }
+
+  const opts = [];
+  let y = from.year, m = from.month;
+  const limit = 60; // safety cap
+  for (let i = 0; i < limit; i++) {
+    const ym = `${y}-${String(m).padStart(2,'0')}`;
+    opts.push({ value: ym, label: _ncFormatMes(ym) });
+    if (y === to.year && m === to.month) break;
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return opts;
+}
+
+function ncAddArticleLine() {
+  const idx = _ncRowIdx++;
+  const tbody = document.getElementById('ncArtBody');
+  const monthOpts = _ncGetMonthOptions();
+  const monthSelHtml = monthOpts.map(o =>
+    `<option value="${o.value}">${o.label}</option>`
+  ).join('');
+
+  const negocios = (_ncCatalog && _ncCatalog.negocios) ? _ncCatalog.negocios : [];
+  const negSelHtml = negocios.map(n => `<option value="${n}">${n}</option>`).join('');
+
+  const tr = document.createElement('tr');
+  tr.id = `nc-row-${idx}`;
+  tr.innerHTML = `
+    <td>
+      <input type="text" class="form-control form-control-sm nc-art-input"
+             id="nc-art-${idx}" placeholder="Código o descripción..."
+             autocomplete="off"
+             oninput="ncOnArticleInput(${idx})"
+             onfocus="ncOnArticleFocus(${idx})"
+             onblur="_ncScheduleHide()"
+             style="min-width:180px;">
+    </td>
+    <td>
+      <select class="form-select form-select-sm nc-neg-sel" id="nc-neg-${idx}"
+              onchange="ncOnNegChange(${idx})" style="min-width:100px;">
+        <option value="">-- Negocio --</option>
+        ${negSelHtml}
+      </select>
+    </td>
+    <td>
+      <select class="form-select form-select-sm nc-sub-sel" id="nc-sub-${idx}"
+              style="min-width:100px;">
+        <option value="">-- Subneg --</option>
+      </select>
+    </td>
+    <td>
+      <select class="form-select form-select-sm" id="nc-mes-${idx}" style="min-width:100px;">
+        ${monthSelHtml}
+      </select>
+    </td>
+    <td>
+      <input type="number" class="form-control form-control-sm" id="nc-qty-${idx}"
+             min="0" step="any" placeholder="0" oninput="ncCalcMonto(${idx})">
+    </td>
+    <td>
+      <input type="number" class="form-control form-control-sm" id="nc-cost-${idx}"
+             min="0" step="any" placeholder="0.00" oninput="ncCalcMonto(${idx})">
+    </td>
+    <td class="fc-nc-monto-cell" id="nc-monto-${idx}">$ 0</td>
+    <td>
+      <button type="button" class="fc-nc-del-btn" onclick="ncRemoveLine(${idx})" title="Eliminar línea">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </td>`;
+  tbody.appendChild(tr);
+
+  // Focus first input
+  const inp = document.getElementById(`nc-art-${idx}`);
+  if (inp) setTimeout(() => inp.focus(), 50);
+}
+
+function ncRemoveLine(idx) {
+  const row = document.getElementById(`nc-row-${idx}`);
+  if (row) row.remove();
+}
+
+// ── Article search: portal dropdown (renders in body, position:fixed) ────────
+// One shared dropdown div for all rows — avoids overflow/scroll clipping issues.
+
+let _ncActiveDropIdx = null;     // which row's input is focused
+let _ncHideTimer     = null;     // scheduled hide (cancelled on mouse-enter)
+
+function _ncGetGlobalDrop() {
+  let el = document.getElementById('nc-global-art-drop');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'nc-global-art-drop';
+    el.style.cssText = [
+      'display:none',
+      'position:fixed',
+      'z-index:99999',
+      'background:#fff',
+      'border:1px solid #ccc',
+      'border-radius:4px',
+      'max-height:240px',
+      'overflow-y:auto',
+      'box-shadow:0 4px 16px rgba(0,0,0,.18)',
+      'min-width:240px',
+    ].join(';');
+    el.addEventListener('mouseenter', () => { clearTimeout(_ncHideTimer); });
+    el.addEventListener('mouseleave', () => { _ncScheduleHide(); });
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function _ncPositionDrop(idx) {
+  const inp = document.getElementById(`nc-art-${idx}`);
+  if (!inp) return;
+  const drop = _ncGetGlobalDrop();
+  const rect = inp.getBoundingClientRect();
+  drop.style.top    = (rect.bottom + 2) + 'px';
+  drop.style.left   = rect.left + 'px';
+  drop.style.width  = Math.max(rect.width, 260) + 'px';
+}
+
+function _ncScheduleHide() {
+  clearTimeout(_ncHideTimer);
+  _ncHideTimer = setTimeout(() => {
+    const drop = document.getElementById('nc-global-art-drop');
+    if (drop) drop.style.display = 'none';
+    _ncActiveDropIdx = null;
+  }, 150);
+}
+
+function ncOnArticleFocus(idx) {
+  _ncActiveDropIdx = idx;
+  clearTimeout(_ncHideTimer);
+  // Show initial articles on focus (empty query)
+  clearTimeout(_ncSearchTimers[idx]);
+  _ncSearchTimers[idx] = setTimeout(() => _ncDoSearch(idx), 0);
+}
+
+function ncOnArticleInput(idx) {
+  _ncActiveDropIdx = idx;
+  clearTimeout(_ncHideTimer);
+  clearTimeout(_ncSearchTimers[idx]);
+  _ncSearchTimers[idx] = setTimeout(() => _ncDoSearch(idx), 250);
+}
+
+function _ncDoSearch(idx) {
+  const inp = document.getElementById(`nc-art-${idx}`);
+  if (!inp) return;
+  const q = (inp.value || '').trim();
+
+  fetch(`/forecast/api/article-search?q=${encodeURIComponent(q)}&limit=40`)
+    .then(r => r.json())
+    .then(arts => {
+      if (_ncActiveDropIdx !== idx) return; // stale result
+      const drop = _ncGetGlobalDrop();
+      drop.innerHTML = '';
+      if (!arts || !arts.length) { drop.style.display = 'none'; return; }
+      arts.forEach(a => {
+        const label = a.descripcion ? `${a.codigo_serie} — ${a.descripcion}` : a.codigo_serie;
+        const div = document.createElement('div');
+        div.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        div.textContent = label;
+        div.addEventListener('mouseover', () => { div.style.background = '#e8f0fe'; });
+        div.addEventListener('mouseout',  () => { div.style.background = ''; });
+        div.addEventListener('mousedown', (e) => {
+          e.preventDefault(); // keep focus on input
+          ncSelectArticle(idx, a);
+        });
+        drop.appendChild(div);
+      });
+      _ncPositionDrop(idx);
+      drop.style.display = 'block';
+    })
+    .catch(() => {
+      const drop = document.getElementById('nc-global-art-drop');
+      if (drop) drop.style.display = 'none';
+    });
+}
+
+function ncSelectArticle(idx, art) {
+  _ncSelectedArt[idx] = art;
+  const inp = document.getElementById(`nc-art-${idx}`);
+  if (inp) inp.value = art.codigo_serie;
+  const drop = document.getElementById('nc-global-art-drop');
+  if (drop) drop.style.display = 'none';
+  _ncActiveDropIdx = null;
+  if (art.neg) {
+    const negSel = document.getElementById(`nc-neg-${idx}`);
+    if (negSel) { negSel.value = art.neg; ncOnNegChange(idx, art.subneg); }
+  }
+}
+
+function ncHideDropdown(idx) {
+  // Legacy stub — kept for references in onblur; actual logic via _ncScheduleHide
+  _ncScheduleHide();
+}
+
+function ncOnArticleChange(idx) {
+  // Legacy stub
+  if (!_ncCatalog) return;
+  const val = (document.getElementById(`nc-art-${idx}`)?.value || '').trim();
+  const art = (_ncCatalog.articulos || []).find(a => a.codigo_serie === val);
+  if (!art) return;
+  if (art.neg) {
+    const negSel = document.getElementById(`nc-neg-${idx}`);
+    if (negSel) { negSel.value = art.neg; ncOnNegChange(idx, art.subneg); }
+  }
+}
+
+function ncOnNegChange(idx, presetSubneg) {
+  if (!_ncCatalog) return;
+  const negSel = document.getElementById(`nc-neg-${idx}`);
+  const subSel = document.getElementById(`nc-sub-${idx}`);
+  if (!negSel || !subSel) return;
+  const neg = negSel.value;
+  const subs = (_ncCatalog.subnegocios || []).filter(s => s.neg === neg);
+  subSel.innerHTML = '<option value="">-- Subneg --</option>' +
+    subs.map(s => `<option value="${s.subneg}">${s.subneg}</option>`).join('');
+  if (presetSubneg) subSel.value = presetSubneg;
+}
+
+function ncCalcMonto(idx) {
+  const qty  = parseFloat(document.getElementById(`nc-qty-${idx}`)?.value  || 0) || 0;
+  const cost = parseFloat(document.getElementById(`nc-cost-${idx}`)?.value || 0) || 0;
+  const monto = qty * cost;
+  const cell = document.getElementById(`nc-monto-${idx}`);
+  if (cell) cell.textContent = '$ ' + monto.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function _ncCollectEntries() {
+  const rows = document.querySelectorAll('#ncArtBody tr');
+  const entries = [];
+  rows.forEach(tr => {
+    const idxMatch = tr.id.match(/nc-row-(\d+)/);
+    if (!idxMatch) return;
+    const i = idxMatch[1];
+    const artVal  = (document.getElementById(`nc-art-${i}`)?.value || '').trim();
+    const negVal  = (document.getElementById(`nc-neg-${i}`)?.value || '').trim();
+    const subVal  = (document.getElementById(`nc-sub-${i}`)?.value || '').trim();
+    const mesVal  = (document.getElementById(`nc-mes-${i}`)?.value || '').trim();
+    const qtyVal  = parseFloat(document.getElementById(`nc-qty-${i}`)?.value  || 0) || 0;
+    const costVal = parseFloat(document.getElementById(`nc-cost-${i}`)?.value || 0) || 0;
+    if (!artVal || !mesVal) return;  // skip empty rows
+
+    // Look up metadata: prefer selection from dynamic search, then catalog
+    const artMeta = _ncSelectedArt[i]
+      || ((_ncCatalog && _ncCatalog.articulos)
+          ? _ncCatalog.articulos.find(a => a.codigo_serie === artVal)
+          : null);
+
+    entries.push({
+      codigo_serie:  artMeta ? artMeta.codigo_serie : artVal,
+      descripcion:   artMeta ? artMeta.descripcion  : artVal,
+      neg:           negVal || (artMeta ? artMeta.neg : ''),
+      subneg:        subVal || (artMeta ? artMeta.subneg : ''),
+      unidad_medida: artMeta ? (artMeta.unidad_medida || 'Unid.') : 'Unid.',
+      forecast_month: mesVal,
+      cantidad:       qtyVal,
+      costo_unitario: costVal,
+      monto_total:    qtyVal * costVal,
+    });
+  });
+  return entries;
+}
+
+function _ncShowMsg(text, type) {
+  const el = document.getElementById('fcNcMsg');
+  if (!el) return;
+  el.className = `fc-nc-msg ${type}`;
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+function _ncHideMsg() {
+  const el = document.getElementById('fcNcMsg');
+  if (el) el.style.display = 'none';
+}
+
+function saveNewClient() {
+  // Validate
+  const nombre = (document.getElementById('ncNombre')?.value || '').trim();
+  let hasError = false;
+
+  if (!nombre) {
+    const errEl = document.getElementById('ncNombreError');
+    if (errEl) { errEl.textContent = 'El nombre del cliente es obligatorio.'; errEl.style.display = 'block'; }
+    hasError = true;
+  } else {
+    const errEl = document.getElementById('ncNombreError');
+    if (errEl) errEl.style.display = 'none';
+  }
+
+  const entries = _ncCollectEntries();
+  if (!entries.length) {
+    const errEl = document.getElementById('ncArtError');
+    if (errEl) { errEl.textContent = 'Debe agregar al menos un artículo con código y mes.'; errEl.style.display = 'block'; }
+    hasError = true;
+  } else {
+    const errEl = document.getElementById('ncArtError');
+    if (errEl) errEl.style.display = 'none';
+  }
+
+  if (hasError) return;
+
+  const grupo = (document.getElementById('ncGrupo')?.value || '').trim() || null;
+
+  const btn = document.getElementById('fcNcBtnSave');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="fc-spinner fc-spinner-xs me-1"></span> Guardando…'; }
+  _ncHideMsg();
+
+  fetch('/forecast/api/create-manual-client', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre_cliente: nombre, grupo, entries }),
+  })
+  .then(r => r.json().then(data => ({ ok: r.ok, data })))
+  .then(({ ok, data }) => {
+    if (!ok) throw new Error(data.detail || 'Error al guardar');
+    _ncShowMsg(`✓ Cliente "${nombre}" agregado correctamente.`, 'success');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar cliente'; }
+
+    // Refresh table to show new client
+    setTimeout(() => {
+      closeNewClientModal();
+      _fcClear();
+      _refreshAfterSave();
+    }, 900);
+  })
+  .catch(err => {
+    _ncShowMsg('Error: ' + (err.message || err), 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar cliente'; }
+  });
+}
+
+/* ===================================================================
+   ELIMINACIÓN DE CLIENTES/ENTRIES MANUALES (solo Admin)
+   =================================================================== */
+
+function confirmDeleteManualClient(manualClientId, clientName) {
+  if (!_FC_IS_ADMIN) return;
+  if (!confirm(`¿Seguro que deseas eliminar el cliente manual "${clientName}" del Forecast?\n\nEsta acción quitará sus valores manuales de la proyección.`)) return;
+  fetch(`/forecast/api/manual-client/${manualClientId}`, { method: 'DELETE' })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok) { alert('Error al eliminar: ' + (d.detail || d.error || 'desconocido')); return; }
+      // Close modal if open for this client
+      const overlay = document.getElementById('fcEditOverlay');
+      if (overlay && overlay.classList.contains('open')) closeModal();
+      _fcClear();
+      _refreshAfterSave();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function confirmDeleteManualEntry(manualEntryId, label) {
+  if (!_FC_IS_ADMIN) return;
+  if (!confirm(`¿Seguro que deseas eliminar la entrada "${label}"?\n\nEl mes quedará en cero si no hay otros valores.`)) return;
+  fetch(`/forecast/api/manual-entry/${manualEntryId}`, { method: 'DELETE' })
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok) { alert('Error al eliminar: ' + (d.detail || d.error || 'desconocido')); return; }
+      // Reload modal data
+      const clientId = (STATE.modalClientData && STATE.modalClientData.client_id) || null;
+      if (clientId) {
+        closeModal();
+        setTimeout(() => openEditModal(clientId), 200);
+      }
+      _fcClear();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+/* ===================================================================
    INIT
    =================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Reposition or close the article dropdown on scroll/resize
+  ['scroll', 'resize'].forEach(evt => {
+    window.addEventListener(evt, () => {
+      if (_ncActiveDropIdx !== null) {
+        _ncPositionDrop(_ncActiveDropIdx);
+      }
+    }, { passive: true });
+  });
+  // Close dropdown on click outside
+  document.addEventListener('mousedown', (e) => {
+    const drop = document.getElementById('nc-global-art-drop');
+    if (!drop || drop.style.display === 'none') return;
+    const inp = _ncActiveDropIdx !== null ? document.getElementById(`nc-art-${_ncActiveDropIdx}`) : null;
+    if (!drop.contains(e.target) && e.target !== inp) {
+      drop.style.display = 'none';
+      _ncActiveDropIdx = null;
+    }
+  });
+
   _restoreForecastView();
 
   const backBtn = document.getElementById('treemapBackBtn');

@@ -20,11 +20,13 @@ import numpy as np
 import pandas as pd
 
 try:
-    from web_comparativas.models import engine, SessionLocal, ForecastUserOverride
+    from web_comparativas.models import engine, SessionLocal, ForecastUserOverride, ForecastManualClient, ForecastManualEntry
 except ImportError:
     engine = None
     SessionLocal = None
     ForecastUserOverride = None
+    ForecastManualClient = None  # type: ignore[assignment,misc]
+    ForecastManualEntry = None   # type: ignore[assignment,misc]
 
 try:
     from sqlalchemy import text as _sa_text
@@ -3000,6 +3002,53 @@ def _pg_get_chart_data_inner(
         else:
             _ch_override_ms = (time.perf_counter() - _t_ovr) * 1000
 
+    # ── Inject manual client entries into PG forecast totals ─────────────
+    _manual_df_pg_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    if not _manual_df_pg_chart.empty and not df_fcst.empty:
+        _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
+        _manual_monthly_pg = (
+            _manual_df_pg_chart.groupby("fecha")[_val_col_m_pg]
+            .sum()
+            .reset_index()
+            .rename(columns={_val_col_m_pg: "_manual_amt"})
+        )
+        print(f"[MANUAL_DASHBOARD] PG chart manual monthly total={_manual_monthly_pg['_manual_amt'].sum():.0f}", flush=True)
+        new_pg_rows = []
+        for _, mr in _manual_monthly_pg.iterrows():
+            mask_m = df_fcst["fecha"] == mr["fecha"]
+            if mask_m.any():
+                for col in ("Total_Forecast", "Total_User_Adj", "Total_Adj", "Total_Li", "Total_Ls"):
+                    if col in df_fcst.columns:
+                        df_fcst.loc[mask_m, col] = df_fcst.loc[mask_m, col] + mr["_manual_amt"]
+            else:
+                new_pg_rows.append({
+                    "fecha": mr["fecha"],
+                    "Total_Forecast": mr["_manual_amt"],
+                    "Total_Li": mr["_manual_amt"],
+                    "Total_Ls": mr["_manual_amt"],
+                    "Total_Adj": mr["_manual_amt"],
+                    "Total_User_Adj": mr["_manual_amt"],
+                })
+        if new_pg_rows:
+            df_fcst = pd.concat([df_fcst, pd.DataFrame(new_pg_rows)], ignore_index=True)
+        df_fcst = df_fcst.sort_values("fecha").reset_index(drop=True)
+    elif not _manual_df_pg_chart.empty and df_fcst.empty:
+        _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
+        _manual_monthly_pg = (
+            _manual_df_pg_chart.groupby("fecha")[_val_col_m_pg]
+            .sum()
+            .reset_index()
+            .rename(columns={_val_col_m_pg: "_manual_amt"})
+        )
+        df_fcst = pd.DataFrame([{
+            "fecha": row["fecha"],
+            "Total_Forecast": row["_manual_amt"],
+            "Total_Li": row["_manual_amt"],
+            "Total_Ls": row["_manual_amt"],
+            "Total_Adj": row["_manual_amt"],
+            "Total_User_Adj": row["_manual_amt"],
+        } for _, row in _manual_monthly_pg.iterrows()])
+
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
         hist_last = df_hist.sort_values("fecha").iloc[-1]
@@ -3176,9 +3225,15 @@ def _pg_get_client_table(
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
     try:
-        return _pg_get_client_table_inner(
+        result = _pg_get_client_table_inner(
             user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
             is_admin=is_admin,
+        )
+        return _inject_manual_client_rows_into_table(
+            result, user_id=user_id,
+            start_date=start_date, end_date=end_date,
+            neg_filter=neg, subneg_filter=subneg,
+            view_money=view_money, is_admin=is_admin,
         )
     except Exception as exc:
         import traceback as _tb
@@ -3781,6 +3836,27 @@ def _pg_get_treemap_data_inner(
     if "monto" not in df_tree.columns:
         logger.error("treemap: expected column 'monto' not found. Columns: %s", list(df_tree.columns))
         return {**_EMPTY, "periods": periods}
+
+    # ── Inject manual client entries into PG treemap ───────────────────────
+    _manual_df_pg_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    if not _manual_df_pg_tm.empty:
+        _val_col_tm = "monto_yhat" if view_money else "yhat_cliente"
+        if period_date:
+            _target_m_pg = pd.to_datetime(period_date).replace(day=1)
+            _manual_df_pg_tm = _manual_df_pg_tm[_manual_df_pg_tm["fecha"] == _target_m_pg]
+        if not _manual_df_pg_tm.empty:
+            print(f"[MANUAL_DASHBOARD] PG treemap manual rows={len(_manual_df_pg_tm)}", flush=True)
+            _manual_tree = _manual_df_pg_tm.groupby(
+                ["fantasia", "nombre_grupo"], dropna=False
+            )[_val_col_tm].sum().reset_index()
+            _manual_tree.rename(columns={_val_col_tm: "monto"}, inplace=True)
+            _manual_tree["perfil"] = "MANUAL"
+            _manual_tree["cliente_id"] = _manual_tree["fantasia"]
+            _manual_tree = _manual_tree.rename(columns={"fantasia": "fantasia", "nombre_grupo": "nombre_grupo"})
+            for _c in df_tree.columns:
+                if _c not in _manual_tree.columns:
+                    _manual_tree[_c] = None
+            df_tree = pd.concat([df_tree, _manual_tree[df_tree.columns]], ignore_index=True)
 
     # Build display columns (same logic as get_treemap_data)
     df_tree["_canal"] = df_tree["perfil"].astype(str).str.upper().str.strip()
@@ -4490,7 +4566,8 @@ def get_chart_data(
         len(_loc_ovr_records_for_debug),
         _loc_ovr_user_ids,
     )
-    if not _data_cache and not _ovr_active:
+    _has_manual = bool(_query_manual_clients(user_id, is_admin=is_admin))
+    if not _data_cache and not _ovr_active and not _has_manual:
         light = _local_get_chart_data_light(
             user_id=user_id,
             start_date=start_date,
@@ -4672,6 +4749,39 @@ def get_chart_data(
     # Safety fallback — ensures Total_User_Adj is always present
     if "Total_User_Adj" not in df_fcst.columns:
         df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
+
+    # ── Inject manual client entries into forecast totals ─────────────────
+    _manual_df_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    if not _manual_df_chart.empty:
+        _val_col_m = "monto_yhat" if view_money else "yhat_cliente"
+        _manual_monthly = (
+            _manual_df_chart.groupby("fecha")[_val_col_m]
+            .sum()
+            .reset_index()
+            .rename(columns={_val_col_m: "_manual_amt"})
+        )
+        print(f"[MANUAL_DASHBOARD] chart manual monthly total={_manual_monthly['_manual_amt'].sum():.0f}", flush=True)
+        new_rows = []
+        for _, mr in _manual_monthly.iterrows():
+            mask_m = df_fcst["fecha"] == mr["fecha"]
+            if mask_m.any():
+                df_fcst.loc[mask_m, "Total_Forecast"] = df_fcst.loc[mask_m, "Total_Forecast"] + mr["_manual_amt"]
+                df_fcst.loc[mask_m, "Total_User_Adj"] = df_fcst.loc[mask_m, "Total_User_Adj"] + mr["_manual_amt"]
+                if "Total_Li" in df_fcst.columns:
+                    df_fcst.loc[mask_m, "Total_Li"] = df_fcst.loc[mask_m, "Total_Li"] + mr["_manual_amt"]
+                if "Total_Ls" in df_fcst.columns:
+                    df_fcst.loc[mask_m, "Total_Ls"] = df_fcst.loc[mask_m, "Total_Ls"] + mr["_manual_amt"]
+            else:
+                new_rows.append({
+                    "fecha": mr["fecha"],
+                    "Total_Forecast": mr["_manual_amt"],
+                    "Total_Li": mr["_manual_amt"],
+                    "Total_Ls": mr["_manual_amt"],
+                    "Total_User_Adj": mr["_manual_amt"],
+                })
+        if new_rows:
+            df_fcst = pd.concat([df_fcst, pd.DataFrame(new_rows)], ignore_index=True)
+        df_fcst = df_fcst.sort_values("fecha").reset_index(drop=True)
 
     # Growth adjustment — flat multiplier matching original app.py
     # Original: Total_Forecast_Adj = Total_Forecast * (1 + growth_pct/100) for all projection months
@@ -4916,8 +5026,39 @@ def get_client_table(
           flush=True)
     df_main = data.get("df_main", pd.DataFrame())
 
+    def _empty_result_with_manual(months_list=None):
+        """Return an empty result that still includes manual client rows."""
+        if months_list is None:
+            months_list = []
+            if start_date and end_date:
+                try:
+                    months_list = [
+                        m.strftime("%b %Y").title()
+                        for m in pd.date_range(
+                            start=pd.to_datetime(start_date),
+                            end=pd.to_datetime(end_date),
+                            freq="MS",
+                        )
+                    ]
+                except Exception:
+                    pass
+        base = {
+            "months": months_list,
+            "rows": [],
+            "totals": {m: 0.0 for m in months_list},
+            "min_val": 0,
+            "max_val": 0,
+            "total_projected": 0,
+        }
+        return _inject_manual_client_rows_into_table(
+            base, user_id=user_id,
+            start_date=start_date, end_date=end_date,
+            neg_filter=neg, subneg_filter=subneg,
+            view_money=view_money, is_admin=is_admin,
+        )
+
     if df_val.empty:
-        return {"months": [], "rows": [], "totals": [], "min_val": 0, "max_val": 0, "total_projected": 0}
+        return _empty_result_with_manual()
 
     # Filter
     mask = pd.Series(True, index=df_val.index)
@@ -4936,7 +5077,7 @@ def get_client_table(
 
     df_c = df_val[mask].copy()
     if df_c.empty:
-        return {"months": [], "rows": [], "totals": [], "min_val": 0, "max_val": 0, "total_projected": 0}
+        return _empty_result_with_manual()
 
     if "fantasia" in df_c.columns:
         _match_test = df_c[df_c["fantasia"].astype(str).str.contains("MINISTERIO DE SALUD PCIA DE BS AS", case=False, na=False)].copy()
@@ -5056,7 +5197,7 @@ def get_client_table(
 
     total_projected = round(float(sum(totals.values())), 0)
 
-    return {
+    base_result = {
         "months": new_col_names,
         "rows": rows,
         "totals": totals,
@@ -5064,6 +5205,14 @@ def get_client_table(
         "max_val": max_val,
         "total_projected": total_projected,
     }
+
+    # Inject manually-added clients
+    return _inject_manual_client_rows_into_table(
+        base_result, user_id=user_id,
+        start_date=start_date, end_date=end_date,
+        neg_filter=neg, subneg_filter=subneg,
+        view_money=view_money, is_admin=is_admin,
+    )
 
 
 def _get_segment_color(canal_code: str) -> str:
@@ -5133,7 +5282,8 @@ def get_treemap_data(
         )
 
     _ovr_active = _has_overrides(user_id, is_admin=is_admin)
-    if not _data_cache and not _ovr_active:
+    _has_manual_tm = bool(_query_manual_clients(user_id, is_admin=is_admin))
+    if not _data_cache and not _ovr_active and not _has_manual_tm:
         light = _local_get_treemap_data_light(
             user_id=user_id,
             start_date=start_date,
@@ -5177,6 +5327,36 @@ def get_treemap_data(
         mask &= df_val["subneg"].isin(subneg)
 
     df_f = df_val[mask].copy()
+
+    # ── Inject manual client entries ───────────────────────────────────────
+    _manual_df_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    if not _manual_df_tm.empty:
+        # Filter manual entries by period_date if set
+        if period_date:
+            _target_m = pd.to_datetime(period_date).replace(day=1)
+            _manual_df_tm = _manual_df_tm[_manual_df_tm["fecha"] == _target_m]
+        if not _manual_df_tm.empty:
+            print(f"[MANUAL_DASHBOARD] treemap manual rows={len(_manual_df_tm)}", flush=True)
+            # Add manual rows to periods list
+            for _d in _manual_df_tm["fecha"].dropna().unique():
+                _ds = str(_d)[:10]
+                if _ds not in periods:
+                    periods = sorted(periods + [_ds])
+            # Align columns: fill any missing cols with None, concat shared cols
+            _shared_cols = list(df_f.columns.intersection(_manual_df_tm.columns))
+            _extra_manual = _manual_df_tm[[c for c in _manual_df_tm.columns if c not in _shared_cols]]
+            for _c in _extra_manual.columns:
+                df_f[_c] = None
+            for _c in _shared_cols:
+                pass  # already in both
+            _manual_aligned = pd.DataFrame(index=range(len(_manual_df_tm)))
+            for _c in df_f.columns:
+                if _c in _manual_df_tm.columns:
+                    _manual_aligned[_c] = _manual_df_tm[_c].values
+                else:
+                    _manual_aligned[_c] = None
+            df_f = pd.concat([df_f, _manual_aligned], ignore_index=True)
+
     if df_f.empty:
         return {**_EMPTY, "periods": periods}
 
@@ -5334,6 +5514,17 @@ def get_client_detail(
     Saved % overrides are injected directly into months_data so the modal shows them.
     """
     import pandas as pd
+
+    # Check if this is a manually-added client first (both SQLite and PG paths)
+    _manual = _manual_client_by_name(client_id, user_id)
+    if _manual is not None:
+        return get_manual_client_detail(
+            _manual, user_id=user_id,
+            start_date=start_date, end_date=end_date,
+            neg_filter=neg, subneg_filter=subneg,
+            growth_pct=growth_pct, is_admin=is_admin,
+        )
+
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_client_detail(
             user_id=user_id,
@@ -5557,3 +5748,723 @@ def get_client_detail(
         "subneg_growths": saved_subneg_growths,
         "effective_from_month": effective_from_month,
     }
+
+
+# ---------------------------------------------------------------------------
+# Manual-client helpers (Forecast > Agregar cliente)
+# ---------------------------------------------------------------------------
+
+def _query_manual_clients(user_id, is_admin=False):
+    """Return list of active ForecastManualClient rows for a user."""
+    if SessionLocal is None or ForecastManualClient is None:
+        return []
+    session = SessionLocal()
+    try:
+        q = session.query(ForecastManualClient).filter(ForecastManualClient.is_active == True)
+        if not is_admin and user_id is not None:
+            q = q.filter(ForecastManualClient.user_id == user_id)
+        return q.all()
+    except Exception as exc:
+        logger.warning("[FORECAST manual] _query_manual_clients error: %s", exc)
+        return []
+    finally:
+        session.close()
+
+
+def _query_manual_entries(client_ids):
+    """Return active ForecastManualEntry rows for a list of client ids."""
+    if SessionLocal is None or ForecastManualEntry is None or not client_ids:
+        return []
+    session = SessionLocal()
+    try:
+        q = session.query(ForecastManualEntry).filter(
+            ForecastManualEntry.client_id.in_(client_ids)
+        )
+        # Filter active entries if the column exists (migration may not have run yet)
+        try:
+            q = q.filter(ForecastManualEntry.is_active == True)
+        except Exception:
+            pass
+        return q.all()
+    except Exception as exc:
+        logger.warning("[FORECAST manual] _query_manual_entries error: %s", exc)
+        return []
+    finally:
+        session.close()
+
+
+def _manual_client_by_name(client_id_str, user_id):
+    """Return ForecastManualClient if client_id_str matches an active manual client."""
+    if SessionLocal is None or ForecastManualClient is None:
+        return None
+    session = SessionLocal()
+    try:
+        return session.query(ForecastManualClient).filter(
+            ForecastManualClient.nombre_cliente == client_id_str,
+            ForecastManualClient.user_id == user_id,
+            ForecastManualClient.is_active == True,
+        ).first()
+    except Exception as exc:
+        logger.warning("[FORECAST manual] _manual_client_by_name error: %s", exc)
+        return None
+    finally:
+        session.close()
+
+
+def _get_manual_entries_df(
+    user_id,
+    start_date=None,
+    end_date=None,
+    neg_filter=None,
+    subneg_filter=None,
+    is_admin=False,
+):
+    """Return manual entries as a DataFrame compatible with df_val for dashboard injection."""
+    import pandas as pd
+    clients = _query_manual_clients(user_id, is_admin=is_admin)
+    if not clients:
+        return pd.DataFrame()
+    client_ids = [c.id for c in clients]
+    all_entries = _query_manual_entries(client_ids)
+    if not all_entries:
+        return pd.DataFrame()
+    client_map = {c.id: c for c in clients}
+    start_p = pd.to_datetime(start_date).to_period("M") if start_date else None
+    end_p   = pd.to_datetime(end_date).to_period("M") if end_date else None
+    neg_set    = set(_norm_filter_list(neg_filter))
+    subneg_set = set(_norm_filter_list(subneg_filter))
+    rows = []
+    for e in all_entries:
+        if neg_set and str(e.neg or "").strip() not in neg_set:
+            continue
+        if subneg_set and str(e.subneg or "").strip() not in subneg_set:
+            continue
+        try:
+            ep = pd.Period(e.forecast_month, freq="M")
+            if start_p and ep < start_p:
+                continue
+            if end_p and ep > end_p:
+                continue
+        except Exception:
+            continue
+        mc = client_map.get(e.client_id)
+        if mc is None:
+            continue
+        rows.append({
+            "fecha": pd.Timestamp(e.forecast_month + "-01"),
+            "fantasia": mc.nombre_cliente,
+            "nombre_grupo": mc.grupo or mc.nombre_cliente,
+            "neg": str(e.neg or "").strip(),
+            "subneg": str(e.subneg or "").strip(),
+            "perfil": "MANUAL",
+            "codigo_serie": str(e.codigo_serie or "").strip(),
+            "descripcion": str(e.descripcion or e.codigo_serie or "").strip(),
+            "monto_yhat": float(e.monto_total or 0.0),
+            "yhat_cliente": float(e.cantidad or 0.0),
+        })
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    print(f"[MANUAL_DASHBOARD] manual entries loaded={len(df)} user_id={user_id}", flush=True)
+    return df
+
+
+def _inject_manual_client_rows_into_table(
+    result,
+    user_id,
+    start_date=None,
+    end_date=None,
+    neg_filter=None,
+    subneg_filter=None,
+    view_money=True,
+    is_admin=False,
+):
+    """Inject manual-client rows into an existing get_client_table() result dict."""
+    import pandas as pd
+    from collections import defaultdict
+    try:
+        months = result.get("months", [])
+        if not months:
+            print("[MANUAL_CLIENT INJECT] No months in base result — skip", flush=True)
+            return result
+
+        clients = _query_manual_clients(user_id, is_admin=is_admin)
+        print(f"[MANUAL_CLIENT QUERY] clients_found={len(clients)} user_id={user_id}", flush=True)
+        if not clients:
+            return result
+
+        client_ids = [c.id for c in clients]
+        all_entries = _query_manual_entries(client_ids)
+        print(f"[MANUAL_CLIENT QUERY] entries_found={len(all_entries)} client_ids={client_ids}", flush=True)
+        if not all_entries:
+            return result
+
+        # Build YYYY-MM → display name mapping robustly.
+        # Generate display names from YYYY-MM using same strftime as get_client_table
+        # and match against the existing months list.
+        months_set = set(months)
+        _month_name_cache: dict = {}
+        # First pass: generate from a wide range of months and check against the existing list
+        for yr in range(2024, 2030):
+            for mo in range(1, 13):
+                ym = f"{yr}-{mo:02d}"
+                try:
+                    dn = pd.to_datetime(f"{ym}-01").strftime("%b %Y").title()
+                    if dn in months_set:
+                        _month_name_cache[ym] = dn
+                except Exception:
+                    pass
+        # Second pass: also try parsing existing month display names (fallback)
+        for mn in months:
+            if any(v == mn for v in _month_name_cache.values()):
+                continue
+            try:
+                d = pd.to_datetime(mn)
+                ym = d.strftime("%Y-%m")
+                if ym not in _month_name_cache:
+                    _month_name_cache[ym] = mn
+            except Exception:
+                pass
+
+        print(f"[MANUAL_CLIENT INJECT] month_cache={_month_name_cache}", flush=True)
+
+        start_ts = pd.to_datetime(start_date).to_period("M") if start_date else None
+        end_ts   = pd.to_datetime(end_date).to_period("M") if end_date else None
+        neg_set    = set(_norm_filter_list(neg_filter))
+        subneg_set = set(_norm_filter_list(subneg_filter))
+        print(f"[MANUAL_CLIENT FILTER] neg_filter={neg_filter} subneg_filter={subneg_filter} neg_set={neg_set} subneg_set={subneg_set}", flush=True)
+
+        client_map = {c.id: c for c in clients}
+        monthly_by_client = defaultdict(lambda: defaultdict(float))
+        kept = 0
+        discarded = 0
+
+        for entry in all_entries:
+            _reason = None
+            if neg_set and str(entry.neg or "").strip() not in neg_set:
+                _reason = f"neg={entry.neg!r} not in {neg_set}"
+            elif subneg_set and str(entry.subneg or "").strip() not in subneg_set:
+                _reason = f"subneg={entry.subneg!r} not in {subneg_set}"
+            else:
+                try:
+                    ep = pd.Period(entry.forecast_month, freq="M")
+                    if start_ts and ep < start_ts:
+                        _reason = f"month {entry.forecast_month} < start {start_ts}"
+                    elif end_ts and ep > end_ts:
+                        _reason = f"month {entry.forecast_month} > end {end_ts}"
+                except Exception:
+                    _reason = f"invalid month {entry.forecast_month!r}"
+
+            if _reason:
+                discarded += 1
+                print(f"[MANUAL_CLIENT FILTER] DISCARD entry id={entry.id} art={entry.codigo_serie!r} reason={_reason}", flush=True)
+                continue
+
+            display_name = _month_name_cache.get(entry.forecast_month)
+            if display_name is None:
+                try:
+                    d = pd.to_datetime(entry.forecast_month + "-01")
+                    display_name = d.strftime("%b %Y").title()
+                except Exception:
+                    print(f"[MANUAL_CLIENT FILTER] DISCARD entry id={entry.id} cannot parse month={entry.forecast_month!r}", flush=True)
+                    discarded += 1
+                    continue
+                if display_name not in months:
+                    print(f"[MANUAL_CLIENT FILTER] DISCARD entry id={entry.id} display={display_name!r} not in months", flush=True)
+                    discarded += 1
+                    continue
+                _month_name_cache[entry.forecast_month] = display_name
+
+            value = float(entry.monto_total if view_money else entry.cantidad)
+            monthly_by_client[entry.client_id][display_name] += value
+            kept += 1
+
+        print(f"[MANUAL_CLIENT FILTER] kept={kept} discarded={discarded}", flush=True)
+
+        if not monthly_by_client:
+            print("[MANUAL_CLIENT INJECT] monthly_by_client empty — nothing to inject", flush=True)
+            return result
+
+        month_name_set = set(months)
+        existing_clients = {r.get("Cliente", "") for r in result.get("rows", [])}
+        new_rows = []
+        totals = dict(result.get("totals", {}))
+
+        for cid, month_vals in monthly_by_client.items():
+            mc = client_map.get(cid)
+            if mc is None:
+                continue
+            if mc.nombre_cliente in existing_clients:
+                continue
+
+            row = {
+                "Cliente": mc.nombre_cliente,
+                "Grupo": mc.grupo or "",
+                "_lab": 0,
+                "_is_manual": True,
+                "_manual_client_id": mc.id,
+            }
+            for mn in months:
+                v = round(float(month_vals.get(mn, 0.0)), 0)
+                row[mn] = v
+                totals[mn] = round(float(totals.get(mn, 0.0)) + v, 0)
+            new_rows.append(row)
+
+        before_rows = len(result.get("rows", []))
+        if not new_rows:
+            print(f"[MANUAL_CLIENT INJECT] No new_rows to inject (before={before_rows})", flush=True)
+            return result
+
+        rows = list(result.get("rows", []))
+        rows.extend(new_rows)
+
+        all_vals = [v for r in rows for k, v in r.items() if k in month_name_set and isinstance(v, (int, float))]
+        min_val = float(min(all_vals)) if all_vals else 0.0
+        max_val = float(max(all_vals)) if all_vals else 0.0
+        total_projected = round(float(sum(totals.values())), 0)
+
+        print(f"[MANUAL_CLIENT INJECT] before_rows={before_rows} manual_rows={len(new_rows)} after_rows={len(rows)}", flush=True)
+        return {
+            **result,
+            "rows": rows,
+            "totals": totals,
+            "min_val": min_val,
+            "max_val": max_val,
+            "total_projected": total_projected,
+        }
+    except Exception as exc:
+        logger.error("[FORECAST manual] _inject_manual_client_rows_into_table error: %s", exc, exc_info=True)
+        print(f"[MANUAL_CLIENT INJECT] Exception: {exc}", flush=True)
+        return result
+
+
+def get_manual_client_detail(
+    manual_client,
+    user_id,
+    start_date=None,
+    end_date=None,
+    neg_filter=None,
+    subneg_filter=None,
+    growth_pct=0.0,
+    is_admin=False,
+):
+    """Return a get_client_detail()-compatible response for a manual client."""
+    import pandas as pd
+    from collections import defaultdict
+    effective_from_month = get_forecast_effective_month()
+
+    if SessionLocal is None or ForecastManualEntry is None:
+        return {
+            "client_id": manual_client.nombre_cliente, "perfil": "", "negocios": [], "dates": [],
+            "is_manual": True, "growth_pct": 0, "client_growth_pct": 0,
+            "client_growth_source": None, "client_growth_mixed": False,
+            "subneg_growths": {}, "effective_from_month": effective_from_month, "max_hist_date": None,
+        }
+
+    session = SessionLocal()
+    try:
+        q = session.query(ForecastManualEntry).filter(
+            ForecastManualEntry.client_id == manual_client.id
+        )
+        try:
+            q = q.filter(ForecastManualEntry.is_active == True)
+        except Exception:
+            pass
+        entries = q.all()
+    finally:
+        session.close()
+
+    saved_overrides = _get_client_overrides_snapshot(
+        user_id=user_id, client_id=manual_client.nombre_cliente, growth_pct=0.0, is_admin=is_admin
+    )
+    saved_subneg_growths = _get_client_subneg_growths(
+        user_id, manual_client.nombre_cliente, is_admin=is_admin
+    )
+
+    if not entries:
+        # Still build dates from range so the modal shows full timeline
+        _empty_dates: list = []
+        if start_date and end_date:
+            try:
+                _empty_dates = [
+                    str(p)
+                    for p in pd.period_range(
+                        start=pd.to_datetime(start_date).to_period("M"),
+                        end=pd.to_datetime(end_date).to_period("M"),
+                        freq="M",
+                    )
+                ]
+            except Exception:
+                pass
+        return {
+            "client_id": manual_client.nombre_cliente,
+            "manual_client_id": manual_client.id,
+            "perfil": "", "neg": "",
+            "negocios": [], "dates": _empty_dates, "growth_pct": growth_pct,
+            "client_growth_pct": 0, "client_growth_source": None, "client_growth_mixed": False,
+            "subneg_growths": saved_subneg_growths,
+            "effective_from_month": effective_from_month, "max_hist_date": None, "is_manual": True,
+        }
+
+    start_p = pd.to_datetime(start_date).to_period("M") if start_date else None
+    end_p   = pd.to_datetime(end_date).to_period("M") if end_date else None
+    neg_set    = set(_norm_filter_list(neg_filter))
+    subneg_set = set(_norm_filter_list(subneg_filter))
+
+    filtered = []
+    for e in entries:
+        if neg_set and str(e.neg or "").strip() not in neg_set:
+            continue
+        if subneg_set and str(e.subneg or "").strip() not in subneg_set:
+            continue
+        try:
+            ep = pd.Period(e.forecast_month, freq="M")
+            if start_p and ep < start_p:
+                continue
+            if end_p and ep > end_p:
+                continue
+        except Exception:
+            continue
+        filtered.append(e)
+
+    if not filtered:
+        filtered = list(entries)
+
+    # Build date_strs from the full start_date/end_date range so the modal
+    # always shows ALL months in the period, not just months with entries.
+    date_strs: list = []
+    if start_date and end_date:
+        try:
+            date_strs = [
+                str(p)
+                for p in pd.period_range(
+                    start=pd.to_datetime(start_date).to_period("M"),
+                    end=pd.to_datetime(end_date).to_period("M"),
+                    freq="M",
+                )
+            ]
+        except Exception:
+            pass
+    if not date_strs:
+        # Fallback: only months that have entries
+        date_strs = sorted({e.forecast_month for e in filtered})
+
+    neg_sub_art = defaultdict(lambda: defaultdict(dict))
+
+    for e in filtered:
+        neg_name = str(e.neg or "Sin Negocio").strip()
+        sub_name = str(e.subneg or "General").strip()
+        art_key  = str(e.codigo_serie).strip()
+        desc     = str(e.descripcion or e.codigo_serie).strip()
+        um       = str(e.unidad_medida or "Unid.").strip()
+        costo    = float(e.costo_unitario or 0.0)
+        cantidad = float(e.cantidad or 0.0)
+        monto    = float(e.monto_total or 0.0)
+
+        if art_key not in neg_sub_art[neg_name][sub_name]:
+            neg_sub_art[neg_name][sub_name][art_key] = {
+                "articulo": art_key, "descripcion": desc, "unidad_medida": um,
+                "nivel_agregacion": "ARTICULO", "precio": costo,
+                "months": {},
+                "entries": [],  # list of {entry_id, forecast_month} for admin delete
+            }
+        neg_sub_art[neg_name][sub_name][art_key]["months"][e.forecast_month] = {
+            "cantidad": cantidad, "costo_unitario": costo, "monto_total": monto,
+            "entry_id": e.id,
+        }
+        neg_sub_art[neg_name][sub_name][art_key]["entries"].append(
+            {"entry_id": e.id, "forecast_month": e.forecast_month, "cantidad": cantidad, "monto_total": monto}
+        )
+
+    negocios_out = []
+    for neg_name, subs in neg_sub_art.items():
+        subnegs_out = []
+        for sub_name, arts in subs.items():
+            products_out = []
+            for art_key, art_data in arts.items():
+                months_data = {}
+                for ds in date_strs:
+                    m = art_data["months"].get(ds, {})
+                    orig     = float(m.get("cantidad", 0.0))
+                    costo_u  = float(m.get("costo_unitario", float(art_data["precio"])))
+                    monto_base = float(m.get("monto_total", 0.0))
+                    pct = 0.0
+                    adj = orig
+                    saved_pct = saved_overrides.get((art_key, ds), None)
+                    if saved_pct is not None:
+                        pct = saved_pct
+                        adj = orig * (1.0 + pct / 100.0)
+                    elif str(sub_name) in saved_subneg_growths and saved_subneg_growths[str(sub_name)]:
+                        scoped = float(saved_subneg_growths[str(sub_name)] or 0.0)
+                        if scoped != 0:
+                            rm = (1 + scoped / 100.0) ** (1 / 12.0) - 1
+                            adj = orig * (1 + rm)
+                            pct = round(rm * 100, 4)
+                    money = round(adj * costo_u, 0) if costo_u else round(monto_base * (1 + pct / 100.0), 0)
+                    months_data[ds] = {
+                        "orig": round(orig, 2), "pct": round(pct, 4),
+                        "nuevo": round(adj, 2), "money": money,
+                    }
+                total_nuevo = sum(v["nuevo"] for v in months_data.values())
+                total_money = round(sum(v["money"] for v in months_data.values()), 0)
+                products_out.append({
+                    "articulo": art_data["articulo"],
+                    "descripcion": art_data["descripcion"],
+                    "unidad_medida": art_data["unidad_medida"],
+                    "nivel_agregacion": art_data["nivel_agregacion"],
+                    "precio": round(float(art_data["precio"]), 2),
+                    "total_nuevo": round(total_nuevo, 2),
+                    "total_money": total_money,
+                    "months": months_data,
+                    "entries": art_data.get("entries", []),
+                })
+            products_out.sort(key=lambda x: x["total_money"], reverse=True)
+            subnegs_out.append({"subneg": sub_name, "products": products_out})
+        negocios_out.append({"neg": neg_name, "subnegs": subnegs_out})
+
+    first_neg = negocios_out[0]["neg"] if negocios_out else ""
+    return {
+        "client_id": manual_client.nombre_cliente,
+        "manual_client_id": manual_client.id,
+        "perfil": "", "neg": first_neg,
+        "negocios": negocios_out, "dates": date_strs,
+        "growth_pct": growth_pct, "client_growth_pct": 0,
+        "client_growth_source": None, "client_growth_mixed": False,
+        "subneg_growths": saved_subneg_growths,
+        "effective_from_month": effective_from_month,
+        "max_hist_date": None,
+        "is_manual": True,
+    }
+
+
+def delete_manual_client(user_id, manual_client_id, deleted_by):
+    """Logical delete of a manual forecast client (is_active=False)."""
+    if SessionLocal is None or ForecastManualClient is None:
+        raise RuntimeError("SessionLocal not available")
+    import datetime as _dt
+    session = SessionLocal()
+    try:
+        mc = session.query(ForecastManualClient).filter(
+            ForecastManualClient.id == manual_client_id,
+            ForecastManualClient.is_active == True,
+        ).first()
+        if mc is None:
+            return {"ok": False, "error": "Cliente manual no encontrado o ya eliminado"}
+        mc.is_active = False
+        mc.deleted_at = _dt.datetime.utcnow()
+        mc.deleted_by = deleted_by
+        session.commit()
+        print(f"[MANUAL_CLIENT DELETE] client_id={manual_client_id} by={deleted_by}", flush=True)
+        return {"ok": True, "client_id": manual_client_id}
+    except Exception as exc:
+        session.rollback()
+        logger.error("[FORECAST manual] delete_manual_client error: %s", exc, exc_info=True)
+        raise
+    finally:
+        session.close()
+
+
+def delete_manual_entry(user_id, manual_entry_id, deleted_by):
+    """Logical delete of a single manual forecast entry row."""
+    if SessionLocal is None or ForecastManualEntry is None:
+        raise RuntimeError("SessionLocal not available")
+    import datetime as _dt
+    session = SessionLocal()
+    try:
+        entry = session.query(ForecastManualEntry).filter(
+            ForecastManualEntry.id == manual_entry_id,
+        ).first()
+        if entry is None:
+            return {"ok": False, "error": "Entrada no encontrada"}
+        entry.is_active = False
+        entry.deleted_at = _dt.datetime.utcnow()
+        entry.deleted_by = deleted_by
+        session.commit()
+        print(f"[MANUAL_ENTRY DELETE] entry_id={manual_entry_id} client_id={entry.client_id} by={deleted_by}", flush=True)
+        return {"ok": True, "entry_id": manual_entry_id, "client_id": entry.client_id}
+    except Exception as exc:
+        session.rollback()
+        logger.error("[FORECAST manual] delete_manual_entry error: %s", exc, exc_info=True)
+        raise
+    finally:
+        session.close()
+
+
+def get_new_client_catalog(user_id=None):
+    """Return catalog for the new-client form: negocios, subnegocios, articulos, grupos."""
+    import pandas as pd
+    result = {"negocios": [], "subnegocios": [], "articulos": [], "grupos": []}
+
+    try:
+        if FORECAST_FILE.exists():
+            cols_needed = {"neg", "subneg", "codigo_serie", "descripcion", "unidad_medida"}
+            df_base = pd.read_csv(
+                str(FORECAST_FILE), sep=";", decimal=",", encoding="utf-8-sig", low_memory=False,
+                usecols=lambda c: str(c).strip().lower() in cols_needed,
+            )
+            df_base.columns = [c.lower().strip() for c in df_base.columns]
+            df_base = df_base.dropna(subset=["codigo_serie"])
+
+            if "neg" in df_base.columns:
+                result["negocios"] = sorted({str(v).strip() for v in df_base["neg"].dropna() if str(v).strip()})
+
+            if "subneg" in df_base.columns and "neg" in df_base.columns:
+                sub_df = df_base[["neg", "subneg"]].drop_duplicates().dropna()
+                result["subnegocios"] = [
+                    {"neg": str(r["neg"]).strip(), "subneg": str(r["subneg"]).strip()}
+                    for _, r in sub_df.iterrows()
+                    if str(r["neg"]).strip() and str(r["subneg"]).strip()
+                ]
+
+            art_cols_avail = [c for c in ["codigo_serie", "descripcion", "neg", "subneg", "unidad_medida"] if c in df_base.columns]
+            art_df = df_base[art_cols_avail].drop_duplicates(subset=["codigo_serie"]).dropna(subset=["codigo_serie"])
+            result["articulos"] = [
+                {
+                    "codigo_serie": str(row.get("codigo_serie", "")).strip(),
+                    "descripcion": str(row.get("descripcion", row.get("codigo_serie", ""))).strip(),
+                    "neg": str(row.get("neg", "")).strip(),
+                    "subneg": str(row.get("subneg", "")).strip(),
+                    "unidad_medida": str(row.get("unidad_medida", "Unid.")).strip(),
+                }
+                for _, row in art_df.iterrows()
+                if str(row.get("codigo_serie", "")).strip()
+            ]
+    except Exception as exc:
+        logger.warning("[FORECAST manual] get_new_client_catalog CSV error: %s", exc)
+
+    if not result["articulos"] and _VALORIZADO_PARQUET.exists():
+        try:
+            df_v = pd.read_parquet(str(_VALORIZADO_PARQUET), columns=["codigo_serie", "descripcion", "neg", "subneg"])
+            art_df2 = df_v.drop_duplicates(subset=["codigo_serie"]).dropna(subset=["codigo_serie"])
+            result["articulos"] = [
+                {
+                    "codigo_serie": str(row.get("codigo_serie", "")).strip(),
+                    "descripcion": str(row.get("descripcion", "")).strip(),
+                    "neg": str(row.get("neg", "")).strip(),
+                    "subneg": str(row.get("subneg", "")).strip(),
+                    "unidad_medida": "Unid.",
+                }
+                for _, row in art_df2.iterrows()
+                if str(row.get("codigo_serie", "")).strip()
+            ]
+        except Exception as exc2:
+            logger.warning("[FORECAST manual] get_new_client_catalog parquet error: %s", exc2)
+
+    grupos = set()
+    try:
+        if CLIENTES_FILE.exists():
+            df_cli = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False)
+            df_cli.columns = [c.lower().strip() for c in df_cli.columns]
+            if "nombre_grupo" in df_cli.columns:
+                for g in df_cli["nombre_grupo"].dropna().unique():
+                    gs = str(g).strip()
+                    if gs and gs.upper() not in ("SIN GRUPO", "NAN", "NONE", ""):
+                        grupos.add(gs)
+    except Exception as exc:
+        logger.warning("[FORECAST manual] get_new_client_catalog grupos CSV error: %s", exc)
+
+    if _data_cache:
+        try:
+            df_v2 = _data_cache.get("df_valorizado", pd.DataFrame())
+            if not df_v2.empty and "nombre_grupo" in df_v2.columns:
+                for g in df_v2["nombre_grupo"].dropna().unique():
+                    gs = str(g).strip()
+                    if gs and gs.upper() not in ("SIN GRUPO", "NAN", "NONE", ""):
+                        grupos.add(gs)
+        except Exception:
+            pass
+
+    result["grupos"] = sorted(grupos)
+    return result
+
+
+_ARTICLE_CACHE: list = []
+_ARTICLE_CACHE_TS: float = 0.0
+_ARTICLE_CACHE_TTL: float = 300.0  # seconds
+
+
+def _get_article_list() -> list:
+    """Return full article list, refreshing every 5 minutes."""
+    import time
+    global _ARTICLE_CACHE, _ARTICLE_CACHE_TS
+    now = time.monotonic()
+    if _ARTICLE_CACHE and (now - _ARTICLE_CACHE_TS) < _ARTICLE_CACHE_TTL:
+        return _ARTICLE_CACHE
+    catalog = get_new_client_catalog()
+    _ARTICLE_CACHE = catalog.get("articulos", [])
+    _ARTICLE_CACHE_TS = now
+    return _ARTICLE_CACHE
+
+
+def search_articles(q: str = "", limit: int = 30):
+    """Search articles by codigo_serie or descripcion across the full catalog."""
+    q = (q or "").strip().lower()
+    arts = _get_article_list()
+
+    if not q:
+        return arts[:limit]
+
+    matched = []
+    for a in arts:
+        code = (a.get("codigo_serie") or "").lower()
+        desc = (a.get("descripcion") or "").lower()
+        if q in code or q in desc:
+            matched.append(a)
+        if len(matched) >= limit:
+            break
+    return matched
+
+
+def create_manual_client(user_id, created_by, nombre_cliente, grupo, entries):
+    """Persist a new manual forecast client with its article-month entries."""
+    if SessionLocal is None or ForecastManualClient is None or ForecastManualEntry is None:
+        raise RuntimeError("SessionLocal not available")
+
+    print(f"[MANUAL_CLIENT CREATE] payload: nombre={nombre_cliente!r} grupo={grupo!r} entries={len(entries)}", flush=True)
+    for i, e in enumerate(entries[:5]):
+        print(f"[MANUAL_CLIENT CREATE] entry[{i}]: art={e.get('codigo_serie')!r} month={e.get('forecast_month')!r} neg={e.get('neg')!r} sub={e.get('subneg')!r} qty={e.get('cantidad')} cost={e.get('costo_unitario')}", flush=True)
+
+    session = SessionLocal()
+    try:
+        client = ForecastManualClient(
+            user_id=user_id,
+            nombre_cliente=nombre_cliente.strip(),
+            grupo=grupo.strip() if grupo else None,
+            created_by=created_by,
+            is_active=True,
+        )
+        session.add(client)
+        session.flush()
+
+        entries_inserted = 0
+        for e in entries:
+            cantidad    = float(e.get("cantidad", 0) or 0)
+            costo_u     = float(e.get("costo_unitario", 0) or 0)
+            monto_total = float(e.get("monto_total", 0) or 0) or round(cantidad * costo_u, 2)
+            entry = ForecastManualEntry(
+                client_id=client.id,
+                neg=str(e.get("neg", "") or "").strip(),
+                subneg=str(e.get("subneg", "") or "").strip(),
+                codigo_serie=str(e.get("codigo_serie", "") or "").strip(),
+                descripcion=str(e.get("descripcion", "") or "").strip(),
+                unidad_medida=str(e.get("unidad_medida", "Unid.") or "Unid.").strip(),
+                forecast_month=str(e.get("forecast_month", "") or "").strip(),
+                cantidad=cantidad,
+                costo_unitario=costo_u,
+                monto_total=monto_total,
+            )
+            session.add(entry)
+            entries_inserted += 1
+
+        session.commit()
+        client_id = client.id
+        print(f"[MANUAL_CLIENT CREATE] client_id={client_id} entries_inserted={entries_inserted}", flush=True)
+        logger.info("[FORECAST manual] Created client id=%s name=%r by=%s entries=%d", client_id, nombre_cliente, created_by, entries_inserted)
+        return {"ok": True, "client_id": client_id, "nombre_cliente": nombre_cliente.strip()}
+    except Exception as exc:
+        session.rollback()
+        logger.error("[FORECAST manual] create_manual_client error: %s", exc, exc_info=True)
+        print(f"[MANUAL_CLIENT CREATE] ERROR: {exc}", flush=True)
+        raise
+    finally:
+        session.close()
