@@ -3003,7 +3003,7 @@ def _pg_get_chart_data_inner(
             _ch_override_ms = (time.perf_counter() - _t_ovr) * 1000
 
     # ── Inject manual client entries into PG forecast totals ─────────────
-    _manual_df_pg_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    _manual_df_pg_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
     if not _manual_df_pg_chart.empty and not df_fcst.empty:
         _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
         _manual_monthly_pg = (
@@ -3234,6 +3234,7 @@ def _pg_get_client_table(
             start_date=start_date, end_date=end_date,
             neg_filter=neg, subneg_filter=subneg,
             view_money=view_money, is_admin=is_admin,
+            profiles_filter=profiles,
         )
     except Exception as exc:
         import traceback as _tb
@@ -3838,7 +3839,7 @@ def _pg_get_treemap_data_inner(
         return {**_EMPTY, "periods": periods}
 
     # ── Inject manual client entries into PG treemap ───────────────────────
-    _manual_df_pg_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    _manual_df_pg_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
     if not _manual_df_pg_tm.empty:
         _val_col_tm = "monto_yhat" if view_money else "yhat_cliente"
         if period_date:
@@ -3847,10 +3848,9 @@ def _pg_get_treemap_data_inner(
         if not _manual_df_pg_tm.empty:
             print(f"[MANUAL_DASHBOARD] PG treemap manual rows={len(_manual_df_pg_tm)}", flush=True)
             _manual_tree = _manual_df_pg_tm.groupby(
-                ["fantasia", "nombre_grupo"], dropna=False
+                ["perfil", "fantasia", "nombre_grupo"], dropna=False
             )[_val_col_tm].sum().reset_index()
             _manual_tree.rename(columns={_val_col_tm: "monto"}, inplace=True)
-            _manual_tree["perfil"] = "MANUAL"
             _manual_tree["cliente_id"] = _manual_tree["fantasia"]
             _manual_tree = _manual_tree.rename(columns={"fantasia": "fantasia", "nombre_grupo": "nombre_grupo"})
             for _c in df_tree.columns:
@@ -4751,7 +4751,7 @@ def get_chart_data(
         df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
 
     # ── Inject manual client entries into forecast totals ─────────────────
-    _manual_df_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    _manual_df_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
     if not _manual_df_chart.empty:
         _val_col_m = "monto_yhat" if view_money else "yhat_cliente"
         _manual_monthly = (
@@ -5055,6 +5055,7 @@ def get_client_table(
             start_date=start_date, end_date=end_date,
             neg_filter=neg, subneg_filter=subneg,
             view_money=view_money, is_admin=is_admin,
+            profiles_filter=profiles,
         )
 
     if df_val.empty:
@@ -5212,6 +5213,7 @@ def get_client_table(
         start_date=start_date, end_date=end_date,
         neg_filter=neg, subneg_filter=subneg,
         view_money=view_money, is_admin=is_admin,
+        profiles_filter=profiles,
     )
 
 
@@ -5329,7 +5331,7 @@ def get_treemap_data(
     df_f = df_val[mask].copy()
 
     # ── Inject manual client entries ───────────────────────────────────────
-    _manual_df_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin)
+    _manual_df_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
     if not _manual_df_tm.empty:
         # Filter manual entries by period_date if set
         if period_date:
@@ -5517,13 +5519,31 @@ def get_client_detail(
 
     # Check if this is a manually-added client first (both SQLite and PG paths)
     _manual = _manual_client_by_name(client_id, user_id)
+    _manual_to_merge = None  # Set when a base client has manual additions to merge
+
     if _manual is not None:
-        return get_manual_client_detail(
-            _manual, user_id=user_id,
-            start_date=start_date, end_date=end_date,
-            neg_filter=neg, subneg_filter=subneg,
-            growth_pct=growth_pct, is_admin=is_admin,
-        )
+        # PG: manual clients are always purely manual — route to manual detail
+        if engine is not None and "postgresql" in str(engine.url):
+            return get_manual_client_detail(
+                _manual, user_id=user_id,
+                start_date=start_date, end_date=end_date,
+                neg_filter=neg, subneg_filter=subneg,
+                growth_pct=growth_pct, is_admin=is_admin,
+            )
+        # SQLite: check if client also exists in base data
+        _chk = get_data().get("df_valorizado", pd.DataFrame())
+        _chk_col = next((c for c in ("fantasia", "cliente_id") if c in _chk.columns), None)
+        _in_base = bool(_chk_col and not _chk.empty and (_chk[_chk_col] == client_id).any())
+        if not _in_base:
+            # Purely manual client → route entirely to manual detail
+            return get_manual_client_detail(
+                _manual, user_id=user_id,
+                start_date=start_date, end_date=end_date,
+                neg_filter=neg, subneg_filter=subneg,
+                growth_pct=growth_pct, is_admin=is_admin,
+            )
+        # Base client with manual additions → continue with base flow, merge later
+        _manual_to_merge = _manual
 
     if engine is not None and "postgresql" in str(engine.url):
         return _pg_get_client_detail(
@@ -5555,6 +5575,11 @@ def get_client_detail(
     effective_from_month = get_forecast_effective_month()
 
     if df_val.empty:
+        if _manual_to_merge is not None:
+            return get_manual_client_detail(
+                _manual_to_merge, user_id=user_id, start_date=start_date, end_date=end_date,
+                neg_filter=neg, subneg_filter=subneg, growth_pct=growth_pct, is_admin=is_admin,
+            )
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
 
     # Filter by client
@@ -5563,6 +5588,11 @@ def get_client_detail(
     elif "cliente_id" in df_val.columns:
         mask_cli = df_val["cliente_id"] == client_id
     else:
+        if _manual_to_merge is not None:
+            return get_manual_client_detail(
+                _manual_to_merge, user_id=user_id, start_date=start_date, end_date=end_date,
+                neg_filter=neg, subneg_filter=subneg, growth_pct=growth_pct, is_admin=is_admin,
+            )
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
 
     df_c = df_val[mask_cli].copy()
@@ -5582,6 +5612,11 @@ def get_client_detail(
         df_c = df_c[df_c["descripcion"].isin(products)]
 
     if df_c.empty:
+        if _manual_to_merge is not None:
+            return get_manual_client_detail(
+                _manual_to_merge, user_id=user_id, start_date=start_date, end_date=end_date,
+                neg_filter=neg, subneg_filter=subneg, growth_pct=growth_pct, is_admin=is_admin,
+            )
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
 
     # Ensure columns
@@ -5724,6 +5759,16 @@ def get_client_detail(
 
         negocios_out.append({"neg": str(neg_name), "subnegs": subnegs_out})
 
+    # Merge manually-added articles (base client that also has manual additions)
+    if _manual_to_merge is not None:
+        _man_detail = get_manual_client_detail(
+            _manual_to_merge, user_id=user_id,
+            start_date=start_date, end_date=end_date,
+            neg_filter=neg, subneg_filter=subneg,
+            growth_pct=growth_pct, is_admin=is_admin,
+        )
+        _merge_manual_into_base_negocios(negocios_out, _man_detail.get("negocios", []))
+
     _client_growth_state = _derive_visible_client_growth_state(
         negocios_out, saved_subneg_growths, growth_pct
     )
@@ -5734,7 +5779,7 @@ def get_client_detail(
         _client_growth_state,
         saved_subneg_growths,
     )
-    return {
+    _result = {
         "client_id": client_id,
         "perfil": perfil,
         "neg": neg_val,
@@ -5748,6 +5793,10 @@ def get_client_detail(
         "subneg_growths": saved_subneg_growths,
         "effective_from_month": effective_from_month,
     }
+    if _manual_to_merge is not None:
+        _result["manual_client_id"] = _manual_to_merge.id
+        _result["is_manual"] = True
+    return _result
 
 
 # ---------------------------------------------------------------------------
@@ -5818,6 +5867,7 @@ def _get_manual_entries_df(
     neg_filter=None,
     subneg_filter=None,
     is_admin=False,
+    profiles_filter=None,
 ):
     """Return manual entries as a DataFrame compatible with df_val for dashboard injection."""
     import pandas as pd
@@ -5831,13 +5881,17 @@ def _get_manual_entries_df(
     client_map = {c.id: c for c in clients}
     start_p = pd.to_datetime(start_date).to_period("M") if start_date else None
     end_p   = pd.to_datetime(end_date).to_period("M") if end_date else None
-    neg_set    = set(_norm_filter_list(neg_filter))
-    subneg_set = set(_norm_filter_list(subneg_filter))
+    neg_set     = set(_norm_filter_list(neg_filter))
+    subneg_set  = set(_norm_filter_list(subneg_filter))
+    profiles_set = set(_norm_filter_list(profiles_filter))
     rows = []
     for e in all_entries:
         if neg_set and str(e.neg or "").strip() not in neg_set:
             continue
         if subneg_set and str(e.subneg or "").strip() not in subneg_set:
+            continue
+        _ep = str(getattr(e, "perfil", None) or "").strip() or "SIN PERFIL"
+        if profiles_set and _ep not in profiles_set:
             continue
         try:
             ep = pd.Period(e.forecast_month, freq="M")
@@ -5850,13 +5904,15 @@ def _get_manual_entries_df(
         mc = client_map.get(e.client_id)
         if mc is None:
             continue
+        _perfil_val = str(getattr(e, "perfil", None) or "").strip() or "SIN PERFIL"
         rows.append({
             "fecha": pd.Timestamp(e.forecast_month + "-01"),
             "fantasia": mc.nombre_cliente,
             "nombre_grupo": mc.grupo or mc.nombre_cliente,
             "neg": str(e.neg or "").strip(),
             "subneg": str(e.subneg or "").strip(),
-            "perfil": "MANUAL",
+            "perfil": _perfil_val,
+            "origen_manual": True,
             "codigo_serie": str(e.codigo_serie or "").strip(),
             "descripcion": str(e.descripcion or e.codigo_serie or "").strip(),
             "monto_yhat": float(e.monto_total or 0.0),
@@ -5878,6 +5934,7 @@ def _inject_manual_client_rows_into_table(
     subneg_filter=None,
     view_money=True,
     is_admin=False,
+    profiles_filter=None,
 ):
     """Inject manual-client rows into an existing get_client_table() result dict."""
     import pandas as pd
@@ -5930,9 +5987,10 @@ def _inject_manual_client_rows_into_table(
 
         start_ts = pd.to_datetime(start_date).to_period("M") if start_date else None
         end_ts   = pd.to_datetime(end_date).to_period("M") if end_date else None
-        neg_set    = set(_norm_filter_list(neg_filter))
-        subneg_set = set(_norm_filter_list(subneg_filter))
-        print(f"[MANUAL_CLIENT FILTER] neg_filter={neg_filter} subneg_filter={subneg_filter} neg_set={neg_set} subneg_set={subneg_set}", flush=True)
+        neg_set      = set(_norm_filter_list(neg_filter))
+        subneg_set   = set(_norm_filter_list(subneg_filter))
+        profiles_set = set(_norm_filter_list(profiles_filter))
+        print(f"[MANUAL_CLIENT FILTER] neg_filter={neg_filter} subneg_filter={subneg_filter} profiles_filter={profiles_filter}", flush=True)
 
         client_map = {c.id: c for c in clients}
         monthly_by_client = defaultdict(lambda: defaultdict(float))
@@ -5941,7 +5999,10 @@ def _inject_manual_client_rows_into_table(
 
         for entry in all_entries:
             _reason = None
-            if neg_set and str(entry.neg or "").strip() not in neg_set:
+            _entry_perfil = str(getattr(entry, "perfil", None) or "").strip() or "SIN PERFIL"
+            if profiles_set and _entry_perfil not in profiles_set:
+                _reason = f"perfil={_entry_perfil!r} not in {profiles_set}"
+            elif neg_set and str(entry.neg or "").strip() not in neg_set:
                 _reason = f"neg={entry.neg!r} not in {neg_set}"
             elif subneg_set and str(entry.subneg or "").strip() not in subneg_set:
                 _reason = f"subneg={entry.subneg!r} not in {subneg_set}"
@@ -6081,6 +6142,8 @@ def get_manual_client_detail(
         user_id, manual_client.nombre_cliente, is_admin=is_admin
     )
 
+    _any_perfil = str(getattr(entries[0], "perfil", None) or "").strip() if entries else ""
+
     if not entries:
         # Still build dates from range so the modal shows full timeline
         _empty_dates: list = []
@@ -6099,7 +6162,7 @@ def get_manual_client_detail(
         return {
             "client_id": manual_client.nombre_cliente,
             "manual_client_id": manual_client.id,
-            "perfil": "", "neg": "",
+            "perfil": _any_perfil, "neg": "",
             "negocios": [], "dates": _empty_dates, "growth_pct": growth_pct,
             "client_growth_pct": 0, "client_growth_source": None, "client_growth_mixed": False,
             "subneg_growths": saved_subneg_growths,
@@ -6223,10 +6286,11 @@ def get_manual_client_detail(
         negocios_out.append({"neg": neg_name, "subnegs": subnegs_out})
 
     first_neg = negocios_out[0]["neg"] if negocios_out else ""
+    _first_perfil = str(getattr(filtered[0], "perfil", None) or "").strip() if filtered else _any_perfil
     return {
         "client_id": manual_client.nombre_cliente,
         "manual_client_id": manual_client.id,
-        "perfil": "", "neg": first_neg,
+        "perfil": _first_perfil, "neg": first_neg,
         "negocios": negocios_out, "dates": date_strs,
         "growth_pct": growth_pct, "client_growth_pct": 0,
         "client_growth_source": None, "client_growth_mixed": False,
@@ -6235,6 +6299,129 @@ def get_manual_client_detail(
         "max_hist_date": None,
         "is_manual": True,
     }
+
+
+def add_articles_to_manual_client(user_id, manual_client_id, entries):
+    """Append new article-month entries to an existing manual client."""
+    if SessionLocal is None or ForecastManualClient is None or ForecastManualEntry is None:
+        raise RuntimeError("SessionLocal not available")
+
+    session = SessionLocal()
+    try:
+        mc = session.query(ForecastManualClient).filter(
+            ForecastManualClient.id == manual_client_id,
+            ForecastManualClient.is_active == True,
+        ).first()
+        if mc is None:
+            raise ValueError(f"Cliente manual id={manual_client_id} no encontrado o inactivo")
+
+        # Use the perfil from the first existing active entry for this client (if not provided)
+        existing_entry = session.query(ForecastManualEntry).filter(
+            ForecastManualEntry.client_id == manual_client_id,
+            ForecastManualEntry.is_active == True,
+        ).first()
+        fallback_perfil = str(getattr(existing_entry, "perfil", None) or "").strip() if existing_entry else ""
+
+        inserted = 0
+        for e in entries:
+            cantidad = float(e.get("cantidad", 0) or 0)
+            costo_u  = float(e.get("costo_unitario", 0) or 0)
+            monto    = float(e.get("monto_total", 0) or 0) or round(cantidad * costo_u, 2)
+            perfil_v = str(e.get("perfil") or fallback_perfil or "").strip() or None
+            entry = ForecastManualEntry(
+                client_id=mc.id,
+                perfil=perfil_v,
+                neg=str(e.get("neg", "") or "").strip(),
+                subneg=str(e.get("subneg", "") or "").strip(),
+                codigo_serie=str(e.get("codigo_serie", "") or "").strip(),
+                descripcion=str(e.get("descripcion", "") or "").strip(),
+                unidad_medida=str(e.get("unidad_medida", "Unid.") or "Unid.").strip(),
+                forecast_month=str(e.get("forecast_month", "") or "").strip(),
+                cantidad=cantidad,
+                costo_unitario=costo_u,
+                monto_total=monto,
+            )
+            session.add(entry)
+            inserted += 1
+
+        session.commit()
+        print(f"[MANUAL_CLIENT ADD_ARTICLES] client_id={manual_client_id} inserted={inserted}", flush=True)
+        logger.info("[FORECAST manual] add_articles client_id=%s inserted=%d", manual_client_id, inserted)
+        return {"ok": True, "manual_client_id": manual_client_id, "inserted": inserted}
+    except Exception as exc:
+        session.rollback()
+        logger.error("[FORECAST manual] add_articles_to_manual_client error: %s", exc, exc_info=True)
+        raise
+    finally:
+        session.close()
+
+
+def add_articles_by_client_name(user_id, created_by, client_name, perfil, entries):
+    """Add article entries to a client by name.
+
+    If a manual client with that name already exists for this user, entries are
+    appended to it.  Otherwise a new ForecastManualClient is created on the fly.
+    This is the unified endpoint for both base-dataset clients and manual clients.
+    """
+    if SessionLocal is None or ForecastManualClient is None or ForecastManualEntry is None:
+        raise RuntimeError("SessionLocal not available")
+
+    session = SessionLocal()
+    try:
+        # Look for an existing active manual client with this exact name
+        mc = session.query(ForecastManualClient).filter(
+            ForecastManualClient.user_id == user_id,
+            ForecastManualClient.nombre_cliente == client_name.strip(),
+            ForecastManualClient.is_active == True,
+        ).first()
+
+        if mc is None:
+            # Create it on the fly — this happens for base-dataset clients
+            mc = ForecastManualClient(
+                user_id=user_id,
+                nombre_cliente=client_name.strip(),
+                grupo=None,
+                created_by=created_by,
+                is_active=True,
+            )
+            session.add(mc)
+            session.flush()
+            print(f"[ADD_ARTICLES_BY_NAME] created new manual client id={mc.id} name={client_name!r}", flush=True)
+        else:
+            print(f"[ADD_ARTICLES_BY_NAME] found existing manual client id={mc.id} name={client_name!r}", flush=True)
+
+        inserted = 0
+        for e in entries:
+            cantidad = float(e.get("cantidad", 0) or 0)
+            costo_u  = float(e.get("costo_unitario", 0) or 0)
+            monto    = float(e.get("monto_total", 0) or 0) or round(cantidad * costo_u, 2)
+            perfil_v = str(e.get("perfil") or perfil or "").strip() or None
+            entry = ForecastManualEntry(
+                client_id=mc.id,
+                perfil=perfil_v,
+                neg=str(e.get("neg", "") or "").strip(),
+                subneg=str(e.get("subneg", "") or "").strip(),
+                codigo_serie=str(e.get("codigo_serie", "") or "").strip(),
+                descripcion=str(e.get("descripcion", "") or "").strip(),
+                unidad_medida=str(e.get("unidad_medida", "Unid.") or "Unid.").strip(),
+                forecast_month=str(e.get("forecast_month", "") or "").strip(),
+                cantidad=cantidad,
+                costo_unitario=costo_u,
+                monto_total=monto,
+            )
+            session.add(entry)
+            inserted += 1
+
+        session.commit()
+        print(f"[ADD_ARTICLES_BY_NAME] manual_client_id={mc.id} inserted={inserted}", flush=True)
+        logger.info("[FORECAST manual] add_articles_by_name client=%r id=%s inserted=%d", client_name, mc.id, inserted)
+        return {"ok": True, "manual_client_id": mc.id, "client_name": client_name, "inserted": inserted}
+    except Exception as exc:
+        session.rollback()
+        logger.error("[FORECAST manual] add_articles_by_client_name error: %s", exc, exc_info=True)
+        raise
+    finally:
+        session.close()
 
 
 def delete_manual_client(user_id, manual_client_id, deleted_by):
@@ -6290,6 +6477,33 @@ def delete_manual_entry(user_id, manual_entry_id, deleted_by):
         session.close()
 
 
+def _merge_manual_into_base_negocios(base_negocios: list, manual_negocios: list) -> None:
+    """Merge manual-entry products into base negocios list in-place.
+
+    Products from manual_negocios are appended to the matching neg/subneg group in
+    base_negocios (or added as a new group if not present).  Articles that already
+    exist in a subneg are skipped to avoid duplicates.
+    """
+    neg_idx: dict[str, int] = {g["neg"]: i for i, g in enumerate(base_negocios)}
+    for m_neg in manual_negocios:
+        neg_name = m_neg["neg"]
+        if neg_name in neg_idx:
+            base_neg = base_negocios[neg_idx[neg_name]]
+            sub_idx: dict[str, int] = {s["subneg"]: j for j, s in enumerate(base_neg["subnegs"])}
+            for m_sub in m_neg.get("subnegs", []):
+                sub_name = m_sub["subneg"]
+                if sub_name in sub_idx:
+                    base_sub = base_neg["subnegs"][sub_idx[sub_name]]
+                    existing_arts = {p["articulo"] for p in base_sub["products"]}
+                    for m_prod in m_sub.get("products", []):
+                        if m_prod["articulo"] not in existing_arts:
+                            base_sub["products"].append(m_prod)
+                else:
+                    base_neg["subnegs"].append(m_sub)
+        else:
+            base_negocios.append(m_neg)
+
+
 def get_new_client_catalog(user_id=None):
     """Return catalog for the new-client form: negocios, subnegocios, articulos, grupos."""
     import pandas as pd
@@ -6304,6 +6518,8 @@ def get_new_client_catalog(user_id=None):
             )
             df_base.columns = [c.lower().strip() for c in df_base.columns]
             df_base = df_base.dropna(subset=["codigo_serie"])
+            # Translate numeric neg/subneg IDs → text names (same as _load_all_data)
+            df_base = _apply_neg_names(df_base, NEGOCIOS_FILE)
 
             if "neg" in df_base.columns:
                 result["negocios"] = sorted({str(v).strip() for v in df_base["neg"].dropna() if str(v).strip()})
@@ -6441,8 +6657,10 @@ def create_manual_client(user_id, created_by, nombre_cliente, grupo, entries):
             cantidad    = float(e.get("cantidad", 0) or 0)
             costo_u     = float(e.get("costo_unitario", 0) or 0)
             monto_total = float(e.get("monto_total", 0) or 0) or round(cantidad * costo_u, 2)
+            perfil_val = e.get("perfil") or None
             entry = ForecastManualEntry(
                 client_id=client.id,
+                perfil=str(perfil_val).strip() if perfil_val else None,
                 neg=str(e.get("neg", "") or "").strip(),
                 subneg=str(e.get("subneg", "") or "").strip(),
                 codigo_serie=str(e.get("codigo_serie", "") or "").strip(),

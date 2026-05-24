@@ -2290,6 +2290,7 @@
             <thead>
               <tr>
                 <th style="min-width:220px;">Artículo</th>
+                <th style="min-width:130px;">Perfil</th>
                 <th style="min-width:110px;">Negocio</th>
                 <th style="min-width:110px;">Subnegocio</th>
                 <th style="min-width:110px;">Mes</th>
@@ -4502,6 +4503,49 @@ function renderModalBody(data) {
     }
   }
 
+  // ── Agregar Artículo — disponible para TODOS los clientes ───────────────
+  {
+    const _ecName   = (data.client_id || '').replace(/'/g, "\\'");
+    const _ecPerfil = (data.perfil   || '').replace(/'/g, "\\'");
+    html += `
+    <div class="fc-nc-section" style="margin-top:14px;border-top:1px solid #e2e8f0;padding-top:10px;">
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              id="editArtToggleBtn"
+              onclick="editToggleArtSection('${_ecName}','${_ecPerfil}')">
+        <i class="bi bi-plus-circle me-1"></i> Agregar Artículo
+      </button>
+      <div id="editArtPanel" style="display:none;margin-top:10px;">
+        <div class="table-responsive">
+          <table class="table table-sm fc-nc-art-table" id="editArtTable">
+            <thead>
+              <tr>
+                <th style="min-width:220px;">Artículo</th>
+                <th style="min-width:110px;">Negocio</th>
+                <th style="min-width:110px;">Subnegocio</th>
+                <th style="min-width:110px;">Mes</th>
+                <th style="min-width:90px;">Cantidad</th>
+                <th style="min-width:100px;">Costo unit. ($)</th>
+                <th style="min-width:100px;">Importe ($)</th>
+                <th style="width:40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="editArtBody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="editAddArticleLine()">
+            <i class="bi bi-plus-circle me-1"></i> Agregar línea
+          </button>
+          <button type="button" class="btn btn-sm btn-success" id="editSaveArtBtn"
+                  onclick="editSaveArticles('${_ecName}','${_ecPerfil}')">
+            <i class="bi bi-check-lg me-1"></i> Guardar artículos
+          </button>
+          <span id="editArtMsg" style="font-size:.82rem;display:none;"></span>
+        </div>
+      </div>
+    </div>`;
+  }
+
   body.innerHTML = html;
   _forceClientGrowthInputFromRenderedSubnegs('after-body-render');
 
@@ -5153,6 +5197,9 @@ function ncAddArticleLine() {
 
   const tr = document.createElement('tr');
   tr.id = `nc-row-${idx}`;
+  const perfiles = (STATE && STATE.filterOptions && STATE.filterOptions.profiles) ? STATE.filterOptions.profiles : [];
+  const perfilSelHtml = perfiles.map(p => `<option value="${p}">${p}</option>`).join('');
+
   tr.innerHTML = `
     <td>
       <input type="text" class="form-control form-control-sm nc-art-input"
@@ -5162,6 +5209,13 @@ function ncAddArticleLine() {
              onfocus="ncOnArticleFocus(${idx})"
              onblur="_ncScheduleHide()"
              style="min-width:180px;">
+    </td>
+    <td>
+      <select class="form-select form-select-sm nc-perfil-sel" id="nc-perfil-${idx}"
+              style="min-width:120px;">
+        <option value="">-- Perfil --</option>
+        ${perfilSelHtml}
+      </select>
     </td>
     <td>
       <select class="form-select form-select-sm nc-neg-sel" id="nc-neg-${idx}"
@@ -5362,12 +5416,13 @@ function _ncCollectEntries() {
     const idxMatch = tr.id.match(/nc-row-(\d+)/);
     if (!idxMatch) return;
     const i = idxMatch[1];
-    const artVal  = (document.getElementById(`nc-art-${i}`)?.value || '').trim();
-    const negVal  = (document.getElementById(`nc-neg-${i}`)?.value || '').trim();
-    const subVal  = (document.getElementById(`nc-sub-${i}`)?.value || '').trim();
-    const mesVal  = (document.getElementById(`nc-mes-${i}`)?.value || '').trim();
-    const qtyVal  = parseFloat(document.getElementById(`nc-qty-${i}`)?.value  || 0) || 0;
-    const costVal = parseFloat(document.getElementById(`nc-cost-${i}`)?.value || 0) || 0;
+    const artVal    = (document.getElementById(`nc-art-${i}`)?.value || '').trim();
+    const perfilVal = (document.getElementById(`nc-perfil-${i}`)?.value || '').trim();
+    const negVal    = (document.getElementById(`nc-neg-${i}`)?.value || '').trim();
+    const subVal    = (document.getElementById(`nc-sub-${i}`)?.value || '').trim();
+    const mesVal    = (document.getElementById(`nc-mes-${i}`)?.value || '').trim();
+    const qtyVal    = parseFloat(document.getElementById(`nc-qty-${i}`)?.value  || 0) || 0;
+    const costVal   = parseFloat(document.getElementById(`nc-cost-${i}`)?.value || 0) || 0;
     if (!artVal || !mesVal) return;  // skip empty rows
 
     // Look up metadata: prefer selection from dynamic search, then catalog
@@ -5377,11 +5432,12 @@ function _ncCollectEntries() {
           : null);
 
     entries.push({
-      codigo_serie:  artMeta ? artMeta.codigo_serie : artVal,
-      descripcion:   artMeta ? artMeta.descripcion  : artVal,
-      neg:           negVal || (artMeta ? artMeta.neg : ''),
-      subneg:        subVal || (artMeta ? artMeta.subneg : ''),
-      unidad_medida: artMeta ? (artMeta.unidad_medida || 'Unid.') : 'Unid.',
+      perfil:         perfilVal || null,
+      codigo_serie:   artMeta ? artMeta.codigo_serie : artVal,
+      descripcion:    artMeta ? artMeta.descripcion  : artVal,
+      neg:            negVal || (artMeta ? artMeta.neg : ''),
+      subneg:         subVal || (artMeta ? artMeta.subneg : ''),
+      unidad_medida:  artMeta ? (artMeta.unidad_medida || 'Unid.') : 'Unid.',
       forecast_month: mesVal,
       cantidad:       qtyVal,
       costo_unitario: costVal,
@@ -5463,6 +5519,183 @@ function saveNewClient() {
 /* ===================================================================
    ELIMINACIÓN DE CLIENTES/ENTRIES MANUALES (solo Admin)
    =================================================================== */
+
+/* ===================================================================
+   AGREGAR ARTÍCULOS DENTRO DEL MODAL DE EDICIÓN (todos los clientes)
+   Reutiliza nc- IDs (offset 1000) y funciones del modal Agregar cliente:
+   ncOnArticleInput, ncOnArticleFocus, ncOnNegChange, ncSelectArticle,
+   nc-global-art-drop, _ncGetMonthOptions, ncCalcMonto, _ncCatalog.
+   =================================================================== */
+
+// Offset alto para no colisionar con filas del modal Agregar cliente (idx 0-999)
+let _editArtIdx = 1000;
+
+function editToggleArtSection(clientName, perfilFallback) {
+  const panel = document.getElementById('editArtPanel');
+  const btn   = document.getElementById('editArtToggleBtn');
+  if (!panel) return;
+
+  const isHidden = panel.style.display === 'none';
+  if (!isHidden) {
+    // Collapse
+    panel.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+    return;
+  }
+
+  // Expand: ensure catalog is loaded before showing first line
+  const _showPanel = () => {
+    panel.style.display = 'block';
+    if (btn) btn.classList.add('active');
+    // Add first line only if tbody is empty
+    const tbody = document.getElementById('editArtBody');
+    if (tbody && tbody.children.length === 0) editAddArticleLine();
+  };
+
+  if (_ncCatalog) {
+    _showPanel();
+  } else {
+    fetch('/forecast/api/new-client-catalog')
+      .then(r => r.json())
+      .then(data => { _ncCatalog = data; _showPanel(); })
+      .catch(() => _showPanel());
+  }
+}
+
+function editAddArticleLine() {
+  const idx = _editArtIdx++;
+  const tbody = document.getElementById('editArtBody');
+  if (!tbody) return;
+
+  // Reuse exact same catalog and month logic as ncAddArticleLine
+  const monthOpts = _ncGetMonthOptions();
+  const monthSelHtml = monthOpts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  const negocios = (_ncCatalog && _ncCatalog.negocios) ? _ncCatalog.negocios : [];
+  const negSelHtml = negocios.map(n => `<option value="${n}">${n}</option>`).join('');
+
+  // Use nc- prefixed IDs so ncOnArticleInput, ncOnNegChange, ncCalcMonto, etc. work natively
+  const tr = document.createElement('tr');
+  tr.id = `nc-row-${idx}`;
+  tr.dataset.editRow = '1';   // marker so _editCollectEntries knows which rows are ours
+  tr.innerHTML = `
+    <td>
+      <input type="text" class="form-control form-control-sm nc-art-input"
+             id="nc-art-${idx}" placeholder="Código o descripción..."
+             autocomplete="off"
+             oninput="ncOnArticleInput(${idx})"
+             onfocus="ncOnArticleFocus(${idx})"
+             onblur="_ncScheduleHide()"
+             style="min-width:180px;">
+    </td>
+    <td>
+      <select class="form-select form-select-sm nc-neg-sel" id="nc-neg-${idx}"
+              onchange="ncOnNegChange(${idx})" style="min-width:100px;">
+        <option value="">-- Negocio --</option>
+        ${negSelHtml}
+      </select>
+    </td>
+    <td>
+      <select class="form-select form-select-sm nc-sub-sel" id="nc-sub-${idx}"
+              style="min-width:100px;">
+        <option value="">-- Subneg --</option>
+      </select>
+    </td>
+    <td>
+      <select class="form-select form-select-sm" id="nc-mes-${idx}" style="min-width:100px;">
+        ${monthSelHtml}
+      </select>
+    </td>
+    <td>
+      <input type="number" class="form-control form-control-sm" id="nc-qty-${idx}"
+             min="0" step="any" placeholder="0" oninput="ncCalcMonto(${idx})">
+    </td>
+    <td>
+      <input type="number" class="form-control form-control-sm" id="nc-cost-${idx}"
+             min="0" step="any" placeholder="0.00" oninput="ncCalcMonto(${idx})">
+    </td>
+    <td class="fc-nc-monto-cell" id="nc-monto-${idx}">$ 0</td>
+    <td>
+      <button type="button" class="fc-nc-del-btn" onclick="ncRemoveLine(${idx})" title="Eliminar línea">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </td>`;
+  tbody.appendChild(tr);
+
+  const inp = document.getElementById(`nc-art-${idx}`);
+  if (inp) setTimeout(() => inp.focus(), 50);
+}
+
+function _editCollectEntries(fallbackPerfil) {
+  // Collect rows that were added by editAddArticleLine (have data-edit-row="1")
+  const rows = document.querySelectorAll('#editArtBody tr[data-edit-row="1"]');
+  const entries = [];
+  rows.forEach(tr => {
+    const idxMatch = tr.id.match(/nc-row-(\d+)/);
+    if (!idxMatch) return;
+    const i = idxMatch[1];
+    const artVal  = (document.getElementById(`nc-art-${i}`)?.value || '').trim();
+    const negVal  = (document.getElementById(`nc-neg-${i}`)?.value || '').trim();
+    const subVal  = (document.getElementById(`nc-sub-${i}`)?.value || '').trim();
+    const mesVal  = (document.getElementById(`nc-mes-${i}`)?.value || '').trim();
+    const qtyVal  = parseFloat(document.getElementById(`nc-qty-${i}`)?.value  || 0) || 0;
+    const costVal = parseFloat(document.getElementById(`nc-cost-${i}`)?.value || 0) || 0;
+    if (!artVal || !mesVal) return;
+
+    const artMeta = _ncSelectedArt[i]
+      || ((_ncCatalog && _ncCatalog.articulos)
+          ? _ncCatalog.articulos.find(a => a.codigo_serie === artVal)
+          : null);
+
+    entries.push({
+      perfil:         fallbackPerfil || null,
+      codigo_serie:   artMeta ? artMeta.codigo_serie : artVal,
+      descripcion:    artMeta ? artMeta.descripcion  : artVal,
+      neg:            negVal || (artMeta ? artMeta.neg : ''),
+      subneg:         subVal || (artMeta ? artMeta.subneg : ''),
+      unidad_medida:  artMeta ? (artMeta.unidad_medida || 'Unid.') : 'Unid.',
+      forecast_month: mesVal,
+      cantidad:       qtyVal,
+      costo_unitario: costVal,
+      monto_total:    qtyVal * costVal,
+    });
+  });
+  return entries;
+}
+
+function editSaveArticles(clientName, perfilFallback) {
+  const entries = _editCollectEntries(perfilFallback);
+  const msgEl = document.getElementById('editArtMsg');
+  const btn   = document.getElementById('editSaveArtBtn');
+
+  if (!entries.length) {
+    if (msgEl) { msgEl.style.display = 'inline'; msgEl.style.color = '#dc2626'; msgEl.textContent = 'Agregue al menos un artículo con código y mes.'; }
+    return;
+  }
+  if (msgEl) msgEl.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="fc-spinner fc-spinner-xs me-1"></span> Guardando…'; }
+
+  fetch('/forecast/api/add-articles-to-client', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_name: clientName, perfil: perfilFallback || null, entries }),
+  })
+  .then(r => r.json().then(d => ({ ok: r.ok, d })))
+  .then(({ ok, d }) => {
+    if (!ok) throw new Error(d.detail || 'Error al guardar');
+    if (msgEl) { msgEl.style.display = 'inline'; msgEl.style.color = '#16a34a'; msgEl.textContent = `✓ ${d.inserted} artículo(s) agregado(s).`; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar artículos'; }
+    setTimeout(() => {
+      _fcClear();
+      const cid = STATE.modalClientData?.client_id;
+      closeModal();
+      if (cid) setTimeout(() => openEditModal(cid), 250);
+    }, 800);
+  })
+  .catch(err => {
+    if (msgEl) { msgEl.style.display = 'inline'; msgEl.style.color = '#dc2626'; msgEl.textContent = 'Error: ' + (err.message || err); }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar artículos'; }
+  });
+}
 
 function confirmDeleteManualClient(manualClientId, clientName) {
   if (!_FC_IS_ADMIN) return;

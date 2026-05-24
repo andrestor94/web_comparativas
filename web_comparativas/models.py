@@ -392,6 +392,7 @@ class ForecastManualEntry(Base):
 
     id = Column(Integer, primary_key=True)
     client_id = Column(Integer, ForeignKey("forecast_manual_clients.id"), nullable=False, index=True)
+    perfil = Column(String(120), nullable=True, default=None)
     neg = Column(String(120), nullable=False, default="")
     subneg = Column(String(255), nullable=False, default="")
     codigo_serie = Column(String(120), nullable=False)
@@ -1375,6 +1376,7 @@ def _ensure_manual_client_columns():
                     ("is_active",  "ALTER TABLE forecast_manual_entries ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"),
                     ("deleted_at", "ALTER TABLE forecast_manual_entries ADD COLUMN deleted_at DATETIME"),
                     ("deleted_by", "ALTER TABLE forecast_manual_entries ADD COLUMN deleted_by VARCHAR(255)"),
+                    ("perfil",     "ALTER TABLE forecast_manual_entries ADD COLUMN perfil VARCHAR(120)"),
                 ]:
                     if col not in existing:
                         conn.execute(text(ddl))

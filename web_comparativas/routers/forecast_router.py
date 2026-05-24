@@ -671,6 +671,7 @@ def api_new_client_catalog(
 
 
 class _ManualEntry(BaseModel):
+    perfil: Optional[str] = None
     neg: str = ""
     subneg: str = ""
     codigo_serie: str
@@ -782,6 +783,78 @@ def api_delete_manual_entry(
         raise
     except Exception as exc:
         logger.error("delete-manual-entry error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+class _AddArticlesPayload(BaseModel):
+    entries: List[_ManualEntry] = Field(default_factory=list)
+
+
+@router.post("/api/manual-client/{manual_client_id}/add-articles")
+def api_add_articles_to_manual_client(
+    manual_client_id: int,
+    payload: _AddArticlesPayload,
+    request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Append new article-month entries to an existing manual client."""
+    started = time.perf_counter()
+    try:
+        if not payload.entries:
+            raise HTTPException(400, "Debe agregar al menos un artículo")
+        result = svc.add_articles_to_manual_client(
+            user_id=_user.id,
+            manual_client_id=manual_client_id,
+            entries=[e.dict() for e in payload.entries],
+        )
+        svc.clear_user_cache(_user.id)
+        _log_api_perf("add-articles-to-manual-client", started, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("add-articles-to-manual-client error: %s", exc, exc_info=True)
+        raise HTTPException(500, str(exc))
+
+
+class _AddArticlesByNamePayload(BaseModel):
+    client_name: str
+    perfil: Optional[str] = None
+    entries: List[_ManualEntry] = Field(default_factory=list)
+
+
+@router.post("/api/add-articles-to-client")
+def api_add_articles_by_client_name(
+    payload: _AddArticlesByNamePayload,
+    request: Request,
+    _user: User = Depends(_require_user),
+):
+    """Add articles to any client (base or manual) by client name.
+
+    If no manual record exists for this client+user, one is created automatically.
+    Existing records are reused, so no duplication occurs.
+    """
+    started = time.perf_counter()
+    try:
+        name = (payload.client_name or "").strip()
+        if not name:
+            raise HTTPException(400, "client_name es obligatorio")
+        if not payload.entries:
+            raise HTTPException(400, "Debe agregar al menos un artículo")
+        result = svc.add_articles_by_client_name(
+            user_id=_user.id,
+            created_by=_user.email or str(_user.id),
+            client_name=name,
+            perfil=payload.perfil or "",
+            entries=[e.dict() for e in payload.entries],
+        )
+        svc.clear_user_cache(_user.id)
+        _log_api_perf("add-articles-to-client", started, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("add-articles-to-client error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
 
 
