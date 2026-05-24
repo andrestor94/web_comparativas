@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -553,6 +554,12 @@ app.add_middleware(
     same_site="lax",
     max_age=60*60*24*7,
 )
+
+# Compresión HTTP: reduce client-table (~1.7 MB) y treemap transferidos al navegador.
+# Outermost — comprime la respuesta final antes de enviarla al cliente.
+# minimum_size=1000 evita overhead en respuestas pequeñas (filtros, KPIs, etc.).
+# No afecta: StaticFiles (Starlette lo bypasea), StreamingResponse, sesiones, CORS.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.get("/healthz")

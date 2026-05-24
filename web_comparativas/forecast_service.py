@@ -872,83 +872,115 @@ def _apply_override_effects_to_dataframe(
         out["_has_override"] = False
         return out, maps
 
-    # Pre-compute month keys as a plain list to avoid itertuples column-rename issues
-    # (pandas renames columns starting with "_" to positional names in namedtuples).
+    # ── VECTORIZED pre-computation (replaces slow per-row Python loops) ────────
+    # month_keys: numpy datetime64[M] cast is ~156ms vs ~2400ms for dt.strftime.
+    import numpy as _np
     if "fecha" in out.columns:
-        month_keys: list[str] = [
-            ts.strftime("%Y-%m") if pd.notna(ts) else ""
-            for ts in out["fecha"]
-        ]
+        _fecha_arr = out["fecha"].values
+        _nat_mask = pd.isna(out["fecha"]).values
+        _mk_arr = _fecha_arr.astype("datetime64[M]").astype(str)
+        _mk_arr[_nat_mask] = ""
+        month_keys: list[str] = _mk_arr.tolist()
     else:
         month_keys = [""] * len(out)
 
-    # Pre-compute fantasia column values (avoid itertuples underscore-rename for _cliente)
-    fantasia_vals: list[str] = (
-        [_clean_override_text(v) for v in out["fantasia"]]
-        if "fantasia" in out.columns
-        else [""] * len(out)
-    )
-    cliente_id_vals: list[str] = (
-        [_clean_override_text(v) for v in out["cliente_id"]]
-        if "cliente_id" in out.columns
-        else [""] * len(out)
-    )
-    # "_cliente" column starts with "_" — access directly from df, not via itertuples
-    _cliente_vals: list[str] = (
-        [_clean_override_text(v) for v in out["_cliente"]]
-        if "_cliente" in out.columns
-        else [""] * len(out)
-    )
-    Cliente_vals: list[str] = (
-        [_clean_override_text(v) for v in out["Cliente"]]
-        if "Cliente" in out.columns
-        else [""] * len(out)
-    )
-    subneg_vals: list[str] = (
-        [_clean_override_text(v) for v in out["subneg"]]
-        if "subneg" in out.columns
-        else [""] * len(out)
-    )
-    codigo_vals: list[str] = (
-        [
-            _clean_override_text(v)
-            for v in (
-                out.get("codigo_serie", out.get("articulo", out.get("descripcion", pd.Series([""] * len(out)))))
-            )
-        ]
-    )
+    # Build override selectors and find affected positions BEFORE building value lists.
+    # This lets us skip building 702K-row lists for columns we only need for ~1K rows.
+    _override_selectors_pre: set[str] = {
+        _clean_override_text(getattr(rec, "client_selector", "") or "")
+        for rec in records
+    }
+    _override_selectors_pre.discard("")
 
-    scopes: list[str] = []
-    monthlies: list[float] = []
-    annual_effects: list[float] = []
-    flags: list[bool] = []
+    # Vectorized mask over selector columns (much faster than Python list scan).
+    if _override_selectors_pre:
+        _aff_mask = pd.Series(False, index=out.index)
+        for _sc in ("fantasia", "cliente_id", "_cliente", "Cliente"):
+            if _sc in out.columns:
+                _aff_mask |= out[_sc].astype(str).str.strip().isin(_override_selectors_pre)
+        _affected_pos_arr = _np.where(_aff_mask.values)[0]  # positional (0-based)
+    else:
+        _affected_pos_arr = _np.array([], dtype=int)
 
-    for i, row in enumerate(out.itertuples(index=False)):
-        row_date = getattr(row, "fecha", None)
-        if max_hist_date is not None and pd.notna(row_date) and row_date <= max_hist_date:
-            scopes.append("base")
-            monthlies.append(0.0)
-            annual_effects.append(1.0)
-            flags.append(False)
-            continue
-
-        selector_candidates = []
-        for val in (fantasia_vals[i], cliente_id_vals[i], _cliente_vals[i], Cliente_vals[i]):
-            if val and val not in selector_candidates:
-                selector_candidates.append(val)
-
-        resolved = _resolve_override_for_row(
-            selector_candidates=selector_candidates,
-            subneg=subneg_vals[i],
-            codigo_serie=codigo_vals[i],
-            forecast_month=month_keys[i],
-            maps=maps,
-            base_growth_pct=base_growth_pct,
+    # Build per-row value arrays ONLY for affected rows (tiny subset, typically < 0.2%).
+    _n_aff = len(_affected_pos_arr)
+    if _n_aff > 0:
+        _df_aff = out.iloc[_affected_pos_arr]
+        fantasia_vals: list[str] = (
+            [_clean_override_text(v) for v in _df_aff["fantasia"]]
+            if "fantasia" in _df_aff.columns else [""] * _n_aff
         )
-        scopes.append(str(resolved["scope"]))
-        monthlies.append(float(resolved["monthly_pct"]))
-        annual_effects.append(1.0 + float(resolved["annual_pct"]) / 100.0)
-        flags.append(str(resolved["scope"]) != "base")
+        cliente_id_vals: list[str] = (
+            [_clean_override_text(v) for v in _df_aff["cliente_id"]]
+            if "cliente_id" in _df_aff.columns else [""] * _n_aff
+        )
+        _cliente_vals: list[str] = (
+            [_clean_override_text(v) for v in _df_aff["_cliente"]]
+            if "_cliente" in _df_aff.columns else [""] * _n_aff
+        )
+        Cliente_vals: list[str] = (
+            [_clean_override_text(v) for v in _df_aff["Cliente"]]
+            if "Cliente" in _df_aff.columns else [""] * _n_aff
+        )
+        subneg_vals: list[str] = (
+            [_clean_override_text(v) for v in _df_aff["subneg"]]
+            if "subneg" in _df_aff.columns else [""] * _n_aff
+        )
+        _cod_src_aff = (
+            _df_aff["codigo_serie"] if "codigo_serie" in _df_aff.columns
+            else _df_aff["articulo"] if "articulo" in _df_aff.columns
+            else _df_aff["descripcion"] if "descripcion" in _df_aff.columns
+            else pd.Series([""] * _n_aff)
+        )
+        codigo_vals: list[str] = [_clean_override_text(v) for v in _cod_src_aff]
+    else:
+        # No affected rows — these lists won't be used but need to exist
+        fantasia_vals = cliente_id_vals = _cliente_vals = Cliente_vals = subneg_vals = codigo_vals = []
+
+    # ── Partition: resolve overrides only for affected rows ──────────────────
+    # _affected_pos_arr and value lists were already built in the pre-computation
+    # section above using vectorized pandas operations.
+    _base_monthly = _monthly_pct_from_annual_growth(base_growth_pct)
+    _n = len(out)
+
+    logger.info(
+        "[FORECAST PATCH] applying overrides to %d/%d rows (selectors=%d)",
+        _n_aff, _n, len(_override_selectors_pre),
+    )
+
+    # Initialize all rows as base (vectorized — no Python loop).
+    scopes: list[str] = ["base"] * _n
+    monthlies: list[float] = [_base_monthly] * _n
+    annual_effects: list[float] = [1.0] * _n
+    flags: list[bool] = [False] * _n
+
+    # Resolve overrides for affected rows only.
+    # j = local index (0..n_aff-1); global_i = positional index in out.
+    if _n_aff > 0:
+        _fecha_col = out["fecha"] if "fecha" in out.columns else None
+        for j, global_i in enumerate(_affected_pos_arr):
+            if _fecha_col is not None and max_hist_date is not None:
+                row_date = _fecha_col.iloc[global_i]
+                if pd.notna(row_date) and row_date <= max_hist_date:
+                    continue  # historical row stays as base
+
+            selector_candidates: list[str] = []
+            for val in (fantasia_vals[j], cliente_id_vals[j], _cliente_vals[j], Cliente_vals[j]):
+                if val and val not in selector_candidates:
+                    selector_candidates.append(val)
+
+            resolved = _resolve_override_for_row(
+                selector_candidates=selector_candidates,
+                subneg=subneg_vals[j],
+                codigo_serie=codigo_vals[j],
+                forecast_month=month_keys[global_i],
+                maps=maps,
+                base_growth_pct=base_growth_pct,
+            )
+            scopes[global_i] = str(resolved["scope"])
+            monthlies[global_i] = float(resolved["monthly_pct"])
+            annual_effects[global_i] = 1.0 + float(resolved["annual_pct"]) / 100.0
+            flags[global_i] = str(resolved["scope"]) != "base"
 
     out["_override_scope"] = scopes
     out["_monthly_pct"] = monthlies
@@ -1493,6 +1525,22 @@ def _get_patched_df_val(user_id: int | None = None, df_source=None, *, is_admin:
     if df is None or df.empty:
         return df if df is not None else pd.DataFrame()
 
+    # Pre-fetch override records once here to avoid _selector_candidates_for_df(702K rows)
+    # inside _apply_override_effects_to_dataframe, which scans all rows to build SQL IN clause.
+    _records = _fetch_override_records(user_id, all_users=is_admin)
+
+    if not _records:
+        # Fast path: no overrides — skip expensive df.copy() + row-by-row loop.
+        # Just add the 4 sentinel columns and return. Values are unchanged from cache.
+        logger.info("[FORECAST PATCH] skipped apply overrides reason=no_overrides uid=%s is_admin=%s", user_id, is_admin)
+        out = df.copy()
+        out["_override_scope"] = "base"
+        out["_monthly_pct"] = _monthly_pct_from_annual_growth(0.0)
+        out["_annual_eff"] = 1.0
+        out["_has_override"] = False
+        out.drop(columns=["_month_key"], inplace=True, errors="ignore")
+        return out
+
     data = get_data()
     df_main = data.get("df_main", pd.DataFrame())
     max_hist_date = None
@@ -1504,6 +1552,7 @@ def _get_patched_df_val(user_id: int | None = None, df_source=None, *, is_admin:
         user_id=user_id,
         base_growth_pct=0.0,
         max_hist_date=max_hist_date,
+        _records=_records,
         is_admin=is_admin,
     )
     if not patched.empty:
@@ -2492,11 +2541,30 @@ def _local_get_treemap_data_light(
 ) -> dict:
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
     try:
+        _t0 = time.monotonic()
         profiles = _norm_filter_list(profiles)
         allowed_codes = _local_allowed_codes_for_filters(profiles, neg, subneg, products)
         val_col = "monto_yhat" if view_money else "yhat_cliente"
-        cols = ["fecha", "codigo_serie", "perfil", "cliente_id", val_col]
-        df_val = pd.read_parquet(str(_VALORIZADO_PARQUET), columns=cols)
+
+        # Use _data_cache["df_valorizado"] when available — skips parquet I/O and client CSV join.
+        # Fallback: read parquet directly (original cold path).
+        _cached_df = _data_cache.get("df_valorizado") if _data_cache else None
+        _has_cache = (
+            _cached_df is not None
+            and not _cached_df.empty
+            and val_col in _cached_df.columns
+        )
+
+        if _has_cache:
+            logger.info("[FORECAST TREEMAP] using _data_cache")
+            _needed = [c for c in ("fecha", "codigo_serie", "perfil", "cliente_id", val_col, "fantasia", "nombre_grupo")
+                       if c in _cached_df.columns]
+            df_val = _cached_df[_needed]  # view — no copy; filters below create new objects
+        else:
+            logger.info("[FORECAST TREEMAP] fallback parquet path")
+            cols = ["fecha", "codigo_serie", "perfil", "cliente_id", val_col]
+            df_val = pd.read_parquet(str(_VALORIZADO_PARQUET), columns=cols)
+
         periods = [str(d)[:10] for d in sorted(df_val["fecha"].dropna().unique())]
         if period_date:
             target = pd.to_datetime(period_date).replace(day=1)
@@ -2512,22 +2580,33 @@ def _local_get_treemap_data_light(
             df_val = df_val[df_val["codigo_serie"].astype(str).isin(allowed_codes)]
         if df_val.empty:
             return {**_EMPTY, "periods": periods}
-        df_tree = (
-            df_val.groupby(["perfil", "cliente_id"], dropna=False)[val_col]
-            .sum()
-            .reset_index()
-            .rename(columns={val_col: "Monto"})
-        )
-        if CLIENTES_FILE.exists():
-            df_cli = pd.read_csv(
-                str(CLIENTES_FILE),
-                encoding="latin-1",
-                dtype=str,
-                usecols=lambda c: str(c).strip() in {"codigo", "fantasia", "nombre_grupo"},
+
+        # Group — when fantasia/nombre_grupo are already in df_val (cache path), include them
+        # in the groupby key to avoid a separate client-CSV join.
+        if _has_cache and "fantasia" in df_val.columns and "nombre_grupo" in df_val.columns:
+            df_tree = (
+                df_val.groupby(["perfil", "cliente_id", "fantasia", "nombre_grupo"], dropna=False)[val_col]
+                .sum()
+                .reset_index()
+                .rename(columns={val_col: "Monto"})
             )
-            df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
-            df_tree["cliente_id"] = df_tree["cliente_id"].astype(str).str.strip()
-            df_tree = df_tree.merge(df_cli.drop_duplicates("codigo"), left_on="cliente_id", right_on="codigo", how="left")
+        else:
+            df_tree = (
+                df_val.groupby(["perfil", "cliente_id"], dropna=False)[val_col]
+                .sum()
+                .reset_index()
+                .rename(columns={val_col: "Monto"})
+            )
+            if CLIENTES_FILE.exists():
+                df_cli = pd.read_csv(
+                    str(CLIENTES_FILE),
+                    encoding="latin-1",
+                    dtype=str,
+                    usecols=lambda c: str(c).strip() in {"codigo", "fantasia", "nombre_grupo"},
+                )
+                df_cli["codigo"] = df_cli["codigo"].astype(str).str.strip()
+                df_tree["cliente_id"] = df_tree["cliente_id"].astype(str).str.strip()
+                df_tree = df_tree.merge(df_cli.drop_duplicates("codigo"), left_on="cliente_id", right_on="codigo", how="left")
         if "fantasia" not in df_tree.columns:
             df_tree["fantasia"] = df_tree["cliente_id"]
         if "nombre_grupo" not in df_tree.columns:
@@ -2575,6 +2654,8 @@ def _local_get_treemap_data_light(
                 clients = canal_df[canal_df["Grupo"] == grow["Grupo"]].sort_values("Monto", ascending=False).head(6)
                 for _, crow in clients.iterrows():
                     add(f"{gid}::cliente::{crow['Cliente']}", str(crow["Cliente"]), gid, float(crow["Monto"]), _blend_with_white(base, 0.50))
+        _elapsed_ms = (time.monotonic() - _t0) * 1000
+        logger.info("[FORECAST TREEMAP] built in %.0f ms (cache=%s)", _elapsed_ms, _has_cache)
         return {"ids": ids, "labels": labels, "parents": parents, "values": values, "colors": colors, "periods": periods, "canals": canals}
     except Exception as exc:
         logger.warning("Local treemap-data light path failed, falling back to full load: %s", exc)
@@ -5383,7 +5464,9 @@ def get_treemap_data(
 
     _ovr_active = _has_overrides(user_id, is_admin=is_admin)
     _has_manual_tm = bool(_query_manual_clients(user_id, is_admin=is_admin))
-    if not _data_cache and not _ovr_active and not _has_manual_tm:
+    # Use light path when no overrides/manual clients — _local_get_treemap_data_light
+    # now uses _data_cache["df_valorizado"] when available (avoids parquet re-read).
+    if not _ovr_active and not _has_manual_tm:
         light = _local_get_treemap_data_light(
             user_id=user_id,
             start_date=start_date,
