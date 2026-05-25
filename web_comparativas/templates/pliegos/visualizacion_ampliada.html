@@ -691,6 +691,13 @@
     </button>
     {% endif %}
 
+    {% if total_ediciones > 0 or es_admin %}
+    <button class="amp-nav-btn" data-target="historial-ediciones">
+      <span class="amp-nav-btn-inner"><i class="bi bi-pencil-square"></i>Historial edic.</span>
+      {% if total_ediciones > 0 %}<span class="amp-nav-badge" style="background:rgba(37,99,235,.12);color:var(--siem-blue);">{{ total_ediciones }}</span>{% endif %}
+    </button>
+    {% endif %}
+
     <!-- CTA volver a pantalla principal -->
     <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" class="nav-cta-resumida">
       <div class="cta-label"><i class="bi bi-arrow-left me-1"></i>Volver a</div>
@@ -911,6 +918,25 @@
                       </div>
                       {% endif %}
                     </div>
+                    {% if es_admin %}
+                    {%- set rfields = [
+                      {"key":"descripcion","label":"Descripción","value": r.descripcion or "","full":true},
+                      {"key":"cantidad","label":"Cantidad","value": r.cantidad or "","full":false},
+                      {"key":"unidad","label":"Unidad","value": r.unidad or "","full":false},
+                      {"key":"codigo_item","label":"Código Item","value": r.codigo_item or "","full":false},
+                      {"key":"marca","label":"Marca","value": r.marca or "","full":false},
+                      {"key":"precio_unitario","label":"Precio Unitario","value": r.precio_unitario or "","full":false},
+                      {"key":"importe_total","label":"Importe Total","value": r.importe_total or "","full":false},
+                      {"key":"lugar_entrega","label":"Lugar / Condición Entrega","value": r.lugar_entrega or "","full":true},
+                      {"key":"observaciones","label":"Observaciones","value": r.observaciones or "","full":true},
+                    ] -%}
+                    <div style="margin-top:.75rem;padding-top:.65rem;border-top:1px solid var(--siem-border);">
+                      <button data-rfields="{{ rfields | tojson | e }}" onclick="event.stopPropagation();openRowEdit('fusion_renglon', {{ r._entity_id or loop.index }}, 'Renglón {{ r.item or idx }}', this.dataset.rfields)"
+                        style="padding:.3rem .7rem;border-radius:.5rem;font-size:.75rem;font-weight:600;background:rgba(37,99,235,.08);color:var(--siem-blue);border:1px solid rgba(37,99,235,.18);cursor:pointer;">
+                        <i class="bi bi-pencil me-1"></i>Editar renglón
+                      </button>
+                    </div>
+                    {% endif %}
                   </div>
                 </td>
               </tr>
@@ -1711,8 +1737,66 @@
     </div>
     {% endif %}
 
+    {# ── Panel: Historial de ediciones manuales ── #}
+    <div class="amp-panel" id="amp-panel-historial-ediciones" data-anchor="historial-ediciones">
+      <div class="amp-card">
+        <div class="amp-card-header">
+          <h2><i class="bi bi-pencil-square"></i> Historial de ediciones manuales</h2>
+          <span style="font-size:.78rem;color:var(--siem-text-muted);">Auditoría completa de cambios realizados por usuarios admin sobre este pliego.</span>
+        </div>
+
+        {% if total_ediciones == 0 %}
+        <div style="padding:2rem;text-align:center;color:var(--siem-text-muted);font-style:italic;">
+          <i class="bi bi-pencil" style="font-size:1.6rem;display:block;margin-bottom:.6rem;opacity:.3;"></i>
+          No hay ediciones manuales registradas para este pliego.
+          {% if es_admin %}
+          <div style="margin-top:.5rem;font-size:.82rem;">
+            Hacé clic en el ícono <i class="bi bi-pencil" style="color:var(--siem-blue);"></i> sobre cualquier campo en la <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista" style="color:var(--siem-blue);font-weight:600;">Ficha del pliego</a> para editar.
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        {# Tabla de historial cargada vía API #}
+        <div style="margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
+          <div style="font-size:.84rem;color:var(--siem-text);">
+            <strong>{{ total_ediciones }}</strong> campo{% if total_ediciones != 1 %}s{% endif %} con edición manual activa.
+          </div>
+          <button onclick="loadEditHistory()" style="padding:.3rem .75rem;border-radius:.5rem;background:var(--siem-blue);color:#fff;border:none;font-size:.78rem;font-weight:600;cursor:pointer;">
+            <i class="bi bi-arrow-repeat me-1"></i>Recargar historial
+          </button>
+        </div>
+        <div id="editHistoryContainer">
+          <div style="text-align:center;padding:1.5rem;color:var(--siem-text-muted);font-size:.85rem;">
+            <i class="bi bi-hourglass-split" style="display:block;margin-bottom:.4rem;"></i>Cargando historial…
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
   </main>
 </div>
+
+{# ── MODAL EDICIÓN RENGLONES (solo admin) ── #}
+{% if es_admin %}
+<div id="rowEditOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(10,22,40,.45);backdrop-filter:blur(3px);align-items:center;justify-content:center;padding:1rem;" onclick="if(event.target===this)closeRowEdit()">
+  <div style="background:#fff;border-radius:1.2rem;box-shadow:0 8px 40px rgba(0,0,0,.22);width:100%;max-width:680px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:1.1rem 1.35rem .8rem;border-bottom:1px solid var(--siem-border);display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:1rem;font-weight:700;color:var(--siem-navy);">Editar renglón</div>
+        <div id="rowEditSubtitle" style="font-size:.76rem;color:var(--siem-text-muted);margin-top:.15rem;"></div>
+      </div>
+      <button onclick="closeRowEdit()" style="background:none;border:none;cursor:pointer;color:var(--siem-text-muted);font-size:1.1rem;padding:.2rem;"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div id="rowEditFields" style="padding:1.1rem 1.35rem;overflow-y:auto;flex:1;display:grid;grid-template-columns:1fr 1fr;gap:.75rem 1rem;"></div>
+    <div style="padding:.85rem 1.35rem;border-top:1px solid var(--siem-border);display:flex;gap:.65rem;justify-content:flex-end;">
+      <button onclick="closeRowEdit()" style="padding:.48rem .9rem;border-radius:.6rem;font-size:.84rem;font-weight:600;background:var(--siem-surface-soft);color:var(--siem-text);border:1px solid var(--siem-border);cursor:pointer;">Cancelar</button>
+      <button onclick="saveRowEdit()" style="padding:.48rem 1rem;border-radius:.6rem;font-size:.84rem;font-weight:700;background:var(--siem-blue);color:#fff;border:none;cursor:pointer;"><i class="bi bi-check2 me-1"></i>Guardar cambios</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -1848,4 +1932,162 @@
 </script>
 <script src="{{ url_for('static', path='js/pliego_widget.js') }}?v=3"></script>
 <script src="{{ url_for('static', path='js/pliegos_navigation.js') }}?v=1"></script>
+
+<script>
+// ── Historial de ediciones ────────────────────────────────────
+const CASO_ID_AMP = {{ caso.id }};
+const ES_ADMIN = {{ 'true' if es_admin else 'false' }};
+
+async function loadEditHistory() {
+  const container = document.getElementById('editHistoryContainer');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center;padding:1.5rem;font-size:.85rem;color:var(--siem-text-muted);"><i class="bi bi-hourglass-split" style="display:block;margin-bottom:.4rem;"></i>Cargando…</div>';
+  try {
+    const res = await fetch(`/mercado-publico/lectura-pliegos/${CASO_ID_AMP}/api/edit-history`);
+    const data = await res.json();
+    if (!data.history || data.history.length === 0) {
+      container.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--siem-text-muted);font-style:italic;">Sin historial de ediciones.</div>';
+      return;
+    }
+    let html = `<div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+        <thead>
+          <tr style="background:var(--siem-surface-soft);border-bottom:2px solid var(--siem-border);">
+            <th style="padding:.45rem .65rem;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:700;white-space:nowrap;">Fecha / Usuario</th>
+            <th style="padding:.45rem .65rem;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:700;">Campo</th>
+            <th style="padding:.45rem .65rem;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:700;">Valor anterior</th>
+            <th style="padding:.45rem .65rem;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:700;">Valor nuevo</th>
+            <th style="padding:.45rem .65rem;text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:700;">Motivo</th>
+          </tr>
+        </thead><tbody>`;
+    data.history.forEach((h, i) => {
+      const bg = i % 2 === 0 ? '' : 'background:#f9fbff;';
+      html += `<tr style="border-bottom:1px solid var(--siem-border);${bg}">
+        <td style="padding:.45rem .65rem;white-space:nowrap;">
+          <div style="font-weight:600;color:var(--siem-navy);">${h.edited_at}</div>
+          <div style="font-size:.7rem;color:var(--siem-text-muted);">${h.edited_by_name} · ${h.edited_by_role}</div>
+        </td>
+        <td style="padding:.45rem .65rem;">
+          <div style="font-weight:600;">${h.field_label || h.field_key}</div>
+          ${h.section_key ? `<div style="font-size:.7rem;color:var(--siem-text-muted);">${h.section_key}</div>` : ''}
+        </td>
+        <td style="padding:.45rem .65rem;max-width:200px;">
+          <div style="color:var(--siem-red);font-size:.8rem;word-break:break-word;">${h.old_value || '<em style="opacity:.5">Sin dato</em>'}</div>
+        </td>
+        <td style="padding:.45rem .65rem;max-width:200px;">
+          <div style="color:var(--siem-green);font-weight:600;font-size:.8rem;word-break:break-word;">${h.new_value || '<em style="opacity:.5">Vacío</em>'}</div>
+        </td>
+        <td style="padding:.45rem .65rem;max-width:180px;">
+          <div style="font-size:.78rem;color:var(--siem-text-muted);">${h.reason || '—'}</div>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = `<div style="padding:1rem;color:var(--siem-red);">Error cargando historial: ${e.message}</div>`;
+  }
+}
+
+// Cargar historial automáticamente al activar la pestaña
+document.addEventListener('DOMContentLoaded', function() {
+  const navBtns = document.querySelectorAll('.amp-nav-btn');
+  navBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      if (this.dataset.target === 'historial-ediciones') {
+        setTimeout(loadEditHistory, 80);
+      }
+    });
+  });
+  // Si llegamos directamente al anchor
+  if (location.hash === '#historial-ediciones') {
+    setTimeout(loadEditHistory, 200);
+  }
+});
+
+// ── Edición de renglones ──────────────────────────────────────
+let _rowEditState = {};
+
+window.openRowEdit = function(entityType, entityId, rowLabel, fieldsJson) {
+  _rowEditState = { entityType, entityId, rowLabel };
+  const fields = JSON.parse(fieldsJson);
+  document.getElementById('rowEditSubtitle').textContent = rowLabel;
+  const container = document.getElementById('rowEditFields');
+  container.innerHTML = '';
+  fields.forEach(f => {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;flex-direction:column;gap:.25rem;';
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;color:var(--siem-text-muted);font-weight:650;';
+    lbl.textContent = f.label;
+    const inp = document.createElement('textarea');
+    inp.rows = 2;
+    inp.style.cssText = 'padding:.4rem .6rem;border:1.5px solid var(--siem-border);border-radius:.55rem;font-size:.84rem;resize:vertical;font-family:inherit;';
+    inp.value = f.value || '';
+    inp.dataset.fieldKey = f.key;
+    inp.dataset.fieldLabel = f.label;
+    inp.dataset.originalValue = f.value || '';
+    div.appendChild(lbl);
+    div.appendChild(inp);
+    if (f.full) div.style.gridColumn = '1/-1';
+    container.appendChild(div);
+  });
+  const overlay = document.getElementById('rowEditOverlay');
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+}
+
+window.closeRowEdit = function() {
+  document.getElementById('rowEditOverlay').style.display = 'none';
+}
+
+window.saveRowEdit = async function() {
+  const inputs = document.querySelectorAll('#rowEditFields textarea');
+  const fieldsToSave = [];
+  let reason = '';
+  inputs.forEach(inp => {
+    const newVal = inp.value.trim();
+    fieldsToSave.push({
+      field_key: inp.dataset.fieldKey,
+      field_label: inp.dataset.fieldLabel,
+      new_value: newVal,
+      original_value: inp.dataset.originalValue,
+      original_status: '',
+      section_key: 'Renglones',
+    });
+  });
+  if (!fieldsToSave.length) return;
+  try {
+    const res = await fetch(`/mercado-publico/lectura-pliegos/${CASO_ID_AMP}/api/row-override`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        entity_type: _rowEditState.entityType,
+        entity_id: _rowEditState.entityId,
+        fields: fieldsToSave,
+        reason: 'Edición manual de renglón',
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      closeRowEdit();
+      showAmpToast('Renglón guardado. Recargando…', 'success');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      showAmpToast('Error: ' + (data.error || 'No se pudo guardar'), 'error');
+    }
+  } catch(e) {
+    showAmpToast('Error de conexión', 'error');
+  }
+}
+
+function showAmpToast(msg, type) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `position:fixed;bottom:1.5rem;right:1.5rem;z-index:99999;padding:.7rem 1.2rem;border-radius:.75rem;font-size:.86rem;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.18);background:${type==='success'?'#059669':'#dc2626'};color:#fff;`;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+</script>
 {% endblock %}

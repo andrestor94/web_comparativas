@@ -1144,11 +1144,17 @@ def _copy_row_style(ws, source_row: int, target_row: int, max_col: int) -> None:
             target.border = copy(source.border)
 
 
-def export_fusion_excel_bytes(caso) -> bytes:
+def export_fusion_excel_bytes(
+    caso,
+    audit_history: list | None = None,
+    fusion_ctx_override: dict | None = None,
+) -> bytes:
     """Genera el Excel final para carga en Fusion/ERP.
     Estructura idéntica al Documento_Importación 2.xlsx (plantilla maestra).
+    Si se pasa fusion_ctx_override, usa ese contexto (con overrides ya aplicados).
+    Si se pasa audit_history (lista de dicts), agrega hoja 'Auditoria_Ediciones'.
     """
-    fusion_ctx = calcular_estado_fusion(caso)
+    fusion_ctx = fusion_ctx_override if fusion_ctx_override is not None else calcular_estado_fusion(caso)
     proceso_row = _build_fusion_process_export_row(caso, fusion_ctx)
     renglones_rows = _build_fusion_renglones_export_rows(caso, fusion_ctx)
 
@@ -1191,10 +1197,69 @@ def export_fusion_excel_bytes(caso) -> bytes:
         for col_idx, column in enumerate(FUSION_EXPORT_RENGLON_COLUMNS, start=1):
             ws_det.cell(row=row_idx, column=col_idx).value = row_data.get(column)
 
+    # Hoja de auditoría de ediciones manuales
+    if audit_history:
+        _append_audit_sheet(workbook, audit_history)
+
     buffer = io.BytesIO()
     workbook.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
+
+_AUDIT_HEADERS = [
+    "Fecha y hora", "Usuario", "Rol", "Sección", "Campo", "Clave campo",
+    "Valor anterior", "Valor nuevo", "Estado anterior", "Estado nuevo", "Motivo",
+]
+
+
+def _append_audit_sheet(workbook: openpyxl.Workbook, audit_history: list) -> None:
+    """Agrega la hoja Auditoria_Ediciones al workbook."""
+    ws = workbook.create_sheet("Auditoria_Ediciones")
+
+    # Estilos de encabezado
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    header_font  = Font(bold=True, color="FFFFFF", size=10)
+    header_fill  = PatternFill("solid", fgColor="1E3A5F")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin = Side(border_style="thin", color="CCCCCC")
+    cell_border  = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col_idx, header in enumerate(_AUDIT_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font  = header_font
+        cell.fill  = header_fill
+        cell.alignment = header_align
+        cell.border = cell_border
+
+    alt_fill = PatternFill("solid", fgColor="EBF3FF")
+    for row_idx, h in enumerate(audit_history, start=2):
+        fill = alt_fill if row_idx % 2 == 0 else None
+        values = [
+            h.get("edited_at", ""),
+            h.get("edited_by_name", ""),
+            h.get("edited_by_role", ""),
+            h.get("section_key", ""),
+            h.get("field_label", ""),
+            h.get("field_key", ""),
+            h.get("old_value", ""),
+            h.get("new_value", ""),
+            h.get("old_status", ""),
+            h.get("new_status", ""),
+            h.get("reason", ""),
+        ]
+        for col_idx, val in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = cell_border
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if fill:
+                cell.fill = fill
+
+    # Ancho de columnas
+    col_widths = [20, 22, 12, 20, 24, 24, 30, 30, 18, 18, 30]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    ws.row_dimensions[1].height = 22
 
 
 def calcular_estado_fusion(caso) -> dict:

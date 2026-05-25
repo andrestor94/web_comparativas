@@ -1869,6 +1869,86 @@ class PliegoControlCarga(Base):
     solicitud = relationship("PliegoSolicitud", back_populates="control_carga")
 
 
+# ==============================================================================
+# MÓDULO: EDICIÓN Y AUDITORÍA DE PLIEGOS (overrides manuales)
+# ==============================================================================
+
+class PliegoFieldOverride(Base):
+    """
+    Override manual de un campo extraído del pliego.
+    Permite al admin corregir cualquier dato sin destruir el valor original.
+    is_active=True → es el override vigente para ese campo.
+    """
+    __tablename__ = "pliego_field_overrides"
+    __table_args__ = (
+        Index("ix_pfo_pliego_entity", "solicitud_id", "entity_type", "entity_id", "field_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+
+    # Identificación de qué se editó
+    entity_type = Column(String(64), nullable=False)   # proceso|cronograma|garantia|renglon|requisito|hallazgo|faltante
+    entity_id   = Column(Integer, nullable=True)        # id de la fila; NULL para campos de proceso
+    section_key = Column(String(128), nullable=True)    # sección visual (ej: "Condiciones económicas")
+    field_key   = Column(String(256), nullable=False)   # clave interna estable del campo
+    field_label = Column(String(256), nullable=True)    # etiqueta visible al usuario
+
+    # Valores
+    original_value = Column(Text, nullable=True)
+    edited_value   = Column(Text, nullable=True)
+    original_status = Column(String(64), nullable=True)
+    edited_status   = Column(String(64), nullable=True)
+
+    # Auditoría
+    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    edited_by_name    = Column(String(256), nullable=True)
+    edited_by_role    = Column(String(64), nullable=True)
+    edited_at         = Column(DateTime(timezone=True),
+                               default=lambda: dt.datetime.now(dt.timezone.utc))
+    reason            = Column(Text, nullable=True)
+
+    # Control
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    solicitud     = relationship("PliegoSolicitud")
+    edited_by     = relationship("User", foreign_keys=[edited_by_user_id])
+
+
+class PliegoEditHistory(Base):
+    """
+    Historial completo de todas las ediciones manuales de un pliego.
+    Se crea un registro cada vez que se guarda un override.
+    """
+    __tablename__ = "pliego_edit_history"
+
+    id = Column(Integer, primary_key=True)
+    solicitud_id = Column(Integer, ForeignKey("pliego_solicitudes.id"),
+                          nullable=False, index=True)
+
+    entity_type  = Column(String(64), nullable=False)
+    entity_id    = Column(Integer, nullable=True)
+    section_key  = Column(String(128), nullable=True)
+    field_key    = Column(String(256), nullable=False)
+    field_label  = Column(String(256), nullable=True)
+
+    old_value    = Column(Text, nullable=True)
+    new_value    = Column(Text, nullable=True)
+    old_status   = Column(String(64), nullable=True)
+    new_status   = Column(String(64), nullable=True)
+
+    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    edited_by_name    = Column(String(256), nullable=True)
+    edited_by_role    = Column(String(64), nullable=True)
+    edited_at         = Column(DateTime(timezone=True),
+                               default=lambda: dt.datetime.now(dt.timezone.utc))
+    reason            = Column(Text, nullable=True)
+
+    solicitud  = relationship("PliegoSolicitud")
+    edited_by  = relationship("User", foreign_keys=[edited_by_user_id])
+
+
 class ComparativaRow(Base):
     """
     Fila individual de una comparativa normalizada de Mercado Público.

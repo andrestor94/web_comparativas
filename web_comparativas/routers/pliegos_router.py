@@ -57,6 +57,18 @@ from web_comparativas.pliegos_fusion import (
     FUSION_CAMPOS_OBLIGATORIOS,
     FUSION_CAMPOS_COMPLEMENTARIOS,
 )
+from web_comparativas.pliegos_overrides import (
+    get_overrides_map,
+    get_edit_history,
+    save_override,
+    restore_original,
+    history_to_dict,
+    override_to_dict,
+    apply_proceso_overrides,
+    apply_fusion_ctx_overrides,
+    get_overridden_field_keys,
+    count_active_overrides,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1485,18 +1497,36 @@ def lectura_pliegos_vista_final(request: Request, caso_id: int):
 
 
 def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicitud, es_admin: bool):
-    canonical_output = build_canonical_output(caso)
+    db: Session = request.state.db
 
-    # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion_rp.html
-    resumen = _build_resumen_licitacion(caso)
-    resumen_summary = build_resumen_licitacion(caso)
-    completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
-    completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
-    completitud_tecnica = resumen_summary["completitud_tecnica"]
-    proceso = caso.datos_proceso.datos if caso.datos_proceso else {}
+    # Cargar overrides activos
+    overrides_map = get_overrides_map(db, caso.id)
+    proceso_raw = caso.datos_proceso.datos if caso.datos_proceso else {}
+    proceso = apply_proceso_overrides(proceso_raw, overrides_map)
 
-    # Calcular estado Fusion independientemente de LicIA
-    fusion_ctx = calcular_estado_fusion(caso)
+    # Aplicar overrides en memoria sobre caso.datos_proceso.datos
+    # para que build_canonical_output, calcular_estado_fusion, etc. usen valores vigentes.
+    # NUNCA se hace db.commit() en este contexto, por lo que no persiste.
+    if caso.datos_proceso and overrides_map:
+        caso.datos_proceso.datos = proceso
+
+    try:
+        canonical_output = build_canonical_output(caso)
+
+        # RECONSTRUIR RESUMEN Y VARIABLES NECESARIAS PARA visualizacion_rp.html
+        resumen = _build_resumen_licitacion(caso)
+        resumen_summary = build_resumen_licitacion(caso)
+        completitud = resumen_summary["completitud_ejecutiva"]["porcentaje"]
+        completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
+        completitud_tecnica = resumen_summary["completitud_tecnica"]
+
+        # Calcular estado Fusion y aplicar overrides de fusion_campo
+        fusion_ctx = calcular_estado_fusion(caso)
+        fusion_ctx = apply_fusion_ctx_overrides(fusion_ctx, overrides_map)
+    finally:
+        # Restaurar siempre el valor original (no queremos dirty state en la sesión)
+        if caso.datos_proceso and overrides_map:
+            caso.datos_proceso.datos = proceso_raw
 
     req_por_cat: dict = {}
     for r in caso.requisitos:
@@ -1518,12 +1548,16 @@ def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicit
     # Versión activa del Excel cargado
     excel_activo, archivo_estado = _active_excel_file_status(caso)
 
+    total_ediciones = count_active_overrides(db, caso.id)
+
     response = templates.TemplateResponse("pliegos/visualizacion_rp.html", {
         "request": request,
         "user": user,
         "caso": caso,
         "canonical_output": canonical_output,
         "proceso": proceso,
+        "proceso_raw": proceso_raw,
+        "overrides_map": {k: override_to_dict(v) for k, v in overrides_map.items()},
         "resumen": resumen,
         "completitud": completitud,
         "completitud_ejecutiva": completitud_ejecutiva,
@@ -1539,8 +1573,9 @@ def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicit
         "fusion_campos_complementarios": FUSION_CAMPOS_COMPLEMENTARIOS,
         "excel_activo": excel_activo,
         "archivo_estado": archivo_estado,
+        "total_ediciones": total_ediciones,
     })
-    response.headers["Cache-Control"] = "private, max-age=45"
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -1616,6 +1651,9 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
     if caso.estado != "listo" and not es_admin:
         return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}", 302)
 
+    db: Session = request.state.db
+    overrides_map = get_overrides_map(db, caso.id)
+
     rp_output = build_rp_output(caso)
     contexto_ampliado = _build_ampliada_context(caso, rp_output)
     debug_matrix = build_debug_matrix(caso)
@@ -1623,8 +1661,9 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
     completitud_ejecutiva = resumen_summary["completitud_ejecutiva"]
     completitud_tecnica = resumen_summary["completitud_tecnica"]
 
-    # Calcular estado Fusion independientemente de LicIA
+    # Calcular estado Fusion y aplicar overrides
     fusion_ctx = calcular_estado_fusion(caso)
+    fusion_ctx = apply_fusion_ctx_overrides(fusion_ctx, overrides_map)
 
     # Parsear SIEM_Analitica para la vista ampliada (lista de filas)
     analitica_raw = caso.analitica.datos if caso.analitica else []
@@ -1635,6 +1674,7 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
     ctrl_row = ctrl_datos[0] if isinstance(ctrl_datos, list) and ctrl_datos else ctrl_datos
 
     excel_activo, archivo_estado = _active_excel_file_status(caso)
+    total_ediciones = count_active_overrides(db, caso.id)
 
     response = templates.TemplateResponse("pliegos/visualizacion_ampliada.html", {
         "request": request,
@@ -1653,9 +1693,11 @@ def lectura_pliegos_vista_ampliada(request: Request, caso_id: int):
         "fusion_campos_obligatorios": FUSION_CAMPOS_OBLIGATORIOS,
         "excel_activo": excel_activo,
         "archivo_estado": archivo_estado,
+        "overrides_map": {k: override_to_dict(v) for k, v in overrides_map.items()},
+        "total_ediciones": total_ediciones,
         **contexto_ampliado,
     })
-    response.headers["Cache-Control"] = "private, max-age=45"
+    response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -1679,7 +1721,28 @@ def lectura_pliegos_exportar_rp(request: Request, caso_id: int):
     if caso.estado != "listo" and not es_admin:
         return RedirectResponse(f"/mercado-publico/lectura-pliegos/{caso_id}", 302)
 
-    payload = export_fusion_excel_bytes(caso)
+    # Cargar overrides y construir fusion_ctx con valores vigentes
+    overrides_map = get_overrides_map(db, caso_id)
+    edit_history  = get_edit_history(db, caso_id)
+    history_dicts = [history_to_dict(h) for h in edit_history]
+
+    # Aplicar overrides de proceso en memoria para que el export use valores vigentes
+    original_proceso = None
+    if caso.datos_proceso and overrides_map:
+        original_proceso = caso.datos_proceso.datos
+        caso.datos_proceso.datos = apply_proceso_overrides(original_proceso, overrides_map)
+
+    try:
+        # Aplicar fusion_campo overrides al fusion_ctx DENTRO del contexto de export
+        from web_comparativas.pliegos_fusion import calcular_estado_fusion as _calc_fusion
+        _fusion_ctx_export = _calc_fusion(caso)
+        _fusion_ctx_export = apply_fusion_ctx_overrides(_fusion_ctx_export, overrides_map)
+        payload = export_fusion_excel_bytes(caso, audit_history=history_dicts,
+                                            fusion_ctx_override=_fusion_ctx_export)
+    finally:
+        if original_proceso is not None and caso.datos_proceso:
+            caso.datos_proceso.datos = original_proceso
+
     safe_name = _slugify(caso.numero_proceso or caso.titulo or f"caso_{caso.id}")
     filename = f"SIEM_Fusion_{safe_name or caso.id}.xlsx"
     headers = {
@@ -2379,3 +2442,225 @@ def _encode_msgs(msgs: list) -> str:
 
 def _decode_msgs(s: str) -> list:
     return [m for m in s.split(",") if m.strip()]
+
+
+# ---------------------------------------------------------------------------
+# API: EDICIÓN Y AUDITORÍA DE CAMPOS (overrides manuales)
+# ---------------------------------------------------------------------------
+
+@router.get("/mercado-publico/lectura-pliegos/{caso_id}/api/overrides")
+def api_get_overrides(request: Request, caso_id: int):
+    """Lista todos los overrides activos del caso."""
+    blocked = _require_admin(request)
+    if blocked:
+        return JSONResponse({"error": "Acceso denegado"}, status_code=403)
+
+    db: Session = request.state.db
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso:
+        return JSONResponse({"error": "Caso no encontrado"}, status_code=404)
+
+    overrides_map = get_overrides_map(db, caso_id)
+    return JSONResponse({
+        "overrides": [override_to_dict(v) for v in overrides_map.values()],
+        "total": len(overrides_map),
+    })
+
+
+@router.post("/mercado-publico/lectura-pliegos/{caso_id}/api/field-override")
+async def api_save_field_override(request: Request, caso_id: int):
+    """
+    Guarda el override de un campo.
+    Body JSON: {
+        entity_type, entity_id (opcional), field_key, field_label,
+        new_value, original_value, original_status, section_key, reason
+    }
+    """
+    blocked = _require_admin(request)
+    if blocked:
+        return JSONResponse({"error": "Solo admin puede editar"}, status_code=403)
+
+    user: User = request.state.user
+    db: Session = request.state.db
+
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso:
+        return JSONResponse({"error": "Caso no encontrado"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "JSON inválido"}, status_code=400)
+
+    entity_type = str(body.get("entity_type", "proceso")).strip()
+    entity_id   = body.get("entity_id")
+    if entity_id is not None:
+        try:
+            entity_id = int(entity_id)
+        except (ValueError, TypeError):
+            entity_id = None
+
+    field_key    = str(body.get("field_key", "")).strip()
+    field_label  = str(body.get("field_label", field_key)).strip()
+    new_value    = str(body.get("new_value", "")).strip()
+    orig_value   = str(body.get("original_value", "")).strip()
+    orig_status  = str(body.get("original_status", "")).strip()
+    section_key  = str(body.get("section_key", "")).strip()
+    reason       = str(body.get("reason", "")).strip()
+
+    if not field_key:
+        return JSONResponse({"error": "field_key requerido"}, status_code=400)
+
+    override = save_override(
+        db=db,
+        solicitud_id=caso_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        field_key=field_key,
+        field_label=field_label,
+        new_value=new_value,
+        user=user,
+        section_key=section_key,
+        reason=reason,
+        original_value=orig_value,
+        original_status=orig_status,
+    )
+    db.commit()
+
+    logger.info("[EDIT] Override guardado caso=%s field=%s user=%s", caso_id, field_key, user.email)
+    return JSONResponse({"ok": True, "override": override_to_dict(override)})
+
+
+@router.post("/mercado-publico/lectura-pliegos/{caso_id}/api/row-override")
+async def api_save_row_override(request: Request, caso_id: int):
+    """
+    Guarda overrides de múltiples campos de una fila (renglón, garantía, etc.).
+    Body JSON: {
+        entity_type, entity_id,
+        fields: [{field_key, field_label, new_value, original_value, original_status, section_key}],
+        reason
+    }
+    """
+    blocked = _require_admin(request)
+    if blocked:
+        return JSONResponse({"error": "Solo admin puede editar"}, status_code=403)
+
+    user: User = request.state.user
+    db: Session = request.state.db
+
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso:
+        return JSONResponse({"error": "Caso no encontrado"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "JSON inválido"}, status_code=400)
+
+    entity_type = str(body.get("entity_type", "renglon")).strip()
+    entity_id   = body.get("entity_id")
+    if entity_id is not None:
+        try:
+            entity_id = int(entity_id)
+        except (ValueError, TypeError):
+            entity_id = None
+
+    fields  = body.get("fields", [])
+    reason  = str(body.get("reason", "")).strip()
+
+    if not fields:
+        return JSONResponse({"error": "Sin campos a guardar"}, status_code=400)
+
+    saved = []
+    for f in fields:
+        fk = str(f.get("field_key", "")).strip()
+        if not fk:
+            continue
+        ov = save_override(
+            db=db,
+            solicitud_id=caso_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            field_key=fk,
+            field_label=str(f.get("field_label", fk)).strip(),
+            new_value=str(f.get("new_value", "")).strip(),
+            user=user,
+            section_key=str(f.get("section_key", "")).strip(),
+            reason=reason,
+            original_value=str(f.get("original_value", "")).strip(),
+            original_status=str(f.get("original_status", "")).strip(),
+        )
+        saved.append(override_to_dict(ov))
+
+    db.commit()
+    logger.info("[EDIT] Row override guardado caso=%s entity=%s id=%s fields=%s user=%s",
+                caso_id, entity_type, entity_id, len(saved), user.email)
+    return JSONResponse({"ok": True, "saved": saved})
+
+
+@router.get("/mercado-publico/lectura-pliegos/{caso_id}/api/edit-history")
+def api_get_edit_history(request: Request, caso_id: int):
+    """Retorna el historial completo de ediciones del caso."""
+    blocked = _require_user(request)
+    if blocked:
+        return JSONResponse({"error": "No autenticado"}, status_code=401)
+
+    user: User = request.state.user
+    db: Session = request.state.db
+    es_admin = _is_admin(request)
+
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso:
+        return JSONResponse({"error": "Caso no encontrado"}, status_code=404)
+    if not es_admin and caso.creado_por_id != user.id:
+        return JSONResponse({"error": "Acceso denegado"}, status_code=403)
+
+    history = get_edit_history(db, caso_id)
+    return JSONResponse({
+        "history": [history_to_dict(h) for h in history],
+        "total": len(history),
+    })
+
+
+@router.post("/mercado-publico/lectura-pliegos/{caso_id}/api/restore-field")
+async def api_restore_field(request: Request, caso_id: int):
+    """
+    Restaura un campo a su valor original (desactiva override).
+    Body JSON: {entity_type, entity_id (opcional), field_key, reason}
+    """
+    blocked = _require_admin(request)
+    if blocked:
+        return JSONResponse({"error": "Solo admin puede restaurar"}, status_code=403)
+
+    user: User = request.state.user
+    db: Session = request.state.db
+
+    caso = db.get(PliegoSolicitud, caso_id)
+    if not caso:
+        return JSONResponse({"error": "Caso no encontrado"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "JSON inválido"}, status_code=400)
+
+    entity_type = str(body.get("entity_type", "proceso")).strip()
+    entity_id   = body.get("entity_id")
+    if entity_id is not None:
+        try:
+            entity_id = int(entity_id)
+        except (ValueError, TypeError):
+            entity_id = None
+    field_key = str(body.get("field_key", "")).strip()
+    reason    = str(body.get("reason", "Restaurado al valor original")).strip()
+
+    if not field_key:
+        return JSONResponse({"error": "field_key requerido"}, status_code=400)
+
+    restored = restore_original(db, caso_id, entity_type, entity_id, field_key, user, reason)
+    db.commit()
+
+    if restored:
+        logger.info("[EDIT] Campo restaurado caso=%s field=%s user=%s", caso_id, field_key, user.email)
+        return JSONResponse({"ok": True, "restored": True})
+    return JSONResponse({"ok": True, "restored": False, "msg": "No había override activo"})

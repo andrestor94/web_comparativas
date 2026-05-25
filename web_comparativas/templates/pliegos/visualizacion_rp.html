@@ -298,6 +298,115 @@
     .erp-item { min-height:auto; }
     .erp-cta  { flex-direction:column;align-items:stretch; }
   }
+
+  /* ── Edit overlay ─────────────────────────────────────────── */
+  .edit-badge {
+    display:inline-flex;align-items:center;gap:.22rem;
+    font-size:.6rem;font-weight:700;border-radius:.35rem;
+    padding:.1rem .4rem;margin-top:.35rem;
+    background:rgba(37,99,235,.1);color:var(--siem-blue);
+    border:1px solid rgba(37,99,235,.2);white-space:nowrap;
+    cursor:help;
+  }
+  .edit-btn-inline {
+    display:none;align-items:center;justify-content:center;
+    width:1.35rem;height:1.35rem;border-radius:.35rem;
+    background:rgba(37,99,235,.08);border:1px solid rgba(37,99,235,.18);
+    color:var(--siem-blue);cursor:pointer;transition:all .15s;
+    flex-shrink:0;font-size:.72rem;
+  }
+  .edit-btn-inline:hover { background:rgba(37,99,235,.18); }
+  .erp-item:hover .edit-btn-inline { display:inline-flex; }
+  .edit-section-btn {
+    display:inline-flex;align-items:center;gap:.35rem;
+    padding:.3rem .8rem;border-radius:.6rem;font-size:.75rem;font-weight:600;
+    background:rgba(37,99,235,.07);color:var(--siem-blue);
+    border:1px solid rgba(37,99,235,.18);cursor:pointer;
+    transition:background .15s;white-space:nowrap;
+  }
+  .edit-section-btn:hover { background:rgba(37,99,235,.15); }
+
+  /* ── Edit count chip ────────────────────────────────────────── */
+  .edit-count-chip {
+    display:inline-flex;align-items:center;gap:.3rem;
+    padding:.2rem .55rem;border-radius:.45rem;font-size:.68rem;font-weight:700;
+    background:rgba(37,99,235,.09);color:var(--siem-blue);
+    border:1px solid rgba(37,99,235,.18);
+  }
+
+  /* ── Modal edición ────────────────────────────────────────── */
+  .edit-modal-overlay {
+    display:none;position:fixed;inset:0;z-index:9999;
+    background:rgba(10,22,40,.45);backdrop-filter:blur(3px);
+    align-items:center;justify-content:center;padding:1rem;
+  }
+  .edit-modal-overlay.active { display:flex; }
+  .edit-modal {
+    background:#fff;border-radius:1.2rem;
+    box-shadow:0 8px 40px rgba(0,0,0,.22);
+    width:100%;max-width:560px;max-height:90vh;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .edit-modal-header {
+    padding:1.1rem 1.35rem .8rem;
+    border-bottom:1px solid var(--p-border);
+    display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;
+  }
+  .edit-modal-title { font-size:1rem;font-weight:700;color:var(--siem-navy);margin:0; }
+  .edit-modal-subtitle { font-size:.76rem;color:var(--p-text3);margin-top:.2rem; }
+  .edit-modal-close {
+    background:none;border:none;cursor:pointer;
+    color:var(--p-text3);font-size:1.1rem;padding:.2rem;border-radius:.4rem;
+    transition:color .15s;flex-shrink:0;
+  }
+  .edit-modal-close:hover { color:var(--siem-navy); }
+  .edit-modal-body { padding:1.1rem 1.35rem;overflow-y:auto;flex:1; }
+  .edit-modal-footer {
+    padding:.85rem 1.35rem;border-top:1px solid var(--p-border);
+    display:flex;gap:.65rem;justify-content:flex-end;flex-wrap:wrap;
+  }
+  .edit-label { font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--p-text3);font-weight:650;margin-bottom:.3rem; }
+  .edit-original {
+    font-size:.8rem;color:var(--p-text3);margin-bottom:.75rem;
+    padding:.4rem .65rem;background:var(--siem-surface-soft);
+    border-radius:.5rem;border-left:3px solid var(--p-border);
+  }
+  .edit-input {
+    width:100%;padding:.55rem .75rem;border:1.5px solid var(--p-border);
+    border-radius:.65rem;font-size:.9rem;color:var(--siem-navy);
+    transition:border-color .15s;background:#fff;
+    font-family:inherit;resize:vertical;
+  }
+  .edit-input:focus { outline:none;border-color:var(--siem-blue);
+    box-shadow:0 0 0 3px rgba(37,99,235,.12); }
+  .edit-reason-input {
+    width:100%;padding:.45rem .7rem;border:1.5px solid var(--p-border);
+    border-radius:.6rem;font-size:.8rem;color:var(--siem-navy);
+    background:#fff;font-family:inherit;margin-top:.5rem;
+  }
+  .edit-reason-input:focus { outline:none;border-color:var(--siem-blue);
+    box-shadow:0 0 0 3px rgba(37,99,235,.12); }
+  .edit-btn-save {
+    padding:.5rem 1.1rem;border-radius:.65rem;font-size:.85rem;font-weight:700;
+    background:var(--siem-blue);color:#fff;border:none;cursor:pointer;
+    transition:background .15s;
+  }
+  .edit-btn-save:hover { background:#1d4ed8; }
+  .edit-btn-cancel {
+    padding:.5rem .95rem;border-radius:.65rem;font-size:.85rem;font-weight:600;
+    background:var(--siem-surface-soft);color:var(--p-text2);
+    border:1px solid var(--p-border);cursor:pointer;transition:background .15s;
+  }
+  .edit-btn-cancel:hover { background:var(--p-border); }
+  .edit-btn-restore {
+    padding:.5rem .95rem;border-radius:.65rem;font-size:.85rem;font-weight:600;
+    background:rgba(239,68,68,.07);color:var(--siem-red);
+    border:1px solid rgba(239,68,68,.18);cursor:pointer;transition:background .15s;
+    margin-right:auto;
+  }
+  .edit-btn-restore:hover { background:rgba(239,68,68,.14); }
+  .edit-saving { opacity:.5;pointer-events:none; }
 </style>
 {% endblock %}
 
@@ -437,28 +546,45 @@
 {%- endmacro %}
 
 {# ── Macro: fusion_field_card — renderiza un campo de fusion_ctx.campos_fusion ── #}
-{%- macro fusion_field_card(key, label=none, full=false, compact=false) -%}
+{%- macro fusion_field_card(key, label=none, full=false, compact=false, section="") -%}
   {%- set fc = fusion_ctx.campos_fusion.get(key, {}) -%}
   {%- set _label = label if label else (fc.label if fc else key) -%}
   {%- set _val = fc.valor if fc else "" -%}
   {%- set _est = fc.estado if fc else "faltante_critico_fusion" -%}
-  {%- if _est == "completo" -%}
+  {%- set _is_edited = (_est == "editado_manualmente") -%}
+  {%- if _is_edited -%}
+    {%- set _cls = "erp-item--ok" -%}
+  {%- elif _est == "completo" -%}
     {%- set _cls = "erp-item--ok" -%}
   {%- elif _est == "requiere_validacion_manual" -%}
     {%- set _cls = "erp-item--warn" -%}
   {%- else -%}
     {%- set _cls = "erp-item--miss" -%}
   {%- endif -%}
-<div class="erp-item {{ _cls }}{% if full %} erp-item--full{% endif %}">
-  <div class="erp-item-label">{{ _label }}</div>
-  {%- if _cls == "erp-item--miss" -%}
+  {%- set _ov_key = "fusion_campo:global:" ~ key -%}
+  {%- set _ov = overrides_map.get(_ov_key) -%}
+<div class="erp-item {{ _cls }}{% if full %} erp-item--full{% endif %}" style="position:relative;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.3rem;">
+    <div class="erp-item-label">{{ _label }}</div>
+    {%- if es_admin -%}
+    <button class="edit-btn-inline" title="Editar campo"
+      onclick="openEditModal('fusion_campo', null, '{{ key }}', '{{ _label | replace("'","\\'")|replace('"','\\"') }}', '{{ (_val or '') | replace("'","\\'")|replace('"','\\"') }}', '{{ section }}', '{{ caso.id }}')"
+    ><i class="bi bi-pencil"></i></button>
+    {%- endif -%}
+  </div>
+  {%- if _cls == "erp-item--miss" and not _is_edited -%}
   <div class="erp-item-value erp-item-value--empty">Sin dato en pliego</div>
   <span class="erp-status-pill erp-status-pill--miss"><i class="bi bi-exclamation-circle"></i> Faltante Fusion</span>
-  {%- elif _cls == "erp-item--warn" -%}
+  {%- elif _cls == "erp-item--warn" and not _is_edited -%}
   <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ fc.valor_normalizado if fc.valor_normalizado else _val }}</div>
   <span class="erp-status-pill erp-status-pill--warn"><i class="bi bi-exclamation-triangle"></i> Revisar</span>
   {%- else -%}
   <div class="erp-item-value{% if compact %} erp-item-value--compact{% endif %}">{{ fc.valor_normalizado if fc.valor_normalizado else _val }}</div>
+  {%- endif -%}
+  {%- if _is_edited and _ov -%}
+  <div class="edit-badge" title="Valor original: {{ _ov.original_value or 'Sin dato' }}">
+    <i class="bi bi-pencil-fill"></i> Editado manualmente · {{ _ov.edited_by_name }}
+  </div>
   {%- endif -%}
 </div>
 {%- endmacro -%}
@@ -670,6 +796,18 @@
             <span class="erph-state-row-lbl">Estado del caso</span>
             <span class="erph-state-row-val">{% if caso.estado in ['listo','en_validacion'] %}Validado{% else %}Pendiente{% endif %}</span>
           </div>
+          {% if total_ediciones > 0 %}
+          <div class="erph-state-row">
+            <span class="erph-state-dot-sm" style="background:var(--siem-blue);"></span>
+            <span class="erph-state-row-lbl">Ediciones manuales</span>
+            <span class="erph-state-row-val">
+              <a href="/mercado-publico/lectura-pliegos/{{ caso.id }}/vista-ampliada#historial-ediciones"
+                 style="color:var(--siem-blue);text-decoration:none;font-weight:700;">
+                {{ total_ediciones }} campo{% if total_ediciones != 1 %}s{% endif %}
+              </a>
+            </span>
+          </div>
+          {% endif %}
         </div>
       </div>
 
@@ -695,13 +833,13 @@
         <div class="erp-item-value">{{ caso.numero_proceso or "No informado" }}</div>
       </div>
 
-      {{ fusion_field_card("numero_proceso", "N° Procesos") }}
-      {{ fusion_field_card("nombre_proceso", "Nombre Proceso") }}
-      {{ fusion_field_card("unidad_ejecutora", "Unidad Ejecutora") }}
-      {{ fusion_field_card("objeto_contratacion", "Objeto Contratación", full=true, compact=true) }}
-      {{ fusion_field_card("procedimiento_seleccion", "Procedimiento Selección") }}
-      {{ fusion_field_card("expediente", "Nro Expediente") }}
-      {{ fusion_field_card("modalidad", "Modalidad") }}
+      {{ fusion_field_card("numero_proceso", "N° Procesos", section="Identificación del proceso") }}
+      {{ fusion_field_card("nombre_proceso", "Nombre Proceso", section="Identificación del proceso") }}
+      {{ fusion_field_card("unidad_ejecutora", "Unidad Ejecutora", section="Identificación del proceso") }}
+      {{ fusion_field_card("objeto_contratacion", "Objeto Contratación", full=true, compact=true, section="Identificación del proceso") }}
+      {{ fusion_field_card("procedimiento_seleccion", "Procedimiento Selección", section="Identificación del proceso") }}
+      {{ fusion_field_card("expediente", "Nro Expediente", section="Identificación del proceso") }}
+      {{ fusion_field_card("modalidad", "Modalidad", section="Identificación del proceso") }}
     </div>
 
     {# Dato secundario: organismo contratante si existe y es diferente a unidad ejecutora #}
@@ -1001,6 +1139,156 @@
     </a>
   </div>
 </div>
+
+{# ── MODAL DE EDICIÓN (solo para admin) ── #}
+{% if es_admin %}
+<div class="edit-modal-overlay" id="editModalOverlay" onclick="if(event.target===this)closeEditModal()">
+  <div class="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+    <div class="edit-modal-header">
+      <div>
+        <h2 class="edit-modal-title" id="editModalTitle">Editar campo</h2>
+        <div class="edit-modal-subtitle" id="editModalSubtitle"></div>
+      </div>
+      <button class="edit-modal-close" onclick="closeEditModal()" aria-label="Cerrar"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="edit-modal-body">
+      <div class="edit-label">Valor original extraído del pliego</div>
+      <div class="edit-original" id="editOriginalValue">—</div>
+
+      <div class="edit-label" style="margin-top:.85rem;">Nuevo valor vigente</div>
+      <textarea class="edit-input" id="editNewValue" rows="3" placeholder="Ingrese el valor correcto..."></textarea>
+
+      <div class="edit-label" style="margin-top:.7rem;color:var(--p-text3);">Motivo de la edición <span style="font-weight:400;text-transform:none;">(opcional)</span></div>
+      <input type="text" class="edit-reason-input" id="editReason" placeholder="Ej: Dato incorrecto en el pliego original, corregido según documento fuente...">
+    </div>
+    <div class="edit-modal-footer">
+      <button class="edit-btn-restore" id="editBtnRestore" onclick="restoreField()" style="display:none;">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar original
+      </button>
+      <button class="edit-btn-cancel" onclick="closeEditModal()">Cancelar</button>
+      <button class="edit-btn-save" onclick="saveFieldEdit()">
+        <i class="bi bi-check2 me-1"></i>Guardar cambio
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CASO_ID = {{ caso.id }};
+let _editState = {};
+
+function openEditModal(entityType, entityId, fieldKey, fieldLabel, originalValue, sectionKey, casoId) {
+  _editState = { entityType, entityId, fieldKey, fieldLabel, originalValue, sectionKey };
+  document.getElementById('editModalTitle').textContent = 'Editar: ' + fieldLabel;
+  document.getElementById('editModalSubtitle').textContent = sectionKey ? 'Sección: ' + sectionKey : fieldKey;
+  document.getElementById('editOriginalValue').textContent = originalValue || '(Sin dato en pliego)';
+  document.getElementById('editNewValue').value = originalValue || '';
+  document.getElementById('editReason').value = '';
+
+  // Mostrar botón restaurar si hay override activo
+  const ovKey = entityType + ':' + (entityId || 'global') + ':' + fieldKey;
+  const hasOverride = (window._OVERRIDES_MAP || {})[ovKey];
+  document.getElementById('editBtnRestore').style.display = hasOverride ? 'inline-flex' : 'none';
+
+  document.getElementById('editModalOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('editNewValue').focus(), 80);
+}
+
+function closeEditModal() {
+  document.getElementById('editModalOverlay').classList.remove('active');
+}
+
+async function saveFieldEdit() {
+  const newValue = document.getElementById('editNewValue').value.trim();
+  const reason   = document.getElementById('editReason').value.trim();
+  const btn      = document.querySelector('.edit-btn-save');
+
+  btn.classList.add('edit-saving');
+  btn.textContent = 'Guardando…';
+
+  try {
+    const res = await fetch(`/mercado-publico/lectura-pliegos/${CASO_ID}/api/field-override`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        entity_type:     _editState.entityType,
+        entity_id:       _editState.entityId,
+        field_key:       _editState.fieldKey,
+        field_label:     _editState.fieldLabel,
+        new_value:       newValue,
+        original_value:  _editState.originalValue,
+        original_status: '',
+        section_key:     _editState.sectionKey,
+        reason:          reason,
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      closeEditModal();
+      showToast('Campo guardado correctamente. Recargando…', 'success');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      showToast('Error: ' + (data.error || 'No se pudo guardar'), 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  } finally {
+    btn.classList.remove('edit-saving');
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Guardar cambio';
+  }
+}
+
+async function restoreField() {
+  if (!confirm('¿Restaurar al valor original extraído del pliego?')) return;
+  const btn = document.getElementById('editBtnRestore');
+  btn.style.opacity = '.5';
+  try {
+    const res = await fetch(`/mercado-publico/lectura-pliegos/${CASO_ID}/api/restore-field`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        entity_type: _editState.entityType,
+        entity_id:   _editState.entityId,
+        field_key:   _editState.fieldKey,
+        reason:      'Restaurado al valor original',
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      closeEditModal();
+      showToast('Valor restaurado. Recargando…', 'success');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      showToast('Error al restaurar: ' + (data.error || ''), 'error');
+    }
+  } catch(e) {
+    showToast('Error de conexión', 'error');
+  } finally {
+    btn.style.opacity = '1';
+  }
+}
+
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `
+    position:fixed;bottom:1.5rem;right:1.5rem;z-index:99999;
+    padding:.7rem 1.2rem;border-radius:.75rem;font-size:.86rem;font-weight:600;
+    box-shadow:0 4px 20px rgba(0,0,0,.18);
+    background:${type==='success'?'#059669':'#dc2626'};color:#fff;
+    animation:fadeInUp .2s ease;
+  `;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditModal(); });
+
+// Exponer overrides_map para el modal
+window._OVERRIDES_MAP = {{ overrides_map | tojson }};
+</script>
+{% endif %}
+
 {% endblock %}
 
 {% block extra_js %}
