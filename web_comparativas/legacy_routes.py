@@ -3410,9 +3410,33 @@ async def crear_carga(
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
     auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
-    if (cuenta_nro or "").strip():
-        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
-        province_hint = (auto_hints or {}).get("provincia", "").strip()
+    if (cuenta_nro or "").strip() and auto_hints:
+        buyer_hint = (auto_hints.get("comprador") or buyer_hint).strip()
+        province_hint = (auto_hints.get("provincia") or province_hint).strip()
+
+    missing_metadata = []
+    if not (proceso_nro or "").strip():
+        missing_metadata.append("N° de proceso")
+    if not (apertura_fecha or "").strip():
+        missing_metadata.append("Fecha de apertura")
+    if not (cuenta_nro or "").strip():
+        missing_metadata.append("N° de cuenta")
+    if not platform_hint:
+        missing_metadata.append("Plataforma")
+    if not buyer_hint:
+        missing_metadata.append("Comprador")
+    if not province_hint:
+        missing_metadata.append("Provincia/Municipio")
+    if missing_metadata:
+        return templates.TemplateResponse(
+            "upload_form.html",
+            {
+                "request": request,
+                "user": user,
+                "error": "Faltan completar: " + ", ".join(missing_metadata) + ".",
+            },
+            status_code=400,
+        )
 
     # --- L├│gica espec├¡fica por plataforma (unificada) ---
     final_filename = ""
@@ -3493,9 +3517,9 @@ async def crear_carga(
     buyer_hint = (buyer_hint or comprador).strip()
     province_hint = (province_hint or provincia).strip()
     auto_hints = _cliente_hints_por_cuenta(cuenta_nro)
-    if (cuenta_nro or "").strip():
-        buyer_hint = (auto_hints or {}).get("comprador", "").strip()
-        province_hint = (auto_hints or {}).get("provincia", "").strip()
+    if (cuenta_nro or "").strip() and auto_hints:
+        buyer_hint = (auto_hints.get("comprador") or buyer_hint).strip()
+        province_hint = (auto_hints.get("provincia") or province_hint).strip()
 
     # Normalizamos el n├║mero de proceso para detectar duplicados
     proceso_nro_clean = (proceso_nro or "").strip() or None
@@ -3596,21 +3620,9 @@ async def form_nueva_carga_otras_fuentes(
     user: User = Depends(require_roles("admin", "analista", "supervisor")),
 ):
     """
-    Muestra el formulario para cargar un nuevo archivo (Principales).
+    Ruta legacy: la carga principal de Comparativa vive en /cargas/nueva.
     """
-    response = templates.TemplateResponse(
-        "upload_form_otras_fuentes.html",
-        {"request": request, "user": user},
-    )
-
-    log_usage_event(
-        user=user,
-        action_type="page_view",
-        section="otras_fuentes_nueva",
-        request=request,
-    )
-
-    return response
+    return RedirectResponse("/cargas/nueva", status_code=303)
 
 
 @router.post("/otras-fuentes", response_class=HTMLResponse)

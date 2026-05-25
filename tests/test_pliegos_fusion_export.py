@@ -34,6 +34,7 @@ def _caso_base(garantias=None):
     }
     return _ns(
         id=1,
+        numero_proceso="52/25",
         fusion_cabecera=None,
         datos_proceso=_ns(datos=datos_proceso),
         control_carga=None,
@@ -68,10 +69,33 @@ def _excel_proc_row(caso):
     return wb["Datos del proceso"]
 
 
+def _excel_workbook(caso):
+    payload = export_fusion_excel_bytes(caso)
+    return load_workbook(io.BytesIO(payload))
+
+
 def test_fusion_process_field_count_is_32():
     ctx = calcular_estado_fusion(_caso_base())
     assert len(FUSION_PROCESS_FIELDS) == 32
     assert ctx["campos_total_obligatorios"] == 32
+
+
+def test_uses_manual_request_id_for_id_proceso():
+    caso = _caso_base()
+    ctx = calcular_estado_fusion(caso)
+    wb = _excel_workbook(caso)
+
+    assert ctx["campos_fusion"]["id_proceso"]["valor"] == "52/25"
+    assert wb["Datos del proceso"]["A2"].value == "52/25"
+    assert wb["Datos del proceso"]["B2"].value == "36/2026"
+
+
+def test_detail_obj_gas_and_cod_item_are_always_empty():
+    wb = _excel_workbook(_caso_base())
+    ws = wb["Detalle"]
+
+    assert ws["B2"].value is None
+    assert ws["C2"].value is None
 
 
 def test_normalizes_currency_and_row_catalogs():

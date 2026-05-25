@@ -65,6 +65,11 @@ def _pick(*values) -> str:
     return ""
 
 
+def get_manual_id_proceso(caso) -> str:
+    """ID Proceso informado por el usuario al crear la solicitud."""
+    return _pick(getattr(caso, "numero_proceso", None))
+
+
 def _build_licia_texto(estado_licia: dict) -> str:
     """Construye texto legible del estado informado por el análisis automático."""
     if not estado_licia or not isinstance(estado_licia, dict):
@@ -610,7 +615,7 @@ FUSION_EXPORT_RENGLON_COLUMNS = [
 ]
 
 _FUSION_PROCESS_FIELD_BY_COLUMN = {
-    # Columna A: ID Proceso se resuelve directamente desde caso.id (ver _build_fusion_process_export_row)
+    # Columna A: ID Proceso se resuelve desde el valor manual cargado por el usuario.
     "N° Procesos":                   "numero_proceso",
     "Nombre Proceso":                "nombre_proceso",
     "Unidad Ejecutora":              "unidad_ejecutora",
@@ -1005,9 +1010,9 @@ def _build_fusion_process_export_row(caso, fusion_ctx: dict) -> dict:
 
     for column in FUSION_EXPORT_PROCESO_COLUMNS:
 
-        # ── ID Proceso: número nativo ───────────────────────────────────────
+        # ── ID Proceso: valor manual de la solicitud, nunca ID interno ─────
         if column == "ID Proceso":
-            row[column] = caso.id if caso.id else None
+            row[column] = _clean_export_value(get_manual_id_proceso(caso)) or None
             continue
 
         field_key = _FUSION_PROCESS_FIELD_BY_COLUMN.get(column)
@@ -1089,20 +1094,10 @@ def _build_fusion_process_export_row(caso, fusion_ctx: dict) -> dict:
 def _build_fusion_renglones_export_rows(caso, fusion_ctx: dict) -> list[dict]:
     rows = []
     for row in fusion_ctx.get("renglones_fusion", []) or []:
-        extra = row.get("datos_extra", {}) if isinstance(row.get("datos_extra", {}), dict) else {}
-        obj_gasto = _pick(
-            row.get("obj_gasto"),
-            row.get("objeto_gasto"),
-            row.get("obj_gas"),
-            extra.get("obj_gasto"),
-            extra.get("objeto_gasto"),
-            extra.get("obj_gas"),
-            extra.get("obj. gas."),
-        )
         rows.append({
             "Item": _clean_export_value(row.get("item")),
-            "Obj. Gas.": _clean_export_value(obj_gasto),
-            "Cod. Item": _clean_export_value(row.get("codigo_item")),
+            "Obj. Gas.": None,
+            "Cod. Item": None,
             "Descripción": _clean_export_value(row.get("descripcion")),
             "Cant": _clean_export_value(row.get("cantidad")),
         })
@@ -1250,11 +1245,12 @@ def calcular_estado_fusion(caso) -> dict:
     for campo_meta in FUSION_CAMPOS_OBLIGATORIOS:
         key = campo_meta["key"]
         if key == "id_proceso":
+            manual_id_proceso = get_manual_id_proceso(caso)
             resultado = {
-                "valor": caso.id,
-                "valor_normalizado": caso.id,
-                "fuente": "SIEM",
-                "completo": bool(caso.id),
+                "valor": manual_id_proceso,
+                "valor_normalizado": manual_id_proceso,
+                "fuente": "Solicitud",
+                "completo": bool(manual_id_proceso),
                 "requiere_validacion": False,
             }
         elif key in _FUSION_CORE_FIELD_KEYS:

@@ -15,11 +15,18 @@
   .campo-error.visible { display: block; }
   .form-control.campo-invalido,
   .form-select.campo-invalido { border-color: #dc3545 !important; box-shadow: 0 0 0 0.2rem rgba(220,53,69,.15); }
+  .cuenta-manual-info {
+    border: 1px solid rgba(245,158,11,.35);
+    background: #fff7ed;
+    color: #7c2d12;
+    border-radius: .65rem;
+    padding: .65rem .8rem;
+    font-size: .9rem;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-
 <div class="h-page-header">
   <div>
     <span class="h-page-header__eyebrow">Mercado Público</span>
@@ -75,6 +82,12 @@
       <div class="campo-error" id="err_cuenta_nro">El N° de cuenta es obligatorio.</div>
     </div>
 
+    <div class="col-12 d-none" id="cuentaManualInfo">
+      <div class="cuenta-manual-info">
+        No encontramos esta cuenta en la base. Complete comprador y provincia/municipio manualmente.
+      </div>
+    </div>
+
     <div class="col-md-4">
       <label class="form-label fw-semibold">
         PLATAFORMA <span style="color:#dc3545;font-weight:700;">*</span>
@@ -98,7 +111,7 @@
              placeholder="Ingresá el N° de cuenta para autocompletar"
              required readonly aria-readonly="true" tabindex="-1" />
       <div class="form-text">Ingresá el N° de cuenta para autocompletar.</div>
-      <div class="campo-error" id="err_comprador">El comprador es obligatorio (ingresá un N° de cuenta válido).</div>
+      <div class="campo-error" id="err_comprador">El comprador es obligatorio.</div>
     </div>
 
     <div class="col-md-4">
@@ -109,7 +122,7 @@
              placeholder="Ingresá el N° de cuenta para autocompletar"
              required readonly aria-readonly="true" tabindex="-1" />
       <div class="form-text">Ingresá el N° de cuenta para autocompletar.</div>
-      <div class="campo-error" id="err_provincia">La provincia/municipio es obligatoria (ingresá un N° de cuenta válido).</div>
+      <div class="campo-error" id="err_provincia">La provincia/municipio es obligatoria.</div>
     </div>
 
     <!-- Archivo genérico (BAC, COMPRAR, PBAC) -->
@@ -220,6 +233,8 @@
 
   var resumen        = document.getElementById('resumenErrores');
   var textoResumen   = document.getElementById('textoErrores');
+  var cuentaManualInfo = document.getElementById('cuentaManualInfo');
+  var modoCuentaManual = false;
 
   /* ── valores considerados vacíos/inválidos ────────────────────────── */
   var INVALIDOS = [
@@ -277,12 +292,43 @@
   function bloquearAutocompletados() {
     [inpComprador, inpProvincia].forEach(function(el) {
       if (!el) return;
+      el.disabled = false;
+      el.removeAttribute('disabled');
       el.readOnly = true;
       el.setAttribute('readonly', 'readonly');
       el.setAttribute('aria-readonly', 'true');
       el.setAttribute('tabindex', '-1');
       el.classList.add('is-readonly');
     });
+  }
+
+  function habilitarCargaManual() {
+    [inpComprador, inpProvincia].forEach(function(el) {
+      if (!el) return;
+      el.disabled = false;
+      el.removeAttribute('disabled');
+      el.readOnly = false;
+      el.removeAttribute('readonly');
+      el.setAttribute('aria-readonly', 'false');
+      el.removeAttribute('tabindex');
+      el.classList.remove('is-readonly');
+    });
+  }
+
+  function mostrarCuentaManualInfo(mostrar) {
+    if (!cuentaManualInfo) return;
+    cuentaManualInfo.classList.toggle('d-none', !mostrar);
+  }
+
+  function setCuentaManualMensaje(msg) {
+    if (!cuentaManualInfo) return;
+    var box = cuentaManualInfo.querySelector('.cuenta-manual-info');
+    if (box) box.textContent = msg;
+  }
+
+  function restaurarPlaceholdersAutocompletar() {
+    if (inpComprador) inpComprador.placeholder = 'Ingresá el N° de cuenta para autocompletar';
+    if (inpProvincia) inpProvincia.placeholder = 'Ingresá el N° de cuenta para autocompletar';
   }
 
   function bloquearEdicion(ev) {
@@ -309,7 +355,6 @@
     if (hPlatform) hPlatform.value = (selPlataforma && selPlataforma.value) ? selPlataforma.value.trim() : '';
     if (hBuyer)    hBuyer.value    = (inpComprador && inpComprador.value)   ? inpComprador.value.trim()   : '';
     if (hProvince) hProvince.value = (inpProvincia && inpProvincia.value)   ? inpProvincia.value.trim()   : '';
-    bloquearAutocompletados();
   }
 
   /* ── mostrar/ocultar sección de archivos según plataforma ─────────── */
@@ -335,6 +380,8 @@
     [inpFecha,    'err_apertura_fecha'],
     [inpCuenta,   'err_cuenta_nro'],
     [selPlataforma,'err_plataforma'],
+    [inpComprador,'err_comprador'],
+    [inpProvincia,'err_provincia'],
     [inpFile,     'err_file'],
     [inpComp,     'err_file_comparativa'],
     [inpPlie,     'err_file_pliego'],
@@ -485,12 +532,28 @@
 
     function buscarCliente(nro) {
       return fetch('/api/clientes/' + encodeURIComponent(nro))
-        .then(function(r) { return r.ok ? r.json() : { ok: false }; })
-        .catch(function() { return { ok: false }; });
+        .then(function(response) {
+          if (response.ok) {
+            return response.json().then(function(payload) {
+              return { estado: 'encontrada', data: (payload && payload.data) ? payload.data : payload };
+            });
+          }
+          if (response.status === 404) {
+            return { estado: 'no_encontrada' };
+          }
+          throw new Error('Error consultando cuenta: ' + response.status);
+        })
+        .catch(function(error) {
+          console.error(error);
+          return { estado: 'error' };
+        });
     }
 
     function rellenarAutocompletados(data) {
       if (!data) return;
+      modoCuentaManual = false;
+      mostrarCuentaManualInfo(false);
+      restaurarPlaceholdersAutocompletar();
       if (inpComprador && data.comprador) {
         inpComprador.value = data.comprador;
         limpiarError('err_comprador');
@@ -504,9 +567,42 @@
     }
 
     function limpiarAutocompletados() {
+      modoCuentaManual = false;
       if (inpComprador) inpComprador.value = '';
       if (inpProvincia) inpProvincia.value = '';
+      restaurarPlaceholdersAutocompletar();
       bloquearAutocompletados();
+      mostrarCuentaManualInfo(false);
+      sincronizarHints();
+    }
+
+    function permitirCargaManual() {
+      modoCuentaManual = true;
+      if (inpComprador) {
+        inpComprador.value = '';
+        inpComprador.placeholder = 'Complete comprador manualmente';
+      }
+      if (inpProvincia) {
+        inpProvincia.value = '';
+        inpProvincia.placeholder = 'Complete provincia/municipio manualmente';
+      }
+      habilitarCargaManual();
+      setCuentaManualMensaje('No encontramos esta cuenta en la base. Complete comprador y provincia/municipio manualmente.');
+      mostrarCuentaManualInfo(true);
+      limpiarError('err_cuenta_nro');
+      limpiarError('err_comprador');
+      limpiarError('err_provincia');
+      sincronizarHints();
+      if (inpComprador) inpComprador.focus();
+    }
+
+    function permitirCargaManualPorErrorReal() {
+      modoCuentaManual = true;
+      habilitarCargaManual();
+      setCuentaManualMensaje('No se pudo consultar la cuenta. Intente nuevamente o complete los datos manualmente.');
+      mostrarCuentaManualInfo(true);
+      limpiarError('err_comprador');
+      limpiarError('err_provincia');
       sincronizarHints();
     }
 
@@ -516,10 +612,13 @@
       if (valor === ultimoBuscado) return;
       ultimoBuscado = valor;
       buscarCliente(valor).then(function(res) {
-        if (res && res.ok && res.data) {
+        if (((inpCuenta && inpCuenta.value) || '').trim() !== valor) return;
+        if (res && res.estado === 'encontrada' && res.data) {
           rellenarAutocompletados(res.data);
+        } else if (res && res.estado === 'no_encontrada') {
+          permitirCargaManual();
         } else {
-          limpiarAutocompletados();
+          permitirCargaManualPorErrorReal();
         }
       });
     }

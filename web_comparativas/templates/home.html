@@ -63,7 +63,7 @@
   </div>
   {% if r in ['admin','analista','supervisor'] %}
   <div class="h-page-header__actions">
-    <a class="btn btn-primary btn-sm" href="/otras-fuentes/nueva">
+    <a class="btn btn-primary btn-sm" href="/cargas/nueva">
       <i class="bi bi-plus-lg me-1"></i> Nueva carga
     </a>
     <a class="btn btn-outline-secondary btn-sm" href="/cargas/historial">Historial</a>
@@ -161,7 +161,7 @@
     <p class="h-empty__title">Sin cargas completadas aún</p>
     <p class="h-empty__desc">Cuando se procesen cargas aparecerán aquí las más recientes.</p>
     {% if r in ['admin','analista','supervisor'] %}
-    <a class="btn btn-primary btn-sm mt-2" href="/otras-fuentes/nueva">
+    <a class="btn btn-primary btn-sm mt-2" href="/cargas/nueva">
       <i class="bi bi-plus-lg me-1"></i> Nueva carga
     </a>
     {% endif %}

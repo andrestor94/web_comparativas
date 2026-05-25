@@ -689,10 +689,10 @@
       <p class="erp-section-note">Datos de identificación para carga en Fusión/ERP.</p>
     </div>
     <div class="erp-grid">
-      {# ID Proceso (caso.id interno) #}
+      {# ID Proceso cargado manualmente por el usuario en la solicitud #}
       <div class="erp-item erp-item--ok">
         <div class="erp-item-label">ID Proceso</div>
-        <div class="erp-item-value">{{ caso.id }}</div>
+        <div class="erp-item-value">{{ caso.numero_proceso or "No informado" }}</div>
       </div>
 
       {{ fusion_field_card("numero_proceso", "N° Procesos") }}

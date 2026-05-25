@@ -789,8 +789,8 @@
 
         <div id="wcMenu" class="submenu submenu-panel{% if wc_expand %} is-open{% endif %}">
 {% if user and r in ['admin','analista','supervisor'] %}
-          <a href="/otras-fuentes/nueva"
-            class="submenu-link {% if request.url.path.startswith('/otras-fuentes/nueva') %}active{% endif %}">
+          <a href="/cargas/nueva"
+            class="submenu-link {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
             <span>Nueva carga</span>
           </a>
           {% endif %}
