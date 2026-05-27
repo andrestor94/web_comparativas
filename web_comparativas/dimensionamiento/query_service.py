@@ -1125,6 +1125,15 @@ def refresh_default_dashboard_snapshot(
     )
     snapshot = _get_dashboard_snapshot(session, target_run_id)
     if snapshot is None:
+        # El índice único en SQLite puede ser solo sobre snapshot_key (sin run_id),
+        # así que buscamos primero por clave sola para reutilizar la fila existente
+        # en lugar de intentar un INSERT que violaría el constraint.
+        snapshot = session.execute(
+            select(DimensionamientoDashboardSnapshot)
+            .where(DimensionamientoDashboardSnapshot.snapshot_key == DEFAULT_DASHBOARD_SNAPSHOT_KEY)
+            .limit(1)
+        ).scalar_one_or_none()
+    if snapshot is None:
         snapshot = DimensionamientoDashboardSnapshot(
             snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
             version=DEFAULT_DASHBOARD_SNAPSHOT_VERSION,
