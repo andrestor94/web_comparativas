@@ -911,7 +911,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
         index_elements=[
             "month", "plataforma", "cliente_nombre_homologado", "cliente_visible",
             "provincia", "familia", "unidad_negocio", "subunidad_negocio",
-            "resultado_participacion", "is_identified", "is_client",
+            "resultado_participacion", "is_identified", "is_client", "import_run_id"
         ]
     )
     session.execute(insert_stmt)
