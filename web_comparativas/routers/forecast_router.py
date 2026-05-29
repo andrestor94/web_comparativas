@@ -20,7 +20,7 @@ import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -984,6 +984,554 @@ def forecast_api_comment(
             pass
         logger.error("forecast-comment error: %s", exc, exc_info=True)
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Auditoría de ajustes Forecast (solo admin / auditor)
+# ---------------------------------------------------------------------------
+
+def _is_sqlite_db() -> bool:
+    try:
+        from web_comparativas.models import engine as _engine
+        return _engine.url.get_backend_name() == "sqlite"
+    except Exception:
+        return False
+
+
+def _require_audit_access(user: User) -> None:
+    if not _can_view_global_forecast_adjustments(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo usuarios con perfil Admin o Auditor pueden acceder al informe de auditoría.",
+        )
+
+
+# ── Textos de limitación incluidos en cada fila del export ──────────────────
+_LIM_VALORES_ABSOLUTOS = (
+    "Valor absoluto no disponible: forecast_user_overrides almacena solo "
+    "porcentajes de ajuste. Para impacto monetario cruzar con fact_forecast_valorizado."
+)
+_LIM_DESC_ARTICULO = (
+    "Descripción no disponible: no se almacena en forecast_user_overrides."
+)
+_LIM_FECHA_REVERSION = (
+    "Fecha de reversión exacta no disponible: se muestra última actualización "
+    "(updated_at). No existe tabla de historial de cambios."
+)
+_LIM_MANUAL_FECHA = (
+    "forecast_manual_entries no tiene campo updated_at propio; "
+    "se usa created_at del cliente manual."
+)
+_ORIGEN_PROD  = "Producción PostgreSQL"
+_ORIGEN_LOCAL = "Local SQLite"
+
+# Cap de registros por fuente para evitar timeouts en exportaciones completas
+_MAX_OVERRIDES_EXPORT = 30000
+_MAX_MANUALES_EXPORT  = 10000
+# Cap del pool para paginación combinada (fetch-all-then-paginate)
+_MAX_POOL = 20000
+
+
+def _parse_date(s: str) -> Optional[dt.datetime]:
+    try:
+        return dt.datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+# ── OVERRIDES ────────────────────────────────────────────────────────────────
+
+def _query_overrides(session, filters: dict, cap: int):
+    """Query forecast_user_overrides with filters. Returns ORM rows (no ordering)."""
+    from web_comparativas.models import ForecastUserOverride, User as UserModel
+
+    q = (
+        session.query(ForecastUserOverride, UserModel)
+        .outerjoin(UserModel, ForecastUserOverride.user_id == UserModel.id)
+        .filter(ForecastUserOverride.source_module == svc.FORECAST_OVERRIDE_SOURCE)
+    )
+
+    df_from = _parse_date(filters.get("date_from") or "")
+    df_to   = _parse_date(filters.get("date_to") or "")
+    comercial = (filters.get("comercial") or "").strip()
+    perfil    = (filters.get("perfil") or "").strip()
+    subneg    = (filters.get("subneg") or "").strip()
+    articulo  = (filters.get("articulo") or "").strip()
+    f_month   = (filters.get("forecast_month") or "").strip()
+    estado    = (filters.get("estado") or "todos").strip().lower()
+
+    if df_from:
+        q = q.filter(ForecastUserOverride.updated_at >= df_from)
+    if df_to:
+        q = q.filter(ForecastUserOverride.updated_at < df_to + dt.timedelta(days=1))
+    if comercial:
+        q = q.filter(ForecastUserOverride.created_by.ilike(f"%{comercial}%"))
+    if perfil:
+        q = q.filter(ForecastUserOverride.perfil.ilike(f"%{perfil}%"))
+    if subneg:
+        q = q.filter(ForecastUserOverride.subneg.ilike(f"%{subneg}%"))
+    if articulo:
+        q = q.filter(
+            ForecastUserOverride.codigo_serie.ilike(f"%{articulo}%")
+            | ForecastUserOverride.client_selector.ilike(f"%{articulo}%")
+        )
+    if f_month:
+        q = q.filter(ForecastUserOverride.forecast_month == f_month)
+    if estado == "activo":
+        q = q.filter(ForecastUserOverride.is_active.is_(True))
+    elif estado == "revertido":
+        q = q.filter(ForecastUserOverride.is_active.is_(False))
+
+    return q.limit(cap).all()
+
+
+def _override_to_dict(override, usr, is_sqlite: bool) -> dict:
+    user_email = getattr(usr, "email", None) or override.created_by or "—"
+    user_name  = getattr(usr, "full_name", None) or getattr(usr, "name", None) or user_email
+    user_role  = getattr(usr, "role", None) or "—"
+    user_bu    = getattr(usr, "unit_business", None) or "—"
+
+    ts_act = override.updated_at  # datetime obj for sorting
+    base_pct = override.base_growth_pct
+    ovr_pct  = override.override_growth_pct
+    delta_pct: Optional[float] = None
+    if base_pct is not None and ovr_pct is not None:
+        delta_pct = round(ovr_pct - base_pct, 4)
+
+    estado_label = "Activo" if override.is_active else "Revertido o desactivado"
+
+    return {
+        "_fecha_sort": ts_act or dt.datetime.min,
+        "tipo_registro": "Ajuste porcentual",
+        "id": override.id,
+        "fecha_actividad": ts_act.strftime("%Y-%m-%d %H:%M:%S") if ts_act else "—",
+        "fecha_creacion": override.created_at.strftime("%Y-%m-%d %H:%M:%S") if override.created_at else "—",
+        "usuario_email": user_email,
+        "usuario_nombre": user_name,
+        "usuario_rol": user_role,
+        "unidad_negocio_usuario": user_bu,
+        "creado_por": override.created_by or "—",
+        "modificado_por": override.updated_by or "—",
+        "cliente": override.client_display or override.client_selector or "—",
+        "client_selector": override.client_selector or "—",
+        "articulo_codigo": override.codigo_serie or "—",
+        "descripcion_articulo": "No disponible",
+        "perfil": override.perfil or "—",
+        "negocio": override.neg or "—",
+        "subnegocio": override.subneg or "—",
+        "mes_forecast": override.forecast_month or "—",
+        "alcance": override.override_scope or "—",
+        "pct_base_anual": base_pct,
+        "pct_ajuste_anual": ovr_pct,
+        "pct_mensual_efectivo": override.effective_monthly_pct,
+        "diferencia_pct_anual": delta_pct,
+        "valor_ajustado_final": None,
+        "mes_vigencia_desde": override.effective_from_month or "Sin restricción",
+        "estado": estado_label,
+        "origen": _ORIGEN_PROD if not is_sqlite else _ORIGEN_LOCAL,
+        "limitacion_dato": (
+            f"{_LIM_VALORES_ABSOLUTOS} | {_LIM_DESC_ARTICULO} | {_LIM_FECHA_REVERSION}"
+            if not override.is_active
+            else f"{_LIM_VALORES_ABSOLUTOS} | {_LIM_DESC_ARTICULO}"
+        ),
+    }
+
+
+# ── CLIENTES MANUALES ────────────────────────────────────────────────────────
+
+def _query_manual_entries(session, filters: dict, cap: int):
+    """
+    Query forecast_manual_entries joined with manual_clients.
+    Filtros aplicados:
+      - date_from/date_to → created_at del cliente manual
+      - comercial        → created_by del cliente manual
+      - articulo         → codigo_serie de la entrada O nombre_cliente
+      - forecast_month   → forecast_month de la entrada
+      - perfil           → perfil de la entrada (si existe en entry)
+      - subneg           → subneg de la entrada (si existe en entry)
+      - estado=activo    → solo entradas y clientes activos
+      - estado=revertido → solo entradas eliminadas (deleted_at IS NOT NULL)
+      - estado=todos     → todos (activos + eliminados)
+    Filtros que NO aplican a manuales (se documentan, no filtran):
+      - negocio: no hay campo neg en manual_entries como campo de filtro separado
+        (sí existe como columna pero no se expone en el filtro UI actual)
+    """
+    from web_comparativas.models import ForecastManualEntry, ForecastManualClient, User as UserModel
+
+    q = (
+        session.query(ForecastManualEntry, ForecastManualClient, UserModel)
+        .join(ForecastManualClient, ForecastManualEntry.client_id == ForecastManualClient.id)
+        .outerjoin(UserModel, ForecastManualClient.user_id == UserModel.id)
+    )
+
+    df_from  = _parse_date(filters.get("date_from") or "")
+    df_to    = _parse_date(filters.get("date_to") or "")
+    comercial = (filters.get("comercial") or "").strip()
+    perfil    = (filters.get("perfil") or "").strip()
+    subneg    = (filters.get("subneg") or "").strip()
+    articulo  = (filters.get("articulo") or "").strip()
+    f_month   = (filters.get("forecast_month") or "").strip()
+    estado    = (filters.get("estado") or "todos").strip().lower()
+
+    # Estado: mapeo para manuales
+    # "activo"    → entry activa + cliente activo
+    # "revertido" → entry eliminada (deleted_at IS NOT NULL) o cliente eliminado
+    # "todos"     → sin filtro de estado (incluye eliminados y activos)
+    if estado == "activo":
+        q = q.filter(ForecastManualEntry.is_active.is_(True))
+        q = q.filter(ForecastManualClient.is_active.is_(True))
+    elif estado == "revertido":
+        # Para manuales "revertido" equivale a "eliminado"
+        q = q.filter(
+            ForecastManualEntry.is_active.is_(False)
+            | ForecastManualClient.is_active.is_(False)
+        )
+    # estado == "todos": no filtrar is_active
+
+    if df_from:
+        q = q.filter(ForecastManualClient.created_at >= df_from)
+    if df_to:
+        q = q.filter(ForecastManualClient.created_at < df_to + dt.timedelta(days=1))
+    if comercial:
+        q = q.filter(ForecastManualClient.created_by.ilike(f"%{comercial}%"))
+    # perfil: aplica a la entrada si existe
+    if perfil:
+        q = q.filter(ForecastManualEntry.perfil.ilike(f"%{perfil}%"))
+    # subneg: aplica a la entrada
+    if subneg:
+        q = q.filter(ForecastManualEntry.subneg.ilike(f"%{subneg}%"))
+    if articulo:
+        q = q.filter(
+            ForecastManualEntry.codigo_serie.ilike(f"%{articulo}%")
+            | ForecastManualClient.nombre_cliente.ilike(f"%{articulo}%")
+        )
+    if f_month:
+        q = q.filter(ForecastManualEntry.forecast_month == f_month)
+
+    return q.limit(cap).all()
+
+
+def _manual_entry_to_dict(entry, client, usr, is_sqlite: bool) -> dict:
+    user_email = getattr(usr, "email", None) or client.created_by or "—"
+    user_name  = getattr(usr, "full_name", None) or getattr(usr, "name", None) or user_email
+    user_role  = getattr(usr, "role", None) or "—"
+    user_bu    = getattr(usr, "unit_business", None) or "—"
+
+    ts_act = client.created_at  # best available timestamp for manual entries
+    entry_deleted = getattr(entry, "deleted_at", None)
+    client_deleted = getattr(client, "deleted_at", None)
+    is_deleted = (entry_deleted is not None) or (not client.is_active)
+    estado_label = "Eliminado" if is_deleted else "Activo"
+
+    return {
+        "_fecha_sort": ts_act or dt.datetime.min,
+        "tipo_registro": "Carga manual",
+        "id": entry.id,
+        "fecha_actividad": ts_act.strftime("%Y-%m-%d %H:%M:%S") if ts_act else "—",
+        "fecha_creacion": ts_act.strftime("%Y-%m-%d %H:%M:%S") if ts_act else "—",
+        "usuario_email": user_email,
+        "usuario_nombre": user_name,
+        "usuario_rol": user_role,
+        "unidad_negocio_usuario": user_bu,
+        "creado_por": client.created_by or "—",
+        "modificado_por": client.created_by or "—",
+        "cliente": client.nombre_cliente or "—",
+        "client_selector": f"manual:{client.id}",
+        "articulo_codigo": entry.codigo_serie or "—",
+        "descripcion_articulo": entry.descripcion or "—",
+        "perfil": entry.perfil or "—",
+        "negocio": entry.neg or "—",
+        "subnegocio": entry.subneg or "—",
+        "mes_forecast": entry.forecast_month or "—",
+        "alcance": "Carga manual",
+        "pct_base_anual": None,
+        "pct_ajuste_anual": None,
+        "pct_mensual_efectivo": None,
+        "diferencia_pct_anual": None,
+        "valor_ajustado_final": round(entry.monto_total or 0.0, 2),
+        "mes_vigencia_desde": "N/A",
+        "estado": estado_label,
+        "origen": _ORIGEN_PROD if not is_sqlite else _ORIGEN_LOCAL,
+        "limitacion_dato": _LIM_MANUAL_FECHA,
+    }
+
+
+# ── HELPERS COMUNES ──────────────────────────────────────────────────────────
+
+_COL_ORDER_EXPORT = [
+    "tipo_registro", "id", "fecha_actividad", "fecha_creacion",
+    "usuario_email", "usuario_nombre", "usuario_rol", "unidad_negocio_usuario",
+    "creado_por", "modificado_por", "cliente", "client_selector",
+    "articulo_codigo", "descripcion_articulo", "perfil", "negocio", "subnegocio",
+    "mes_forecast", "alcance", "pct_base_anual", "pct_ajuste_anual",
+    "pct_mensual_efectivo", "diferencia_pct_anual", "valor_ajustado_final",
+    "mes_vigencia_desde", "estado", "limitacion_dato", "origen",
+]
+
+_EXPORT_COL_LABELS = {
+    "tipo_registro": "Tipo de Registro",
+    "id": "ID",
+    "fecha_actividad": "Fecha de Actividad",
+    "fecha_creacion": "Fecha Creación",
+    "usuario_email": "Email Usuario",
+    "usuario_nombre": "Nombre Usuario",
+    "usuario_rol": "Rol",
+    "unidad_negocio_usuario": "Unidad de Negocio",
+    "creado_por": "Creado Por",
+    "modificado_por": "Modificado Por",
+    "cliente": "Cliente",
+    "client_selector": "ID Cliente (interno)",
+    "articulo_codigo": "Código Artículo",
+    "descripcion_articulo": "Descripción Artículo",
+    "perfil": "Perfil",
+    "negocio": "Negocio",
+    "subnegocio": "Subnegocio",
+    "mes_forecast": "Mes Forecast",
+    "alcance": "Alcance",
+    "pct_base_anual": "% Base Anual",
+    "pct_ajuste_anual": "% Ajuste Anual",
+    "pct_mensual_efectivo": "% Mensual Efectivo",
+    "diferencia_pct_anual": "Diferencia % Anual",
+    "valor_ajustado_final": "Valor Ajustado (ARS)",
+    "mes_vigencia_desde": "Vigente Desde (Mes)",
+    "estado": "Estado",
+    "limitacion_dato": "Limitación del Dato",
+    "origen": "Origen Datos",
+}
+
+
+def _merge_sort_paginate(all_records: list[dict], page: int, page_size: int) -> list[dict]:
+    """Sort combined records by _fecha_sort desc, then slice for pagination."""
+    all_records.sort(key=lambda r: r.get("_fecha_sort") or dt.datetime.min, reverse=True)
+    start = (page - 1) * page_size
+    return all_records[start: start + page_size]
+
+
+def _strip_sort_key(records: list[dict]) -> list[dict]:
+    """Remove internal _fecha_sort key before returning to client."""
+    for r in records:
+        r.pop("_fecha_sort", None)
+    return records
+
+
+def _build_export_rows(records: list[dict]) -> list[dict]:
+    return [{k: r.get(k, "—") for k in _COL_ORDER_EXPORT} for r in records]
+
+
+# ── ENDPOINTS ────────────────────────────────────────────────────────────────
+
+@router.get("/api/audit", response_class=JSONResponse)
+def api_audit(
+    request: Request,
+    user: User = Depends(_require_user),
+    date_from: Optional[str] = Query(None, description="Fecha desde YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="Fecha hasta YYYY-MM-DD"),
+    comercial: Optional[str] = Query(None, description="Email del comercial (parcial)"),
+    perfil: Optional[str] = Query(None, description="Perfil comercial"),
+    subneg: Optional[str] = Query(None, description="Subnegocio"),
+    articulo: Optional[str] = Query(None, description="Código artículo o nombre cliente"),
+    forecast_month: Optional[str] = Query(None, description="Mes forecast YYYY-MM"),
+    estado: Optional[str] = Query("todos", description="activo | revertido | todos"),
+    incluir_manuales: bool = Query(True, description="Incluir cargas manuales"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=2000),
+):
+    """
+    Informe de auditoría Forecast combinado y ordenado cronológicamente.
+    Fuentes: forecast_user_overrides + forecast_manual_entries (opcional).
+    Paginación real: merge+sort en Python → luego slice.
+    Solo Admin/Auditor. Compatible con SQLite y PostgreSQL.
+    """
+    _require_audit_access(user)
+    from web_comparativas.models import SessionLocal, ForecastManualEntry
+    if SessionLocal is None:
+        raise HTTPException(503, "ORM no disponible")
+
+    is_sqlite = _is_sqlite_db()
+    filters = dict(
+        date_from=date_from, date_to=date_to, comercial=comercial, perfil=perfil,
+        subneg=subneg, articulo=articulo, forecast_month=forecast_month, estado=estado,
+    )
+
+    try:
+        with SessionLocal() as session:
+            ov_rows = _query_overrides(session, filters, cap=_MAX_POOL)
+            all_records = [_override_to_dict(ov, usr, is_sqlite) for ov, usr in ov_rows]
+            total_ov = len(all_records)
+
+            total_manual = 0
+            if incluir_manuales and ForecastManualEntry is not None:
+                man_rows = _query_manual_entries(session, filters, cap=_MAX_POOL // 4)
+                manual_recs = [_manual_entry_to_dict(e, c, u, is_sqlite) for e, c, u in man_rows]
+                total_manual = len(manual_recs)
+                all_records.extend(manual_recs)
+
+        total = len(all_records)
+        page_records = _merge_sort_paginate(all_records, page, page_size)
+        _strip_sort_key(page_records)
+
+        return JSONResponse({
+            "ok": True,
+            "total": total,
+            "total_overrides": total_ov,
+            "total_manual_entries": total_manual,
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, -(-total // page_size)),
+            "records": page_records,
+            "origen": "postgresql" if not is_sqlite else "sqlite",
+            "pool_capped": total >= _MAX_POOL,
+        })
+    except Exception as exc:
+        logger.error("audit error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al consultar auditoría: {exc}")
+
+
+@router.get("/api/audit/export")
+def api_audit_export(
+    request: Request,
+    user: User = Depends(_require_user),
+    fmt: str = Query("csv", description="csv | xlsx"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    comercial: Optional[str] = Query(None),
+    perfil: Optional[str] = Query(None),
+    subneg: Optional[str] = Query(None),
+    articulo: Optional[str] = Query(None),
+    forecast_month: Optional[str] = Query(None),
+    estado: Optional[str] = Query("todos"),
+    incluir_manuales: bool = Query(True),
+):
+    """
+    Exporta auditoría (mismos filtros que /api/audit) a CSV o Excel on-demand.
+    No genera archivos en disco. Solo Admin/Auditor.
+    """
+    _require_audit_access(user)
+    from web_comparativas.models import SessionLocal, ForecastManualEntry
+    if SessionLocal is None:
+        raise HTTPException(503, "ORM no disponible")
+
+    is_sqlite = _is_sqlite_db()
+    filters = dict(
+        date_from=date_from, date_to=date_to, comercial=comercial, perfil=perfil,
+        subneg=subneg, articulo=articulo, forecast_month=forecast_month, estado=estado,
+    )
+
+    try:
+        with SessionLocal() as session:
+            ov_rows  = _query_overrides(session, filters, cap=_MAX_OVERRIDES_EXPORT)
+            all_recs = [_override_to_dict(ov, usr, is_sqlite) for ov, usr in ov_rows]
+            if incluir_manuales and ForecastManualEntry is not None:
+                man_rows = _query_manual_entries(session, filters, cap=_MAX_MANUALES_EXPORT)
+                all_recs.extend(_manual_entry_to_dict(e, c, u, is_sqlite) for e, c, u in man_rows)
+    except Exception as exc:
+        logger.error("audit export query error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al consultar datos: {exc}")
+
+    # Sort then strip internal key
+    all_recs.sort(key=lambda r: r.get("_fecha_sort") or dt.datetime.min, reverse=True)
+    _strip_sort_key(all_recs)
+    export_rows = _build_export_rows(all_recs)
+
+    ts = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename_base = f"forecast_auditoria_{ts}"
+
+    if fmt == "xlsx":
+        import io
+        import pandas as _pd
+        df = _pd.DataFrame(export_rows)
+        df.rename(columns=_EXPORT_COL_LABELS, inplace=True)
+        buf = io.BytesIO()
+        with _pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Auditoría Forecast")
+            glosario = _pd.DataFrame([
+                {"Campo": "Tipo de Registro",
+                 "Descripción": "'Ajuste porcentual' = override de crecimiento %; 'Carga manual' = cliente manual con valores absolutos."},
+                {"Campo": "Fecha de Actividad",
+                 "Descripción": "Para ajustes: updated_at de forecast_user_overrides. Para manuales: created_at del cliente manual."},
+                {"Campo": "Estado",
+                 "Descripción": "Activo / Revertido o desactivado (overrides) | Activo / Eliminado (manuales)."},
+                {"Campo": "Limitación del Dato",
+                 "Descripción": "Describe qué campos no están disponibles y por qué."},
+                {"Campo": "Valor Ajustado (ARS)",
+                 "Descripción": "Solo disponible para Cargas Manuales (monto_total). Para ajustes porcentuales: requiere cruce con CSV base."},
+                {"Campo": "% Ajuste Anual / % Mensual",
+                 "Descripción": "Solo disponible para Ajustes Porcentuales. No aplica a Cargas Manuales."},
+                {"Campo": "Origen Datos",
+                 "Descripción": f"'{_ORIGEN_PROD}' cuando está desplegado en Render. '{_ORIGEN_LOCAL}' en entorno local."},
+            ])
+            glosario.to_excel(writer, index=False, sheet_name="Glosario")
+        buf.seek(0)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename_base}.xlsx"',
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+        return Response(content=buf.read(), headers=headers)
+
+    # Default: CSV UTF-8 BOM (compatible con Excel en español)
+    import csv, io as _io
+    output = _io.StringIO()
+    if export_rows:
+        labels = [_EXPORT_COL_LABELS.get(k, k) for k in _COL_ORDER_EXPORT]
+        w = csv.writer(output)
+        w.writerow(labels)
+        for r in export_rows:
+            w.writerow([r.get(k, "—") for k in _COL_ORDER_EXPORT])
+    else:
+        output.write("sin_datos\n")
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename_base}.csv"',
+        "Content-Type": "text/csv; charset=utf-8-sig",
+    }
+    return Response(content=csv_bytes, headers=headers)
+
+
+@router.get("/api/audit/filter-options", response_class=JSONResponse)
+def api_audit_filter_options(
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Valores distintos para desplegables de filtro. Solo Admin/Auditor."""
+    _require_audit_access(user)
+    from web_comparativas.models import SessionLocal, ForecastUserOverride, ForecastManualClient
+    if SessionLocal is None or ForecastUserOverride is None:
+        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": []})
+
+    try:
+        with SessionLocal() as session:
+            base = (
+                session.query(ForecastUserOverride)
+                .filter(ForecastUserOverride.source_module == svc.FORECAST_OVERRIDE_SOURCE)
+            )
+            perfiles = sorted({
+                r.perfil for r in base.with_entities(ForecastUserOverride.perfil).distinct()
+                if r.perfil
+            })
+            subnegs = sorted({
+                r.subneg for r in base.with_entities(ForecastUserOverride.subneg).distinct()
+                if r.subneg
+            })
+            comerciales = set(
+                r.created_by for r in base.with_entities(ForecastUserOverride.created_by).distinct()
+                if r.created_by
+            )
+            if ForecastManualClient is not None:
+                comerciales |= {
+                    r.created_by
+                    for r in session.query(ForecastManualClient)
+                    .with_entities(ForecastManualClient.created_by).distinct()
+                    if r.created_by
+                }
+        return JSONResponse({
+            "ok": True,
+            "perfiles": perfiles,
+            "subneg": subnegs,
+            "comerciales": sorted(comerciales),
+        })
+    except Exception as exc:
+        logger.error("audit filter-options error: %s", exc, exc_info=True)
+        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": []})
 
 
 @router.get("/api/comments/summary", response_class=JSONResponse)
