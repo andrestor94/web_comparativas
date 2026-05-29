@@ -53,6 +53,25 @@
                 {% endif %}
             </div>
 
+            {# ====== Contraseña inicial (solo al crear) ====== #}
+            {% if is_new %}
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="password">Contraseña inicial</label>
+                <input class="form-control form-control-sic" id="password" type="password" name="password"
+                    minlength="12" required autocomplete="new-password"
+                    placeholder="Mínimo 12 caracteres">
+                <div class="text-white-50 small mt-1">Mínimo 12 caracteres. El usuario podrá cambiarla después.</div>
+            </div>
+
+            <div class="span-12">
+                <label class="form-label text-white-50 small" for="password_confirm">Confirmar contraseña</label>
+                <input class="form-control form-control-sic" id="password_confirm" type="password" name="password_confirm"
+                    minlength="12" required autocomplete="new-password"
+                    placeholder="Repite la contraseña">
+                <div id="pw-match-msg" class="small mt-1" style="display:none; color: #f87171;">Las contraseñas no coinciden.</div>
+            </div>
+            {% endif %}
+
             <div class="span-12">
                 <label class="form-label text-white-50 small" for="role">Rol</label>
                 {% set r = (form.role or '')|lower %}
@@ -136,4 +155,27 @@
     </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var pw = document.getElementById('password');
+    var pc = document.getElementById('password_confirm');
+    var msg = document.getElementById('pw-match-msg');
+    if (!pw || !pc) return;
+
+    function checkMatch() {
+        if (pc.value && pw.value !== pc.value) {
+            msg.style.display = 'block';
+            pc.setCustomValidity('Las contraseñas no coinciden.');
+        } else {
+            msg.style.display = 'none';
+            pc.setCustomValidity('');
+        }
+    }
+    pw.addEventListener('input', checkMatch);
+    pc.addEventListener('input', checkMatch);
+})();
+</script>
 {% endblock %}

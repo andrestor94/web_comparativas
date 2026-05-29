@@ -1062,9 +1062,19 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         access_scope="todos", # Default
     )
     
-    # Capture error from redirect
-    err = request.query_params.get("err")
-    
+    # Capture error from redirect and map to friendly message
+    _err_map = {
+        "password_vacio": "La contraseña inicial es obligatoria.",
+        "password_minimo_12": "La contraseña debe tener al menos 12 caracteres.",
+        "password_no_coincide": "Las contraseñas no coinciden.",
+        "email_vacio": "El email es obligatorio.",
+        "email_existe": "Ya existe un usuario con ese email.",
+        "error_interno": "Ocurrió un error al crear el usuario. Intenta nuevamente.",
+        "permiso_denegado": "No tienes permisos para realizar esta acción.",
+    }
+    raw_err = request.query_params.get("err")
+    err = _err_map.get(raw_err, raw_err)
+
     ctx = {
         "request": request,
         "user": user,
@@ -1075,7 +1085,7 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         "business_units": business_units,
         "section": "users",
         "is_admin": is_admin,
-        "error": err 
+        "error": err
     }
     return templates.TemplateResponse("sic/users_form.html", ctx)
 
@@ -1085,7 +1095,8 @@ def sic_users_create(
     email: str = Form(...),
     name: str = Form(""),
     role: str = Form("analista"),
-    password: str = Form(""),  # El admin debe ingresar contraseña explícita
+    password: str = Form(""),
+    password_confirm: str = Form(""),
     unit_business: str = Form("Otros"),
     access_scope: str = Form("todos"),
     user: User = Depends(sic_access_required),
@@ -1097,14 +1108,20 @@ def sic_users_create(
     email = (email or "").strip().lower()
     role = (role or "").strip().lower()
     password = (password or "").strip()
+    password_confirm = (password_confirm or "").strip()
     unit_ok = normalize_unit_business(unit_business)
 
     if not email:
         return RedirectResponse("/sic/users/new?err=email_vacio", status_code=303)
 
-    # Contraseña obligatoria con mínimo de seguridad
+    if not password:
+        return RedirectResponse("/sic/users/new?err=password_vacio", status_code=303)
+
     if len(password) < 12:
         return RedirectResponse("/sic/users/new?err=password_minimo_12", status_code=303)
+
+    if password_confirm and password != password_confirm:
+        return RedirectResponse("/sic/users/new?err=password_no_coincide", status_code=303)
 
     try:
         exists = db_session.query(User).filter(func.lower(User.email) == email).first()
