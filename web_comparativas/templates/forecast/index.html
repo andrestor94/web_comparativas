@@ -436,7 +436,7 @@
   }
 
   /* == Main Panel & Header == */
-  .fc-main { flex: 1; display: flex; flex-direction: column; overflow: visible; background: var(--bg-primary); }
+  .fc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: visible; background: var(--bg-primary); }
   .fc-main__header {
     padding: 32px 24px 12px;
     background: transparent;
@@ -674,10 +674,11 @@
   }
 
   /* == Content Scroll Container == */
-  .fc-content { 
-    flex: 1; 
-    overflow-y: visible; 
-    padding: 0 24px 32px; 
+  .fc-content {
+    flex: 1;
+    min-width: 0;
+    overflow-y: visible;
+    padding: 0 24px 32px;
   }
 
   /* == Switch view tabs (Material Design Tabs) == */
@@ -1854,6 +1855,304 @@
     .fc-kpi-row { grid-template-columns: 1fr; }
     .fc-param-chip { margin-left: 0; width: 100%; justify-content: center; }
   }
+
+  /* ════════════════════════════════════════════════════════════════
+     APROBACIONES FORECAST — rediseño ejecutivo premium
+     ════════════════════════════════════════════════════════════════ */
+  #panel-aprobaciones .fc-table-card { overflow: visible; }
+
+  /* ── Encabezado ── */
+  .appr-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 18px; padding: 15px 24px 12px; flex-wrap: wrap;
+  }
+  .appr-head-titles { display: flex; gap: 13px; align-items: center; min-width: 260px; }
+  .appr-head-ic {
+    width: 42px; height: 42px; border-radius: var(--radius-md); flex: none;
+    background: linear-gradient(135deg, var(--g-blue) 0%, #4f93f7 100%); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 1.25rem;
+    box-shadow: 0 6px 14px rgba(26,115,232,.26);
+  }
+  .appr-head h3 { margin: 0; font-size: 1.22rem; font-weight: 700; letter-spacing: -.015em; color: var(--text-primary); }
+  .appr-head .appr-sub { margin: 3px 0 0; font-size: .82rem; color: var(--text-muted); max-width: 560px; line-height: 1.45; }
+  .appr-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .appr-btn-refresh {
+    border: 1px solid var(--border-color); background: #fff; color: var(--text-secondary);
+    border-radius: var(--radius-sm); padding: 8px 15px; font-size: .8rem; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px; transition: all .14s;
+  }
+  .appr-btn-refresh:hover { background: var(--bg-primary); border-color: #cfd4da; box-shadow: var(--shadow-soft); }
+  .appr-seg { display: inline-flex; border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; background: #fff; box-shadow: var(--shadow-soft); }
+  .appr-seg button {
+    border: none; background: #fff; padding: 8px 14px; font-size: .8rem; font-weight: 600; color: var(--text-secondary);
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer; border-right: 1px solid var(--border-color); transition: background .12s;
+  }
+  .appr-seg button:last-child { border-right: none; }
+  .appr-seg button:hover { background: var(--g-blue-hover); color: var(--g-blue); }
+
+  /* ── Resumen superior: KPIs (izq) + matriz ejecutiva (der) ── */
+  .appr-summary {
+    display: grid; grid-template-columns: minmax(190px, 240px) 1fr;
+    gap: 12px; padding: 4px 24px 6px; align-items: stretch;
+  }
+  .appr-kpi-stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .appr-kpi-stack .appr-kpi { flex: 1; }
+
+  /* Matriz ejecutiva (executive control summary) */
+  .appr-matrix-card {
+    background: var(--bg-card); border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-card);
+    overflow: hidden; display: flex; flex-direction: column; min-width: 0;
+  }
+  .appr-matrix-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 14px; border-bottom: 1px solid var(--border-color); background: var(--bg-primary);
+  }
+  .appr-matrix-title { font-size: .74rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; }
+  .appr-matrix-note { font-size: .68rem; color: var(--text-muted); font-style: italic; white-space: nowrap; }
+  table.appr-matrix { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .83rem; margin: 0; }
+  table.appr-matrix thead th {
+    font-size: .63rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; color: var(--text-muted);
+    padding: 6px 14px; text-align: left; border-bottom: 1px solid var(--border-color); white-space: nowrap;
+  }
+  table.appr-matrix th.appr-num, table.appr-matrix td.appr-num { text-align: right; }
+  table.appr-matrix tbody td { padding: 6px 14px; border-bottom: 1px solid var(--border-color); vertical-align: middle; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.appr-matrix tbody tr:last-child td { border-bottom: none; }
+  table.appr-matrix tbody tr:hover { background: var(--g-blue-hover); }
+  .appr-mtx-down { color: var(--g-red); font-weight: 600; }
+  .appr-mtx-up { color: var(--g-green); font-weight: 600; }
+  .appr-mtx-zero { color: var(--text-muted); font-weight: 500; }
+  @media (max-width: 760px) { .appr-summary { grid-template-columns: 1fr; } }
+
+  .appr-kpi {
+    display: flex; align-items: center; gap: 10px; position: relative; overflow: hidden;
+    background: var(--bg-card); border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    box-shadow: var(--shadow-card); transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .appr-kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--g-blue); }
+  .appr-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .appr-kpi-ic {
+    width: 34px; height: 34px; border-radius: var(--radius-sm); flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 1rem;
+    background: var(--g-blue-light); color: var(--g-blue);
+  }
+  .appr-kpi-meta { min-width: 0; flex: 1; }
+  .appr-kpi-label { font-size: .62rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: .03em; line-height: 1.2; }
+  .appr-kpi-value { font-size: 1.18rem; font-weight: 750; color: var(--text-primary); margin-top: 1px; line-height: 1.12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .appr-kpi-value--sm {
+    font-size: .82rem; font-weight: 700; line-height: 1.15; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .appr-kpi--pending::before { background: #f4b400; } .appr-kpi--pending .appr-kpi-ic { background: #fef7e0; color: #b06000; }
+  .appr-kpi--approved::before { background: var(--g-green); } .appr-kpi--approved .appr-kpi-ic { background: var(--g-green-light); color: var(--g-green); }
+  .appr-kpi--rejected::before { background: var(--g-red); } .appr-kpi--rejected .appr-kpi-ic { background: var(--g-red-light); color: var(--g-red); }
+  .appr-kpi--accent::before { background: #7c4dff; } .appr-kpi--accent .appr-kpi-ic { background: #efe9ff; color: #6c3fe0; }
+
+  .appr-kpis-sub { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; padding: 2px 24px 12px; }
+  .appr-chip {
+    background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill); padding: 3px 10px; font-size: .71rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .appr-chip strong { font-weight: 750; }
+  .appr-chip--up { background: var(--g-green-light); color: var(--g-green); border-color: transparent; }
+  .appr-chip--down { background: var(--g-red-light); color: var(--g-red); border-color: transparent; }
+  .appr-chip.appr-note { background: transparent; border: none; color: var(--text-muted); font-style: italic; font-weight: 500; margin-left: auto; }
+
+  /* ── Filtros ── */
+  .appr-filters { padding: 16px 24px; border-top: 1px solid var(--border-color); background: var(--bg-primary); }
+  .appr-fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 13px 14px; align-items: end; }
+  .appr-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .appr-field label { font-size: .66rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .appr-field .form-control, .appr-field .form-select { font-size: .83rem; border-radius: var(--radius-sm); border-color: var(--border-color); }
+  .appr-field .form-control:focus, .appr-field .form-select:focus { border-color: var(--g-blue); box-shadow: 0 0 0 3px rgba(26,115,232,.12); }
+  .appr-fbtns { display: flex; gap: 8px; }
+  .appr-fbtns .btn { font-weight: 600; }
+  .appr-adv { margin-top: 12px; }
+  .appr-adv > summary {
+    cursor: pointer; font-size: .78rem; font-weight: 700; color: var(--g-blue); list-style: none;
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 2px; user-select: none;
+  }
+  .appr-adv > summary::-webkit-details-marker { display: none; }
+  .appr-adv-caret { transition: transform .18s ease; font-size: .85rem; }
+  .appr-adv[open] > summary .appr-adv-caret { transform: rotate(180deg); }
+  .appr-adv-grid { margin-top: 12px; padding-top: 14px; border-top: 1px dashed var(--border-color); }
+
+  /* ── Barra superior de tabla ── */
+  .appr-tbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 24px; flex-wrap: wrap; }
+  .appr-count { font-size: .82rem; color: var(--text-muted); }
+  .appr-count b { color: var(--text-primary); font-weight: 700; }
+
+  /* ── Tabla (scroll interno real, x + y) ── */
+  .appr-tablewrap { overflow: auto; max-width: 100%; max-height: 58vh; }
+  table.appr-table { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; font-size: .82rem; margin: 0; }
+  table.appr-table thead th {
+    position: sticky; top: 0; z-index: 2; background: var(--bg-primary);
+    font-size: .67rem; text-transform: uppercase; letter-spacing: .045em; font-weight: 700; color: var(--text-muted);
+    padding: 9px 14px; text-align: left; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); white-space: nowrap;
+    box-shadow: inset 0 -1px 0 var(--border-color);
+  }
+  table.appr-table tbody td { padding: 8px 14px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+  table.appr-table tbody tr { transition: background .1s ease; }
+  table.appr-table tbody tr:hover { background: var(--g-blue-hover); }
+  table.appr-table tbody tr:last-child td { border-bottom: none; }
+  .appr-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .appr-user { display: flex; align-items: center; gap: 11px; }
+  .appr-avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    background: var(--g-blue-light); color: var(--g-blue);
+    display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  }
+  .appr-cell-main { font-weight: 600; color: var(--text-primary); }
+  .appr-cell-sub { font-size: .72rem; color: var(--text-muted); margin-top: 1px; }
+  .appr-trunc { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .appr-code { font-family: var(--font-mono, ui-monospace, monospace); font-size: .72rem; color: var(--text-secondary); }
+
+  .appr-change { display: inline-flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .appr-change .old { color: var(--text-muted); }
+  .appr-change .arrow { color: #b0b4ba; }
+  .appr-change .new { font-weight: 700; color: var(--text-primary); }
+  .appr-delta { font-size: .71rem; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  .appr-type { border-radius: var(--radius-pill); padding: 3px 10px; font-size: .7rem; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .appr-type--up { background: var(--g-green-light); color: var(--g-green); }
+  .appr-type--down { background: var(--g-red-light); color: var(--g-red); }
+  .appr-type--adj { background: #eef0f2; color: var(--text-secondary); }
+  .appr-type--alta { background: var(--g-blue-light); color: var(--g-blue); }
+
+  .appr-impact { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: var(--radius-pill); font-size: .79rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .appr-impact--pos { background: var(--g-green-light); color: var(--g-green); }
+  .appr-impact--neg { background: var(--g-red-light); color: var(--g-red); }
+  .appr-impact--na { background: var(--bg-primary); color: var(--text-muted); font-weight: 500; font-style: italic; }
+
+  .appr-badge { border-radius: var(--radius-pill); padding: 4px 11px; font-size: .7rem; font-weight: 700; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .appr-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .appr-badge--pend { background: #fef7e0; color: #b06000; }
+  .appr-badge--ok { background: var(--g-green-light); color: var(--g-green); }
+  .appr-badge--no { background: var(--g-red-light); color: var(--g-red); }
+  .appr-badge--mix { background: #ede7f6; color: #6c3fe0; }
+
+  /* ── Filas de grupo (padre) e hijos ── */
+  table.appr-table tbody tr.appr-group-row { cursor: pointer; background: var(--bg-primary); }
+  table.appr-table tbody tr.appr-group-row:hover { background: #eef3fb; }
+  table.appr-table tbody tr.appr-group-row td { padding: 9px 14px; border-bottom: 1px solid var(--border-color); }
+  .appr-group-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .appr-group-caret { color: var(--text-muted); font-size: .9rem; transition: transform .12s; flex: none; }
+  .appr-group-tag {
+    background: linear-gradient(135deg, var(--g-blue) 0%, #4f93f7 100%); color: #fff;
+    font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 2px 8px; border-radius: var(--radius-pill); flex: none;
+  }
+  .appr-group-name { font-weight: 700; color: var(--text-primary); font-size: .9rem; max-width: 260px; }
+  .appr-group-meta { display: inline-flex; gap: 12px; flex-wrap: wrap; }
+  .appr-gmeta { font-size: .74rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .appr-group-impact { display: inline-flex; gap: 6px; }
+  .appr-group-status { display: inline-flex; align-items: center; gap: 8px; }
+  .appr-group-breakdown { white-space: nowrap; }
+  .appr-group-actions { display: inline-flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .appr-gbtn {
+    border: 1px solid var(--border-color); background: #fff; border-radius: var(--radius-sm);
+    padding: 5px 11px; font-size: .75rem; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; transition: all .12s; white-space: nowrap;
+  }
+  .appr-gbtn--ok { color: var(--g-green); border-color: #aedcc0; }
+  .appr-gbtn--ok:hover { background: var(--g-green); color: #fff; border-color: var(--g-green); }
+  .appr-gbtn--no { color: var(--g-red); border-color: #f0c0ba; }
+  .appr-gbtn--no:hover { background: var(--g-red); color: #fff; border-color: var(--g-red); }
+
+  /* Hijos del grupo: indentación sutil con riel */
+  table.appr-table tbody tr.appr-child-row td:first-child { box-shadow: inset 3px 0 0 var(--g-blue-light); }
+  table.appr-table tbody tr.appr-child-row { background: #fcfdff; }
+  .appr-child-rail { width: 14px; flex: none; }
+
+  .appr-rowacts { display: inline-flex; gap: 5px; justify-content: flex-end; }
+  .appr-act {
+    border: 1px solid var(--border-color); background: #fff; color: var(--text-secondary);
+    border-radius: var(--radius-sm); width: 31px; height: 31px; cursor: pointer; font-size: .92rem;
+    display: inline-flex; align-items: center; justify-content: center; transition: all .12s ease;
+  }
+  .appr-act:hover { background: var(--bg-primary); box-shadow: var(--shadow-soft); }
+  .appr-act--ok { color: var(--g-green); } .appr-act--ok:hover { background: var(--g-green-light); border-color: #aedcc0; }
+  .appr-act--no { color: var(--g-red); } .appr-act--no:hover { background: var(--g-red-light); border-color: #f0c0ba; }
+
+  /* ── Estado vacío ── */
+  .appr-empty { text-align: center; padding: 56px 20px; }
+  .appr-empty-ic {
+    width: 66px; height: 66px; border-radius: 50%; background: var(--g-green-light); color: var(--g-green);
+    display: flex; align-items: center; justify-content: center; font-size: 1.8rem; margin: 0 auto 16px;
+  }
+  .appr-empty h4 { font-size: 1.02rem; margin: 0 0 5px; color: var(--text-primary); font-weight: 700; }
+  .appr-empty p { font-size: .85rem; color: var(--text-muted); margin: 0; }
+
+  /* ── Contención global del panel ── */
+  #panel-aprobaciones { min-width: 0; max-width: 100%; }
+  #panel-aprobaciones .fc-table-card { max-width: 100%; }
+  .appr-tbar { row-gap: 8px; }
+
+  /* ── Paginación (premium, coherente arriba y abajo) ── */
+  #appr-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 24px; border-top: 1px solid var(--border-color); font-size: .8rem; color: var(--text-muted); }
+  .appr-pager { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-muted); white-space: nowrap; }
+  .appr-pgbtn {
+    border: 1px solid var(--border-color); background: #fff; color: var(--text-secondary);
+    border-radius: var(--radius-pill); padding: 6px 13px; font-size: .78rem; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; transition: all .14s ease;
+  }
+  .appr-pgbtn i { font-size: .9rem; }
+  .appr-pgbtn:hover:not(:disabled) { background: var(--g-blue); border-color: var(--g-blue); color: #fff; box-shadow: 0 3px 8px rgba(26,115,232,.25); }
+  .appr-pgbtn:disabled { opacity: .4; cursor: default; }
+  .appr-pginfo {
+    font-weight: 700; color: var(--text-secondary); padding: 5px 12px;
+    background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-pill);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Modales (refinados) ── */
+  .appr-modal-overlay {
+    position: fixed; inset: 0; background: rgba(20,22,28,.5); backdrop-filter: blur(2px);
+    z-index: 1080; display: flex; align-items: center; justify-content: center; padding: 20px;
+    animation: apprFade .15s ease;
+  }
+  @keyframes apprFade { from { opacity: 0; } to { opacity: 1; } }
+  .appr-modal {
+    background: #fff; border-radius: var(--radius-lg); width: 600px; max-width: 100%;
+    max-height: 88vh; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28); animation: apprPop .18s cubic-bezier(.2,.8,.3,1);
+  }
+  @keyframes apprPop { from { transform: translateY(12px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
+  .appr-modal--sm { width: 460px; }
+  .appr-modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 22px; border-bottom: 1px solid var(--border-color);
+  }
+  .appr-modal-head h4 { margin: 0; font-size: 1.06rem; font-weight: 700; display: flex; align-items: center; }
+  .appr-modal-x { background: none; border: none; font-size: 1.6rem; line-height: 1; cursor: pointer; color: var(--text-muted); transition: color .12s; }
+  .appr-modal-x:hover { color: var(--text-primary); }
+  .appr-modal-body { padding: 18px 22px; overflow-y: auto; }
+  .appr-modal-foot { padding: 14px 22px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 9px; background: var(--bg-primary); }
+  .appr-dt-row { display: flex; justify-content: space-between; gap: 18px; padding: 9px 0; border-bottom: 1px solid var(--border-color); font-size: .85rem; }
+  .appr-dt-row:last-child { border-bottom: none; }
+  .appr-dt-k { color: var(--text-muted); font-weight: 600; }
+  .appr-dt-v { text-align: right; color: var(--text-primary); font-weight: 600; }
+  .appr-modal textarea.form-control { border-radius: var(--radius-sm); }
+  .appr-modal textarea.form-control:focus { border-color: var(--g-red); box-shadow: 0 0 0 3px rgba(217,48,37,.12); }
+
+  @media (max-width: 1280px) { .appr-trunc { max-width: 140px; } }
+  @media (max-width: 992px) {
+    .appr-head { padding: 16px 18px; }
+    .appr-summary, .appr-kpis-sub, .appr-filters, .appr-tbar, #appr-pagination { padding-left: 18px; padding-right: 18px; }
+    table.appr-table thead th, table.appr-table tbody td { padding-left: 12px; padding-right: 12px; }
+  }
+
+  @media print {
+    body * { visibility: hidden; }
+    #panel-aprobaciones, #panel-aprobaciones * { visibility: visible; }
+    #panel-aprobaciones { position: absolute; left: 0; top: 0; width: 100%; }
+    .appr-actions, .appr-filters, .appr-rowacts, #appr-pagination, #appr-pagination-top, .appr-tbar .appr-count { display: none !important; }
+    .appr-kpi, .fc-table-card { box-shadow: none !important; }
+    .appr-tablewrap { max-height: none !important; overflow: visible !important; }
+  }
 </style>
 {% endblock %}
 
@@ -1956,10 +2255,10 @@
         Detalle Operativo
         <span class="fc-tab-badge">Vista 2</span>
       </button>
-      {% if user.is_admin() or user.role|lower in ['auditor','audit','aud','auditor_siem','administrator','administrador'] %}
-      <button class="fc-view-tab" id="tab-auditoria" onclick="switchTab('auditoria')">
-        <i class="bi bi-shield-check"></i>
-        Auditoría
+      {% if user.is_admin() %}
+      <button class="fc-view-tab" id="tab-aprobaciones" onclick="switchTab('aprobaciones')">
+        <i class="bi bi-clipboard-check"></i>
+        Aprobaciones Forecast
         <span class="fc-tab-badge">Admin</span>
       </button>
       {% endif %}
@@ -2195,179 +2494,255 @@
       </div><!-- /panel-detalle -->
 
       <!-- ════════════════════════════════════════════════════════════ -->
-      <!-- PANEL 3 — AUDITORÍA DE AJUSTES FORECAST (Admin/Auditor)     -->
+      <!-- PANEL 3 — APROBACIONES FORECAST (solo Admin)                -->
       <!-- ════════════════════════════════════════════════════════════ -->
-      {% if user.is_admin() or user.role|lower in ['auditor','audit','aud','auditor_siem','administrator','administrador'] %}
-      <div class="fc-tab-panel" id="panel-auditoria">
+      {% if user.is_admin() %}
+      <div class="fc-tab-panel" id="panel-aprobaciones">
 
-        <!-- ── Aviso limitaciones (destacado) ── -->
-        <div style="padding:14px 18px;background:#fff3cd;border-radius:var(--radius-sm);border-left:4px solid #f4b400;margin-bottom:16px;font-size:0.8rem;color:#5a4300;line-height:1.6;">
-          <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Limitación de datos — leer antes de interpretar el informe</strong><br>
-          Este informe muestra los <strong>ajustes porcentuales</strong> registrados por los usuarios. Los valores absolutos base/ajustado
-          <strong>no se encuentran almacenados</strong> en la tabla de overrides (<code>forecast_user_overrides</code>), por lo que el impacto
-          monetario absoluto no está disponible en esta versión.<br>
-          <span style="color:#7d4e00;">La columna <em>"Fecha de Actividad"</em> corresponde a <code>updated_at</code> para ajustes porcentuales y a <code>created_at</code>
-          del cliente manual para cargas manuales. Si un ajuste figura como <strong>Revertido o desactivado</strong>, esa fecha indica
-          la última modificación —no una fecha histórica exacta de reversión—, dado que no existe tabla de historial de cambios.</span>
+        <!-- ── Resumen ejecutivo (KPIs) ── -->
+        <div class="fc-table-card" style="margin-bottom:18px;">
+
+          <!-- Encabezado premium -->
+          <div class="appr-head">
+            <div class="appr-head-titles">
+              <div class="appr-head-ic"><i class="bi bi-clipboard-check"></i></div>
+              <div>
+                <h3>Aprobaciones Forecast</h3>
+                <p class="appr-sub">Revisión de modificaciones realizadas por cotizadores sobre las proyecciones comerciales. Apruebe o rechace los cambios y descargue el informe ejecutivo.</p>
+              </div>
+            </div>
+            <div class="appr-actions">
+              <button class="appr-btn-refresh" onclick="_apprLoad()" title="Actualizar listado">
+                <i class="bi bi-arrow-clockwise"></i> Actualizar
+              </button>
+              <div class="appr-seg" role="group" aria-label="Exportar informe">
+                <button onclick="_apprExport('csv')" title="Descargar informe en CSV"><i class="bi bi-filetype-csv"></i> CSV</button>
+                <button onclick="_apprExport('xlsx')" title="Descargar informe en Excel"><i class="bi bi-file-earmark-excel"></i> Excel</button>
+                <button onclick="_apprPrint()" title="Imprimir informe ejecutivo"><i class="bi bi-printer"></i> Imprimir</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resumen: KPIs (izq) + matriz ejecutiva (der) -->
+          <div class="appr-summary">
+
+            <!-- Izquierda: dos KPIs apilados -->
+            <div class="appr-kpi-stack">
+              <div class="appr-kpi appr-kpi--pending">
+                <div class="appr-kpi-ic"><i class="bi bi-hourglass-split"></i></div>
+                <div class="appr-kpi-meta">
+                  <div class="appr-kpi-label">Modificaciones pendientes</div>
+                  <div class="appr-kpi-value" id="kpi-pendientes">—</div>
+                </div>
+              </div>
+              <div class="appr-kpi appr-kpi--accent">
+                <div class="appr-kpi-ic"><i class="bi bi-people"></i></div>
+                <div class="appr-kpi-meta">
+                  <div class="appr-kpi-label">Usuarios con cambios</div>
+                  <div class="appr-kpi-value" id="kpi-usuarios">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Derecha: matriz ejecutiva impacto estimado por estatus × tipo -->
+            <div class="appr-matrix-card">
+              <div class="appr-matrix-head">
+                <span class="appr-matrix-title"><i class="bi bi-grid-3x3-gap me-1"></i>Impacto estimado por estatus</span>
+                <span class="appr-matrix-note">Valores estimados (ARS)</span>
+              </div>
+              <table class="appr-matrix">
+                <thead>
+                  <tr>
+                    <th>Estatus</th>
+                    <th class="appr-num"><i class="bi bi-arrow-down-right"></i> Baja</th>
+                    <th class="appr-num"><i class="bi bi-arrow-up-right"></i> Suba</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="appr-badge appr-badge--pend">Pendiente</span></td>
+                    <td class="appr-num appr-mtx-down" id="mtx-pendiente-baja">—</td>
+                    <td class="appr-num appr-mtx-up" id="mtx-pendiente-suba">—</td>
+                  </tr>
+                  <tr>
+                    <td><span class="appr-badge appr-badge--ok">Aprobado</span></td>
+                    <td class="appr-num appr-mtx-down" id="mtx-aprobado-baja">—</td>
+                    <td class="appr-num appr-mtx-up" id="mtx-aprobado-suba">—</td>
+                  </tr>
+                  <tr>
+                    <td><span class="appr-badge appr-badge--no">Rechazado</span></td>
+                    <td class="appr-num appr-mtx-down" id="mtx-rechazado-baja">—</td>
+                    <td class="appr-num appr-mtx-up" id="mtx-rechazado-suba">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="appr-kpis-sub" id="appr-kpis-sub">
+            <span class="appr-chip appr-chip--up"><i class="bi bi-arrow-up-right"></i> Subas de %: <strong id="kpi-subas">0</strong></span>
+            <span class="appr-chip appr-chip--down"><i class="bi bi-arrow-down-right"></i> Bajas de %: <strong id="kpi-bajas">0</strong></span>
+            <span class="appr-chip"><i class="bi bi-sliders"></i> Ajustes: <strong id="kpi-ajustes">0</strong></span>
+            <span class="appr-chip appr-note">Los importes son <strong>estimados</strong> (cruce del % con la base valorizada).</span>
+          </div>
         </div>
 
         <div class="fc-table-card" style="margin-bottom:24px;">
-          <div class="fc-table-header">
-            <div class="fc-table-header-left">
-              <h3><i class="bi bi-shield-check me-2" style="color:var(--g-blue)"></i>Auditoría de Ajustes Forecast</h3>
-              <p class="fc-table-subtitle">
-                Fuentes: <code>forecast_user_overrides</code> (ajustes %) + <code>forecast_manual_entries</code> (clientes manuales con valores absolutos). Solo lectura.
-              </p>
-            </div>
-            <div class="fc-table-header-right" style="gap:8px; flex-wrap:wrap;">
-              <button class="btn btn-sm btn-outline-secondary" onclick="_auditLoad()" title="Actualizar">
-                <i class="bi bi-arrow-clockwise"></i> Actualizar
-              </button>
-              <button class="btn btn-sm" style="background:var(--g-green);color:#fff;" onclick="_auditExport('csv')" title="Exportar CSV">
-                <i class="bi bi-filetype-csv"></i> CSV
-              </button>
-              <button class="btn btn-sm" style="background:#217346;color:#fff;" onclick="_auditExport('xlsx')" title="Exportar Excel (incluye hoja Glosario)">
-                <i class="bi bi-file-earmark-excel"></i> Excel
-              </button>
-            </div>
-          </div>
 
           <!-- Filtros -->
-          <div style="display:flex;flex-wrap:wrap;gap:10px;padding:12px 16px 8px;border-bottom:1px solid var(--border-color);">
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Desde</label>
-              <input type="date" id="aud-date-from" class="form-control form-control-sm" style="font-size:0.82rem;">
+          <div class="appr-filters">
+            <div class="appr-fgrid">
+              <div class="appr-field">
+                <label>Estado</label>
+                <select id="appr-estado" class="form-select form-select-sm">
+                  <option value="pendiente">Pendientes</option>
+                  <option value="aprobado">Aprobados</option>
+                  <option value="rechazado">Rechazados</option>
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="appr-field">
+                <label>Usuario (cotizador)</label>
+                <select id="appr-comercial" class="form-select form-select-sm">
+                  <option value="">Todos</option>
+                </select>
+              </div>
+              <div class="appr-field">
+                <label>Artículo / Cuenta</label>
+                <input type="text" id="appr-articulo" class="form-control form-control-sm" placeholder="Código o cliente…">
+              </div>
+              <div class="appr-field">
+                <label>Período</label>
+                <input type="month" id="appr-period" class="form-control form-control-sm">
+              </div>
+              <div class="appr-field appr-fbtns">
+                <button class="btn btn-sm" style="background:var(--g-blue);color:#fff;" onclick="_apprLoad()">
+                  <i class="bi bi-search"></i> Filtrar
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="_apprReset()">Limpiar</button>
+              </div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Hasta</label>
-              <input type="date" id="aud-date-to" class="form-control form-control-sm" style="font-size:0.82rem;">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:180px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Comercial (email)</label>
-              <select id="aud-comercial" class="form-select form-select-sm" style="font-size:0.82rem;">
-                <option value="">Todos</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:150px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Perfil</label>
-              <select id="aud-perfil" class="form-select form-select-sm" style="font-size:0.82rem;">
-                <option value="">Todos</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:160px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Subnegocio</label>
-              <select id="aud-subneg" class="form-select form-select-sm" style="font-size:0.82rem;">
-                <option value="">Todos</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:150px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Artículo / Cliente</label>
-              <input type="text" id="aud-articulo" class="form-control form-control-sm" placeholder="Código o nombre..." style="font-size:0.82rem;">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Mes Forecast</label>
-              <input type="month" id="aud-forecast-month" class="form-control form-control-sm" style="font-size:0.82rem;">
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:130px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Estado</label>
-              <select id="aud-estado" class="form-select form-select-sm" style="font-size:0.82rem;">
-                <option value="todos">Todos</option>
-                <option value="activo">Activo</option>
-                <option value="revertido">Revertido</option>
-              </select>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:3px;min-width:175px;">
-              <label style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Incluir clientes manuales</label>
-              <select id="aud-manuales" class="form-select form-select-sm" style="font-size:0.82rem;">
-                <option value="true">Sí (overrides + manuales)</option>
-                <option value="false">No (solo overrides %)</option>
-              </select>
-            </div>
-            <div style="display:flex;align-items:flex-end;gap:6px;">
-              <button class="btn btn-sm" style="background:var(--g-blue);color:#fff;" onclick="_auditLoad()">
-                <i class="bi bi-search"></i> Filtrar
-              </button>
-              <button class="btn btn-sm btn-outline-secondary" onclick="_auditReset()">
-                Limpiar
-              </button>
-            </div>
+
+            <details class="appr-adv">
+              <summary><i class="bi bi-sliders2"></i> Filtros avanzados <i class="bi bi-chevron-down appr-adv-caret"></i></summary>
+              <div class="appr-fgrid appr-adv-grid">
+                <div class="appr-field">
+                  <label>Desde</label>
+                  <input type="date" id="appr-date-from" class="form-control form-control-sm">
+                </div>
+                <div class="appr-field">
+                  <label>Hasta</label>
+                  <input type="date" id="appr-date-to" class="form-control form-control-sm">
+                </div>
+                <div class="appr-field">
+                  <label>Perfil</label>
+                  <select id="appr-perfil" class="form-select form-select-sm"><option value="">Todos</option></select>
+                </div>
+                <div class="appr-field">
+                  <label>Subnegocio</label>
+                  <select id="appr-subneg" class="form-select form-select-sm"><option value="">Todos</option></select>
+                </div>
+                <div class="appr-field">
+                  <label>Tipo</label>
+                  <select id="appr-tipo" class="form-select form-select-sm">
+                    <option value="">Todos</option>
+                    <option value="suba_pct">Suba de porcentaje</option>
+                    <option value="baja_pct">Baja de porcentaje</option>
+                    <option value="ajuste">Ajuste de proyección</option>
+                  </select>
+                </div>
+                <div class="appr-field">
+                  <label>Impacto</label>
+                  <select id="appr-impacto" class="form-select form-select-sm">
+                    <option value="">Todos</option>
+                    <option value="positivo">Solo positivos</option>
+                    <option value="negativo">Solo negativos</option>
+                  </select>
+                </div>
+                <div class="appr-field">
+                  <label>Alto impacto</label>
+                  <select id="appr-alto" class="form-select form-select-sm">
+                    <option value="">Todos</option>
+                    <option value="1">Solo alto impacto</option>
+                  </select>
+                </div>
+              </div>
+            </details>
           </div>
 
-          <!-- Estado / info -->
-          <div id="aud-status" style="padding:8px 16px;font-size:0.8rem;color:var(--text-muted);min-height:28px;"></div>
+          <!-- Barra superior: conteo / estado + paginación accesible -->
+          <div class="appr-tbar">
+            <div class="appr-count" id="appr-status">Cargando modificaciones…</div>
+            <div class="appr-pager" id="appr-pagination-top"></div>
+          </div>
 
           <!-- Tabla -->
-          <div style="overflow-x:auto;">
-            <table class="table table-sm table-hover" id="aud-table" style="font-size:0.78rem;margin-bottom:0;">
-              <thead id="aud-thead" style="position:sticky;top:0;background:#fff;z-index:2;">
+          <div class="appr-tablewrap">
+            <table class="appr-table" id="appr-table">
+              <thead id="appr-thead">
                 <tr>
-                  <th>Tipo de Registro</th>
-                  <th>Fecha de Actividad</th>
-                  <th>Comercial</th>
-                  <th>Rol</th>
-                  <th>Cliente</th>
-                  <th>Código Art.</th>
-                  <th>Descripción</th>
-                  <th>Perfil</th>
-                  <th>Negocio</th>
-                  <th>Subnegocio</th>
-                  <th>Mes Forecast</th>
-                  <th>Alcance</th>
-                  <th>% Base Anual</th>
-                  <th>% Ajuste Anual</th>
-                  <th>% Mensual</th>
-                  <th>Δ % Anual</th>
-                  <th>Valor Ajustado</th>
-                  <th>Vigente Desde</th>
+                  <th>Usuario</th>
+                  <th>Tipo</th>
+                  <th>Cambio (% anterior → nuevo)</th>
+                  <th class="appr-num">Impacto estimado</th>
+                  <th>Cuenta / Artículo</th>
+                  <th>Período</th>
                   <th>Estado</th>
-                  <th>Origen</th>
+                  <th style="text-align:right;">Acciones</th>
                 </tr>
               </thead>
-              <tbody id="aud-tbody">
-                <tr><td colspan="20" style="text-align:center;padding:32px;color:var(--text-muted);">
-                  <i class="bi bi-shield-check" style="font-size:1.5rem;display:block;margin-bottom:8px;"></i>
-                  Use los filtros y presione <strong>Filtrar</strong> para cargar los datos de auditoría.
+              <tbody id="appr-tbody">
+                <tr><td colspan="8">
+                  <div class="appr-empty">
+                    <div class="appr-empty-ic"><i class="bi bi-hourglass-split"></i></div>
+                    <h4>Cargando modificaciones…</h4>
+                    <p>Estamos recuperando los cambios para revisión.</p>
+                  </div>
                 </td></tr>
               </tbody>
             </table>
           </div>
 
           <!-- Paginación -->
-          <div id="aud-pagination" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border-color);font-size:0.8rem;color:var(--text-muted);">
+          <div id="appr-pagination"></div>
+        </div>
+
+        <!-- ── Modal: detalle de modificación ── -->
+        <div id="appr-detail-overlay" class="appr-modal-overlay" style="display:none;" onclick="if(event.target===this)_apprCloseDetail()">
+          <div class="appr-modal">
+            <div class="appr-modal-head">
+              <h4><i class="bi bi-clipboard-data me-2"></i>Detalle de la modificación</h4>
+              <button class="appr-modal-x" onclick="_apprCloseDetail()" aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="appr-modal-body" id="appr-detail-body"></div>
+            <div class="appr-modal-foot" id="appr-detail-foot"></div>
           </div>
         </div>
 
-        <!-- ── Diagnóstico técnico: tabla de auditoría futura ── -->
-        <details style="margin-bottom:16px;">
-          <summary style="cursor:pointer;padding:10px 14px;background:#f1f3f4;border-radius:var(--radius-sm);font-size:0.8rem;font-weight:600;color:var(--text-secondary);user-select:none;">
-            <i class="bi bi-code-square me-1"></i> Diagnóstico técnico — Campos faltantes para auditoría completa (expandir)
-          </summary>
-          <div style="padding:14px 16px;background:#f8fafc;border:1px solid var(--border-color);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);font-size:0.78rem;color:var(--text-secondary);line-height:1.8;">
-            <p><strong>Estado actual:</strong> La estructura existente permite auditar <em>qué porcentaje aplicó cada usuario</em>, pero no el impacto monetario absoluto ni un historial de cambios por fila.</p>
-            <p><strong>Tabla futura sugerida:</strong> <code>forecast_user_override_audit_log</code></p>
-            <table class="table table-sm" style="font-size:0.75rem;margin-bottom:8px;">
-              <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th></tr></thead>
-              <tbody>
-                <tr><td><code>audit_id</code></td><td>SERIAL PK</td><td>Clave primaria del log</td></tr>
-                <tr><td><code>override_id</code></td><td>INT FK</td><td>FK a forecast_user_overrides.id</td></tr>
-                <tr><td><code>action_type</code></td><td>VARCHAR(20)</td><td>created / updated / reverted / deleted</td></tr>
-                <tr><td><code>user_id</code></td><td>INT</td><td>Usuario que ejecutó la acción</td></tr>
-                <tr><td><code>user_email</code></td><td>VARCHAR</td><td>Email snapshot al momento de la acción</td></tr>
-                <tr><td><code>timestamp</code></td><td>TIMESTAMPTZ</td><td>Fecha/hora exacta de la acción (UTC)</td></tr>
-                <tr><td><code>scope / cliente / articulo / perfil / subneg / mes</code></td><td>VARCHAR</td><td>Snapshot de identificadores del registro</td></tr>
-                <tr><td><code>old_base_pct / new_base_pct</code></td><td>FLOAT</td><td>% base antes y después del cambio</td></tr>
-                <tr><td><code>old_adjusted_pct / new_adjusted_pct</code></td><td>FLOAT</td><td>% ajuste antes y después del cambio</td></tr>
-                <tr><td><code>old_absolute_value / new_absolute_value</code></td><td>FLOAT</td><td>Valor monetario antes y después (requiere cruce con CSV)</td></tr>
-                <tr><td><code>descripcion_articulo</code></td><td>VARCHAR</td><td>Snapshot de la descripción al momento del ajuste</td></tr>
-                <tr><td><code>source</code></td><td>VARCHAR(50)</td><td>Origen: "save-client" / "save-group" / "clear-client"</td></tr>
-                <tr><td><code>request_id</code></td><td>VARCHAR</td><td>ID de sesión/request para trazabilidad</td></tr>
-              </tbody>
-            </table>
-            <p style="color:var(--text-muted);">Esta tabla no está creada aún. Requiere una migración de base de datos y hooks en <code>save_client_overrides()</code>, <code>save_group_expectations()</code> y <code>clear_client_overrides()</code>. Solicitar implementación cuando sea necesario.</p>
+        <!-- ── Modal: rechazar con motivo ── -->
+        <div id="appr-reject-overlay" class="appr-modal-overlay" style="display:none;" onclick="if(event.target===this)_apprCloseReject()">
+          <div class="appr-modal appr-modal--sm">
+            <div class="appr-modal-head">
+              <h4><i class="bi bi-x-circle me-2" style="color:#d93025;"></i><span id="appr-reject-title">Rechazar modificación</span></h4>
+              <button class="appr-modal-x" onclick="_apprCloseReject()" aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="appr-modal-body">
+              <p id="appr-reject-sub" style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;"></p>
+              <label style="font-size:0.82rem;font-weight:600;display:block;margin-bottom:6px;">Motivo del rechazo</label>
+              <textarea id="appr-reject-motivo" class="form-control form-control-sm" rows="4"
+                        placeholder="Indique el motivo por el cual se rechaza esta modificación…"></textarea>
+              <div id="appr-reject-error" style="color:#d93025;font-size:0.78rem;margin-top:6px;display:none;"></div>
+            </div>
+            <div class="appr-modal-foot">
+              <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseReject()">Cancelar</button>
+              <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprConfirmReject()">
+                <i class="bi bi-x-circle"></i> Confirmar rechazo
+              </button>
+            </div>
           </div>
-        </details>
+        </div>
 
-      </div><!-- /panel-auditoria -->
+      </div><!-- /panel-aprobaciones -->
       {% endif %}
 
     </div><!-- /fc-content -->
@@ -6026,226 +6401,625 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 <script>
 /* ===================================================================
-   AUDITORÍA DE AJUSTES FORECAST — v2
-   Fuentes: forecast_user_overrides + forecast_manual_entries
+   APROBACIONES FORECAST — revisión de modificaciones (solo Admin)
+   Registro de control: aprobar/rechazar NO revierte el override.
    =================================================================== */
 (function () {
-  if (!document.getElementById('panel-auditoria')) return;
+  if (!document.getElementById('panel-aprobaciones')) return;
 
-  let _audPage = 1;
-  const _audPageSize = 200;
-  let _audTotal = 0;
-  let _audPages = 1;
+  let _apprPage = 1;
+  const _apprPageSize = 50;
+  let _apprTotal = 0;
+  let _apprPages = 1;
+  let _apprRecords = [];
+  let _apprById = {};
+  let _apprKpis = {};
+  let _apprThreshold = 1000000;
+  let _rejectId = null;
+  let _rejectMode = 'single';     // 'single' | 'group'
+  let _rejectGroup = null;
+  let _apprUnits = [];            // unidades de la página actual (grupos + sueltos)
+  const _apprGroupExpanded = {};  // nombre de grupo → bool (default colapsado)
+  const _NC = 8;
 
-  async function _auditLoadOptions() {
-    try {
-      const r = await fetch('/forecast/api/audit/filter-options');
-      const d = await r.json();
-      if (!d.ok) return;
-      _populateSelect('aud-comercial', d.comerciales, 'Todos');
-      _populateSelect('aud-perfil', d.perfiles, 'Todos');
-      _populateSelect('aud-subneg', d.subneg, 'Todos');
-    } catch (_) {}
+  function _apprInitials(name) {
+    const s = (name || '').replace(/@.*/, '').trim();
+    if (!s) return '—';
+    const parts = s.split(/[\s._-]+/).filter(Boolean);
+    const a = parts[0] ? parts[0][0] : '';
+    const b = parts[1] ? parts[1][0] : (parts[0] && parts[0][1] ? parts[0][1] : '');
+    return (a + b).toUpperCase();
   }
 
+  // ── Formateadores ──────────────────────────────────────────────
+  const esc = s => (s === null || s === undefined) ? '' : String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const dash = '<span style="color:var(--text-muted);">—</span>';
+  function fmtMoney(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) return dash;
+    const n = parseFloat(v);
+    const sign = n < 0 ? '-' : '';
+    return sign + '$' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0});
+  }
+  function fmtMoneyPlain(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) return 'N/D';
+    const n = parseFloat(v);
+    const sign = n < 0 ? '-' : '';
+    return sign + '$' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0});
+  }
+  function fmtPct(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) return dash;
+    return parseFloat(v).toFixed(2) + '%';
+  }
+  function fmtPctPlain(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) return '—';
+    return parseFloat(v).toFixed(2) + '%';
+  }
+  function deltaChip(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) return dash;
+    const pv = parseFloat(v);
+    const color = pv > 0 ? '#0f9d58' : pv < 0 ? '#d93025' : '#3c4043';
+    const sign = pv > 0 ? '+' : '';
+    return `<span style="color:${color};font-weight:600;">${sign}${pv.toFixed(2)}</span>`;
+  }
+  function impactCell(v) {
+    if (v === null || v === undefined || isNaN(parseFloat(v))) {
+      return `<span class="appr-impact appr-impact--na" title="No hay base valorizada para estimar">N/D</span>`;
+    }
+    const n = parseFloat(v);
+    const cls = n > 0 ? 'appr-impact--pos' : n < 0 ? 'appr-impact--neg' : 'appr-impact--na';
+    const ic = n > 0 ? '<i class="bi bi-arrow-up-short"></i>' : n < 0 ? '<i class="bi bi-arrow-down-short"></i>' : '';
+    return `<span class="appr-impact ${cls}">${ic}${fmtMoney(n)}</span>`;
+  }
+  function statusBadge(s) {
+    if (s === 'aprobado') return `<span class="appr-badge appr-badge--ok">Aprobado</span>`;
+    if (s === 'rechazado') return `<span class="appr-badge appr-badge--no">Rechazado</span>`;
+    if (s === 'mixto') return `<span class="appr-badge appr-badge--mix">Mixto</span>`;
+    return `<span class="appr-badge appr-badge--pend">Pendiente</span>`;
+  }
+  function typeChip(r) {
+    const map = {
+      suba_pct: ['appr-type--up', 'bi-arrow-up-right', 'Suba %'],
+      baja_pct: ['appr-type--down', 'bi-arrow-down-right', 'Baja %'],
+      ajuste:   ['appr-type--adj', 'bi-sliders', 'Ajuste'],
+      alta_manual: ['appr-type--alta', 'bi-plus-circle', 'Alta'],
+    };
+    const m = map[r.change_type] || ['appr-type--adj', 'bi-dot', (r.change_type_label || '—')];
+    return `<span class="appr-type ${m[0]}"><i class="bi ${m[1]}"></i>${esc(m[2])}</span>`;
+  }
+  // Celda combinada "valor anterior → valor nuevo" + Δ
+  function changeCell(r) {
+    const ant = fmtPctPlain(r.valor_anterior);
+    const nue = fmtPctPlain(r.valor_nuevo);
+    let delta = '';
+    const dv = r.delta_abs;
+    if (dv !== null && dv !== undefined && !isNaN(parseFloat(dv))) {
+      const pv = parseFloat(dv);
+      const color = pv > 0 ? 'var(--g-green)' : pv < 0 ? 'var(--g-red)' : 'var(--text-secondary)';
+      const sign = pv > 0 ? '+' : '';
+      delta = `<div class="appr-delta" style="color:${color};">${sign}${pv.toFixed(2)} pts</div>`;
+    }
+    return `<div><span class="appr-change"><span class="old">${ant}</span>`
+         + `<i class="bi bi-arrow-right arrow"></i><span class="new">${nue}</span></span>${delta}</div>`;
+  }
+
+  // ── Filtros ────────────────────────────────────────────────────
   function _populateSelect(id, items, allLabel) {
     const sel = document.getElementById(id);
     if (!sel) return;
     const cur = sel.value;
-    sel.innerHTML = `<option value="">${allLabel}</option>`;
-    items.forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v; opt.textContent = v;
-      if (v === cur) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    const opts = [`<option value="">${allLabel}</option>`].concat(
+      (items||[]).map(v => `<option value="${esc(v)}"${v===cur?' selected':''}>${esc(v)}</option>`));
+    sel.innerHTML = opts.join('');
   }
 
-  function _auditGetFilters() {
+  async function _apprLoadOptions() {
+    try {
+      const r = await fetch('/forecast/api/approvals/filter-options', {credentials:'same-origin'});
+      const d = await r.json();
+      if (!d.ok) return;
+      _populateSelect('appr-comercial', d.comerciales, 'Todos');
+      _populateSelect('appr-perfil', d.perfiles, 'Todos');
+      _populateSelect('appr-subneg', d.subneg, 'Todos');
+    } catch (_) {}
+  }
+
+  function _apprGetFilters() {
     return {
-      date_from:      (document.getElementById('aud-date-from')?.value || ''),
-      date_to:        (document.getElementById('aud-date-to')?.value || ''),
-      comercial:      (document.getElementById('aud-comercial')?.value || ''),
-      perfil:         (document.getElementById('aud-perfil')?.value || ''),
-      subneg:         (document.getElementById('aud-subneg')?.value || ''),
-      articulo:       (document.getElementById('aud-articulo')?.value || ''),
-      forecast_month: (document.getElementById('aud-forecast-month')?.value || ''),
-      estado:         (document.getElementById('aud-estado')?.value || 'todos'),
-      incluir_manuales: (document.getElementById('aud-manuales')?.value !== 'false'),
+      estado:      (document.getElementById('appr-estado')?.value || 'pendiente'),
+      date_from:   (document.getElementById('appr-date-from')?.value || ''),
+      date_to:     (document.getElementById('appr-date-to')?.value || ''),
+      comercial:   (document.getElementById('appr-comercial')?.value || ''),
+      perfil:      (document.getElementById('appr-perfil')?.value || ''),
+      subneg:      (document.getElementById('appr-subneg')?.value || ''),
+      articulo:    (document.getElementById('appr-articulo')?.value || ''),
+      period:      (document.getElementById('appr-period')?.value || ''),
+      change_type: (document.getElementById('appr-tipo')?.value || ''),
+      impacto:     (document.getElementById('appr-impacto')?.value || ''),
+      alto_impacto:(document.getElementById('appr-alto')?.value || ''),
     };
   }
 
-  function _auditBuildURL(page, fmt) {
-    const f = _auditGetFilters();
-    const base = fmt ? `/forecast/api/audit/export` : `/forecast/api/audit`;
+  function _apprBuildURL(page, fmt) {
+    const f = _apprGetFilters();
+    const base = fmt ? `/forecast/api/approvals/export` : `/forecast/api/approvals`;
     const p = new URLSearchParams();
     if (fmt) p.set('fmt', fmt);
-    else { p.set('page', page); p.set('page_size', _audPageSize); }
-    if (f.date_from)      p.set('date_from', f.date_from);
-    if (f.date_to)        p.set('date_to', f.date_to);
-    if (f.comercial)      p.set('comercial', f.comercial);
-    if (f.perfil)         p.set('perfil', f.perfil);
-    if (f.subneg)         p.set('subneg', f.subneg);
-    if (f.articulo)       p.set('articulo', f.articulo);
-    if (f.forecast_month) p.set('forecast_month', f.forecast_month);
-    if (f.estado && f.estado !== 'todos') p.set('estado', f.estado);
-    p.set('incluir_manuales', f.incluir_manuales ? 'true' : 'false');
+    else { p.set('page', page); p.set('page_size', _apprPageSize); }
+    Object.keys(f).forEach(k => { if (f[k]) p.set(k, f[k]); });
     return `${base}?${p.toString()}`;
   }
 
-  function _auditSetStatus(msg, color) {
-    const el = document.getElementById('aud-status');
+  function _apprSetStatus(msg, color) {
+    const el = document.getElementById('appr-status');
     if (el) { el.textContent = msg; el.style.color = color || 'var(--text-muted)'; }
   }
 
-  const _NC = 20; // número de columnas en la tabla
+  // ── KPIs ───────────────────────────────────────────────────────
+  function _apprRenderKpis(k) {
+    _apprKpis = k || {};
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    // Dos KPIs (izquierda)
+    set('kpi-pendientes', (k.pendientes ?? 0).toLocaleString('es-AR'));
+    set('kpi-usuarios', (k.usuarios ?? 0).toLocaleString('es-AR'));
+    // Chips de resumen (conteos)
+    set('kpi-subas', (k.subas ?? 0));
+    set('kpi-bajas', (k.bajas ?? 0));
+    set('kpi-ajustes', (k.ajustes ?? 0));
 
-  function _auditRenderTable(records) {
-    const tbody = document.getElementById('aud-tbody');
+    // Matriz ejecutiva: impacto estimado por estatus × {baja, suba}
+    const m = k.matrix || {};
+    const setCell = (id, v) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const n = (typeof v === 'number') ? v : parseFloat(v);
+      if (!isFinite(n) || n === 0) {
+        el.textContent = '$0';
+        el.classList.add('appr-mtx-zero');
+        el.title = '';
+      } else {
+        el.textContent = fmtMoneyPlain(n);
+        el.classList.remove('appr-mtx-zero');
+        el.title = fmtMoneyPlain(n);
+      }
+    };
+    ['pendiente', 'aprobado', 'rechazado'].forEach(st => {
+      const row = m[st] || {};
+      setCell(`mtx-${st}-baja`, row.baja);
+      setCell(`mtx-${st}-suba`, row.suba);
+    });
+  }
+
+  // ── Tabla (agrupada por grupo de clientes) ─────────────────────
+  function _apprEmptyHtml() {
+    const f = _apprGetFilters();
+    const isPend = (f.estado === 'pendiente');
+    const title = isPend ? 'No hay modificaciones pendientes' : 'Sin modificaciones para mostrar';
+    const msg = isPend
+      ? 'No hay modificaciones pendientes de aprobación con los filtros seleccionados.'
+      : 'No se registraron modificaciones de Forecast con los filtros seleccionados.';
+    return `<tr><td colspan="${_NC}">
+      <div class="appr-empty">
+        <div class="appr-empty-ic"><i class="bi bi-clipboard-check"></i></div>
+        <h4>${title}</h4>
+        <p>${msg}</p>
+      </div>
+    </td></tr>`;
+  }
+
+  // Fila individual (cliente/modificación) — sirve para sueltos y para hijos de grupo
+  function _apprRowHtml(r, isChild) {
+    const pend = r.status === 'pendiente';
+    const actions = pend
+      ? `<button class="appr-act appr-act--ok" title="Aprobar" onclick="_apprApprove(${r.id})"><i class="bi bi-check-lg"></i></button>
+         <button class="appr-act appr-act--no" title="Rechazar" onclick="_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i></button>
+         <button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`
+      : `<button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`;
+    const estadoCell = pend
+      ? statusBadge(r.status)
+      : `${statusBadge(r.status)}<div class="appr-cell-sub" style="margin-top:4px;">${esc(r.revisado_por)} · ${esc(r.revisado_el)}</div>`;
+    const art = (r.codigo_serie && r.codigo_serie !== '—')
+      ? `<div class="appr-cell-sub"><span class="appr-code">${esc(r.codigo_serie)}</span></div>` : '';
+    return `<tr class="${isChild ? 'appr-child-row' : ''}">
+      <td>
+        <div class="appr-user">
+          ${isChild ? '<span class="appr-child-rail"></span>' : ''}
+          <div class="appr-avatar">${esc(_apprInitials(r.usuario))}</div>
+          <div style="min-width:0;">
+            <div class="appr-cell-main appr-trunc" title="${esc(r.usuario)}">${esc(r.usuario)}</div>
+            <div class="appr-cell-sub">${esc(r.created_at)}</div>
+          </div>
+        </div>
+      </td>
+      <td>${typeChip(r)}</td>
+      <td>${changeCell(r)}</td>
+      <td class="appr-num">${impactCell(r.impacto_estimado)}</td>
+      <td>
+        <div class="appr-cell-main appr-trunc" title="${esc(r.client_name)}">${esc(r.client_name)}</div>
+        ${art}
+      </td>
+      <td style="white-space:nowrap;">${esc(r.periodo)}</td>
+      <td>${estadoCell}</td>
+      <td><div class="appr-rowacts">${actions}</div></td>
+    </tr>`;
+  }
+
+  // Fila padre de grupo (colspan) con agregados + acciones de grupo
+  function _apprGroupRowHtml(u, idx) {
+    const expanded = _apprGroupExpanded[u.grupo] === true;
+    const caret = expanded ? 'bi-chevron-down' : 'bi-chevron-right';
+    const est = u.estados || {};
+    const cons = statusBadge(u.estado_consolidado);
+    const hasPend = (u.pendientes || 0) > 0;
+    const groupActs = hasPend
+      ? `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar todo el grupo" onclick="event.stopPropagation();_apprApproveGroupIdx(${idx})"><i class="bi bi-check2-all"></i> Aprobar grupo</button>
+         <button class="appr-gbtn appr-gbtn--no" title="Rechazar todo el grupo" onclick="event.stopPropagation();_apprOpenRejectGroupIdx(${idx})"><i class="bi bi-x-octagon"></i> Rechazar grupo</button>`
+      : `<span class="appr-cell-sub" style="font-style:italic;">Sin pendientes</span>`;
+    const impChips =
+      `<span class="appr-impact appr-impact--neg" title="Total bajas estimado">${(u.impacto_baja||0) ? '↓ '+fmtMoney(u.impacto_baja) : '$0'}</span>`
+      + `<span class="appr-impact appr-impact--pos" title="Total subas estimado">${(u.impacto_suba||0) ? '↑ '+fmtMoney(u.impacto_suba) : '$0'}</span>`;
+    return `<tr class="appr-group-row" onclick="_apprToggleGroupIdx(${idx})">
+      <td colspan="${_NC}">
+        <div class="appr-group-bar">
+          <i class="bi ${caret} appr-group-caret"></i>
+          <span class="appr-group-tag">Grupo</span>
+          <span class="appr-group-name appr-trunc" title="${esc(u.grupo)}">${esc(u.grupo)}</span>
+          <span class="appr-group-meta">
+            <span class="appr-gmeta"><i class="bi bi-people"></i> ${u.clientes} cuenta${u.clientes!==1?'s':''}</span>
+            <span class="appr-gmeta"><i class="bi bi-list-check"></i> ${u.modificaciones} modif.</span>
+          </span>
+          <span class="appr-group-impact">${impChips}</span>
+          <span class="appr-group-status">
+            ${cons}
+            <span class="appr-cell-sub appr-group-breakdown">Pend: ${est.pendiente||0} · Aprob: ${est.aprobado||0} · Rech: ${est.rechazado||0}</span>
+          </span>
+          <span class="appr-group-actions">${groupActs}</span>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  function _apprRenderGrouped(units) {
+    const tbody = document.getElementById('appr-tbody');
     if (!tbody) return;
-    if (!records || !records.length) {
-      tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:var(--text-muted);">
-        <i class="bi bi-search" style="font-size:1.5rem;display:block;margin-bottom:8px;"></i>
-        No se encontraron ajustes con los filtros seleccionados.
-      </td></tr>`;
-      return;
+    if (!units || !units.length) { tbody.innerHTML = _apprEmptyHtml(); return; }
+    const html = [];
+    units.forEach((u, i) => {
+      if (u.type === 'single') {
+        html.push(_apprRowHtml(u.record, false));
+      } else {
+        html.push(_apprGroupRowHtml(u, i));
+        if (_apprGroupExpanded[u.grupo] === true) {
+          (u.records || []).forEach(r => html.push(_apprRowHtml(r, true)));
+        }
+      }
+    });
+    tbody.innerHTML = html.join('');
+  }
+
+  window._apprToggleGroupIdx = function(i) {
+    const u = _apprUnits[i];
+    if (!u || u.type !== 'group') return;
+    _apprGroupExpanded[u.grupo] = !(_apprGroupExpanded[u.grupo] === true);
+    _apprRenderGrouped(_apprUnits);   // re-render local, sin refetch
+  };
+
+  function _apprRenderPagination() {
+    const bottom = document.getElementById('appr-pagination');
+    const top = document.getElementById('appr-pagination-top');
+    const dis = (cond) => cond ? '' : ' disabled';
+    const prevAttr = _apprPage > 1 ? ` onclick="_apprGoPage(${_apprPage - 1})"` : '';
+    const nextAttr = _apprPage < _apprPages ? ` onclick="_apprGoPage(${_apprPage + 1})"` : '';
+
+    // Pager compacto (barra superior) — siempre accesible
+    if (top) {
+      top.innerHTML = (_apprPages <= 1)
+        ? ''
+        : `<button class="appr-pgbtn"${prevAttr}${dis(_apprPage > 1)}><i class="bi bi-chevron-left"></i> Anterior</button>`
+          + `<span class="appr-pginfo">Pág. ${_apprPage} / ${_apprPages}</span>`
+          + `<button class="appr-pgbtn"${nextAttr}${dis(_apprPage < _apprPages)}>Siguiente <i class="bi bi-chevron-right"></i></button>`;
     }
 
-    const fmt = v => (v === null || v === undefined || v === 'No disponible' || v === 'No disponible (no almacenada en overrides)') ? '<span style="color:var(--text-muted);font-style:italic;">N/D</span>' : String(v);
-    const fmtNum = v => (v === null || v === undefined) ? '<span style="color:var(--text-muted);">—</span>' : v;
-    const fmtPct = v => (v === null || v === undefined) ? '<span style="color:var(--text-muted);">—</span>' : (parseFloat(v) * 100).toFixed(2) + '%';
-    const fmtAnualPct = v => (v === null || v === undefined) ? '<span style="color:var(--text-muted);">—</span>' : parseFloat(v).toFixed(2) + '%';
-    const fmtMoney = v => {
-      if (v === null || v === undefined || v === 'No disponible') return '<span style="color:var(--text-muted);">—</span>';
-      const n = parseFloat(v);
-      if (isNaN(n)) return fmt(v);
-      return '$' + n.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
-    };
-    const estadoChip = s => {
-      if (s === 'Activo') return `<span style="background:#e6f4ea;color:#0f9d58;border-radius:99px;padding:2px 8px;font-size:0.7rem;font-weight:600;">Activo</span>`;
-      if (s === 'Eliminado') return `<span style="background:#fce8e6;color:#d93025;border-radius:99px;padding:2px 8px;font-size:0.7rem;font-weight:600;">Eliminado</span>`;
-      return `<span style="background:#fff3cd;color:#856404;border-radius:99px;padding:2px 8px;font-size:0.7rem;font-weight:600;">${s}</span>`;
-    };
-    const tipoChip = t => t === 'Carga manual'
-      ? `<span style="background:#e8f0fe;color:#1a56db;border-radius:4px;padding:2px 6px;font-size:0.68rem;white-space:nowrap;">Carga manual</span>`
-      : `<span style="background:#f1f3f4;color:#3c4043;border-radius:4px;padding:2px 6px;font-size:0.68rem;white-space:nowrap;">Ajuste %</span>`;
-    const deltaChip = v => {
-      if (v === null || v === undefined) return '<span style="color:var(--text-muted);">—</span>';
-      const pv = parseFloat(v);
-      const color = pv > 0 ? '#0f9d58' : pv < 0 ? '#d93025' : '#3c4043';
-      const sign = pv > 0 ? '+' : '';
-      return `<span style="color:${color};font-weight:600;">${sign}${pv.toFixed(2)}%</span>`;
-    };
-
-    tbody.innerHTML = records.map(r => `<tr>
-      <td>${tipoChip(r.tipo_registro)}</td>
-      <td style="white-space:nowrap;">${fmt(r.fecha_actividad)}</td>
-      <td title="${r.usuario_email || ''}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fmt(r.usuario_nombre || r.creado_por)}</td>
-      <td><span style="background:#e8f0fe;color:#1a73e8;border-radius:99px;padding:2px 7px;font-size:0.68rem;">${fmt(r.usuario_rol)}</span></td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.client_selector || ''}">${fmt(r.cliente)}</td>
-      <td><code style="font-size:0.7rem;">${fmt(r.articulo_codigo)}</code></td>
-      <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.descripcion_articulo || ''}">${fmt(r.descripcion_articulo)}</td>
-      <td>${fmt(r.perfil)}</td>
-      <td>${fmt(r.negocio)}</td>
-      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${fmt(r.subnegocio)}</td>
-      <td style="white-space:nowrap;">${fmt(r.mes_forecast)}</td>
-      <td><span style="background:#f1f3f4;border-radius:4px;padding:1px 5px;font-size:0.68rem;">${fmt(r.alcance)}</span></td>
-      <td style="text-align:right;">${fmtAnualPct(r.pct_base_anual)}</td>
-      <td style="text-align:right;font-weight:600;">${fmtAnualPct(r.pct_ajuste_anual)}</td>
-      <td style="text-align:right;">${fmtPct(r.pct_mensual_efectivo)}</td>
-      <td style="text-align:right;">${deltaChip(r.diferencia_pct_anual)}</td>
-      <td style="text-align:right;">${fmtMoney(r.valor_ajustado_final)}</td>
-      <td style="white-space:nowrap;">${fmt(r.mes_vigencia_desde)}</td>
-      <td>${estadoChip(r.estado)}</td>
-      <td style="font-size:0.68rem;color:var(--text-muted);white-space:nowrap;">${fmt(r.origen)}</td>
-    </tr>`).join('');
+    // Pager inferior (detallado)
+    if (bottom) {
+      if (_apprPages <= 1) {
+        bottom.innerHTML = `<span>${_apprTotal} modificación(es)</span>`;
+      } else {
+        bottom.innerHTML =
+          `<button class="appr-pgbtn"${prevAttr}${dis(_apprPage > 1)}><i class="bi bi-chevron-left"></i> Anterior</button>`
+          + `<span class="appr-pginfo">Pág. ${_apprPage} de ${_apprPages} (${_apprTotal} modificaciones)</span>`
+          + `<button class="appr-pgbtn"${nextAttr}${dis(_apprPage < _apprPages)}>Siguiente <i class="bi bi-chevron-right"></i></button>`;
+      }
+    }
   }
 
-  function _auditRenderPagination() {
-    const el = document.getElementById('aud-pagination');
-    if (!el) return;
-    if (_audPages <= 1) { el.innerHTML = `<span>${_audTotal} registro(s)</span>`; return; }
-    const prev = _audPage > 1
-      ? `<button class="btn btn-sm btn-outline-secondary" onclick="_auditGoPage(${_audPage - 1})">‹ Anterior</button>`
-      : `<button class="btn btn-sm btn-outline-secondary" disabled>‹ Anterior</button>`;
-    const next = _audPage < _audPages
-      ? `<button class="btn btn-sm btn-outline-secondary" onclick="_auditGoPage(${_audPage + 1})">Siguiente ›</button>`
-      : `<button class="btn btn-sm btn-outline-secondary" disabled>Siguiente ›</button>`;
-    el.innerHTML = `${prev} <span>Pág. ${_audPage} de ${_audPages} (${_audTotal} registros)</span> ${next}`;
+  window._apprGoPage = function(p) { _apprPage = p; _apprFetch(); };
+
+  const _apprGroupedPageSize = 25;   // unidades (grupos + sueltos) por página
+  function _apprBuildGroupedURL(page) {
+    const f = _apprGetFilters();
+    const p = new URLSearchParams();
+    p.set('page', page); p.set('page_size', _apprGroupedPageSize);
+    Object.keys(f).forEach(k => { if (f[k]) p.set(k, f[k]); });
+    return `/forecast/api/approvals/grouped?${p.toString()}`;
   }
 
-  window._auditGoPage = function(p) { _audPage = p; _auditFetch(); };
-
-  async function _auditFetch() {
-    _auditSetStatus('Cargando datos…', 'var(--g-blue)');
-    const tbody = document.getElementById('aud-tbody');
+  async function _apprFetch() {
+    _apprSetStatus('Cargando modificaciones…', 'var(--g-blue)');
+    const tbody = document.getElementById('appr-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:24px;"><span class="fc-spinner"></span></td></tr>`;
     try {
-      const url = _auditBuildURL(_audPage, null);
-      const r = await fetch(url);
+      const r = await fetch(_apprBuildGroupedURL(_apprPage), {credentials:'same-origin'});
       if (r.status === 403) {
-        _auditSetStatus('Sin permisos para acceder a este informe.', '#d93025');
+        _apprSetStatus('Solo usuarios Admin pueden acceder a esta sección.', '#d93025');
         if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:#d93025;"><i class="bi bi-lock"></i> Sin permisos</td></tr>`;
         return;
       }
-      if (r.status === 401) {
-        _auditSetStatus('Sesión expirada. Recarga la página.', '#d93025');
-        return;
-      }
+      if (r.status === 401) { _apprSetStatus('Sesión expirada. Recargá la página.', '#d93025'); return; }
       const d = await r.json();
       if (!d.ok) throw new Error(d.detail || 'Error desconocido');
-      _audTotal = d.total;
-      _audPages = d.pages;
-      _auditRenderTable(d.records);
-      _auditRenderPagination();
-      const origen = d.origen === 'postgresql' ? 'PostgreSQL (Producción)' : 'SQLite (Local)';
-      const desglose = d.total_manual_entries > 0
-        ? ` (${d.total_overrides} overrides + ${d.total_manual_entries} entradas manuales)`
-        : ` (${d.total_overrides} overrides)`;
-      _auditSetStatus(
-        `${d.total} registro(s)${desglose} — Base: ${origen} — Pág. ${_audPage}/${_audPages}`,
+      _apprPages = d.pages;
+      _apprUnits = d.units || [];
+      // Indexar TODOS los registros (sueltos + hijos de grupo) para acciones individuales e impresión
+      _apprById = {};
+      _apprRecords = [];
+      _apprUnits.forEach(u => {
+        if (u.type === 'single') {
+          if (u.record) { _apprById[u.record.id] = u.record; _apprRecords.push(u.record); }
+        } else {
+          (u.records || []).forEach(x => { _apprById[x.id] = x; _apprRecords.push(x); });
+        }
+      });
+      _apprTotal = d.total_records || 0;
+      _apprThreshold = d.high_impact_threshold || _apprThreshold;
+      _apprRenderKpis(d.kpis || {});
+      _apprRenderGrouped(_apprUnits);
+      _apprRenderPagination();
+      const grupos = d.total_groups || 0;
+      const sueltos = (d.total_units || 0) - grupos;
+      _apprSetStatus(
+        d.total_records
+          ? `${d.total_records} modificaciones · ${grupos} grupo(s) · ${sueltos} suelta(s) — Pág. ${_apprPage}/${_apprPages}`
+          : 'Sin modificaciones',
         'var(--text-muted)'
       );
     } catch (err) {
-      _auditSetStatus('Error al cargar: ' + (err.message || err), '#d93025');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:#d93025;">Error: ${err.message}</td></tr>`;
+      _apprSetStatus('Error al cargar: ' + (err.message || err), '#d93025');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:#d93025;">Error: ${esc(err.message)}</td></tr>`;
     }
   }
 
-  window._auditLoad = function() { _audPage = 1; _auditFetch(); };
+  window._apprLoad = function() { _apprPage = 1; _apprFetch(); };
 
-  window._auditReset = function() {
-    ['aud-date-from','aud-date-to','aud-articulo','aud-forecast-month'].forEach(id => {
+  window._apprReset = function() {
+    ['appr-date-from','appr-date-to','appr-articulo','appr-period'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-    ['aud-comercial','aud-perfil','aud-subneg','aud-estado','aud-manuales'].forEach(id => {
+    ['appr-comercial','appr-perfil','appr-subneg','appr-tipo','appr-impacto','appr-alto'].forEach(id => {
       const el = document.getElementById(id); if (el) el.selectedIndex = 0;
     });
-    _audPage = 1;
-    const tbody = document.getElementById('aud-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:var(--text-muted);">
-      <i class="bi bi-shield-check" style="font-size:1.5rem;display:block;margin-bottom:8px;"></i>
-      Use los filtros y presione <strong>Filtrar</strong> para cargar.
-    </td></tr>`;
-    _auditSetStatus('Filtros limpiados.', 'var(--text-muted)');
-    const pg = document.getElementById('aud-pagination'); if (pg) pg.innerHTML = '';
+    const est = document.getElementById('appr-estado'); if (est) est.value = 'pendiente';
+    _apprPage = 1;
+    _apprFetch();
   };
 
-  window._auditExport = function(fmt) { window.location.href = _auditBuildURL(1, fmt); };
+  window._apprExport = function(fmt) { window.location.href = _apprBuildURL(1, fmt); };
 
-  // Patch switchTab to handle the 'auditoria' tab
+  // ── Aprobar / Rechazar ─────────────────────────────────────────
+  async function _apprPost(url, body) {
+    const r = await fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {}),
+    });
+    if (r.status === 403) throw new Error('Solo usuarios Admin pueden realizar esta acción.');
+    let d = {};
+    try { d = await r.json(); } catch (_) {}
+    if (!r.ok || !d.ok) throw new Error(d.detail || `Error (${r.status})`);
+    return d;
+  }
+
+  // Construye el cuerpo con los filtros actuales (para acotar la acción de grupo al contexto)
+  function _apprGroupBody(grupo, extra) {
+    const f = _apprGetFilters();
+    return Object.assign({ grupo: grupo }, f, extra || {});
+  }
+
+  // ── Acciones individuales ──────────────────────────────────────
+  window._apprApprove = async function(id) {
+    if (!confirm('¿Aprobar esta modificación? Quedará registrada como aprobada por Dirección.')) return;
+    _apprSetStatus('Aprobando…', 'var(--g-blue)');
+    try { await _apprPost(`/forecast/api/approvals/${id}/approve`, {}); _apprFetch(); }
+    catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
+  };
+
+  // ── Acciones de grupo ──────────────────────────────────────────
+  window._apprApproveGroupIdx = async function(i) {
+    const u = _apprUnits[i];
+    if (!u || u.type !== 'group') return;
+    const n = u.pendientes || 0;
+    if (!confirm(`¿Aprobar las ${n} modificación(es) pendiente(s) del grupo "${u.grupo}"?\nQuedarán registradas como aprobadas por Dirección.`)) return;
+    _apprSetStatus('Aprobando grupo…', 'var(--g-blue)');
+    try {
+      const d = await _apprPost('/forecast/api/approvals/group/approve', _apprGroupBody(u.grupo));
+      _apprSetStatus(`Grupo aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
+      _apprFetch();
+    } catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
+  };
+
+  window._apprOpenRejectGroupIdx = function(i) {
+    const u = _apprUnits[i];
+    if (!u || u.type !== 'group') return;
+    _rejectMode = 'group';
+    _rejectGroup = u.grupo;
+    _apprOpenRejectModal(`Rechazar grupo “${u.grupo}”`,
+      `Se rechazarán las ${u.pendientes || 0} modificación(es) pendiente(s) de este grupo bajo los filtros actuales.`);
+  };
+
+  // ── Rechazo (individual o grupo) ───────────────────────────────
+  function _apprOpenRejectModal(titleHtml, subHtml) {
+    const t = document.getElementById('appr-reject-title'); if (t) t.innerHTML = titleHtml;
+    const s = document.getElementById('appr-reject-sub'); if (s) s.innerHTML = subHtml || '';
+    const ta = document.getElementById('appr-reject-motivo'); if (ta) ta.value = '';
+    const er = document.getElementById('appr-reject-error'); if (er) er.style.display = 'none';
+    const ov = document.getElementById('appr-reject-overlay'); if (ov) ov.style.display = 'flex';
+    if (ta) setTimeout(() => ta.focus(), 50);
+  }
+  window._apprOpenReject = function(id) {
+    _rejectMode = 'single';
+    _rejectId = id;
+    _apprOpenRejectModal('Rechazar modificación', 'Esta acción rechaza una única modificación e indica el motivo.');
+  };
+  window._apprCloseReject = function() {
+    const ov = document.getElementById('appr-reject-overlay'); if (ov) ov.style.display = 'none';
+    _rejectId = null; _rejectGroup = null; _rejectMode = 'single';
+  };
+  window._apprConfirmReject = async function() {
+    const ta = document.getElementById('appr-reject-motivo');
+    const er = document.getElementById('appr-reject-error');
+    const motivo = (ta?.value || '').trim();
+    if (!motivo) { if (er) { er.textContent = 'Debe indicar un motivo para rechazar.'; er.style.display = 'block'; } return; }
+    try {
+      if (_rejectMode === 'group') {
+        const d = await _apprPost('/forecast/api/approvals/group/reject', _apprGroupBody(_rejectGroup, { motivo }));
+        _apprCloseReject();
+        _apprSetStatus(`Grupo rechazado: ${d.afectados} modificación(es).`, 'var(--g-red)');
+        _apprFetch();
+      } else {
+        await _apprPost(`/forecast/api/approvals/${_rejectId}/reject`, { motivo });
+        _apprCloseReject();
+        _apprFetch();
+      }
+    } catch (err) {
+      if (er) { er.textContent = err.message || String(err); er.style.display = 'block'; }
+    }
+  };
+
+  // ── Detalle ────────────────────────────────────────────────────
+  window._apprDetail = function(id) {
+    const r = _apprById[id];
+    if (!r) return;
+    const row = (label, val) => `<div class="appr-dt-row"><span class="appr-dt-k">${label}</span><span class="appr-dt-v">${val}</span></div>`;
+    const body = document.getElementById('appr-detail-body');
+    if (body) body.innerHTML = [
+      row('Usuario', esc(r.usuario)),
+      row('Fecha y hora', esc(r.created_at)),
+      row('Tipo de modificación', esc(r.change_type_label)),
+      row('Campo modificado', esc(r.campo)),
+      row('Valor anterior', fmtPctPlain(r.valor_anterior)),
+      row('Valor nuevo', `<strong>${fmtPctPlain(r.valor_nuevo)}</strong>`),
+      row('Diferencia', deltaChip(r.delta_abs) + ' pts'),
+      row('Impacto económico estimado', impactCell(r.impacto_estimado)),
+      row('Base valorizada (estimada)', fmtMoneyPlain(r.impacto_base)),
+      row('Cuenta / Cliente', esc(r.client_name)),
+      row('Perfil', esc(r.perfil)),
+      row('Negocio', esc(r.negocio)),
+      row('Subnegocio', esc(r.subnegocio)),
+      row('Artículo', esc(r.codigo_serie)),
+      row('Período', esc(r.periodo)),
+      row('Alcance', esc(r.scope_type)),
+      row('Estado', statusBadge(r.status)),
+      (r.status !== 'pendiente' ? row('Revisado por', esc(r.revisado_por) + ' — ' + esc(r.revisado_el)) : ''),
+      (r.motivo ? row('Observación / Motivo', esc(r.motivo)) : ''),
+    ].join('');
+    const foot = document.getElementById('appr-detail-foot');
+    if (foot) {
+      foot.innerHTML = (r.status === 'pendiente')
+        ? `<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" onclick="_apprCloseDetail();_apprApprove(${r.id})"><i class="bi bi-check-lg"></i> Aprobar</button>
+           <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprCloseDetail();_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i> Rechazar</button>
+           <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`
+        : `<button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`;
+    }
+    const ov = document.getElementById('appr-detail-overlay'); if (ov) ov.style.display = 'flex';
+  };
+  window._apprCloseDetail = function() {
+    const ov = document.getElementById('appr-detail-overlay'); if (ov) ov.style.display = 'none';
+  };
+
+  // ── Impresión del informe ejecutivo ────────────────────────────
+  window._apprPrint = function() {
+    const k = _apprKpis || {};
+    const f = _apprGetFilters();
+    const now = new Date();
+    const fdesc = [];
+    const estLabel = {pendiente:'Pendientes', aprobado:'Aprobados', rechazado:'Rechazados', todos:'Todos'}[f.estado] || f.estado;
+    fdesc.push(`Estado: ${estLabel}`);
+    if (f.date_from) fdesc.push(`Desde: ${f.date_from}`);
+    if (f.date_to) fdesc.push(`Hasta: ${f.date_to}`);
+    if (f.comercial) fdesc.push(`Usuario: ${f.comercial}`);
+    if (f.perfil) fdesc.push(`Perfil: ${f.perfil}`);
+    if (f.subneg) fdesc.push(`Subnegocio: ${f.subneg}`);
+    if (f.articulo) fdesc.push(`Artículo/Cuenta: ${f.articulo}`);
+    if (f.period) fdesc.push(`Período: ${f.period}`);
+    if (f.change_type) fdesc.push(`Tipo: ${f.change_type}`);
+
+    const rows = (_apprRecords || []).map(r => `<tr>
+      <td>${esc(r.usuario)}</td><td>${esc(r.created_at)}</td><td>${esc(r.change_type_label)}</td>
+      <td style="text-align:right;">${fmtPctPlain(r.valor_anterior)}</td>
+      <td style="text-align:right;">${fmtPctPlain(r.valor_nuevo)}</td>
+      <td style="text-align:right;">${fmtMoneyPlain(r.impacto_estimado)}</td>
+      <td>${esc(r.client_name)}</td><td>${esc(r.codigo_serie)}</td><td>${esc(r.periodo)}</td>
+      <td>${esc(r.status_label)}</td><td>${esc(r.motivo || '')}</td>
+    </tr>`).join('');
+
+    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+      <title>Informe de modificaciones de Forecast</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;color:#202124;margin:28px;font-size:12px;}
+        h1{font-size:18px;margin:0 0 2px;} .sub{color:#5f6368;margin:0 0 16px;font-size:12px;}
+        .meta{font-size:11px;color:#5f6368;margin-bottom:14px;}
+        .kpis{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 18px;}
+        .kpi{border:1px solid #dadce0;border-radius:6px;padding:8px 12px;min-width:150px;}
+        .kpi .l{font-size:10px;color:#5f6368;text-transform:uppercase;}
+        .kpi .v{font-size:15px;font-weight:700;}
+        table{border-collapse:collapse;width:100%;font-size:10.5px;}
+        th,td{border:1px solid #dadce0;padding:4px 6px;text-align:left;vertical-align:top;}
+        th{background:#f1f3f4;}
+        .firma{margin-top:42px;display:flex;gap:60px;}
+        .firma div{border-top:1px solid #202124;padding-top:4px;width:230px;text-align:center;font-size:11px;}
+        @media print{ .noprint{display:none;} }
+      </style></head><body>
+      <h1>Informe de modificaciones de Forecast</h1>
+      <p class="sub">Revisión de modificaciones realizadas por cotizadores sobre las proyecciones comerciales.</p>
+      <div class="meta">
+        Generado: ${now.toLocaleString('es-AR')} &nbsp;|&nbsp; Filtros aplicados: ${esc(fdesc.join(' · '))}<br>
+        <em>Los importes son estimados (cruce del porcentaje de ajuste con la base valorizada).</em>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Pendientes</div><div class="v">${k.pendientes ?? 0}</div></div>
+        <div class="kpi"><div class="l">Impacto pendiente</div><div class="v">${fmtMoneyPlain(k.impacto_pendiente)}</div></div>
+        <div class="kpi"><div class="l">Impacto aprobado</div><div class="v">${fmtMoneyPlain(k.impacto_aprobado)}</div></div>
+        <div class="kpi"><div class="l">Impacto rechazado</div><div class="v">${fmtMoneyPlain(k.impacto_rechazado)}</div></div>
+        <div class="kpi"><div class="l">Usuarios</div><div class="v">${k.usuarios ?? 0}</div></div>
+      </div>
+      <table><thead><tr>
+        <th>Usuario</th><th>Fecha</th><th>Tipo</th><th>Ant. (%)</th><th>Nuevo (%)</th>
+        <th>Impacto estimado</th><th>Cuenta/Cliente</th><th>Artículo</th><th>Período</th><th>Estado</th><th>Observación</th>
+      </tr></thead><tbody>${rows || `<tr><td colspan="11" style="text-align:center;padding:18px;">Sin modificaciones para los filtros aplicados.</td></tr>`}</tbody></table>
+      <div class="firma"><div>Revisado por (Admin)</div><div>Aprobado por Dirección</div></div>
+      <p class="noprint" style="margin-top:18px;"><button onclick="window.print()">Imprimir</button></p>
+      <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { alert('Habilite las ventanas emergentes para imprimir el informe.'); return; }
+    w.document.write(html); w.document.close();
+  };
+
+  // ── Patch switchTab para la pestaña 'aprobaciones' ─────────────
   const _origSwitchTab = window.switchTab;
-  let _auditOptsLoaded = false;
+  let _apprOptsLoaded = false;
   window.switchTab = function(name) {
     if (typeof _origSwitchTab === 'function') _origSwitchTab(name);
-    if (name === 'auditoria') {
+    if (name === 'aprobaciones') {
       document.querySelectorAll('.fc-view-tab').forEach(b => b.classList.remove('active'));
-      const btn = document.getElementById('tab-auditoria');
+      const btn = document.getElementById('tab-aprobaciones');
       if (btn) btn.classList.add('active');
       document.querySelectorAll('.fc-tab-panel').forEach(p => p.classList.remove('active'));
-      const panel = document.getElementById('panel-auditoria');
+      const panel = document.getElementById('panel-aprobaciones');
       if (panel) panel.classList.add('active');
-      if (!_auditOptsLoaded) { _auditOptsLoaded = true; _auditLoadOptions(); }
+      if (!_apprOptsLoaded) { _apprOptsLoaded = true; _apprLoadOptions(); }
+      _apprFetch();
     }
   };
 })();

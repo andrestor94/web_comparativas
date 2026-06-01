@@ -998,12 +998,22 @@ def _is_sqlite_db() -> bool:
         return False
 
 
-def _require_audit_access(user: User) -> None:
-    if not _can_view_global_forecast_adjustments(user):
+def _require_admin_only(user: User) -> None:
+    """Aprobaciones Forecast: acceso EXCLUSIVO de Admin (frontend + backend)."""
+    try:
+        is_admin = bool(user) and user.is_admin()
+    except Exception:
+        is_admin = False
+    if not is_admin:
         raise HTTPException(
             status_code=403,
-            detail="Solo usuarios con perfil Admin o Auditor pueden acceder al informe de auditoría.",
+            detail="Solo usuarios Admin pueden acceder a esta sección.",
         )
+
+
+def _require_audit_access(user: User) -> None:
+    # Defensa en profundidad: la sección pasó a ser exclusiva de Admin.
+    _require_admin_only(user)
 
 
 # ── Textos de limitación incluidos en cada fila del export ──────────────────
@@ -1532,6 +1542,666 @@ def api_audit_filter_options(
     except Exception as exc:
         logger.error("audit filter-options error: %s", exc, exc_info=True)
         return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": []})
+
+
+# ---------------------------------------------------------------------------
+# Aprobaciones Forecast (EXCLUSIVO Admin)
+# Revisión de modificaciones realizadas por cotizadores sobre las
+# proyecciones comerciales. Registro de control: aprobar/rechazar NO revierte
+# ni bloquea el override; solo deja constancia formal de Dirección.
+# ---------------------------------------------------------------------------
+
+_CR_TYPE_LABELS = {
+    "suba_pct": "Suba de porcentaje",
+    "baja_pct": "Baja de porcentaje",
+    "ajuste": "Ajuste de proyección",
+    "alta_manual": "Alta manual",
+}
+_CR_STATUS_LABELS = {
+    "pendiente": "Pendiente",
+    "aprobado": "Aprobado",
+    "rechazado": "Rechazado",
+}
+_HIGH_IMPACT_THRESHOLD = 1_000_000.0   # ARS — umbral "alto impacto"
+_MAX_CR_POOL = 20000
+
+
+def _lookup_grupo(client_name, client_selector, group_map: dict | None) -> str:
+    """Grupo del cliente (misma agrupación que 'Proyección más expectativa').
+    '' = sin grupo (cliente suelto)."""
+    if not group_map:
+        return ""
+    for key in (client_name, client_selector):
+        if key and key != "—":
+            g = group_map.get(str(key).strip().lower())
+            if g:
+                return g
+    return ""
+
+
+def _cr_to_dict(cr, group_map: dict | None = None) -> dict:
+    return {
+        "_created_sort": cr.created_at or dt.datetime.min,
+        "id": cr.id,
+        "grupo": _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map),
+        "created_at": cr.created_at.strftime("%Y-%m-%d %H:%M:%S") if cr.created_at else "—",
+        "source": cr.source or "—",
+        "change_type": cr.change_type or "ajuste",
+        "change_type_label": _CR_TYPE_LABELS.get(cr.change_type, cr.change_type or "—"),
+        "usuario": cr.created_by_username or "—",
+        "scope_type": cr.scope_type or "—",
+        "client_name": cr.client_name or cr.client_selector or "—",
+        "perfil": cr.perfil or "—",
+        "negocio": cr.neg or "—",
+        "subnegocio": cr.subneg or "—",
+        "codigo_serie": cr.codigo_serie or "—",
+        "descripcion_articulo": cr.descripcion_articulo or "—",
+        "periodo": cr.period or "—",
+        "campo": cr.field_changed or "—",
+        "valor_anterior": cr.old_value,
+        "valor_nuevo": cr.new_value,
+        "delta_abs": cr.absolute_delta,
+        "delta_pct": cr.percentage_delta,
+        "impacto_base": cr.estimated_amount_base,
+        "impacto_estimado": cr.estimated_amount_delta,
+        "status": cr.status or "pendiente",
+        "status_label": _CR_STATUS_LABELS.get(cr.status, cr.status or "—"),
+        "revisado_por": cr.reviewed_by_username or "—",
+        "revisado_el": cr.reviewed_at.strftime("%Y-%m-%d %H:%M:%S") if cr.reviewed_at else "—",
+        "motivo": cr.review_comment or "",
+    }
+
+
+def _query_change_requests(session, filters: dict, cap: int):
+    """Filtra forecast_change_requests. Compatible con SQLite y PostgreSQL."""
+    from web_comparativas.models import ForecastChangeRequest as CR
+
+    q = session.query(CR)
+
+    estado = (filters.get("estado") or "todos").strip().lower()
+    if estado in ("pendiente", "aprobado", "rechazado"):
+        q = q.filter(CR.status == estado)
+
+    df_from = _parse_date(filters.get("date_from") or "")
+    df_to = _parse_date(filters.get("date_to") or "")
+    if df_from:
+        q = q.filter(CR.created_at >= df_from)
+    if df_to:
+        q = q.filter(CR.created_at < df_to + dt.timedelta(days=1))
+
+    comercial = (filters.get("comercial") or "").strip()
+    if comercial:
+        q = q.filter(CR.created_by_username.ilike(f"%{comercial}%"))
+
+    perfil = (filters.get("perfil") or "").strip()
+    if perfil:
+        q = q.filter(CR.perfil.ilike(f"%{perfil}%"))
+
+    subneg = (filters.get("subneg") or "").strip()
+    if subneg:
+        q = q.filter(CR.subneg.ilike(f"%{subneg}%"))
+
+    articulo = (filters.get("articulo") or "").strip()
+    if articulo:
+        q = q.filter(
+            CR.codigo_serie.ilike(f"%{articulo}%")
+            | CR.client_name.ilike(f"%{articulo}%")
+        )
+
+    period = (filters.get("period") or "").strip()
+    if period:
+        q = q.filter(CR.period == period)
+
+    change_type = (filters.get("change_type") or "").strip()
+    if change_type:
+        q = q.filter(CR.change_type == change_type)
+
+    impacto = (filters.get("impacto") or "").strip().lower()
+    if impacto == "positivo":
+        q = q.filter(CR.percentage_delta > 0)
+    elif impacto == "negativo":
+        q = q.filter(CR.percentage_delta < 0)
+
+    if str(filters.get("alto_impacto") or "").strip().lower() in ("1", "true", "si", "sí"):
+        q = q.filter(
+            CR.estimated_amount_delta.isnot(None),
+            (CR.estimated_amount_delta >= _HIGH_IMPACT_THRESHOLD)
+            | (CR.estimated_amount_delta <= -_HIGH_IMPACT_THRESHOLD),
+        )
+
+    return q.order_by(CR.created_at.desc()).limit(cap).all()
+
+
+def _compute_approval_kpis(records: list[dict]) -> dict:
+    """KPIs ejecutivos sobre el conjunto FILTRADO (antes de paginar)."""
+    def _amt(r):
+        v = r.get("impacto_estimado")
+        return float(v) if isinstance(v, (int, float)) else 0.0
+
+    pendientes = [r for r in records if r.get("status") == "pendiente"]
+    aprobados = [r for r in records if r.get("status") == "aprobado"]
+    rechazados = [r for r in records if r.get("status") == "rechazado"]
+
+    # Mayor impacto por cuenta/grupo (suma de impacto estimado en valor absoluto)
+    por_cuenta: dict[str, float] = {}
+    for r in records:
+        cta = r.get("client_name") or "—"
+        por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(_amt(r))
+    mayor_cuenta, mayor_cuenta_monto = ("—", 0.0)
+    if por_cuenta:
+        mayor_cuenta, mayor_cuenta_monto = max(por_cuenta.items(), key=lambda kv: kv[1])
+
+    usuarios = {r.get("usuario") for r in records if r.get("usuario") and r.get("usuario") != "—"}
+
+    subas = sum(1 for r in records if r.get("change_type") == "suba_pct")
+    bajas = sum(1 for r in records if r.get("change_type") == "baja_pct")
+    ajustes = sum(1 for r in records if r.get("change_type") == "ajuste")
+    altas = sum(1 for r in records if r.get("change_type") == "alta_manual")
+
+    # Matriz ejecutiva: impacto estimado por estatus × tipo (baja / suba).
+    def _row_amt(rows, ct):
+        return round(sum(_amt(r) for r in rows if r.get("change_type") == ct), 2)
+
+    matrix = {
+        "pendiente": {"baja": _row_amt(pendientes, "baja_pct"), "suba": _row_amt(pendientes, "suba_pct")},
+        "aprobado":  {"baja": _row_amt(aprobados, "baja_pct"),  "suba": _row_amt(aprobados, "suba_pct")},
+        "rechazado": {"baja": _row_amt(rechazados, "baja_pct"), "suba": _row_amt(rechazados, "suba_pct")},
+    }
+
+    return {
+        "pendientes": len(pendientes),
+        "aprobados": len(aprobados),
+        "rechazados": len(rechazados),
+        "impacto_pendiente": round(sum(_amt(r) for r in pendientes), 2),
+        "impacto_aprobado": round(sum(_amt(r) for r in aprobados), 2),
+        "impacto_rechazado": round(sum(_amt(r) for r in rechazados), 2),
+        "usuarios": len(usuarios),
+        "mayor_cuenta": mayor_cuenta,
+        "mayor_cuenta_monto": round(mayor_cuenta_monto, 2),
+        "subas": subas,
+        "bajas": bajas,
+        "ajustes": ajustes,
+        "altas_manuales": altas,
+        "matrix": matrix,
+        "total": len(records),
+    }
+
+
+@router.get("/api/approvals", response_class=JSONResponse)
+def api_approvals(
+    request: Request,
+    user: User = Depends(_require_user),
+    estado: Optional[str] = Query("todos"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    comercial: Optional[str] = Query(None),
+    perfil: Optional[str] = Query(None),
+    subneg: Optional[str] = Query(None),
+    articulo: Optional[str] = Query(None),
+    period: Optional[str] = Query(None),
+    change_type: Optional[str] = Query(None),
+    impacto: Optional[str] = Query(None),
+    alto_impacto: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+):
+    """Lista de modificaciones para revisión + KPIs ejecutivos. Solo Admin."""
+    _require_admin_only(user)
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+
+    filters = dict(
+        estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
+        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
+    )
+    try:
+        with SessionLocal() as session:
+            rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+            records = [_cr_to_dict(r) for r in rows]
+
+        kpis = _compute_approval_kpis(records)
+        total = len(records)
+        start = (page - 1) * page_size
+        page_records = records[start: start + page_size]
+        for r in page_records:
+            r.pop("_created_sort", None)
+
+        return JSONResponse({
+            "ok": True,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": max(1, -(-total // page_size)),
+            "kpis": kpis,
+            "high_impact_threshold": _HIGH_IMPACT_THRESHOLD,
+            "records": page_records,
+            "pool_capped": total >= _MAX_CR_POOL,
+        })
+    except Exception as exc:
+        logger.error("approvals error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al consultar modificaciones: {exc}")
+
+
+@router.get("/api/approvals/filter-options", response_class=JSONResponse)
+def api_approvals_filter_options(
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Valores distintos para desplegables de filtro. Solo Admin."""
+    _require_admin_only(user)
+    from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
+    if SessionLocal is None or CR is None:
+        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": [], "periodos": []})
+    try:
+        with SessionLocal() as session:
+            perfiles = sorted({r.perfil for r in session.query(CR.perfil).distinct() if r.perfil})
+            subnegs = sorted({r.subneg for r in session.query(CR.subneg).distinct() if r.subneg})
+            comerciales = sorted({
+                r.created_by_username
+                for r in session.query(CR.created_by_username).distinct()
+                if r.created_by_username
+            })
+            periodos = sorted({r.period for r in session.query(CR.period).distinct() if r.period})
+        return JSONResponse({
+            "ok": True,
+            "perfiles": perfiles,
+            "subneg": subnegs,
+            "comerciales": comerciales,
+            "periodos": periodos,
+        })
+    except Exception as exc:
+        logger.error("approvals filter-options error: %s", exc, exc_info=True)
+        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": [], "periodos": []})
+
+
+class _ReviewPayload(BaseModel):
+    motivo: Optional[str] = Field(default=None, max_length=2000)
+
+
+def _apply_review(session, cr, *, status: str, user: User, motivo: Optional[str]):
+    cr.status = status
+    cr.reviewed_by_user_id = getattr(user, "id", None)
+    cr.reviewed_by_username = getattr(user, "email", None) or getattr(user, "display_name", None)
+    cr.reviewed_at = dt.datetime.utcnow()
+    if motivo is not None:
+        cr.review_comment = motivo.strip() or None
+
+
+@router.post("/api/approvals/{request_id:int}/approve", response_class=JSONResponse)
+def api_approvals_approve(
+    request_id: int,
+    payload: _ReviewPayload,
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Aprueba una modificación pendiente. Solo Admin. No revierte el override."""
+    _require_admin_only(user)
+    from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+    try:
+        with SessionLocal() as session:
+            cr = session.get(CR, request_id)
+            if cr is None:
+                raise HTTPException(404, "Modificación no encontrada")
+            _apply_review(session, cr, status="aprobado", user=user, motivo=payload.motivo)
+            session.commit()
+        return JSONResponse({"ok": True, "id": request_id, "status": "aprobado"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("approve error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al aprobar: {exc}")
+
+
+@router.post("/api/approvals/{request_id:int}/reject", response_class=JSONResponse)
+def api_approvals_reject(
+    request_id: int,
+    payload: _ReviewPayload,
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Rechaza una modificación con motivo. Solo Admin. No revierte el override."""
+    _require_admin_only(user)
+    motivo = (payload.motivo or "").strip()
+    if not motivo:
+        raise HTTPException(400, "Debe indicar un motivo para rechazar la modificación.")
+    from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+    try:
+        with SessionLocal() as session:
+            cr = session.get(CR, request_id)
+            if cr is None:
+                raise HTTPException(404, "Modificación no encontrada")
+            _apply_review(session, cr, status="rechazado", user=user, motivo=motivo)
+            session.commit()
+        return JSONResponse({"ok": True, "id": request_id, "status": "rechazado"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("reject error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al rechazar: {exc}")
+
+
+# ── Vista AGRUPADA por grupo de clientes (misma agrupación que Forecast) ──────
+
+def _amt_of(r: dict) -> float:
+    v = r.get("impacto_estimado")
+    return float(v) if isinstance(v, (int, float)) else 0.0
+
+
+def _build_group_unit(grupo: str, recs: list[dict]) -> dict:
+    """Fila padre de grupo con agregados sobre sus registros (ya filtrados)."""
+    clientes = len({r.get("client_name") for r in recs if r.get("client_name")})
+    baja = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "baja_pct"), 2)
+    suba = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "suba_pct"), 2)
+    neto = round(sum(_amt_of(r) for r in recs), 2)
+
+    estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
+    for r in recs:
+        st = r.get("status") or "pendiente"
+        estados[st] = estados.get(st, 0) + 1
+    presentes = [k for k, v in estados.items() if v > 0]
+    consolidado = presentes[0] if len(presentes) == 1 else "mixto"
+
+    periodos = sorted({r.get("periodo") for r in recs if r.get("periodo") and r.get("periodo") != "—"})
+    for r in recs:
+        r.pop("_created_sort", None)
+
+    return {
+        "type": "group",
+        "grupo": grupo,
+        "clientes": clientes,
+        "modificaciones": len(recs),
+        "impacto_baja": baja,
+        "impacto_suba": suba,
+        "impacto_neto": neto,
+        "estados": estados,
+        "estado_consolidado": consolidado,
+        "pendientes": estados["pendiente"],
+        "periodo_desde": periodos[0] if periodos else None,
+        "periodo_hasta": periodos[-1] if periodos else None,
+        "records": recs,
+    }
+
+
+@router.get("/api/approvals/grouped", response_class=JSONResponse)
+def api_approvals_grouped(
+    request: Request,
+    user: User = Depends(_require_user),
+    estado: Optional[str] = Query("todos"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    comercial: Optional[str] = Query(None),
+    perfil: Optional[str] = Query(None),
+    subneg: Optional[str] = Query(None),
+    articulo: Optional[str] = Query(None),
+    period: Optional[str] = Query(None),
+    change_type: Optional[str] = Query(None),
+    impacto: Optional[str] = Query(None),
+    alto_impacto: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=200),
+):
+    """Modificaciones agrupadas por grupo de clientes (clientes sueltos al final).
+    Paginación por UNIDAD (un grupo entero = 1 unidad → nunca se parte). Solo Admin.
+    KPIs/matriz se calculan sobre TODO el conjunto filtrado."""
+    _require_admin_only(user)
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+
+    filters = dict(
+        estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
+        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
+    )
+    try:
+        group_map = svc.get_client_group_map()
+        with SessionLocal() as session:
+            rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+            records = [_cr_to_dict(r, group_map) for r in rows]
+
+        kpis = _compute_approval_kpis(records)
+
+        # Agrupar: grupo → registros ; sin grupo → sueltos
+        grouped: dict[str, list[dict]] = {}
+        singles: list[dict] = []
+        for r in records:
+            g = (r.get("grupo") or "").strip()
+            if g:
+                grouped.setdefault(g, []).append(r)
+            else:
+                r.pop("_created_sort", None)
+                singles.append(r)
+
+        units: list[dict] = []
+        for gname in sorted(grouped.keys(), key=lambda s: s.lower()):
+            units.append(_build_group_unit(gname, grouped[gname]))
+        for r in singles:
+            units.append({"type": "single", "record": r})
+
+        total_units = len(units)
+        total_records = len(records)
+        pages = max(1, -(-total_units // page_size))
+        start = (page - 1) * page_size
+        page_units = units[start: start + page_size]
+
+        return JSONResponse({
+            "ok": True,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "total_units": total_units,
+            "total_records": total_records,
+            "total_groups": len(grouped),
+            "kpis": kpis,
+            "high_impact_threshold": _HIGH_IMPACT_THRESHOLD,
+            "units": page_units,
+            "pool_capped": total_records >= _MAX_CR_POOL,
+        })
+    except Exception as exc:
+        logger.error("approvals grouped error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al agrupar modificaciones: {exc}")
+
+
+class _GroupReviewPayload(BaseModel):
+    grupo: str
+    motivo: Optional[str] = Field(default=None, max_length=2000)
+    # Contexto/filtros actuales: la acción solo afecta lo que el Admin está viendo
+    estado: Optional[str] = "todos"
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comercial: Optional[str] = None
+    perfil: Optional[str] = None
+    subneg: Optional[str] = None
+    articulo: Optional[str] = None
+    period: Optional[str] = None
+    change_type: Optional[str] = None
+    impacto: Optional[str] = None
+    alto_impacto: Optional[str] = None
+
+
+def _group_filters(payload: "_GroupReviewPayload") -> dict:
+    return dict(
+        estado=payload.estado, date_from=payload.date_from, date_to=payload.date_to,
+        comercial=payload.comercial, perfil=payload.perfil, subneg=payload.subneg,
+        articulo=payload.articulo, period=payload.period, change_type=payload.change_type,
+        impacto=payload.impacto, alto_impacto=payload.alto_impacto,
+    )
+
+
+def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) -> int:
+    """Aplica revisión (aprobado/rechazado) a las modificaciones PENDIENTES del grupo,
+    dentro del contexto/filtros actuales. No toca registros ya decididos."""
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+    gkey = (payload.grupo or "").strip().lower()
+    if not gkey:
+        raise HTTPException(400, "Grupo no especificado.")
+    motivo = (payload.motivo or "").strip() or None
+    group_map = svc.get_client_group_map()
+    filters = _group_filters(payload)
+    n = 0
+    with SessionLocal() as session:
+        rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+        for cr in rows:
+            if cr.status != "pendiente":
+                continue
+            g = _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map)
+            if (g or "").strip().lower() != gkey:
+                continue
+            _apply_review(session, cr, status=status, user=user, motivo=motivo)
+            n += 1
+        session.commit()
+    return n
+
+
+@router.post("/api/approvals/group/approve", response_class=JSONResponse)
+def api_approvals_group_approve(
+    payload: _GroupReviewPayload,
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Aprueba todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
+    _require_admin_only(user)
+    try:
+        n = _review_group(payload, status="aprobado", user=user)
+        return JSONResponse({"ok": True, "grupo": payload.grupo, "status": "aprobado", "afectados": n})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("group approve error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al aprobar grupo: {exc}")
+
+
+@router.post("/api/approvals/group/reject", response_class=JSONResponse)
+def api_approvals_group_reject(
+    payload: _GroupReviewPayload,
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Rechaza con motivo todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
+    _require_admin_only(user)
+    if not (payload.motivo or "").strip():
+        raise HTTPException(400, "Debe indicar un motivo para rechazar el grupo.")
+    try:
+        n = _review_group(payload, status="rechazado", user=user)
+        return JSONResponse({"ok": True, "grupo": payload.grupo, "status": "rechazado", "afectados": n})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("group reject error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al rechazar grupo: {exc}")
+
+
+_CR_EXPORT_ORDER = [
+    "created_at", "usuario", "grupo", "change_type_label", "campo", "valor_anterior",
+    "valor_nuevo", "delta_abs", "delta_pct", "impacto_estimado", "client_name",
+    "perfil", "negocio", "subnegocio", "codigo_serie", "periodo",
+    "status_label", "revisado_por", "revisado_el", "motivo",
+]
+_CR_EXPORT_LABELS = {
+    "created_at": "Fecha y hora",
+    "usuario": "Usuario",
+    "grupo": "Grupo",
+    "change_type_label": "Tipo de modificación",
+    "campo": "Campo modificado",
+    "valor_anterior": "Valor anterior (%)",
+    "valor_nuevo": "Valor nuevo (%)",
+    "delta_abs": "Diferencia (puntos)",
+    "delta_pct": "Diferencia %",
+    "impacto_estimado": "Impacto estimado (ARS)",
+    "client_name": "Cuenta / Cliente",
+    "perfil": "Perfil",
+    "negocio": "Negocio",
+    "subnegocio": "Subnegocio",
+    "codigo_serie": "Artículo",
+    "periodo": "Período",
+    "status_label": "Estado",
+    "revisado_por": "Revisado por",
+    "revisado_el": "Fecha de revisión",
+    "motivo": "Observación / Motivo",
+}
+
+
+@router.get("/api/approvals/export")
+def api_approvals_export(
+    request: Request,
+    user: User = Depends(_require_user),
+    fmt: str = Query("csv", description="csv | xlsx"),
+    estado: Optional[str] = Query("todos"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    comercial: Optional[str] = Query(None),
+    perfil: Optional[str] = Query(None),
+    subneg: Optional[str] = Query(None),
+    articulo: Optional[str] = Query(None),
+    period: Optional[str] = Query(None),
+    change_type: Optional[str] = Query(None),
+    impacto: Optional[str] = Query(None),
+    alto_impacto: Optional[str] = Query(None),
+):
+    """Informe ejecutivo de modificaciones (CSV/Excel). Solo Admin."""
+    _require_admin_only(user)
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+
+    filters = dict(
+        estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
+        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
+    )
+    try:
+        group_map = svc.get_client_group_map()
+        with SessionLocal() as session:
+            rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+            records = [_cr_to_dict(r, group_map) for r in rows]
+            for r in records:
+                r["grupo"] = r.get("grupo") or "Sin grupo"
+    except Exception as exc:
+        logger.error("approvals export query error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al consultar datos: {exc}")
+
+    export_rows = [{k: r.get(k, "") for k in _CR_EXPORT_ORDER} for r in records]
+    ts = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename_base = f"informe_modificaciones_forecast_{ts}"
+
+    if fmt == "xlsx":
+        import io
+        import pandas as _pd
+        df = _pd.DataFrame(export_rows)
+        if not df.empty:
+            df = df[_CR_EXPORT_ORDER]
+        df.rename(columns=_CR_EXPORT_LABELS, inplace=True)
+        buf = io.BytesIO()
+        with _pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Modificaciones Forecast")
+        buf.seek(0)
+        headers = {
+            "Content-Disposition": f'attachment; filename="{filename_base}.xlsx"',
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+        return Response(content=buf.read(), headers=headers)
+
+    import csv, io as _io
+    output = _io.StringIO()
+    labels = [_CR_EXPORT_LABELS.get(k, k) for k in _CR_EXPORT_ORDER]
+    w = csv.writer(output)
+    w.writerow(labels)
+    for r in export_rows:
+        w.writerow([r.get(k, "") for k in _CR_EXPORT_ORDER])
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename_base}.csv"',
+        "Content-Type": "text/csv; charset=utf-8-sig",
+    }
+    return Response(content=csv_bytes, headers=headers)
 
 
 @router.get("/api/comments/summary", response_class=JSONResponse)

@@ -415,6 +415,76 @@ class ForecastManualEntry(Base):
         )
 
 
+# ---------- Aprobaciones Forecast: solicitudes de cambio ----------
+class ForecastChangeRequest(Base):
+    """
+    Registro de control de modificaciones del Forecast realizadas por los
+    cotizadores (módulo "Aprobaciones Forecast").
+
+    Semántica = REGISTRO DE CONTROL: el override del cotizador se aplica al
+    instante (lógica existente intacta). Esta tabla NO bloquea ni revierte el
+    cambio; solo deja constancia para que Dirección/Admin lo revise, apruebe o
+    rechace con un motivo. Tabla puramente aditiva: nunca sobrescribe ni
+    modifica forecast_user_overrides.
+    """
+    __tablename__ = "forecast_change_requests"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+
+    # Trazabilidad con el override de origen (nullable: backfill / manuales).
+    override_id = Column(
+        Integer,
+        ForeignKey("forecast_user_overrides.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source = Column(String(30), nullable=False, default="save-client")  # save-client/save-group/backfill/manual
+
+    # Quién hizo la modificación (snapshot). Sin FK físico: es un registro de
+    # control que debe sobrevivir a cambios/bajas de usuarios y nunca bloquear
+    # su administración (se guarda también el username como snapshot).
+    created_by_user_id = Column(Integer, nullable=True, index=True)
+    created_by_username = Column(String(255), nullable=True)
+
+    # Qué se modificó (snapshot de identificadores del alcance).
+    change_type = Column(String(30), nullable=False, default="ajuste", index=True)  # suba_pct/baja_pct/ajuste/alta_manual
+    scope_type = Column(String(20), nullable=True)        # = override_scope
+    client_selector = Column(String(255), nullable=True, index=True)
+    client_name = Column(String(255), nullable=True)
+    perfil = Column(String(120), nullable=True)
+    neg = Column(String(120), nullable=True)
+    subneg = Column(String(255), nullable=True)
+    codigo_serie = Column(String(120), nullable=True)
+    descripcion_articulo = Column(String(255), nullable=True)
+    period = Column(String(7), nullable=True)             # = forecast_month "YYYY-MM"
+
+    # Valor anterior / nuevo (porcentajes de ajuste anual).
+    field_changed = Column(String(60), nullable=True, default="% ajuste anual")
+    old_value = Column(Float, nullable=True)
+    new_value = Column(Float, nullable=True)
+    absolute_delta = Column(Float, nullable=True)
+    percentage_delta = Column(Float, nullable=True)
+
+    # Impacto económico estimado (best-effort; NULL si no hay base para calcular).
+    estimated_amount_base = Column(Float, nullable=True)
+    estimated_amount_delta = Column(Float, nullable=True)
+
+    # Flujo de aprobación.
+    status = Column(String(12), nullable=False, default="pendiente", index=True)  # pendiente/aprobado/rechazado
+    reviewed_by_user_id = Column(Integer, nullable=True)  # snapshot, sin FK físico
+    reviewed_by_username = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    review_comment = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ForecastChangeRequest id={self.id} status={self.status!r} "
+            f"by={self.created_by_username!r} override_id={self.override_id} "
+            f"delta_pct={self.percentage_delta} amount_delta={self.estimated_amount_delta}>"
+        )
+
+
 # ---------- Solicitudes de restablecimiento de contraseña ----------
 class PasswordResetRequest(Base):
     """

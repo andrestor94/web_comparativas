@@ -21,13 +21,14 @@ import numpy as np
 import pandas as pd
 
 try:
-    from web_comparativas.models import engine, SessionLocal, ForecastUserOverride, ForecastManualClient, ForecastManualEntry
+    from web_comparativas.models import engine, SessionLocal, ForecastUserOverride, ForecastManualClient, ForecastManualEntry, ForecastChangeRequest
 except ImportError:
     engine = None
     SessionLocal = None
     ForecastUserOverride = None
     ForecastManualClient = None  # type: ignore[assignment,misc]
     ForecastManualEntry = None   # type: ignore[assignment,misc]
+    ForecastChangeRequest = None  # type: ignore[assignment,misc]
 
 try:
     from sqlalchemy import text as _sa_text
@@ -989,6 +990,204 @@ def _apply_override_effects_to_dataframe(
     return out, maps
 
 
+# ---------------------------------------------------------------------------
+# Aprobaciones Forecast — captura de modificaciones (registro de control)
+# ---------------------------------------------------------------------------
+
+def estimate_scope_amount(
+    *,
+    perfil: str | None = None,
+    subneg: str | None = None,
+    codigo_serie: str | None = None,
+    client_selector: str | None = None,
+    forecast_month: str | None = None,
+) -> float | None:
+    """Impacto económico base (best-effort) para un alcance de override.
+
+    Suma ``monto_yhat`` del df valorizado cacheado filtrando por los campos
+    disponibles del alcance. Devuelve ``None`` si no hay base para calcular —
+    nunca inventa valores. El monto resultante es un ESTIMADO.
+    """
+    try:
+        df = get_data().get("df_valorizado", pd.DataFrame())
+    except Exception:
+        return None
+    if df is None or df.empty or "monto_yhat" not in df.columns:
+        return None
+
+    mask = pd.Series(True, index=df.index)
+    applied = False
+
+    cs = _clean_override_text(client_selector)
+    if cs and "fantasia" in df.columns:
+        m = df["fantasia"].astype(str).str.strip() == cs
+        if (not m.any()) and "nombre_grupo" in df.columns:
+            m = df["nombre_grupo"].astype(str).str.strip() == cs
+        if m.any():
+            mask &= m
+            applied = True
+
+    code = (codigo_serie or "").strip()
+    if code and "codigo_serie" in df.columns:
+        m = df["codigo_serie"].astype(str).str.strip() == code
+        if m.any():
+            mask &= m
+            applied = True
+
+    sub = (subneg or "").strip()
+    if sub and "subneg" in df.columns:
+        m = df["subneg"].astype(str).str.strip() == sub
+        if m.any():
+            mask &= m
+            applied = True
+
+    perf = (perfil or "").strip()
+    if perf and "perfil" in df.columns:
+        m = df["perfil"].astype(str).str.strip() == perf
+        if m.any():
+            mask &= m
+            applied = True
+
+    fm = (forecast_month or "").strip()
+    if fm and "fecha" in df.columns:
+        try:
+            m = df["fecha"].dt.strftime("%Y-%m") == fm
+            if m.any():
+                mask &= m
+                applied = True
+        except Exception:
+            pass
+
+    if not applied:
+        return None
+    sub_df = df.loc[mask]
+    if sub_df.empty:
+        return None
+    try:
+        return float(sub_df["monto_yhat"].sum())
+    except Exception:
+        return None
+
+
+# Sentinelas que representan "sin grupo" (misma convención que el treemap/cliente).
+_SIN_GRUPO_SENTINELS = {"SIN GRUPO", "SIN GRUPO / OTROS", "", "NAN", "NONE"}
+
+
+def get_client_group_map() -> dict[str, str]:
+    """Mapa cliente(fantasía normalizada) → nombre_grupo.
+
+    Misma fuente y criterio de agrupación que la tabla "Proyección más
+    expectativa de crecimiento" (df_valorizado: fantasia → nombre_grupo).
+    Excluye los sentinelas de "sin grupo". Best-effort: devuelve {} si falla.
+    """
+    out: dict[str, str] = {}
+    try:
+        df = get_data().get("df_valorizado", pd.DataFrame())
+        if df is None or df.empty or not {"fantasia", "nombre_grupo"}.issubset(df.columns):
+            return out
+        sub = df[["fantasia", "nombre_grupo"]].dropna().drop_duplicates("fantasia")
+        for fant, grp in zip(sub["fantasia"].astype(str), sub["nombre_grupo"].astype(str)):
+            fant_c = fant.strip()
+            grp_c = grp.strip()
+            if not fant_c or grp_c.upper() in _SIN_GRUPO_SENTINELS:
+                continue
+            out[fant_c.lower()] = grp_c
+    except Exception:
+        return {}
+    return out
+
+
+def _classify_change_type(old_pct: float | None, new_pct: float | None) -> str:
+    if old_pct is None:
+        return "ajuste"  # alta de override
+    try:
+        d = float(new_pct or 0.0) - float(old_pct or 0.0)
+    except (TypeError, ValueError):
+        return "ajuste"
+    if d > 0:
+        return "suba_pct"
+    if d < 0:
+        return "baja_pct"
+    return "ajuste"
+
+
+def _record_change_request(
+    session,
+    rec,
+    *,
+    old_pct: float | None,
+    new_pct: float | None,
+    source: str,
+    user_id: int,
+    user_email: str | None,
+) -> None:
+    """Registra una solicitud de cambio PENDIENTE (módulo Aprobaciones Forecast).
+
+    Registro de control: NO bloquea ni revierte el override. Best-effort —
+    nunca propaga excepción para no romper el guardado del cotizador.
+    """
+    if ForecastChangeRequest is None:
+        return
+    try:
+        old_v = None if old_pct is None else float(old_pct)
+        new_v = None if new_pct is None else float(new_pct)
+        # No registrar no-ops (re-guardar el mismo valor).
+        if old_v is not None and new_v is not None and abs(new_v - old_v) < 1e-9:
+            return
+
+        abs_delta = None
+        pct_delta = None
+        if new_v is not None:
+            base = old_v if old_v is not None else 0.0
+            abs_delta = round(new_v - base, 4)
+            pct_delta = abs_delta  # los valores ya son puntos porcentuales
+
+        amount_base = estimate_scope_amount(
+            perfil=rec.perfil,
+            subneg=rec.subneg,
+            codigo_serie=rec.codigo_serie,
+            client_selector=rec.client_selector,
+            forecast_month=rec.forecast_month,
+        )
+        amount_delta = None
+        if amount_base is not None and abs_delta is not None:
+            amount_delta = round(amount_base * (abs_delta / 100.0), 2)
+
+        # Flush para asegurar rec.id (trazabilidad e idempotencia del backfill).
+        try:
+            session.flush()
+        except Exception:
+            pass
+
+        cr = ForecastChangeRequest(
+            override_id=getattr(rec, "id", None),
+            source=source,
+            created_by_user_id=int(user_id) if user_id else None,
+            created_by_username=user_email,
+            change_type=_classify_change_type(old_v, new_v),
+            scope_type=getattr(rec, "override_scope", None),
+            client_selector=rec.client_selector,
+            client_name=getattr(rec, "client_display", None) or rec.client_selector,
+            perfil=rec.perfil,
+            neg=rec.neg,
+            subneg=(rec.subneg or None),
+            codigo_serie=(rec.codigo_serie or None),
+            descripcion_articulo=None,
+            period=(rec.forecast_month or None),
+            field_changed="% ajuste anual",
+            old_value=old_v,
+            new_value=new_v,
+            absolute_delta=abs_delta,
+            percentage_delta=pct_delta,
+            estimated_amount_base=amount_base,
+            estimated_amount_delta=amount_delta,
+            status="pendiente",
+        )
+        session.add(cr)
+    except Exception as exc:
+        logger.warning("change-request record skipped: %s", exc)
+
+
 def _upsert_override_record(
     session,
     existing_map: dict[tuple[str, str, str, str], Any],
@@ -1006,9 +1205,12 @@ def _upsert_override_record(
     perfil: str | None = None,
     neg: str | None = None,
     effective_from_month: str | None = None,
+    source: str = "save-client",
 ) -> None:
     identity = _override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month)
     rec = existing_map.get(identity)
+    # Capturar el valor anterior ANTES de mutar (None = alta de override).
+    _old_override_pct = None if rec is None else getattr(rec, "override_growth_pct", None)
     if rec is None:
         rec = ForecastUserOverride(
             user_id=int(user_id),
@@ -1038,6 +1240,18 @@ def _upsert_override_record(
         rec.effective_from_month = effective_from_month
     except AttributeError:
         pass  # Column not yet migrated — safe to skip
+
+    # Aprobaciones Forecast: registrar la modificación como solicitud pendiente.
+    # Registro de control aditivo; nunca rompe el guardado (best-effort interno).
+    _record_change_request(
+        session,
+        rec,
+        old_pct=_old_override_pct,
+        new_pct=rec.override_growth_pct,
+        source=source,
+        user_id=user_id,
+        user_email=user_email,
+    )
 
 
 def _deactivate_override(
@@ -1365,6 +1579,7 @@ def save_group_expectations(
                         effective_monthly_pct=float(monthly_pct),
                         user_email=user_email,
                         effective_from_month=effective_from_month,
+                        source="save-group",
                     )
                     session.commit()
                 _clear_cache_for_override_save(user_id)
