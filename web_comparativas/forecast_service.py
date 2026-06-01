@@ -994,6 +994,27 @@ def _apply_override_effects_to_dataframe(
 # Aprobaciones Forecast — captura de modificaciones (registro de control)
 # ---------------------------------------------------------------------------
 
+def _ensure_valorizado_norm_cols(df) -> None:
+    """Precalcula columnas normalizadas (lower/strip) una sola vez sobre el df
+    valorizado cacheado, para que el matching sea robusto y rápido aún con
+    miles de llamadas (recompute/backfill). Agrega columnas auxiliares; no
+    altera las existentes ni rompe a otros consumidores del df."""
+    try:
+        for col, ncol in (
+            ("fantasia", "_fant_n"), ("nombre_grupo", "_grp_n"),
+            ("codigo_serie", "_cod_n"), ("subneg", "_sub_n"), ("perfil", "_perf_n"),
+        ):
+            if col in df.columns and ncol not in df.columns:
+                df[ncol] = df[col].astype(str).str.strip().str.lower()
+        if "fecha" in df.columns and "_ym" not in df.columns:
+            try:
+                df["_ym"] = df["fecha"].dt.strftime("%Y-%m")
+            except Exception:
+                df["_ym"] = ""
+    except Exception:
+        pass
+
+
 def estimate_scope_amount(
     *,
     perfil: str | None = None,
@@ -1004,10 +1025,14 @@ def estimate_scope_amount(
 ) -> float | None:
     """Impacto económico base (best-effort) para un alcance de override.
 
-    Suma ``monto_yhat`` del df valorizado cacheado filtrando por los campos
-    disponibles del alcance. Devuelve ``None`` si no hay base para calcular —
-    nunca inventa valores. El monto resultante es un ESTIMADO.
+    Suma ``monto_yhat`` del df valorizado cacheado. El matching es
+    case-insensitive y con FALLBACK PROGRESIVO (de más específico a menos):
+    si la combinación completa no encuentra filas, relaja el alcance. Devuelve
+    ``None`` solo si ningún campo del alcance matchea — nunca inventa valores.
     """
+    import functools
+    import operator
+
     try:
         df = get_data().get("df_valorizado", pd.DataFrame())
     except Exception:
@@ -1015,58 +1040,73 @@ def estimate_scope_amount(
     if df is None or df.empty or "monto_yhat" not in df.columns:
         return None
 
-    mask = pd.Series(True, index=df.index)
-    applied = False
+    _ensure_valorizado_norm_cols(df)
 
-    cs = _clean_override_text(client_selector)
-    if cs and "fantasia" in df.columns:
-        m = df["fantasia"].astype(str).str.strip() == cs
-        if (not m.any()) and "nombre_grupo" in df.columns:
-            m = df["nombre_grupo"].astype(str).str.strip() == cs
-        if m.any():
-            mask &= m
-            applied = True
+    def _n(s: str | None) -> str:
+        return str(s or "").strip().lower()
 
-    code = (codigo_serie or "").strip()
-    if code and "codigo_serie" in df.columns:
-        m = df["codigo_serie"].astype(str).str.strip() == code
-        if m.any():
-            mask &= m
-            applied = True
-
-    sub = (subneg or "").strip()
-    if sub and "subneg" in df.columns:
-        m = df["subneg"].astype(str).str.strip() == sub
-        if m.any():
-            mask &= m
-            applied = True
-
-    perf = (perfil or "").strip()
-    if perf and "perfil" in df.columns:
-        m = df["perfil"].astype(str).str.strip() == perf
-        if m.any():
-            mask &= m
-            applied = True
-
+    masks: dict[str, Any] = {}
+    cs = _n(client_selector)
+    if cs and "_fant_n" in df.columns:
+        mf = df["_fant_n"] == cs
+        if (not mf.any()) and "_grp_n" in df.columns:
+            mf = df["_grp_n"] == cs
+        if mf.any():
+            masks["client"] = mf
+    code = _n(codigo_serie)
+    if code and "_cod_n" in df.columns:
+        mc = df["_cod_n"] == code
+        if mc.any():
+            masks["codigo"] = mc
+    sub = _n(subneg)
+    if sub and "_sub_n" in df.columns:
+        ms = df["_sub_n"] == sub
+        if ms.any():
+            masks["subneg"] = ms
+    perf = _n(perfil)
+    if perf and "_perf_n" in df.columns:
+        mp = df["_perf_n"] == perf
+        if mp.any():
+            masks["perfil"] = mp
     fm = (forecast_month or "").strip()
-    if fm and "fecha" in df.columns:
-        try:
-            m = df["fecha"].dt.strftime("%Y-%m") == fm
-            if m.any():
-                mask &= m
-                applied = True
-        except Exception:
-            pass
+    if fm and "_ym" in df.columns:
+        mt = df["_ym"] == fm
+        if mt.any():
+            masks["period"] = mt
 
-    if not applied:
+    if not masks:
         return None
-    sub_df = df.loc[mask]
-    if sub_df.empty:
-        return None
-    try:
-        return float(sub_df["monto_yhat"].sum())
-    except Exception:
-        return None
+
+    def _combine(keys):
+        sel = [masks[k] for k in keys if k in masks]
+        if not sel:
+            return None
+        m = functools.reduce(operator.and_, sel)
+        return m if m.any() else None
+
+    # De más específico a menos específico.
+    for combo in (
+        ("client", "subneg", "codigo", "period"),
+        ("client", "subneg", "period"),
+        ("client", "subneg"),
+        ("client", "codigo"),
+        ("client", "period"),
+        ("client",),
+        ("subneg", "perfil", "period"),
+        ("subneg", "perfil"),
+        ("subneg", "period"),
+        ("subneg",),
+        ("codigo", "period"),
+        ("codigo",),
+        ("perfil",),
+    ):
+        m = _combine(combo)
+        if m is not None:
+            try:
+                return float(df.loc[m, "monto_yhat"].sum())
+            except Exception:
+                return None
+    return None
 
 
 # Sentinelas que representan "sin grupo" (misma convención que el treemap/cliente).

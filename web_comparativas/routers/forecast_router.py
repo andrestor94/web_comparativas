@@ -1693,20 +1693,42 @@ def _compute_approval_kpis(records: list[dict]) -> dict:
 
     usuarios = {r.get("usuario") for r in records if r.get("usuario") and r.get("usuario") != "—"}
 
-    subas = sum(1 for r in records if r.get("change_type") == "suba_pct")
-    bajas = sum(1 for r in records if r.get("change_type") == "baja_pct")
-    ajustes = sum(1 for r in records if r.get("change_type") == "ajuste")
+    # Dirección (Baja/Suba) por SIGNO del impacto; si el impacto no está estimado,
+    # se usa el signo de la diferencia % (siempre disponible). Esto evita que un
+    # change_type "ajuste" o un impacto NULL excluya el registro de la matriz.
+    def _impact_value(r):
+        v = r.get("impacto_estimado")
+        return float(v) if isinstance(v, (int, float)) else None
+
+    def _direction(r):
+        v = _impact_value(r)
+        if v is not None and v != 0:
+            return "baja" if v < 0 else "suba"
+        d = r.get("delta_pct")
+        if isinstance(d, (int, float)) and d != 0:
+            return "baja" if d < 0 else "suba"
+        return None  # sin dirección clara (delta 0 y sin impacto)
+
+    subas = sum(1 for r in records if _direction(r) == "suba")
+    bajas = sum(1 for r in records if _direction(r) == "baja")
+    ajustes = sum(1 for r in records if _direction(r) is None)
     altas = sum(1 for r in records if r.get("change_type") == "alta_manual")
 
-    # Matriz ejecutiva: impacto estimado por estatus × tipo (baja / suba).
-    def _row_amt(rows, ct):
-        return round(sum(_amt(r) for r in rows if r.get("change_type") == ct), 2)
+    # Matriz ejecutiva: por estatus × {baja, suba}.
+    # Cada celda lleva: monto (suma de impactos estimados), n (cantidad) y
+    # sin_estimar (cuántos no tienen impacto calculable) → permite mostrar N/D
+    # honesto en vez de un falso $0.
+    def _cell(rows, direction):
+        sel = [r for r in rows if _direction(r) == direction]
+        monto = round(sum(v for v in (_impact_value(r) for r in sel) if v is not None), 2)
+        sin_est = sum(1 for r in sel if _impact_value(r) is None)
+        return {"monto": monto, "n": len(sel), "sin_estimar": sin_est}
 
     matrix = {
-        "pendiente": {"baja": _row_amt(pendientes, "baja_pct"), "suba": _row_amt(pendientes, "suba_pct")},
-        "aprobado":  {"baja": _row_amt(aprobados, "baja_pct"),  "suba": _row_amt(aprobados, "suba_pct")},
-        "rechazado": {"baja": _row_amt(rechazados, "baja_pct"), "suba": _row_amt(rechazados, "suba_pct")},
+        st: {"baja": _cell(rows, "baja"), "suba": _cell(rows, "suba")}
+        for st, rows in (("pendiente", pendientes), ("aprobado", aprobados), ("rechazado", rechazados))
     }
+    sin_estimar_total = sum(1 for r in records if _impact_value(r) is None)
 
     return {
         "pendientes": len(pendientes),
@@ -1723,6 +1745,7 @@ def _compute_approval_kpis(records: list[dict]) -> dict:
         "ajustes": ajustes,
         "altas_manuales": altas,
         "matrix": matrix,
+        "sin_estimar_total": sin_estimar_total,
         "total": len(records),
     }
 

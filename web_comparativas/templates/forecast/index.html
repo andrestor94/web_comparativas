@@ -1922,6 +1922,7 @@
   .appr-mtx-down { color: var(--g-red); font-weight: 600; }
   .appr-mtx-up { color: var(--g-green); font-weight: 600; }
   .appr-mtx-zero { color: var(--text-muted); font-weight: 500; }
+  .appr-mtx-nd { color: #b06000; font-weight: 600; font-style: italic; cursor: help; }
   @media (max-width: 760px) { .appr-summary { grid-template-columns: 1fr; } }
 
   .appr-kpi {
@@ -2548,7 +2549,7 @@
             <div class="appr-matrix-card">
               <div class="appr-matrix-head">
                 <span class="appr-matrix-title"><i class="bi bi-grid-3x3-gap me-1"></i>Impacto estimado por estatus</span>
-                <span class="appr-matrix-note">Valores estimados (ARS)</span>
+                <span class="appr-matrix-note" id="appr-matrix-note">Valores estimados (ARS)</span>
               </div>
               <table class="appr-matrix">
                 <thead>
@@ -6567,20 +6568,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     set('kpi-bajas', (k.bajas ?? 0));
     set('kpi-ajustes', (k.ajustes ?? 0));
 
-    // Matriz ejecutiva: impacto estimado por estatus × {baja, suba}
+    // Matriz ejecutiva: impacto estimado por estatus × {baja, suba}.
+    // Cada celda es {monto, n, sin_estimar}. Mostramos N/D honesto (no $0 falso)
+    // cuando hay registros pero sin base valorizada para estimar.
     const m = k.matrix || {};
-    const setCell = (id, v) => {
+    const setCell = (id, cell) => {
       const el = document.getElementById(id);
       if (!el) return;
-      const n = (typeof v === 'number') ? v : parseFloat(v);
-      if (!isFinite(n) || n === 0) {
+      cell = cell || {};
+      const monto = (typeof cell.monto === 'number') ? cell.monto : 0;
+      const n = cell.n || 0;
+      const sinEst = cell.sin_estimar || 0;
+      el.classList.remove('appr-mtx-zero', 'appr-mtx-nd');
+      if (monto !== 0) {
+        el.textContent = fmtMoneyPlain(monto)
+          + (sinEst ? ` (+${sinEst} N/D)` : '');
+        el.title = fmtMoneyPlain(monto) + (sinEst ? ` · ${sinEst} sin base valorizada` : '');
+      } else if (n > 0 && sinEst > 0) {
+        el.textContent = 'N/D';
+        el.classList.add('appr-mtx-nd');
+        el.title = `${n} modificación(es) sin base valorizada para estimar el impacto`;
+      } else if (n > 0) {
         el.textContent = '$0';
         el.classList.add('appr-mtx-zero');
-        el.title = '';
+        el.title = 'Sin impacto neto';
       } else {
-        el.textContent = fmtMoneyPlain(n);
-        el.classList.remove('appr-mtx-zero');
-        el.title = fmtMoneyPlain(n);
+        el.textContent = '—';
+        el.classList.add('appr-mtx-zero');
+        el.title = '';
       }
     };
     ['pendiente', 'aprobado', 'rechazado'].forEach(st => {
@@ -6588,6 +6603,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       setCell(`mtx-${st}-baja`, row.baja);
       setCell(`mtx-${st}-suba`, row.suba);
     });
+    // Nota de la matriz: advertir si hay modificaciones sin estimar
+    const noteEl = document.getElementById('appr-matrix-note');
+    if (noteEl) {
+      const sinTot = k.sin_estimar_total || 0;
+      noteEl.textContent = sinTot
+        ? `Valores estimados (ARS) · ${sinTot.toLocaleString('es-AR')} sin base (N/D)`
+        : 'Valores estimados (ARS)';
+      noteEl.style.color = sinTot ? '#b06000' : '';
+    }
   }
 
   // ── Tabla (agrupada por grupo de clientes) ─────────────────────
