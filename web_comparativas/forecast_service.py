@@ -2312,10 +2312,11 @@ def _local_get_product_list_light(profiles: list | None = None, neg: list | None
             usecols=lambda c: str(c).strip().lower() in main_cols,
         )
         df_main.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+        df_main = _apply_neg_names(df_main, NEGOCIOS_FILE)
         if profiles and "perfil" in df_main.columns:
             df_main = df_main[df_main["perfil"].isin(profiles)]
         if neg and "neg" in df_main.columns:
-            df_main = df_main[df_main["neg"].isin(neg)]
+            df_main = df_main[df_main["neg"].astype(str).isin(neg)]
         keep_cols = [c for c in ["neg", "codigo_serie", "perfil", "descripcion"] if c in df_main.columns]
         df = df_main[keep_cols].drop_duplicates()
 
@@ -2381,15 +2382,19 @@ def _local_allowed_codes_for_filters(profiles=None, neg=None, subneg=None, produ
         usecols=lambda c: str(c).strip().lower() in cols,
     )
     df.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+    df = _apply_neg_names(df, NEGOCIOS_FILE)
+    rows_before = len(df)
     if profiles and "perfil" in df.columns:
         df = df[df["perfil"].isin(profiles)]
     if neg and "neg" in df.columns:
-        df = df[df["neg"].isin(neg)]
+        df = df[df["neg"].astype(str).isin(neg)]
     if subneg and "subneg" in df.columns:
-        df = df[df["subneg"].isin(subneg)]
+        df = df[df["subneg"].astype(str).isin(subneg)]
     if products:
         df = df[df["codigo_serie"].astype(str).isin(products)]
-    return set(df["codigo_serie"].dropna().astype(str))
+    allowed = set(df["codigo_serie"].dropna().astype(str))
+    print(f"[FORECAST FILTER] profiles={profiles} neg={neg} subneg={subneg} | rows_before={rows_before} rows_after={len(df)} codes={len(allowed)}", flush=True)
+    return allowed
 
 
 def _local_get_chart_data_light(
@@ -2919,8 +2924,16 @@ def _pg_get_chart_data_inner(
         start_date=hist_start, end_date=hist_end,
         profiles=profiles,
         products_as_codes=prod_codes,
-        skip_neg=True,
+        skip_neg=True,  # forecast_imp_hist has no neg/subneg cols — use subquery below
     )
+    # When neg/subneg filter active, restrict hist series via forecast_main subquery
+    _hist_neg_subquery = ""
+    if neg or subneg:
+        _neg_series_where = _build_filter_sql(neg=neg, subneg=subneg)
+        _hist_neg_subquery = (
+            f" AND codigo_serie IN "
+            f"(SELECT DISTINCT codigo_serie FROM forecast_main WHERE {_neg_series_where})"
+        )
     # WHERE for forecast_valorizado: use val_prod (None when column absent → no crash)
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
@@ -2964,7 +2977,7 @@ def _pg_get_chart_data_inner(
         df_hist = _query_agg(
             f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
             f"FROM forecast_imp_hist "
-            f"WHERE {hist_where}{_canon_clause} "
+            f"WHERE {hist_where}{_canon_clause}{_hist_neg_subquery} "
             f"GROUP BY fecha ORDER BY fecha"
         )
         _ch_hist_ms = (time.perf_counter() - _ch_t0) * 1000
@@ -4562,6 +4575,7 @@ def get_filter_options() -> dict:
                     usecols=lambda c: str(c).strip().lower() in needed,
                 )
                 df_main_opts.rename(columns={"Neg": "neg", "Subneg": "subneg"}, inplace=True)
+                df_main_opts = _apply_neg_names(df_main_opts, NEGOCIOS_FILE)
                 _consume_filter_df(df_main_opts)
         except Exception as exc:
             logger.warning("Filter options local forecast_main light read failed: %s", exc)
@@ -4606,7 +4620,7 @@ def get_filter_options() -> dict:
         min_date = min(min_dates).strftime("%Y-%m-%d") if min_dates else None
         max_date = max(max_dates).strftime("%Y-%m-%d") if max_dates else None
 
-        return {
+        result = {
             "profiles": sanitize_list(perfiles_set),
             "neg": sanitize_list(negs_set),
             "subneg": sanitize_list(subnegs_set),
@@ -4614,6 +4628,8 @@ def get_filter_options() -> dict:
             "min_date": min_date,
             "max_date": max_date,
         }
+        print(f"[FORECAST FILTER-OPTIONS] neg={result['neg']} subneg_count={len(result['subneg'])}", flush=True)
+        return result
 
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
@@ -4805,6 +4821,7 @@ def get_chart_data(
         mask &= df["descripcion"].isin(products)
 
     df_filt = df[mask].copy()
+    print(f"[FORECAST CHART FULL-PATH] profiles={profiles} neg={neg} | total_rows={len(df)} filtered_rows={len(df_filt)} neg_col_sample={df['neg'].dropna().unique()[:3].tolist() if 'neg' in df.columns else 'NO_NEG_COL'}", flush=True)
 
     # Ensure precio column and apply prices → monetary conversion
     if "precio" not in df_filt.columns:
@@ -4827,6 +4844,18 @@ def get_chart_data(
             df_val[df_val["descripcion"].isin(products)]["codigo_serie"].astype(str).unique()
         )
 
+    # Derive allowed codigo_serie for neg/subneg filter when hist/val lack those columns.
+    # df (df_main) has neg/subneg after _apply_neg_names; same pattern as df_fact_2026 below.
+    _neg_allowed_codes: "set | None" = None
+    if (neg or subneg) and "codigo_serie" in df.columns:
+        _neg_mask = pd.Series(True, index=df.index)
+        if neg and "neg" in df.columns:
+            _neg_mask &= df["neg"].isin(neg)
+        if subneg and "subneg" in df.columns:
+            _neg_mask &= df["subneg"].isin(subneg)
+        _neg_allowed_codes = set(df.loc[_neg_mask, "codigo_serie"].dropna().astype(str).unique())
+        print(f"[FORECAST HIST NEG FILTER] neg={neg} subneg={subneg} | neg_allowed_codes_count={len(_neg_allowed_codes)}", flush=True)
+
     df_hist = pd.DataFrame()
     if view_money and not df_imp_hist.empty and "imp_hist" in df_imp_hist.columns and "fecha" in df_imp_hist.columns:
         mask_ih = pd.Series(True, index=df_imp_hist.index)
@@ -4842,15 +4871,21 @@ def get_chart_data(
             mask_ih &= df_imp_hist["neg"].isin(neg)
         if subneg and "subneg" in df_imp_hist.columns:
             mask_ih &= df_imp_hist["subneg"].isin(subneg)
+        # Fallback: df_imp_hist has no neg/subneg cols — filter via codigo_serie derived from df_main
+        if _neg_allowed_codes is not None and "codigo_serie" in df_imp_hist.columns:
+            if "neg" not in df_imp_hist.columns and "subneg" not in df_imp_hist.columns:
+                mask_ih &= df_imp_hist["codigo_serie"].astype(str).isin(_neg_allowed_codes)
         # Filter by selected products via codigo_serie lookup (df_imp_hist has no descripcion)
         if products and "codigo_serie" in df_imp_hist.columns:
             mask_ih &= df_imp_hist["codigo_serie"].astype(str).isin(_prod_codes_lookup)
+        _hist_rows_before = int(mask_ih.sum())
         df_hist = (
             df_imp_hist[mask_ih]
             .groupby("fecha")
             .agg(Total_Venta=("imp_hist", "sum"))
             .reset_index()
         )
+        print(f"[FORECAST HIST] rows_matched={_hist_rows_before} months={len(df_hist)} total_venta={df_hist['Total_Venta'].sum():.0f}", flush=True)
 
     if df_hist.empty:
         # Fallback: price×units from forecast_base_consolidado tipo='hist'
@@ -4871,6 +4906,10 @@ def get_chart_data(
             mask_v &= df_val["neg"].isin(neg)
         if subneg and "subneg" in df_val.columns:
             mask_v &= df_val["subneg"].isin(subneg)
+        # Fallback: df_val (parquet) has no neg/subneg cols — filter via codigo_serie from df_main
+        if _neg_allowed_codes is not None and "codigo_serie" in df_val.columns:
+            if "neg" not in df_val.columns and "subneg" not in df_val.columns:
+                mask_v &= df_val["codigo_serie"].astype(str).isin(_neg_allowed_codes)
         if products and "descripcion" in df_val.columns:
             mask_v &= df_val["descripcion"].isin(products)
 
