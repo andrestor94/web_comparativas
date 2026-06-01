@@ -994,25 +994,148 @@ def _apply_override_effects_to_dataframe(
 # Aprobaciones Forecast — captura de modificaciones (registro de control)
 # ---------------------------------------------------------------------------
 
-def _ensure_valorizado_norm_cols(df) -> None:
-    """Precalcula columnas normalizadas (lower/strip) una sola vez sobre el df
-    valorizado cacheado, para que el matching sea robusto y rápido aún con
-    miles de llamadas (recompute/backfill). Agrega columnas auxiliares; no
-    altera las existentes ni rompe a otros consumidores del df."""
+# ── Resolver de base valorizada por alcance ──────────────────────────────────
+# Estima el monto base (monto_yhat) ANUAL — sin filtrar por mes — para cada
+# alcance posible de un override. Usa la MISMA fuente real que Forecast:
+#   - Producción (PostgreSQL): tabla forecast_valorizado.
+#   - Local (SQLite): parquet df_valorizado.
+# Precalcula agregados una sola vez (cache TTL) → resolución O(1) por registro,
+# robusta a casing/espacios. NO depende de que el override tenga período.
+
+_SCOPE_RESOLVER_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_SCOPE_RESOLVER_TTL = 600  # segundos
+
+
+def _scope_norm(s: Any) -> str:
+    return str(s or "").strip().lower()
+
+
+def build_scope_value_resolver() -> dict:
+    """Construye los agregados de monto_yhat por alcance. Best-effort."""
+    res: dict[str, Any] = {
+        "ok": False, "source": None, "rows": 0,
+        "client": {}, "group": {}, "subneg": {}, "codigo": {}, "perfil": {},
+        "client_subneg": {}, "client_codigo": {},
+    }
+    is_pg = engine is not None and "postgresql" in str(engine.url)
     try:
-        for col, ncol in (
-            ("fantasia", "_fant_n"), ("nombre_grupo", "_grp_n"),
-            ("codigo_serie", "_cod_n"), ("subneg", "_sub_n"), ("perfil", "_perf_n"),
-        ):
-            if col in df.columns and ncol not in df.columns:
-                df[ncol] = df[col].astype(str).str.strip().str.lower()
-        if "fecha" in df.columns and "_ym" not in df.columns:
-            try:
-                df["_ym"] = df["fecha"].dt.strftime("%Y-%m")
-            except Exception:
-                df["_ym"] = ""
-    except Exception:
-        pass
+        if is_pg:
+            res["source"] = "postgresql:forecast_valorizado"
+
+            def _agg1(col: str) -> dict:
+                df = _query_agg(
+                    f"SELECT LOWER(TRIM({col})) AS k, SUM(monto_yhat) AS v "
+                    f"FROM forecast_valorizado WHERE {col} IS NOT NULL GROUP BY 1"
+                )
+                if df is None or df.empty:
+                    return {}
+                return {str(r["k"]): float(r["v"] or 0.0) for _, r in df.iterrows() if r["k"]}
+
+            res["client"] = _agg1("fantasia")
+            res["group"] = _agg1("nombre_grupo")
+            res["subneg"] = _agg1("subneg")
+            res["codigo"] = _agg1("codigo_serie")
+            res["perfil"] = _agg1("perfil")
+
+            df_cs = _query_agg(
+                "SELECT LOWER(TRIM(fantasia)) AS k1, LOWER(TRIM(subneg)) AS k2, "
+                "SUM(monto_yhat) AS v FROM forecast_valorizado "
+                "WHERE fantasia IS NOT NULL AND subneg IS NOT NULL GROUP BY 1,2"
+            )
+            if df_cs is not None and not df_cs.empty:
+                res["client_subneg"] = {
+                    (str(r["k1"]), str(r["k2"])): float(r["v"] or 0.0)
+                    for _, r in df_cs.iterrows() if r["k1"] and r["k2"]
+                }
+            df_cc = _query_agg(
+                "SELECT LOWER(TRIM(fantasia)) AS k1, LOWER(TRIM(codigo_serie)) AS k2, "
+                "SUM(monto_yhat) AS v FROM forecast_valorizado "
+                "WHERE fantasia IS NOT NULL AND codigo_serie IS NOT NULL GROUP BY 1,2"
+            )
+            if df_cc is not None and not df_cc.empty:
+                res["client_codigo"] = {
+                    (str(r["k1"]), str(r["k2"])): float(r["v"] or 0.0)
+                    for _, r in df_cc.iterrows() if r["k1"] and r["k2"]
+                }
+        else:
+            res["source"] = "parquet:df_valorizado"
+            df = get_data().get("df_valorizado", pd.DataFrame())
+            if df is not None and not df.empty and "monto_yhat" in df.columns:
+                def _g(col: str) -> dict:
+                    if col not in df.columns:
+                        return {}
+                    key = df[col].astype(str).str.strip().str.lower()
+                    t = df.groupby(key)["monto_yhat"].sum()
+                    return {k: float(v) for k, v in t.items() if k}
+
+                res["client"] = _g("fantasia")
+                res["group"] = _g("nombre_grupo")
+                res["subneg"] = _g("subneg")
+                res["codigo"] = _g("codigo_serie")
+                res["perfil"] = _g("perfil")
+                if {"fantasia", "subneg"}.issubset(df.columns):
+                    k1 = df["fantasia"].astype(str).str.strip().str.lower()
+                    k2 = df["subneg"].astype(str).str.strip().str.lower()
+                    t = df.groupby([k1, k2])["monto_yhat"].sum()
+                    res["client_subneg"] = {(a, b): float(v) for (a, b), v in t.items()}
+                if {"fantasia", "codigo_serie"}.issubset(df.columns):
+                    k1 = df["fantasia"].astype(str).str.strip().str.lower()
+                    k2 = df["codigo_serie"].astype(str).str.strip().str.lower()
+                    t = df.groupby([k1, k2])["monto_yhat"].sum()
+                    res["client_codigo"] = {(a, b): float(v) for (a, b), v in t.items()}
+
+        res["rows"] = len(res["client"]) + len(res["subneg"])
+        res["ok"] = bool(res["client"] or res["subneg"] or res["codigo"] or res["perfil"])
+    except Exception as exc:
+        logger.warning("build_scope_value_resolver error: %s", exc)
+    return res
+
+
+def get_scope_value_resolver(force: bool = False) -> dict:
+    """Resolver cacheado (TTL). force=True lo reconstruye."""
+    now = time.time()
+    cached = _SCOPE_RESOLVER_CACHE.get("data")
+    if (not force) and cached is not None and (now - _SCOPE_RESOLVER_CACHE.get("ts", 0) < _SCOPE_RESOLVER_TTL):
+        return cached
+    data = build_scope_value_resolver()
+    if data.get("ok"):
+        _SCOPE_RESOLVER_CACHE["data"] = data
+        _SCOPE_RESOLVER_CACHE["ts"] = now
+    return data
+
+
+def resolve_scope_base(
+    resolver: dict | None,
+    *,
+    perfil: str | None = None,
+    subneg: str | None = None,
+    codigo_serie: str | None = None,
+    client_selector: str | None = None,
+) -> float | None:
+    """Monto base ANUAL del alcance, con fallback progresivo. None si no hay match."""
+    if not resolver or not resolver.get("ok"):
+        return None
+    cli = _scope_norm(client_selector)
+    sub = _scope_norm(subneg)
+    cod = _scope_norm(codigo_serie)
+    per = _scope_norm(perfil)
+
+    if cli and cod and (cli, cod) in resolver["client_codigo"]:
+        return resolver["client_codigo"][(cli, cod)]
+    if cli and sub and (cli, sub) in resolver["client_subneg"]:
+        return resolver["client_subneg"][(cli, sub)]
+    if cli:
+        if cli in resolver["client"]:
+            return resolver["client"][cli]
+        if cli in resolver["group"]:
+            return resolver["group"][cli]
+    if cod and cod in resolver["codigo"]:
+        return resolver["codigo"][cod]
+    if sub and sub in resolver["subneg"]:
+        return resolver["subneg"][sub]
+    if per and per in resolver["perfil"]:
+        return resolver["perfil"][per]
+    return None
 
 
 def estimate_scope_amount(
@@ -1021,92 +1144,21 @@ def estimate_scope_amount(
     subneg: str | None = None,
     codigo_serie: str | None = None,
     client_selector: str | None = None,
-    forecast_month: str | None = None,
+    forecast_month: str | None = None,   # se ignora: el impacto se estima sobre el alcance ANUAL completo
 ) -> float | None:
-    """Impacto económico base (best-effort) para un alcance de override.
+    """Monto base (estimado) del alcance del override desde la fuente real
+    (PG forecast_valorizado en producción / parquet en local).
 
-    Suma ``monto_yhat`` del df valorizado cacheado. El matching es
-    case-insensitive y con FALLBACK PROGRESIVO (de más específico a menos):
-    si la combinación completa no encuentra filas, relaja el alcance. Devuelve
-    ``None`` solo si ningún campo del alcance matchea — nunca inventa valores.
+    NO depende del período: si el override es anual/global (sin forecast_month),
+    igual se estima sobre el alcance completo (cliente / cliente+subneg /
+    subnegocio / artículo / perfil), con fallback progresivo. Devuelve ``None``
+    solo si ningún identificador del alcance matchea la base valorizada.
     """
-    import functools
-    import operator
-
-    try:
-        df = get_data().get("df_valorizado", pd.DataFrame())
-    except Exception:
-        return None
-    if df is None or df.empty or "monto_yhat" not in df.columns:
-        return None
-
-    _ensure_valorizado_norm_cols(df)
-
-    def _n(s: str | None) -> str:
-        return str(s or "").strip().lower()
-
-    masks: dict[str, Any] = {}
-    cs = _n(client_selector)
-    if cs and "_fant_n" in df.columns:
-        mf = df["_fant_n"] == cs
-        if (not mf.any()) and "_grp_n" in df.columns:
-            mf = df["_grp_n"] == cs
-        if mf.any():
-            masks["client"] = mf
-    code = _n(codigo_serie)
-    if code and "_cod_n" in df.columns:
-        mc = df["_cod_n"] == code
-        if mc.any():
-            masks["codigo"] = mc
-    sub = _n(subneg)
-    if sub and "_sub_n" in df.columns:
-        ms = df["_sub_n"] == sub
-        if ms.any():
-            masks["subneg"] = ms
-    perf = _n(perfil)
-    if perf and "_perf_n" in df.columns:
-        mp = df["_perf_n"] == perf
-        if mp.any():
-            masks["perfil"] = mp
-    fm = (forecast_month or "").strip()
-    if fm and "_ym" in df.columns:
-        mt = df["_ym"] == fm
-        if mt.any():
-            masks["period"] = mt
-
-    if not masks:
-        return None
-
-    def _combine(keys):
-        sel = [masks[k] for k in keys if k in masks]
-        if not sel:
-            return None
-        m = functools.reduce(operator.and_, sel)
-        return m if m.any() else None
-
-    # De más específico a menos específico.
-    for combo in (
-        ("client", "subneg", "codigo", "period"),
-        ("client", "subneg", "period"),
-        ("client", "subneg"),
-        ("client", "codigo"),
-        ("client", "period"),
-        ("client",),
-        ("subneg", "perfil", "period"),
-        ("subneg", "perfil"),
-        ("subneg", "period"),
-        ("subneg",),
-        ("codigo", "period"),
-        ("codigo",),
-        ("perfil",),
-    ):
-        m = _combine(combo)
-        if m is not None:
-            try:
-                return float(df.loc[m, "monto_yhat"].sum())
-            except Exception:
-                return None
-    return None
+    return resolve_scope_base(
+        get_scope_value_resolver(),
+        perfil=perfil, subneg=subneg, codigo_serie=codigo_serie,
+        client_selector=client_selector,
+    )
 
 
 # Sentinelas que representan "sin grupo" (misma convención que el treemap/cliente).
