@@ -1986,17 +1986,22 @@
   .appr-count b { color: var(--text-primary); font-weight: 700; }
 
   /* ── Tabla (scroll interno real, x + y) ── */
+  /* table-layout:fixed → columnas estables: header y filas (padre/hijas)
+     comparten exactamente la misma grilla definida en <colgroup>. */
   .appr-tablewrap { overflow: auto; max-width: 100%; max-height: 58vh; }
-  table.appr-table { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; font-size: .82rem; margin: 0; }
+  table.appr-table { width: 100%; min-width: 1080px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: .82rem; margin: 0; }
   table.appr-table thead th {
     position: sticky; top: 0; z-index: 2; background: var(--bg-primary);
     font-size: .67rem; text-transform: uppercase; letter-spacing: .045em; font-weight: 700; color: var(--text-muted);
     padding: 9px 14px; text-align: left; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); white-space: nowrap;
     box-shadow: inset 0 -1px 0 var(--border-color);
+    overflow: hidden; text-overflow: ellipsis;
   }
-  table.appr-table tbody td { padding: 8px 14px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+  /* Celdas de DATOS (filas hijas/sueltas): clip al ancho de columna. La fila de
+     grupo (.appr-group-row) se exceptúa abajo porque es una banda full-width. */
+  table.appr-table tbody tr:not(.appr-group-row) td { padding: 8px 14px; border-bottom: 1px solid var(--border-color); vertical-align: middle; overflow: hidden; }
   table.appr-table tbody tr { transition: background .1s ease; }
-  table.appr-table tbody tr:hover { background: var(--g-blue-hover); }
+  table.appr-table tbody tr:not(.appr-group-row):hover { background: var(--g-blue-hover); }
   table.appr-table tbody tr:last-child td { border-bottom: none; }
   .appr-num { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -2007,8 +2012,8 @@
     display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; text-transform: uppercase;
   }
   .appr-cell-main { font-weight: 600; color: var(--text-primary); }
-  .appr-cell-sub { font-size: .72rem; color: var(--text-muted); margin-top: 1px; }
-  .appr-trunc { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .appr-cell-sub { font-size: .72rem; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .appr-trunc { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .appr-code { font-family: var(--font-mono, ui-monospace, monospace); font-size: .72rem; color: var(--text-secondary); }
 
   .appr-change { display: inline-flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -2035,24 +2040,33 @@
   .appr-badge--no { background: var(--g-red-light); color: var(--g-red); }
   .appr-badge--mix { background: #ede7f6; color: #6c3fe0; }
 
-  /* ── Filas de grupo (padre) e hijos ── */
-  table.appr-table tbody tr.appr-group-row { cursor: pointer; background: var(--bg-primary); }
-  table.appr-table tbody tr.appr-group-row:hover { background: #eef3fb; }
-  table.appr-table tbody tr.appr-group-row td { padding: 9px 14px; border-bottom: 1px solid var(--border-color); }
-  .appr-group-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .appr-group-caret { color: var(--text-muted); font-size: .9rem; transition: transform .12s; flex: none; }
+  /* ── Banda de grupo (fila padre) — sección full-width, clara y premium ── */
+  table.appr-table tbody tr.appr-group-row { cursor: pointer; }
+  table.appr-table tbody tr.appr-group-row > td { padding: 0; border-bottom: 1px solid var(--border-color); }
+  .appr-group-bar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; background: linear-gradient(180deg, #f5f8fd 0%, #eef3fb 100%);
+    border-left: 3px solid var(--g-blue);
+  }
+  table.appr-table tbody tr.appr-group-row:hover .appr-group-bar { background: linear-gradient(180deg, #eef3fb 0%, #e6eefb 100%); }
+  .appr-group-caret { color: var(--g-blue); font-size: .95rem; flex: none; transition: transform .12s; }
   .appr-group-tag {
     background: linear-gradient(135deg, var(--g-blue) 0%, #4f93f7 100%); color: #fff;
-    font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-    padding: 2px 8px; border-radius: var(--radius-pill); flex: none;
+    font-size: .6rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    padding: 3px 9px; border-radius: var(--radius-pill); flex: none;
   }
-  .appr-group-name { font-weight: 700; color: var(--text-primary); font-size: .9rem; max-width: 260px; }
-  .appr-group-meta { display: inline-flex; gap: 12px; flex-wrap: wrap; }
-  .appr-gmeta { font-size: .74rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .appr-group-id { min-width: 0; flex: 1 1 180px; }
+  .appr-group-name { font-weight: 700; color: var(--text-primary); font-size: .92rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .appr-group-meta { font-size: .72rem; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .appr-group-cluster { display: flex; align-items: center; gap: 18px; flex: none; }
   .appr-group-impact { display: inline-flex; gap: 6px; }
   .appr-group-status { display: inline-flex; align-items: center; gap: 8px; }
-  .appr-group-breakdown { white-space: nowrap; }
-  .appr-group-actions { display: inline-flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .appr-group-breakdown { font-size: .68rem; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .appr-group-actions { display: inline-flex; gap: 6px; flex: none; }
+  @media (max-width: 1100px) {
+    .appr-group-breakdown { display: none; }
+    .appr-group-cluster { gap: 12px; }
+  }
   .appr-gbtn {
     border: 1px solid var(--border-color); background: #fff; border-radius: var(--radius-sm);
     padding: 5px 11px; font-size: .75rem; font-weight: 600; cursor: pointer;
@@ -2068,10 +2082,10 @@
   table.appr-table tbody tr.appr-child-row { background: #fcfdff; }
   .appr-child-rail { width: 14px; flex: none; }
 
-  .appr-rowacts { display: inline-flex; gap: 5px; justify-content: flex-end; }
+  .appr-rowacts { display: inline-flex; gap: 4px; justify-content: flex-end; }
   .appr-act {
     border: 1px solid var(--border-color); background: #fff; color: var(--text-secondary);
-    border-radius: var(--radius-sm); width: 31px; height: 31px; cursor: pointer; font-size: .92rem;
+    border-radius: var(--radius-sm); width: 28px; height: 28px; flex: none; cursor: pointer; font-size: .88rem;
     display: inline-flex; align-items: center; justify-content: center; transition: all .12s ease;
   }
   .appr-act:hover { background: var(--bg-primary); box-shadow: var(--shadow-soft); }
@@ -2680,6 +2694,16 @@
           <!-- Tabla -->
           <div class="appr-tablewrap">
             <table class="appr-table" id="appr-table">
+              <colgroup>
+                <col style="width:15%;">
+                <col style="width:10%;">
+                <col style="width:13%;">
+                <col style="width:16%;">
+                <col style="width:15%;">
+                <col style="width:7%;">
+                <col style="width:11%;">
+                <col style="width:13%;">
+              </colgroup>
               <thead id="appr-thead">
                 <tr>
                   <th>Usuario</th>
@@ -6668,7 +6692,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     </tr>`;
   }
 
-  // Fila padre de grupo (colspan) con agregados + acciones de grupo
+  // Fila padre de grupo — banda full-width (no datos en columnas): nombre +
+  // metadata a la izquierda; impacto, estado y acciones a la derecha.
   function _apprGroupRowHtml(u, idx) {
     const expanded = _apprGroupExpanded[u.grupo] === true;
     const caret = expanded ? 'bi-chevron-down' : 'bi-chevron-right';
@@ -6678,26 +6703,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     const groupActs = hasPend
       ? `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar todo el grupo" onclick="event.stopPropagation();_apprApproveGroupIdx(${idx})"><i class="bi bi-check2-all"></i> Aprobar grupo</button>
          <button class="appr-gbtn appr-gbtn--no" title="Rechazar todo el grupo" onclick="event.stopPropagation();_apprOpenRejectGroupIdx(${idx})"><i class="bi bi-x-octagon"></i> Rechazar grupo</button>`
-      : `<span class="appr-cell-sub" style="font-style:italic;">Sin pendientes</span>`;
-    const impChips =
-      `<span class="appr-impact appr-impact--neg" title="Total bajas estimado">${(u.impacto_baja||0) ? '↓ '+fmtMoney(u.impacto_baja) : '$0'}</span>`
-      + `<span class="appr-impact appr-impact--pos" title="Total subas estimado">${(u.impacto_suba||0) ? '↑ '+fmtMoney(u.impacto_suba) : '$0'}</span>`;
+      : `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">Sin pendientes</span>`;
+    const baja = (u.impacto_baja || 0)
+      ? `<span class="appr-impact appr-impact--neg" title="Total bajas estimado">↓ ${fmtMoney(u.impacto_baja)}</span>` : '';
+    const suba = (u.impacto_suba || 0)
+      ? `<span class="appr-impact appr-impact--pos" title="Total subas estimado">↑ ${fmtMoney(u.impacto_suba)}</span>` : '';
+    const imp = (baja || suba) ? (baja + suba)
+      : `<span class="appr-impact appr-impact--na" title="Sin base valorizada">N/D</span>`;
     return `<tr class="appr-group-row" onclick="_apprToggleGroupIdx(${idx})">
       <td colspan="${_NC}">
         <div class="appr-group-bar">
           <i class="bi ${caret} appr-group-caret"></i>
           <span class="appr-group-tag">Grupo</span>
-          <span class="appr-group-name appr-trunc" title="${esc(u.grupo)}">${esc(u.grupo)}</span>
-          <span class="appr-group-meta">
-            <span class="appr-gmeta"><i class="bi bi-people"></i> ${u.clientes} cuenta${u.clientes!==1?'s':''}</span>
-            <span class="appr-gmeta"><i class="bi bi-list-check"></i> ${u.modificaciones} modif.</span>
-          </span>
-          <span class="appr-group-impact">${impChips}</span>
-          <span class="appr-group-status">
-            ${cons}
-            <span class="appr-cell-sub appr-group-breakdown">Pend: ${est.pendiente||0} · Aprob: ${est.aprobado||0} · Rech: ${est.rechazado||0}</span>
-          </span>
-          <span class="appr-group-actions">${groupActs}</span>
+          <div class="appr-group-id">
+            <div class="appr-group-name" title="${esc(u.grupo)}">${esc(u.grupo)}</div>
+            <div class="appr-group-meta">${u.clientes} cuenta${u.clientes!==1?'s':''} · ${u.modificaciones} modificación${u.modificaciones!==1?'es':''}</div>
+          </div>
+          <div class="appr-group-cluster">
+            <div class="appr-group-impact">${imp}</div>
+            <div class="appr-group-status">${cons}<span class="appr-group-breakdown">Pend ${est.pendiente||0} · Aprob ${est.aprobado||0} · Rech ${est.rechazado||0}</span></div>
+            <div class="appr-group-actions">${groupActs}</div>
+          </div>
         </div>
       </td>
     </tr>`;
