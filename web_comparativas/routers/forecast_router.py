@@ -1637,6 +1637,10 @@ def _query_change_requests(session, filters: dict, cap: int):
     if perfil:
         q = q.filter(CR.perfil.ilike(f"%{perfil}%"))
 
+    negocio = (filters.get("negocio") or "").strip()
+    if negocio:
+        q = q.filter(CR.neg.ilike(f"%{negocio}%"))
+
     subneg = (filters.get("subneg") or "").strip()
     if subneg:
         q = q.filter(CR.subneg.ilike(f"%{subneg}%"))
@@ -1759,6 +1763,7 @@ def api_approvals(
     date_to: Optional[str] = Query(None),
     comercial: Optional[str] = Query(None),
     perfil: Optional[str] = Query(None),
+    negocio: Optional[str] = Query(None),
     subneg: Optional[str] = Query(None),
     articulo: Optional[str] = Query(None),
     period: Optional[str] = Query(None),
@@ -1776,7 +1781,7 @@ def api_approvals(
 
     filters = dict(
         estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
-        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        perfil=perfil, negocio=negocio, subneg=subneg, articulo=articulo, period=period,
         change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
     )
     try:
@@ -1812,31 +1817,62 @@ def api_approvals_filter_options(
     request: Request,
     user: User = Depends(_require_user),
 ):
-    """Valores distintos para desplegables de filtro. Solo Admin."""
+    """Valores distintos para desplegables de filtro. Solo Admin.
+
+    Perfil, Negocio y Subnegocio se alimentan de la MISMA fuente que el filtro
+    general superior de Forecast (svc.get_filter_options() → dataset valorizado),
+    de modo que el listado coincida exactamente. Usuario (cotizador) y Período
+    son específicos de las modificaciones, por lo que se derivan de la propia
+    tabla forecast_change_requests."""
     _require_admin_only(user)
     from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
     if SessionLocal is None or CR is None:
-        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": [], "periodos": []})
+        return JSONResponse({"ok": False, "perfiles": [], "negocios": [], "subneg": [], "comerciales": [], "periodos": []})
     try:
+        # Perfil / Negocio / Subnegocio: misma fuente que el filtro general.
+        perfiles, negocios, subnegs = [], [], []
+        try:
+            opts = svc.get_filter_options()
+            if isinstance(opts, bytes):
+                import json as _json
+                opts = _json.loads(opts.decode("utf-8"))
+            if isinstance(opts, dict):
+                perfiles = list(opts.get("profiles") or [])
+                negocios = list(opts.get("neg") or [])
+                subnegs = list(opts.get("subneg") or [])
+        except Exception as fo_exc:
+            logger.warning("approvals filter-options: general source failed (%s)", fo_exc)
+
+        # Usuario (cotizador) y Período: propios de las modificaciones.
         with SessionLocal() as session:
-            perfiles = sorted({r.perfil for r in session.query(CR.perfil).distinct() if r.perfil})
-            subnegs = sorted({r.subneg for r in session.query(CR.subneg).distinct() if r.subneg})
             comerciales = sorted({
                 r.created_by_username
                 for r in session.query(CR.created_by_username).distinct()
                 if r.created_by_username
             })
             periodos = sorted({r.period for r in session.query(CR.period).distinct() if r.period})
+
+            # Fallback: si la fuente general no devolvió perfiles/negocios/subneg
+            # (p. ej. dataset no disponible), usar los valores presentes en las
+            # modificaciones para no dejar el filtro vacío.
+            if not perfiles:
+                perfiles = sorted({r.perfil for r in session.query(CR.perfil).distinct() if r.perfil})
+            if not negocios:
+                negocios = sorted({r.neg for r in session.query(CR.neg).distinct() if r.neg})
+            if not subnegs:
+                subnegs = sorted({r.subneg for r in session.query(CR.subneg).distinct() if r.subneg})
+
         return JSONResponse({
             "ok": True,
             "perfiles": perfiles,
+            "negocios": negocios,
             "subneg": subnegs,
             "comerciales": comerciales,
             "periodos": periodos,
         })
     except Exception as exc:
         logger.error("approvals filter-options error: %s", exc, exc_info=True)
-        return JSONResponse({"ok": False, "perfiles": [], "subneg": [], "comerciales": [], "periodos": []})
+        return JSONResponse({"ok": False, "perfiles": [], "negocios": [], "subneg": [], "comerciales": [], "periodos": []})
 
 
 class _ReviewPayload(BaseModel):
@@ -1960,6 +1996,7 @@ def api_approvals_grouped(
     date_to: Optional[str] = Query(None),
     comercial: Optional[str] = Query(None),
     perfil: Optional[str] = Query(None),
+    negocio: Optional[str] = Query(None),
     subneg: Optional[str] = Query(None),
     articulo: Optional[str] = Query(None),
     period: Optional[str] = Query(None),
@@ -1979,7 +2016,7 @@ def api_approvals_grouped(
 
     filters = dict(
         estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
-        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        perfil=perfil, negocio=negocio, subneg=subneg, articulo=articulo, period=period,
         change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
     )
     try:
@@ -2040,6 +2077,7 @@ class _GroupReviewPayload(BaseModel):
     date_to: Optional[str] = None
     comercial: Optional[str] = None
     perfil: Optional[str] = None
+    negocio: Optional[str] = None
     subneg: Optional[str] = None
     articulo: Optional[str] = None
     period: Optional[str] = None
@@ -2051,9 +2089,9 @@ class _GroupReviewPayload(BaseModel):
 def _group_filters(payload: "_GroupReviewPayload") -> dict:
     return dict(
         estado=payload.estado, date_from=payload.date_from, date_to=payload.date_to,
-        comercial=payload.comercial, perfil=payload.perfil, subneg=payload.subneg,
-        articulo=payload.articulo, period=payload.period, change_type=payload.change_type,
-        impacto=payload.impacto, alto_impacto=payload.alto_impacto,
+        comercial=payload.comercial, perfil=payload.perfil, negocio=payload.negocio,
+        subneg=payload.subneg, articulo=payload.articulo, period=payload.period,
+        change_type=payload.change_type, impacto=payload.impacto, alto_impacto=payload.alto_impacto,
     )
 
 
@@ -2162,6 +2200,7 @@ def api_approvals_export(
     date_to: Optional[str] = Query(None),
     comercial: Optional[str] = Query(None),
     perfil: Optional[str] = Query(None),
+    negocio: Optional[str] = Query(None),
     subneg: Optional[str] = Query(None),
     articulo: Optional[str] = Query(None),
     period: Optional[str] = Query(None),
@@ -2177,7 +2216,7 @@ def api_approvals_export(
 
     filters = dict(
         estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
-        perfil=perfil, subneg=subneg, articulo=articulo, period=period,
+        perfil=perfil, negocio=negocio, subneg=subneg, articulo=articulo, period=period,
         change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
     )
     try:

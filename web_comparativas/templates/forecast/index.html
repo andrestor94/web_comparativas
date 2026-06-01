@@ -2151,6 +2151,17 @@
     background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-pill);
     font-variant-numeric: tabular-nums;
   }
+  .appr-pgjump { display: inline-flex; align-items: center; gap: 5px; }
+  .appr-pgjump-input {
+    width: 56px; text-align: center; font-size: .78rem; font-weight: 700;
+    padding: 5px 6px; border: 1px solid var(--border-color); border-radius: var(--radius-pill);
+    color: var(--text-secondary); font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+  }
+  .appr-pgjump-input::-webkit-outer-spin-button,
+  .appr-pgjump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .appr-pgjump-input:focus { border-color: var(--g-blue); box-shadow: 0 0 0 3px rgba(26,115,232,.12); outline: none; }
+  .appr-pgjump-btn { padding: 6px 12px; }
+  .appr-pgtotal { font-size: .78rem; color: var(--text-muted); white-space: nowrap; }
 
   /* ── Modales (refinados) ── */
   .appr-modal-overlay {
@@ -2552,7 +2563,6 @@
               <div class="appr-head-ic"><i class="bi bi-clipboard-check"></i></div>
               <div>
                 <h3>Aprobaciones Forecast</h3>
-                <p class="appr-sub">Revisión de modificaciones realizadas por cotizadores sobre las proyecciones comerciales. Apruebe o rechace los cambios y descargue el informe ejecutivo.</p>
               </div>
             </div>
             <div class="appr-actions">
@@ -2661,7 +2671,7 @@
               </div>
               <div class="appr-field appr-fbtns">
                 <button class="btn btn-sm" style="background:var(--g-blue);color:#fff;" onclick="_apprLoad()">
-                  <i class="bi bi-search"></i> Filtrar
+                  Filtrar
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" onclick="_apprReset()">Limpiar</button>
               </div>
@@ -2681,6 +2691,10 @@
                 <div class="appr-field">
                   <label>Perfil</label>
                   <select id="appr-perfil" class="form-select form-select-sm"><option value="">Todos</option></select>
+                </div>
+                <div class="appr-field">
+                  <label>Negocio</label>
+                  <select id="appr-negocio" class="form-select form-select-sm"><option value="">Todos</option></select>
                 </div>
                 <div class="appr-field">
                   <label>Subnegocio</label>
@@ -6564,6 +6578,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!d.ok) return;
       _populateSelect('appr-comercial', d.comerciales, 'Todos');
       _populateSelect('appr-perfil', d.perfiles, 'Todos');
+      _populateSelect('appr-negocio', d.negocios, 'Todos');
       _populateSelect('appr-subneg', d.subneg, 'Todos');
     } catch (_) {}
   }
@@ -6575,6 +6590,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       date_to:     (document.getElementById('appr-date-to')?.value || ''),
       comercial:   (document.getElementById('appr-comercial')?.value || ''),
       perfil:      (document.getElementById('appr-perfil')?.value || ''),
+      negocio:     (document.getElementById('appr-negocio')?.value || ''),
       subneg:      (document.getElementById('appr-subneg')?.value || ''),
       articulo:    (document.getElementById('appr-articulo')?.value || ''),
       period:      (document.getElementById('appr-period')?.value || ''),
@@ -6817,20 +6833,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     _apprRenderGrouped(_apprUnits);   // re-render local, sin refetch
   };
 
-  function _apprRenderPagination() {
-    const bottom = document.getElementById('appr-pagination');
-    const top = document.getElementById('appr-pagination-top');
+  // Controles de paginación reutilizables (Anterior · Pág. N de M · [N] Ir · Siguiente).
+  // inputId distingue el pager superior del inferior para que el "Ir a página"
+  // funcione en ambos sin colisión de IDs.
+  function _apprPagerControls(inputId) {
     const dis = (cond) => cond ? '' : ' disabled';
     const prevAttr = _apprPage > 1 ? ` onclick="_apprGoPage(${_apprPage - 1})"` : '';
     const nextAttr = _apprPage < _apprPages ? ` onclick="_apprGoPage(${_apprPage + 1})"` : '';
+    return `<button class="appr-pgbtn"${prevAttr}${dis(_apprPage > 1)}><i class="bi bi-chevron-left"></i> Anterior</button>`
+      + `<span class="appr-pginfo">Pág. ${_apprPage} de ${_apprPages}</span>`
+      + `<span class="appr-pgjump">`
+      +   `<input type="number" id="${inputId}" class="appr-pgjump-input" min="1" max="${_apprPages}" `
+      +     `value="${_apprPage}" step="1" inputmode="numeric" aria-label="Ir a página" title="Ir a página" `
+      +     `onkeydown="if(event.key==='Enter'){event.preventDefault();_apprJump('${inputId}');}">`
+      +   `<button class="appr-pgbtn appr-pgjump-btn" onclick="_apprJump('${inputId}')" title="Ir a la página indicada">Ir</button>`
+      + `</span>`
+      + `<button class="appr-pgbtn"${nextAttr}${dis(_apprPage < _apprPages)}>Siguiente <i class="bi bi-chevron-right"></i></button>`;
+  }
+
+  function _apprRenderPagination() {
+    const bottom = document.getElementById('appr-pagination');
+    const top = document.getElementById('appr-pagination-top');
 
     // Pager compacto (barra superior) — siempre accesible
     if (top) {
-      top.innerHTML = (_apprPages <= 1)
-        ? ''
-        : `<button class="appr-pgbtn"${prevAttr}${dis(_apprPage > 1)}><i class="bi bi-chevron-left"></i> Anterior</button>`
-          + `<span class="appr-pginfo">Pág. ${_apprPage} / ${_apprPages}</span>`
-          + `<button class="appr-pgbtn"${nextAttr}${dis(_apprPage < _apprPages)}>Siguiente <i class="bi bi-chevron-right"></i></button>`;
+      top.innerHTML = (_apprPages <= 1) ? '' : _apprPagerControls('appr-jump-top');
     }
 
     // Pager inferior (detallado)
@@ -6838,15 +6865,33 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (_apprPages <= 1) {
         bottom.innerHTML = `<span>${_apprTotal} modificación(es)</span>`;
       } else {
-        bottom.innerHTML =
-          `<button class="appr-pgbtn"${prevAttr}${dis(_apprPage > 1)}><i class="bi bi-chevron-left"></i> Anterior</button>`
-          + `<span class="appr-pginfo">Pág. ${_apprPage} de ${_apprPages} (${_apprTotal} modificaciones)</span>`
-          + `<button class="appr-pgbtn"${nextAttr}${dis(_apprPage < _apprPages)}>Siguiente <i class="bi bi-chevron-right"></i></button>`;
+        bottom.innerHTML = _apprPagerControls('appr-jump-bottom')
+          + `<span class="appr-pgtotal">${_apprTotal} modificaciones</span>`;
       }
     }
   }
 
-  window._apprGoPage = function(p) { _apprPage = p; _apprFetch(); };
+  // Navega a una página validando el rango [1, _apprPages]. Si la página pedida
+  // coincide con la actual (o tras recortar al rango válido), re-sincroniza los
+  // inputs sin recargar.
+  window._apprGoPage = function(p) {
+    p = parseInt(p, 10);
+    if (isNaN(p)) { _apprRenderPagination(); return; }
+    if (p < 1) p = 1;
+    if (p > _apprPages) p = _apprPages;
+    if (p === _apprPage) { _apprRenderPagination(); return; }
+    _apprPage = p;
+    _apprFetch();
+  };
+
+  // Lee el input "Ir a página" y navega. Valores fuera de rango se recortan.
+  window._apprJump = function(inputId) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    const p = parseInt(el.value, 10);
+    if (isNaN(p)) { el.value = _apprPage; return; }
+    _apprGoPage(p);
+  };
 
   const _apprGroupedPageSize = 25;   // unidades (grupos + sueltos) por página
   function _apprBuildGroupedURL(page) {
@@ -6908,7 +6953,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ['appr-date-from','appr-date-to','appr-articulo','appr-period'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-    ['appr-comercial','appr-perfil','appr-subneg','appr-tipo','appr-impacto','appr-alto'].forEach(id => {
+    ['appr-comercial','appr-perfil','appr-negocio','appr-subneg','appr-tipo','appr-impacto','appr-alto'].forEach(id => {
       const el = document.getElementById(id); if (el) el.selectedIndex = 0;
     });
     const est = document.getElementById('appr-estado'); if (est) est.value = 'pendiente';
