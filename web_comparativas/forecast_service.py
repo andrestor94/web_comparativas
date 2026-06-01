@@ -2941,12 +2941,12 @@ def _pg_get_chart_data_inner(
         products_as_codes=val_prod,
         products=None if val_prod is not None else products,
     )
-    # fact_2026 uses two independent subqueries so each dimension resolves correctly:
-    # 1. Profile → client subquery via forecast_valorizado.
-    #    forecast_fact_2026.perfil has internal codes ("9 - 1"); the correct commercial
-    #    profile is stored in forecast_valorizado.perfil.  Both tables share cliente_id.
+    # fact_2026 uses two independent filters so each dimension resolves correctly:
+    # 1. Profile → tipocli column directly from forecast_fact_2026 (enriched at load time
+    #    from clientes.csv). Using JOIN via forecast_valorizado.perfil was incorrect: it
+    #    excluded clients present in forecast_fact_2026 (tipocli=X) but absent in
+    #    forecast_valorizado, causing $663M undercount for DRO Apr-2026 (73 clients lost).
     # 2. Neg/subneg/products → series subquery via forecast_main.
-    fact_perfil_where = _build_filter_sql(profiles=profiles) if profiles else None
     _has_series_filter = bool(neg or subneg or (prod_codes is not None) or products)
     fact_series_only_where = _build_filter_sql(
         neg=neg, subneg=subneg,
@@ -3238,13 +3238,14 @@ def _pg_get_chart_data_inner(
     # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
     # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
     _fact_parts = ["fecha >= '2026-01-01'", "fecha < '2026-05-01'"]
-    if fact_perfil_where:
-        _fact_parts.append(
-            f"CAST(cliente_id AS TEXT) IN ("
-            f"  SELECT DISTINCT CAST(fv.cliente_id AS TEXT) "
-            f"  FROM forecast_valorizado fv WHERE {fact_perfil_where}"
-            f")"
-        )
+    if profiles:
+        # Filter directly by tipocli (commercial profile enriched at load time from clientes.csv).
+        # Do NOT use JOIN with forecast_valorizado: that table misses clients that exist in
+        # forecast_fact_2026, causing an undercount.  tipocli is the authoritative profile column.
+        _fact_tipocli = _safe_in("tipocli", profiles)
+        if _fact_tipocli:
+            _fact_parts.append(_fact_tipocli)
+        print(f"[FORECAST FACT2026] profiles={profiles} → tipocli filter: {_fact_tipocli or 'NONE'}", flush=True)
     if fact_series_only_where:
         _fact_parts.append(
             f"codigo_serie IN ("
