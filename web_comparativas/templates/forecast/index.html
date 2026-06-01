@@ -2058,15 +2058,44 @@
   .appr-group-id { min-width: 0; flex: 1 1 180px; }
   .appr-group-name { font-weight: 700; color: var(--text-primary); font-size: .92rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .appr-group-meta { font-size: .72rem; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .appr-group-cluster { display: flex; align-items: center; gap: 18px; flex: none; }
+  .appr-group-cluster { display: flex; align-items: center; gap: 22px; flex: none; }
+  /* Campos del grupo con micro-rótulo arriba → la banda se lee sola, sin
+     depender de un encabezado de columnas. */
+  .appr-gfield { display: flex; flex-direction: column; gap: 2px; }
+  .appr-glabel { font-size: .56rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
   .appr-group-impact { display: inline-flex; gap: 6px; }
   .appr-group-status { display: inline-flex; align-items: center; gap: 8px; }
   .appr-group-breakdown { font-size: .68rem; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .appr-group-actions { display: inline-flex; gap: 6px; flex: none; }
+  .appr-group-actions { display: inline-flex; gap: 6px; flex: none; align-self: center; }
   @media (max-width: 1100px) {
     .appr-group-breakdown { display: none; }
-    .appr-group-cluster { gap: 12px; }
+    .appr-group-cluster { gap: 14px; }
   }
+
+  /* ── Divisor de sección (Grupos / Cuentas sin grupo) ── */
+  table.appr-table tbody tr.appr-sec > td { padding: 0; border-bottom: 1px solid var(--border-color); }
+  .appr-sec-bar {
+    display: flex; align-items: center; gap: 8px; padding: 9px 16px;
+    background: var(--bg-card); border-left: 3px solid transparent;
+    font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary);
+  }
+  .appr-sec--group .appr-sec-bar { border-left-color: var(--g-blue); }
+  .appr-sec--single .appr-sec-bar { border-left-color: #9aa0a6; }
+  .appr-sec-bar i { font-size: .92rem; color: var(--text-muted); }
+  .appr-sec-hint { font-weight: 500; text-transform: none; letter-spacing: 0; font-size: .72rem; color: var(--text-muted); }
+  .appr-sec-count { margin-left: auto; font-weight: 700; color: var(--text-muted); }
+
+  /* ── Sub-encabezado de DETALLE (columnas de cliente) ── */
+  table.appr-table tbody tr.appr-subhead th {
+    position: sticky; top: 0; z-index: 3; background: var(--bg-primary);
+    font-size: .64rem; text-transform: uppercase; letter-spacing: .045em; font-weight: 700; color: var(--text-muted);
+    padding: 7px 14px; text-align: left; white-space: nowrap;
+    border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  table.appr-table tbody tr.appr-subhead th.appr-num { text-align: right; }
+  /* Sub-encabezado de hijos de grupo: matiz para mostrar subordinación */
+  table.appr-table tbody tr.appr-subhead--child th { background: #f1f5fb; color: var(--g-blue-dark); }
   .appr-gbtn {
     border: 1px solid var(--border-color); background: #fff; border-radius: var(--radius-sm);
     padding: 5px 11px; font-size: .75rem; font-weight: 600; cursor: pointer;
@@ -2704,18 +2733,8 @@
                 <col style="width:11%;">
                 <col style="width:13%;">
               </colgroup>
-              <thead id="appr-thead">
-                <tr>
-                  <th>Usuario</th>
-                  <th>Tipo</th>
-                  <th>Cambio (% anterior → nuevo)</th>
-                  <th class="appr-num">Impacto estimado</th>
-                  <th>Cuenta / Artículo</th>
-                  <th>Período</th>
-                  <th>Estado</th>
-                  <th style="text-align:right;">Acciones</th>
-                </tr>
-              </thead>
+              <!-- Encabezados contextuales (grupo / detalle de cliente) se
+                   renderizan dentro del tbody según el tipo de fila. -->
               <tbody id="appr-tbody">
                 <tr><td colspan="8">
                   <div class="appr-empty">
@@ -6720,8 +6739,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="appr-group-meta">${u.clientes} cuenta${u.clientes!==1?'s':''} · ${u.modificaciones} modificación${u.modificaciones!==1?'es':''}</div>
           </div>
           <div class="appr-group-cluster">
-            <div class="appr-group-impact">${imp}</div>
-            <div class="appr-group-status">${cons}<span class="appr-group-breakdown">Pend ${est.pendiente||0} · Aprob ${est.aprobado||0} · Rech ${est.rechazado||0}</span></div>
+            <div class="appr-gfield">
+              <span class="appr-glabel">Impacto estimado</span>
+              <div class="appr-group-impact">${imp}</div>
+            </div>
+            <div class="appr-gfield">
+              <span class="appr-glabel">Estado consolidado</span>
+              <div class="appr-group-status">${cons}<span class="appr-group-breakdown">Pend ${est.pendiente||0} · Aprob ${est.aprobado||0} · Rech ${est.rechazado||0}</span></div>
+            </div>
             <div class="appr-group-actions">${groupActs}</div>
           </div>
         </div>
@@ -6729,19 +6754,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     </tr>`;
   }
 
+  // Sub-encabezado con las columnas de DETALLE (cliente/modificación).
+  // variant: 'child' (hijos de un grupo) | 'main' (cuentas sin grupo)
+  function _apprDetailHeaderHtml(variant) {
+    const cls = (variant === 'child') ? 'appr-subhead appr-subhead--child' : 'appr-subhead';
+    return `<tr class="${cls}">
+      <th>Usuario</th>
+      <th>Tipo</th>
+      <th>Cambio (% anterior → nuevo)</th>
+      <th class="appr-num">Impacto estimado</th>
+      <th>Cuenta / Artículo</th>
+      <th>Período</th>
+      <th>Estado</th>
+      <th style="text-align:right;">Acciones</th>
+    </tr>`;
+  }
+
   function _apprRenderGrouped(units) {
     const tbody = document.getElementById('appr-tbody');
     if (!tbody) return;
     if (!units || !units.length) { tbody.innerHTML = _apprEmptyHtml(); return; }
+
+    const nGroups = units.filter(u => u.type === 'group').length;
+    const nSingles = units.length - nGroups;
     const html = [];
+    let groupSecDone = false, singleSecDone = false;
+
     units.forEach((u, i) => {
-      if (u.type === 'single') {
-        html.push(_apprRowHtml(u.record, false));
-      } else {
+      if (u.type === 'group') {
+        if (!groupSecDone) {
+          groupSecDone = true;
+          html.push(`<tr class="appr-sec appr-sec--group"><td colspan="${_NC}">
+            <div class="appr-sec-bar"><i class="bi bi-collection"></i> Grupos de clientes
+              <span class="appr-sec-hint">— resumen por grupo; desplegá para ver el detalle de cuentas</span>
+              <span class="appr-sec-count">${nGroups} grupo${nGroups!==1?'s':''}</span>
+            </div></td></tr>`);
+        }
         html.push(_apprGroupRowHtml(u, i));
         if (_apprGroupExpanded[u.grupo] === true) {
+          html.push(_apprDetailHeaderHtml('child'));
           (u.records || []).forEach(r => html.push(_apprRowHtml(r, true)));
         }
+      } else {
+        if (!singleSecDone) {
+          singleSecDone = true;
+          html.push(`<tr class="appr-sec appr-sec--single"><td colspan="${_NC}">
+            <div class="appr-sec-bar"><i class="bi bi-person"></i> Cuentas sin grupo
+              <span class="appr-sec-count">${nSingles} cuenta${nSingles!==1?'s':''}</span>
+            </div></td></tr>`);
+          html.push(_apprDetailHeaderHtml('main'));
+        }
+        html.push(_apprRowHtml(u.record, false));
       }
     });
     tbody.innerHTML = html.join('');
