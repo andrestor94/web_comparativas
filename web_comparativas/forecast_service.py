@@ -1165,28 +1165,83 @@ def estimate_scope_amount(
 _SIN_GRUPO_SENTINELS = {"SIN GRUPO", "SIN GRUPO / OTROS", "", "NAN", "NONE"}
 
 
-def get_client_group_map() -> dict[str, str]:
-    """Mapa cliente(fantasía normalizada) → nombre_grupo.
+_CLIENT_DIM_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_CLIENT_DIM_TTL = 600  # segundos
 
-    Misma fuente y criterio de agrupación que la tabla "Proyección más
-    expectativa de crecimiento" (df_valorizado: fantasia → nombre_grupo).
-    Excluye los sentinelas de "sin grupo". Best-effort: devuelve {} si falla.
+
+def build_client_dim_map() -> dict[str, dict]:
+    """Mapa cliente(fantasía normalizada) → {grupo, perfil}.
+
+    MISMA fuente y criterio que la tabla "Proyección más expectativa de
+    crecimiento": en producción usa PG forecast_valorizado; en local el parquet
+    df_valorizado. Cada cliente tiene 1 grupo y 1 perfil. Best-effort: {} si falla.
     """
-    out: dict[str, str] = {}
+    out: dict[str, dict] = {}
+    is_pg = engine is not None and "postgresql" in str(engine.url)
     try:
-        df = get_data().get("df_valorizado", pd.DataFrame())
-        if df is None or df.empty or not {"fantasia", "nombre_grupo"}.issubset(df.columns):
-            return out
-        sub = df[["fantasia", "nombre_grupo"]].dropna().drop_duplicates("fantasia")
-        for fant, grp in zip(sub["fantasia"].astype(str), sub["nombre_grupo"].astype(str)):
-            fant_c = fant.strip()
-            grp_c = grp.strip()
-            if not fant_c or grp_c.upper() in _SIN_GRUPO_SENTINELS:
-                continue
-            out[fant_c.lower()] = grp_c
-    except Exception:
+        if is_pg:
+            df = _query_agg(
+                "SELECT LOWER(TRIM(fantasia)) AS f, "
+                "MAX(TRIM(nombre_grupo)) AS grupo, MAX(TRIM(perfil)) AS perfil "
+                "FROM forecast_valorizado WHERE fantasia IS NOT NULL GROUP BY 1"
+            )
+            if df is None or df.empty:
+                return out
+            for _, r in df.iterrows():
+                f = str(r.get("f") or "").strip()
+                if not f:
+                    continue
+                grp = str(r.get("grupo") or "").strip()
+                perf = str(r.get("perfil") or "").strip()
+                out[f] = {
+                    "grupo": None if grp.upper() in _SIN_GRUPO_SENTINELS else grp,
+                    "perfil": perf or None,
+                }
+        else:
+            df = get_data().get("df_valorizado", pd.DataFrame())
+            if df is None or df.empty or "fantasia" not in df.columns:
+                return out
+            cols = [c for c in ("fantasia", "nombre_grupo", "perfil") if c in df.columns]
+            sub = df[cols].dropna(subset=["fantasia"]).drop_duplicates("fantasia")
+            for _, r in sub.iterrows():
+                f = str(r.get("fantasia") or "").strip().lower()
+                if not f:
+                    continue
+                grp = str(r.get("nombre_grupo") or "").strip()
+                perf = str(r.get("perfil") or "").strip()
+                out[f] = {
+                    "grupo": None if grp.upper() in _SIN_GRUPO_SENTINELS else grp,
+                    "perfil": perf or None,
+                }
+    except Exception as exc:
+        logger.warning("build_client_dim_map error: %s", exc)
         return {}
     return out
+
+
+def get_client_dim_map(force: bool = False) -> dict[str, dict]:
+    """Mapa cliente→{grupo,perfil} cacheado (TTL)."""
+    now = time.time()
+    cached = _CLIENT_DIM_CACHE.get("data")
+    if (not force) and cached is not None and (now - _CLIENT_DIM_CACHE.get("ts", 0) < _CLIENT_DIM_TTL):
+        return cached
+    data = build_client_dim_map()
+    if data:
+        _CLIENT_DIM_CACHE["data"] = data
+        _CLIENT_DIM_CACHE["ts"] = now
+    return data
+
+
+def get_client_group_map() -> dict[str, str]:
+    """Mapa cliente(fantasía normalizada) → nombre_grupo (sin sentinelas)."""
+    dim = get_client_dim_map()
+    return {k: v["grupo"] for k, v in dim.items() if v.get("grupo")}
+
+
+def get_client_perfil_map() -> dict[str, str]:
+    """Mapa cliente(fantasía normalizada) → perfil."""
+    dim = get_client_dim_map()
+    return {k: v["perfil"] for k, v in dim.items() if v.get("perfil")}
 
 
 def _classify_change_type(old_pct: float | None, new_pct: float | None) -> str:
@@ -1245,6 +1300,17 @@ def _record_change_request(
         if amount_base is not None and abs_delta is not None:
             amount_delta = round(amount_base * (abs_delta / 100.0), 2)
 
+        # Perfil: si el override no lo trae (típico en alcance subnegocio), se
+        # deriva del cliente (cada cliente tiene un único perfil). Hace que el
+        # filtro Perfil funcione también para registros nuevos.
+        _perfil = (rec.perfil or "").strip() or None
+        if not _perfil:
+            try:
+                _cli = getattr(rec, "client_display", None) or rec.client_selector
+                _perfil = get_client_perfil_map().get(str(_cli or "").strip().lower())
+            except Exception:
+                _perfil = None
+
         # Flush para asegurar rec.id (trazabilidad e idempotencia del backfill).
         try:
             session.flush()
@@ -1260,7 +1326,7 @@ def _record_change_request(
             scope_type=getattr(rec, "override_scope", None),
             client_selector=rec.client_selector,
             client_name=getattr(rec, "client_display", None) or rec.client_selector,
-            perfil=rec.perfil,
+            perfil=_perfil,
             neg=rec.neg,
             subneg=(rec.subneg or None),
             codigo_serie=(rec.codigo_serie or None),

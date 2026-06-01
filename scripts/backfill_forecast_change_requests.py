@@ -99,6 +99,16 @@ def main() -> int:
 
             change_type = svc._classify_change_type(old_v, new_v)
 
+            # Perfil: si el override no lo trae (alcance subnegocio), derivarlo
+            # del cliente (1 perfil por cliente) → el filtro Perfil funciona.
+            _perfil = (ov.perfil or "").strip() or None
+            if not _perfil:
+                try:
+                    _cli = ov.client_display or ov.client_selector
+                    _perfil = svc.get_client_perfil_map().get(str(_cli or "").strip().lower())
+                except Exception:
+                    _perfil = None
+
             cr = ForecastChangeRequest(
                 created_at=ov.updated_at or ov.created_at,
                 override_id=ov.id,
@@ -109,7 +119,7 @@ def main() -> int:
                 scope_type=ov.override_scope,
                 client_selector=ov.client_selector,
                 client_name=ov.client_display or ov.client_selector,
-                perfil=ov.perfil,
+                perfil=_perfil,
                 neg=ov.neg,
                 subneg=(ov.subneg or None),
                 codigo_serie=(ov.codigo_serie or None),
