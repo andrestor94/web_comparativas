@@ -1837,15 +1837,18 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
             ogp = round(float(info.get("ogp") or 0.0), 2)
             sel = key[1]
             cands = [c for c in cr_index.get(key, []) if c[2] is not None and abs(c[2] - ogp) < 0.01]
-            if not cands:
-                # Override activo SIN request vigente coincidente → no se mezcla
-                # en la matriz; solo se reporta en diagnóstico.
+            if cands:
+                # Hay request vigente coincidente → usa su status (el más reciente).
+                cands.sort(key=lambda c: c[0])
+                status = cands[-1][1]
+                if status not in matrix:
+                    status = "pendiente"
+            else:
+                # Override activo SIN request coincidente → es un ajuste vigente
+                # que afecta la curva, así que cuenta como PENDIENTE (pendiente de
+                # aprobación), NO se excluye. Se reporta en diagnóstico.
                 sin_request += 1
                 sin_request_monto += impact
-                continue
-            cands.sort(key=lambda c: c[0])
-            status = cands[-1][1]
-            if status not in matrix:
                 status = "pendiente"
             direction = "baja" if impact < 0 else "suba"
             cell = matrix[status][direction]
@@ -1853,16 +1856,20 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
             cell["n"] += 1
             imp_status[status] += impact
             por_cuenta[sel] = por_cuenta.get(sel, 0.0) + abs(impact)
+            sel_display.setdefault(sel, info.get("selector") or sel)
             considerados += 1
 
         for st in matrix:
             for d in ("baja", "suba"):
                 matrix[st][d]["monto"] = round(matrix[st][d]["monto"], 2)
-        logger.debug(
-            "approvals impacto curva: overrides_considerados=%d neto=%.2f | "
-            "override_sin_request=%d/%.2f",
-            considerados, round(sum(imp_status.values()), 2),
-            sin_request, round(sin_request_monto, 2),
+        # LOG TEMPORAL (INFO) para validar el primer deploy en producción.
+        # TODO: bajar a logger.debug o quitar tras validar (no dejar en INFO).
+        _compute_net = round(sum(float(i.get("impact") or 0.0) for i in override_impacts.values()), 2)
+        logger.info(
+            "approvals impacto curva [TEMP]: compute_net=%.2f considerados=%d | "
+            "override_sin_request=%d/%.2f | pendiente baja=%.2f suba=%.2f",
+            _compute_net, considerados, sin_request, round(sin_request_monto, 2),
+            matrix["pendiente"]["baja"]["monto"], matrix["pendiente"]["suba"]["monto"],
         )
         sin_estimar_total = 0
     else:

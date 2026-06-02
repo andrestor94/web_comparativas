@@ -1221,13 +1221,33 @@ def compute_approval_curve_impacts(growth_pct: float = 25.0, *, is_admin: bool =
         return {}
     ov["_delta"] = ov["base_val"].astype(float) * (ov["_annual_eff"].astype(float) - eff_base)
 
+    # Selector = el client_selector del override que matcheó (mismo campo que la
+    # change_request), NO el fantasia crudo de la fila. _apply matchea por varios
+    # candidatos (fantasia/cliente_id/...); acá recuperamos cuál es un selector de
+    # override activo para que el linkeo impacto↔request del router sea correcto.
+    ovr_sel_set = {
+        _clean_override_text(getattr(rec, "client_selector", "") or "").lower()
+        for rec in recs
+    }
+    ovr_sel_set.discard("")
+
+    def _matched_selector(row):
+        cands = [
+            _clean_override_text(row.get("fantasia", "") or "").lower(),
+            _clean_override_text(row.get("cliente_id", "") or "").lower(),
+        ]
+        for c in cands:
+            if c in ovr_sel_set:
+                return c
+        return cands[0]  # fallback (no deberia ocurrir si la fila matcheó un override)
+
     out: dict[tuple, dict] = {}
     for _, r in ov.iterrows():
         d = float(r.get("_delta") or 0.0)
         if d == 0.0:
             continue
         scope = _normalize_scope(r.get("_override_scope"))
-        sel = _clean_override_text(r.get("fantasia", "") or "").lower()
+        sel = _matched_selector(r)
         sub = _clean_override_text(r.get("subneg", "") or "").lower()
         cod = _clean_override_text(r.get("codigo_serie", "") or "").lower()
         ae = float(r.get("_annual_eff", 1.0) or 1.0)
