@@ -1676,19 +1676,91 @@ def _query_change_requests(session, filters: dict, cap: int):
     return q.order_by(CR.created_at.desc()).limit(cap).all()
 
 
+def _dedupe_and_resolve_overlap(records: list[dict]) -> list[dict]:
+    """Devuelve los registros 'netos' para los IMPORTES en $ (matriz e impacto
+    por estatus), evitando contar dos veces el mismo dinero. Dos pasos:
+
+    1) DEDUP por celda vigente — identidad de negocio:
+       (scope_type, cliente, subnegocio, artículo, período). Entre registros con
+       la MISMA clave se conserva SOLO el más reciente (created_at; desempata id).
+       Así una celda re-guardada N veces cuenta una sola vez, con su valor vigente.
+       OJO: el PERÍODO es parte de la clave → meses distintos NO son duplicados
+       (son celdas mensuales legítimas y se mantienen ambas).
+
+    2) SOLAPAMIENTO de alcance — jerarquía cliente-ancla:
+            celda / producto  ⊂  subnegocio   (mismo cliente + subnegocio)
+       Si para un (cliente, subnegocio) existe un cambio vigente de alcance
+       'subnegocio', los cambios 'celda'/'producto' contenidos en ese mismo
+       (cliente, subnegocio) se EXCLUYEN: la base anual del subnegocio ya incluye
+       económicamente a esas celdas. Se conserva el alcance MÁS GENERAL → el mismo
+       dinero del forecast nunca se suma dos veces.
+
+    IMPORTANTE (no romper otras métricas): esto afecta SOLO los importes en $.
+    Los CONTEOS de la pantalla (chips subas/bajas/ajustes y conteos por estatus)
+    se calculan a propósito sobre el set bruto en _compute_approval_kpis, porque
+    miden cuántas modificaciones se hicieron, no el dinero neto resultante.
+    """
+    def _n(v):
+        return str(v or "").strip().lower()
+
+    def _key(r):
+        return (
+            _n(r.get("scope_type")), _n(r.get("client_name")),
+            _n(r.get("subnegocio")), _n(r.get("codigo_serie")), _n(r.get("periodo")),
+        )
+
+    # Paso 1 — dedup: gana el registro más reciente por clave de celda.
+    best: dict[tuple, dict] = {}
+    for r in records:
+        k = _key(r)
+        cur = best.get(k)
+        rank = (r.get("_created_sort") or dt.datetime.min, r.get("id") or 0)
+        if cur is None or rank > (cur.get("_created_sort") or dt.datetime.min, cur.get("id") or 0):
+            best[k] = r
+    survivors = list(best.values())
+
+    # Paso 2 — solapamiento: celda/producto contenida en su subnegocio vigente.
+    subneg_scopes = {
+        (_n(r.get("client_name")), _n(r.get("subnegocio")))
+        for r in survivors if _n(r.get("scope_type")) == "subnegocio"
+    }
+    return [
+        r for r in survivors
+        if not (
+            _n(r.get("scope_type")) in ("celda", "producto")
+            and (_n(r.get("client_name")), _n(r.get("subnegocio"))) in subneg_scopes
+        )
+    ]
+
+
 def _compute_approval_kpis(records: list[dict]) -> dict:
-    """KPIs ejecutivos sobre el conjunto FILTRADO (antes de paginar)."""
+    """KPIs ejecutivos sobre el conjunto FILTRADO (antes de paginar).
+
+    Dos vistas del mismo conjunto:
+      • CONTEOS (cuántas modificaciones) → set bruto ``records``.
+      • IMPORTES en $ (matriz + impacto por estatus + mayor cuenta) → set ``neto``
+        ya deduplicado y sin solapamiento de alcance (ver
+        _dedupe_and_resolve_overlap), para no contar el mismo dinero dos veces.
+    """
     def _amt(r):
         v = r.get("impacto_estimado")
         return float(v) if isinstance(v, (int, float)) else 0.0
 
+    # Conteos por estatus → set bruto.
     pendientes = [r for r in records if r.get("status") == "pendiente"]
     aprobados = [r for r in records if r.get("status") == "aprobado"]
     rechazados = [r for r in records if r.get("status") == "rechazado"]
 
-    # Mayor impacto por cuenta/grupo (suma de impacto estimado en valor absoluto)
+    # Importes en $ → set neto (deduplicado + sin solapamiento de alcance).
+    neto = _dedupe_and_resolve_overlap(records)
+    pendientes_n = [r for r in neto if r.get("status") == "pendiente"]
+    aprobados_n = [r for r in neto if r.get("status") == "aprobado"]
+    rechazados_n = [r for r in neto if r.get("status") == "rechazado"]
+
+    # Mayor impacto por cuenta/grupo (suma de impacto estimado en valor absoluto).
+    # Sobre el set neto: es un importe en $, no un conteo.
     por_cuenta: dict[str, float] = {}
-    for r in records:
+    for r in neto:
         cta = r.get("client_name") or "—"
         por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(_amt(r))
     mayor_cuenta, mayor_cuenta_monto = ("—", 0.0)
@@ -1728,19 +1800,20 @@ def _compute_approval_kpis(records: list[dict]) -> dict:
         sin_est = sum(1 for r in sel if _impact_value(r) is None)
         return {"monto": monto, "n": len(sel), "sin_estimar": sin_est}
 
+    # Matriz e importes en $ → set NETO (sin duplicados ni solapamiento de alcance).
     matrix = {
         st: {"baja": _cell(rows, "baja"), "suba": _cell(rows, "suba")}
-        for st, rows in (("pendiente", pendientes), ("aprobado", aprobados), ("rechazado", rechazados))
+        for st, rows in (("pendiente", pendientes_n), ("aprobado", aprobados_n), ("rechazado", rechazados_n))
     }
-    sin_estimar_total = sum(1 for r in records if _impact_value(r) is None)
+    sin_estimar_total = sum(1 for r in neto if _impact_value(r) is None)
 
     return {
         "pendientes": len(pendientes),
         "aprobados": len(aprobados),
         "rechazados": len(rechazados),
-        "impacto_pendiente": round(sum(_amt(r) for r in pendientes), 2),
-        "impacto_aprobado": round(sum(_amt(r) for r in aprobados), 2),
-        "impacto_rechazado": round(sum(_amt(r) for r in rechazados), 2),
+        "impacto_pendiente": round(sum(_amt(r) for r in pendientes_n), 2),
+        "impacto_aprobado": round(sum(_amt(r) for r in aprobados_n), 2),
+        "impacto_rechazado": round(sum(_amt(r) for r in rechazados_n), 2),
         "usuarios": len(usuarios),
         "mayor_cuenta": mayor_cuenta,
         "mayor_cuenta_monto": round(mayor_cuenta_monto, 2),
