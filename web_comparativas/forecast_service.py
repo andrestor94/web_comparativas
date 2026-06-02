@@ -1138,6 +1138,123 @@ def resolve_scope_base(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Impacto curva-consistente de los overrides ACTIVOS para "Aprobaciones Forecast".
+#
+# Reutiliza EXACTAMENTE la lógica de la curva visible (/forecast/api/chart-data):
+# por cada fila del valorizado afectada por un override,
+#     delta_fila = base_val × (_annual_eff − _eff_base),  _eff_base = 1+growth/100
+# (igual que _pg_get_chart_data_inner al construir Total_User_Adj − Total_Adj).
+# forecast_valorizado es la PROYECCIÓN (todo futuro) → _eff_base aplica a todas
+# las filas; por eso la suma reconcilia con Σ(Total_User_Adj − Total_Adj) por
+# construcción. SOLO LECTURA: no modifica datos ni el guardado de overrides.
+# ---------------------------------------------------------------------------
+def compute_approval_curve_impacts(growth_pct: float = 25.0, *, is_admin: bool = True) -> dict:
+    """Impacto de cada override ACTIVO sobre la curva, agregado por alcance.
+
+    Devuelve dict keyed por identidad normalizada
+    ``(scope, selector, subneg, codigo, month)`` →
+    ``{'impact', 'ogp', 'scope', 'selector', 'subneg', 'codigo', 'month'}``,
+    donde ``impact`` = contribución del override a (Proyección ajustada −
+    Proyección +growth%). El router linkea cada identidad con su
+    forecast_change_request vigente para asignarle el status.
+
+    Misma precedencia/last-wins que la curva (vía _apply_override_effects_to_dataframe
+    + _build_override_maps); no introduce reglas paralelas.
+    """
+    recs = [r for r in _fetch_override_records(None, all_users=bool(is_admin))
+            if getattr(r, "is_active", False)]
+    if not recs:
+        return {}
+    # MISMA consolidación que la curva en producción (_pg_get_chart_data_inner):
+    # un único override por alcance, el más reciente (records ya vienen ordenados
+    # por updated_at ASC). Evita doble conteo de duplicados activos.
+    recs = _consolidate_override_records(recs, "approvals")
+    selectors = _build_override_maps(recs).get("selectors", [])
+    if not selectors:
+        return {}
+
+    is_pg = engine is not None and "postgresql" in str(engine.url)
+    try:
+        if is_pg:
+            sel_f = _safe_in("fantasia", selectors)
+            ov = _query_agg(
+                "SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
+                "SUM(COALESCE(monto_yhat,0)) AS base_val "
+                f"FROM forecast_valorizado WHERE ({sel_f}) "
+                "GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie"
+            )
+        else:
+            df = get_data().get("df_valorizado", pd.DataFrame())
+            if df is None or df.empty or "monto_yhat" not in df.columns or "fantasia" not in df.columns:
+                return {}
+            sel_norm = {_clean_override_text(s) for s in selectors}
+            fnorm = df["fantasia"].astype(str).map(_clean_override_text)
+            sub_df = df[fnorm.isin(sel_norm)].copy()
+            if sub_df.empty:
+                return {}
+            sub_df["base_val"] = sub_df["monto_yhat"]
+            gcols = [c for c in ("fecha", "fantasia", "cliente_id", "subneg", "codigo_serie") if c in sub_df.columns]
+            ov = sub_df.groupby(gcols, dropna=False)["base_val"].sum().reset_index()
+    except Exception as exc:
+        logger.warning("compute_approval_curve_impacts load failed: %s", exc)
+        return {}
+    if ov is None or ov.empty:
+        return {}
+
+    # fecha → datetime (necesario para _apply_override_effects_to_dataframe).
+    if "fecha" in ov.columns:
+        ov["fecha"] = pd.to_datetime(ov["fecha"], errors="coerce")
+
+    # Reusar EXACTAMENTE la resolución de overrides de la curva. max_hist_date=None
+    # porque el valorizado es proyección (todo futuro) → todas las filas vigentes.
+    ov, _ = _apply_override_effects_to_dataframe(
+        ov, user_id=None, base_growth_pct=float(growth_pct),
+        max_hist_date=None, _records=recs, is_admin=bool(is_admin),
+    )
+    if ov is None or ov.empty or "_annual_eff" not in ov.columns:
+        return {}
+
+    eff_base = 1.0 + float(growth_pct) / 100.0
+    ov = ov[ov.get("_has_override") == True].copy()
+    if ov.empty:
+        return {}
+    ov["_delta"] = ov["base_val"].astype(float) * (ov["_annual_eff"].astype(float) - eff_base)
+
+    out: dict[tuple, dict] = {}
+    for _, r in ov.iterrows():
+        d = float(r.get("_delta") or 0.0)
+        if d == 0.0:
+            continue
+        scope = _normalize_scope(r.get("_override_scope"))
+        sel = _clean_override_text(r.get("fantasia", "") or "").lower()
+        sub = _clean_override_text(r.get("subneg", "") or "").lower()
+        cod = _clean_override_text(r.get("codigo_serie", "") or "").lower()
+        ae = float(r.get("_annual_eff", 1.0) or 1.0)
+        if scope == FORECAST_SCOPE_SUBNEG:
+            key = (scope, sel, sub, "", "")
+            ident = {"subneg": sub, "codigo": "", "month": ""}
+        elif scope == FORECAST_SCOPE_PRODUCT:
+            key = (scope, sel, "", cod, "")
+            ident = {"subneg": "", "codigo": cod, "month": ""}
+        elif scope == FORECAST_SCOPE_CELL:
+            f = r.get("fecha")
+            month = _normalize_month_key(str(f)[:7]) if f is not None and pd.notna(f) else ""
+            key = (scope, sel, sub, cod, month)
+            ident = {"subneg": sub, "codigo": cod, "month": month}
+        else:
+            continue
+        agg = out.get(key)
+        if agg is None:
+            out[key] = {"impact": d, "ogp": round((ae - 1.0) * 100.0, 2),
+                        "scope": scope, "selector": sel, **ident}
+        else:
+            agg["impact"] += d
+    for v in out.values():
+        v["impact"] = round(v["impact"], 2)
+    return out
+
+
 def estimate_scope_amount(
     *,
     perfil: str | None = None,

@@ -1591,6 +1591,7 @@ def _cr_to_dict(cr, group_map: dict | None = None) -> dict:
         "usuario": cr.created_by_username or "—",
         "scope_type": cr.scope_type or "—",
         "client_name": cr.client_name or cr.client_selector or "—",
+        "client_selector": cr.client_selector or "",
         "perfil": cr.perfil or "—",
         "negocio": cr.neg or "—",
         "subnegocio": cr.subneg or "—",
@@ -1733,87 +1734,179 @@ def _dedupe_and_resolve_overlap(records: list[dict]) -> list[dict]:
     ]
 
 
-def _compute_approval_kpis(records: list[dict]) -> dict:
+def _vig_norm(v) -> str:
+    """Normaliza un componente de clave de vigencia. Trata '—'/'none'/'' como vacío
+    (porque _cr_to_dict rellena faltantes con '—' y los overrides con ''/None)."""
+    s = str(v or "").strip().lower()
+    return "" if s in ("—", "none", "nan") else s
+
+
+def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = None) -> dict:
     """KPIs ejecutivos sobre el conjunto FILTRADO (antes de paginar).
 
     Dos vistas del mismo conjunto:
-      • CONTEOS (cuántas modificaciones) → set bruto ``records``.
-      • IMPORTES en $ (matriz + impacto por estatus + mayor cuenta) → set ``neto``
-        ya deduplicado y sin solapamiento de alcance (ver
-        _dedupe_and_resolve_overlap), para no contar el mismo dinero dos veces.
+      • CONTEOS (cuántas modificaciones) → set bruto ``records`` (chips subas/
+        bajas/ajustes y conteos por estatus).
+      • IMPORTES en $ (matriz + impacto por estatus + mayor cuenta):
+
+        - Si se pasa ``override_impacts`` (dict de
+          ``svc.compute_approval_curve_impacts``): los importes se calculan con la
+          MISMA lógica que la curva visible (Proyección ajustada − Proyección +25%),
+          por override ACTIVO, y se segmentan por el status de su request vigente
+          coincidente. NO usa ``estimated_amount_delta`` persistido. Reglas de borde:
+            · override activo con request vigente coincidente → entra con ese status;
+            · override activo sin request coincidente → ``override_sin_request``
+              (solo diagnóstico, NO suma en la matriz);
+            · request sin override activo coincidente → excluida (no aparece).
+        - Si ``override_impacts`` es None (red de seguridad, p.ej. curva no
+          disponible): cae al neto deduplicado del log. Degradado, no preferente.
     """
     def _amt(r):
         v = r.get("impacto_estimado")
         return float(v) if isinstance(v, (int, float)) else 0.0
 
-    # Conteos por estatus → set bruto.
+    # ── CONTEOS (cuántas modificaciones) → set BRUTO ─────────────────────────
     pendientes = [r for r in records if r.get("status") == "pendiente"]
     aprobados = [r for r in records if r.get("status") == "aprobado"]
     rechazados = [r for r in records if r.get("status") == "rechazado"]
-
-    # Importes en $ → set neto (deduplicado + sin solapamiento de alcance).
-    neto = _dedupe_and_resolve_overlap(records)
-    pendientes_n = [r for r in neto if r.get("status") == "pendiente"]
-    aprobados_n = [r for r in neto if r.get("status") == "aprobado"]
-    rechazados_n = [r for r in neto if r.get("status") == "rechazado"]
-
-    # Mayor impacto por cuenta/grupo (suma de impacto estimado en valor absoluto).
-    # Sobre el set neto: es un importe en $, no un conteo.
-    por_cuenta: dict[str, float] = {}
-    for r in neto:
-        cta = r.get("client_name") or "—"
-        por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(_amt(r))
-    mayor_cuenta, mayor_cuenta_monto = ("—", 0.0)
-    if por_cuenta:
-        mayor_cuenta, mayor_cuenta_monto = max(por_cuenta.items(), key=lambda kv: kv[1])
-
     usuarios = {r.get("usuario") for r in records if r.get("usuario") and r.get("usuario") != "—"}
 
-    # Dirección (Baja/Suba) por SIGNO del impacto; si el impacto no está estimado,
-    # se usa el signo de la diferencia % (siempre disponible). Esto evita que un
-    # change_type "ajuste" o un impacto NULL excluya el registro de la matriz.
-    def _impact_value(r):
-        v = r.get("impacto_estimado")
-        return float(v) if isinstance(v, (int, float)) else None
-
-    def _direction(r):
-        v = _impact_value(r)
-        if v is not None and v != 0:
-            return "baja" if v < 0 else "suba"
+    def _direction_pct(r):
         d = r.get("delta_pct")
         if isinstance(d, (int, float)) and d != 0:
             return "baja" if d < 0 else "suba"
-        return None  # sin dirección clara (delta 0 y sin impacto)
+        v = r.get("impacto_estimado")
+        if isinstance(v, (int, float)) and v != 0:
+            return "baja" if v < 0 else "suba"
+        return None
 
-    subas = sum(1 for r in records if _direction(r) == "suba")
-    bajas = sum(1 for r in records if _direction(r) == "baja")
-    ajustes = sum(1 for r in records if _direction(r) is None)
+    subas = sum(1 for r in records if _direction_pct(r) == "suba")
+    bajas = sum(1 for r in records if _direction_pct(r) == "baja")
+    ajustes = sum(1 for r in records if _direction_pct(r) is None)
     altas = sum(1 for r in records if r.get("change_type") == "alta_manual")
 
-    # Matriz ejecutiva: por estatus × {baja, suba}.
-    # Cada celda lleva: monto (suma de impactos estimados), n (cantidad) y
-    # sin_estimar (cuántos no tienen impacto calculable) → permite mostrar N/D
-    # honesto en vez de un falso $0.
-    def _cell(rows, direction):
-        sel = [r for r in rows if _direction(r) == direction]
-        monto = round(sum(v for v in (_impact_value(r) for r in sel) if v is not None), 2)
-        sin_est = sum(1 for r in sel if _impact_value(r) is None)
-        return {"monto": monto, "n": len(sel), "sin_estimar": sin_est}
-
-    # Matriz e importes en $ → set NETO (sin duplicados ni solapamiento de alcance).
     matrix = {
-        st: {"baja": _cell(rows, "baja"), "suba": _cell(rows, "suba")}
-        for st, rows in (("pendiente", pendientes_n), ("aprobado", aprobados_n), ("rechazado", rechazados_n))
+        st: {"baja": {"monto": 0.0, "n": 0, "sin_estimar": 0},
+             "suba": {"monto": 0.0, "n": 0, "sin_estimar": 0}}
+        for st in ("pendiente", "aprobado", "rechazado")
     }
-    sin_estimar_total = sum(1 for r in neto if _impact_value(r) is None)
+    imp_status = {"pendiente": 0.0, "aprobado": 0.0, "rechazado": 0.0}
+    por_cuenta: dict[str, float] = {}
+    sel_display: dict[str, str] = {}
+
+    if override_impacts is not None:
+        # ── IMPORTES en $ = IMPACTO CURVA (Ajustada − +25%) por override activo,
+        #    segmentado por el status de su request vigente. NO usa
+        #    estimated_amount_delta persistido. ─────────────────────────────────
+        def _ck(scope, sel, sub, cod, month):
+            if scope == "subnegocio":
+                return (scope, sel, sub, "", "")
+            if scope == "producto":
+                return (scope, sel, "", cod, "")
+            if scope == "celda":
+                return (scope, sel, sub, cod, month)
+            return None
+
+        # Índice de requests por identidad de alcance → [(sort, status, new_value)]
+        cr_index: dict[tuple, list] = {}
+        for r in records:
+            scope = _vig_norm(r.get("scope_type"))
+            sub = _vig_norm(r.get("subnegocio"))
+            cod = _vig_norm(r.get("codigo_serie"))
+            month = _vig_norm(r.get("periodo"))
+            nv = r.get("valor_nuevo")
+            nvr = round(float(nv), 2) if isinstance(nv, (int, float)) else None
+            st = r.get("status") or "pendiente"
+            so = r.get("_created_sort") or dt.datetime.min
+            disp = r.get("client_name") or r.get("client_selector") or "—"
+            for sel in {_vig_norm(r.get("client_selector")), _vig_norm(r.get("client_name"))}:
+                if not sel:
+                    continue
+                sel_display.setdefault(sel, disp)
+                k = _ck(scope, sel, sub, cod, month)
+                if k:
+                    cr_index.setdefault(k, []).append((so, st, nvr))
+
+        sin_request = 0
+        sin_request_monto = 0.0
+        considerados = 0
+        for key, info in override_impacts.items():
+            impact = float(info.get("impact") or 0.0)
+            if impact == 0.0:
+                continue
+            ogp = round(float(info.get("ogp") or 0.0), 2)
+            sel = key[1]
+            cands = [c for c in cr_index.get(key, []) if c[2] is not None and abs(c[2] - ogp) < 0.01]
+            if not cands:
+                # Override activo SIN request vigente coincidente → no se mezcla
+                # en la matriz; solo se reporta en diagnóstico.
+                sin_request += 1
+                sin_request_monto += impact
+                continue
+            cands.sort(key=lambda c: c[0])
+            status = cands[-1][1]
+            if status not in matrix:
+                status = "pendiente"
+            direction = "baja" if impact < 0 else "suba"
+            cell = matrix[status][direction]
+            cell["monto"] += impact
+            cell["n"] += 1
+            imp_status[status] += impact
+            por_cuenta[sel] = por_cuenta.get(sel, 0.0) + abs(impact)
+            considerados += 1
+
+        for st in matrix:
+            for d in ("baja", "suba"):
+                matrix[st][d]["monto"] = round(matrix[st][d]["monto"], 2)
+        logger.debug(
+            "approvals impacto curva: overrides_considerados=%d neto=%.2f | "
+            "override_sin_request=%d/%.2f",
+            considerados, round(sum(imp_status.values()), 2),
+            sin_request, round(sin_request_monto, 2),
+        )
+        sin_estimar_total = 0
+    else:
+        # ── FALLBACK (sin impactos de curva disponibles): set neto sumando el
+        #    estimated_amount_delta persistido. Solo como red de seguridad. ─────
+        neto = _dedupe_and_resolve_overlap(records)
+
+        def _impact_value(r):
+            v = r.get("impacto_estimado")
+            return float(v) if isinstance(v, (int, float)) else None
+
+        for r in neto:
+            v = _impact_value(r)
+            if v is None or v == 0:
+                continue
+            st = r.get("status") or "pendiente"
+            if st not in matrix:
+                st = "pendiente"
+            direction = "baja" if v < 0 else "suba"
+            matrix[st][direction]["monto"] += v
+            matrix[st][direction]["n"] += 1
+            imp_status[st] += v
+            cta = _vig_norm(r.get("client_selector")) or _vig_norm(r.get("client_name"))
+            por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(v)
+            sel_display.setdefault(cta, r.get("client_name") or "—")
+        for st in matrix:
+            for d in ("baja", "suba"):
+                matrix[st][d]["monto"] = round(matrix[st][d]["monto"], 2)
+        sin_estimar_total = sum(
+            1 for r in neto if not isinstance(r.get("impacto_estimado"), (int, float))
+        )
+
+    mayor_cuenta, mayor_cuenta_monto = ("—", 0.0)
+    if por_cuenta:
+        _sel, mayor_cuenta_monto = max(por_cuenta.items(), key=lambda kv: kv[1])
+        mayor_cuenta = sel_display.get(_sel, _sel) or "—"
 
     return {
         "pendientes": len(pendientes),
         "aprobados": len(aprobados),
         "rechazados": len(rechazados),
-        "impacto_pendiente": round(sum(_amt(r) for r in pendientes_n), 2),
-        "impacto_aprobado": round(sum(_amt(r) for r in aprobados_n), 2),
-        "impacto_rechazado": round(sum(_amt(r) for r in rechazados_n), 2),
+        "impacto_pendiente": round(imp_status["pendiente"], 2),
+        "impacto_aprobado": round(imp_status["aprobado"], 2),
+        "impacto_rechazado": round(imp_status["rechazado"], 2),
         "usuarios": len(usuarios),
         "mayor_cuenta": mayor_cuenta,
         "mayor_cuenta_monto": round(mayor_cuenta_monto, 2),
@@ -1862,7 +1955,14 @@ def api_approvals(
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
             records = [_cr_to_dict(r) for r in rows]
 
-        kpis = _compute_approval_kpis(records)
+        # Impacto curva-consistente (Ajustada − +25%) por override activo. Si no
+        # se puede calcular, None → fallback degradado en _compute_approval_kpis.
+        try:
+            _impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
+        except Exception as _imp_exc:
+            logger.warning("approval curve impacts failed: %s", _imp_exc)
+            _impacts = None
+        kpis = _compute_approval_kpis(records, override_impacts=_impacts or None)
         total = len(records)
         start = (page - 1) * page_size
         page_records = records[start: start + page_size]
@@ -2098,7 +2198,12 @@ def api_approvals_grouped(
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
             records = [_cr_to_dict(r, group_map) for r in rows]
 
-        kpis = _compute_approval_kpis(records)
+        try:
+            _impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
+        except Exception as _imp_exc:
+            logger.warning("approval curve impacts failed: %s", _imp_exc)
+            _impacts = None
+        kpis = _compute_approval_kpis(records, override_impacts=_impacts or None)
 
         # Agrupar: grupo → registros ; sin grupo → sueltos
         grouped: dict[str, list[dict]] = {}
