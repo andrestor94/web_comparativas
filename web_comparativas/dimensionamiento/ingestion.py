@@ -789,7 +789,14 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
     logger.info("Rebuilding monthly summary table for import_run_id=%s", run_id)
     if IS_POSTGRES:
         session.execute(text("SET LOCAL statement_timeout = 0"))
-    session.execute(delete(DimensionamientoFamilyMonthlySummary))
+    # Run-scoped: solo borra/reconstruye el resumen de ESTA corrida y agrega solo
+    # SUS registros. Si coexisten varias corridas (flujo blue-green), agregar todos
+    # los records inflaba el summary del run activo (p.ej. al regenerar el snapshot).
+    session.execute(
+        delete(DimensionamientoFamilyMonthlySummary).where(
+            DimensionamientoFamilyMonthlySummary.import_run_id == run_id
+        )
+    )
 
     if IS_SQLITE:
         # En SQLite, insert().from_select() sobre esta tabla deja filas visibles
@@ -833,6 +840,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
                     COUNT(DISTINCT cliente_visible) AS clientes_unicos,
                     :run_id AS import_run_id
                 FROM dimensionamiento_records
+                WHERE import_run_id = :run_id
                 GROUP BY
                     date(fecha, 'start of month'),
                     plataforma,
@@ -872,6 +880,7 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             func.count(func.distinct(DimensionamientoRecord.cliente_visible)).label("clientes_unicos"),
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
         )
+        .where(DimensionamientoRecord.import_run_id == run_id)
         .group_by(
             month_bucket,
             DimensionamientoRecord.plataforma,
