@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, insert
+from sqlalchemy import delete, func, insert, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -32,7 +32,7 @@ from web_comparativas.dimensionamiento.query_service import (
     invalidate_query_cache,
     DEFAULT_DASHBOARD_SNAPSHOT_KEY,
 )
-from web_comparativas.models import User, IS_SQLITE
+from web_comparativas.models import User, IS_SQLITE, IS_POSTGRES
 from web_comparativas.dimensionamiento.models import (
     DimensionamientoImportRun,
     DimensionamientoRecord,
@@ -1026,6 +1026,67 @@ def admin_import_chunk_summaries(
         raise HTTPException(status_code=500, detail=f"Error inserting summaries chunk: {e}")
 
 
+def _rebuild_summary_for_run(db: Session, run_id: int) -> int:
+    """
+    Reconstruye dimensionamiento_family_monthly_summary para una corrida a partir de
+    SUS registros (fuente de verdad, bien deduplicados por uq_dim_records_id_run ya que
+    id_registro_unico es NOT NULL).
+
+    Esto evita summaries inflados: el upload por chunks de summaries puede duplicar filas
+    con NULL en columnas del unique uq_dim_family_monthly_summary (cliente/provincia/...),
+    porque PostgreSQL trata NULL como DISTINTO en UNIQUE (NULLS DISTINCT), por lo que
+    ON CONFLICT DO NOTHING no las deduplica al reintentar un chunk. El GROUP BY colapsa
+    cualquier duplicado y deja el resumen consistente con los registros.
+
+    Devuelve la cantidad de filas de resumen generadas para la corrida.
+    """
+    if IS_POSTGRES:
+        db.execute(text("SET LOCAL statement_timeout = 0"))
+        month_sql = "date_trunc('month', fecha)::date"
+    else:
+        month_sql = "date(fecha, 'start of month')"
+
+    db.execute(
+        delete(DimensionamientoFamilyMonthlySummary).where(
+            DimensionamientoFamilyMonthlySummary.import_run_id == run_id
+        )
+    )
+    db.execute(
+        text(
+            f"""
+            INSERT INTO dimensionamiento_family_monthly_summary (
+                month, plataforma, cliente_nombre_homologado, cliente_visible, provincia,
+                familia, unidad_negocio, subunidad_negocio, resultado_participacion,
+                is_identified, is_client, total_cantidad, total_valorizacion,
+                total_registros, clientes_unicos, import_run_id
+            )
+            SELECT
+                {month_sql} AS month,
+                plataforma, cliente_nombre_homologado, cliente_visible, provincia,
+                familia, unidad_negocio, subunidad_negocio, resultado_participacion,
+                is_identified, is_client,
+                COALESCE(SUM(cantidad_demandada), 0),
+                COALESCE(SUM(valorizacion_estimada), 0),
+                COUNT(id),
+                COUNT(DISTINCT cliente_visible),
+                :rid
+            FROM dimensionamiento_records
+            WHERE import_run_id = :rid
+            GROUP BY {month_sql}, plataforma, cliente_nombre_homologado,
+                cliente_visible, provincia, familia, unidad_negocio, subunidad_negocio,
+                resultado_participacion, is_identified, is_client
+            """
+        ),
+        {"rid": run_id},
+    )
+    return int(
+        db.query(func.count(DimensionamientoFamilyMonthlySummary.id))
+        .filter_by(import_run_id=run_id)
+        .scalar()
+        or 0
+    )
+
+
 @router.post("/admin/import/finalize")
 def admin_import_finalize(
     payload: FinalizePayload,
@@ -1033,8 +1094,9 @@ def admin_import_finalize(
     db: Session = Depends(get_db),
 ):
     """
-    Finaliza la importación, guarda el snapshot precalculado localmente y activa
-    la corrida al poner su estado en 'success'. Además, limpia los cachés del servidor.
+    Finaliza la importación: reconstruye el resumen mensual desde los registros subidos
+    (fuente de verdad), guarda el snapshot precalculado y activa la corrida poniéndola en
+    'success'. Además, limpia los cachés del servidor.
     """
     run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
     if not run:
@@ -1043,6 +1105,12 @@ def admin_import_finalize(
         raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
 
     try:
+        # Fuente de verdad: reconstruir el resumen desde los registros de la corrida.
+        # Reemplaza cualquier summary subido por chunks (que podría venir inflado por
+        # duplicación de filas NULL bajo ON CONFLICT DO NOTHING) y lo deja consistente.
+        summary_rows = _rebuild_summary_for_run(db, run.id)
+        logger.info("[DIM][IMPORT] Run %d: summary rebuilt from records rows=%d", run.id, summary_rows)
+
         if payload.snapshot:
             snap = db.query(DimensionamientoDashboardSnapshot).filter_by(
                 snapshot_key=DEFAULT_DASHBOARD_SNAPSHOT_KEY,
