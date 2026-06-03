@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.responses import JSONResponse
-from sqlalchemy import insert
+from sqlalchemy import func, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -1169,4 +1169,62 @@ def admin_import_cleanup(
         db.rollback()
         logger.exception("[DIM][IMPORT] Error performing cleanup")
         raise HTTPException(status_code=500, detail=f"Error performing cleanup: {e}")
+
+
+@router.get("/admin/import/verify")
+def admin_import_verify(
+    run_id: int | None = Query(default=None),
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Verificación read-only (protegida por import token) para validar la carga en
+    producción sin necesidad de sesión de usuario. Devuelve conteos y totales del
+    run indicado (o del último 'success' si no se especifica).
+    """
+    latest_success = db.query(DimensionamientoImportRun).filter_by(status="success").order_by(
+        DimensionamientoImportRun.finished_at.desc(),
+        DimensionamientoImportRun.id.desc(),
+    ).first()
+
+    if run_id is not None:
+        run = db.query(DimensionamientoImportRun).filter_by(id=run_id).first()
+    else:
+        run = latest_success
+
+    if not run:
+        raise HTTPException(status_code=404, detail="No import run found")
+
+    rid = run.id
+    rec_q = db.query(DimensionamientoRecord).filter_by(import_run_id=rid)
+    records = rec_q.with_entities(func.count(DimensionamientoRecord.id)).scalar() or 0
+    summaries = db.query(func.count(DimensionamientoFamilyMonthlySummary.id)).filter_by(import_run_id=rid).scalar() or 0
+    total_val = db.query(func.coalesce(func.sum(DimensionamientoRecord.valorizacion_estimada), 0)).filter_by(import_run_id=rid).scalar() or 0
+    total_cant = db.query(func.coalesce(func.sum(DimensionamientoRecord.cantidad_demandada), 0)).filter_by(import_run_id=rid).scalar() or 0
+    fecha_min = db.query(func.min(DimensionamientoRecord.fecha)).filter_by(import_run_id=rid).scalar()
+    fecha_max = db.query(func.max(DimensionamientoRecord.fecha)).filter_by(import_run_id=rid).scalar()
+    snapshots = db.query(func.count(DimensionamientoDashboardSnapshot.id)).filter_by(import_run_id=rid).scalar() or 0
+    plat_rows = (
+        db.query(DimensionamientoRecord.plataforma, func.count(DimensionamientoRecord.id))
+        .filter_by(import_run_id=rid)
+        .group_by(DimensionamientoRecord.plataforma)
+        .all()
+    )
+
+    return {
+        "ok": True,
+        "data": {
+            "run_id": rid,
+            "run_status": run.status,
+            "is_latest_success": bool(latest_success and latest_success.id == rid),
+            "records": int(records),
+            "summaries": int(summaries),
+            "total_valorizacion": float(total_val),
+            "total_cantidad": float(total_cant),
+            "fecha_min": str(fecha_min) if fecha_min else None,
+            "fecha_max": str(fecha_max) if fecha_max else None,
+            "snapshots": int(snapshots),
+            "platforms": {p: int(c) for p, c in plat_rows},
+        },
+    }
 
