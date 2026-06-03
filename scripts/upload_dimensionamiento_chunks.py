@@ -58,7 +58,7 @@ def post_with_retry(url: str, headers: dict, json_data: dict, description: str, 
     retry_delay = 1.0
     for attempt in range(1, max_retries + 1):
         try:
-            response = requests.post(url, headers=headers, json=json_data, timeout=120)
+            response = requests.post(url, headers=headers, json=json_data, timeout=600)
             if response.status_code == 200:
                 return response.json()
             else:
@@ -211,7 +211,16 @@ def handle_upload(args):
             "X-Import-Token": args.token,
             "Content-Type": "application/json"
         }
-        
+
+        # Warmup: despierta el servicio de Render (free tier puede estar dormido)
+        # para que la primera inserción no sufra un cold-start que dispare timeouts.
+        print("\n⏰ Despertando el servidor de producción (warmup)...")
+        try:
+            warm = requests.get(args.url, timeout=120)
+            print(f"   Servidor respondió (HTTP {warm.status_code}). Continuando.")
+        except requests.RequestException as e:
+            print(f"   Advertencia: warmup no respondió a tiempo ({e}). Continuando igualmente.")
+
         if resume_upload:
             remote_run_id = state["remote_run_id"]
             records_offset = state.get("records_offset", 0)

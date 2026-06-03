@@ -10,6 +10,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy import insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -941,7 +943,17 @@ def admin_import_chunk_records(
                 "import_run_id": payload.import_run_id,
             })
         
-        db.execute(insert(DimensionamientoRecord), mappings)
+        # Idempotente: un reintento tras un timeout de red (donde el servidor
+        # ya habia insertado el lote) no debe romper con UniqueViolation. Se
+        # mantiene executemany (no .values()) para no exceder el limite de
+        # parametros de PostgreSQL con lotes grandes.
+        if IS_SQLITE:
+            stmt = sqlite_insert(DimensionamientoRecord).on_conflict_do_nothing()
+        else:
+            stmt = pg_insert(DimensionamientoRecord).on_conflict_do_nothing(
+                constraint="uq_dim_records_id_run"
+            )
+        db.execute(stmt, mappings)
 
         run.rows_processed += len(mappings)
         run.rows_inserted += len(mappings)
@@ -996,7 +1008,14 @@ def admin_import_chunk_summaries(
                 "import_run_id": payload.import_run_id,
             })
         
-        db.execute(insert(DimensionamientoFamilyMonthlySummary), mappings)
+        # Idempotente (ver chunk/records): reintentos tras timeout no deben fallar.
+        if IS_SQLITE:
+            stmt = sqlite_insert(DimensionamientoFamilyMonthlySummary).on_conflict_do_nothing()
+        else:
+            stmt = pg_insert(DimensionamientoFamilyMonthlySummary).on_conflict_do_nothing(
+                constraint="uq_dim_family_monthly_summary"
+            )
+        db.execute(stmt, mappings)
         db.commit()
         
         logger.info("[DIM][IMPORT] Run %d: inserted %d summaries", run.id, len(mappings))
