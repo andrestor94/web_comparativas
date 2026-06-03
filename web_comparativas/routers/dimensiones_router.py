@@ -1174,13 +1174,21 @@ def admin_import_cleanup(
 @router.get("/admin/import/verify")
 def admin_import_verify(
     run_id: int | None = Query(default=None),
+    full: bool = Query(default=False),
     _: str = Depends(verify_import_token),
     db: Session = Depends(get_db),
 ):
     """
     Verificación read-only (protegida por import token) para validar la carga en
-    producción sin necesidad de sesión de usuario. Devuelve conteos y totales del
-    run indicado (o del último 'success' si no se especifica).
+    producción sin necesidad de sesión de usuario.
+
+    Por defecto devuelve metadata barata de la corrida (estado, filas procesadas,
+    plataformas registradas en summary_metadata, si es la activa) leyendo solo la
+    tabla pequeña import_runs — instantáneo aún en instancias saturadas.
+
+    Con ?full=true agrega los totales agregados (records/valorizacion/cantidad/
+    plataformas/rango de meses) desde la tabla resumen. Esto es más pesado y puede
+    tardar si la base está digiriendo una carga grande.
     """
     latest_success = db.query(DimensionamientoImportRun).filter_by(status="success").order_by(
         DimensionamientoImportRun.finished_at.desc(),
@@ -1196,6 +1204,22 @@ def admin_import_verify(
         raise HTTPException(status_code=404, detail="No import run found")
 
     rid = run.id
+    run_summary = dict(run.summary or {})
+    data: dict[str, Any] = {
+        "run_id": rid,
+        "run_status": run.status,
+        "is_latest_success": bool(latest_success and latest_success.id == rid),
+        "rows_processed": int(run.rows_processed or 0),
+        "rows_inserted": int(run.rows_inserted or 0),
+        "rows_rejected": int(run.rows_rejected or 0),
+        "finished_at": str(run.finished_at) if run.finished_at else None,
+        "source_path": run.source_path,
+        "summary_metadata_platforms": run_summary.get("platforms"),
+    }
+
+    if not full:
+        return {"ok": True, "data": data}
+
     Su = DimensionamientoFamilyMonthlySummary
     # Totales desde la tabla resumen (pre-agregada) para evitar escanear la tabla
     # de registros completa varias veces (lento en instancias chicas de Render).
@@ -1217,25 +1241,17 @@ def admin_import_verify(
         .group_by(Su.plataforma)
         .all()
     )
-    # Conteo real en la tabla de registros (cross-check, un solo COUNT indexado).
-    records = db.query(func.count(DimensionamientoRecord.id)).filter_by(import_run_id=rid).scalar() or 0
     snapshots = db.query(func.count(DimensionamientoDashboardSnapshot.id)).filter_by(import_run_id=rid).scalar() or 0
 
-    return {
-        "ok": True,
-        "data": {
-            "run_id": rid,
-            "run_status": run.status,
-            "is_latest_success": bool(latest_success and latest_success.id == rid),
-            "records": int(records),
-            "records_from_summary": int(records_from_summary),
-            "summaries": int(summaries),
-            "total_valorizacion": float(total_val),
-            "total_cantidad": float(total_cant),
-            "month_min": str(month_min) if month_min else None,
-            "month_max": str(month_max) if month_max else None,
-            "snapshots": int(snapshots),
-            "platforms": {p: int(c) for p, c in plat_rows},
-        },
-    }
+    data.update({
+        "records_from_summary": int(records_from_summary),
+        "summaries": int(summaries),
+        "total_valorizacion": float(total_val),
+        "total_cantidad": float(total_cant),
+        "month_min": str(month_min) if month_min else None,
+        "month_max": str(month_max) if month_max else None,
+        "snapshots": int(snapshots),
+        "platforms": {p: int(c) for p, c in plat_rows},
+    })
+    return {"ok": True, "data": data}
 
