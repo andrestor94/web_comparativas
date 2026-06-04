@@ -76,7 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const aplicarBtn = container.querySelector('.dim-ms-aplicar');
         const labelEl  = container.querySelector('.dim-ms-label');
 
-        let allOptions = [];   // [{value, label}]
+        let allOptions = [];   // [{value, label}] — opciones visibles (puede venir estrechado por otros filtros)
+        let universe   = new Set(); // universo COMPLETO de valores vistos (monotónico, nunca se achica).
+                                    // Se usa para detectar "todos seleccionados" sin que el estrechamiento
+                                    // dinámico de un filtro haga colapsar a otro filtro como si fuera "Todos".
         let pending    = new Set(); // estado visual temporal (no aplicado)
         let applied    = new Set(); // estado real (enviado al backend)
         let isOpen     = false;
@@ -158,7 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (todosBtn) {
             todosBtn.addEventListener('click', () => {
-                pending = new Set(allOptions.map(o => String(o.value)));
+                // "Todos" = sin filtro en esta dimensión (selección vacía).
+                // Coincide con la convención del filtro Plataformas (0 marcados = Todas) y
+                // evita el desfase label/consulta: con selección vacía el trigger muestra
+                // "Todos" y el backend no recibe filtro para esta dimensión.
+                pending = new Set();
                 renderList(search ? search.value : '');
             });
         }
@@ -192,6 +199,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     typeof o === 'object' ? { value: String(o.value), label: o.label || String(o.value) }
                                          : { value: String(o), label: String(o) }
                 );
+                // El universo crece de forma monotónica: aunque el backend devuelva una lista
+                // estrechada (porque hay otro filtro activo), seguimos recordando todos los
+                // valores conocidos. Así "todos seleccionados" se mide contra el set real.
+                allOptions.forEach(o => universe.add(String(o.value)));
                 updateTriggerLabel();
             },
             getApplied() {
@@ -199,6 +210,9 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             getOptionValues() {
                 return allOptions.map(o => String(o.value));
+            },
+            getUniverseValues() {
+                return Array.from(universe);
             },
             setApplied(values) {
                 const vals = Array.isArray(values) ? values : [values];
@@ -772,7 +786,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function normalizeMultiSelectParam(name, control) {
         if (!control) return [];
-        return normalizeMultiFilterForQuery(control.getApplied(), control.getOptionValues(), name);
+        // Importante: medimos "todos seleccionados" contra el UNIVERSO completo, no contra
+        // las opciones visibles (que el backend puede estrechar cuando hay otro filtro activo).
+        // Si usáramos las opciones estrechadas, un filtro aplicado podría verse como "Todos"
+        // y descartarse silenciosamente al aplicar otro filtro.
+        return normalizeMultiFilterForQuery(control.getApplied(), control.getUniverseValues(), name);
     }
 
     function normalizeMultiFilterForQuery(values, allOptions = [], name = '') {
@@ -1082,11 +1100,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getAllOptionsForQueryKey(key) {
-        if (key === 'familia' && msFamily) return msFamily.getOptionValues();
-        if (key === 'cliente' && msClient) return msClient.getOptionValues();
-        if (key === 'provincia' && msProvince) return msProvince.getOptionValues();
-        if (key === 'unidad_negocio' && msUnit) return msUnit.getOptionValues();
-        if (key === 'subunidad_negocio' && msSubunit) return msSubunit.getOptionValues();
+        // Universo completo (monotónico), no las opciones estrechadas: misma razón que en
+        // normalizeMultiSelectParam — evita el colapso accidental de un filtro a "Todos".
+        if (key === 'familia' && msFamily) return msFamily.getUniverseValues();
+        if (key === 'cliente' && msClient) return msClient.getUniverseValues();
+        if (key === 'provincia' && msProvince) return msProvince.getUniverseValues();
+        if (key === 'unidad_negocio' && msUnit) return msUnit.getUniverseValues();
+        if (key === 'subunidad_negocio' && msSubunit) return msSubunit.getUniverseValues();
         if (key === 'plataforma') return elements.platformCheckboxes.map(cb => cb.value);
 
         const filters = state.lastBootstrap && state.lastBootstrap.filters ? state.lastBootstrap.filters : {};
