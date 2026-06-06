@@ -163,3 +163,49 @@ retiran **de a una**, confirmando que la migración equivalente ya está en Alem
 9. **Deprecación controlada** de tablas fantasma (rename `zz_deprecated_*`, nunca DROP directo).
 
 > Cada paso = rama separada + commit claro + QA + tu autorización antes de tocar prod.
+
+---
+
+## 12. Fase 4 — Estado del diagnóstico de producción
+
+> Rama: `chore/db-production-diagnostics-phase-4` (apilada sobre la de Fase 3).
+
+### Qué quedó preparado (sin tocar producción)
+- `scripts/db_diagnostics.py` mejorado: apéndice de detalle por tabla
+  (columnas/tipos/nullable, PK, FK con destino, índices con columnas/unicidad) +
+  export `--json` de snapshot estructural.
+- `scripts/db_compare.py`: compara dos snapshots JSON (local vs prod) **offline**.
+- Snapshot **local** generado: `docs/db_snapshot_local.json` (52 tablas).
+- `docs/db_diagnostics_report_production.md`: placeholder + runbook credential-safe.
+
+### Estado de la ejecución contra producción
+- ⏳ **PENDIENTE.** El asistente no tiene credenciales de prod y, por política, no las
+  pide por chat ni las ejecuta. El backup y el diagnóstico read-only los corre el
+  usuario en su máquina (ver runbook en `db_diagnostics_report_production.md` y
+  `backup_postgres_render_checklist.md`).
+- Hasta tener `docs/db_snapshot_prod.json`, **no hay foto real de producción**: el
+  mapa real de `forecast_*` y la comparación local↔prod quedan a la espera de ese dato.
+
+### Hallazgos confirmados (de código, ya conocidos)
+- **Ingesta Forecast destructiva**: `migrate_forecast_csv_to_postgres.py` usa
+  `if_exists="replace"` sobre `forecast_main` (44), `forecast_valorizado` (139),
+  `forecast_imp_hist` (165), `forecast_fact_2026` (198), `forecast_product_labs` (232).
+  Re-ejecutarlo **DROPea y recrea** esas tablas en prod. **Prohibido correrlo** en
+  esta y las próximas fases. Propuesta (NO implementar aún): guarda por ambiente
+  (ej. exigir `ALLOW_PROD_REPLACE=1` o bloquear si el host es de Render) — documentado,
+  sin tocar el flujo productivo todavía.
+
+### Riesgos nuevos a validar con el diagnóstico real
+- Tipos exactos de `forecast_*` en PG (¿`FLOAT8` vs `NUMERIC` en montos? ¿`TIMESTAMP` tz?).
+- Existencia/ausencia de PK/constraints (por `to_sql index=False`, probablemente sin PK).
+- Diferencias de columnas entre lo inferido del código y la tabla real.
+- Tablas en prod que no estén en local (¿alguna `forecast_*` extra o auxiliar no vista?).
+
+### Qué se puede hacer en Fase 5 (después de tener la foto real)
+- Validar/ajustar `forecast_models_proposed.py` contra el esquema real.
+- Baseline de Alembic en local (revisado a mano).
+- Optimizaciones clase A + índices validados con `EXPLAIN` (local primero).
+
+### Qué NO se debe tocar todavía
+- Nada de producción (DDL/DML), Alembic contra prod, ingesta Forecast, `upload_blobs`,
+  índices en prod, renombrados, deprecaciones, purga de logs. Todo requiere backup + OK.
