@@ -355,20 +355,33 @@ def get_filtros(
 
     session = _get_session(request)
 
-    def _vals(col):
-        rows = session.execute(
+    def _vals(col, limit: int | None = None):
+        stmt = (
             select(col).where(col.isnot(None)).where(col != "").distinct().order_by(col)
-        ).scalars().all()
+        )
+        # Empujamos el limite al SQL cuando aplica: evita traer todo el universo de
+        # valores distintos a Python para luego recortarlo. Compatible SQLite/PostgreSQL.
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = session.execute(stmt).scalars().all()
         return [r for r in rows if r]
 
+    # plataformas / provincias / rubros: baja cardinalidad y son el UNIVERSO real de
+    # filtros del usuario. NO se limitan a proposito: un LIMIT podria ocultar opciones
+    # validas. Si en el futuro alguna creciera de forma anomala, conviene un buscador
+    # tipo /filtros/search en vez de un cap ciego.
     plataformas = _vals(ComparativaRow.plataforma)
-    compradores = _vals(ComparativaRow.comprador)
     provincias = _vals(ComparativaRow.provincia)
     rubros = _vals(ComparativaRow.rubro)
+    # compradores: alta cardinalidad. El comportamiento previo ya mostraba solo los
+    # primeros 200 (recorte en Python con [:200]); ahora ese mismo cap se aplica en SQL
+    # -> identico resultado, mucha menos transferencia. Para buscar mas alla del top-200
+    # existe el endpoint /filtros/search (campo=comprador).
+    compradores = _vals(ComparativaRow.comprador, limit=200)
 
     data = {
         "plataformas": plataformas,
-        "compradores": compradores[:200],
+        "compradores": compradores,
         "provincias": provincias,
         "rubros": rubros,
     }
