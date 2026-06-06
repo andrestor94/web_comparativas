@@ -167,10 +167,9 @@ def _human_bytes(n: int | None) -> str:
     return f"{n} B"
 
 
-def _compat_warnings(engine: Engine, table: str, columns: list[dict]) -> list[str]:
+def _compat_warnings(backend: str, columns: list[dict]) -> list[str]:
     """Advertencias de compatibilidad SQLite <-> PostgreSQL por columna."""
     warns: list[str] = []
-    backend = engine.url.get_backend_name()
     for col in columns:
         type_str = str(col.get("type", "")).upper()
         name = col.get("name", "?")
@@ -187,12 +186,91 @@ def _compat_warnings(engine: Engine, table: str, columns: list[dict]) -> list[st
 
 
 # --------------------------------------------------------------------------
-# Reporte
+# Recolección de snapshot estructurado (solo lectura)
 # --------------------------------------------------------------------------
-def build_report(engine: Engine, *, estimate: bool) -> str:
+def collect_snapshot(engine: Engine, *, estimate: bool) -> dict:
+    """
+    Recolecta un snapshot estructural completo (sin filas de datos ni credenciales).
+    Reutilizable para el reporte Markdown y para el export JSON (comparación).
+    """
     insp = inspect(engine)
     backend = engine.url.get_backend_name()
     table_names = sorted(insp.get_table_names())
+
+    tables: dict[str, dict] = {}
+    for t in table_names:
+        try:
+            columns = [
+                {"name": c.get("name"), "type": str(c.get("type")), "nullable": bool(c.get("nullable"))}
+                for c in insp.get_columns(t)
+            ]
+        except Exception:
+            columns = []
+        try:
+            pk = insp.get_pk_constraint(t).get("constrained_columns") or []
+        except Exception:
+            pk = []
+        try:
+            fks = [
+                {
+                    "constrained_columns": fk.get("constrained_columns") or [],
+                    "referred_table": fk.get("referred_table"),
+                    "referred_columns": fk.get("referred_columns") or [],
+                }
+                for fk in insp.get_foreign_keys(t)
+            ]
+        except Exception:
+            fks = []
+        try:
+            indexes = [
+                {
+                    "name": ix.get("name"),
+                    "columns": list(ix.get("column_names") or []),
+                    "unique": bool(ix.get("unique")),
+                }
+                for ix in insp.get_indexes(t)
+            ]
+        except Exception:
+            indexes = []
+        tables[t] = {
+            "rows": _table_rowcount(engine, t, estimate=estimate),
+            "size_bytes": _table_size_bytes(engine, t),
+            "columns": columns,
+            "pk": pk,
+            "fks": fks,
+            "indexes": indexes,
+        }
+
+    return {
+        "meta": {
+            "backend": backend,
+            "db_label": _safe_db_label(engine),
+            "generated_utc": dt.datetime.utcnow().isoformat(timespec="seconds"),
+            "count_mode": "estimate" if (estimate and backend.startswith("postgresql")) else "exact",
+        },
+        "tables": tables,
+    }
+
+
+def write_json(snapshot: dict, path: Path) -> None:
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# Reporte
+# --------------------------------------------------------------------------
+def build_report(snapshot: dict) -> str:
+    meta = snapshot["meta"]
+    tables = snapshot["tables"]
+    table_names = sorted(tables.keys())
+    backend = meta["backend"]
+
+    # Vistas derivadas para no reescribir el resto del render.
+    rows_by_table = {t: tables[t]["rows"] for t in table_names}
+    size_by_table = {t: tables[t]["size_bytes"] for t in table_names}
+    cols_by_table = {t: tables[t]["columns"] for t in table_names}
 
     lines: list[str] = []
     w = lines.append
@@ -200,25 +278,11 @@ def build_report(engine: Engine, *, estimate: bool) -> str:
     w("# Reporte de diagnóstico de base de datos — SIEM")
     w("")
     w("> Generado por `scripts/db_diagnostics.py` (solo lectura).")
-    # Nota: no usamos Date.now()/utcnow del entorno restringido del modelo; aquí
-    # es un script normal de Python, utcnow está disponible.
-    w(f"> Fecha (UTC): {dt.datetime.utcnow().isoformat(timespec='seconds')}")
-    w(f"> Motor: **{_safe_db_label(engine)}**  ·  conteo: **{'estimado' if estimate and backend.startswith('postgresql') else 'exacto'}**")
+    w(f"> Fecha (UTC): {meta['generated_utc']}")
+    w(f"> Motor: **{meta['db_label']}**  ·  conteo: **{'estimado' if meta['count_mode'] == 'estimate' else 'exacto'}**")
     w("")
     w("Este reporte es estructural. No contiene filas de datos ni credenciales.")
     w("")
-
-    # --- Resumen ---
-    rows_by_table: dict[str, int | None] = {}
-    size_by_table: dict[str, int | None] = {}
-    cols_by_table: dict[str, list[dict]] = {}
-    for t in table_names:
-        rows_by_table[t] = _table_rowcount(engine, t, estimate=estimate)
-        size_by_table[t] = _table_size_bytes(engine, t)
-        try:
-            cols_by_table[t] = insp.get_columns(t)
-        except Exception:
-            cols_by_table[t] = []
 
     forecast_tables = [t for t in table_names if t.startswith(FORECAST_PREFIX)]
     forecast_not_in_orm = [t for t in forecast_tables if t not in FORECAST_TABLES_IN_ORM]
@@ -247,18 +311,9 @@ def build_report(engine: Engine, *, estimate: bool) -> str:
         rows_str = f"{rows:,}" if isinstance(rows, int) else "—"
         size_str = _human_bytes(size_by_table.get(t))
         cols = cols_by_table.get(t, [])
-        try:
-            pk = insp.get_pk_constraint(t).get("constrained_columns") or []
-        except Exception:
-            pk = []
-        try:
-            fks = insp.get_foreign_keys(t)
-        except Exception:
-            fks = []
-        try:
-            idxs = insp.get_indexes(t)
-        except Exception:
-            idxs = []
+        pk = tables[t]["pk"]
+        fks = tables[t]["fks"]
+        idxs = tables[t]["indexes"]
         notes = []
         if t in forecast_not_in_orm:
             notes.append("forecast_* (NO en ORM — datos base)")
@@ -319,7 +374,7 @@ def build_report(engine: Engine, *, estimate: bool) -> str:
     w("")
     any_warn = False
     for t in table_names:
-        warns = _compat_warnings(engine, t, cols_by_table.get(t, []))
+        warns = _compat_warnings(backend, cols_by_table.get(t, []))
         if warns:
             any_warn = True
             w(f"- **`{t}`**")
@@ -328,8 +383,44 @@ def build_report(engine: Engine, *, estimate: bool) -> str:
     if not any_warn:
         w("_Sin advertencias de tipos detectadas._")
     w("")
+
+    # --- Apéndice: detalle por tabla (columnas/tipos/nullable, PK, FK, índices) ---
+    w("## Apéndice — detalle por tabla")
+    w("")
+    for t in table_names:
+        info = tables[t]
+        rows = info["rows"]
+        rows_str = f"{rows:,}" if isinstance(rows, int) else "—"
+        w(f"### `{t}` — {rows_str} filas")
+        w("")
+        w("**Columnas**")
+        w("")
+        w("| Columna | Tipo | Nullable |")
+        w("|---|---|---|")
+        for c in info["columns"]:
+            w(f"| `{c['name']}` | {c['type']} | {c['nullable']} |")
+        w("")
+        w(f"**PK:** {', '.join(info['pk']) if info['pk'] else '—'}")
+        w("")
+        if info["fks"]:
+            w("**FK:**")
+            for fk in info["fks"]:
+                cc = ", ".join(fk["constrained_columns"])
+                rc = ", ".join(fk["referred_columns"])
+                w(f"- ({cc}) → `{fk['referred_table']}` ({rc})")
+        else:
+            w("**FK:** —")
+        w("")
+        if info["indexes"]:
+            w("**Índices:**")
+            for ix in info["indexes"]:
+                uq = " (unique)" if ix["unique"] else ""
+                w(f"- `{ix['name']}` [{', '.join(ix['columns'])}]{uq}")
+        else:
+            w("**Índices:** —")
+        w("")
     w("---")
-    w(f"_Backend analizado: {_safe_db_label(engine)}._")
+    w(f"_Backend analizado: {meta['db_label']}._")
     return "\n".join(lines) + "\n"
 
 
@@ -356,6 +447,13 @@ def main() -> int:
         action="store_true",
         help="Imprimir el reporte por stdout además de escribir el archivo.",
     )
+    parser.add_argument(
+        "--json",
+        dest="json_path",
+        default=None,
+        help="Ruta opcional para exportar el snapshot estructural como JSON "
+             "(útil para comparar local vs producción con scripts/db_compare.py).",
+    )
     args = parser.parse_args()
 
     url = _resolve_database_url()
@@ -373,12 +471,19 @@ def main() -> int:
         return 3
 
     print(f"[db_diagnostics] Analizando: {_safe_db_label(engine)}", flush=True)
-    report = build_report(engine, estimate=args.estimate)
+    snapshot = collect_snapshot(engine, estimate=args.estimate)
+    report = build_report(snapshot)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report, encoding="utf-8")
     print(f"[db_diagnostics] Reporte escrito en: {out_path}", flush=True)
+
+    if args.json_path:
+        json_path = Path(args.json_path)
+        write_json(snapshot, json_path)
+        print(f"[db_diagnostics] Snapshot JSON escrito en: {json_path}", flush=True)
+
     if args.to_stdout:
         print(report)
     return 0
