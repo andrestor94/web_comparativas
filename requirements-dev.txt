@@ -1,0 +1,8 @@
+# Dependencias SOLO de desarrollo / tooling. NO se instalan en producción
+# (requirements.txt de Render permanece intacto para no alterar el build).
+#
+# Instalación local:
+#   pip install -r requirements-dev.txt
+
+# Migraciones formales (Fase 3 — preparación, no se ejecuta en startup ni en prod).
+alembic==1.13.2
