@@ -105,6 +105,9 @@ _cache_lock = threading.Lock()
 _data_cache: dict[str, Any] = {}
 FORECAST_OVERRIDE_SOURCE = "forecast"
 FORECAST_OVERRIDE_CONTEXT = "default"
+# Umbral solo para logging: si _fetch_override_records trae >= esta cantidad de filas,
+# se emite un warning para detectar cargas anomalas sin alterar el resultado.
+_OVERRIDE_RECORDS_WARN_THRESHOLD = 5000
 FORECAST_SCOPE_SUBNEG = "subnegocio"
 FORECAST_SCOPE_PRODUCT = "producto"
 FORECAST_SCOPE_CELL = "celda"
@@ -631,7 +634,25 @@ def _fetch_override_records(
         # When querying all users, sort by updated_at ascending so later saves win on conflict
         if all_users:
             q = q.order_by(ForecastUserOverride.updated_at.asc())
-        return list(q.all())
+        records = list(q.all())
+
+        # Observabilidad (NO cambia el resultado): la query ya filtra por is_active,
+        # usuario y client_selector, asi que esta tan acotada como permite la semantica.
+        # NO se aplica LIMIT a proposito: recortar filas dropearia overrides activos y
+        # alteraria el calculo del forecast. Pero si el set crece mucho (sobre todo en el
+        # path all_users del admin, que trae overrides de TODOS los usuarios) queremos
+        # verlo en logs antes de que se vuelva un problema de memoria/latencia.
+        # Mejora estructural para una fase futura: paginar o pre-agregar el path admin.
+        if all_users or len(records) >= _OVERRIDE_RECORDS_WARN_THRESHOLD:
+            logger.warning(
+                "[FORECAST][OVERRIDES] fetch grande all_users=%s rows=%s client_selector=%s "
+                "client_selectors=%s (sin LIMIT por diseno: ver propuesta de paginacion fase 3)",
+                all_users,
+                len(records),
+                client_selector,
+                len(client_selectors) if client_selectors else 0,
+            )
+        return records
 
 
 def _override_record_user_ids(records: list[Any], limit: int = 20) -> list[int]:

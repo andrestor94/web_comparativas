@@ -377,6 +377,57 @@ def _summary_health_snapshot_cached(session: Session, import_run_id: int | None 
     return val
 
 
+def _summary_fallback_reason(summary_state: dict[str, Any]) -> tuple[str, str]:
+    """
+    Traduce un health-snapshot NO usable a (razon, gravedad) para logging.
+
+    gravedad:
+      - "error":   la summary esta corrupta/desalineada respecto de la base
+                   (columnas faltantes o totales monetarios que no cuadran).
+                   Es un problema de integridad: la app sigue funcionando por
+                   fallback a la tabla cruda, pero hay que arreglar la summary.
+      - "warning": estado transitorio esperado (summary aun no construida, sin
+                   ingesta, o sin rango de fechas). No es una falla de datos.
+
+    Esto NO cambia comportamiento: solo da contexto para que el fallback a la
+    tabla cruda (mas lento) sea visible en logs y no se descubra por lentitud.
+    """
+    missing = summary_state.get("missing_columns")
+    if missing:
+        return (f"schema_mismatch missing_columns={missing}", "error")
+    if summary_state.get("valorizacion_mismatch"):
+        return (
+            "valorizacion_mismatch "
+            f"summary_total={summary_state.get('summary_total_valorizacion')} "
+            f"records_total={summary_state.get('records_total_valorizacion')}",
+            "error",
+        )
+    if not summary_state.get("rows"):
+        return ("summary_empty (sin filas para el import_run: ingesta pendiente o en curso)", "warning")
+    if summary_state.get("min_month") is None or summary_state.get("max_month") is None:
+        return ("summary_no_date_bounds (filas presentes pero sin rango de meses)", "warning")
+    return ("summary_unavailable", "warning")
+
+
+def _log_summary_fallback(endpoint_tag: str, summary_state: dict[str, Any], base_message: str) -> None:
+    """
+    Loguea un fallback a la tabla cruda con razon y gravedad diferenciadas.
+    error -> problema de integridad de la summary; warning -> estado transitorio.
+    """
+    reason, severity = _summary_fallback_reason(summary_state)
+    log_fn = logger.error if severity == "error" else logger.warning
+    log_fn(
+        "[DIM][%s] %s reason=%s severity=%s summary_rows=%s raw_min_month=%r raw_max_month=%r",
+        endpoint_tag,
+        base_message,
+        reason,
+        severity,
+        summary_state.get("rows"),
+        summary_state.get("raw_min_month"),
+        summary_state.get("raw_max_month"),
+    )
+
+
 def _global_date_bounds(session: Session, import_run_id: int | None = None) -> tuple[dt.date | None, dt.date | None]:
     if import_run_id is None:
         latest = _latest_success_import_run(session)
@@ -412,7 +463,12 @@ def _default_platform_values(session: Session, import_run_id: int | None = None)
         return []
 
     summary_state = _summary_health_snapshot_cached(session, import_run_id)
-    model = DimensionamientoFamilyMonthlySummary if summary_state["usable"] else DimensionamientoRecord
+    if summary_state["usable"]:
+        model = DimensionamientoFamilyMonthlySummary
+    else:
+        # Antes este fallback era silencioso: ahora dejamos rastro en logs.
+        model = DimensionamientoRecord
+        _log_summary_fallback("DEFAULT_PLATFORMS", summary_state, "using base table")
     stmt = (
         select(distinct(model.plataforma))
         .where(model.plataforma.is_not(None))
@@ -468,14 +524,9 @@ def _resolve_aggregate_model(
         )
         return DimensionamientoFamilyMonthlySummary
 
-    logger.warning(
-        "[DIM][%s] %s reason=summary_unavailable summary_rows=%s raw_min_month=%r raw_max_month=%r",
-        endpoint_tag,
-        base_message,
-        summary_state["rows"],
-        summary_state["raw_min_month"],
-        summary_state["raw_max_month"],
-    )
+    # Fallback a tabla cruda (mas lento). Logueamos con razon y gravedad para que
+    # un escaneo de la tabla base sea visible en logs y no se descubra por lentitud.
+    _log_summary_fallback(endpoint_tag, summary_state, base_message)
     return DimensionamientoRecord
 
 
@@ -1388,11 +1439,8 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     summary_state["max_month"].isoformat(),
                 )
             else:
-                logger.info(
-                    "[DIM][FILTERS] using distinct_visible_clients base path reason=summary_unavailable summary_rows=%s raw_min_month=%r raw_max_month=%r",
-                    summary_state["rows"],
-                    summary_state["raw_min_month"],
-                    summary_state["raw_max_month"],
+                _log_summary_fallback(
+                    "FILTERS", summary_state, "using distinct_visible_clients base path"
                 )
             date_col = _get_date_column(filt_model)
             date_aggregate_col = cast(date_col, Text) if (use_summary and IS_SQLITE) else date_col
