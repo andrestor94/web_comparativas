@@ -114,3 +114,34 @@ Resolver corriendo `scripts/db_diagnostics.py --confirm-remote` contra prod (con
 
 > Hasta resolver esto, los modelos propuestos son **borrador**. No integrar al `Base` real
 > sin validar el esquema productivo.
+
+---
+
+## 5. ACTUALIZACIÓN FASE 4 — esquema REAL de producción ✅
+
+El diagnóstico real (`hallazgos_produccion_fase4.md`) confirmó y **amplió** el mapa:
+existen **10** tablas `forecast_*` de datos base (no 5), en **dos familias**.
+
+### 5.1 Familia VIEJA — usada por la app (`forecast_service.py`), SIN PK, columnas TEXT
+- `forecast_main` (277.452, 27 cols TEXT, sin PK): `periodo, codigo_serie,
+  nivel_agregacion, perfil, neg, subneg, familia_x, tipo, y, yhat, li, ls, submodelo, ...,
+  fecha:TIMESTAMP, precio:DOUBLE`.
+- `forecast_valorizado` (702.436, 18 cols): `monto_yhat/li/ls:DOUBLE`,
+  `yhat_cliente/li_cliente/ls_cliente:BIGINT`, `fantasia, nombre_grupo, neg, subneg`.
+- `forecast_imp_hist` (44.861): `periodo, codigo_serie, perfil, imp_hist:DOUBLE, tipo, fecha`.
+- `forecast_fact_2026` (206.246): `fecha, codigo_serie, perfil, cliente_id, ..., tipocli`.
+- `forecast_product_labs` (2.914): `codigo_serie, laboratorios:TEXT`.
+- ⚠️ **Índices duplicados** (`idx_fc_*` y `ix_fc_*` sobre las mismas columnas).
+- Estos son los que `forecast_models_proposed.py` debe modelar (ajustar tipos a los
+  **TEXT/DOUBLE reales** del snapshot; las inferencias de tipos de Fase 3 quedan corregidas).
+
+### 5.2 Familia NUEVA tipada — SIN referencias en el código ⚠️ (validación humana)
+- `forecast_base` (966.072, PK id, VARCHAR/INTEGER/DOUBLE, incluye `etiqueta_upper`).
+- `forecast_dataset_base` (221.424, PK id, `qty_mes:DOUBLE`).
+- `forecast_articulo` (121.701, PK id) · `forecast_cliente` (40.092, PK id) ·
+  `forecast_negocio` (145, PK id).
+- **0 referencias** en `web_comparativas/*.py`. **No modelar ni tocar** hasta validar su rol.
+
+> Corrección importante: Fase 3 asumía tipos numéricos para `forecast_main/valorizado`;
+> el snapshot real muestra que **muchas columnas son TEXT**. Al integrarlos al ORM,
+> declarar los tipos reales y castear en las queries donde haga falta.
