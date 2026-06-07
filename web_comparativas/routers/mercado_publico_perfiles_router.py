@@ -20,7 +20,7 @@ from sqlalchemy import select, func, extract, case, distinct, text, and_, or_, c
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import (
-    SessionLocal, db_session, User, Upload, ComparativaRow
+    SessionLocal, db_session, User, Upload, ComparativaRow, IS_SQLITE
 )
 from web_comparativas.auth import require_roles
 
@@ -518,19 +518,38 @@ def articulos_kpis(
 
     row = session.execute(base).one_or_none()
 
-    # Mediana de precio unitario: calculada en Python
-    precios_q = select(ComparativaRow.precio_unitario).where(
-        ComparativaRow.precio_unitario.isnot(None),
-        ComparativaRow.fecha_apertura.isnot(None),
-    )
-    precios_q = _apply_exact_text(precios_q, ComparativaRow.descripcion, descripcion)
-    precios_q = _apply_date_filters(precios_q, fecha_desde, fecha_hasta)
-    precios_q = _apply_multi(precios_q, ComparativaRow.marca, marca)
-    precios_q = _apply_multi(precios_q, ComparativaRow.proveedor, proveedor)
-    precios_q = _apply_multi(precios_q, ComparativaRow.rubro, rubro)
-    precios_q = _apply_exact_text(precios_q, ComparativaRow.plataforma, plataforma)
-    prices = [r[0] for r in session.execute(precios_q).all() if r[0] is not None]
-    mediana = round(statistics.median(prices), 2) if prices else None
+    # Mediana de precio unitario.
+    # PostgreSQL: percentile_cont(0.5) en la DB devuelve un número, sin traer N filas.
+    # SQLite (local): cálculo en Python, idéntico al anterior.
+    # percentile_cont(0.5) ≡ statistics.median (interpolación lineal en la mediana).
+    if not IS_SQLITE:
+        med_q = select(
+            func.percentile_cont(0.5).within_group(ComparativaRow.precio_unitario.asc())
+        ).where(
+            ComparativaRow.precio_unitario.isnot(None),
+            ComparativaRow.fecha_apertura.isnot(None),
+        )
+        med_q = _apply_exact_text(med_q, ComparativaRow.descripcion, descripcion)
+        med_q = _apply_date_filters(med_q, fecha_desde, fecha_hasta)
+        med_q = _apply_multi(med_q, ComparativaRow.marca, marca)
+        med_q = _apply_multi(med_q, ComparativaRow.proveedor, proveedor)
+        med_q = _apply_multi(med_q, ComparativaRow.rubro, rubro)
+        med_q = _apply_exact_text(med_q, ComparativaRow.plataforma, plataforma)
+        _med_val = session.execute(med_q).scalar()
+        mediana = round(float(_med_val), 2) if _med_val is not None else None
+    else:
+        precios_q = select(ComparativaRow.precio_unitario).where(
+            ComparativaRow.precio_unitario.isnot(None),
+            ComparativaRow.fecha_apertura.isnot(None),
+        )
+        precios_q = _apply_exact_text(precios_q, ComparativaRow.descripcion, descripcion)
+        precios_q = _apply_date_filters(precios_q, fecha_desde, fecha_hasta)
+        precios_q = _apply_multi(precios_q, ComparativaRow.marca, marca)
+        precios_q = _apply_multi(precios_q, ComparativaRow.proveedor, proveedor)
+        precios_q = _apply_multi(precios_q, ComparativaRow.rubro, rubro)
+        precios_q = _apply_exact_text(precios_q, ComparativaRow.plataforma, plataforma)
+        prices = [r[0] for r in session.execute(precios_q).all() if r[0] is not None]
+        mediana = round(statistics.median(prices), 2) if prices else None
 
     rubro_q = (
         select(
@@ -736,33 +755,74 @@ def articulos_por_proveedor(
         mid = n // 2
         return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
 
-    # Precios del período para calcular mediana y último precio por proveedor.
-    # Ordenados por fecha desc → primer registro = precio más reciente.
+    # Mediana y último precio por proveedor (precios del período, precio > 0).
     prov_names = [r.proveedor for r in rows]
-    prices_by_prov: dict = {}       # prov -> list of unit prices (desc by date)
-    ultimo_precio_by_prov: dict = {}  # prov -> most recent valid price
+    mediana_by_prov: dict = {}        # prov -> mediana de precios
+    ultimo_precio_by_prov: dict = {}  # prov -> precio más reciente (fecha desc, id asc)
     if prov_names:
-        hist_q = (
-            select(
-                participaciones.c.proveedor,
-                participaciones.c.precio_unitario,
+        if not IS_SQLITE:
+            # PostgreSQL: ambos cálculos en la DB, sin traer todos los precios a Python.
+            med_q = (
+                select(
+                    participaciones.c.proveedor,
+                    func.percentile_cont(0.5)
+                    .within_group(participaciones.c.precio_unitario.asc())
+                    .label("mediana"),
+                )
+                .select_from(participaciones)
+                .where(participaciones.c.proveedor.in_(prov_names))
+                .where(participaciones.c.precio_unitario.isnot(None))
+                .where(participaciones.c.precio_unitario > 0)
+                .group_by(participaciones.c.proveedor)
             )
-            .select_from(participaciones)
-            .where(participaciones.c.proveedor.in_(prov_names))
-            .where(participaciones.c.precio_unitario.isnot(None))
-            .where(participaciones.c.precio_unitario > 0)
-            .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
-        )
-        for hr in session.execute(hist_q).all():
-            prov = hr.proveedor
-            prices_by_prov.setdefault(prov, []).append(hr.precio_unitario)
-            if prov not in ultimo_precio_by_prov:
-                ultimo_precio_by_prov[prov] = hr.precio_unitario
+            for mr in session.execute(med_q).all():
+                mediana_by_prov[mr.proveedor] = float(mr.mediana) if mr.mediana is not None else 0.0
+            # Último precio: la fila más reciente por proveedor (DISTINCT ON).
+            ult_q = (
+                select(
+                    participaciones.c.proveedor,
+                    participaciones.c.precio_unitario,
+                )
+                .select_from(participaciones)
+                .where(participaciones.c.proveedor.in_(prov_names))
+                .where(participaciones.c.precio_unitario.isnot(None))
+                .where(participaciones.c.precio_unitario > 0)
+                .distinct(participaciones.c.proveedor)
+                .order_by(
+                    participaciones.c.proveedor,
+                    participaciones.c.fecha_apertura.desc(),
+                    participaciones.c.id.asc(),
+                )
+            )
+            for ur in session.execute(ult_q).all():
+                ultimo_precio_by_prov[ur.proveedor] = ur.precio_unitario
+        else:
+            # SQLite (local): cálculo en Python, idéntico al anterior.
+            # Ordenado por fecha desc → primer registro = precio más reciente.
+            hist_q = (
+                select(
+                    participaciones.c.proveedor,
+                    participaciones.c.precio_unitario,
+                )
+                .select_from(participaciones)
+                .where(participaciones.c.proveedor.in_(prov_names))
+                .where(participaciones.c.precio_unitario.isnot(None))
+                .where(participaciones.c.precio_unitario > 0)
+                .order_by(participaciones.c.fecha_apertura.desc(), participaciones.c.id.asc())
+            )
+            prices_by_prov: dict = {}
+            for hr in session.execute(hist_q).all():
+                prov = hr.proveedor
+                prices_by_prov.setdefault(prov, []).append(hr.precio_unitario)
+                if prov not in ultimo_precio_by_prov:
+                    ultimo_precio_by_prov[prov] = hr.precio_unitario
+            for prov, vals in prices_by_prov.items():
+                mediana_by_prov[prov] = _median(vals)
 
     data = [
         {
             "proveedor": r.proveedor,
-            "mediana_precio": round(_median(prices_by_prov.get(r.proveedor, [])), 2),
+            "mediana_precio": round(mediana_by_prov.get(r.proveedor, 0.0), 2),
             "veces_ganado": int(r.veces_ganado or 0),
             "total_adjudicado": round(r.total_adjudicado or 0, 2),
             "count": r.count_filas,
