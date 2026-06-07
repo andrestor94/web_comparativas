@@ -207,28 +207,49 @@ def privado_articulo_kpis(
         total_valorizado = float(row.total_valorizado or 0)
         total_cantidad = float(row.total_cantidad or 0)
 
-        # KPI 2: mediana precio unitario — requiere datos por registro
+        # KPI 2: mediana precio unitario — requiere datos por registro.
+        # PostgreSQL: percentile_cont(0.5) calcula la mediana en la DB y devuelve UN
+        # número, en vez de traer una fila por registro (hasta ~319k) a Python.
+        # SQLite (local): se mantiene el cálculo en Python, idéntico al anterior.
+        # percentile_cont(0.5) ≡ statistics.median (interpolación lineal en la mediana).
         mediana_precio = None
         try:
-            precio_stmt = _apply_common_filters(
-                select(
-                    DimensionamientoRecord.valorizacion_estimada,
-                    DimensionamientoRecord.cantidad_demandada,
-                ).where(
-                    DimensionamientoRecord.cantidad_demandada.isnot(None),
-                    DimensionamientoRecord.cantidad_demandada > 0,
-                    DimensionamientoRecord.valorizacion_estimada.isnot(None),
-                    DimensionamientoRecord.valorizacion_estimada > 0,
-                ),
-                DimensionamientoRecord,
-                filters,
+            _ratio = (
+                DimensionamientoRecord.valorizacion_estimada
+                / DimensionamientoRecord.cantidad_demandada
             )
-            ratios = [
-                row_r.valorizacion_estimada / row_r.cantidad_demandada
-                for row_r in db.execute(precio_stmt).all()
-            ]
-            if ratios:
-                mediana_precio = round(statistics.median(ratios), 2)
+            _precio_where = (
+                DimensionamientoRecord.cantidad_demandada.isnot(None),
+                DimensionamientoRecord.cantidad_demandada > 0,
+                DimensionamientoRecord.valorizacion_estimada.isnot(None),
+                DimensionamientoRecord.valorizacion_estimada > 0,
+            )
+            if not IS_SQLITE:
+                med_stmt = _apply_common_filters(
+                    select(
+                        func.percentile_cont(0.5).within_group(_ratio.asc())
+                    ).where(*_precio_where),
+                    DimensionamientoRecord,
+                    filters,
+                )
+                med_val = db.execute(med_stmt).scalar()
+                if med_val is not None:
+                    mediana_precio = round(float(med_val), 2)
+            else:
+                precio_stmt = _apply_common_filters(
+                    select(
+                        DimensionamientoRecord.valorizacion_estimada,
+                        DimensionamientoRecord.cantidad_demandada,
+                    ).where(*_precio_where),
+                    DimensionamientoRecord,
+                    filters,
+                )
+                ratios = [
+                    row_r.valorizacion_estimada / row_r.cantidad_demandada
+                    for row_r in db.execute(precio_stmt).all()
+                ]
+                if ratios:
+                    mediana_precio = round(statistics.median(ratios), 2)
         except Exception:
             pass
 
@@ -263,30 +284,55 @@ def privado_articulo_precio_evolucion(
         else:
             month_expr = cast(_month_expr(DimensionamientoRecord.fecha), Date)
 
-        stmt = _apply_common_filters(
-            select(
-                month_expr.label("month"),
-                DimensionamientoRecord.valorizacion_estimada,
-                DimensionamientoRecord.cantidad_demandada,
-            ).where(
-                DimensionamientoRecord.cantidad_demandada.isnot(None),
-                DimensionamientoRecord.cantidad_demandada > 0,
-                DimensionamientoRecord.valorizacion_estimada.isnot(None),
-                DimensionamientoRecord.valorizacion_estimada > 0,
-            ),
-            DimensionamientoRecord,
-            filters,
+        _precio_where = (
+            DimensionamientoRecord.cantidad_demandada.isnot(None),
+            DimensionamientoRecord.cantidad_demandada > 0,
+            DimensionamientoRecord.valorizacion_estimada.isnot(None),
+            DimensionamientoRecord.valorizacion_estimada > 0,
         )
-        rows = db.execute(stmt).all()
 
-        month_ratios: dict[str, list[float]] = {}
-        for row in rows:
-            m = _month_value_to_iso(row.month)
-            ratio = row.valorizacion_estimada / row.cantidad_demandada
-            month_ratios.setdefault(m, []).append(ratio)
+        if not IS_SQLITE:
+            # PostgreSQL: mediana por mes calculada en la DB (percentile_cont).
+            # Devuelve una fila por mes en vez de una fila por registro.
+            _ratio = (
+                DimensionamientoRecord.valorizacion_estimada
+                / DimensionamientoRecord.cantidad_demandada
+            )
+            stmt = _apply_common_filters(
+                select(
+                    month_expr.label("month"),
+                    func.percentile_cont(0.5).within_group(_ratio.asc()).label("mediana"),
+                )
+                .where(*_precio_where)
+                .group_by(month_expr)
+                .order_by(month_expr),
+                DimensionamientoRecord,
+                filters,
+            )
+            rows = db.execute(stmt).all()
+            months = [_month_value_to_iso(r.month) for r in rows]
+            values = [round(float(r.mediana), 2) if r.mediana is not None else 0 for r in rows]
+        else:
+            # SQLite (local): cálculo en Python, idéntico al anterior.
+            stmt = _apply_common_filters(
+                select(
+                    month_expr.label("month"),
+                    DimensionamientoRecord.valorizacion_estimada,
+                    DimensionamientoRecord.cantidad_demandada,
+                ).where(*_precio_where),
+                DimensionamientoRecord,
+                filters,
+            )
+            rows = db.execute(stmt).all()
 
-        months = sorted(month_ratios.keys())
-        values = [round(statistics.median(month_ratios[m]), 2) for m in months]
+            month_ratios: dict[str, list[float]] = {}
+            for row in rows:
+                m = _month_value_to_iso(row.month)
+                ratio = row.valorizacion_estimada / row.cantidad_demandada
+                month_ratios.setdefault(m, []).append(ratio)
+
+            months = sorted(month_ratios.keys())
+            values = [round(statistics.median(month_ratios[m]), 2) for m in months]
 
         data = {"months": months, "values": values}
         _cache_set(key, data)
