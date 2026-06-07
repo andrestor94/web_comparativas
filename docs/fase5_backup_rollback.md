@@ -11,6 +11,30 @@
 
 ---
 
+## Checklist práctico (TL;DR)
+
+**Opciones de backup**
+- **Opción A — Snapshot de Render** (gestionado): rápido, sin descargar archivo. Ideal como
+  punto de control y para PITR. (§1)
+- **Opción B — `pg_dump` a archivo** (portátil): copia descargable, restaurable selectivo,
+  sirve para restaurar en una base local y probar la migración antes. (§2)
+- **Recomendada:** **A + B juntas** para Batch 2 estructural — snapshot de Render como red de
+  seguridad gestionada **y** un `pg_dump` específico de las tablas afectadas para poder
+  restaurar/probar offline. Para cambios solo-de-índice alcanza con A + capturar el DDL (§3).
+
+**Pasos mínimos antes de ejecutar cualquier cosa de Batch 2/3**
+- [ ] Backup tomado (A y/o B) — anotar fecha/hora UTC + ID/archivo.
+- [ ] Backup **verificado** (existe y es restaurable — ver §2).
+- [ ] DDL/estado afectado capturado (§3) y pegado en el changelog (§5).
+- [ ] Script `.sql` revisado y aprobado (sin ejecutar).
+- [ ] Plan de rollback escrito para ese cambio (§0 + §7).
+- [ ] Validación antes/después definida (`phase5_parity_check.py` + conteos).
+
+> Hasta tener una vía de backup **verificada**, Batch 2 (índices/estructura) queda
+> *listo-pero-no-ejecutado*. Batch 1 (código) no depende de esto.
+
+---
+
 ## 0. Qué requiere backup y qué no
 
 | Cambio | Tipo | ¿Backup de datos? | Rollback |
@@ -134,6 +158,24 @@ ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC;
    Dimensionamiento) + tiempos vs baseline.
 6. Registrar resultado en el changelog (§5). Si algo falla → ejecutar el **rollback**
    correspondiente (§0) y re-validar.
+
+---
+
+## 4bis. Qué hacer si falla una migración o un índice (rollback por caso)
+
+| Falla | Síntoma | Acción inmediata | Rollback |
+|---|---|---|---|
+| `CREATE INDEX CONCURRENTLY` se interrumpe | Queda un índice **INVALID** (`pg_index.indisvalid = false`) | No reintentar encima | `DROP INDEX CONCURRENTLY <idx>;` y volver a crear |
+| `CREATE INDEX` (sin CONCURRENTLY) bloquea escrituras | La tabla queda bloqueada / la app se traba | Cancelar la sesión (`pg_cancel_backend`) | Nada que revertir si no terminó; si terminó, `DROP INDEX` |
+| `DROP INDEX` de un índice que sí se usaba | Endpoints más lentos tras el cambio | Confirmar con `EXPLAIN` | Re-`CREATE INDEX CONCURRENTLY` con el **DDL guardado** (§3) |
+| Poblar tabla nueva (coarse summary) falla a mitad | Tabla parcial | La tabla es **aditiva**, nadie la lee aún | `TRUNCATE <tabla_nueva>;` y reintentar, o `DROP TABLE <tabla_nueva>;` |
+| Cambio de datos (retención/normalización) con resultado inesperado | Conteos/sumas no coinciden post-cambio | **Detener**, no seguir | `ROLLBACK;` si está en transacción; si ya hubo `COMMIT`, **restaurar desde el dump** (§2) |
+| La app muestra errores tras un cambio | 500 / datos vacíos | Revisar logs | Revertir el cambio (rollback de arriba) y, si es de código, `git revert` + redeploy |
+
+**Principios:**
+- Cambios de **datos** siempre dentro de `BEGIN; ... ; COMMIT;` y revisados **antes** del commit.
+- DDL con `CONCURRENTLY` **no** puede ir en transacción → su seguro es el backup + el DDL guardado para recrear.
+- Si hay cualquier duda → `ROLLBACK` / no commitear / restaurar desde dump. Nunca "arreglar a mano" sin script.
 
 ---
 
