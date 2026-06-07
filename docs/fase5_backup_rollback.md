@@ -181,9 +181,9 @@ ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC;
 
 ## 5. Changelog de intervenciones (llenar en cada cambio)
 
-| Fecha (UTC) | Cambio | Backup (snapshot/dump + verif.) | DDL previo guardado | Script | Validación | Resultado | Rollback usado |
+| Fecha | Cambio | Backup (export + verif.) | DDL previo guardado | Script | Validación | Resultado | Rollback |
 |---|---|---|---|---|---|---|---|
-| _(pendiente Batch 2)_ | | | | | | | |
+| 2026-06-07 | **Batch 2 · Tanda 1** — `DROP INDEX CONCURRENTLY ix_dim_sum_familia_qty` (80 MB, índice muerto del summary fino) | Export Render 2026-06-07 ~15:00 (`.dir.tar.gz`, disponible) + PITR 7 días | `CREATE INDEX ix_dim_sum_familia_qty ON public.dimensionamiento_family_monthly_summary USING btree (familia, total_cantidad)` | `scripts/sql/phase5_batch2/07_summary_dead_indexes_cleanup_PROPUESTA.sql` (Tanda 1) | Pre: `idx_scan=0`, `idx_tup_read=0`. Post: índices summary **413 → 333 MB** (−80 MB); `filas_summary=259.702` sin cambios; PK + `uq_dim_family_monthly_summary` presentes; EXPLAIN Top-familias/Geo/Serie = `Parallel Seq Scan` (plan idéntico); smoke test UI OK, sin 500 | ✅ Éxito | No necesario |
 
 ---
 
