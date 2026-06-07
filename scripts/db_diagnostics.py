@@ -188,6 +188,28 @@ def _compat_warnings(backend: str, columns: list[dict]) -> list[str]:
 # --------------------------------------------------------------------------
 # Recolección de snapshot estructurado (solo lectura)
 # --------------------------------------------------------------------------
+def _pg_index_defs(engine: Engine) -> dict:
+    """
+    Mapa (tabla, indice) -> indexdef para PostgreSQL, leyendo pg_indexes (SOLO SELECT).
+    Permite conservar la definición completa de índices funcionales/por expresión/
+    parciales (que la reflexión devuelve con columnas en None). Vacío fuera de PostgreSQL.
+    """
+    if not engine.url.get_backend_name().startswith("postgresql"):
+        return {}
+    out: dict = {}
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'")
+            ).fetchall()
+        for tbl, idx, ddl in rows:
+            out[(tbl, idx)] = ddl
+    except Exception as exc:
+        print(f"[db_diagnostics][WARN] no se pudo leer pg_indexes: {exc}", file=sys.stderr)
+        return {}
+    return out
+
+
 def collect_snapshot(engine: Engine, *, estimate: bool) -> dict:
     """
     Recolecta un snapshot estructural completo (sin filas de datos ni credenciales).
@@ -196,6 +218,7 @@ def collect_snapshot(engine: Engine, *, estimate: bool) -> dict:
     insp = inspect(engine)
     backend = engine.url.get_backend_name()
     table_names = sorted(insp.get_table_names())
+    index_defs = _pg_index_defs(engine)  # {(tabla, indice): indexdef} en PostgreSQL
 
     tables: dict[str, dict] = {}
     for t in table_names:
@@ -222,15 +245,23 @@ def collect_snapshot(engine: Engine, *, estimate: bool) -> dict:
         except Exception:
             fks = []
         try:
-            indexes = [
-                {
+            indexes = []
+            for ix in insp.get_indexes(t):
+                # column_names puede contener None para índices funcionales/por expresión.
+                raw_cols = list(ix.get("column_names") or [])
+                ddl = index_defs.get((t, ix.get("name")))
+                indexes.append({
                     "name": ix.get("name"),
-                    "columns": list(ix.get("column_names") or []),
+                    "columns": raw_cols,                       # se conserva tal cual (incluye None)
                     "unique": bool(ix.get("unique")),
-                }
-                for ix in insp.get_indexes(t)
-            ]
-        except Exception:
+                    "expressions": [str(e) for e in (ix.get("expressions") or [])] or None,
+                    "indexdef": ddl,                           # definición completa (PostgreSQL)
+                    "is_expression": any(c is None for c in raw_cols) or bool(ix.get("expressions")),
+                    "is_partial": bool(ddl and " WHERE " in ddl.upper()),
+                })
+        except Exception as exc:
+            # No perdemos el reporte por un índice raro: registramos warning y seguimos.
+            print(f"[db_diagnostics][WARN] índices de {t}: {exc}", file=sys.stderr)
             indexes = []
         tables[t] = {
             "rows": _table_rowcount(engine, t, estimate=estimate),
@@ -256,6 +287,86 @@ def write_json(snapshot: dict, path: Path) -> None:
     import json
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _render_index(ix: dict) -> str:
+    """
+    Renderiza un índice de forma ROBUSTA, incluso si tiene columnas por expresión
+    (donde la reflexión devuelve None). No pierde información:
+      - columnas None -> placeholder `<expression>`
+      - marca funcional/expresión y parcial
+      - conserva las expresiones y el indexdef completo cuando están disponibles.
+    """
+    name = ix.get("name") or "<sin nombre>"
+    cols = [(c if c is not None else "<expression>") for c in (ix.get("columns") or [])]
+    cols_str = ", ".join(cols) if cols else "—"
+    uq = " (unique)" if ix.get("unique") else ""
+    tags = []
+    if ix.get("is_expression"):
+        tags.append("funcional/expresión")
+    if ix.get("is_partial"):
+        tags.append("parcial")
+    tag_str = f" · {', '.join(tags)}" if tags else ""
+    line = f"- `{name}` [{cols_str}]{uq}{tag_str}"
+    extra = []
+    if ix.get("expressions"):
+        extra.append(f"  - expresiones: {', '.join(ix['expressions'])}")
+    if ix.get("indexdef"):
+        extra.append(f"  - `{ix['indexdef']}`")
+    if extra:
+        line = line + "\n" + "\n".join(extra)
+    return line
+
+
+def _selftest() -> int:
+    """
+    Smoke test SIN base de datos: reproduce el caso que rompía el reporte
+    (un índice por expresión con columns=[None]) más un índice parcial y uno
+    normal, y verifica que build_report NO rompe y los representa sin perder info.
+    """
+    fake = {
+        "meta": {
+            "backend": "postgresql", "db_label": "selftest",
+            "generated_utc": "1970-01-01T00:00:00", "count_mode": "exact",
+        },
+        "tables": {
+            "demo": {
+                "rows": 3,
+                "size_bytes": None,
+                "columns": [{"name": "id", "type": "INTEGER", "nullable": False}],
+                "pk": ["id"],
+                "fks": [],
+                "indexes": [
+                    {  # índice por expresión: column_names = [None]  (el caso del bug)
+                        "name": "ix_expr", "columns": [None], "unique": False,
+                        "expressions": ["lower((email)::text)"],
+                        "indexdef": "CREATE INDEX ix_expr ON demo (lower(email))",
+                        "is_expression": True, "is_partial": False,
+                    },
+                    {  # índice parcial
+                        "name": "ix_partial", "columns": ["id"], "unique": False,
+                        "expressions": None,
+                        "indexdef": "CREATE INDEX ix_partial ON demo (id) WHERE id > 0",
+                        "is_expression": False, "is_partial": True,
+                    },
+                    {  # índice normal
+                        "name": "ix_normal", "columns": ["id"], "unique": True,
+                        "expressions": None, "indexdef": None,
+                        "is_expression": False, "is_partial": False,
+                    },
+                ],
+            }
+        },
+    }
+    report = build_report(fake)
+    assert "<expression>" in report, "el índice por expresión no se renderizó con placeholder"
+    assert "funcional/expresión" in report, "no se marcó el índice funcional/expresión"
+    assert "parcial" in report, "no se marcó el índice parcial"
+    assert "ix_normal" in report, "no se renderizó el índice normal"
+    assert "lower(email)" in report, "no se conservó el indexdef del índice por expresión"
+    print("[db_diagnostics][selftest] OK: índices por expresión/parciales/normales se "
+          "renderizan sin romper y conservan indexdef.")
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -388,37 +499,43 @@ def build_report(snapshot: dict) -> str:
     w("## Apéndice — detalle por tabla")
     w("")
     for t in table_names:
-        info = tables[t]
-        rows = info["rows"]
-        rows_str = f"{rows:,}" if isinstance(rows, int) else "—"
-        w(f"### `{t}` — {rows_str} filas")
-        w("")
-        w("**Columnas**")
-        w("")
-        w("| Columna | Tipo | Nullable |")
-        w("|---|---|---|")
-        for c in info["columns"]:
-            w(f"| `{c['name']}` | {c['type']} | {c['nullable']} |")
-        w("")
-        w(f"**PK:** {', '.join(info['pk']) if info['pk'] else '—'}")
-        w("")
-        if info["fks"]:
-            w("**FK:**")
-            for fk in info["fks"]:
-                cc = ", ".join(fk["constrained_columns"])
-                rc = ", ".join(fk["referred_columns"])
-                w(f"- ({cc}) → `{fk['referred_table']}` ({rc})")
-        else:
-            w("**FK:** —")
-        w("")
-        if info["indexes"]:
-            w("**Índices:**")
-            for ix in info["indexes"]:
-                uq = " (unique)" if ix["unique"] else ""
-                w(f"- `{ix['name']}` [{', '.join(ix['columns'])}]{uq}")
-        else:
-            w("**Índices:** —")
-        w("")
+        try:
+            info = tables[t]
+            rows = info["rows"]
+            rows_str = f"{rows:,}" if isinstance(rows, int) else "—"
+            w(f"### `{t}` — {rows_str} filas")
+            w("")
+            w("**Columnas**")
+            w("")
+            w("| Columna | Tipo | Nullable |")
+            w("|---|---|---|")
+            for c in info["columns"]:
+                w(f"| `{c['name']}` | {c['type']} | {c['nullable']} |")
+            w("")
+            pk_cols = [str(c) for c in (info["pk"] or []) if c is not None]
+            w(f"**PK:** {', '.join(pk_cols) if pk_cols else '—'}")
+            w("")
+            if info["fks"]:
+                w("**FK:**")
+                for fk in info["fks"]:
+                    cc = ", ".join(str(c) for c in fk["constrained_columns"])
+                    rc = ", ".join(str(c) for c in fk["referred_columns"])
+                    w(f"- ({cc}) → `{fk['referred_table']}` ({rc})")
+            else:
+                w("**FK:** —")
+            w("")
+            if info["indexes"]:
+                w("**Índices:**")
+                for ix in info["indexes"]:
+                    w(_render_index(ix))
+            else:
+                w("**Índices:** —")
+            w("")
+        except Exception as exc:
+            # Una tabla rara no debe romper el reporte completo.
+            w(f"### `{t}` — (error al renderizar: {exc})")
+            w("")
+            print(f"[db_diagnostics][WARN] no se pudo renderizar la tabla {t}: {exc}", file=sys.stderr)
     w("---")
     w(f"_Backend analizado: {meta['db_label']}._")
     return "\n".join(lines) + "\n"
@@ -454,7 +571,16 @@ def main() -> int:
         help="Ruta opcional para exportar el snapshot estructural como JSON "
              "(útil para comparar local vs producción con scripts/db_compare.py).",
     )
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="Smoke test SIN base de datos: valida el render de índices raros "
+             "(por expresión / parciales). No conecta a ninguna base.",
+    )
     args = parser.parse_args()
+
+    if args.selftest:
+        return _selftest()
 
     url = _resolve_database_url()
     # Engine read-only por convención (no ejecutamos DDL/DML en ningún punto).
