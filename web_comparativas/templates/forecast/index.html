@@ -7,12 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<!-- Plotly.js (local) -->
-<script src="{{ url_for('static', path='vendor/plotly/plotly.min.js') }}"></script>
-<!-- ag-Grid Community (local) -->
+<!-- Plotly.js custom bundle browser (local) — core+scatter+treemap, v3.3.1, build --platform=browser. defer: no bloquea el render; se ejecuta antes de DOMContentLoaded. CSS aparte (abajo) porque el custom build no lo inyecta solo. -->
+<link rel="stylesheet" href="{{ url_for('static', path='vendor/plotly/plotly-custom.browser.min.css') }}">
+<script defer src="{{ url_for('static', path='vendor/plotly/plotly-custom.browser.min.js') }}"></script>
+<!-- ag-Grid Community (local) — defer: descarga sin bloquear el render; se ejecuta antes de DOMContentLoaded, así buildProdGrid/buildClientGrid ya tienen window.agGrid -->
 <link rel="stylesheet" href="{{ url_for('static', path='vendor/ag-grid/ag-grid.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', path='vendor/ag-grid/ag-theme-alpine.css') }}">
-<script src="{{ url_for('static', path='vendor/ag-grid/ag-grid-community.min.js') }}"></script>
+<script defer src="{{ url_for('static', path='vendor/ag-grid/ag-grid-community.min.js') }}"></script>
 <!-- Flatpickr (local) -->
 <link rel="stylesheet" href="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.css') }}">
 <script src="{{ url_for('static', path='vendor/flatpickr/flatpickr.min.js') }}"></script>
