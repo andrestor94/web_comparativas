@@ -4371,12 +4371,23 @@ def _pg_get_treemap_data_inner(
         extra=extra,
     )
     _tm_base_t0 = time.perf_counter()
-    df_tree = _query_agg(
-        f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
-        f"SUM(COALESCE({val_col}, 0)) AS monto "
-        f"FROM forecast_valorizado WHERE {val_where} "
-        f"GROUP BY perfil, nombre_grupo, fantasia, cliente_id"
-    )
+    # Rama summary: sin filtro de producto y con la tabla 1 disponible -> lee el
+    # agregado pre-calculado (gate default = forecast_valorizado_summary). Treemap
+    # no ORDER BY -> HashAggregate en RAM, no necesita work_mem.
+    if prod_codes is None and _forecast_summary_available():
+        df_tree = _query_agg(
+            f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
+            f"SUM(COALESCE({val_col}, 0)) AS monto "
+            f"FROM forecast_valorizado_summary WHERE {val_where} "
+            f"GROUP BY perfil, nombre_grupo, fantasia, cliente_id"
+        )
+    else:
+        df_tree = _query_agg(
+            f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
+            f"SUM(COALESCE({val_col}, 0)) AS monto "
+            f"FROM forecast_valorizado WHERE {val_where} "
+            f"GROUP BY perfil, nombre_grupo, fantasia, cliente_id"
+        )
     if df_tree.empty:
         return {**_EMPTY, "periods": periods}
     _tm_base_ms = (time.perf_counter() - _tm_base_t0) * 1000
