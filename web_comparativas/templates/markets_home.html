@@ -280,6 +280,7 @@
         }
         .status-available { color: #15935a; }
         .status-restricted { color: #00806b; }
+        .status-soon { color: #94a3b8; }   /* "Próximamente": tono neutro atenuado, NO verde */
 
         /* Botón: outline por defecto (tarjetas laterales) */
         .cta {
@@ -329,6 +330,19 @@
             color: #ffffff;
             border-color: var(--mc-accent);
         }
+
+        /* ── Estado deshabilitado (Indicadores en producción) ──────────── */
+        .module-card--disabled { cursor: default; }
+        .cta--disabled,
+        .module-card.is-active .cta--disabled {
+            background: #f1f5f9;
+            color: #94a3b8;
+            border-color: #cbd5e1;
+            opacity: 0.7;
+            cursor: not-allowed;
+            pointer-events: none;   /* no clickeable */
+        }
+        .module-card--disabled:hover .module-card__icon { transform: none; }
 
         /* ── Posiciones del escenario (coverflow) ─────────────────────── */
         .carousel-stage.is-ready .module-card.is-active {
@@ -659,9 +673,13 @@
                         </div>
                     </a>
 
-                    {% if show_indicadores %}
-                    <!-- Indicadores Comerciales — visible solo fuera de Render (ruta WIP no desplegada) -->
-                    <a href="/indicadores-comerciales/" class="module-card module-card--indicadores">
+                    <!-- Indicadores Comerciales — siempre visible.
+                         En local (show_indicadores): tarjeta funcional, badge "Disponible",
+                         botón "Ingresar" con href real. En producción (RENDER_MODE): mismo
+                         diseño, badge "Próximamente" y botón deshabilitado (sin href). La
+                         ruta /indicadores-comerciales/ tampoco se registra en prod (404). -->
+                    <a {% if show_indicadores %}href="/indicadores-comerciales/"{% endif %}
+                       class="module-card module-card--indicadores{% if not show_indicadores %} module-card--disabled{% endif %}">
                         <div class="module-card__body">
                             <span class="module-card__icon"><i class="bi bi-bar-chart-line"></i></span>
                             <h2 class="module-card__title">Indicadores Comerciales</h2>
@@ -670,12 +688,16 @@
                                 y tableros de análisis ejecutivo y operativo.
                             </p>
                             <div class="module-card__footer">
+                                {% if show_indicadores %}
                                 <span class="status-badge status-available"><span class="dot"></span>Disponible</span>
                                 <span class="cta">Ingresar <i class="bi bi-arrow-right"></i></span>
+                                {% else %}
+                                <span class="status-badge status-soon"><span class="dot"></span>Próximamente</span>
+                                <span class="cta cta--disabled" aria-disabled="true">Próximamente <i class="bi bi-lock"></i></span>
+                                {% endif %}
                             </div>
                         </div>
                     </a>
-                    {% endif %}
 
                     {% if user and (user.role or '')|lower in ['admin', 'auditor'] %}
                     <!-- Soporte de Inteligencia Comercial — Admin y Auditor -->
