@@ -8,6 +8,7 @@ import copy
 import csv
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -3180,6 +3181,39 @@ def _local_get_treemap_data_light(
 # Cache for schema check — checked once per process lifetime.
 _val_has_codigo_serie: "bool | None" = None
 _val_schema_lock = threading.Lock()
+
+
+# ── Gate de summaries agregadas (consumido por endpoints en Rama 2/3) ──────
+_SUMMARY_AVAIL_CACHE: dict = {}          # table -> (checked_monotonic, bool)
+_SUMMARY_AVAIL_TTL = 60.0                # TTL corto: levanta tablas recién creadas por --summaries-only
+_SUMMARY_AVAIL_LOCK = threading.Lock()
+
+
+def _forecast_summary_available(table: str = "forecast_valorizado_summary") -> bool:
+    """True si: motor PostgreSQL + FORECAST_USE_SUMMARY no apagado + la tabla existe.
+
+    Kill-switch: FORECAST_USE_SUMMARY in {0,false,no,off} -> fuerza camino crudo
+    sin redeploy. Cache con TTL para no pegarle a information_schema por request.
+    Inerte en Rama 1: ningún endpoint lo consume todavía.
+    """
+    if engine is None or "postgresql" not in str(engine.url):
+        return False
+    if os.environ.get("FORECAST_USE_SUMMARY", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    now = time.monotonic()
+    with _SUMMARY_AVAIL_LOCK:
+        entry = _SUMMARY_AVAIL_CACHE.get(table)
+        if entry and (now - entry[0]) < _SUMMARY_AVAIL_TTL:
+            return entry[1]
+    df = _query_agg(
+        f"SELECT 1 FROM information_schema.tables WHERE table_name = '{table}' LIMIT 1"
+    )
+    exists = not df.empty
+    with _SUMMARY_AVAIL_LOCK:
+        _SUMMARY_AVAIL_CACHE[table] = (now, exists)
+    if not exists:
+        logger.info("[FORECAST summary] tabla %s ausente -> endpoints caen a crudo.", table)
+    return exists
 
 
 def _pg_valorizado_has_codigo_serie() -> bool:

@@ -159,6 +159,46 @@ def _enrich_batch(
     return df
 
 
+def _rebuild_forecast_summaries(engine) -> None:
+    """Reconstruye las 2 summaries agregadas. Idempotente (2+ corridas) y atómico. Solo PostgreSQL.
+
+    Literal entero 0 en COALESCE = espeja las queries de los endpoints.
+    Tipos resultantes: monto_yhat -> double precision; yhat_cliente -> numeric (SUM(bigint)).
+    """
+    from sqlalchemy import text
+    if "postgresql" not in str(engine.url):
+        logger.info("Summaries: motor no-PostgreSQL -> omitido (gate de motor).")
+        return
+    SUMMARIES = [
+        ("forecast_valorizado_summary", "idx_fvs_filtros", "(perfil, neg, subneg, fecha)",
+         """SELECT perfil, neg, subneg, nombre_grupo, fantasia, cliente_id, fecha,
+                   SUM(COALESCE(monto_yhat,   0)) AS monto_yhat,
+                   SUM(COALESCE(yhat_cliente, 0)) AS yhat_cliente
+            FROM forecast_valorizado
+            GROUP BY perfil, neg, subneg, nombre_grupo, fantasia, cliente_id, fecha"""),
+        ("forecast_product_summary", "idx_fps_filtros", "(perfil, neg)",
+         """SELECT perfil, neg, codigo_serie,
+                   SUM(COALESCE(monto_yhat, 0)) AS vol_venta
+            FROM forecast_valorizado
+            GROUP BY perfil, neg, codigo_serie"""),
+    ]
+    logger.info("Reconstruyendo summaries (build + swap atomico)...")
+    with engine.begin() as conn:                      # 1 transaccion -> readers ven la vieja hasta el commit
+        conn.execute(text("SET LOCAL statement_timeout = 0"))
+        for base, idx, idx_cols, select_sql in SUMMARIES:
+            # BUILD (self-healing: limpia restos de una corrida fallida previa)
+            conn.execute(text(f"DROP TABLE IF EXISTS {base}_new"))
+            conn.execute(text(f"CREATE TABLE {base}_new AS {select_sql}"))
+            conn.execute(text(f"CREATE INDEX {idx}_new ON {base}_new {idx_cols}"))
+            # SWAP atomico
+            conn.execute(text(f"DROP TABLE IF EXISTS {base}_old"))
+            conn.execute(text(f"ALTER TABLE IF EXISTS {base} RENAME TO {base}_old"))
+            conn.execute(text(f"ALTER TABLE {base}_new RENAME TO {base}"))
+            conn.execute(text(f"DROP TABLE IF EXISTS {base}_old"))   # MOVIDO ARRIBA: libera el nombre del indice {idx}
+            conn.execute(text(f"ALTER INDEX IF EXISTS {idx}_new RENAME TO {idx}"))
+    logger.info("Summaries reconstruidas OK.")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -237,6 +277,9 @@ def run() -> None:
             ))
     logger.info("Índices OK.")
 
+    # ── Summaries agregadas (precálculo forecast) ──────────────────────────
+    _rebuild_forecast_summaries(engine)
+
     # ── Validación post-carga ──────────────────────────────────────────────
     logger.info("Validando...")
     with engine.connect() as conn:
@@ -282,4 +325,12 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    if "--summaries-only" in sys.argv:
+        if not DATABASE_URL:
+            logger.error("DATABASE_URL no configurado.")
+            sys.exit(1)
+        engine = _get_engine(DATABASE_URL)   # mismo método que run() (línea ~179)
+        logger.info("Modo --summaries-only: reconstruyo summaries sin recargar valorizado.")
+        _rebuild_forecast_summaries(engine)
+    else:
+        run()
