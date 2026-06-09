@@ -683,6 +683,8 @@
           <div class="sidebar-market-label" style="color: #94a3b8;">Notificaciones</div>
           {% elif market_context == 'account' %}
           <div class="sidebar-market-label" style="color: #94a3b8;">Mi Cuenta</div>
+          {% elif market_context == 'indicadores' %}
+          <div class="sidebar-market-label" style="color: #d97706;">Indicadores Comerciales</div>
           {% else %}
           <div class="sidebar-market-label">Mercado Público</div>
           {% endif %}
@@ -755,6 +757,32 @@
         <!-- Home Alternativo (opcional si hay sub-rutas, hoy apunta a /forecast) -->
         <a href="/forecast/" class="nav-link {% if request.url.path.startswith('/forecast') %}active{% endif %}">
           <div><i class="bi bi-graph-up-arrow"></i> Forecast</div>
+        </a>
+
+        <!-- Mi contraseña -->
+        <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
+          <div><i class="bi bi-key"></i> Mi contraseña</div>
+        </a>
+
+        {% elif market_context == 'indicadores' %}
+        <!-- ================= MENÚ INDICADORES COMERCIALES ================= -->
+
+        <!-- Rentabilidad Negativa -->
+        <a href="/indicadores-comerciales/rentabilidad-negativa"
+          class="nav-link {% if request.url.path == '/indicadores-comerciales/rentabilidad-negativa' %}active{% endif %}">
+          <div><i class="bi bi-graph-down-arrow"></i> Rentabilidad Negativa</div>
+        </a>
+
+        <!-- Inflación -->
+        <a href="/indicadores-comerciales/inflacion"
+          class="nav-link {% if request.url.path == '/indicadores-comerciales/inflacion' %}active{% endif %}">
+          <div><i class="bi bi-arrow-up-right-circle"></i> Inflación</div>
+        </a>
+
+        <!-- Informes de Laboratorio -->
+        <a href="/indicadores-comerciales/informes-laboratorio"
+          class="nav-link {% if request.url.path == '/indicadores-comerciales/informes-laboratorio' %}active{% endif %}">
+          <div><i class="bi bi-capsule"></i> Informes de Laboratorio</div>
         </a>
 
         <!-- Mi contraseña -->
