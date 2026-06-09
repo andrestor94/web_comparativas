@@ -26,7 +26,7 @@ from sqlalchemy import func
 
 # === PROYECTO ===
 from web_comparativas.models import (
-    SessionLocal, db_session, User, init_db,
+    SessionLocal, db_session, User, init_db, RENDER_MODE,
 )
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
@@ -520,6 +520,11 @@ print("DEBUG: TrackingMiddleware ENABLED (robust mode)", flush=True)
 _APP_ENV_MAIN = os.getenv("APP_ENV", "development").strip().lower()
 _IS_PRODUCTION = _APP_ENV_MAIN in {"production", "prod"}
 
+# Tarjeta de Indicadores Comerciales: visible solo fuera de Render. La ruta
+# /indicadores-comerciales/ es trabajo en curso aún no desplegado en prod, así
+# que se oculta cuando corremos en Render (RENDER_MODE) y se muestra en local.
+_SHOW_INDICADORES = not RENDER_MODE
+
 
 def _get_app_secret() -> str:
     secret = os.getenv("APP_SECRET", "").strip()
@@ -608,6 +613,21 @@ app.include_router(comments_router)
 app.include_router(forecast_router)
 app.include_router(perfiles_router)
 app.include_router(perfiles_privado_router)
+
+# === INDICADORES COMERCIALES (solo local) ===
+# Registro condicional y resiliente:
+#  - if not RENDER_MODE → la ruta /indicadores-comerciales/ solo existe en
+#    local; en Render no se registra (coherente con show_indicadores, que
+#    oculta la tarjeta allá). El módulo aún no está desplegado en prod.
+#  - try/except → si los archivos del módulo (untracked/WIP) no están en este
+#    entorno, la app NO crashea: loguea y sigue.
+if not RENDER_MODE:
+    try:
+        from web_comparativas.routers.indicadores_router import router as indicadores_router
+        app.include_router(indicadores_router)
+        logger.info("Indicadores Comerciales registrado (entorno local).")
+    except Exception as e:
+        logger.warning(f"Indicadores no registrado: {e}")
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
@@ -829,7 +849,8 @@ def markets_home(request: Request):
         return RedirectResponse("/login", 303)
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
-        "user": request.state.user
+        "user": request.state.user,
+        "show_indicadores": _SHOW_INDICADORES,
     })
 
 # === MARKET SWITCHING ===
