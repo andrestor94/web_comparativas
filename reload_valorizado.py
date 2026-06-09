@@ -177,9 +177,19 @@ def _rebuild_forecast_summaries(engine) -> None:
             FROM forecast_valorizado
             GROUP BY perfil, neg, subneg, nombre_grupo, fantasia, cliente_id, fecha"""),
         ("forecast_product_summary", "idx_fps_filtros", "(perfil, neg)",
-         """SELECT perfil, neg, codigo_serie,
-                   SUM(COALESCE(monto_yhat, 0)) AS vol_venta
-            FROM forecast_valorizado
+         # Rama A (valorizado) = volumen real; Rama B (main) = catálogo completo con
+         # vol 0, para preservar las series de forecast_main sin filas en valorizado.
+         # El conjunto (perfil, neg, codigo_serie) replica el UNION del mapping actual.
+         """SELECT perfil, neg, codigo_serie, SUM(vol_venta) AS vol_venta
+            FROM (
+                SELECT perfil, neg, codigo_serie,
+                       SUM(COALESCE(monto_yhat, 0)) AS vol_venta
+                FROM forecast_valorizado
+                GROUP BY perfil, neg, codigo_serie
+                UNION ALL
+                SELECT DISTINCT perfil, neg, codigo_serie, 0 AS vol_venta
+                FROM forecast_main
+            ) u
             GROUP BY perfil, neg, codigo_serie"""),
     ]
     logger.info("Reconstruyendo summaries (build + swap atomico)...")
