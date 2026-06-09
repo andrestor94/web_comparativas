@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block title %}Inflación PVP — Indicadores Comerciales — SIEM{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=2.0">
+{% endblock %}
+
+{% block header_title %}Indicadores Comerciales{% endblock %}
+
+{% block content %}
+
+<!-- ── Encabezado ─────────────────────────────────────────────── -->
+<div class="h-page-header mb-3">
+  <div>
+    <p class="h-page-header__eyebrow">Suite SIEM · Indicadores Comerciales</p>
+    <h1 class="h-page-header__title">Inflación PVP</h1>
+    <p class="h-page-header__subtitle">Variación mensual de precios públicos — Tratamientos Especiales · Solo productos comparables</p>
+  </div>
+  <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+    <button id="inf-btn-print-report" class="ind-btn ind-btn--ghost btn-sm" onclick="INF.printReport()" title="Imprimir informe completo">
+      <i class="bi bi-printer me-1"></i>Imprimir
+    </button>
+    <a href="/markets" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-grid me-1"></i>Suite SIEM
+    </a>
+  </div>
+</div>
+
+<!-- ── Cabecera de impresión (solo visible en @media print) ─── -->
+<div class="ind-print-header" id="inf-print-header" style="display:none;">
+  <div class="ind-print-header__brand">SIEM — Suizo Argentina · Indicadores Comerciales</div>
+  <h1 class="ind-print-header__title">Inflación PVP — Tratamientos Especiales</h1>
+  <div class="ind-print-header__meta">
+    <span id="inf-ph-rango"></span>
+    <span id="inf-ph-filtros"></span>
+    <span id="inf-ph-emitido"></span>
+  </div>
+</div>
+
+<!-- ── Banner SQL ─────────────────────────────────────────────── -->
+<div id="inf-sql-banner" class="ind-sql-banner ind-sql-banner--checking" style="display:none;">
+  <span id="inf-sql-icon" class="bi bi-circle-fill"></span>
+  <span id="inf-sql-text">Verificando conexión SQL Server…</span>
+</div>
+
+<!-- ── Filtros ───────────────────────────────────────────────── -->
+<div class="ind-filter-bar h-panel mb-4">
+  <div class="ind-filter-grid">
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Fecha inicio</label>
+      <input type="date" id="inf-desde" class="ind-input" value="{{ default_desde }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Fecha fin</label>
+      <input type="date" id="inf-hasta" class="ind-input" value="{{ default_hasta }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Negocio</label>
+      <select id="inf-negocio" class="ind-select">
+        <option value="">Todos</option>
+        <option value="2 - 1">Alto Costo</option>
+        <option value="2 - 2">Uso Compasivo</option>
+        <option value="2 - 3">Diabetes</option>
+        <option value="2 - 4">Alimentos</option>
+        <option value="2 - 5">Capita Fija</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Buscar producto</label>
+      <input type="text" id="inf-search" class="ind-input" placeholder="Ej: insulina…">
+    </div>
+    <div class="ind-filter-group ind-filter-group--actions">
+      <button id="inf-btn-apply" class="ind-btn ind-btn--primary">
+        <i class="bi bi-funnel-fill"></i> Consultar
+      </button>
+      <button id="inf-btn-clear" class="ind-btn ind-btn--ghost">
+        <i class="bi bi-x-circle"></i> Limpiar
+      </button>
+      <button id="inf-btn-export" class="ind-btn ind-btn--ghost" disabled>
+        <i class="bi bi-filetype-csv"></i> CSV
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Estado de carga / error ───────────────────────────────── -->
+<div id="inf-loading" class="ind-loading-overlay" style="display:none;">
+  <div class="ind-spinner"></div>
+  <p class="mt-3 text-muted small">Consultando SQL Server y calculando inflación…</p>
+</div>
+<div id="inf-error" class="ind-error-box" style="display:none;">
+  <i class="bi bi-exclamation-triangle-fill text-danger me-2 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <span id="inf-error-msg"></span>
+    <br>
+    <button class="ind-btn ind-btn--ghost btn-sm mt-2" id="inf-btn-retry" style="height:28px;font-size:0.75rem;">
+      <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+    </button>
+  </div>
+</div>
+
+<!-- ── KPIs principales ──────────────────────────────────────── -->
+<div class="ind-kpi-grid mb-3">
+  <div class="kpi-card kpi-card--ind-rojo">
+    <span class="kl">Inflación Ponderada</span>
+    <span class="kv" id="inf-kv-ponderada">—</span>
+    <span class="ks">variación ponderada por facturación</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-ambar">
+    <span class="kl">Inflación PVP Índice</span>
+    <span class="kv" id="inf-kv-indice">—</span>
+    <span class="ks">SUM(PVP final) / SUM(PVP inicial) − 1</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-azul">
+    <span class="kl">IPC INDEC</span>
+    <div class="ind-kpi-split">
+      <span>Nivel general <strong id="inf-kv-indec-general">—</strong></span>
+      <span>Salud <strong id="inf-kv-indec-salud">—</strong></span>
+    </div>
+    <span class="ks" id="inf-kv-indec-periodo">Último dato publicado</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Mayor Aumento del Mes</span>
+    <span class="kv" id="inf-kv-mayor-pct">—</span>
+    <span class="ks" id="inf-kv-mayor-desc">—</span>
+  </div>
+</div>
+
+<!-- ── KPIs cobertura ─────────────────────────────────────────── -->
+<div class="ind-kpi-grid ind-kpi-grid--4 mb-4">
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Productos Totales</span>
+    <span class="kv kv--sm" id="inf-kv-total">—</span>
+    <span class="ks">unineg = 2</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Comparables</span>
+    <span class="kv kv--sm" id="inf-kv-comparables">—</span>
+    <span class="ks">PI y PF válidos</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Con Aumento</span>
+    <span class="kv kv--sm" id="inf-kv-con-aumento">—</span>
+    <span class="ks">PVP final mayor</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Sin Precio Final</span>
+    <span class="kv kv--sm" id="inf-kv-sin-pf">—</span>
+    <span class="ks">tienen PI pero no PF</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Facturación Total</span>
+    <span class="kv kv--sm" id="inf-kv-facturacion">—</span>
+    <span class="ks">ventas del filtro</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Sin Cambio</span>
+    <span class="kv kv--sm" id="inf-kv-sin-cambio">—</span>
+    <span class="ks">PI = PF</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Altas del Período</span>
+    <span class="kv kv--sm" id="inf-kv-altas">—</span>
+    <span class="ks">no impactan inflación</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Cobertura Facturación</span>
+    <span class="kv kv--sm" id="inf-kv-cobertura">—</span>
+    <span class="ks">comparable / total</span>
+  </div>
+</div>
+
+<!-- ── Gráficos ──────────────────────────────────────────────── -->
+<div class="ind-charts-row mb-4">
+  <div class="h-panel ind-chart-panel ind-chart-panel--wide">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Tendencia</p><h3 class="h-panel__title">Evolución Mensual de Inflación</h3></div>
+      <span class="chart-badge">Vs. IPC INDEC</span>
+    </div>
+    <div class="ind-chart-container">
+      <canvas id="inf-chart-evolucion"></canvas>
+      <div class="ind-chart-empty" id="inf-chart-empty" style="display:none;">
+        <i class="bi bi-bar-chart text-muted"></i>
+        <p class="text-muted small mt-2">Seleccioná un rango de fechas y consultá</p>
+      </div>
+    </div>
+  </div>
+  <div class="h-panel ind-chart-panel">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Ranking</p><h3 class="h-panel__title">Laboratorios</h3></div>
+    </div>
+    <div class="table-responsive" style="max-height:320px;overflow-y:auto;">
+      <table class="h-table h-table--compact" id="inf-tabla-labs">
+        <thead>
+          <tr>
+            <th>Laboratorio</th>
+            <th class="text-end">Inflación</th>
+            <th class="text-end">Facturación</th>
+          </tr>
+        </thead>
+        <tbody id="inf-tbody-labs">
+          <tr><td colspan="3" class="text-center text-muted py-3">Cargando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tabla de productos ─────────────────────────────────────── -->
+<div class="h-panel mb-4">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Detalle</p>
+      <h3 class="h-panel__title">Productos</h3>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <div class="ind-pill-group" id="inf-filter-pills">
+        <button class="ind-pill ind-pill--active" data-filter="all">Todos</button>
+        <button class="ind-pill" data-filter="comp">Comparables</button>
+        <button class="ind-pill" data-filter="alta">Altas</button>
+        <button class="ind-pill" data-filter="sin_pf">Sin PF</button>
+      </div>
+      <span id="inf-table-count" class="text-muted small"></span>
+    </div>
+  </div>
+  <div class="table-responsive" style="max-height:520px;overflow-y:auto;">
+    <table class="h-table h-table--sticky-head h-table--compact" id="inf-tabla-productos">
+      <thead>
+        <tr>
+          <th data-sort="articulo">Código</th>
+          <th data-sort="descripcion">Descripción</th>
+          <th data-sort="laboratorio">Laboratorio</th>
+          <th data-sort="estado_calculo">Estado</th>
+          <th class="text-end" data-sort="pvp_inicial">PVP Inicial</th>
+          <th data-sort="fecha_inicial">Fecha PI</th>
+          <th class="text-end" data-sort="pvp_final">PVP Final</th>
+          <th data-sort="fecha_final">Fecha PF</th>
+          <th class="text-end" data-sort="facturacion">Facturación</th>
+          <th class="text-end" data-sort="variacion_pvp">Variación</th>
+        </tr>
+      </thead>
+      <tbody id="inf-tbody-productos">
+        <tr>
+          <td colspan="10" class="text-center text-muted py-5">
+            <i class="bi bi-funnel fs-3 d-block mb-2 opacity-25"></i>
+            Seleccioná un período y hacé clic en <strong>Consultar</strong>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="ind-table-footer" id="inf-table-footer" style="display:none;">
+    <span id="inf-footer-count" class="text-muted small"></span>
+  </div>
+</div>
+
+<!-- ── Estado vacío ───────────────────────────────────────────── -->
+<div id="inf-empty" class="ind-empty-state" style="display:none;">
+  <i class="bi bi-arrow-up-right-circle ind-empty-icon"></i>
+  <h3 class="ind-empty-title">Sin resultados</h3>
+  <p class="ind-empty-desc">No hay productos comparables para el período seleccionado.</p>
+  <button class="ind-btn ind-btn--ghost" id="inf-btn-clear2"><i class="bi bi-x-circle me-1"></i>Limpiar filtros</button>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', path='js/indicadores_inflacion.js') }}?v=2.0"></script>
+<script>
+  INF.init({
+    desde: "{{ default_desde }}",
+    hasta: "{{ default_hasta }}",
+    sqlAvailable: {{ 'true' if sql_available else 'false' }},
+    apiBase: "/indicadores-comerciales/api/inflacion",
+    indecBase: "/indicadores-comerciales/api/indec"
+  });
+</script>
+{% endblock %}

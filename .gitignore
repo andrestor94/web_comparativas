@@ -69,3 +69,8 @@ sim_result*
 test_out*
 golden_master*
 commit_diff*
+
+# --- Indicadores Comerciales: datos pesados del ERP (no son codigo) ---
+Indicadores Comerciales/
+# Backups locales
+*.bak

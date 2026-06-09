@@ -1,0 +1,522 @@
+"""
+Consultas y agregaciones para el módulo Indicadores Comerciales.
+Adaptado de 03 - Rentabilidad Negativa/backend/services/rentabilidad_service.py.
+Utiliza indicadores_db en lugar del db.py local del módulo original.
+"""
+
+from datetime import date, datetime, timezone
+from typing import Iterable, Optional
+import hashlib
+import logging
+import time
+import unicodedata
+
+from web_comparativas.indicadores_db import get_etl_db, get_fusion_db
+
+logger = logging.getLogger("wc.indicadores.svc")
+
+# ── Caché en memoria para get_rows() ──────────────────────────────────────────
+# Evita que /api/resumen y /api/detalle ejecuten la misma query SQL por separado
+# cuando se llaman con los mismos parámetros en un intervalo corto.
+_ROW_CACHE: dict = {}
+_CACHE_TTL = 90  # segundos
+
+
+def _cache_key(desde, hasta, laboratorio, familia, cliente, search, cadneg, modo) -> str:
+    raw = "|".join([
+        str(desde), str(hasta),
+        str(laboratorio or ""), str(familia or ""),
+        str(cliente or ""), str(search or ""),
+        str(cadneg or ""), str(modo),
+    ])
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[list]:
+    entry = _ROW_CACHE.get(key)
+    if entry and (time.monotonic() - entry["ts"]) < _CACHE_TTL:
+        return entry["data"]
+    return None
+
+
+def _cache_set(key: str, data: list) -> None:
+    _ROW_CACHE[key] = {"data": data, "ts": time.monotonic()}
+    # Purga entradas expiradas para no crecer sin límite
+    now = time.monotonic()
+    stale = [k for k, v in _ROW_CACHE.items() if (now - v["ts"]) > _CACHE_TTL * 2]
+    for k in stale:
+        _ROW_CACHE.pop(k, None)
+
+
+CADNEG_VALUES = ("2 - 1", "2 - 2", "2 - 3", "2 - 4", "2 - 5")
+
+QUERY_NEGATIVE_ROWS = """
+DECLARE @FechaInicio DATE = ?;
+DECLARE @FechaFin DATE = ?;
+
+WITH ClientesBase AS (
+    SELECT
+        codigo,
+        fantasia,
+        cliente_grupo,
+        CASE
+            WHEN nombre_grupo = 'SIN GRUPO' OR nombre_grupo IS NULL THEN fantasia
+            ELSE nombre_grupo
+        END AS NombreCliente
+    FROM dbo.clientes
+),
+RentabilidadBase AS (
+    SELECT
+        rc.ctacte,
+        rc.fecha,
+        rc.articulo,
+        LTRIM(RTRIM(rc.cadneg)) AS cadneg,
+        rc.cant,
+        rc.importe AS facturacion,
+        rc.renta1 AS utilidad
+    FROM dbo.rentabilidad_cliente rc
+    WHERE
+        rc.fecha IS NOT NULL
+        AND CAST(rc.fecha AS DATE) >= @FechaInicio
+        AND CAST(rc.fecha AS DATE) < @FechaFin
+        AND UPPER(LTRIM(RTRIM(ISNULL(rc.comprob, '')))) <> 'NC'
+        AND LTRIM(RTRIM(rc.cadneg)) IN ('2 - 1', '2 - 2', '2 - 3', '2 - 4', '2 - 5')
+        AND TRY_CONVERT(FLOAT, rc.renta1) < 0
+        {cadneg_filter}
+)
+SELECT
+    rb.ctacte AS Cliente,
+    cb.cliente_grupo AS Cliente_Grupo,
+    cb.NombreCliente AS Nombre_Cliente_Grupo,
+    rb.fecha,
+    rb.articulo AS Articulo,
+    rb.cadneg AS Negocio,
+    SUM(CAST(ISNULL(rb.cant, 0) AS FLOAT)) AS Unidades,
+    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) AS Facturacion,
+    SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) AS Utilidad,
+    CASE
+        WHEN SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) = 0 THEN NULL
+        ELSE SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0)
+    END AS Rentabilidad
+FROM RentabilidadBase rb
+LEFT JOIN ClientesBase cb ON rb.ctacte = cb.codigo
+GROUP BY
+    rb.ctacte,
+    cb.cliente_grupo,
+    cb.NombreCliente,
+    rb.fecha,
+    rb.articulo,
+    rb.cadneg
+HAVING SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) < 0
+ORDER BY rb.fecha DESC, Utilidad ASC;
+"""
+
+
+QUERY_GROUPED_ROWS = """
+DECLARE @FechaInicio DATE = ?;
+DECLARE @FechaFin DATE = ?;
+
+WITH ClientesBase AS (
+    SELECT
+        codigo,
+        fantasia,
+        cliente_grupo,
+        CASE
+            WHEN nombre_grupo = 'SIN GRUPO' OR nombre_grupo IS NULL THEN fantasia
+            ELSE nombre_grupo
+        END AS NombreCliente
+    FROM dbo.clientes
+),
+RentabilidadBase AS (
+    SELECT
+        rc.ctacte,
+        rc.fecha,
+        rc.articulo,
+        LTRIM(RTRIM(rc.cadneg)) AS cadneg,
+        rc.cant,
+        rc.importe AS facturacion,
+        rc.renta1 AS utilidad
+    FROM dbo.rentabilidad_cliente rc
+    WHERE
+        rc.fecha IS NOT NULL
+        AND CAST(rc.fecha AS DATE) >= @FechaInicio
+        AND CAST(rc.fecha AS DATE) < @FechaFin
+        AND UPPER(LTRIM(RTRIM(ISNULL(rc.comprob, '')))) <> 'NC'
+        AND LTRIM(RTRIM(rc.cadneg)) IN ('2 - 1', '2 - 2', '2 - 3', '2 - 4', '2 - 5')
+        {cadneg_filter}
+)
+SELECT
+    rb.ctacte AS Cliente,
+    cb.cliente_grupo AS Cliente_Grupo,
+    cb.NombreCliente AS Nombre_Cliente_Grupo,
+    DATEFROMPARTS(YEAR(rb.fecha), MONTH(rb.fecha), 1) AS fecha,
+    rb.articulo AS Articulo,
+    MIN(rb.cadneg) AS Negocio,
+    SUM(CAST(ISNULL(rb.cant, 0) AS FLOAT)) AS Unidades,
+    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) AS Facturacion,
+    SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) AS Utilidad,
+    CASE
+        WHEN SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) = 0 THEN NULL
+        ELSE SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0)
+    END AS Rentabilidad
+FROM RentabilidadBase rb
+LEFT JOIN ClientesBase cb ON rb.ctacte = cb.codigo
+GROUP BY
+    rb.ctacte,
+    cb.cliente_grupo,
+    cb.NombreCliente,
+    DATEFROMPARTS(YEAR(rb.fecha), MONTH(rb.fecha), 1),
+    rb.articulo
+HAVING
+    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) <> 0
+    AND SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0) < 0
+ORDER BY fecha DESC, Utilidad ASC;
+"""
+
+
+QUERY_ARTICLES_BASE = """
+SELECT
+    codigo AS articulo,
+    nombre AS marca,
+    lab_nombre AS laboratorio,
+    monodroga AS principio_activo,
+    familia
+FROM dbo.vsl_art_alfabeta_full
+WHERE codigo IN ({placeholders});
+"""
+
+
+QUERY_HEALTH_ETL = """
+SELECT TOP 1 fecha, articulo, cant
+FROM dbo.rentabilidad_cliente
+WHERE fecha IS NOT NULL;
+"""
+
+
+QUERY_HEALTH_FUSION = """
+SELECT TOP 1 codigo, nombre, lab_nombre
+FROM dbo.vsl_art_alfabeta_full;
+"""
+
+
+NEGOCIO_LABELS = {
+    "2 - 1": "Alto Costo",
+    "2 - 2": "Uso Compasivo",
+    "2 - 3": "Diabetes",
+    "2 - 4": "Alimentos",
+    "2 - 5": "Capita Fija",
+}
+
+
+def _rows_to_dicts(cursor) -> list:
+    columns = [col[0] for col in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def _norm_text(value) -> str:
+    return str(value or "").strip()
+
+
+def normalize_text(value) -> str:
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFD", str(value))
+    return "".join(c for c in normalized if unicodedata.category(c) != "Mn").lower().strip()
+
+
+def _date_text(value) -> str:
+    if not value:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]
+    text = str(value)
+    if text.startswith("/Date("):
+        digits = "".join(c for c in text if c.isdigit() or c == "-")
+        if digits:
+            ms = int(digits)
+            return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date().isoformat()
+    return text[:10]
+
+
+def _clean_cliente(value) -> str:
+    text = _norm_text(value)
+    replacements = [
+        ("BANCO PROV. NUEVO", "GRUPO BANCO PROVINCIA"),
+        ("PLACONA", "UTA - SAN ANTONIO (GRUPO PLACONA)"),
+        ("OSTEL - OS DEL PERSONALLEFONICO", "OSTEL - OS DEL PERSONAL TELEFONICO"),
+        ("VTA MOSTRADOR FCIA LIBERTADOR SAR201", "VENTA MOSTRADOR"),
+        ("GPO OSMATA", "GRUPO OSMATA"),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+    suffixes = [
+        " (T.E)", " TRAT ESPEC", " TE", " - ALTO COSTO", " T.E",
+        " (TRAT ESP)", " (TRA.ESP)", " TRAT ESP", " (TRAT. ESP.)",
+        " (PROFE)", " -.", " (TRAT.ESP.)", " (TRAT. ESP)",
+    ]
+    for suffix in suffixes:
+        text = text.replace(suffix, "")
+    return text.strip()
+
+
+def _chunk(values: list, size: int = 1800) -> Iterable:
+    for i in range(0, len(values), size):
+        yield values[i:i + size]
+
+
+def _build_negative_query(cadneg: Optional[str]) -> tuple:
+    params = []
+    cadneg_filter = ""
+    if cadneg:
+        cadneg_filter = "AND LTRIM(RTRIM(rc.cadneg)) = ?"
+        params.append(cadneg.strip())
+    return QUERY_NEGATIVE_ROWS.format(cadneg_filter=cadneg_filter), params
+
+
+def _build_grouped_query(cadneg: Optional[str]) -> tuple:
+    params = []
+    cadneg_filter = ""
+    if cadneg:
+        cadneg_filter = "AND LTRIM(RTRIM(rc.cadneg)) = ?"
+        params.append(cadneg.strip())
+    return QUERY_GROUPED_ROWS.format(cadneg_filter=cadneg_filter), params
+
+
+def get_health() -> dict:
+    result = {"status": "ok", "etl": False, "fusion": False, "error": None}
+    try:
+        with get_etl_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(QUERY_HEALTH_ETL)
+            result["etl"] = cursor.fetchone() is not None
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["status"] = "error"
+    try:
+        with get_fusion_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(QUERY_HEALTH_FUSION)
+            result["fusion"] = cursor.fetchone() is not None
+    except Exception as exc:
+        if not result["error"]:
+            result["error"] = str(exc)
+        result["status"] = "error"
+    return result
+
+
+def get_article_map(articulos: list) -> dict:
+    if not articulos:
+        return {}
+    article_map = {}
+    try:
+        with get_fusion_db() as conn:
+            cursor = conn.cursor()
+            for items in _chunk(articulos):
+                placeholders = ",".join("?" for _ in items)
+                cursor.execute(QUERY_ARTICLES_BASE.format(placeholders=placeholders), items)
+                for row in _rows_to_dicts(cursor):
+                    article_map[str(row["articulo"])] = {
+                        "marca": _norm_text(row.get("marca")) or str(row["articulo"]),
+                        "laboratorio": _norm_text(row.get("laboratorio")) or "SIN LABORATORIO",
+                        "principio_activo": _norm_text(row.get("principio_activo")) or "",
+                        "familia": _norm_text(row.get("familia")) or "SIN FAMILIA",
+                    }
+    except Exception:
+        pass
+    return article_map
+
+
+def get_rows(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    familia: Optional[str] = None,
+    cliente: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+    modo: str = "detalle",
+) -> list:
+    key = _cache_key(desde, hasta, laboratorio, familia, cliente, search, cadneg, modo)
+    cached = _cache_get(key)
+    if cached is not None:
+        logger.debug("get_rows: cache HIT key=%s rows=%d", key[:8], len(cached))
+        return cached
+
+    t0 = time.monotonic()
+    grouped_mode = modo == "agrupado"
+    query, extra_params = _build_grouped_query(cadneg) if grouped_mode else _build_negative_query(cadneg)
+
+    logger.info(
+        "get_rows: SQL START modo=%s desde=%s hasta=%s lab=%s fam=%s cli=%s cadneg=%s",
+        modo, desde, hasta,
+        laboratorio or "-", familia or "-", cliente or "-", cadneg or "-",
+    )
+
+    with get_etl_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, [desde, hasta, *extra_params])
+        raw_rows = _rows_to_dicts(cursor)
+
+    logger.info("get_rows: ETL raw_rows=%d (%.1fs)", len(raw_rows), time.monotonic() - t0)
+
+    articulos = sorted({str(row["Articulo"]) for row in raw_rows if row.get("Articulo") is not None})
+    article_map = get_article_map(articulos)
+    search_norm = normalize_text(search)
+    cliente_norm = normalize_text(cliente)
+    lab_norm = normalize_text(laboratorio)
+    fam_norm = normalize_text(familia)
+
+    rows = []
+    for row in raw_rows:
+        articulo = str(row.get("Articulo"))
+        article = article_map.get(
+            articulo,
+            {"marca": articulo, "laboratorio": "SIN LABORATORIO", "principio_activo": "", "familia": "SIN FAMILIA"},
+        )
+        cliente_limpio = _clean_cliente(row.get("Nombre_Cliente_Grupo")) or "SIN CLIENTE"
+        lab = article["laboratorio"]
+        fam = article["familia"]
+        marca = article["marca"]
+
+        if lab_norm and normalize_text(lab) != lab_norm:
+            continue
+        if fam_norm and normalize_text(fam) != fam_norm:
+            continue
+        if cliente_norm and cliente_norm not in normalize_text(cliente_limpio):
+            continue
+        if search_norm and search_norm not in normalize_text(f"{marca} {articulo} {article['principio_activo']}"):
+            continue
+
+        negocio_codigo = _norm_text(row.get("Negocio"))
+        fecha_text = _date_text(row.get("fecha"))
+        utilidad = float(row.get("Utilidad") or 0)
+        facturacion = float(row.get("Facturacion") or 0)
+
+        rows.append({
+            "fecha": fecha_text,
+            "mes": fecha_text[:7],
+            "cliente_codigo": row.get("Cliente"),
+            "grupo": row.get("Cliente_Grupo"),
+            "cliente": cliente_limpio,
+            "articulo": articulo,
+            "marca": marca,
+            "laboratorio": lab,
+            "principio_activo": article["principio_activo"],
+            "familia": fam,
+            "negocio": NEGOCIO_LABELS.get(negocio_codigo, negocio_codigo or "SIN NEGOCIO"),
+            "negocio_codigo": negocio_codigo,
+            "unidades": float(row.get("Unidades") or 0),
+            "facturacion": facturacion,
+            "utilidad": utilidad,
+            "rentabilidad": (
+                row.get("Rentabilidad")
+                if row.get("Rentabilidad") is not None
+                else (utilidad / facturacion if facturacion else None)
+            ),
+            "modo": "agrupado" if grouped_mode else "detalle",
+        })
+
+    logger.info("get_rows: DONE filtered_rows=%d total_time=%.1fs", len(rows), time.monotonic() - t0)
+    _cache_set(key, rows)
+    return rows
+
+
+def _rank(acc: dict, limit: Optional[int] = None) -> list:
+    items = [
+        {"name": key, "value": value}
+        for key, value in sorted(acc.items(), key=lambda item: item[1])
+    ]
+    return items[:limit] if limit else items
+
+
+def _add(acc: dict, key: str, value: float):
+    if key:
+        acc[key] = acc.get(key, 0.0) + value
+
+
+def get_summary(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    familia: Optional[str] = None,
+    cliente: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+    modo: str = "detalle",
+) -> dict:
+    rows = get_rows(desde, hasta, laboratorio=laboratorio, familia=familia,
+                    cliente=cliente, search=search, cadneg=cadneg, modo=modo)
+    by_month: dict = {}
+    by_lab: dict = {}
+    by_client: dict = {}
+    by_brand: dict = {}
+    by_negocio: dict = {}
+    facturacion_total = 0.0
+    utilidad_total = 0.0
+
+    for row in rows:
+        loss = float(row["utilidad"] or 0)
+        facturacion_total += float(row["facturacion"] or 0)
+        utilidad_total += loss
+        _add(by_month, row["mes"], loss)
+        _add(by_lab, row["laboratorio"], loss)
+        _add(by_client, row["cliente"], loss)
+        _add(by_brand, row["marca"], loss)
+        _add(by_negocio, row["negocio"], loss)
+
+    months = [{"mes": key, "utilidad": value} for key, value in sorted(by_month.items())]
+    prev = months[-2]["utilidad"] if len(months) >= 2 else None
+    last = months[-1]["utilidad"] if months else None
+    variation = (last / prev - 1) if prev and last is not None else None
+
+    return {
+        "total_transacciones": len(rows),
+        "facturacion_total": facturacion_total,
+        "utilidad_total": utilidad_total,
+        "rentabilidad_promedio": utilidad_total / facturacion_total if facturacion_total else None,
+        "variacion_mensual": variation,
+        "meses": months,
+        "laboratorios": _rank(by_lab, 12),
+        "clientes": _rank(by_client, 12),
+        "marcas": _rank(by_brand, 12),
+        "negocios": _rank(by_negocio),
+        "cantidad_laboratorios": len({row["laboratorio"] for row in rows}),
+        "cantidad_marcas": len({row["marca"] for row in rows}),
+        "cantidad_clientes": len({row["cliente"] for row in rows}),
+        "total_registros": len(rows),
+    }
+
+
+def get_detail(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    familia: Optional[str] = None,
+    cliente: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+    modo: str = "detalle",
+) -> list:
+    return get_rows(desde, hasta, laboratorio=laboratorio, familia=familia,
+                    cliente=cliente, search=search, cadneg=cadneg, modo=modo)
+
+
+def get_metadata(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    familia: Optional[str] = None,
+    cliente: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+) -> dict:
+    rows = get_rows(desde, hasta, laboratorio=laboratorio, familia=familia,
+                    cliente=cliente, search=search, cadneg=cadneg)
+    return {
+        "laboratorios": sorted({row["laboratorio"] for row in rows}),
+        "familias": sorted({row["familia"] for row in rows}),
+        "clientes": sorted({row["cliente"] for row in rows}),
+        "marcas": sorted({row["marca"] for row in rows}),
+        "meses": sorted({row["mes"] for row in rows}),
+        "total_registros": len(rows),
+    }
