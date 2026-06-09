@@ -32,6 +32,11 @@ const INF = (() => {
     if (abs >= 1_000_000) return '$ ' + (v/1_000_000).toFixed(1) + ' M';
     return '$ ' + Math.round(v).toLocaleString('es-AR');
   };
+  // Moneda argentina completa: "$ 1.234.567,89" (solo display; no altera el valor que se ordena/calcula)
+  const _fmtPesos = (v) => {
+    if (v == null || isNaN(v)) return '—';
+    return '$ ' + Number(v).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
   const _fmtNum = (v) => {
     if (v == null || isNaN(v)) return '—';
     return Math.round(parseFloat(v)).toLocaleString('es-AR');
@@ -77,21 +82,20 @@ const INF = (() => {
     _checkHealth();
   }
 
+  // Mes en formato YYYY-MM a partir de componentes locales (sin desfase de zona horaria)
+  const _ym = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+
   function _setupDates() {
-    // Default: mes anterior completo
+    // Default: mes anterior completo (mismo mes en ambos selectores)
     const now = new Date();
     const desde = $('inf-desde');
     const hasta = $('inf-hasta');
-    if (desde && !desde.value) {
-      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      desde.value = d.toISOString().slice(0,10);
-    }
-    if (hasta && !hasta.value) {
-      const d = new Date(now.getFullYear(), now.getMonth(), 1);
-      hasta.value = d.toISOString().slice(0,10);
-    }
-    if (desde && _cfg.desde) desde.value = _cfg.desde;
-    if (hasta && _cfg.hasta) hasta.value = _cfg.hasta;
+    const prevMonth = _ym(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    // Los <input type="month"> esperan value YYYY-MM; los defaults/cfg vienen YYYY-MM-DD → recortar.
+    if (desde && !desde.value) desde.value = prevMonth;
+    if (hasta && !hasta.value) hasta.value = prevMonth;
+    if (desde && _cfg.desde) desde.value = String(_cfg.desde).slice(0, 7);
+    if (hasta && _cfg.hasta) hasta.value = String(_cfg.hasta).slice(0, 7);
   }
 
   function _bindEvents() {
@@ -197,20 +201,34 @@ const INF = (() => {
     $('inf-chart-empty').style.display = 'flex';
   }
 
+  // Convierte la selección de mes (YYYY-MM) al rango de fechas que espera el backend.
+  // hasta = primer día del mes SIGUIENTE al "mes fin": límite superior exclusivo, así
+  // facturación (`fecha < hasta`) cubre el mes fin COMPLETO sin perder el último día,
+  // y get_evolucion sigue iterando correctamente. El backend no se toca.
+  function _mesARango(mesDesde, mesFin) {
+    const desde = `${mesDesde}-01`;
+    const [y, m] = mesFin.split('-').map(Number);       // m es 1-based
+    const next = new Date(y, m, 1);                       // Date usa mes 0-based → mes siguiente
+    const hasta = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`;
+    return { desde, hasta };
+  }
+
   // ── Load ─────────────────────────────────────────────────────────────────────
   async function _loadData() {
     _loading = true;
     _setLoading(true);
     _hideError();
 
-    const desde = $('inf-desde')?.value;
-    const hasta = $('inf-hasta')?.value;
-    if (!desde || !hasta) {
-      _showError('Seleccioná fecha inicio y fin.');
+    const mesDesde = $('inf-desde')?.value;
+    const mesHasta = $('inf-hasta')?.value;
+    if (!mesDesde || !mesHasta) {
+      _showError('Seleccioná mes inicio y mes fin.');
       _loading = false;
       _setLoading(false);
       return;
     }
+    // Convertir meses (YYYY-MM) al rango de fechas (YYYY-MM-DD) que espera el backend
+    const { desde, hasta } = _mesARango(mesDesde, mesHasta);
 
     const p = new URLSearchParams({ desde, hasta });
     const neg = $('inf-negocio')?.value;
@@ -269,7 +287,7 @@ const INF = (() => {
     setText('inf-kv-comparables', _fmtNum(r.productos_comparables));
     setText('inf-kv-con-aumento', _fmtNum(r.productos_con_aumento));
     setText('inf-kv-sin-pf', _fmtNum(r.productos_sin_precio_final));
-    setText('inf-kv-facturacion', _fmtARS(r.facturacion_total));
+    setText('inf-kv-facturacion', _fmtPesos(r.facturacion_total));
     setText('inf-kv-sin-cambio', _fmtNum(r.productos_sin_cambio));
     setText('inf-kv-altas', _fmtNum(r.productos_alta_periodo));
     setText('inf-kv-cobertura', r.cobertura_facturacion != null ? (r.cobertura_facturacion*100).toFixed(1)+'%' : '—');
@@ -392,11 +410,11 @@ const INF = (() => {
         <td>${escHtml(r.descripcion||'')}</td>
         <td>${escHtml(r.laboratorio||'')}</td>
         <td><span class="ind-badge ${badge}">${escHtml(label)}</span></td>
-        <td class="text-end">${r.pvp_inicial != null ? r.pvp_inicial.toFixed(2) : '—'}</td>
+        <td class="text-end">${_fmtPesos(r.pvp_inicial)}</td>
         <td class="text-muted small">${escHtml(r.fecha_inicial||'')}</td>
-        <td class="text-end">${r.pvp_final != null ? r.pvp_final.toFixed(2) : '—'}</td>
+        <td class="text-end">${_fmtPesos(r.pvp_final)}</td>
         <td class="text-muted small">${escHtml(r.fecha_final||'')}</td>
-        <td class="text-end">${_fmtARS(r.facturacion)}</td>
+        <td class="text-end">${_fmtPesos(r.facturacion)}</td>
         <td class="text-end ${varCls}">${varPct}</td>
       </tr>`;
     }).join('');
@@ -490,14 +508,15 @@ const INF = (() => {
       srch && `Búsqueda: ${srch}`,
     ].filter(Boolean).join('  ·  ');
 
-    const _fmtDMY = (s) => {
+    // Los selectores son de mes (YYYY-MM) → mostrar el período como MM/AAAA
+    const _fmtMesAnio = (s) => {
       if (!s) return '';
-      const [y, m, d] = s.split('-');
-      return `${d}/${m}/${y}`;
+      const [y, m] = String(s).split('-');
+      return m ? `${m}/${y}` : String(s);
     };
 
     const _setTxt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-    _setTxt('inf-ph-rango',   `Período: ${_fmtDMY(desde)} — ${_fmtDMY(hasta)}`);
+    _setTxt('inf-ph-rango',   `Período: ${_fmtMesAnio(desde)} — ${_fmtMesAnio(hasta)}`);
     _setTxt('inf-ph-filtros', filtrosActivos ? `Filtros: ${filtrosActivos}` : 'Sin filtros adicionales');
     _setTxt('inf-ph-emitido', `Emitido: ${new Date().toLocaleString('es-AR')}`);
 
