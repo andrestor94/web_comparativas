@@ -614,6 +614,21 @@ app.include_router(forecast_router)
 app.include_router(perfiles_router)
 app.include_router(perfiles_privado_router)
 
+# === INDICADORES COMERCIALES (solo local) ===
+# Registro condicional y resiliente:
+#  - if not RENDER_MODE → la ruta /indicadores-comerciales/ solo existe en
+#    local; en Render no se registra (coherente con show_indicadores, que
+#    oculta la tarjeta allá). El módulo aún no está desplegado en prod.
+#  - try/except → si los archivos del módulo (untracked/WIP) no están en este
+#    entorno, la app NO crashea: loguea y sigue.
+if not RENDER_MODE:
+    try:
+        from web_comparativas.routers.indicadores_router import router as indicadores_router
+        app.include_router(indicadores_router)
+        logger.info("Indicadores Comerciales registrado (entorno local).")
+    except Exception as e:
+        logger.warning(f"Indicadores no registrado: {e}")
+
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
 app.include_router(legacy_router)
