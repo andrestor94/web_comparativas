@@ -3294,37 +3294,54 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     _pl_labs_ms = 0.0
     _pl_build_ms = 0.0
     neg_where = _build_filter_sql(profiles=profiles, neg=neg)
-    # Query 1: channel mapping — only distinct text columns, from both main and valorizado
-    _pl_t0 = time.perf_counter()
-    df_neg = _query_agg(
-        f"SELECT DISTINCT COALESCE(neg, 'Varios') AS neg, codigo_serie FROM ("
-        f"  SELECT neg, codigo_serie, perfil FROM forecast_main"
-        f"  UNION"
-        f"  SELECT neg, codigo_serie, perfil FROM forecast_valorizado"
-        f") AS combined WHERE {neg_where}"
-    )
-    _pl_mapping_ms = (time.perf_counter() - _pl_t0) * 1000
-    if df_neg.empty:
-        return []
-    df_neg["neg"] = df_neg["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
-
-    # Query 2: monetary volume from forecast_valorizado (monto_yhat is FLOAT)
-    vol_where = _build_filter_sql(profiles=profiles, neg=neg)
-    _pl_t0 = time.perf_counter()
-    df_vol = _query_agg(
-        f"SELECT codigo_serie, SUM(COALESCE(monto_yhat, 0)) AS vol_venta "
-        f"FROM forecast_valorizado WHERE {vol_where} GROUP BY codigo_serie"
-    )
-    # vol_venta alias is already lowercase — PostgreSQL preserves it as-is ✓
-
-    _pl_volume_ms = (time.perf_counter() - _pl_t0) * 1000
-    # Merge: left join so all products appear even if not in forecast_valorizado
-    if df_vol.empty:
-        df = df_neg.copy()
-        df["vol_venta"] = 0.0
+    # Rama summary (PR-3): la tabla 2 ya trae (neg, codigo_serie, vol_venta), así que UNA
+    # lectura reemplaza el mapping UNION+DISTINCT (query 1) y la de volumen (query 2).
+    # Gate con NOMBRE EXPLÍCITO: product-list usa forecast_product_summary, no el default.
+    # Sin work_mem (product-list no derrama a disco).
+    if _forecast_summary_available("forecast_product_summary"):
+        _pl_t0 = time.perf_counter()
+        df = _query_agg(
+            f"SELECT COALESCE(neg, 'Varios') AS neg, codigo_serie, "
+            f"SUM(COALESCE(vol_venta, 0)) AS vol_venta "
+            f"FROM forecast_product_summary WHERE {neg_where} "
+            f"GROUP BY COALESCE(neg, 'Varios'), codigo_serie"
+        )
+        _pl_mapping_ms = (time.perf_counter() - _pl_t0) * 1000
+        if df.empty:
+            return []
+        df["neg"] = df["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
     else:
-        df = pd.merge(df_neg, df_vol, on="codigo_serie", how="left")
-        df["vol_venta"] = df["vol_venta"].fillna(0.0)
+        # Query 1: channel mapping — only distinct text columns, from both main and valorizado
+        _pl_t0 = time.perf_counter()
+        df_neg = _query_agg(
+            f"SELECT DISTINCT COALESCE(neg, 'Varios') AS neg, codigo_serie FROM ("
+            f"  SELECT neg, codigo_serie, perfil FROM forecast_main"
+            f"  UNION"
+            f"  SELECT neg, codigo_serie, perfil FROM forecast_valorizado"
+            f") AS combined WHERE {neg_where}"
+        )
+        _pl_mapping_ms = (time.perf_counter() - _pl_t0) * 1000
+        if df_neg.empty:
+            return []
+        df_neg["neg"] = df_neg["neg"].fillna("Varios").replace({"nan": "Varios", "None": "Varios", "none": "Varios"})
+
+        # Query 2: monetary volume from forecast_valorizado (monto_yhat is FLOAT)
+        vol_where = _build_filter_sql(profiles=profiles, neg=neg)
+        _pl_t0 = time.perf_counter()
+        df_vol = _query_agg(
+            f"SELECT codigo_serie, SUM(COALESCE(monto_yhat, 0)) AS vol_venta "
+            f"FROM forecast_valorizado WHERE {vol_where} GROUP BY codigo_serie"
+        )
+        # vol_venta alias is already lowercase — PostgreSQL preserves it as-is ✓
+
+        _pl_volume_ms = (time.perf_counter() - _pl_t0) * 1000
+        # Merge: left join so all products appear even if not in forecast_valorizado
+        if df_vol.empty:
+            df = df_neg.copy()
+            df["vol_venta"] = 0.0
+        else:
+            df = pd.merge(df_neg, df_vol, on="codigo_serie", how="left")
+            df["vol_venta"] = df["vol_venta"].fillna(0.0)
 
     _pl_t0 = time.perf_counter()
     labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
