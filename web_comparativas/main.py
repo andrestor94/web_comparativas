@@ -26,7 +26,7 @@ from sqlalchemy import func
 
 # === PROYECTO ===
 from web_comparativas.models import (
-    SessionLocal, db_session, User, init_db,
+    SessionLocal, db_session, User, init_db, RENDER_MODE,
 )
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
@@ -520,6 +520,11 @@ print("DEBUG: TrackingMiddleware ENABLED (robust mode)", flush=True)
 _APP_ENV_MAIN = os.getenv("APP_ENV", "development").strip().lower()
 _IS_PRODUCTION = _APP_ENV_MAIN in {"production", "prod"}
 
+# Tarjeta de Indicadores Comerciales: visible solo fuera de Render. La ruta
+# /indicadores-comerciales/ es trabajo en curso aún no desplegado en prod, así
+# que se oculta cuando corremos en Render (RENDER_MODE) y se muestra en local.
+_SHOW_INDICADORES = not RENDER_MODE
+
 
 def _get_app_secret() -> str:
     secret = os.getenv("APP_SECRET", "").strip()
@@ -829,7 +834,8 @@ def markets_home(request: Request):
         return RedirectResponse("/login", 303)
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
-        "user": request.state.user
+        "user": request.state.user,
+        "show_indicadores": _SHOW_INDICADORES,
     })
 
 # === MARKET SWITCHING ===
