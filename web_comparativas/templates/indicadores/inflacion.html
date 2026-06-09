@@ -48,12 +48,12 @@
 <div class="ind-filter-bar h-panel mb-4">
   <div class="ind-filter-grid">
     <div class="ind-filter-group">
-      <label class="ind-filter-label">Fecha inicio</label>
-      <input type="date" id="inf-desde" class="ind-input" value="{{ default_desde }}">
+      <label class="ind-filter-label">Mes inicio</label>
+      <input type="month" id="inf-desde" class="ind-input" value="{{ default_desde[:7] }}">
     </div>
     <div class="ind-filter-group">
-      <label class="ind-filter-label">Fecha fin</label>
-      <input type="date" id="inf-hasta" class="ind-input" value="{{ default_hasta }}">
+      <label class="ind-filter-label">Mes fin</label>
+      <input type="month" id="inf-hasta" class="ind-input" value="{{ default_hasta[:7] }}">
     </div>
     <div class="ind-filter-group">
       <label class="ind-filter-label">Negocio</label>
@@ -267,7 +267,7 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', path='js/indicadores_inflacion.js') }}?v=2.0"></script>
+<script src="{{ url_for('static', path='js/indicadores_inflacion.js') }}?v=2.2"></script>
 <script>
   INF.init({
     desde: "{{ default_desde }}",
