@@ -16,16 +16,6 @@
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
-    <!-- Preload de las 5 imágenes del carrusel: se decodifican antes de
-         renderizar, evitando parpadeo/recarga al cambiar de tarjeta. -->
-    <link rel="preload" as="image" href="{{ url_for('static', path='img/suite/mercado-publico.png') }}">
-    <link rel="preload" as="image" href="{{ url_for('static', path='img/suite/mercado-privado.png') }}">
-    <link rel="preload" as="image" href="{{ url_for('static', path='img/suite/forecast.png') }}">
-    <link rel="preload" as="image" href="{{ url_for('static', path='img/suite/sic.png') }}">
-    {# Preload de Indicadores Comerciales desactivado: tarjeta oculta en este deploy.
-    <link rel="preload" as="image" href="{{ url_for('static', path='img/suite/indicadores-comerciales.png') }}">
-    #}
-
     <style>
         :root {
             --sa-azul: #064066;
@@ -147,7 +137,7 @@
         .carousel-stage {
             /* Variables responsivas que controlan la composición */
             --card-w: 324px;
-            --card-h: 412px;
+            --card-h: 372px;
             --shift-near: 258px;
             --shift-far: 446px;
             --scale-near: 0.82;
@@ -174,22 +164,23 @@
             overflow: hidden;
         }
 
-        /* ── Tarjeta de módulo (premium) ──────────────────────────────── */
+        /* ── Tarjeta de módulo (minimalista, sin imagen) ──────────────── */
         .module-card {
             --mc-accent: var(--sa-azul);
+            --mc-soft: rgba(6, 64, 102, 0.10);
             position: relative;
             flex: 0 0 var(--card-w);
             max-width: var(--card-w);
-            min-height: 412px;
+            min-height: var(--card-h);
             display: flex;
             flex-direction: column;
             text-align: left;
             text-decoration: none;
             color: inherit;
-            border-radius: 24px;
-            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
-            border: 1px solid rgba(0, 68, 120, 0.10);
-            box-shadow: 0 18px 46px -20px rgba(0, 42, 85, 0.28);
+            border-radius: 18px;
+            background: #ffffff;
+            border: 1px solid #e7edf3;
+            box-shadow: 0 10px 30px -16px rgba(0, 42, 85, 0.22);
             overflow: hidden;
         }
 
@@ -206,79 +197,20 @@
             transform-origin: center center;
             backface-visibility: hidden;
             /* Sólo se animan transform y opacity (propiedades compositables):
-               sin animar box-shadow/filter/width/height → transición estable,
-               sin repaint por frame ni cambios de nitidez. */
+               sin animar box-shadow/filter/width/height → transición estable. */
             transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
                         opacity 0.32s ease;
         }
 
-        /* Barra de acento superior por módulo */
+        /* Línea fina de acento superior por módulo */
         .module-card::before {
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0;
-            height: 4px;
+            height: 3px;
             background: var(--mc-accent);
             z-index: 3;
             transition: height 0.25s ease;
-        }
-
-        /* ── Zona visual (imagen hero nítida) ─────────────────────────── */
-        .module-card__visual {
-            position: relative;
-            width: 100%;
-            height: 162px;
-            flex: 0 0 auto;
-            overflow: hidden;
-            background: #e9f1f9;
-        }
-        .module-card__visual img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            object-position: center;
-            image-rendering: auto;
-            display: block;
-            backface-visibility: hidden;
-            /* Imagen estática a 1:1: sin transform ni transición → el navegador
-               la rasteriza una sola vez, nítida, sin re-render en transición. */
-        }
-
-        /* Degradado de integración imagen → cuerpo (sólo el borde inferior;
-           no lava la imagen: arranca transparente y solo tiñe el último tramo) */
-        .module-card__visual::after {
-            content: '';
-            position: absolute;
-            inset: auto 0 0 0;
-            height: 32%;
-            background: linear-gradient(180deg,
-                        rgba(247, 251, 255, 0) 0%,
-                        rgba(247, 251, 255, 0.45) 70%,
-                        #f7fbff 100%);
-            pointer-events: none;
-        }
-
-        /* Icono flotante en el borde imagen/contenido.
-           Es hijo directo de .module-card (NO del visual con overflow:hidden),
-           y queda dentro de los límites de la card → nunca se recorta. */
-        .module-card__icon {
-            position: absolute;
-            left: 1.45rem;
-            top: 128px;                 /* 162 (visual) - 34 → solapa el borde */
-            width: 48px;
-            height: 48px;
-            border-radius: 15px;
-            background: rgba(255, 255, 255, 0.97);
-            border: 1px solid rgba(0, 68, 120, 0.12);
-            box-shadow: 0 12px 28px -6px rgba(0, 42, 85, 0.22);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.4rem;
-            color: var(--mc-accent);
-            z-index: 5;
-            transition: transform 0.3s ease, box-shadow 0.3s ease,
-                        background 0.3s ease, color 0.3s ease;
         }
 
         /* ── Cuerpo ───────────────────────────────────────────────────── */
@@ -286,19 +218,36 @@
             display: flex;
             flex-direction: column;
             flex: 1 1 auto;
-            padding: 2.15rem 1.45rem 1.2rem;   /* padding-top despeja el icono */
+            padding: 1.9rem 1.6rem 1.4rem;
         }
+
+        /* ── Ícono (line icon en contenedor cuadrado redondeado) ──────── */
+        .module-card__icon {
+            width: 54px;
+            height: 54px;
+            flex: 0 0 auto;
+            border-radius: 15px;
+            background: var(--mc-soft);
+            color: var(--mc-accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.65rem;
+            margin-bottom: 1.35rem;
+            transition: transform 0.3s ease, background 0.3s ease, color 0.3s ease;
+        }
+
         .module-card__title {
             color: #003b64;
             font-weight: 800;
-            font-size: 1.1rem;
+            font-size: 1.12rem;
             letter-spacing: -0.02em;
-            line-height: 1.22;
-            margin: 0 0 0.45rem;
+            line-height: 1.24;
+            margin: 0 0 0.5rem;
         }
         .module-card__desc {
             color: #52657a;
-            line-height: 1.5;
+            line-height: 1.55;
             font-size: 0.875rem;
             margin: 0 0 1.05rem;
             flex: 1 1 auto;
@@ -351,12 +300,12 @@
         }
         .cta i { transition: transform 0.28s ease; }
 
-        /* ── Variantes de acento por módulo ───────────────────────────── */
-        .module-card--publico     { --mc-accent: #06486f; }
-        .module-card--privado     { --mc-accent: #5770b0; }
-        .module-card--forecast    { --mc-accent: #6366F1; }
-        .module-card--sic         { --mc-accent: #00A487; }
-        .module-card--indicadores { --mc-accent: #d97706; }
+        /* ── Variantes de acento por módulo (acento + tinte tenue) ────── */
+        .module-card--publico     { --mc-accent: #06486f; --mc-soft: rgba(6, 72, 111, 0.10); }
+        .module-card--privado     { --mc-accent: #5770b0; --mc-soft: rgba(87, 112, 176, 0.12); }
+        .module-card--forecast    { --mc-accent: #6366F1; --mc-soft: rgba(99, 102, 241, 0.12); }
+        .module-card--sic         { --mc-accent: #00A487; --mc-soft: rgba(0, 164, 135, 0.13); }
+        .module-card--indicadores { --mc-accent: #d97706; --mc-soft: rgba(217, 119, 6, 0.13); }
 
         /* ── Posiciones del escenario (coverflow) ─────────────────────── */
         .carousel-stage.is-ready .module-card.is-active {
@@ -366,7 +315,7 @@
             box-shadow: 0 30px 70px -22px rgba(0, 42, 85, 0.42),
                         0 0 0 1px rgba(0, 68, 120, 0.05);
         }
-        .carousel-stage.is-ready .module-card.is-active::before { height: 5px; }
+        .carousel-stage.is-ready .module-card.is-active::before { height: 4px; }
 
         .carousel-stage.is-ready .module-card.is-prev {
             transform: translate(-50%, -50%) translateX(calc(-1 * var(--shift-near))) scale(var(--scale-near));
@@ -403,13 +352,10 @@
             transform: translate(-50%, calc(-50% - 5px)) scale(1);
             box-shadow: 0 40px 84px -24px rgba(0, 42, 85, 0.48);
         }
-        /* Sin zoom de imagen en hover: la imagen activa queda siempre a 1:1
-           (máxima nitidez, nunca re-muestreada). */
         .module-card.is-active:hover .module-card__icon {
-            transform: translateY(-3px) scale(1.05);
+            transform: translateY(-3px);
             background: var(--mc-accent);
             color: #ffffff;
-            box-shadow: 0 16px 32px -8px rgba(0, 42, 85, 0.32);
         }
         .module-card.is-active:hover .cta {
             background: var(--mc-accent);
@@ -494,7 +440,7 @@
         @media (max-width: 1200px) {
             .carousel-stage {
                 --card-w: 312px;
-                --card-h: 420px;
+                --card-h: 380px;
                 --shift-near: 234px;
                 --shift-far: 400px;
             }
@@ -505,7 +451,7 @@
             .suite-heading { margin-bottom: 0.9rem; }
             .carousel-stage {
                 --card-w: 300px;
-                --card-h: 430px;
+                --card-h: 392px;
                 --shift-near: 204px;
                 --shift-far: 366px;
                 --scale-near: 0.80;
@@ -515,7 +461,7 @@
         @media (max-width: 640px) {
             .carousel-stage {
                 --card-w: min(84vw, 322px);
-                --card-h: 446px;
+                --card-h: 404px;
                 /* Laterales apenas insinuadas */
                 --shift-near: 62vw;
                 --shift-far: 110vw;
@@ -524,13 +470,10 @@
             }
             /* En mobile la navegación principal es swipe + dots */
             .carousel-btn { display: none; }
-            .module-card__visual { height: 162px; }
-            .module-card__icon { top: 128px; }
         }
 
         @media (prefers-reduced-motion: reduce) {
             .carousel-stage.is-ready .module-card { transition: opacity 0.2s ease; }
-            .module-card__visual img,
             .module-card__icon { transition: none !important; }
         }
 
@@ -663,12 +606,8 @@
 
                     <!-- Mercado Público -->
                     <a href="/mercado-publico/web-comparativas" class="module-card module-card--publico">
-                        <div class="module-card__visual">
-                            <img src="{{ url_for('static', path='img/suite/mercado-publico.png') }}"
-                                 alt="Mercado Público" loading="eager" decoding="sync" fetchpriority="high">
-                        </div>
-                        <span class="module-card__icon"><i class="bi bi-building"></i></span>
                         <div class="module-card__body">
+                            <span class="module-card__icon"><i class="bi bi-building"></i></span>
                             <h2 class="module-card__title">Mercado Público</h2>
                             <p class="module-card__desc">
                                 Análisis de licitaciones públicas, oportunidades, participación
@@ -683,12 +622,8 @@
 
                     <!-- Mercado Privado -->
                     <a href="/mercado-privado" class="module-card module-card--privado">
-                        <div class="module-card__visual">
-                            <img src="{{ url_for('static', path='img/suite/mercado-privado.png') }}"
-                                 alt="Mercado Privado" loading="eager" decoding="sync" fetchpriority="high">
-                        </div>
-                        <span class="module-card__icon"><i class="bi bi-briefcase"></i></span>
                         <div class="module-card__body">
+                            <span class="module-card__icon"><i class="bi bi-briefcase"></i></span>
                             <h2 class="module-card__title">Mercado Privado</h2>
                             <p class="module-card__desc">
                                 Análisis de cotizaciones y organizaciones dentro y fuera de plataformas
@@ -703,12 +638,8 @@
 
                     <!-- Forecast -->
                     <a href="/forecast/" class="module-card module-card--forecast">
-                        <div class="module-card__visual">
-                            <img src="{{ url_for('static', path='img/suite/forecast.png') }}"
-                                 alt="Forecast" loading="eager" decoding="sync" fetchpriority="high">
-                        </div>
-                        <span class="module-card__icon"><i class="bi bi-graph-up-arrow"></i></span>
                         <div class="module-card__body">
+                            <span class="module-card__icon"><i class="bi bi-graph-up-arrow"></i></span>
                             <h2 class="module-card__title">Forecast</h2>
                             <p class="module-card__desc">
                                 Proyecciones de demanda, simulaciones y seguimiento por cliente,
@@ -721,15 +652,27 @@
                         </div>
                     </a>
 
+                    <!-- Indicadores Comerciales -->
+                    <a href="/indicadores-comerciales/" class="module-card module-card--indicadores">
+                        <div class="module-card__body">
+                            <span class="module-card__icon"><i class="bi bi-bar-chart-line"></i></span>
+                            <h2 class="module-card__title">Indicadores Comerciales</h2>
+                            <p class="module-card__desc">
+                                Seguimiento de indicadores comerciales, rentabilidad, desvíos
+                                y tableros de análisis ejecutivo y operativo.
+                            </p>
+                            <div class="module-card__footer">
+                                <span class="status-badge status-available"><span class="dot"></span>Disponible</span>
+                                <span class="cta">Ingresar <i class="bi bi-arrow-right"></i></span>
+                            </div>
+                        </div>
+                    </a>
+
                     {% if user and (user.role or '')|lower in ['admin', 'auditor'] %}
                     <!-- Soporte de Inteligencia Comercial — Admin y Auditor -->
                     <a href="/sic" class="module-card module-card--sic">
-                        <div class="module-card__visual">
-                            <img src="{{ url_for('static', path='img/suite/sic.png') }}"
-                                 alt="Soporte de Inteligencia Comercial" loading="eager" decoding="sync" fetchpriority="high">
-                        </div>
-                        <span class="module-card__icon"><i class="bi bi-shield-check"></i></span>
                         <div class="module-card__body">
+                            <span class="module-card__icon"><i class="bi bi-shield-check"></i></span>
                             <h2 class="module-card__title">Soporte de Inteligencia Comercial</h2>
                             <p class="module-card__desc">
                                 Gestión de consultas, seguimiento de casos, auditoría
@@ -742,30 +685,6 @@
                         </div>
                     </a>
                     {% endif %}
-
-                    {# Indicadores Comerciales — oculta temporalmente: el módulo aún
-                       no está desplegado en producción (la ruta /indicadores-comerciales/
-                       no existe en prod). Reactivar esta tarjeta cuando el módulo esté
-                       testeado y desplegado.
-                    <a href="/indicadores-comerciales/" class="module-card module-card--indicadores">
-                        <div class="module-card__visual">
-                            <img src="{{ url_for('static', path='img/suite/indicadores-comerciales.png') }}"
-                                 alt="Indicadores Comerciales" loading="eager" decoding="sync" fetchpriority="high">
-                        </div>
-                        <span class="module-card__icon"><i class="bi bi-graph-down-arrow"></i></span>
-                        <div class="module-card__body">
-                            <h2 class="module-card__title">Indicadores Comerciales</h2>
-                            <p class="module-card__desc">
-                                Seguimiento de indicadores comerciales, rentabilidad, desvíos
-                                y tableros de análisis ejecutivo y operativo.
-                            </p>
-                            <div class="module-card__footer">
-                                <span class="status-badge status-available"><span class="dot"></span>Disponible</span>
-                                <span class="cta">Ingresar <i class="bi bi-arrow-right"></i></span>
-                            </div>
-                        </div>
-                    </a>
-                    #}
                 </div>
 
                 <button type="button" class="carousel-btn carousel-btn-next"
