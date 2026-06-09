@@ -2689,6 +2689,23 @@ def _query_agg(sql: str, _conn=None) -> "pd.DataFrame":
         return pd.DataFrame()
 
 
+def _query_agg_hi_mem(sql: str, work_mem: str = "16MB") -> "pd.DataFrame":
+    """Como _query_agg pero con SET LOCAL work_mem en la MISMA transacción que el
+    SELECT, para que el sort del ORDER BY no derrame a disco. SET LOCAL solo afecta
+    esta transacción y se revierte al COMMIT — no toca la config global de Render ni
+    deja la conexión del pool con un work_mem alterado. Solo PostgreSQL; ante
+    cualquier problema reintenta sin work_mem (mismo resultado, más lento)."""
+    if engine is None or "postgresql" not in str(engine.url) or _sa_text is None:
+        return _query_agg(sql)          # SQLite/otros: camino normal, sin work_mem
+    try:
+        with engine.begin() as conn:    # BEGIN ... COMMIT explícito (1 transacción)
+            conn.execute(_sa_text(f"SET LOCAL work_mem = '{work_mem}'"))
+            return _query_agg(sql, _conn=conn)   # reusa logging + parseo de fecha
+    except Exception as exc:
+        logger.error("[FORECAST] hi_mem agg error: %s | SQL (first 200): %.200s", exc, sql)
+        return _query_agg(sql)          # fallback defensivo
+
+
 def _pg_resolve_prod_codes(products: list, _conn=None) -> "list | None":
     """Return codigo_serie list for given product names/codes, or None if no product filter.
     Queries both forecast_main and forecast_valorizado to ensure all products are resolved."""
@@ -3994,53 +4011,70 @@ def _pg_get_client_table_inner(
     )
 
     _ct_base_t0 = time.perf_counter()
-    if view_money:
-        # Primary: SUM(monto_yhat) per (fantasia, nombre_grupo, fecha).
-        # Does NOT select codigo_serie from forecast_valorizado — backward-compatible
-        # with older migrations where that column may be absent (avoids UndefinedColumn
-        # → empty DataFrame → "No Rows To Show" regression).
-        df_agg = _query_agg(
+    # Rama summary (PR-2): sin filtro de producto y con la tabla 1 disponible -> lee el
+    # agregado pre-calculado con work_mem alto (el ORDER BY fecha derramaba a disco).
+    # Si el summary da vacío o (en plata) monto all-zero, df_agg=None y cae al bloque
+    # crudo de abajo, que conserva el fallback yhat×precio IDÉNTICO a hoy.
+    _use_summary = (prod_codes is None and _forecast_summary_available())
+    df_agg = None
+    if _use_summary:
+        _ct_col = "monto_yhat" if view_money else "yhat_cliente"
+        df_agg = _query_agg_hi_mem(
             f"SELECT fantasia, nombre_grupo, fecha, "
-            f"SUM(COALESCE(monto_yhat, 0)) AS val "
-            f"FROM forecast_valorizado WHERE {val_where} "
+            f"SUM(COALESCE({_ct_col}, 0)) AS val "
+            f"FROM forecast_valorizado_summary WHERE {val_where} "
             f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
         )
-        if df_agg.empty:
-            return _EMPTY
+        if df_agg.empty or (view_money and df_agg["val"].sum() == 0):
+            df_agg = None   # cae al crudo (con su fallback yhat×precio)
+    if df_agg is None:
+        if view_money:
+            # Primary: SUM(monto_yhat) per (fantasia, nombre_grupo, fecha).
+            # Does NOT select codigo_serie from forecast_valorizado — backward-compatible
+            # with older migrations where that column may be absent (avoids UndefinedColumn
+            # → empty DataFrame → "No Rows To Show" regression).
+            df_agg = _query_agg(
+                f"SELECT fantasia, nombre_grupo, fecha, "
+                f"SUM(COALESCE(monto_yhat, 0)) AS val "
+                f"FROM forecast_valorizado WHERE {val_where} "
+                f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
+            )
+            if df_agg.empty:
+                return _EMPTY
 
-        if df_agg["val"].sum() == 0:
-            # monto_yhat all-zero (stale migration without parquet):
-            # attempt per-serie price fallback via subquery so val_where column
-            # references are unambiguous (no JOIN column name clash).
-            # If forecast_valorizado lacks codigo_serie, _query_agg catches the
-            # UndefinedColumn error and returns empty — in that case we keep df_agg
-            # (rows present with val=0: visible but unvalorized, better than no rows).
-            logger.warning(
-                "[FORECAST client-table] monto_yhat is all-zero — "
-                "falling back to yhat_cliente × avg(precio). Run the migration to fix permanently."
+            if df_agg["val"].sum() == 0:
+                # monto_yhat all-zero (stale migration without parquet):
+                # attempt per-serie price fallback via subquery so val_where column
+                # references are unambiguous (no JOIN column name clash).
+                # If forecast_valorizado lacks codigo_serie, _query_agg catches the
+                # UndefinedColumn error and returns empty — in that case we keep df_agg
+                # (rows present with val=0: visible but unvalorized, better than no rows).
+                logger.warning(
+                    "[FORECAST client-table] monto_yhat is all-zero — "
+                    "falling back to yhat_cliente × avg(precio). Run the migration to fix permanently."
+                )
+                df_fallback = _query_agg(
+                    f"SELECT v.fantasia, v.nombre_grupo, v.fecha, "
+                    f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS val "
+                    f"FROM (SELECT fantasia, nombre_grupo, fecha, codigo_serie, yhat_cliente "
+                    f"      FROM forecast_valorizado WHERE {val_where}) v "
+                    f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
+                    f"           FROM forecast_main GROUP BY codigo_serie) m "
+                    f"  ON v.codigo_serie = m.codigo_serie "
+                    f"GROUP BY v.fantasia, v.nombre_grupo, v.fecha ORDER BY v.fecha"
+                )
+                if not df_fallback.empty and df_fallback["val"].sum() > 0:
+                    df_agg = df_fallback
+                # else: keep df_agg — rows exist (val=0), table renders rather than going blank
+        else:
+            df_agg = _query_agg(
+                f"SELECT fantasia, nombre_grupo, fecha, "
+                f"SUM(COALESCE(yhat_cliente, 0)) AS val "
+                f"FROM forecast_valorizado WHERE {val_where} "
+                f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
             )
-            df_fallback = _query_agg(
-                f"SELECT v.fantasia, v.nombre_grupo, v.fecha, "
-                f"SUM(COALESCE(v.yhat_cliente, 0) * COALESCE(m.avg_precio, 0)) AS val "
-                f"FROM (SELECT fantasia, nombre_grupo, fecha, codigo_serie, yhat_cliente "
-                f"      FROM forecast_valorizado WHERE {val_where}) v "
-                f"LEFT JOIN (SELECT codigo_serie, AVG(COALESCE(precio, 0)) AS avg_precio "
-                f"           FROM forecast_main GROUP BY codigo_serie) m "
-                f"  ON v.codigo_serie = m.codigo_serie "
-                f"GROUP BY v.fantasia, v.nombre_grupo, v.fecha ORDER BY v.fecha"
-            )
-            if not df_fallback.empty and df_fallback["val"].sum() > 0:
-                df_agg = df_fallback
-            # else: keep df_agg — rows exist (val=0), table renders rather than going blank
-    else:
-        df_agg = _query_agg(
-            f"SELECT fantasia, nombre_grupo, fecha, "
-            f"SUM(COALESCE(yhat_cliente, 0)) AS val "
-            f"FROM forecast_valorizado WHERE {val_where} "
-            f"GROUP BY fantasia, nombre_grupo, fecha ORDER BY fecha"
-        )
-        if df_agg.empty:
-            return _EMPTY
+            if df_agg.empty:
+                return _EMPTY
 
     # Max hist date for growth adjustment — shared across all filter combinations
     _ct_base_ms = (time.perf_counter() - _ct_base_t0) * 1000
