@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block title %}Rentabilidad Negativa — Indicadores Comerciales — SIEM{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=3.0">
+{% endblock %}
+
+{% block header_title %}Indicadores Comerciales{% endblock %}
+
+{% block content %}
+
+<!-- ── Encabezado de página ──────────────────────────────────── -->
+<div class="h-page-header mb-3">
+  <div>
+    <p class="h-page-header__eyebrow">Suite SIEM · Indicadores Comerciales</p>
+    <h1 class="h-page-header__title">Rentabilidad Negativa</h1>
+    <p class="h-page-header__subtitle">Transacciones con utilidad negativa por negocio, laboratorio y cliente</p>
+  </div>
+  <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+    <span id="badge-modo" class="badge rounded-pill ind-badge-modo">Detalle</span>
+    <button id="btn-print-report" class="ind-btn ind-btn--ghost btn-sm" onclick="IND.printReport()" title="Imprimir informe completo">
+      <i class="bi bi-printer me-1"></i>Imprimir
+    </button>
+    <a href="/markets" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-grid me-1"></i>Suite SIEM
+    </a>
+  </div>
+</div>
+
+<!-- ── Cabecera de impresión (solo visible en @media print) ─── -->
+<div class="ind-print-header" id="print-header" style="display:none;">
+  <div class="ind-print-header__brand">SIEM — Suizo Argentina · Indicadores Comerciales</div>
+  <h1 class="ind-print-header__title">Rentabilidad Negativa</h1>
+  <div class="ind-print-header__meta">
+    <span id="ph-rango"></span>
+    <span id="ph-filtros"></span>
+    <span id="ph-emitido"></span>
+  </div>
+</div>
+
+<!-- ── Estado SQL Server ─────────────────────────────────────── -->
+<div id="sql-status-banner" class="ind-sql-banner ind-sql-banner--checking" style="display:none;">
+  <span id="sql-status-icon" class="bi bi-circle-fill"></span>
+  <span id="sql-status-text">Verificando conexión SQL Server…</span>
+</div>
+
+<!-- ── Filtros ───────────────────────────────────────────────── -->
+<div class="ind-filter-bar h-panel mb-4" id="filter-bar">
+  <div class="ind-filter-grid">
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Desde</label>
+      <input type="date" id="f-desde" class="ind-input" value="{{ default_desde }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Hasta</label>
+      <input type="date" id="f-hasta" class="ind-input" value="{{ default_hasta }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Laboratorio</label>
+      <select id="f-laboratorio" class="ind-select">
+        <option value="">Todos los laboratorios</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Familia</label>
+      <select id="f-familia" class="ind-select">
+        <option value="">Todas las familias</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Cliente</label>
+      <input type="text" id="f-cliente" class="ind-input" placeholder="Buscar cliente…" list="dl-clientes" autocomplete="off">
+      <datalist id="dl-clientes"></datalist>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Negocio</label>
+      <select id="f-negocio" class="ind-select">
+        <option value="">Todos</option>
+        <option value="2 - 1">Alto Costo</option>
+        <option value="2 - 2">Uso Compasivo</option>
+        <option value="2 - 3">Diabetes</option>
+        <option value="2 - 4">Alimentos</option>
+        <option value="2 - 5">Capita Fija</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Buscar producto</label>
+      <input type="text" id="f-search" class="ind-input" placeholder="Marca, código, monodroga…">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Modo agrupación</label>
+      <select id="f-modo" class="ind-select">
+        <option value="detalle" selected>Detalle</option>
+        <option value="agrupado">Agrupado por mes</option>
+      </select>
+    </div>
+    <div class="ind-filter-group ind-filter-group--actions">
+      <button id="btn-apply" class="ind-btn ind-btn--primary" onclick="IND.applyFilters()">
+        <i class="bi bi-funnel-fill"></i> Aplicar
+      </button>
+      <button id="btn-clear" class="ind-btn ind-btn--ghost" onclick="IND.clearFilters()">
+        <i class="bi bi-x-circle"></i> Limpiar
+      </button>
+    </div>
+  </div>
+  <div class="ind-period-info" id="period-info" style="display:none;">
+    <i class="bi bi-calendar3 me-1"></i>
+    <span id="period-text"></span>
+    <span id="results-count" class="ms-2 text-muted small"></span>
+  </div>
+</div>
+
+<!-- ── Estado de carga / error global ────────────────────────── -->
+<div id="global-loading" class="ind-loading-overlay" style="display:none;">
+  <div class="ind-spinner"></div>
+  <p class="mt-3 text-muted small">Consultando SQL Server…</p>
+</div>
+<div id="global-error" class="ind-error-box" style="display:none;">
+  <i class="bi bi-exclamation-triangle-fill text-danger me-2 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <span id="global-error-msg"></span>
+    <br>
+    <button class="ind-btn ind-btn--ghost btn-sm mt-2" onclick="IND.applyFilters()" style="height:28px;font-size:0.75rem;">
+      <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+    </button>
+  </div>
+</div>
+
+<!-- ── Estado vacío global ────────────────────────────────────── -->
+<div id="empty-state" class="ind-empty-state" style="display:none;">
+  <i class="bi bi-search ind-empty-icon"></i>
+  <h3 class="ind-empty-title">Sin resultados</h3>
+  <p class="ind-empty-desc">No hay transacciones con rentabilidad negativa para los filtros seleccionados.</p>
+  <button class="ind-btn ind-btn--ghost" onclick="IND.clearFilters()">
+    <i class="bi bi-x-circle me-1"></i>Limpiar filtros
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PANEL GENERAL — KPIs + gráficos + negocios
+═══════════════════════════════════════════ -->
+<div id="section-panel">
+
+  <!-- KPIs fila 1 -->
+  <div class="ind-kpi-grid mb-3" id="kpis-main">
+    <div class="kpi-card kpi-card--ind-rojo">
+      <span class="kl">Pérdida Total</span>
+      <span class="kv" id="kv-perdida">—</span>
+      <span class="ks" id="ks-variacion">vs. mes anterior</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-azul">
+      <span class="kl">Transacciones Neg.</span>
+      <span class="kv" id="kv-transacciones">—</span>
+      <span class="ks">registros con utilidad negativa</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-ambar">
+      <span class="kl">Facturación Afectada</span>
+      <span class="kv" id="kv-facturacion">—</span>
+      <span class="ks">ventas con rentabilidad negativa</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-gris">
+      <span class="kl">Rentabilidad Promedio</span>
+      <span class="kv" id="kv-renta-prom">—</span>
+      <span class="ks">sobre facturación afectada</span>
+    </div>
+  </div>
+
+  <!-- KPIs fila 2 -->
+  <div class="ind-kpi-grid ind-kpi-grid--4 mb-4" id="kpis-coverage">
+    <div class="kpi-card kpi-card--ind-flat">
+      <span class="kl">Laboratorios</span>
+      <span class="kv kv--sm" id="kv-labs">—</span>
+      <span class="ks">con casos negativos</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-flat">
+      <span class="kl">Marcas Comerciales</span>
+      <span class="kv kv--sm" id="kv-marcas">—</span>
+      <span class="ks">productos impactados</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-flat">
+      <span class="kl">Clientes</span>
+      <span class="kv kv--sm" id="kv-clientes">—</span>
+      <span class="ks">grupos con pérdida</span>
+    </div>
+    <div class="kpi-card kpi-card--ind-flat">
+      <span class="kl">Mayor Pérdida</span>
+      <span class="kv kv--sm kv--truncate" id="kv-mayor-perdida">—</span>
+      <span class="ks" id="ks-mayor-perdida-monto"></span>
+    </div>
+  </div>
+
+  <!-- Gráficos: evolución + top labs -->
+  <div class="ind-charts-row mb-4">
+    <div class="h-panel ind-chart-panel ind-chart-panel--wide">
+      <div class="h-panel__header">
+        <div><p class="h-panel__eyebrow">Evolución</p><h3 class="h-panel__title">Utilidad Negativa por Mes</h3></div>
+      </div>
+      <div class="ind-chart-container">
+        <canvas id="chart-evolucion"></canvas>
+        <div class="ind-chart-empty" id="chart-evolucion-empty" style="display:none;">
+          <i class="bi bi-bar-chart text-muted"></i>
+          <p class="text-muted small mt-2">Sin datos para el período seleccionado</p>
+        </div>
+      </div>
+    </div>
+    <div class="h-panel ind-chart-panel">
+      <div class="h-panel__header">
+        <div><p class="h-panel__eyebrow">Ranking</p><h3 class="h-panel__title">Top 10 Laboratorios por Pérdida</h3></div>
+      </div>
+      <div class="ind-chart-container">
+        <canvas id="chart-labs"></canvas>
+        <div class="ind-chart-empty" id="chart-labs-empty" style="display:none;">
+          <i class="bi bi-capsule text-muted"></i>
+          <p class="text-muted small mt-2">Sin datos disponibles</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Composición por negocio -->
+  <div class="h-panel mb-5" id="panel-negocios">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Composición</p><h3 class="h-panel__title">Pérdida por Tipo de Negocio</h3></div>
+    </div>
+    <div id="negocios-chips" class="ind-negocios-chips"></div>
+  </div>
+
+</div><!-- /section-panel -->
+
+<!-- ═══════════════════════════════════════════
+     ANÁLISIS POR LABORATORIO
+═══════════════════════════════════════════ -->
+<div class="ind-section-divider mb-4">
+  <span class="ind-section-divider__label">
+    <i class="bi bi-capsule me-2"></i>Análisis por laboratorio
+  </span>
+</div>
+
+<div id="section-laboratorios">
+  <div class="h-panel mb-4">
+    <div class="h-panel__header">
+      <div>
+        <p class="h-panel__eyebrow">Ranking</p>
+        <h3 class="h-panel__title">Laboratorios por Pérdida</h3>
+        <p class="h-panel__desc">Ordenados por utilidad negativa acumulada en el período</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="h-table" id="table-labs">
+        <thead>
+          <tr>
+            <th>#</th><th>Laboratorio</th>
+            <th class="text-end">Pérdida (ARS)</th>
+            <th class="text-end">% del Total</th>
+            <th>Barra</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-labs">
+          <tr><td colspan="5" class="text-center text-muted py-4">Aplicá filtros y hacé clic en Aplicar</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="h-panel mb-5">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Visualización</p><h3 class="h-panel__title">Top 12 — Pérdida por Laboratorio</h3></div>
+    </div>
+    <div class="ind-chart-container ind-chart-container--tall">
+      <canvas id="chart-labs-2"></canvas>
+    </div>
+  </div>
+</div><!-- /section-laboratorios -->
+
+<!-- ═══════════════════════════════════════════
+     ANÁLISIS POR CLIENTE
+═══════════════════════════════════════════ -->
+<div class="ind-section-divider mb-4">
+  <span class="ind-section-divider__label">
+    <i class="bi bi-people me-2"></i>Análisis por cliente
+  </span>
+</div>
+
+<div id="section-clientes">
+  <div class="h-panel mb-4">
+    <div class="h-panel__header">
+      <div>
+        <p class="h-panel__eyebrow">Ranking</p>
+        <h3 class="h-panel__title">Clientes por Pérdida</h3>
+        <p class="h-panel__desc">Grupos de clientes con mayor impacto de utilidad negativa</p>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="h-table" id="table-clientes">
+        <thead>
+          <tr>
+            <th>#</th><th>Cliente</th>
+            <th class="text-end">Pérdida (ARS)</th>
+            <th class="text-end">% del Total</th>
+            <th>Barra</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-clientes">
+          <tr><td colspan="5" class="text-center text-muted py-4">Aplicá filtros y hacé clic en Aplicar</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="h-panel mb-5">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Visualización</p><h3 class="h-panel__title">Top 12 — Pérdida por Cliente</h3></div>
+    </div>
+    <div class="ind-chart-container ind-chart-container--tall">
+      <canvas id="chart-clientes"></canvas>
+    </div>
+  </div>
+</div><!-- /section-clientes -->
+
+<!-- ═══════════════════════════════════════════
+     DETALLE DE TRANSACCIONES
+═══════════════════════════════════════════ -->
+<div class="ind-section-divider mb-4">
+  <span class="ind-section-divider__label">
+    <i class="bi bi-table me-2"></i>Detalle de transacciones
+  </span>
+</div>
+
+<div id="section-detalle">
+  <div class="h-panel">
+    <div class="h-panel__header">
+      <div>
+        <p class="h-panel__eyebrow">Explorador</p>
+        <h3 class="h-panel__title">Transacciones con Rentabilidad Negativa</h3>
+        <p class="h-panel__desc" id="detalle-desc">Hasta 1.200 filas · Usá los filtros para acotar el resultado</p>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <button id="btn-load-detail" class="ind-btn ind-btn--primary btn-sm" onclick="IND.loadDetail()" style="display:none;">
+          <i class="bi bi-download me-1"></i>Cargar detalle
+        </button>
+        <button class="ind-btn ind-btn--ghost btn-sm" onclick="IND.exportCSV()" id="btn-export-csv" title="Exportar CSV" style="display:none;">
+          <i class="bi bi-filetype-csv me-1"></i>CSV
+        </button>
+        <button class="ind-btn ind-btn--ghost btn-sm" onclick="window.print()" title="Imprimir" style="display:none;" id="btn-print">
+          <i class="bi bi-printer me-1"></i>Imprimir
+        </button>
+      </div>
+    </div>
+
+    <!-- Estado inicial del detalle -->
+    <div id="detalle-placeholder" class="text-center text-muted py-5">
+      <i class="bi bi-funnel fs-3 d-block mb-2 opacity-25"></i>
+      Aplicá filtros y hacé clic en <strong>Aplicar</strong> para habilitar el detalle de transacciones.
+    </div>
+
+    <div class="table-responsive" id="detalle-table-wrapper" style="display:none;max-height:620px;overflow-y:auto;">
+      <table class="h-table h-table--sticky-head" id="table-detalle">
+        <thead>
+          <tr>
+            <th data-sort="fecha">Fecha<span class="sort-icon"></span></th>
+            <th data-sort="cliente">Cliente<span class="sort-icon"></span></th>
+            <th data-sort="marca">Marca Comercial<span class="sort-icon"></span></th>
+            <th data-sort="laboratorio">Laboratorio<span class="sort-icon"></span></th>
+            <th>Negocio</th>
+            <th class="text-end" data-sort="unidades">Unid.<span class="sort-icon"></span></th>
+            <th class="text-end" data-sort="facturacion">Facturación<span class="sort-icon"></span></th>
+            <th class="text-end" data-sort="utilidad">Utilidad<span class="sort-icon"></span></th>
+            <th class="text-end" data-sort="rentabilidad">Rent. %<span class="sort-icon"></span></th>
+          </tr>
+        </thead>
+        <tbody id="tbody-detalle"></tbody>
+      </table>
+    </div>
+
+    <div class="ind-table-footer" id="detalle-footer" style="display:none;">
+      <span id="detalle-count" class="text-muted small"></span>
+    </div>
+  </div>
+</div><!-- /section-detalle -->
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', path='js/indicadores.js') }}?v=3.0"></script>
+<script>
+  IND.init({
+    desde: "{{ default_desde }}",
+    hasta: "{{ default_hasta }}",
+    sqlAvailable: {{ 'true' if sql_available else 'false' }},
+    apiBase: "/indicadores-comerciales/api/rentabilidad"
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}Informes de Laboratorio — Indicadores Comerciales — SIEM{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=2.0">
+{% endblock %}
+
+{% block header_title %}Indicadores Comerciales{% endblock %}
+
+{% block content %}
+
+<!-- ── Encabezado ─────────────────────────────────────────────── -->
+<div class="h-page-header mb-3">
+  <div>
+    <p class="h-page-header__eyebrow">Suite SIEM · Indicadores Comerciales</p>
+    <h1 class="h-page-header__title">Informes de Laboratorio</h1>
+    <p class="h-page-header__subtitle">Sell out mensual de unidades por laboratorio, marca y cliente — Tratamientos Especiales</p>
+  </div>
+  <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+    <button id="lab-btn-print-report" class="ind-btn ind-btn--ghost btn-sm" onclick="LAB.printReport()" title="Imprimir informe completo">
+      <i class="bi bi-printer me-1"></i>Imprimir
+    </button>
+    <a href="/markets" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-grid me-1"></i>Suite SIEM
+    </a>
+  </div>
+</div>
+
+<!-- ── Cabecera de impresión (solo visible en @media print) ─── -->
+<div class="ind-print-header" id="lab-print-header" style="display:none;">
+  <div class="ind-print-header__brand">SIEM — Suizo Argentina · Indicadores Comerciales</div>
+  <h1 class="ind-print-header__title">Informes de Laboratorio</h1>
+  <div class="ind-print-header__meta">
+    <span id="lab-ph-rango"></span>
+    <span id="lab-ph-filtros"></span>
+    <span id="lab-ph-emitido"></span>
+  </div>
+</div>
+
+<!-- ── Banner SQL ─────────────────────────────────────────────── -->
+<div id="lab-sql-banner" class="ind-sql-banner ind-sql-banner--checking" style="display:none;">
+  <span id="lab-sql-icon" class="bi bi-circle-fill"></span>
+  <span id="lab-sql-text">Verificando conexión SQL Server…</span>
+</div>
+
+<!-- ── Filtros ───────────────────────────────────────────────── -->
+<div class="ind-filter-bar h-panel mb-4">
+  <div class="ind-filter-grid">
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Desde</label>
+      <input type="date" id="lab-desde" class="ind-input" value="{{ default_desde }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Hasta</label>
+      <input type="date" id="lab-hasta" class="ind-input" value="{{ default_hasta }}">
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Laboratorio</label>
+      <select id="lab-laboratorio" class="ind-select">
+        <option value="">Todos los laboratorios</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Familia</label>
+      <select id="lab-familia" class="ind-select">
+        <option value="">Todas las familias</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Cliente</label>
+      <input type="text" id="lab-cliente" class="ind-input" placeholder="Buscar cliente…" list="lab-clientes-list" autocomplete="off">
+      <datalist id="lab-clientes-list"></datalist>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Negocio</label>
+      <select id="lab-negocio" class="ind-select">
+        <option value="">Todos</option>
+        <option value="2 - 1">Alto Costo</option>
+        <option value="2 - 2">Uso Compasivo</option>
+        <option value="2 - 3">Diabetes</option>
+        <option value="2 - 4">Alimentos</option>
+        <option value="2 - 5">Capita Fija</option>
+      </select>
+    </div>
+    <div class="ind-filter-group">
+      <label class="ind-filter-label">Buscar marca</label>
+      <input type="text" id="lab-search" class="ind-input" placeholder="Nombre de marca…">
+    </div>
+    <div class="ind-filter-group ind-filter-group--actions">
+      <button id="lab-btn-apply" class="ind-btn ind-btn--primary">
+        <i class="bi bi-funnel-fill"></i> Consultar
+      </button>
+      <button id="lab-btn-clear" class="ind-btn ind-btn--ghost">
+        <i class="bi bi-x-circle"></i> Limpiar
+      </button>
+      <button id="lab-btn-export" class="ind-btn ind-btn--ghost" disabled>
+        <i class="bi bi-filetype-csv"></i> CSV
+      </button>
+    </div>
+  </div>
+  <div class="ind-period-info" id="lab-period-info" style="display:none;">
+    <i class="bi bi-calendar3 me-1"></i>
+    <span id="lab-period-text"></span>
+    <span id="lab-results-count" class="ms-2 text-muted small"></span>
+  </div>
+</div>
+
+<!-- ── Estado de carga / error ───────────────────────────────── -->
+<div id="lab-loading" class="ind-loading-overlay" style="display:none;">
+  <div class="ind-spinner"></div>
+  <p class="mt-3 text-muted small">Consultando SQL Server…</p>
+</div>
+<div id="lab-error" class="ind-error-box" style="display:none;">
+  <i class="bi bi-exclamation-triangle-fill text-danger me-2 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <span id="lab-error-msg"></span>
+    <br>
+    <button class="ind-btn ind-btn--ghost btn-sm mt-2" id="lab-btn-retry" style="height:28px;font-size:0.75rem;">
+      <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+    </button>
+  </div>
+</div>
+
+<!-- ── KPIs ──────────────────────────────────────────────────── -->
+<div class="ind-kpi-grid mb-3" id="lab-kpis-main">
+  <div class="kpi-card kpi-card--ind-azul">
+    <span class="kl">Unidades Totales</span>
+    <span class="kv" id="lab-kv-unidades">—</span>
+    <span class="ks" id="lab-kv-periodo">Período seleccionado</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Promedio Mensual</span>
+    <span class="kv" id="lab-kv-promedio">—</span>
+    <span class="ks">unidades por mes activo</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Variación Mensual</span>
+    <span class="kv" id="lab-kv-variacion">—</span>
+    <span class="ks" id="lab-kv-variacion-sub">último vs anterior</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-ambar">
+    <span class="kl">Mayor Laboratorio</span>
+    <span class="kv kv--sm" id="lab-kv-top-lab">—</span>
+    <span class="ks" id="lab-kv-top-lab-sub">participación en unidades</span>
+  </div>
+</div>
+<div class="ind-kpi-grid ind-kpi-grid--4 mb-4">
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Laboratorios</span>
+    <span class="kv kv--sm" id="lab-kv-labs">—</span>
+    <span class="ks">con ventas en el filtro</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Marcas Comerciales</span>
+    <span class="kv kv--sm" id="lab-kv-marcas">—</span>
+    <span class="ks">productos activos</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Clientes</span>
+    <span class="kv kv--sm" id="lab-kv-clientes">—</span>
+    <span class="ks">grupos con unidades</span>
+  </div>
+  <div class="kpi-card kpi-card--ind-flat">
+    <span class="kl">Marca Líder</span>
+    <span class="kv kv--sm" id="lab-kv-top-marca">—</span>
+    <span class="ks" id="lab-kv-top-marca-sub">top por unidades</span>
+  </div>
+</div>
+
+<!-- ── Gráficos ──────────────────────────────────────────────── -->
+<div class="ind-charts-row mb-4">
+  <div class="h-panel ind-chart-panel ind-chart-panel--wide">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Tendencia</p><h3 class="h-panel__title">Evolución Mensual de Unidades</h3></div>
+      <span class="chart-badge" id="lab-chart-badge">Período</span>
+    </div>
+    <div class="ind-chart-container">
+      <canvas id="lab-chart-evolucion"></canvas>
+      <div class="ind-chart-empty" id="lab-chart-empty" style="display:none;">
+        <i class="bi bi-bar-chart text-muted"></i>
+        <p class="text-muted small mt-2">Sin datos para el período seleccionado</p>
+      </div>
+    </div>
+  </div>
+  <div class="h-panel ind-chart-panel">
+    <div class="h-panel__header">
+      <div><p class="h-panel__eyebrow">Ranking</p><h3 class="h-panel__title">Top Laboratorios</h3></div>
+    </div>
+    <div class="ind-chart-container">
+      <canvas id="lab-chart-labs"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tabla: Sell Out por Producto ──────────────────────────── -->
+<div class="h-panel mb-4">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Matriz</p>
+      <h3 class="h-panel__title">Sell Out por Producto</h3>
+    </div>
+    <span id="lab-prod-count" class="text-muted small"></span>
+  </div>
+  <div class="table-responsive" style="max-height:520px;overflow-y:auto;">
+    <table class="h-table h-table--sticky-head lab-matrix-table" id="lab-tabla-productos">
+      <thead>
+        <tr id="lab-prod-head-years"></tr>
+        <tr id="lab-prod-head-months"></tr>
+      </thead>
+      <tbody id="lab-prod-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Tabla detalle: Marca × Cliente ────────────────────────── -->
+<div class="h-panel mb-4">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Matriz</p>
+      <h3 class="h-panel__title">Sell Out por Marca Comercial y Cliente</h3>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <div id="lab-year-controls" class="ind-year-controls"></div>
+      <span id="lab-table-count" class="text-muted small"></span>
+    </div>
+  </div>
+  <div class="table-responsive" style="max-height:520px;overflow-y:auto;">
+    <table class="h-table h-table--sticky-head lab-matrix-table" id="lab-tabla-detalle">
+      <thead>
+        <tr id="lab-head-years"></tr>
+        <tr id="lab-head-months"></tr>
+      </thead>
+      <tbody id="lab-tbody"></tbody>
+    </table>
+  </div>
+  <div class="ind-table-footer" id="lab-table-footer" style="display:none;">
+    <span id="lab-footer-count" class="text-muted small"></span>
+  </div>
+</div>
+
+<!-- ── Tabla: Sell Out por Cliente y Marca Comercial ─────────── -->
+<div class="h-panel mb-4">
+  <div class="h-panel__header">
+    <div>
+      <p class="h-panel__eyebrow">Matriz</p>
+      <h3 class="h-panel__title">Sell Out por Cliente y Marca Comercial</h3>
+    </div>
+    <span id="lab-cli-count" class="text-muted small"></span>
+  </div>
+  <div class="table-responsive" style="max-height:520px;overflow-y:auto;">
+    <table class="h-table h-table--sticky-head lab-matrix-table" id="lab-tabla-cliente">
+      <thead>
+        <tr id="lab-cli-head-years"></tr>
+        <tr id="lab-cli-head-months"></tr>
+      </thead>
+      <tbody id="lab-cli-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Estado vacío ───────────────────────────────────────────── -->
+<div id="lab-empty" class="ind-empty-state" style="display:none;">
+  <i class="bi bi-capsule ind-empty-icon"></i>
+  <h3 class="ind-empty-title">Sin resultados</h3>
+  <p class="ind-empty-desc">No hay registros de sell out para los filtros seleccionados.</p>
+  <button class="ind-btn ind-btn--ghost" id="lab-btn-clear2"><i class="bi bi-x-circle me-1"></i>Limpiar filtros</button>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', path='js/indicadores_laboratorios.js') }}?v=2.1"></script>
+<script>
+  LAB.init({
+    desde: "{{ default_desde }}",
+    hasta: "{{ default_hasta }}",
+    sqlAvailable: {{ 'true' if sql_available else 'false' }},
+    apiBase: "/indicadores-comerciales/api/laboratorios"
+  });
+</script>
+{% endblock %}

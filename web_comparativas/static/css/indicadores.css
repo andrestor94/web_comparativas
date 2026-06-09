@@ -1,0 +1,937 @@
+/* ═══════════════════════════════════════════════════════════════════
+   INDICADORES COMERCIALES — Estilos del módulo
+   Usa los tokens de app.theme.css como base.
+   No sobreescribe estilos globales de SIEM.
+═══════════════════════════════════════════════════════════════════ */
+
+/* ── Navegación interna (tabs) ────────────────────────────────── */
+.ind-nav-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  border-bottom: 2px solid var(--ink-200, #e2e8f0);
+  padding-bottom: 0;
+}
+
+.ind-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: var(--ink-500, #64748b);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  white-space: nowrap;
+}
+
+.ind-tab:hover {
+  color: var(--brand-azul, #06486f);
+  background: var(--ink-050, #f8fafc);
+}
+
+.ind-tab.active {
+  color: var(--brand-azul, #06486f);
+  border-bottom-color: var(--brand-azul, #06486f);
+  background: transparent;
+}
+
+.ind-tab i {
+  font-size: 0.875rem;
+}
+
+/* ── Vistas legacy (index.html antiguo, no usado en producción) ── */
+.ind-view { display: none; }
+.ind-view.active { display: block; }
+
+/* ── Divisor de sección (vista única Rentabilidad Negativa) ───── */
+.ind-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.ind-section-divider::before,
+.ind-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--ink-200, #e2e8f0);
+}
+.ind-section-divider__label {
+  display: flex;
+  align-items: center;
+  padding: 0.3rem 0.9rem;
+  background: var(--ink-050, #f8fafc);
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-600, #475569);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ── Barra de filtros ─────────────────────────────────────────── */
+.ind-filter-bar {
+  position: sticky;
+  top: 56px;
+  z-index: 10;
+}
+
+.ind-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+}
+
+.ind-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ind-filter-group--actions {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.ind-filter-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-500, #64748b);
+}
+
+.ind-input,
+.ind-select {
+  height: 36px;
+  padding: 0 0.65rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--ink-900, #0f172a);
+  background: var(--ink-050, #f8fafc);
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: var(--radius-sm, 8px);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+  outline: none;
+}
+
+.ind-input:focus,
+.ind-select:focus {
+  border-color: var(--brand-azul, #06486f);
+  box-shadow: 0 0 0 3px rgba(6, 72, 111, 0.08);
+  background: #fff;
+}
+
+.ind-period-info {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--ink-100, #f1f5f9);
+  font-size: 0.78rem;
+  color: var(--ink-500, #64748b);
+}
+
+/* ── Botones ──────────────────────────────────────────────────── */
+.ind-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 36px;
+  padding: 0 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s ease;
+  text-decoration: none;
+}
+
+.ind-btn--primary {
+  background: var(--brand-azul, #06486f);
+  color: #fff;
+  border-color: var(--brand-azul, #06486f);
+}
+.ind-btn--primary:hover {
+  background: #053d60;
+}
+
+.ind-btn--ghost {
+  background: transparent;
+  color: var(--ink-700, #334155);
+  border-color: var(--ink-200, #e2e8f0);
+}
+.ind-btn--ghost:hover {
+  background: var(--ink-050, #f8fafc);
+  border-color: var(--ink-300, #94a3b8);
+}
+
+/* ── KPI Grid ─────────────────────────────────────────────────── */
+.ind-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.ind-kpi-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* ── KPI Cards — variantes de color para Indicadores ─────────── */
+.kpi-card--ind-rojo   { --kc: #d93025; }
+.kpi-card--ind-azul   { --kc: var(--brand-azul, #06486f); }
+.kpi-card--ind-ambar  { --kc: #d97706; }
+.kpi-card--ind-gris   { --kc: #64748b; }
+.kpi-card--ind-flat   { --kc: var(--brand-azul-2, #5770b0); }
+
+.kv--sm {
+  font-size: 1.75rem !important;
+}
+
+.kv--truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  max-width: 100%;
+}
+
+/* ── Gráficos ─────────────────────────────────────────────────── */
+.ind-charts-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 1rem;
+}
+
+.ind-chart-panel {
+  min-height: 300px;
+}
+
+.ind-chart-panel--wide {}
+
+.ind-chart-container {
+  position: relative;
+  height: 260px;
+  width: 100%;
+}
+
+.ind-chart-container--tall {
+  height: 380px;
+}
+
+.ind-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--ink-300, #94a3b8);
+}
+
+/* ── Negocios chips ───────────────────────────────────────────── */
+.ind-negocios-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.ind-negocio-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--ink-050, #f8fafc);
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: var(--radius-md, 12px);
+  flex: 1 1 180px;
+  min-width: 150px;
+}
+
+.ind-negocio-chip__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-500, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ind-negocio-chip__value {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #d93025;
+  letter-spacing: -0.02em;
+}
+
+/* ── Tablas ───────────────────────────────────────────────────── */
+.h-table--sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fff;
+}
+
+.ind-table-footer {
+  padding: 0.6rem 0 0;
+  border-top: 1px solid var(--ink-100, #f1f5f9);
+  margin-top: 0.5rem;
+}
+
+.ind-rank-bar-cell {
+  width: 100px;
+}
+
+.ind-rank-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #d93025, rgba(217, 48, 37, 0.3));
+}
+
+.ind-util-neg {
+  color: #d93025;
+  font-weight: 700;
+}
+
+.ind-rent-neg {
+  color: #d93025;
+  font-size: 0.8rem;
+}
+
+/* ── Badge modo ───────────────────────────────────────────────── */
+.ind-badge-modo {
+  background: rgba(6, 72, 111, 0.1);
+  color: var(--brand-azul, #06486f);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Estado SQL Server banner ─────────────────────────────────── */
+.ind-sql-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-sm, 8px);
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.ind-sql-banner--ok      { background: #dcfce7; color: #166534; }
+.ind-sql-banner--error   { background: #fef2f2; color: #b91c1c; }
+.ind-sql-banner--checking { background: #f1f5f9; color: #64748b; }
+
+/* ── Loading overlay ──────────────────────────────────────────── */
+.ind-loading-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  text-align: center;
+}
+
+.ind-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--ink-200, #e2e8f0);
+  border-top-color: var(--brand-azul, #06486f);
+  border-radius: 50%;
+  animation: ind-spin 0.75s linear infinite;
+}
+
+@keyframes ind-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error box ────────────────────────────────────────────────── */
+.ind-error-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm, 8px);
+  font-size: 0.82rem;
+  color: #b91c1c;
+  margin-bottom: 1rem;
+}
+
+/* ── Empty state ──────────────────────────────────────────────── */
+.ind-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.ind-empty-icon {
+  font-size: 3.5rem;
+  color: var(--ink-200, #e2e8f0);
+  margin-bottom: 1rem;
+}
+
+.ind-empty-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--ink-700, #334155);
+  margin-bottom: 0.35rem;
+}
+
+.ind-empty-desc {
+  font-size: 0.875rem;
+  color: var(--ink-500, #64748b);
+  margin-bottom: 1.25rem;
+  max-width: 360px;
+}
+
+/* ── Sidebar: label indicadores ───────────────────────────────── */
+.sidebar-market-label--indicadores {
+  color: #e29b3f;
+}
+
+/* ── Print ────────────────────────────────────────────────────── */
+@media print {
+  .sidebar,
+  .header,
+  .ind-filter-bar,
+  .ind-nav-tabs,
+  .h-page-header__actions,
+  #sql-status-banner,
+  .ind-btn,
+  .signout {
+    display: none !important;
+  }
+  .main { margin: 0 !important; padding: 0 !important; }
+  .h-table th, .h-table td { font-size: 0.7rem; }
+  .ind-chart-container { page-break-inside: avoid; }
+}
+
+/* ── Responsive ───────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .ind-charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .ind-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ind-kpi-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .ind-filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ind-kpi-grid,
+  .ind-kpi-grid--4 {
+    grid-template-columns: 1fr;
+  }
+  .ind-tab span:not(.bi) {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .ind-filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NAVEGACIÓN PRINCIPAL DEL MÓDULO (3 dashboards)
+══════════════════════════════════════════════════════════════════ */
+.ind-module-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--ink-050, #f8fafc);
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: 10px;
+}
+
+.ind-module-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-500, #64748b);
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 7px;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.ind-module-tab:hover {
+  color: var(--brand-azul, #06486f);
+  background: #fff;
+  border-color: var(--ink-200, #e2e8f0);
+}
+
+.ind-module-tab.active {
+  color: #fff;
+  background: var(--brand-azul, #06486f);
+  border-color: var(--brand-azul, #06486f);
+}
+
+.ind-module-tab i {
+  font-size: 0.9rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BADGES DE ESTADO (para Inflación)
+══════════════════════════════════════════════════════════════════ */
+.ind-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ind-badge--rojo   { background: #fee2e2; color: #991b1b; }
+.ind-badge--verde  { background: #dcfce7; color: #166534; }
+.ind-badge--ambar  { background: #fef3c7; color: #92400e; }
+.ind-badge--gris   { background: var(--ink-100, #f1f5f9); color: var(--ink-500, #64748b); }
+
+/* ══════════════════════════════════════════════════════════════════
+   KPI SPLIT (Inflación INDEC)
+══════════════════════════════════════════════════════════════════ */
+.ind-kpi-split {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-600, #475569);
+}
+.ind-kpi-split strong {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--ink-800, #1e293b);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MATRIX TABLE — Laboratorios (columnas mes)
+══════════════════════════════════════════════════════════════════ */
+.lab-matrix-table {
+  font-size: 0.78rem;
+  min-width: 600px;
+}
+.lab-col-fixed {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 2;
+  min-width: 200px;
+  max-width: 260px;
+  white-space: normal;
+  line-height: 1.3;
+}
+.lab-col-year {
+  background: var(--ink-050, #f8fafc);
+  font-size: 0.75rem;
+  color: var(--ink-500, #64748b);
+  border-bottom: 1px solid var(--ink-200, #e2e8f0);
+}
+.lab-col-month {
+  min-width: 72px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.lab-col-total {
+  background: var(--ink-050, #f8fafc);
+  font-weight: 700;
+}
+
+/* Year controls */
+.ind-year-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.ind-year-btn {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink-500, #64748b);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ind-year-btn.active {
+  background: var(--brand-azul, #06486f);
+  border-color: var(--brand-azul, #06486f);
+  color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PILL GROUP (Inflación — filtro de tabla)
+══════════════════════════════════════════════════════════════════ */
+.ind-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.ind-pill {
+  padding: 0.2rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--ink-200, #e2e8f0);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-500, #64748b);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ind-pill--active,
+.ind-pill:hover {
+  background: var(--brand-azul, #06486f);
+  border-color: var(--brand-azul, #06486f);
+  color: #fff;
+}
+
+/* Tabla compacta para labs en Inflación */
+.h-table--compact td,
+.h-table--compact th {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+/* Chart badge inline */
+.chart-badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  background: var(--ink-100, #f1f5f9);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  color: var(--ink-600, #475569);
+  font-weight: 600;
+  align-self: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .ind-module-nav {
+    gap: 0.25rem;
+    padding: 0.35rem;
+  }
+  .ind-module-tab span {
+    display: none;
+  }
+  .ind-module-tab {
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PRINT — Indicadores Comerciales
+   Causa raíz del corte: .app>.sidebar+.main tiene height:100vh y
+   overflow-y:auto en app.theme.css. Hay que romper ese contenedor
+   en @media print con mayor especificidad y forzar height:auto.
+══════════════════════════════════════════════════════════════════ */
+@media print {
+  /* ── 1. ROMPER EL CONTENEDOR 100vh (causa raíz del corte) ───── */
+  html, body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    font-size: 9pt;
+  }
+
+  /* Igualar especificidad de .app>.sidebar+.main de app.theme.css */
+  .app,
+  #app-container,
+  .app.sidebar-collapsed {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+  }
+
+  /* Selector exacto del problema — misma especificidad + !important */
+  .app > .sidebar + .main,
+  .app.sidebar-collapsed > .sidebar + .main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+  }
+
+  .main {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin-left: 0 !important;
+    padding: 0 8px !important;
+    width: 100% !important;
+  }
+
+  /* ── 2. OCULTAR CHROME DE SIEM ───────────────────────────────── */
+  .sidebar,
+  .header,
+  #sidebarToggle,
+  .h-page-header__actions,
+  .ind-filter-bar,
+  .ind-sql-banner,
+  #global-loading, #lab-loading, #inf-loading,
+  #global-error,   #lab-error,   #inf-error,
+  #empty-state,    #lab-empty,   #inf-empty,
+  #btn-apply, #btn-clear, #btn-load-detail,
+  #btn-export-csv, #btn-print, #btn-print-report,
+  #lab-btn-apply, #lab-btn-clear, #lab-btn-clear2,
+  #lab-btn-export, #lab-btn-retry, #lab-btn-print-report,
+  #inf-btn-apply, #inf-btn-clear, #inf-btn-clear2,
+  #inf-btn-export, #inf-btn-retry, #inf-btn-print-report,
+  #inf-filter-pills,
+  .ind-section-divider,
+  .ind-year-controls,
+  .no-print,
+  #lab-period-info,
+  #period-info,
+  #lab-year-controls,
+  [id$="-footer"] .ind-btn {
+    display: none !important;
+  }
+
+  /* ── 3. CABECERA EJECUTIVA ───────────────────────────────────── */
+  .ind-print-header {
+    display: block !important;
+    border-bottom: 2px solid #1e293b;
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+  .ind-print-header__brand {
+    font-size: 8pt;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .ind-print-header__title {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 4px;
+    line-height: 1.2;
+  }
+  .ind-print-header__meta {
+    font-size: 8pt;
+    color: #475569;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+    margin-top: 5px;
+  }
+  .ind-print-header__meta span { white-space: nowrap; }
+
+  /* ── 4. COLOR EXACTO PARA PDF ────────────────────────────────── */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* ── 5. CONTENEDORES — eliminar todo overflow/height ─────────── */
+  /* Cualquier div con scroll inline o por clase */
+  .table-responsive,
+  #detalle-table-wrapper,
+  .table-wrapper,
+  .table-wrapper-main,
+  .table-wrapper-product,
+  .table-wrapper-small,
+  [class*="table-wrap"],
+  [class*="matrix-scroll"] {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+  }
+
+  /* Forzar también los que tienen style inline */
+  * {
+    overflow: visible !important;
+  }
+  /* Excepciones: canvas y img no necesitan overflow:visible */
+  canvas, img { overflow: hidden !important; }
+
+  /* ── 6. LAYOUT: ancho completo ───────────────────────────────── */
+  .container, .container-fluid,
+  .container-xl, .container-lg, .container-md, .container-sm {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+
+  /* ── 7. KPIs ─────────────────────────────────────────────────── */
+  .ind-kpi-grid {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 5px !important;
+    page-break-inside: avoid;
+  }
+  .ind-kpi-grid--4 {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 5px !important;
+  }
+  .kpi-card {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    background: #fff !important;
+    padding: 7px 9px !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .kv { font-size: 13pt !important; }
+  .kv--sm { font-size: 10pt !important; }
+  .kl { font-size: 7.5pt !important; }
+  .ks { font-size: 7pt !important; }
+
+  /* ── 8. PANELES ──────────────────────────────────────────────── */
+  .h-panel {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    background: #fff !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 10px !important;
+  }
+  .h-panel__header {
+    padding: 8px 12px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+  }
+  .h-panel__title { font-size: 10pt !important; }
+  .h-panel__eyebrow { font-size: 7pt !important; }
+
+  /* ── 9. GRÁFICOS — canvas sustituido por .ind-print-canvas-img ── */
+  .ind-charts-row {
+    display: grid !important;
+    grid-template-columns: 2fr 1fr !important;
+    gap: 8px !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .ind-chart-container,
+  .ind-chart-container--tall {
+    height: 180px !important;
+    min-height: 0 !important;
+    max-height: 190px !important;
+    position: relative;
+  }
+  /* Canvas original oculto; se usa la img generada por JS */
+  canvas { display: none !important; }
+  .ind-print-canvas-img {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain;
+    max-height: 190px;
+  }
+
+  /* ── 10. TABLAS ──────────────────────────────────────────────── */
+  table {
+    width: 100% !important;
+    font-size: 7pt !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+  thead { display: table-header-group !important; }
+  tfoot { display: table-footer-group !important; }
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  th, td {
+    padding: 3px 4px !important;
+    border: 0.5px solid #e2e8f0 !important;
+    word-break: break-word;
+  }
+  thead th {
+    background: #f8fafc !important;
+    font-weight: 700;
+    font-size: 7pt !important;
+    position: static !important;  /* sin sticky en print */
+  }
+
+  /* ── 11. NEGOCIOS CHIPS ───────────────────────────────────────── */
+  .ind-negocios-chips {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+  }
+  .ind-negocio-chip {
+    border: 1px solid #e2e8f0 !important;
+    padding: 3px 7px !important;
+    border-radius: 4px !important;
+    font-size: 7.5pt !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* ── 12. LAB MATRIX ──────────────────────────────────────────── */
+  .lab-col-fixed {
+    min-width: 100px !important;
+    max-width: 150px !important;
+    position: static !important;
+    background: #fff !important;
+  }
+  .lab-col-month { min-width: 44px !important; font-size: 6pt !important; }
+
+  /* ── 13. BADGES ──────────────────────────────────────────────── */
+  .ind-badge, .badge {
+    border: 1px solid #e2e8f0 !important;
+    background: #f8fafc !important;
+    color: #1e293b !important;
+    padding: 1px 4px !important;
+    font-size: 6.5pt !important;
+  }
+
+  /* ── 14. MISCELÁNEA ──────────────────────────────────────────── */
+  .sort-icon { display: none !important; }
+  .ind-rank-bar-cell { width: 60px !important; }
+  .ind-rank-bar { height: 5px !important; border-radius: 2px !important; }
+  a { color: #1e293b !important; text-decoration: none !important; }
+  .text-muted { color: #64748b !important; }
+  .ind-util-neg { color: #b91c1c !important; }
+  .ind-rent-neg { color: #b91c1c !important; }
+}
