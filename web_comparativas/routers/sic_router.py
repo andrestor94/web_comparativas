@@ -12,7 +12,7 @@ from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.policy import (
     require_perm, normalize_module_access, derive_access_scope,
     role_ceilings_map, form_nav_tree, FORM_ROLES, can_access as _can_access_tpl,
-    can_switch_market as _can_switch_market_tpl,
+    can_switch_market as _can_switch_market_tpl, parse_module_access,
 )
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
 from web_comparativas.notifications_service import create_notification
@@ -22,6 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
+# Filtro para normalizar module_access en el form de permisos: en Postgres la columna
+# es TEXT y puede llegar como str JSON; el template hace `node.key in ma`, que sobre un
+# string sería un substring-check (marca checkboxes mal). parse_module_access → list|None.
+templates.env.filters["parse_module_access"] = parse_module_access
 
 # Create Router
 router = APIRouter(prefix="/sic", tags=["sic"])

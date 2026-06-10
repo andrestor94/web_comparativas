@@ -423,24 +423,58 @@ def role_allowed_leaves(role: str) -> set[str]:
     return {lk for lk in nav.leaf_keys() if role_allows_key(role, lk)}
 
 
+def parse_module_access(raw):
+    """
+    Normaliza el valor crudo de User.module_access a list[str] | None,
+    independientemente de cómo lo devuelva el motor de base de datos.
+
+    Motivación: en PostgreSQL la columna es TEXT (ver migrations.py) y, según el
+    driver/dialecto, el valor JSON puede llegar como STRING sin deserializar
+    ('["mercado_publico.home", ...]') en vez de como lista. Si no se parsea, el
+    código que itera o hace `in` sobre module_access recorre el string carácter a
+    carácter → granted_set vacío → bucle de login. En SQLite llega como lista.
+
+    Semántica (NO confundir None con vacío):
+      - None            → None  (NULL = legacy / acceso completo al techo del rol).
+      - list / tuple    → [str(x).strip() for x in raw].
+      - str ""          → []    (configurado sin acceso explícito).
+      - str JSON lista  → la lista parseada (strip por elemento).
+      - str no parseable → []   (no rompe; tratado como sin acceso).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (list, tuple)):
+        return [str(x).strip() for x in raw]
+    if isinstance(raw, str):
+        s = raw.strip()
+        if s == "":
+            return []
+        try:
+            import json
+            val = json.loads(s)
+        except Exception:
+            return []
+        if isinstance(val, (list, tuple)):
+            return [str(x).strip() for x in val]
+        return []
+    return []
+
+
 def granted_set(user) -> set[str]:
     """
     Hojas EFECTIVAMENTE concedidas al usuario:
       - module_access NULL  → todas las hojas que su rol permita (legacy = completo).
       - module_access lista → lista ∩ hojas-permitidas-por-rol.
       - module_access []    → vacío.
+    El valor crudo se normaliza con parse_module_access (tolera str JSON de Postgres).
     """
     if not user:
         return set()
     allowed = role_allowed_leaves(_role_of(user))
-    grant = getattr(user, "module_access", None)
+    grant = parse_module_access(getattr(user, "module_access", None))
     if grant is None:
-        return allowed
-    try:
-        grant_set = {str(k).strip() for k in grant}
-    except TypeError:
-        return allowed  # valor corrupto → tratamos como sin configurar
-    return grant_set & allowed
+        return allowed  # NULL = sin configurar → acceso completo del rol
+    return set(grant) & allowed
 
 
 def can_access(user, key: str) -> bool:
