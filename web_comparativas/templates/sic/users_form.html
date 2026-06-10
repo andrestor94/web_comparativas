@@ -152,7 +152,9 @@
                  - form.module_access es []    -> ninguna marcada.
                El JS de abajo: cascada padre→hijos, recálculo de ramas (Parcial) y, al
                cambiar el rol, deshabilita/desmarca las hojas fuera del techo de ese rol. #}
-            {% set ma = form.module_access %}
+            {# Postgres (TEXT) puede devolver module_access como str JSON; normalizamos a
+               lista|None para que `node.key in ma` no sea un substring-check. #}
+            {% set ma = form.module_access | parse_module_access %}
             {% macro render_node(node, ma, level) %}
               {% set is_module = (level == 0) %}
               {% if node.is_leaf %}
