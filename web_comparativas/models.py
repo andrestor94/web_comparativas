@@ -13,10 +13,12 @@ try:
 except ImportError:
     pass
 
+import json
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, ForeignKey, Float, event, text,
     UniqueConstraint, select, Boolean, JSON, Text, func, LargeBinary, Date, Index
 )
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import (
     declarative_base, relationship, sessionmaker, scoped_session
 )
@@ -179,6 +181,60 @@ db_session = scoped_session(SessionLocal)
 
 Base = declarative_base()
 
+
+# ----------------------------------------------------------------------
+# Tipo de columna para listas serializadas como JSON sobre TEXT
+# ----------------------------------------------------------------------
+class JSONEncodedList(TypeDecorator):
+    """
+    Lista[str] | None serializada como JSON, persistida sobre una columna TEXT.
+
+    Motivo: en PostgreSQL la columna `users.module_access` es físicamente TEXT
+    (ver migrations.py) mientras el modelo la declaraba como JSON; ese JSON-sobre-TEXT
+    NO siempre deserializa según el driver/dialecto y el valor llegaba como STRING
+    crudo, rompiendo la lógica de permisos (bucle de login). Este TypeDecorator
+    normaliza la lectura/escritura en el BORDE DEL ORM, sin cambiar el tipo físico
+    (impl = Text → ningún ALTER/migración).
+
+    INVARIANTE CLAVE (núcleo del incidente): None se preserva como None en lectura
+    y escritura (NULL = acceso completo al techo del rol). Solo "" o "[]" → []. Nunca
+    None ⇄ [].
+    """
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        # ESCRITURA. None se preserva tal cual (NULL = acceso total del rol).
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Ya viene serializado o es texto: normalizar a JSON de lista.
+            try:
+                v = json.loads(value)
+            except Exception:
+                v = []
+            return json.dumps(v if isinstance(v, list) else [])
+        # lista/tupla → JSON (strip por elemento).
+        return json.dumps([str(x).strip() for x in value])
+
+    def process_result_value(self, value, dialect):
+        # LECTURA. None → None (NO convertir a []). String JSON → lista.
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            s = value.strip()
+            if s == "":
+                return []
+            try:
+                v = json.loads(s)
+                return v if isinstance(v, list) else []
+            except Exception:
+                return []
+        return []
+
+
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
@@ -228,7 +284,11 @@ class User(Base):
     # En SQLite se persiste como TEXT (JSON serializado por SQLAlchemy). NO requiere migración
     # nueva: misma columna que la versión previa, solo cambió la semántica (antes guardaba
     # keys de módulo top-level; ahora keys de hoja jerárquicas).
-    module_access = Column(JSON, nullable=True, default=None)
+    #
+    # Tipo JSONEncodedList (impl=Text): normaliza lectura/escritura en el borde del ORM
+    # para que el JSON-sobre-TEXT de Postgres siempre devuelva lista|None (None preservado
+    # como NULL = acceso total). El tipo físico sigue siendo TEXT → sin migración.
+    module_access = Column(JSONEncodedList, nullable=True, default=None)
 
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
