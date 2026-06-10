@@ -42,6 +42,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from web_comparativas.models import User
+from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 
 logger = logging.getLogger("wc.indicadores")
 
@@ -65,6 +66,8 @@ def _safe_error(exc: Exception) -> str:
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"])
 
@@ -103,7 +106,7 @@ def indicadores_redirect():
 
 
 @router.get("/rentabilidad-negativa", response_class=HTMLResponse)
-def indicadores_rentabilidad(request: Request, user: User = Depends(_require_user)):
+def indicadores_rentabilidad(request: Request, user: User = Depends(require_module("indicadores_comerciales.rentabilidad_negativa"))):
     request.session["market_context"] = "indicadores"
     from web_comparativas.indicadores_db import is_available
     return templates.TemplateResponse(
@@ -121,7 +124,7 @@ def indicadores_rentabilidad(request: Request, user: User = Depends(_require_use
 
 
 @router.get("/informes-laboratorio", response_class=HTMLResponse)
-def indicadores_laboratorios(request: Request, user: User = Depends(_require_user)):
+def indicadores_laboratorios(request: Request, user: User = Depends(require_module("indicadores_comerciales.informes_laboratorio"))):
     request.session["market_context"] = "indicadores"
     from web_comparativas.indicadores_db import is_available
     return templates.TemplateResponse(
@@ -139,7 +142,7 @@ def indicadores_laboratorios(request: Request, user: User = Depends(_require_use
 
 
 @router.get("/inflacion", response_class=HTMLResponse)
-def indicadores_inflacion(request: Request, user: User = Depends(_require_user)):
+def indicadores_inflacion(request: Request, user: User = Depends(require_module("indicadores_comerciales.inflacion"))):
     request.session["market_context"] = "indicadores"
     from web_comparativas.indicadores_db import is_available
     return templates.TemplateResponse(
@@ -161,7 +164,7 @@ def indicadores_inflacion(request: Request, user: User = Depends(_require_user))
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/api/health")
-def api_health(request: Request, _user: User = Depends(_require_user)):
+def api_health(request: Request, _user: User = Depends(require_module("indicadores_comerciales"))):
     try:
         from web_comparativas.indicadores_service import get_health
         return JSONResponse(get_health())
@@ -197,12 +200,12 @@ def _rentabilidad_params(
 
 
 @router.get("/api/rentabilidad/health")
-def api_rentabilidad_health(request: Request, _user: User = Depends(_require_user)):
+def api_rentabilidad_health(request: Request, _user: User = Depends(require_module("indicadores_comerciales"))):
     return api_health(request, _user)
 
 
 @router.get("/api/rentabilidad/metadata")
-def api_rentabilidad_metadata(request: Request, _user: User = Depends(_require_user),
+def api_rentabilidad_metadata(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                                desde: Optional[str] = Query(default=None),
                                hasta: Optional[str] = Query(default=None),
                                laboratorio: Optional[str] = Query(default=None),
@@ -228,7 +231,7 @@ def api_rentabilidad_metadata(request: Request, _user: User = Depends(_require_u
 
 
 @router.get("/api/rentabilidad/resumen")
-def api_rentabilidad_resumen(request: Request, _user: User = Depends(_require_user),
+def api_rentabilidad_resumen(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                               desde: Optional[str] = Query(default=None),
                               hasta: Optional[str] = Query(default=None),
                               laboratorio: Optional[str] = Query(default=None),
@@ -256,7 +259,7 @@ def api_rentabilidad_resumen(request: Request, _user: User = Depends(_require_us
 
 
 @router.get("/api/rentabilidad/detalle")
-def api_rentabilidad_detalle(request: Request, _user: User = Depends(_require_user),
+def api_rentabilidad_detalle(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                               desde: Optional[str] = Query(default=None),
                               hasta: Optional[str] = Query(default=None),
                               laboratorio: Optional[str] = Query(default=None),
@@ -288,7 +291,7 @@ def api_rentabilidad_detalle(request: Request, _user: User = Depends(_require_us
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/api/laboratorios/health")
-def api_laboratorios_health(request: Request, _user: User = Depends(_require_user)):
+def api_laboratorios_health(request: Request, _user: User = Depends(require_module("indicadores_comerciales"))):
     try:
         from web_comparativas.indicadores_laboratorios_service import get_health
         return JSONResponse(get_health())
@@ -298,7 +301,7 @@ def api_laboratorios_health(request: Request, _user: User = Depends(_require_use
 
 
 @router.get("/api/laboratorios/metadata")
-def api_laboratorios_metadata(request: Request, _user: User = Depends(_require_user),
+def api_laboratorios_metadata(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                                desde: Optional[str] = Query(default=None),
                                hasta: Optional[str] = Query(default=None),
                                laboratorio: Optional[str] = Query(default=None),
@@ -324,7 +327,7 @@ def api_laboratorios_metadata(request: Request, _user: User = Depends(_require_u
 
 
 @router.get("/api/laboratorios/resumen")
-def api_laboratorios_resumen(request: Request, _user: User = Depends(_require_user),
+def api_laboratorios_resumen(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                               desde: Optional[str] = Query(default=None),
                               hasta: Optional[str] = Query(default=None),
                               laboratorio: Optional[str] = Query(default=None),
@@ -350,7 +353,7 @@ def api_laboratorios_resumen(request: Request, _user: User = Depends(_require_us
 
 
 @router.get("/api/laboratorios/detalle")
-def api_laboratorios_detalle(request: Request, _user: User = Depends(_require_user),
+def api_laboratorios_detalle(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                               desde: Optional[str] = Query(default=None),
                               hasta: Optional[str] = Query(default=None),
                               laboratorio: Optional[str] = Query(default=None),
@@ -380,7 +383,7 @@ def api_laboratorios_detalle(request: Request, _user: User = Depends(_require_us
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/api/inflacion/health")
-def api_inflacion_health(request: Request, _user: User = Depends(_require_user)):
+def api_inflacion_health(request: Request, _user: User = Depends(require_module("indicadores_comerciales"))):
     try:
         from web_comparativas.indicadores_inflacion_service import get_health
         return JSONResponse(get_health())
@@ -390,7 +393,7 @@ def api_inflacion_health(request: Request, _user: User = Depends(_require_user))
 
 
 @router.get("/api/inflacion/resumen")
-def api_inflacion_resumen(request: Request, _user: User = Depends(_require_user),
+def api_inflacion_resumen(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                            desde: str = Query(...),
                            hasta: str = Query(...),
                            laboratorio: Optional[str] = Query(default=None),
@@ -412,7 +415,7 @@ def api_inflacion_resumen(request: Request, _user: User = Depends(_require_user)
 
 
 @router.get("/api/inflacion/productos")
-def api_inflacion_productos(request: Request, _user: User = Depends(_require_user),
+def api_inflacion_productos(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                              desde: str = Query(...),
                              hasta: str = Query(...),
                              laboratorio: Optional[str] = Query(default=None),
@@ -434,7 +437,7 @@ def api_inflacion_productos(request: Request, _user: User = Depends(_require_use
 
 
 @router.get("/api/inflacion/laboratorios")
-def api_inflacion_laboratorios(request: Request, _user: User = Depends(_require_user),
+def api_inflacion_laboratorios(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                                 desde: str = Query(...),
                                 hasta: str = Query(...),
                                 search: Optional[str] = Query(default=None),
@@ -454,7 +457,7 @@ def api_inflacion_laboratorios(request: Request, _user: User = Depends(_require_
 
 
 @router.get("/api/inflacion/evolucion")
-def api_inflacion_evolucion(request: Request, _user: User = Depends(_require_user),
+def api_inflacion_evolucion(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                              desde: str = Query(...),
                              hasta: str = Query(...),
                              laboratorio: Optional[str] = Query(default=None),
@@ -476,7 +479,7 @@ def api_inflacion_evolucion(request: Request, _user: User = Depends(_require_use
 
 
 @router.get("/api/indec/ipc")
-def api_indec_ipc(request: Request, _user: User = Depends(_require_user),
+def api_indec_ipc(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                   desde: Optional[str] = Query(default=None),
                   hasta: Optional[str] = Query(default=None)):
     try:
@@ -491,7 +494,7 @@ def api_indec_ipc(request: Request, _user: User = Depends(_require_user),
 
 
 @router.get("/api/indec/ipc/evolucion")
-def api_indec_ipc_evolucion(request: Request, _user: User = Depends(_require_user),
+def api_indec_ipc_evolucion(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                              desde: str = Query(...),
                              hasta: str = Query(...)):
     try:
@@ -507,7 +510,7 @@ def api_indec_ipc_evolucion(request: Request, _user: User = Depends(_require_use
 # (los endpoints /api/metadata, /api/resumen, /api/detalle del router anterior)
 
 @router.get("/api/metadata")
-def _compat_metadata(request: Request, _user: User = Depends(_require_user),
+def _compat_metadata(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                      desde: Optional[str] = Query(default=None),
                      hasta: Optional[str] = Query(default=None),
                      laboratorio: Optional[str] = Query(default=None),
@@ -519,7 +522,7 @@ def _compat_metadata(request: Request, _user: User = Depends(_require_user),
 
 
 @router.get("/api/resumen")
-def _compat_resumen(request: Request, _user: User = Depends(_require_user),
+def _compat_resumen(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                     desde: Optional[str] = Query(default=None),
                     hasta: Optional[str] = Query(default=None),
                     laboratorio: Optional[str] = Query(default=None),
@@ -532,7 +535,7 @@ def _compat_resumen(request: Request, _user: User = Depends(_require_user),
 
 
 @router.get("/api/detalle")
-def _compat_detalle(request: Request, _user: User = Depends(_require_user),
+def _compat_detalle(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
                     desde: Optional[str] = Query(default=None),
                     hasta: Optional[str] = Query(default=None),
                     laboratorio: Optional[str] = Query(default=None),

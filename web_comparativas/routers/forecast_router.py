@@ -27,12 +27,15 @@ from pydantic import BaseModel, Field
 
 from web_comparativas.models import User, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
+from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 
 logger = logging.getLogger("wc.forecast.router")
 logger.setLevel(logging.INFO)
 
 BASE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
@@ -120,7 +123,7 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
 
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/", response_class=HTMLResponse)
-def forecast_home(request: Request, user: User = Depends(_require_user)):
+def forecast_home(request: Request, user: User = Depends(require_module("forecast"))):
     return templates.TemplateResponse(
         "forecast/index.html",
         {"request": request, "user": user, "market_context": "forecast"},
@@ -132,7 +135,7 @@ def forecast_home(request: Request, user: User = Depends(_require_user)):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/filter-options")
-def api_filter_options(request: Request, _user: User = Depends(_require_user)):
+def api_filter_options(request: Request, _user: User = Depends(require_module("forecast"))):
     started = time.perf_counter()
     try:
         result = svc.get_filter_options()
@@ -150,7 +153,7 @@ def api_product_list(
     request: Request,
     profiles: Optional[List[str]] = Query(default=None, alias="profiles[]"),
     neg: Optional[List[str]] = Query(default=None, alias="neg[]"),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     started = time.perf_counter()
     try:
@@ -176,7 +179,7 @@ def api_chart_data(
     lab_name: Optional[str] = Query(default=None),
     view_money: bool = Query(default=True),
     growth_pct: float = Query(default=0.0),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     import traceback as _tb
     import json as _json
@@ -267,7 +270,7 @@ def api_client_table(
     growth_pct: float = Query(default=0.0),
     lab_products: Optional[List[str]] = Query(default=None, alias="lab_products[]"),
     lab_name: Optional[str] = Query(default=None),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     import traceback as _tb
     started = time.perf_counter()
@@ -309,7 +312,7 @@ def api_treemap_data(
     view_money: bool = Query(default=True),
     period_date: Optional[str] = Query(default=None),
     lab_name: Optional[str] = Query(default=None),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     started = time.perf_counter()
     logger.debug("treemap-data start=%s end=%s profiles=%s neg=%s period=%s", start_date, end_date, profiles, neg, period_date)
@@ -348,7 +351,7 @@ def api_client_detail(
     subneg: Optional[List[str]] = Query(default=None, alias="subneg[]"),
     products: Optional[List[str]] = Query(default=None, alias="products[]"),
     growth_pct: float = Query(default=0.0),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     started = time.perf_counter()
     try:
@@ -379,7 +382,7 @@ def api_client_detail(
 
 
 @router.get("/api/debug-schema")
-def api_debug_schema(request: Request, _user: User = Depends(_require_user)):
+def api_debug_schema(request: Request, _user: User = Depends(require_module("forecast"))):
     """Return actual column names for all forecast tables from information_schema.
     Use this to verify the real PostgreSQL schema matches what the code expects."""
     try:
@@ -390,7 +393,7 @@ def api_debug_schema(request: Request, _user: User = Depends(_require_user)):
 
 
 @router.get("/api/debug-overrides")
-def api_debug_overrides(request: Request, _user: User = Depends(_require_user)):
+def api_debug_overrides(request: Request, _user: User = Depends(require_module("forecast"))):
     """Inspect ForecastUserOverride records for the current user — for debugging only."""
     from web_comparativas.models import SessionLocal, ForecastUserOverride
     from web_comparativas import forecast_service as _svc
@@ -435,7 +438,7 @@ def api_debug_overrides(request: Request, _user: User = Depends(_require_user)):
 
 
 @router.post("/api/reload")
-def api_reload(request: Request, _user: User = Depends(_require_user)):
+def api_reload(request: Request, _user: User = Depends(require_module("forecast"))):
     if (getattr(_user, "role", "") or "").lower() not in ("admin", "auditor"):
         raise HTTPException(403, "Solo admins pueden recargar los datos de Forecast")
     try:
@@ -446,7 +449,7 @@ def api_reload(request: Request, _user: User = Depends(_require_user)):
 
 
 @router.get("/api/diag")
-def api_diag(_user: User = Depends(_require_user)):
+def api_diag(_user: User = Depends(require_module("forecast"))):
     """Diagnostic endpoint: reports which CSV file is loaded, row counts, totals and timestamps.
     Available to all authenticated users for debugging purposes."""
     import pandas as pd
@@ -523,7 +526,7 @@ class _SavePayload(BaseModel):
 def api_save_client(
     payload: _SavePayload,
     _request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Persist per-product overrides for a client and reflect changes in the whole dashboard."""
     try:
@@ -568,7 +571,7 @@ class _GroupSavePayload(BaseModel):
 def api_save_group(
     payload: _GroupSavePayload,
     _request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Save a uniform growth expectation for all clients in a group."""
     try:
@@ -597,7 +600,7 @@ class _GroupBatchSavePayload(BaseModel):
 def api_save_group_batch(
     payload: _GroupBatchSavePayload,
     _request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Save a uniform growth expectation across multiple groups at once."""
     try:
@@ -641,7 +644,7 @@ def api_save_group_batch(
 def api_clear_client(
     client_id: str,
     _request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Remove all saved overrides for a client, restoring the CSV baseline."""
     try:
@@ -661,7 +664,7 @@ def api_article_search(
     request: Request,
     q: str = Query(default=""),
     limit: int = Query(default=30, ge=1, le=200),
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Dynamic article search for the new-client modal."""
     try:
@@ -675,7 +678,7 @@ def api_article_search(
 @router.get("/api/new-client-catalog")
 def api_new_client_catalog(
     request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Return catalog data for the new-manual-client form."""
     started = time.perf_counter()
@@ -711,7 +714,7 @@ class _CreateManualClientPayload(BaseModel):
 def api_create_manual_client(
     payload: _CreateManualClientPayload,
     request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Create a new manual forecast client with article-month entries."""
     started = time.perf_counter()
@@ -744,7 +747,7 @@ def api_create_manual_client(
 # Eliminación lógica de clientes/entries manuales (solo Admin)
 # ---------------------------------------------------------------------------
 
-def _require_admin(request: Request, _user: User = Depends(_require_user)) -> User:
+def _require_admin(request: Request, _user: User = Depends(require_module("forecast"))) -> User:
     """Only users with admin role may call delete endpoints."""
     if not _user.is_admin():
         raise HTTPException(status_code=403, detail="Solo administradores pueden eliminar clientes manuales")
@@ -813,7 +816,7 @@ def api_add_articles_to_manual_client(
     manual_client_id: int,
     payload: _AddArticlesPayload,
     request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Append new article-month entries to an existing manual client."""
     started = time.perf_counter()
@@ -845,7 +848,7 @@ class _AddArticlesByNamePayload(BaseModel):
 def api_add_articles_by_client_name(
     payload: _AddArticlesByNamePayload,
     request: Request,
-    _user: User = Depends(_require_user),
+    _user: User = Depends(require_module("forecast")),
 ):
     """Add articles to any client (base or manual) by client name.
 
@@ -891,7 +894,7 @@ class _ForecastCommentSchema(BaseModel):
 def forecast_api_comment(
     request: Request,
     payload: _ForecastCommentSchema,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """
     Crea o reutiliza un ticket de Mesa de Ayuda para el módulo Forecast.
@@ -1333,7 +1336,7 @@ def _build_export_rows(records: list[dict]) -> list[dict]:
 @router.get("/api/audit", response_class=JSONResponse)
 def api_audit(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
     date_from: Optional[str] = Query(None, description="Fecha desde YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="Fecha hasta YYYY-MM-DD"),
     comercial: Optional[str] = Query(None, description="Email del comercial (parcial)"),
@@ -1400,7 +1403,7 @@ def api_audit(
 @router.get("/api/audit/export")
 def api_audit_export(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
     fmt: str = Query("csv", description="csv | xlsx"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -1500,7 +1503,7 @@ def api_audit_export(
 @router.get("/api/audit/filter-options", response_class=JSONResponse)
 def api_audit_filter_options(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Valores distintos para desplegables de filtro. Solo Admin/Auditor."""
     _require_audit_access(user)
@@ -1930,7 +1933,7 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
 @router.get("/api/approvals", response_class=JSONResponse)
 def api_approvals(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
     estado: Optional[str] = Query("todos"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -1995,7 +1998,7 @@ def api_approvals(
 @router.get("/api/approvals/filter-options", response_class=JSONResponse)
 def api_approvals_filter_options(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Valores distintos para desplegables de filtro. Solo Admin.
 
@@ -2073,7 +2076,7 @@ def api_approvals_approve(
     request_id: int,
     payload: _ReviewPayload,
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Aprueba una modificación pendiente. Solo Admin. No revierte el override."""
     _require_admin_only(user)
@@ -2100,7 +2103,7 @@ def api_approvals_reject(
     request_id: int,
     payload: _ReviewPayload,
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Rechaza una modificación con motivo. Solo Admin. No revierte el override."""
     _require_admin_only(user)
@@ -2170,7 +2173,7 @@ def _build_group_unit(grupo: str, recs: list[dict]) -> dict:
 @router.get("/api/approvals/grouped", response_class=JSONResponse)
 def api_approvals_grouped(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
     estado: Optional[str] = Query("todos"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -2311,7 +2314,7 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
 def api_approvals_group_approve(
     payload: _GroupReviewPayload,
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Aprueba todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
     _require_admin_only(user)
@@ -2329,7 +2332,7 @@ def api_approvals_group_approve(
 def api_approvals_group_reject(
     payload: _GroupReviewPayload,
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """Rechaza con motivo todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
     _require_admin_only(user)
@@ -2378,7 +2381,7 @@ _CR_EXPORT_LABELS = {
 @router.get("/api/approvals/export")
 def api_approvals_export(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
     fmt: str = Query("csv", description="csv | xlsx"),
     estado: Optional[str] = Query("todos"),
     date_from: Optional[str] = Query(None),
@@ -2454,7 +2457,7 @@ def api_approvals_export(
 @router.get("/api/comments/summary", response_class=JSONResponse)
 def forecast_api_summary(
     request: Request,
-    user: User = Depends(_require_user),
+    user: User = Depends(require_module("forecast")),
 ):
     """
     Retorna el resumen de tickets activos de Forecast para el usuario actual.

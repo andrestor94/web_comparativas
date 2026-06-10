@@ -213,7 +213,22 @@ class User(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
     
     # Campo para Segmentación de Acceso: "Mercado Publico", "Mercado Privado", "Todos"
+    # OJO: access_scope es solo ROUTING (página de inicio post-login), NO un permiso
+    # de acceso real. El control de acceso real por módulo vive en `module_access`.
     access_scope = Column(String, default="todos")
+
+    # Control de acceso por usuario hasta nivel de SUB-SECCIÓN (ver web_comparativas/nav.py
+    # y web_comparativas/policy.py). El ROL define el techo de keys visibles; este campo
+    # solo restringe DENTRO de ese techo (nunca lo amplía). Semántica:
+    #   - NULL  -> usuario legacy/sin configurar -> acceso COMPLETO a todas las hojas que
+    #              su rol permita (preserva el acceso de los usuarios ya existentes).
+    #   - lista -> set de keys de HOJA concedidas (keys con puntos de nav.MENU sin hijos;
+    #              "forecast" cuenta como hoja). Efectivo = lista ∩ hojas-permitidas-por-rol.
+    #   - []    -> explícitamente sin acceso a ninguna de estas secciones.
+    # En SQLite se persiste como TEXT (JSON serializado por SQLAlchemy). NO requiere migración
+    # nueva: misma columna que la versión previa, solo cambió la semántica (antes guardaba
+    # keys de módulo top-level; ahora keys de hoja jerárquicas).
+    module_access = Column(JSON, nullable=True, default=None)
 
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)

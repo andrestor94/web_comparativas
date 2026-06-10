@@ -105,6 +105,10 @@ from .visibility_service import (
     _is_auditor,   # función centralizada — no redefinir localmente
 )
 from .policy import resolve_login_redirect as _resolve_login_redirect
+from .policy import require_module as _require_module
+from .policy import can_access as _can_access_tpl
+from .policy import first_accessible_url as _first_accessible_url
+from .policy import can_switch_market as _can_switch_market_tpl
 
 # === Visibilidad extendida para AUDITOR ================================
 # _is_auditor ya importada desde visibility_service: no duplicar definición.
@@ -206,6 +210,8 @@ if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
 # ======================================================================
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 router = APIRouter() # Replaced FastAPI app
 
 # --- MIGRACIONES ---
@@ -1667,18 +1673,11 @@ def markets_home(
     """
     role = (user.role or "").lower()
     
-    # Analistas no deben ver el SIEM, redirigir a su mercado
+    # Analistas no deben ver el SIEM. Si pueden ver AMBOS mercados, mostrar la pantalla
+    # de selecci├│n; si no, caer en la primera secci├│n accesible (respeta module_access).
     if role == "analista":
-        scope = (user.access_scope or "").strip().lower()
-        
-        if scope == "privado":
-            return RedirectResponse("/mercado-privado", status_code=303)
-        elif scope == "todos":
-            # Si tiene acceso a ambos, deja ver la pantalla de selecci├│n
-            pass
-        else:
-            # Por defecto (scope='publico' o vac├¡o) va a Mercado P├║blico
-            return RedirectResponse("/mercado-publico", status_code=303)
+        if not (_can_access_tpl(user, "mercado_publico") and _can_access_tpl(user, "mercado_privado")):
+            return RedirectResponse(_first_accessible_url(user), status_code=303)
     
     # Admin y Supervisor ven el SIEM
     ctx = {
@@ -1695,8 +1694,9 @@ def markets_home(
 def mercado_privado_home(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_privado.home")),
 ):
     """
     Home del Mercado Privado.
@@ -1713,8 +1713,9 @@ def mercado_privado_home(
 def mercado_privado_dimensiones(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_privado.dimensionamiento")),
 ):
     """
     Placeholder View para Dimensionamiento de Mercado (Privado).
@@ -1731,8 +1732,9 @@ def mercado_privado_dimensiones(
 def mercado_publico_helpdesk(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.mesa_ayuda")),
 ):
     """
     Mesa de ayuda espec├¡fica para Mercado P├║blico.
@@ -1871,8 +1873,9 @@ def mercado_publico_helpdesk_reply(
 def mercado_privado_helpdesk(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_privado.mesa_ayuda")),
 ):
     is_privileged = user.has_role("admin", "auditor")
     
@@ -2022,8 +2025,9 @@ def mercado_privado_helpdesk_reply(
 def mercado_privado_reporte_perfiles(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "supervisor", "auditor")
+        require_roles("admin", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_privado.reporte_perfiles")),
 ):
     """
     M├│dulo Reporte de Perfiles (Privado).
@@ -2040,7 +2044,7 @@ def mercado_privado_reporte_perfiles(
 def mercado_privado_comentarios(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     """
@@ -2120,8 +2124,9 @@ def _parse_iso_date(s: str | None) -> dt.date | None:
 def mercado_publico_home(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.home")),
 ):
     """
     Home (panel principal) del Mercado P├║blico.
@@ -2143,8 +2148,9 @@ def mercado_publico_home(
 def mercado_publico_web_comparativas(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.home")),
 ):
     """
     Home espec├¡fico de Web Comparativas dentro de Mercado P├║blico.
@@ -2167,8 +2173,9 @@ def mercado_publico_web_comparativas(
 def mercado_publico_oportunidades(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.oportunidades")),
 ):
     """
     M├│dulo Oportunidades (placeholder).
@@ -2194,8 +2201,9 @@ def mercado_publico_oportunidades(
 def mercado_publico_reporte_perfiles(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "supervisor", "auditor", "analista", "analyst")
+        require_roles("admin", "supervisor", "auditor", "analista", "analyst", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.reporte_perfiles")),
 ):
     """
     M├│dulo Reporte de Perfiles (placeholder).
@@ -2244,8 +2252,9 @@ def oportunidades_buscador(
     page_size: int = Query(20, ge=10, le=200),
     uploaded: int = Query(0),
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.oportunidades.buscador")),
 ):
     opp_info = _oportunidades_status()
     toast_msg = None
@@ -3312,7 +3321,8 @@ def api_oportunidades_dimensiones(
 @router.get("/oportunidades/dimensiones", response_class=HTMLResponse)
 def oportunidades_dimensiones(
     request: Request,
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")),
+    _mod: User = Depends(_require_module("mercado_publico.oportunidades.dimensiones")),
 ):
     """
     Vista de Dimensiones (an├ílisis por ejes: regi├│n, comprador, cuenta, plataforma, etc.).
@@ -3344,6 +3354,7 @@ def oportunidades_dimensiones(
 async def form_nueva_carga(
     request: Request,
     user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.nueva_carga")),
 ):
     """
     Muestra el formulario para cargar un nuevo archivo.
@@ -3389,6 +3400,7 @@ async def crear_carga(
     file_siprosa_2: UploadFile = File(None),
     file_siprosa_3: UploadFile = File(None),
     user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.nueva_carga")),
 ):
     """
     Crea una carga y dispara el procesamiento en segundo plano.
@@ -3594,6 +3606,7 @@ async def crear_carga(
 def page_otras_fuentes_externas(
     request: Request,
     user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.nueva_carga_otras")),
 ):
     """
     Muestra la p├ígina con el iframe de Microsoft Forms.
@@ -3618,6 +3631,7 @@ def page_otras_fuentes_externas(
 async def form_nueva_carga_otras_fuentes(
     request: Request,
     user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.nueva_carga_otras")),
 ):
     """
     Ruta legacy: la carga principal de Comparativa vive en /cargas/nueva.
@@ -3650,6 +3664,7 @@ async def crear_carga_otras_fuentes(
     file_siprosa_2: UploadFile = File(None),
     file_siprosa_3: UploadFile = File(None),
     user: User = Depends(require_roles("admin", "analista", "supervisor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.nueva_carga_otras")),
 ):
     """
     Maneja la carga de 'Principales'.
@@ -3967,8 +3982,9 @@ def historial_cargas(
     province: str = Query("", description="Provincia/Municipio"),
     filename: str = Query("", description="Nombre de archivo"),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.historial")),
 ):
     """
     Listado del historial de cargas, con visibilidad por grupos.
@@ -7593,6 +7609,7 @@ def _allowed_users_for_group(user: User, group: Group):
 def grupos_list_view(
     request: Request,
     user: User = Depends(require_roles("admin", "supervisor")),
+    _mod: User = Depends(_require_module("mercado_publico.comparativa.grupos")),
 ):
     role = (user.role or "").lower()
     if role == "admin":

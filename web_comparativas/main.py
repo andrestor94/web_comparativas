@@ -43,6 +43,9 @@ from web_comparativas.visibility_service import (
 # === SETUP ===
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+from web_comparativas.policy import can_access as _can_access_tpl, first_accessible_url as _first_accessible_url, can_switch_market as _can_switch_market_tpl, accessible_top_count as _accessible_top_count
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 # Logging Console
 logger = logging.getLogger("wc.main")
@@ -59,6 +62,7 @@ FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 # === MIGRACIONES ===
 from web_comparativas.migrations import (
     ensure_access_scope_column,
+    ensure_module_access_column,
     ensure_password_reset_columns,
     ensure_original_content_column,
     ensure_normalized_storage_columns,
@@ -138,6 +142,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: 'access_scope' checked/added.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning: {e}", flush=True)
+
+    try:
+        ensure_module_access_column()
+        print("[MIGRATION] SUCCESS: 'module_access' checked/added.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning module_access: {e}", flush=True)
 
     try:
         ensure_password_reset_columns()
@@ -778,10 +788,14 @@ def home(request: Request):
     # Analistas y Supervisores siempre van a su mercado asignado.
     # Nunca deben ver esta vista genérica (que en versiones anteriores no filtraba).
     if _vs_is_analyst(user) or _vs_is_supervisor(user):
-        scope = (getattr(user, "access_scope", None) or "").strip().lower()
-        if scope in ("privado", "mercado_privado"):
-            return RedirectResponse("/mercado-privado", 303)
-        return RedirectResponse("/mercado-publico", 303)
+        # Landing derivada del MENU: primera sección accesible (respeta module_access).
+        return RedirectResponse(_first_accessible_url(user), 303)
+
+    # Roles universales (admin/auditor/gerente/manager) con module_access ACOTADO (no NULL):
+    # el panel general "/" no les sirve si no tienen el contexto público → primera sección
+    # accesible. Con module_access NULL (acceso total) siguen viendo el panel general.
+    if getattr(user, "module_access", None) is not None:
+        return RedirectResponse(_first_accessible_url(user), 303)
 
     # Mercado privado: redirige según contexto de sesión
     if getattr(request.state, "market_context", "public") == "private":
@@ -847,9 +861,15 @@ def home(request: Request):
 def markets_home(request: Request):
     if not request.state.user:
         return RedirectResponse("/login", 303)
+    user = request.state.user
+    # Suite: si el usuario tiene 0 o 1 apartado accesible (S.I.C INCLUIDO en este conteo),
+    # no tiene sentido la pantalla de selección → lo mandamos directo a su primera sección
+    # accesible. Con 2+ apartados, la Suite se RENDERIZA (no redirige).
+    if _accessible_top_count(user) < 2:
+        return RedirectResponse(_first_accessible_url(user), 303)
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
-        "user": request.state.user,
+        "user": user,
         "show_indicadores": _SHOW_INDICADORES,
     })
 

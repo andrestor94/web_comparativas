@@ -224,14 +224,20 @@
 
             <div class="d-flex align-items-center gap-4 sic-nav-actions">
                 <div class="d-none d-md-flex gap-3 me-3">
+                    {% if can_access(user, 'sic.mesa_ayuda') %}
                     <a href="/sic/helpdesk"
                         class="nav-link small {% if request.url.path.startswith('/sic/helpdesk') %}active{% endif %}">Mesa
                         de ayuda</a>
+                    {% endif %}
+                    {% if can_access(user, 'sic.seguimiento') %}
                     <a href="/sic/tracking"
                         class="nav-link small {% if request.url.path.startswith('/sic/tracking') %}active{% endif %}">Seguimiento</a>
+                    {% endif %}
+                    {% if can_access(user, 'sic.usuarios') %}
                     <a href="/sic/users"
                         class="nav-link small {% if request.url.path.startswith('/sic/users') %}active{% endif %}">Usuarios</a>
-                    {% if user and (user.role == 'admin' or user.role == 'administrator') %}
+                    {% endif %}
+                    {% if can_access(user, 'sic.contrasenas') %}
                     <a href="/sic/password-resets"
                         class="nav-link small position-relative {% if request.url.path.startswith('/sic/password-resets') %}active{% endif %}">
                         Contraseñas
