@@ -626,6 +626,7 @@
                     {% set user_role = (user.role or '')|lower %}
 
                     <!-- Mercado Público -->
+                    {% if can_access(user, 'mercado_publico') %}
                     <a href="/mercado-publico/web-comparativas" class="module-card module-card--publico">
                         <div class="module-card__body">
                             <span class="module-card__icon"><i class="bi bi-building"></i></span>
@@ -640,8 +641,10 @@
                             </div>
                         </div>
                     </a>
+                    {% endif %}
 
                     <!-- Mercado Privado -->
+                    {% if can_access(user, 'mercado_privado') %}
                     <a href="/mercado-privado" class="module-card module-card--privado">
                         <div class="module-card__body">
                             <span class="module-card__icon"><i class="bi bi-briefcase"></i></span>
@@ -656,8 +659,10 @@
                             </div>
                         </div>
                     </a>
+                    {% endif %}
 
                     <!-- Forecast -->
+                    {% if can_access(user, 'forecast') %}
                     <a href="/forecast/" class="module-card module-card--forecast">
                         <div class="module-card__body">
                             <span class="module-card__icon"><i class="bi bi-graph-up-arrow"></i></span>
@@ -672,12 +677,14 @@
                             </div>
                         </div>
                     </a>
+                    {% endif %}
 
                     <!-- Indicadores Comerciales — siempre visible.
                          En local (show_indicadores): tarjeta funcional, badge "Disponible",
                          botón "Ingresar" con href real. En producción (RENDER_MODE): mismo
                          diseño, badge "Próximamente" y botón deshabilitado (sin href). La
                          ruta /indicadores-comerciales/ tampoco se registra en prod (404). -->
+                    {% if can_access(user, 'indicadores_comerciales') %}
                     <a {% if show_indicadores %}href="/indicadores-comerciales/"{% endif %}
                        class="module-card module-card--indicadores{% if not show_indicadores %} module-card--disabled{% endif %}">
                         <div class="module-card__body">
@@ -698,9 +705,10 @@
                             </div>
                         </div>
                     </a>
+                    {% endif %}
 
-                    {% if user and (user.role or '')|lower in ['admin', 'auditor'] %}
-                    <!-- Soporte de Inteligencia Comercial — Admin y Auditor -->
+                    <!-- Soporte de Inteligencia Comercial — apartado elegible de la Suite -->
+                    {% if can_access(user, 'sic') %}
                     <a href="/sic" class="module-card module-card--sic">
                         <div class="module-card__body">
                             <span class="module-card__icon"><i class="bi bi-shield-check"></i></span>
@@ -710,7 +718,7 @@
                                 y trazabilidad del soporte comercial.
                             </p>
                             <div class="module-card__footer">
-                                <span class="status-badge status-restricted"><span class="dot"></span>Admin / Auditor</span>
+                                <span class="status-badge status-available"><span class="dot"></span>Disponible</span>
                                 <span class="cta">Acceder <i class="bi bi-arrow-right"></i></span>
                             </div>
                         </div>

@@ -707,18 +707,22 @@
         <!-- ================= MENÚ MERCADO PRIVADO ================= -->
 
         <!-- Home -->
+        {% if can_access(user, 'mercado_privado.home') %}
         <a href="/mercado-privado" class="nav-link {% if request.url.path == '/mercado-privado' %}active{% endif %}">
           <div><i class="bi bi-house-door"></i> Home</div>
         </a>
+        {% endif %}
 
         <!-- Dimensionamiento de mercado -->
+        {% if can_access(user, 'mercado_privado.dimensionamiento') %}
         <a href="/mercado-privado/dimensiones"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/dimensiones') %}active{% endif %}">
           <div><i class="bi bi-pie-chart"></i> Dimensionamiento</div>
         </a>
+        {% endif %}
 
         <!-- Reporte perfiles (Reutilizado) -->
-        {% if user and r in ['admin','supervisor','auditor'] %}
+        {% if can_access(user, 'mercado_privado.reporte_perfiles') %}
         <a href="/mercado-privado/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-privado/reporte-perfiles') %}active{% endif %}">
           <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
@@ -726,7 +730,7 @@
         {% endif %}
 
         <!-- Mesa de ayuda (Reutilizado) -->
-        {% if user and r in ['analista','supervisor','auditor'] %}
+        {% if can_access(user, 'mercado_privado.mesa_ayuda') %}
         {% set is_comments = request.url.path.startswith('/mercado-privado/comentarios') %}
         <a href="/mercado-privado/helpdesk"
           class="nav-link d-flex align-items-center justify-content-between {% if is_comments %}active{% endif %}"
@@ -755,9 +759,11 @@
         <!-- ================= MENÚ FORECAST (INDEPENDIENTE) ================= -->
 
         <!-- Home Alternativo (opcional si hay sub-rutas, hoy apunta a /forecast) -->
+        {% if can_access(user, 'forecast') %}
         <a href="/forecast/" class="nav-link {% if request.url.path.startswith('/forecast') %}active{% endif %}">
           <div><i class="bi bi-graph-up-arrow"></i> Forecast</div>
         </a>
+        {% endif %}
 
         <!-- Mi contraseña -->
         <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
@@ -768,22 +774,28 @@
         <!-- ================= MENÚ INDICADORES COMERCIALES ================= -->
 
         <!-- Rentabilidad Negativa -->
+        {% if can_access(user, 'indicadores_comerciales.rentabilidad_negativa') %}
         <a href="/indicadores-comerciales/rentabilidad-negativa"
           class="nav-link {% if request.url.path == '/indicadores-comerciales/rentabilidad-negativa' %}active{% endif %}">
           <div><i class="bi bi-graph-down-arrow"></i> Rentabilidad Negativa</div>
         </a>
+        {% endif %}
 
         <!-- Inflación -->
+        {% if can_access(user, 'indicadores_comerciales.inflacion') %}
         <a href="/indicadores-comerciales/inflacion"
           class="nav-link {% if request.url.path == '/indicadores-comerciales/inflacion' %}active{% endif %}">
           <div><i class="bi bi-arrow-up-right-circle"></i> Inflación</div>
         </a>
+        {% endif %}
 
         <!-- Informes de Laboratorio -->
+        {% if can_access(user, 'indicadores_comerciales.informes_laboratorio') %}
         <a href="/indicadores-comerciales/informes-laboratorio"
           class="nav-link {% if request.url.path == '/indicadores-comerciales/informes-laboratorio' %}active{% endif %}">
           <div><i class="bi bi-capsule"></i> Informes de Laboratorio</div>
         </a>
+        {% endif %}
 
         <!-- Mi contraseña -->
         <a href="/mi/password" class="nav-link {% if request.url.path.startswith('/mi/password') %}active{% endif %}">
@@ -804,11 +816,14 @@
         or request.url.path.startswith('/mercado-publico/oportunidades') %}
 
         <!-- Home Mercado Público -->
+        {% if can_access(user, 'mercado_publico.home') %}
         <a href="/mercado-publico" class="nav-link {% if request.url.path == '/mercado-publico' %}active{% endif %}">
           <div><i class="bi bi-house-door"></i> Home</div>
         </a>
+        {% endif %}
 
         <!-- ====== Web Comparativa (submenú colapsable) ====== -->
+        {% if can_access(user, 'mercado_publico.comparativa') %}
         <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
           data-submenu-target="#wcMenu" aria-expanded="{{ 'true' if wc_expand else 'false' }}" aria-controls="wcMenu">
           <div><i class="bi bi-intersect"></i> Comparativa</div>
@@ -816,13 +831,14 @@
         </button>
 
         <div id="wcMenu" class="submenu submenu-panel{% if wc_expand %} is-open{% endif %}">
-{% if user and r in ['admin','analista','supervisor'] %}
+{% if can_access(user, 'mercado_publico.comparativa.nueva_carga') %}
           <a href="/cargas/nueva"
             class="submenu-link {% if request.url.path.startswith('/cargas/nueva') %}active{% endif %}">
             <span>Nueva carga</span>
           </a>
           {% endif %}
 
+          {% if can_access(user, 'mercado_publico.comparativa.nueva_carga_otras') %}
           <div class="px-3 mt-2 mb-1 text-uppercase submenu-section-title">
             Otras Fuentes
           </div>
@@ -830,11 +846,12 @@
             class="submenu-link {% if request.url.path.startswith('/otras-fuentes-externas') %}active{% endif %}">
             <span>Nueva carga</span>
           </a>
+          {% endif %}
 
           <!-- Separador -->
           <div class="my-2 border-top border-white opacity-10 mx-3"></div>
 
-          {% if user and r in ['admin','analista','supervisor','auditor'] %}
+          {% if can_access(user, 'mercado_publico.comparativa.historial') %}
           {% set is_hist =
           request.url.path.startswith('/cargas/historial')
           or request.url.path == '/historial'
@@ -853,24 +870,25 @@
           </a>
           {% endif %}
 
-          {% if user and r in ['admin','supervisor'] %}
+          {% if can_access(user, 'mercado_publico.comparativa.grupos') %}
           {% set is_groups = request.url.path.startswith('/grupos') %}
           <a href="/grupos" class="submenu-link {% if is_groups %}active{% endif %}">
             <span>Grupos</span>
           </a>
           {% endif %}
         </div>
+        {% endif %}
         <!-- ====== /Web Comparativa ====== -->
 
         
         <!-- ====== Lectura de Pliegos ====== -->
-        {% if user and r in ['admin','analista','supervisor','auditor','visor'] %}
+        {% if can_access(user, 'mercado_publico.lectura_pliegos') %}
         <a href="/mercado-publico/lectura-pliegos" class="nav-link {% if request.url.path.startswith('/mercado-publico/lectura-pliegos') %}active{% endif %}">
           <div><i class="bi bi-file-earmark-text"></i> Lectura de Pliegos</div>
         </a>
         {% endif %}
 <!-- ====== Oportunidades (submenú colapsable) ====== -->
-        {% if user and r in ['admin','analista','supervisor','auditor'] %}
+        {% if can_access(user, 'mercado_publico.oportunidades') %}
         <button type="button" class="nav-link nav-link-toggle d-flex align-items-center justify-content-between"
           data-submenu-target="#opMenu" aria-expanded="{{ 'true' if op_expand else 'false' }}" aria-controls="opMenu">
           <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
@@ -878,20 +896,24 @@
         </button>
 
         <div id="opMenu" class="submenu submenu-panel{% if op_expand %} is-open{% endif %}">
+          {% if can_access(user, 'mercado_publico.oportunidades.buscador') %}
           <a href="/oportunidades/buscador"
             class="submenu-link {% if request.url.path.startswith('/oportunidades/buscador') or request.url.path.startswith('/mercado-publico/oportunidades/buscador') %}active{% endif %}">
             <span>Buscador</span>
           </a>
+          {% endif %}
+          {% if can_access(user, 'mercado_publico.oportunidades.dimensiones') %}
           <a href="/oportunidades/dimensiones"
             class="submenu-link {% if request.url.path.startswith('/oportunidades/dimensiones') or request.url.path.startswith('/mercado-publico/oportunidades/dimensiones') %}active{% endif %}">
             <span>Dimensiones</span>
           </a>
+          {% endif %}
         </div>
         {% endif %}
         <!-- ====== /Oportunidades ====== -->
 
         <!-- Reporte perfiles -->
-        {% if user and r in ['admin','supervisor','auditor','analista','analyst'] %}
+        {% if can_access(user, 'mercado_publico.reporte_perfiles') %}
         <a href="/mercado-publico/reporte-perfiles"
           class="nav-link {% if request.url.path.startswith('/mercado-publico/reporte-perfiles') %}active{% endif %}">
           <div><i class="bi bi-file-earmark-bar-graph"></i> Reporte perfiles <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
@@ -901,7 +923,7 @@
         <!-- Mesa de ayuda -->
         <!-- Mesa de ayuda (SIC) -->
         {% if user %}
-        {% if (r in ['analista', 'supervisor', 'auditor']) %}
+        {% if can_access(user, 'mercado_publico.mesa_ayuda') and r != 'admin' %}
         <a href="/mercado-publico/helpdesk"
           class="nav-link d-flex align-items-center justify-content-between {% if request.url.path.startswith('/mercado-publico/helpdesk') %}active{% endif %}"
           title="Mesa de ayuda">
@@ -939,10 +961,8 @@
           <i class="bi bi-box-arrow-right"></i> Cerrar sesión
         </a>
         {% else %}
-        {% if r != 'gerente' %}
-        {% if r != 'analista' or (user.access_scope or '') == 'todos' %}
+        {% if can_switch_market(user) %}
         <a class="btn btn-outline-secondary sidebar-market-switch w-100 mb-2 btn-sm" href="/switch-market">Cambiar Mercado</a>
-        {% endif %}
         {% endif %}
         <a class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2"
           href="/logout">

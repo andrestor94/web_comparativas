@@ -15,6 +15,9 @@ from web_comparativas.auth import user_display
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+from web_comparativas.policy import can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 

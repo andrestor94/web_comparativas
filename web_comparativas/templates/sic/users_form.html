@@ -1,6 +1,38 @@
 {% extends "sic/base_sic.html" %}
 {% block title %}{{ 'Nuevo usuario' if is_new else 'Editar usuario' }} – S.I.C{% endblock %}
 
+{% block extra_css %}
+<style>
+  /* ====== Árbol "Acceso a módulos" — filas con interruptor (tema oscuro S.I.C) ====== */
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .acc-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
+    border:1px solid rgba(255,255,255,.07);border-radius:10px;
+    background:rgba(255,255,255,.02);cursor:pointer;margin-bottom:6px;
+    transition:background .15s,border-color .15s}
+  .acc-row:hover{border-color:rgba(124,131,232,.4)}
+  .acc-row.on{background:rgba(108,122,224,.14);border-color:rgba(108,122,224,.55)}
+  .acc-row.disabled{opacity:.4;cursor:not-allowed}
+  .acc-kids{margin-left:16px;padding-left:14px;border-left:1px solid rgba(255,255,255,.07)}
+  .acc-row .lbl{flex:1;color:#e7edf6;font-size:13px}
+  .acc-row.mod .lbl{font-size:14px;font-weight:600}
+  .acc-ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;
+    justify-content:center;background:rgba(255,255,255,.05);color:#9aa6b8;flex:0 0 auto}
+  .acc-row.on .acc-ic{color:#aab2f2}
+  .chev{color:#6b7689;transition:transform .15s;width:14px;text-align:center;flex:0 0 auto}
+  .collapsed>.acc-row .chev{transform:rotate(-90deg)}
+  .collapsed>.acc-kids{display:none}
+  .sw{width:38px;height:22px;border-radius:999px;background:rgba(255,255,255,.15);
+    position:relative;flex:0 0 auto;transition:background .15s}
+  .acc-row.on .sw{background:#6c7ae0}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
+    border-radius:50%;background:#fff;transition:left .15s}
+  .acc-row.on .sw::after{left:18px}
+  .acc-pill{font-size:11px;color:#aab2f2;border:1px solid rgba(108,122,224,.55);
+    border-radius:999px;padding:1px 7px;margin:0 8px}
+</style>
+{% endblock %}
+
 {% block content %}
 
 <div class="d-flex justify-content-center">
@@ -75,16 +107,19 @@
             <div class="span-12">
                 <label class="form-label text-white-50 small" for="role">Rol</label>
                 {% set r = (form.role or '')|lower %}
-                {# Normaliza 'visor' heredado como 'auditor' #}
+                {# Normaliza alias heredados #}
                 {% if r == 'visor' %}{% set r = 'auditor' %}{% endif %}
+                {% if r == 'manager' %}{% set r = 'gerente' %}{% endif %}
                 <select class="form-select form-select-sic" id="role" name="role" required>
                     <option value="admin" {% if r=='admin' %}selected{% endif %}>Administrador</option>
+                    <option value="gerente" {% if r=='gerente' %}selected{% endif %}>Gerente</option>
                     <option value="supervisor" {% if r=='supervisor' %}selected{% endif %}>Supervisor</option>
                     <option value="analista" {% if r=='analista' %}selected{% endif %}>Analista</option>
                     <option value="auditor" {% if r=='auditor' %}selected{% endif %}>Auditor</option>
                 </select>
                 <div class="text-white-50 small mt-1">
                     • <strong>Administrador:</strong> acceso total.<br>
+                    • <strong>Gerente:</strong> lectura total de todos los procesos, sin crear usuarios.<br>
                     • <strong>Supervisor:</strong> puede cargar y ver todo, sin crear usuarios.<br>
                     • <strong>Analista:</strong> puede cargar y ver solo sus procesos.<br>
                     • <strong>Auditor:</strong> solo lectura de todos los procesos.
@@ -110,18 +145,58 @@
                     pertenece.</div>
             </div>
 
-            {# ====== Apartado / Segmentación ====== #}
-            {% set scope_val = (form.access_scope or 'todos') %}
+            {# ====== Acceso a módulos / sub-secciones (árbol jerárquico) ====== #}
+            {# Semántica de marcado inicial (hojas):
+                 - form.module_access es None  -> sin configurar -> marcar TODO el techo del rol.
+                 - form.module_access es lista -> marcar solo las hojas de la lista.
+                 - form.module_access es []    -> ninguna marcada.
+               El JS de abajo: cascada padre→hijos, recálculo de ramas (Parcial) y, al
+               cambiar el rol, deshabilita/desmarca las hojas fuera del techo de ese rol. #}
+            {% set ma = form.module_access %}
+            {% macro render_node(node, ma, level) %}
+              {% set is_module = (level == 0) %}
+              {% if node.is_leaf %}
+                <div class="acc-node">
+                    <div class="acc-row leaf{% if is_module %} mod{% endif %}{% if ma is none or node.key in ma %} on{% endif %}"
+                        data-leaf="{{ node.key }}">
+                        {% if is_module and node.icon %}<span class="acc-ic"><i class="bi {{ node.icon }}"></i></span>{% endif %}
+                        <span class="lbl">{{ node.label }}</span>
+                        <span class="sw" aria-hidden="true"></span>
+                        {# Fuente de datos REAL: checkbox oculto (sr-only). name/value intactos. #}
+                        <input class="ma-leaf sr-only" type="checkbox" name="module_access"
+                            value="{{ node.key }}" id="ma_{{ node.key }}" tabindex="-1"
+                            {% if ma is none or node.key in ma %}checked{% endif %}>
+                    </div>
+                </div>
+              {% else %}
+                <div class="acc-node acc-branch collapsed" data-branch="{{ node.key }}">
+                    <div class="acc-row branch{% if is_module %} mod{% endif %}" data-branch-row="{{ node.key }}">
+                        <span class="chev"><i class="bi bi-chevron-down"></i></span>
+                        {% if is_module and node.icon %}<span class="acc-ic"><i class="bi {{ node.icon }}"></i></span>{% endif %}
+                        <span class="lbl">{{ node.label }}</span>
+                        <span class="acc-pill ma-partial" data-partial="{{ node.key }}" style="display:none;">Parcial</span>
+                        {# Interruptor de rama: derivado de las hojas (NO se envía). #}
+                        <span class="sw acc-branch-sw" data-branch-sw="{{ node.key }}" role="button" aria-hidden="true"></span>
+                    </div>
+                    <div class="acc-kids">
+                        {% for child in node.children %}{{ render_node(child, ma, level + 1) }}{% endfor %}
+                    </div>
+                </div>
+              {% endif %}
+            {% endmacro %}
             <div class="span-12">
-                <label class="form-label text-white-50 small" for="access_scope">Apartado (Alcance)</label>
-                <select class="form-select form-select-sic" id="access_scope" name="access_scope" required>
-                    <option value="todos" {% if scope_val=='todos' %}selected{% endif %}>Todos (Público + Privado)
-                    </option>
-                    <option value="publico" {% if scope_val=='publico' %}selected{% endif %}>Mercado Público</option>
-                    <option value="privado" {% if scope_val=='privado' %}selected{% endif %}>Mercado Privado</option>
-                </select>
-                <div class="text-white-50 small mt-1">Define si el usuario opera solo en un mercado específico o en
-                    ambos.</div>
+                <label class="form-label text-white-50 small">Acceso a módulos</label>
+                <div id="module-access-tree" class="acc-tree p-3 rounded-3"
+                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
+                    {% for node in nav_tree %}
+                    {{ render_node(node, ma, 0) }}
+                    {% endfor %}
+                </div>
+                <div class="text-white-50 small mt-1">
+                    Controla a qué secciones puede entrar el usuario. El rol define el máximo disponible;
+                    las secciones fuera del alcance del rol se deshabilitan automáticamente. El
+                    "Apartado (Alcance)" / página de inicio se deriva solo de los mercados concedidos.
+                </div>
             </div>
 
             <div class="span-12 d-flex gap-2">
@@ -176,6 +251,99 @@
     }
     pw.addEventListener('input', checkMatch);
     pc.addEventListener('input', checkMatch);
+})();
+
+// ── Acceso a módulos (filas con interruptor): cascada, ramas Parcial·X/Y, colapsar, techo de rol ──
+(function () {
+    var roleSelect = document.getElementById('role');
+    var tree = document.getElementById('module-access-tree');
+    if (!roleSelect || !tree) return;
+
+    // role_ceilings embebido: { rol: [keys de hoja permitidas...] }
+    var roleCeilings = {{ role_ceilings | tojson }};
+    var leaves = Array.prototype.slice.call(tree.querySelectorAll('.ma-leaf'));
+
+    function ceilingFor(role) { return roleCeilings[(role || '').toLowerCase()] || []; }
+    function leavesUnder(key) {
+        var box = tree.querySelector('.acc-node[data-branch="' + key + '"]');
+        return box ? Array.prototype.slice.call(box.querySelectorAll('.ma-leaf')) : [];
+    }
+    // Sincroniza la fila visual (clases .on/.disabled) con el estado del checkbox real.
+    function syncLeafRow(input) {
+        var row = input.closest('.acc-row');
+        if (!row) return;
+        row.classList.toggle('on', input.checked && !input.disabled);
+        row.classList.toggle('disabled', input.disabled);
+    }
+
+    // Recalcula cada rama: "on" si alguna hoja on; badge "Parcial · X/Y" si on parcial.
+    function recomputeBranches() {
+        var boxes = Array.prototype.slice.call(tree.querySelectorAll('.acc-node[data-branch]'));
+        boxes.forEach(function (box) {
+            var key = box.getAttribute('data-branch');
+            var kids = leavesUnder(key).filter(function (l) { return !l.disabled; });
+            var total = kids.length;
+            var on = kids.filter(function (l) { return l.checked; }).length;
+            var partial = on > 0 && on < total;
+            var row = box.querySelector('.acc-row.branch[data-branch-row="' + key + '"]');
+            if (row) {
+                row.classList.toggle('on', on > 0);
+                row.classList.toggle('disabled', total === 0);
+            }
+            var pill = tree.querySelector('.ma-partial[data-partial="' + key + '"]');
+            if (pill) {
+                if (partial) { pill.textContent = 'Parcial · ' + on + '/' + total; pill.style.display = ''; }
+                else { pill.style.display = 'none'; }
+            }
+        });
+    }
+
+    function toggleLeaf(row) {
+        var input = row.querySelector('.ma-leaf');
+        if (!input || input.disabled) return;
+        input.checked = !input.checked;
+        syncLeafRow(input);
+        recomputeBranches();
+    }
+    // Interruptor de rama: si alguna hoja habilitada está on → apaga todas; si no → prende todas.
+    function toggleBranch(key) {
+        var kids = leavesUnder(key).filter(function (l) { return !l.disabled; });
+        if (!kids.length) return;
+        var want = !kids.some(function (l) { return l.checked; });
+        kids.forEach(function (l) { l.checked = want; syncLeafRow(l); });
+        recomputeBranches();
+    }
+
+    tree.addEventListener('click', function (e) {
+        var sw = e.target.closest('.acc-branch-sw');
+        if (sw) { e.preventDefault(); e.stopPropagation(); toggleBranch(sw.getAttribute('data-branch-sw')); return; }
+        var leafRow = e.target.closest('.acc-row.leaf');
+        if (leafRow) { toggleLeaf(leafRow); return; }
+        var brRow = e.target.closest('.acc-row.branch');
+        if (brRow) { brRow.parentElement.classList.toggle('collapsed'); return; }
+    });
+
+    // Aplica el techo del rol a las hojas.
+    //  - resetChecked=true (cambio de rol): marca todas las hojas del techo.
+    //  - resetChecked=false (carga inicial): respeta el estado guardado del server.
+    function applyCeiling(resetChecked) {
+        var ceiling = ceilingFor(roleSelect.value);
+        leaves.forEach(function (l) {
+            var inCeiling = ceiling.indexOf(l.value) !== -1;
+            if (inCeiling) {
+                l.disabled = false;
+                if (resetChecked) l.checked = true;
+            } else {
+                l.checked = false;
+                l.disabled = true;
+            }
+            syncLeafRow(l);
+        });
+        recomputeBranches();
+    }
+
+    roleSelect.addEventListener('change', function () { applyCeiling(true); });
+    applyCeiling(false);
 })();
 </script>
 {% endblock %}

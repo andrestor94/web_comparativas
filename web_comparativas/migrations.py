@@ -45,6 +45,27 @@ def ensure_access_scope_column():
             print(f"[MIGRATION] Error intentando agregar columna: {e}", flush=True)
 
 
+def ensure_module_access_column():
+    """
+    Agrega la columna 'module_access' a la tabla 'users' si falta.
+
+    Almacena la lista de módulos a los que el usuario tiene acceso (JSON).
+    En SQLite se guarda como TEXT (SQLAlchemy serializa/deserializa el JSON);
+    en PostgreSQL TEXT también es válido para el mapeo JSON de SQLAlchemy.
+
+    IMPORTANTE: NO se escriben datos en filas existentes. Las filas quedan con
+    module_access = NULL, lo que en policy.can_access_module() significa
+    "acceso a TODO el techo de su rol" -> preserva el acceso de usuarios legacy.
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE users ADD COLUMN module_access TEXT",
+            "users.module_access",
+        )
+    print("[MIGRATION] Columna 'users.module_access' verificada/creada.", flush=True)
+
+
 def ensure_password_reset_columns():
     """
     MigraciÃ³n para el flujo de restablecimiento de contraseÃ±a corporativo.

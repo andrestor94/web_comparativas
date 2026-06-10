@@ -93,6 +93,8 @@ FUENTE ÚNICA DE VERDAD — MAPA DE FUNCIONES
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+from fastapi import Request, HTTPException
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
     from web_comparativas.models import Upload, User, Group
@@ -111,6 +113,10 @@ from web_comparativas.visibility_service import (
     uploads_visible_query,
     can_view_upload as _can_view_upload_data,
 )
+
+# Estructura declarativa del menú (única fuente de verdad de keys/roles/jerarquía)
+from web_comparativas import nav
+from web_comparativas.nav import MENU, MENU_BY_KEY, MODULES, TOP_LEVEL_KEYS
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -354,37 +360,215 @@ def can_add_member_to_group(actor, target_user: "User", group: "Group") -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Acción: Módulos — ACCESO
+# Acción: Módulos / Sub-secciones — ACCESO (jerárquico, basado en nav.MENU)
 # ──────────────────────────────────────────────────────────────────────────────
+#
+# Modelo:
+#   - El ROL define el TECHO de keys visibles (nav.MENU[key].roles + ancestros).
+#     admin y gerente/manager son UNIVERSALES (techo = todo el MENU).
+#   - El campo por-usuario User.module_access SOLO restringe dentro de ese techo:
+#       · NULL  → acceso completo a todas las hojas que su rol permita (legacy).
+#       · lista → set de keys de HOJA concedidas; efectivo = lista ∩ hojas-del-rol.
+#       · []    → sin acceso a ninguna hoja del catálogo.
+#
+# MODULES (catálogo top-level key→label) y la jerarquía vienen de nav (única fuente).
 
-# Módulos disponibles y sus roles permitidos
-_MODULE_ACCESS: dict[str, set[str]] = {
-    "sic":               ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
-    "dimensionamiento":  ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
-    "mercado_publico":   ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
-    "mercado_privado":   ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
-    "admin_usuarios":    ADMIN_ROLES,
-    "admin_grupos":      ADMIN_ROLES | SUPERVISOR_ROLES,
-    "reports":           ADMIN_ROLES | AUDITOR_ROLES | MANAGER_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
-    "helpdesk":          ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
+# Módulos admin-only / históricos que NO están en nav.MENU: se gobiernan SOLO por
+# rol (no por module_access), igual que siempre. No se tocan.
+_LEGACY_MODULE_ROLES: dict[str, set[str]] = {
+    "admin_usuarios": ADMIN_ROLES,
+    "admin_grupos":   ADMIN_ROLES | SUPERVISOR_ROLES,
+    "reports":        ADMIN_ROLES | AUDITOR_ROLES | MANAGER_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
+    "helpdesk":       ADMIN_ROLES | AUDITOR_ROLES | SUPERVISOR_ROLES | ANALYST_ROLES,
 }
+
+# Roles universales para el control por módulo: ven TODO el catálogo (techo = MENU).
+#   admin            → superusuario.
+#   gerente/manager  → lectura total (techo = todos los módulos, incluido S.I.C).
+# Lo que cada uno tiene DE VERDAD lo define module_access; el techo no recorta nada.
+_UNIVERSAL_MENU_ROLES = ADMIN_ROLES | MANAGER_ROLES
+
+
+def role_allows_key(role: str, key: str) -> bool:
+    """
+    ¿El rol `role` puede ver/acceder la `key`?
+    Chequea nav.MENU[key].roles Y los roles de todos sus ancestros.
+    admin y gerente/manager → universales (siempre True).
+    """
+    role_n = _norm(role)
+    if role_n in _UNIVERSAL_MENU_ROLES:
+        return True
+    item = MENU_BY_KEY.get(key)
+    if item is None:
+        return False
+    node = item
+    while node is not None:
+        roles = node.get("roles")
+        if roles is not None and role_n not in roles:
+            return False
+        parent = node.get("parent")
+        node = MENU_BY_KEY.get(parent) if parent else None
+    return True
+
+
+def role_allows(user, key: str) -> bool:
+    """Variante de role_allows_key sobre el objeto user."""
+    if not user:
+        return False
+    return role_allows_key(_role_of(user), key)
+
+
+def role_allowed_leaves(role: str) -> set[str]:
+    """Hojas del MENU que el rol `role` puede ver (techo de hojas del rol)."""
+    return {lk for lk in nav.leaf_keys() if role_allows_key(role, lk)}
+
+
+def granted_set(user) -> set[str]:
+    """
+    Hojas EFECTIVAMENTE concedidas al usuario:
+      - module_access NULL  → todas las hojas que su rol permita (legacy = completo).
+      - module_access lista → lista ∩ hojas-permitidas-por-rol.
+      - module_access []    → vacío.
+    """
+    if not user:
+        return set()
+    allowed = role_allowed_leaves(_role_of(user))
+    grant = getattr(user, "module_access", None)
+    if grant is None:
+        return allowed
+    try:
+        grant_set = {str(k).strip() for k in grant}
+    except TypeError:
+        return allowed  # valor corrupto → tratamos como sin configurar
+    return grant_set & allowed
+
+
+def can_access(user, key: str) -> bool:
+    """
+    ¿Puede `user` acceder a la `key` (hoja o rama)?
+      - Hoja → key ∈ granted_set.
+      - Rama → alguna hoja descendiente ∈ granted_set.
+    Siempre AND con role_allows (el techo del rol).
+    """
+    if not user or key not in MENU_BY_KEY:
+        return False
+    if not role_allows(user, key):
+        return False
+    gset = granted_set(user)
+    if nav.is_leaf(key):
+        return key in gset
+    return any(leaf in gset for leaf in nav.descendant_leaves(key))
 
 
 def can_access_module(user, module: str) -> bool:
     """
-    ¿Puede `user` acceder al módulo indicado?
-
-    Módulos válidos: 'sic', 'dimensionamiento', 'mercado_publico', 'mercado_privado',
-                     'admin_usuarios', 'admin_grupos', 'reports', 'helpdesk'.
-
+    Compatibilidad: acceso a un módulo top-level del catálogo (vía can_access),
+    o a un módulo admin-only histórico (solo por rol).
     Deny-by-default para módulos desconocidos.
     """
     if not user:
         return False
-    allowed_roles = _MODULE_ACCESS.get(module)
+    if module in MENU_BY_KEY:
+        return can_access(user, module)
+    allowed_roles = _LEGACY_MODULE_ROLES.get(module)
     if allowed_roles is None:
-        return False  # módulo desconocido → denegado
+        return False
     return _role_of(user) in allowed_roles
+
+
+def derive_access_scope(granted_leaves) -> str:
+    """
+    Deriva access_scope (routing post-login) a partir de las hojas concedidas:
+      - público y privado → "todos"
+      - solo público → "publico" ; solo privado → "privado"
+      - ninguno → "todos" (default seguro; el landing real lo decide
+        resolve_login_redirect según el rol).
+    """
+    keys = {str(k) for k in (granted_leaves or [])}
+    has_pub = any(k.startswith("mercado_publico") for k in keys)
+    has_priv = any(k.startswith("mercado_privado") for k in keys)
+    if has_pub and has_priv:
+        return "todos"
+    if has_pub:
+        return "publico"
+    if has_priv:
+        return "privado"
+    return "todos"
+
+
+def normalize_module_access(keys, role: str) -> list[str]:
+    """
+    Normaliza las keys recibidas del formulario:
+      = [k for k in keys if k es HOJA válida de MENU and role_allows_key(rol, k)]
+    Orden estable según nav.leaf_keys().
+    """
+    recibidas = {str(k).strip() for k in (keys or [])}
+    return [lk for lk in nav.leaf_keys() if lk in recibidas and role_allows_key(role, lk)]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dependencia FastAPI: exigir acceso a una key (módulo o sub-sección)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def require_perm(key: str):
+    """
+    Fábrica de dependencia FastAPI que exige acceso a la `key` del MENU.
+      - 401 si no hay sesión.
+      - 403 si not can_access(user, key).
+      - devuelve el User (drop-in de _require_user).
+    """
+    def _dep(request: Request):
+        user = getattr(request.state, "user", None)
+        if not user:
+            raise HTTPException(status_code=401, detail="No autenticado")
+        if not can_access(user, key):
+            raise HTTPException(status_code=403, detail="Sección no autorizada para este usuario.")
+        return user
+    return _dep
+
+
+# Alias retrocompatible: require_module(key) == require_perm(key).
+require_module = require_perm
+
+
+# Apartados top-level (criterio ÚNICO): S.I.C cuenta como un apartado más, igual que
+# los mercados, forecast e indicadores. Una sola lista y un solo contador para todo
+# (Suite /markets, botón "Cambiar Mercado", "Volver a SIEM").
+_TOP_KEYS = ["sic", "mercado_publico", "mercado_privado", "forecast", "indicadores_comerciales"]
+
+
+def accessible_top_count(user) -> int:
+    """Cuántos apartados top-level (S.I.C incluido) puede abrir el user."""
+    if not user:
+        return 0
+    return sum(1 for k in _TOP_KEYS if can_access(user, k))
+
+
+def can_switch_market(user) -> bool:
+    """True si el user puede entrar a 2+ apartados top-level (hay algo entre qué cambiar)."""
+    return accessible_top_count(user) >= 2
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers para el FORMULARIO de permisos (templates/sic/users_form.html)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Roles ofrecidos en el <select> de Rol del formulario (clave canónica).
+FORM_ROLES: list[str] = ["admin", "gerente", "supervisor", "analista", "auditor"]
+
+
+def role_ceilings_map() -> dict[str, list[str]]:
+    """
+    {rol: [keys de hoja que ese rol puede tener]} para los roles del formulario.
+    El JS lo usa para habilitar/deshabilitar hojas al cambiar el rol.
+    admin y gerente → todas las hojas (universales).
+    """
+    return {r: sorted(role_allowed_leaves(r)) for r in FORM_ROLES}
+
+
+def form_nav_tree() -> list[dict]:
+    """Árbol anidado del MENU para construir el árbol de checkboxes del formulario."""
+    return nav.menu_tree()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -445,20 +629,44 @@ def validate_user_config(user) -> list[str]:
     return errors
 
 
+def first_accessible_url(user) -> str:
+    """
+    Primera URL del MENU (hojas EN ORDEN de definición) a la que `user` tiene acceso
+    real (can_access = role_allows + granted_set). Es la landing correcta para roles
+    restringidos: cae en la primera sección que SÍ puede abrir, sin mandarlo a una que
+    le daría 403.
+
+    Fallback "/mi/password" (siempre accesible) si no puede entrar a ninguna sección.
+    """
+    if not user:
+        return "/mi/password"
+    for key in nav.leaf_keys():
+        if can_access(user, key):
+            url = MENU_BY_KEY.get(key, {}).get("url")
+            if url:
+                return url
+    return "/mi/password"
+
+
 def resolve_login_redirect(user) -> str:
     """
-    Determina la URL de destino después del login según rol y access_scope.
+    Determina la URL de destino después del login según rol.
 
     Regla única para el redirect post-login — NO duplicar esta lógica en rutas.
     """
     if not user:
         return "/login"
     role = _role_of(user)
-    scope = _norm(getattr(user, "access_scope", None) or "todos")
 
     if role in (ANALYST_ROLES | SUPERVISOR_ROLES):
-        if scope in ("privado", "mercado_privado"):
-            return "/mercado-privado"
-        return "/mercado-publico"  # default seguro para analista/supervisor
+        # Landing derivada del MENU: primera sección accesible (respeta module_access).
+        return first_accessible_url(user)
 
-    return "/"  # Admin, Auditor, Manager → panel general
+    # Roles "universales" (admin/auditor/gerente/manager): el panel general "/" solo sirve
+    # de landing para quien puede ver el contexto público. Con module_access ACOTADO
+    # (no NULL) la landing debe ser su primera sección accesible; con NULL (acceso total)
+    # va a "/" como siempre.
+    if getattr(user, "module_access", None) is not None:
+        return first_accessible_url(user)
+
+    return "/"  # acceso total (module_access NULL) → panel general

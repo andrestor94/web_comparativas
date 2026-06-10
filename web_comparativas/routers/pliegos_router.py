@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
-from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
+from web_comparativas.policy import require_module as _require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import IntegrityError
@@ -76,6 +77,8 @@ logger.setLevel(logging.DEBUG)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 
 def _jinja_safe_text(value) -> str:
@@ -526,6 +529,7 @@ def lectura_pliegos_lista(
     q: str = "",
     deleted: str = "",
     delete_error: str = "",
+    _mod: "User" = Depends(_require_module("mercado_publico.lectura_pliegos")),
 ):
     blocked = _require_user(request)
     if blocked:

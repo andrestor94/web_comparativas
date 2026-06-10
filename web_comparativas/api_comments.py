@@ -773,6 +773,9 @@ async def stream(upload_id: str, request: Request):
 # UI (bandeja)  ->  /comentarios
 # ============================================================================
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+from web_comparativas.policy import can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 def _user_for_template(request: Request):
     """

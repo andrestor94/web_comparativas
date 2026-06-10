@@ -9,18 +9,29 @@ from sqlalchemy import func, or_
 
 from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember
 from web_comparativas.auth import user_display, hash_password, verify_password
+from web_comparativas.policy import (
+    require_perm, normalize_module_access, derive_access_scope,
+    role_ceilings_map, form_nav_tree, FORM_ROLES, can_access as _can_access_tpl,
+    can_switch_market as _can_switch_market_tpl,
+)
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
 from web_comparativas.notifications_service import create_notification
 
 # Setup templates
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["can_access"] = _can_access_tpl
+templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 # Create Router
 router = APIRouter(prefix="/sic", tags=["sic"])
 
 # Roles que pueden acceder al módulo S.I.C.
-_SIC_ALLOWED_ROLES = {"admin", "auditor", "supervisor", "analista"}
+_SIC_ALLOWED_ROLES = {"admin", "auditor", "supervisor", "analista", "gerente", "manager"}
+# Roles cuyo acceso al shell de S.I.C exige tener al menos una sección S.I.C concedida
+# (module_access). Ver nota en sic_access_required.
+_SIC_REQUIRE_GRANT_ROLES = {"gerente", "manager"}
+
 
 # --- Security Dependency ---
 def sic_access_required(request: Request) -> User:
@@ -30,6 +41,13 @@ def sic_access_required(request: Request) -> User:
     - Requiere rol dentro de _SIC_ALLOWED_ROLES → 403 si el rol no está permitido.
     - El contenido visible dentro de cada endpoint se restringe según el rol
       (admin/auditor ven todo; supervisor/analista ven solo lo propio).
+
+    Nota (gerente/manager): a diferencia de los roles históricos —que entran al shell
+    solo por rol y cuyo control fino lo dan los require_perm donde existen—, NO todas las
+    rutas /sic/* tienen require_perm. Para no abrir /sic/* a un gerente SIN S.I.C
+    concedido, exigimos que gerente/manager tengan al menos una sección S.I.C en su
+    module_access (can_access(user, 'sic')). El control por sección sigue dándolo
+    require_perm en las rutas que lo tienen.
     """
     user: User = getattr(request.state, "user", None)
     if not user:
@@ -38,6 +56,9 @@ def sic_access_required(request: Request) -> User:
     role = (user.role or "").strip().lower()
     if role not in _SIC_ALLOWED_ROLES:
         raise HTTPException(status_code=403, detail="S.I.C.: rol no autorizado.")
+
+    if role in _SIC_REQUIRE_GRANT_ROLES and not _can_access_tpl(user, "sic"):
+        raise HTTPException(status_code=403, detail="S.I.C.: sin secciones concedidas.")
 
     return user
 
@@ -53,7 +74,8 @@ def sic_home(request: Request, user: User = Depends(sic_access_required)):
     return templates.TemplateResponse("sic/home.html", ctx)
 
 @router.get("/helpdesk", response_class=HTMLResponse)
-def sic_helpdesk(request: Request, user: User = Depends(sic_access_required)):
+def sic_helpdesk(request: Request, user: User = Depends(sic_access_required),
+                 _perm: User = Depends(require_perm("sic.mesa_ayuda"))):
     # Admin y Auditor ven todos los tickets; el resto solo los propios.
     full_access_roles = {"admin", "auditor"}
     user_role = (user.role or "").strip().lower()
@@ -557,7 +579,8 @@ def sic_helpdesk_delete(
 
 # --- TRACKING ---
 @router.get("/tracking", response_class=HTMLResponse)
-def sic_tracking(request: Request, user: User = Depends(sic_access_required)):
+def sic_tracking(request: Request, user: User = Depends(sic_access_required),
+                 _perm: User = Depends(require_perm("sic.seguimiento"))):
     import json as _json_mod
     user_role = (user.role or "").lower()
     has_access = user_role in ["admin", "supervisor", "auditor"]
@@ -1003,7 +1026,8 @@ def sic_api_usage_live_users(
 # --- USERS MANAGEMENT ---
 
 @router.get("/users", response_class=HTMLResponse)
-def sic_users_list(request: Request, user: User = Depends(sic_access_required)):
+def sic_users_list(request: Request, user: User = Depends(sic_access_required),
+                   _perm: User = Depends(require_perm("sic.usuarios"))):
     error = None
     users = []
     try:
@@ -1060,6 +1084,7 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         role="analista",
         unit_business="Otros",
         access_scope="todos", # Default
+        module_access=None,  # None → en alta el template marca todo el techo del rol
     )
     
     # Capture error from redirect and map to friendly message
@@ -1085,7 +1110,10 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         "business_units": business_units,
         "section": "users",
         "is_admin": is_admin,
-        "error": err
+        "error": err,
+        "nav_tree": form_nav_tree(),
+        "role_ceilings": role_ceilings_map(),
+        "form_roles": FORM_ROLES,
     }
     return templates.TemplateResponse("sic/users_form.html", ctx)
 
@@ -1098,7 +1126,7 @@ def sic_users_create(
     password: str = Form(""),
     password_confirm: str = Form(""),
     unit_business: str = Form("Otros"),
-    access_scope: str = Form("todos"),
+    module_access: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     # Enforce admin
@@ -1128,6 +1156,9 @@ def sic_users_create(
         if exists:
             return RedirectResponse("/sic/users/new?err=email_existe", status_code=303)
 
+        modulos_ok = normalize_module_access(module_access, role)
+        scope_ok = derive_access_scope(modulos_ok)
+
         u = User(
             email=email,
             name=(name or "").strip() or email.split("@")[0],
@@ -1135,7 +1166,8 @@ def sic_users_create(
             password_hash=hash_password(password),
             created_at=dt.datetime.utcnow(),
             unit_business=unit_ok,
-            access_scope=access_scope,
+            access_scope=scope_ok,
+            module_access=modulos_ok,
         )
         db_session.add(u)
         db_session.commit()
@@ -1178,7 +1210,10 @@ def sic_users_edit(
         "allow_edit_email": False,
         "business_units": business_units,
         "section": "users",
-        "is_admin": is_admin
+        "is_admin": is_admin,
+        "nav_tree": form_nav_tree(),
+        "role_ceilings": role_ceilings_map(),
+        "form_roles": FORM_ROLES,
     }
     return templates.TemplateResponse("sic/users_form.html", ctx)
 
@@ -1189,7 +1224,7 @@ def sic_users_update(
     name: str = Form(""),
     role: str = Form("analista"),
     unit_business: str = Form("Otros"),
-    access_scope: str = Form("todos"),
+    module_access: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     if "admin" not in (user.role or "").lower():
@@ -1200,13 +1235,17 @@ def sic_users_update(
         return RedirectResponse("/sic/users?err=not_found", status_code=303)
 
     unit_ok = normalize_unit_business(unit_business)
+    role_ok = (role or "").strip().lower()
+    modulos_ok = normalize_module_access(module_access, role_ok)
+    scope_ok = derive_access_scope(modulos_ok)
 
     try:
         u.name = (name or "").strip()
-        u.role = (role or "").strip().lower()
+        u.role = role_ok
         if hasattr(u, "unit_business"):
             u.unit_business = unit_ok
-        u.access_scope = access_scope
+        u.access_scope = scope_ok
+        u.module_access = modulos_ok
         db_session.commit()
         return RedirectResponse("/sic/users?ok=updated", status_code=303)
     except Exception as e:
@@ -1290,7 +1329,8 @@ def sic_password_resets_count(request: Request, user: User = Depends(sic_access_
 
 
 @router.get("/password-resets", response_class=HTMLResponse)
-def sic_password_resets_list(request: Request, user: User = Depends(sic_access_required)):
+def sic_password_resets_list(request: Request, user: User = Depends(sic_access_required),
+                             _perm: User = Depends(require_perm("sic.contrasenas"))):
     if "admin" not in (user.role or "").lower():
         return RedirectResponse("/sic/", status_code=303)
 
