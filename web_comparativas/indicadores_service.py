@@ -11,7 +11,10 @@ import logging
 import time
 import unicodedata
 
-from web_comparativas.indicadores_db import get_etl_db, get_fusion_db
+from sqlalchemy import bindparam, text
+
+from web_comparativas.indicadores_db import get_etl_db, get_fusion_db, _indicadores_summary_available
+from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.svc")
 
@@ -282,6 +285,110 @@ def _build_grouped_query(cadneg: Optional[str]) -> tuple:
     return QUERY_GROUPED_ROWS.format(cadneg_filter=cadneg_filter), params
 
 
+# ---------------------------------------------------------------------------
+# RAMA FLAG ON — lectura desde tablas summary PUBLICADAS (SQLite local / Postgres prod).
+# SQL idéntico al validado A/B contra el vivo (ventana 2025-06..2026-06: 0 huérfanos,
+# 0 diffs en 2048 claves detalle + 792 agrupado, conjuntos SUM(DISTINCT) idénticos).
+# cliente_grupo/nombre_cliente van CONGELADOS del summary (no se re-joinea dbo.clientes).
+# Nota de tipo: CAST(... AS FLOAT) == CAST(... AS REAL) en SQLite (misma afinidad, igual
+# que el script de validación); en PostgreSQL FLOAT es doble precisión (REAL sería float4).
+# NO toca la rama OFF.
+# ---------------------------------------------------------------------------
+
+_RENTNEG_DETALLE_SUMMARY_SQL = """
+SELECT
+    ctacte            AS "Cliente",
+    cliente_grupo     AS "Cliente_Grupo",
+    nombre_cliente    AS "Nombre_Cliente_Grupo",
+    fecha,
+    articulo          AS "Articulo",
+    cadneg            AS "Negocio",
+    SUM(CAST(COALESCE(cant, 0) AS FLOAT))    AS "Unidades",
+    SUM(CAST(COALESCE(importe, 0) AS FLOAT)) AS "Facturacion",
+    SUM(CAST(COALESCE(renta1, 0) AS FLOAT))  AS "Utilidad",
+    CASE WHEN SUM(CAST(COALESCE(importe, 0) AS FLOAT)) = 0 THEN NULL
+         ELSE SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
+    END AS "Rentabilidad"
+FROM ind_rentabilidad_lineas
+WHERE fecha >= :desde AND fecha < :hasta
+  AND UPPER(LTRIM(RTRIM(COALESCE(comprob, '')))) <> 'NC'
+  AND cadneg IN :cadnegs
+  AND CAST(renta1 AS FLOAT) < 0
+  {cadneg_filter}
+GROUP BY ctacte, cliente_grupo, nombre_cliente, fecha, articulo, cadneg
+HAVING SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) < 0
+ORDER BY fecha DESC, "Utilidad" ASC
+"""
+
+_RENTNEG_AGRUPADO_SUMMARY_SQL = """
+SELECT
+    ctacte            AS "Cliente",
+    cliente_grupo     AS "Cliente_Grupo",
+    nombre_cliente    AS "Nombre_Cliente_Grupo",
+    substr(CAST(fecha AS VARCHAR(32)), 1, 7) || '-01' AS fecha,
+    articulo          AS "Articulo",
+    MIN(cadneg)       AS "Negocio",
+    SUM(CAST(COALESCE(cant, 0) AS FLOAT))             AS "Unidades",
+    SUM(CAST(COALESCE(importe, 0) AS FLOAT))          AS "Facturacion",
+    SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT))  AS "Utilidad",
+    CASE WHEN SUM(CAST(COALESCE(importe, 0) AS FLOAT)) = 0 THEN NULL
+         ELSE SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
+    END AS "Rentabilidad"
+FROM ind_rentabilidad_lineas
+WHERE fecha >= :desde AND fecha < :hasta
+  AND UPPER(LTRIM(RTRIM(COALESCE(comprob, '')))) <> 'NC'
+  AND cadneg IN :cadnegs
+  {cadneg_filter}
+GROUP BY ctacte, cliente_grupo, nombre_cliente, substr(CAST(fecha AS VARCHAR(32)), 1, 7) || '-01', articulo
+HAVING SUM(CAST(COALESCE(importe, 0) AS FLOAT)) <> 0
+   AND SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT)) < 0
+ORDER BY fecha DESC, "Utilidad" ASC
+"""
+
+
+def _fetch_rentneg_summary(desde: date, hasta: date, cadneg: Optional[str], grouped: bool) -> list:
+    """Rama ON de QUERY_NEGATIVE_ROWS / QUERY_GROUPED_ROWS sobre ind_rentabilidad_lineas.
+    Mismo shape que el vivo (la columna fecha del modo agrupado sale como 'YYYY-MM-01',
+    que _date_text deja idéntico al DATEFROMPARTS del vivo). Respeta cadneg_filter."""
+    sql_tpl = _RENTNEG_AGRUPADO_SUMMARY_SQL if grouped else _RENTNEG_DETALLE_SUMMARY_SQL
+    params = {"desde": desde, "hasta": hasta, "cadnegs": list(CADNEG_VALUES)}
+    cadneg_filter = ""
+    if cadneg:
+        cadneg_filter = "AND LTRIM(RTRIM(cadneg)) = :cad"
+        params["cad"] = cadneg.strip()
+    stmt = text(sql_tpl.format(cadneg_filter=cadneg_filter)).bindparams(
+        bindparam("cadnegs", expanding=True)
+    )
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(stmt, params)]
+
+
+def _get_article_map_summary(articulos: list) -> dict:
+    """Rama ON de get_article_map: atributos desde ind_articulos (no Fusion en vivo).
+    Mismo shape y mismos fallbacks que la rama OFF, incluido principio_activo."""
+    arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
+    if not arts:
+        return {}
+    article_map = {}
+    stmt = text(
+        "SELECT articulo, marca, laboratorio, principio_activo, familia "
+        "FROM ind_articulos WHERE articulo IN :arts"
+    ).bindparams(bindparam("arts", expanding=True))
+    try:
+        with engine.connect() as conn:
+            for items in _chunk(arts):
+                for articulo, marca, laboratorio, principio_activo, familia in conn.execute(stmt, {"arts": items}):
+                    article_map[str(int(articulo))] = {
+                        "marca": _norm_text(marca) or str(int(articulo)),
+                        "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",
+                        "principio_activo": _norm_text(principio_activo) or "",
+                        "familia": _norm_text(familia) or "SIN FAMILIA",
+                    }
+    except Exception:
+        pass
+    return article_map
+
+
 def get_health() -> dict:
     result = {"status": "ok", "etl": False, "fusion": False, "error": None}
     try:
@@ -307,6 +414,8 @@ def get_health() -> dict:
 def get_article_map(articulos: list) -> dict:
     if not articulos:
         return {}
+    if _indicadores_summary_available("ind_articulos"):
+        return _get_article_map_summary(articulos)
     article_map = {}
     try:
         with get_fusion_db() as conn:
@@ -352,10 +461,13 @@ def get_rows(
         laboratorio or "-", familia or "-", cliente or "-", cadneg or "-",
     )
 
-    with get_etl_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, [desde, hasta, *extra_params])
-        raw_rows = _rows_to_dicts(cursor)
+    if _indicadores_summary_available("ind_rentabilidad_lineas"):
+        raw_rows = _fetch_rentneg_summary(desde, hasta, cadneg=cadneg, grouped=grouped_mode)
+    else:
+        with get_etl_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, [desde, hasta, *extra_params])
+            raw_rows = _rows_to_dicts(cursor)
 
     logger.info("get_rows: ETL raw_rows=%d (%.1fs)", len(raw_rows), time.monotonic() - t0)
 

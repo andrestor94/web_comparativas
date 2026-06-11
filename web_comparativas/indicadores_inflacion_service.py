@@ -16,11 +16,14 @@ import io
 import logging
 import ssl
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 from urllib.request import Request, urlopen
 
-from web_comparativas.indicadores_db import get_db, get_sales_db
+from sqlalchemy import bindparam, text
+
+from web_comparativas.indicadores_db import get_db, get_sales_db, _indicadores_summary_available
+from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.inf")
 
@@ -419,10 +422,193 @@ def get_indec_ipc_evolucion(desde: date, hasta: date) -> list:
 
 
 # ---------------------------------------------------------------------------
+# RAMA FLAG ON — lectura desde tablas summary PUBLICADas (SQLite local / Postgres prod).
+# Replica la lógica validada en 4B-1 (facturación) y 4B-2 (PVP). NO toca la rama OFF.
+# El gate _indicadores_summary_available() es postgres-only (igual que FORECAST): en
+# local el routing queda en OFF; estas funciones se validan llamándolas directo.
+# ---------------------------------------------------------------------------
+
+def _mes_lo_hi(desde: date, hasta: date) -> "tuple[str, str]":
+    """Ventana [desde, hasta) -> etiquetas 'YYYY-MM' inclusivas. mes_hi sobre (hasta-1d)
+    para que un 'hasta' a primero de mes NO incluya ese mes (coherente con fecha < hasta)."""
+    return desde.strftime("%Y-%m"), (hasta - timedelta(days=1)).strftime("%Y-%m")
+
+
+def _get_facturacion_por_articulo_summary(desde: date, hasta: date, cadneg: Optional[str] = None) -> dict:
+    """Rama ON de _get_facturacion_por_articulo: SUM por articulo desde el summary."""
+    mes_lo, mes_hi = _mes_lo_hi(desde, hasta)
+    sql = ("SELECT articulo, SUM(unidades) AS unidades, "
+           "SUM(facturacion) AS facturacion, MAX(cadneg) AS cadneg "
+           "FROM ind_inflacion_facturacion_mensual "
+           "WHERE mes >= :lo AND mes <= :hi ")
+    params = {"lo": mes_lo, "hi": mes_hi}
+    if cadneg:
+        sql += "AND LTRIM(RTRIM(cadneg)) = :cad "
+        params["cad"] = cadneg.strip()
+    sql += "GROUP BY articulo"
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(text(sql), params)]
+    return {
+        str(int(r["articulo"])): {
+            "unidades": float(r["unidades"]) if r.get("unidades") is not None else 0,
+            "facturacion": float(r["facturacion"]) if r.get("facturacion") is not None else 0,
+            "cadneg": (r.get("cadneg") or "").strip() or None,
+            "negocio": CADNEG_LABELS.get((r.get("cadneg") or "").strip()),
+        }
+        for r in rows
+    }
+
+
+def _get_facturacion_mensual_summary(desde: date, hasta: date, articulos: list) -> list:
+    """Rama ON de get_facturacion_mensual: SUM por articulo×mes desde el summary."""
+    arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
+    if not arts:
+        return []
+    mes_lo, mes_hi = _mes_lo_hi(desde, hasta)
+    stmt = text(
+        "SELECT articulo, mes, SUM(unidades) AS unidades, SUM(facturacion) AS facturacion "
+        "FROM ind_inflacion_facturacion_mensual "
+        "WHERE mes >= :lo AND mes <= :hi AND articulo IN :arts "
+        "GROUP BY articulo, mes ORDER BY articulo, mes"
+    ).bindparams(bindparam("arts", expanding=True))
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(stmt, {"lo": mes_lo, "hi": mes_hi, "arts": arts})]
+    # Mismo shape que el vivo: articulo string, mes string, unidades/facturacion float.
+    return [
+        {
+            "articulo": str(int(r["articulo"])),
+            "mes": r["mes"],
+            "unidades": float(r["unidades"]) if r.get("unidades") is not None else 0.0,
+            "facturacion": float(r["facturacion"]) if r.get("facturacion") is not None else 0.0,
+        }
+        for r in rows
+    ]
+
+
+def _snap_date(value):
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _last_le(snaps: list, cut: date):
+    """De [(fecha_snapshot, pvp), ...] devuelve (pvp, fecha) del MAX fecha_snapshot <= cut.
+    Día-exacto, replicando 'último prepubact con fecha <= corte' del SQL vivo."""
+    best = None
+    for fs, pvp in snaps:
+        if fs is not None and fs <= cut and (best is None or fs > best[1]):
+            best = (pvp, fs)
+    return best if best else (None, None)
+
+
+def _datediff_month(fecha_i: date, cut_ini: date) -> int:
+    return (cut_ini.year * 12 + cut_ini.month) - (fecha_i.year * 12 + fecha_i.month)
+
+
+def _calc_pvp(pvp_i, fecha_i, pvp_f, cut_ini: date):
+    """Replica estado_calculo / es_comparable / variacion_pvp de QUERY_PRODUCTOS."""
+    # estado_calculo
+    if pvp_i is None and pvp_f is not None:
+        estado = "ALTA_PERIODO_SIN_PRECIO_INICIAL"
+    elif pvp_i is not None and pvp_f is None:
+        estado = "SIN_PRECIO_FINAL"
+    elif pvp_i is None and pvp_f is None:
+        estado = "SIN_PRECIOS"
+    elif pvp_i is not None and pvp_f is not None and fecha_i is not None and _datediff_month(fecha_i, cut_ini) > 8:
+        estado = "ALTA_REINCORPORADO"
+    elif pvp_i == pvp_f:
+        estado = "COMPARABLE_SIN_CAMBIO"
+    elif pvp_f > pvp_i:
+        estado = "COMPARABLE_CON_AUMENTO"
+    elif pvp_f < pvp_i:
+        estado = "COMPARABLE_CON_BAJA"
+    else:
+        estado = "REVISAR"
+    # es_comparable / variacion_pvp
+    if pvp_i is None or pvp_f is None or pvp_i < 1 or fecha_i is None or _datediff_month(fecha_i, cut_ini) > 8:
+        return estado, 0, None
+    return estado, 1, (float(pvp_f) / float(pvp_i)) - 1.0
+
+
+def _build_pvp_rows_from_summary(desde: date, hasta: date) -> list:
+    """Reconstruye las filas de QUERY_PRODUCTOS (pre-enriquecimiento) desde el summary.
+    Universo unineg=2 + descripcion/laboratorio desde ind_articulos; pvp desde
+    ind_inflacion_pvp_mensual (último snapshot <= corte, día-exacto)."""
+    with engine.connect() as conn:
+        arts = conn.execute(text(
+            "SELECT articulo, descripcion, laboratorio FROM ind_articulos WHERE unineg = 2"
+        )).fetchall()
+        pvp_raw = conn.execute(text(
+            "SELECT articulo, fecha_snapshot, pvp FROM ind_inflacion_pvp_mensual"
+        )).fetchall()
+
+    snaps_by_art: dict = {}
+    for art, fs, pvp in pvp_raw:
+        snaps_by_art.setdefault(int(art), []).append(
+            (_snap_date(fs), float(pvp) if pvp is not None else None))
+
+    rows = []
+    for art, descripcion, laboratorio in arts:
+        snaps = snaps_by_art.get(int(art), [])
+        pvp_i, fecha_i = _last_le(snaps, desde)
+        pvp_f, fecha_f = _last_le(snaps, hasta)
+        estado, es_comp, var = _calc_pvp(pvp_i, fecha_i, pvp_f, desde)
+        rows.append({
+            "articulo": int(art),
+            "descripcion": descripcion,
+            "laboratorio": laboratorio,
+            "fecha_inicial": fecha_i.isoformat() if fecha_i else None,
+            "pvp_inicial": pvp_i,
+            "fecha_final": fecha_f.isoformat() if fecha_f else None,
+            "pvp_final": pvp_f,
+            "estado_calculo": estado,
+            "es_comparable": es_comp,
+            "variacion_pvp": var,
+        })
+    return rows
+
+
+def _get_productos_summary(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+    fact_desde: Optional[date] = None,
+    fact_hasta: Optional[date] = None,
+) -> list:
+    """Rama ON de get_productos. Mismo enriquecimiento y filtros que la rama OFF, pero
+    PVP desde ind_inflacion_pvp_mensual y facturación desde el summary (no del vivo).
+    fact_desde/fact_hasta desacoplan la ventana de facturación de los cortes de PVP."""
+    rows = _build_pvp_rows_from_summary(desde, hasta)
+    facturacion = _get_facturacion_por_articulo_summary(fact_desde or desde, fact_hasta or hasta, cadneg=cadneg)
+    for row in rows:
+        ventas = facturacion.get(str(row.get("articulo")).strip(), {})
+        row["unidades"] = ventas.get("unidades", 0)
+        row["facturacion"] = ventas.get("facturacion", 0)
+        row["cadneg"] = ventas.get("cadneg") or cadneg
+        row["negocio"] = ventas.get("negocio") or CADNEG_LABELS.get(cadneg or "")
+        row["tiene_facturacion"] = 1 if row["facturacion"] and row["facturacion"] > 0 else 0
+
+    if cadneg:
+        rows = [r for r in rows if (r.get("facturacion") or 0) > 0]
+    if search:
+        q = search.upper()
+        rows = [r for r in rows if q in (r.get("descripcion") or "").upper()]
+    if laboratorio:
+        rows = [r for r in rows if (r.get("laboratorio") or "").upper() == laboratorio.upper()]
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Facturación (ponderación)
 # ---------------------------------------------------------------------------
 
 def _get_facturacion_por_articulo(desde: date, hasta: date, cadneg: Optional[str] = None) -> dict:
+    if _indicadores_summary_available("ind_inflacion_facturacion_mensual"):
+        return _get_facturacion_por_articulo_summary(desde, hasta, cadneg)
     params = [str(desde), str(hasta)]
     cadneg_filter = ""
     if cadneg:
@@ -450,6 +636,8 @@ def _get_facturacion_por_articulo(desde: date, hasta: date, cadneg: Optional[str
 
 
 def get_facturacion_mensual(desde: date, hasta: date, articulos: list) -> list:
+    if _indicadores_summary_available("ind_inflacion_facturacion_mensual"):
+        return _get_facturacion_mensual_summary(desde, hasta, articulos)
     articulos = [str(a).strip() for a in articulos if str(a).strip()]
     if not articulos:
         return []
@@ -472,7 +660,17 @@ def get_productos(
     laboratorio: Optional[str] = None,
     search: Optional[str] = None,
     cadneg: Optional[str] = None,
+    fact_desde: Optional[date] = None,
+    fact_hasta: Optional[date] = None,
 ) -> list:
+    # fact_desde/fact_hasta: ventana de facturación desacoplada de los cortes de PVP.
+    # Default = (desde, hasta) => las llamadas del usuario quedan idénticas. La serie
+    # mensual (get_evolucion) la usa para que PVP corte a fin de mes y la facturación
+    # cubra el mes calendario completo.
+    if _indicadores_summary_available("ind_inflacion_pvp_mensual"):
+        return _get_productos_summary(desde, hasta, laboratorio=laboratorio, search=search,
+                                      cadneg=cadneg, fact_desde=fact_desde, fact_hasta=fact_hasta)
+
     t0 = time.monotonic()
     logger.info("inflacion get_productos: START desde=%s hasta=%s", desde, hasta)
 
@@ -483,7 +681,7 @@ def get_productos(
 
     logger.info("inflacion get_productos: raw=%d (%.1fs)", len(rows), time.monotonic() - t0)
 
-    facturacion = _get_facturacion_por_articulo(desde, hasta, cadneg=cadneg)
+    facturacion = _get_facturacion_por_articulo(fact_desde or desde, fact_hasta or hasta, cadneg=cadneg)
     for row in rows:
         ventas = facturacion.get(str(row.get("articulo")).strip(), {})
         row["unidades"] = ventas.get("unidades", 0)
@@ -514,8 +712,11 @@ def get_resumen(
     laboratorio: Optional[str] = None,
     search: Optional[str] = None,
     cadneg: Optional[str] = None,
+    fact_desde: Optional[date] = None,
+    fact_hasta: Optional[date] = None,
 ) -> dict:
-    productos = get_productos(desde, hasta, laboratorio=laboratorio, search=search, cadneg=cadneg)
+    productos = get_productos(desde, hasta, laboratorio=laboratorio, search=search, cadneg=cadneg,
+                              fact_desde=fact_desde, fact_hasta=fact_hasta)
 
     comparables = [p for p in productos if p["es_comparable"] == 1]
     productos_facturados = [p for p in productos if (p.get("facturacion") or 0) > 0]
@@ -639,7 +840,14 @@ def get_evolucion(
         else:
             siguiente = date(cursor_mes.year, cursor_mes.month + 1, 1)
 
-        resumen = get_resumen(cursor_mes, siguiente, laboratorio=laboratorio, search=search, cadneg=cadneg)
+        # Convención FIN DE MES para la serie: el PVP del mes se corta al ÚLTIMO día
+        # del mes anterior (inicial) y al último día del mes (final), así el summary
+        # —que guarda el último snapshot mensual— reproduce exacto al vivo. La facturación
+        # sigue cubriendo el mes calendario completo [primero, primero del siguiente).
+        corte_ini = cursor_mes - timedelta(days=1)   # último día del mes anterior
+        corte_fin = siguiente - timedelta(days=1)     # último día de este mes
+        resumen = get_resumen(corte_ini, corte_fin, laboratorio=laboratorio, search=search,
+                              cadneg=cadneg, fact_desde=cursor_mes, fact_hasta=siguiente)
         resultados.append({
             "mes": cursor_mes.strftime("%Y-%m"),
             "inflacion_pvp_indice": resumen["inflacion_pvp_indice"],

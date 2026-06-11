@@ -10,7 +10,10 @@ from datetime import date
 from typing import Iterable, Optional
 import unicodedata
 
-from web_comparativas.indicadores_db import get_etl_db, get_fusion_db
+from sqlalchemy import bindparam, text
+
+from web_comparativas.indicadores_db import get_etl_db, get_fusion_db, _indicadores_summary_available
+from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.lab")
 
@@ -196,6 +199,75 @@ def _build_sales_query(cadneg: Optional[str]) -> tuple:
     return QUERY_SALES.format(cadneg_filter=cadneg_filter, cliente_filter=""), params
 
 
+# ---------------------------------------------------------------------------
+# RAMA FLAG ON — lectura desde tablas summary PUBLICADAS (SQLite local / Postgres prod).
+# Validada A/B contra el vivo (ventana 2025-06..2026-06: total global idéntico, 0 diffs
+# en claves comunes; huérfanos esperables porque cliente_grupo/nombre_cliente quedan
+# CONGELADOS al extract — comportamiento aceptado). NO toca la rama OFF.
+# ---------------------------------------------------------------------------
+
+def _fetch_sales_summary(desde: date, hasta: date, cadneg: Optional[str] = None) -> list:
+    """Rama ON de QUERY_SALES: agrega ind_rentabilidad_lineas con la MISMA lógica —
+    SUM(cant) por cliente_grupo × nombre_cliente × mes × articulo, mismo universo
+    (cadneg 2-x OR artículos monitoreados), mismo HAVING SUM(cant)<>0 y mismo filtro
+    opcional de cadneg. cliente_grupo/nombre_cliente salen TAL CUAL del summary
+    (congelados al extract): NO se re-joinea dbo.clientes. Mismo shape que el vivo."""
+    sql = (
+        'SELECT cliente_grupo AS "Grupo_Cliente", '
+        'nombre_cliente AS "Nombre_Grupo_Cliente", '
+        'substr(CAST(fecha AS VARCHAR(32)), 1, 7) AS mes, '
+        'articulo AS "Articulo", '
+        'SUM(CAST(cant AS FLOAT)) AS "Unidades" '
+        "FROM ind_rentabilidad_lineas "
+        "WHERE fecha >= :desde AND fecha < :hasta "
+        "AND (cadneg IN :cadnegs OR articulo IN :extras) "
+    )
+    params = {
+        "desde": desde,
+        "hasta": hasta,
+        "cadnegs": list(CADNEG_VALUES),
+        "extras": [int(a) for a in MONITORED_EXTRA_ARTICLES],
+    }
+    if cadneg:
+        sql += "AND LTRIM(RTRIM(cadneg)) = :cad "
+        params["cad"] = cadneg.strip()
+    sql += (
+        "GROUP BY cliente_grupo, nombre_cliente, substr(CAST(fecha AS VARCHAR(32)), 1, 7), articulo "
+        "HAVING SUM(CAST(cant AS FLOAT)) <> 0 "
+        "ORDER BY mes, articulo"
+    )
+    stmt = text(sql).bindparams(
+        bindparam("cadnegs", expanding=True),
+        bindparam("extras", expanding=True),
+    )
+    with engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(stmt, params)]
+
+
+def _get_article_map_summary(articulos: list) -> dict:
+    """Rama ON de get_article_map: marca/laboratorio/familia desde ind_articulos
+    (no desde vsl_art_alfabeta_full en vivo). Mismo shape y mismos fallbacks."""
+    arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
+    if not arts:
+        return {}
+    article_map = {}
+    stmt = text(
+        "SELECT articulo, marca, laboratorio, familia FROM ind_articulos WHERE articulo IN :arts"
+    ).bindparams(bindparam("arts", expanding=True))
+    try:
+        with engine.connect() as conn:
+            for items in _chunk(arts):
+                for articulo, marca, laboratorio, familia in conn.execute(stmt, {"arts": items}):
+                    article_map[str(int(articulo))] = {
+                        "marca": _norm_text(marca) or str(int(articulo)),
+                        "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",
+                        "familia": _norm_text(familia) or "SIN FAMILIA",
+                    }
+    except Exception:
+        pass
+    return article_map
+
+
 def get_health() -> dict:
     result = {"status": "ok", "etl": False, "fusion": False, "error": None}
     try:
@@ -221,6 +293,8 @@ def get_health() -> dict:
 def get_article_map(articulos: list) -> dict:
     if not articulos:
         return {}
+    if _indicadores_summary_available("ind_articulos"):
+        return _get_article_map_summary(articulos)
     article_map = {}
     try:
         with get_fusion_db() as conn:
@@ -251,11 +325,14 @@ def get_rows(
     t0 = time.monotonic()
     logger.info("lab get_rows: START desde=%s hasta=%s lab=%s cadneg=%s", desde, hasta, laboratorio or "-", cadneg or "-")
 
-    query, extra_params = _build_sales_query(cadneg=cadneg)
-    with get_etl_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, [desde, hasta, *extra_params])
-        sales_rows = _rows_to_dicts(cursor)
+    if _indicadores_summary_available("ind_rentabilidad_lineas"):
+        sales_rows = _fetch_sales_summary(desde, hasta, cadneg=cadneg)
+    else:
+        query, extra_params = _build_sales_query(cadneg=cadneg)
+        with get_etl_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, [desde, hasta, *extra_params])
+            sales_rows = _rows_to_dicts(cursor)
 
     logger.info("lab get_rows: raw=%d (%.1fs)", len(sales_rows), time.monotonic() - t0)
 
