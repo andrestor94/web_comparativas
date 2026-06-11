@@ -7,8 +7,11 @@ No modifica app.db ni depende de pyodbc (usa el puente sqlclient).
 from contextlib import contextmanager
 from datetime import date, datetime
 import json
+import os
 from pathlib import Path
 import subprocess
+import threading
+import time
 import uuid
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -266,3 +269,50 @@ def is_available() -> bool:
 # Aliases para el servicio de Inflación, que usa nombres distintos
 get_db = get_fusion_db
 get_sales_db = get_etl_db
+
+
+# ── Gate de tablas summary publicadas (kill-switch INDICADORES_USE_SUMMARY) ────
+# Replica EXACTAMENTE el cableado de forecast_service._forecast_summary_available:
+# motor PostgreSQL + flag de entorno no apagado + la tabla existe, con cache TTL
+# corto bajo lock para no pegarle a information_schema en cada request.
+#
+# Diferencia deliberada respecto de FORECAST_USE_SUMMARY: el default acá es OFF
+# (FASE 1, esquema recién creado, ETL todavía sin poblar). FORECAST_USE_SUMMARY
+# arranca en "1" (on); INDICADORES_USE_SUMMARY arranca en "0" (False) por consigna.
+#
+# Inerte en FASE 1: ningún endpoint del módulo lo consume todavía.
+_IND_SUMMARY_AVAIL_CACHE: dict = {}        # table -> (checked_monotonic, bool)
+_IND_SUMMARY_AVAIL_TTL = 60.0              # TTL corto: levanta tablas recién publicadas
+_IND_SUMMARY_AVAIL_LOCK = threading.Lock()
+
+
+def _indicadores_summary_available(table: str = "ind_rentabilidad_lineas") -> bool:
+    """True si: INDICADORES_USE_SUMMARY encendido + la tabla publicada existe.
+
+    Kill-switch: INDICADORES_USE_SUMMARY in {0,false,no,off} (default) -> fuerza el
+    camino crudo (lectura directa de SQL Server vía bridge). Con el flag encendido,
+    routea al summary tanto en PostgreSQL (prod) como en SQLite (local) — la existencia
+    de la tabla se chequea de forma agnóstica al dialecto (inspect.has_table), con cache
+    TTL corto. La rama OFF (flag apagado) queda idéntica en cualquier motor.
+    """
+    try:
+        from web_comparativas.models import engine
+    except Exception:
+        return False
+    if engine is None:
+        return False
+    if os.environ.get("INDICADORES_USE_SUMMARY", "0").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    now = time.monotonic()
+    with _IND_SUMMARY_AVAIL_LOCK:
+        entry = _IND_SUMMARY_AVAIL_CACHE.get(table)
+        if entry and (now - entry[0]) < _IND_SUMMARY_AVAIL_TTL:
+            return entry[1]
+    try:
+        from sqlalchemy import inspect as _sa_inspect
+        exists = _sa_inspect(engine).has_table(table)
+    except Exception:
+        exists = False
+    with _IND_SUMMARY_AVAIL_LOCK:
+        _IND_SUMMARY_AVAIL_CACHE[table] = (now, exists)
+    return exists
