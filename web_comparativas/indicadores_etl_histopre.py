@@ -67,6 +67,20 @@ FROM base WHERE rn = 1 ORDER BY articulo;
 # altas que entren durante la corrida. Sin parámetros => sin el problema de DATEFORMAT.
 QUERY_MAX_IDHISTO = "SELECT MAX(idhisto) AS max_idhisto FROM dbo.histopre;"
 
+# Meses tocados por filas NUEVAS (idhisto > watermark), con los MISMOS filtros de la
+# extracción (prepubact >= 1): un idhisto nuevo solo afecta el agregado del mes de su
+# fecha, así el incremental refresca únicamente esos meses. idhisto es IDENTITY (PK),
+# el rango idhisto > @wm es un range scan barato.
+QUERY_MESES_IDHISTO_NUEVO = """
+DECLARE @wm BIGINT = ?;
+SELECT DISTINCT CONVERT(CHAR(7), fecha, 120) AS mes
+FROM dbo.histopre
+WHERE idhisto > @wm
+  AND fecha IS NOT NULL
+  AND prepubact IS NOT NULL
+  AND prepubact >= 1;
+"""
+
 _Q4 = Decimal("0.0001")
 
 
@@ -101,6 +115,33 @@ def max_idhisto_global():
         cursor.execute(QUERY_MAX_IDHISTO)
         row = cursor.fetchone()
     return row[0] if row else None
+
+
+def meses_con_idhisto_nuevo(watermark: int) -> list:
+    """Meses 'YYYY-MM' tocados por filas con idhisto > watermark (consumidor del incremental)."""
+    with get_fusion_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(QUERY_MESES_IDHISTO_NUEVO, [watermark])
+        return [r[0] for r in cursor.fetchall() if r and r[0]]
+
+
+def leer_control() -> "dict | None":
+    """Watermark + ventana persistidos en ind_etl_control (fuente='histopre'), o None.
+
+    Primer consumidor real del watermark que la carga base escribe desde siempre.
+    """
+    session = SessionLocal()
+    try:
+        row = session.query(IndEtlControl).filter_by(fuente="histopre").first()
+        if row is None:
+            return None
+        return {
+            "watermark_idhisto": row.watermark_idhisto,
+            "ventana_desde": row.ventana_desde,
+            "ventana_hasta": row.ventana_hasta,
+        }
+    finally:
+        session.close()
 
 
 def clear_run(import_run_id: int) -> int:

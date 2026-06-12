@@ -162,6 +162,74 @@ def run_base_load(ventana_desde: date, ventana_hasta: date, *, import_run_id: in
     return len(objetos)
 
 
+def _labels_meses(desde: date, hasta: date) -> list:
+    """Etiquetas 'YYYY-MM' de los meses calendario en [desde, hasta)."""
+    labels = []
+    cur = date(desde.year, desde.month, 1)
+    while cur < hasta:
+        labels.append(cur.strftime("%Y-%m"))
+        cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
+    return labels
+
+
+def run_incremental_refresh(ventana_desde: date, ventana_hasta: date, *, import_run_id: int) -> int:
+    """Refresh INCREMENTAL: borra SOLO los meses de [ventana_desde, ventana_hasta) DE ESTA
+    corrida y reinserta el re-agregado fresco, en una misma transacción.
+
+    A diferencia de run_base_load NO hace clear_run total ni toca ind_etl_control (la
+    ventana publicada de la corrida es más amplia que la refrescada; el control lo sigue
+    escribiendo solo la carga base). Mismas guardas de calidad que la carga base, más una
+    guarda de ventana: si el SQL devolviera un mes fuera del rango, ese mes no habría sido
+    borrado antes y el insert lo duplicaría/colisionaría — se corta con error.
+    """
+    Base.metadata.create_all(bind=engine)
+    labels = _labels_meses(ventana_desde, ventana_hasta)
+    print(f"[ETL factur] refresh incremental corrida={import_run_id}  meses={labels}", flush=True)
+
+    t0 = time.monotonic()
+    rows = fetch_facturacion(ventana_desde, ventana_hasta)
+    dt_q = time.monotonic() - t0
+    print(f"[ETL factur] filas devueltas por SQL: {len(rows)}  tiempo_query={dt_q:.1f}s", flush=True)
+
+    bad_art = [r.get("articulo") for r in rows
+               if not (str(r.get("articulo") or "").strip().lstrip("-").isdigit())]
+    null_cadneg = sum(1 for r in rows if (r.get("cadneg") is None or str(r.get("cadneg")).strip() == ""))
+    if bad_art:
+        raise RuntimeError(f"[ETL factur] {len(bad_art)} articulos no numéricos. Muestra: {bad_art[:10]}")
+    if null_cadneg:
+        raise RuntimeError(f"[ETL factur] {null_cadneg} filas con cadneg NULL/vacío (clave natural articulo+cadneg+mes).")
+    fuera = [r.get("mes") for r in rows if r.get("mes") not in set(labels)]
+    if fuera:
+        raise RuntimeError(f"[ETL factur] {len(fuera)} filas con mes fuera de la ventana de refresh. Muestra: {fuera[:5]}")
+
+    objetos = [
+        IndInflacionFacturacionMensual(
+            articulo=int(str(r["articulo"]).strip()),
+            cadneg=str(r["cadneg"]).strip(),
+            mes=r["mes"],
+            unidades=(float(r["unidades"]) if r.get("unidades") is not None else None),
+            facturacion=_to_decimal(r.get("facturacion")),
+            import_run_id=import_run_id,
+        )
+        for r in rows
+    ]
+    session = SessionLocal()
+    try:
+        borradas = (session.query(IndInflacionFacturacionMensual)
+                           .filter(IndInflacionFacturacionMensual.mes.in_(labels),
+                                   IndInflacionFacturacionMensual.import_run_id == import_run_id)
+                           .delete(synchronize_session=False))
+        session.bulk_save_objects(objetos)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    print(f"[ETL factur] refresh: {borradas} filas borradas, {len(objetos)} reinsertadas", flush=True)
+    return len(objetos)
+
+
 def _ventana_meses(n: int, hoy: date) -> "tuple[date, date]":
     """[primer día de (mes_actual - n) .. primer día del mes actual)."""
     hasta = date(hoy.year, hoy.month, 1)
