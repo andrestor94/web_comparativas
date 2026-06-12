@@ -618,6 +618,9 @@ from web_comparativas.api_comments import router as comments_router
 from web_comparativas.routers.forecast_router import router as forecast_router
 from web_comparativas.routers.mercado_publico_perfiles_router import router as perfiles_router
 from web_comparativas.routers.mercado_privado_perfiles_router import router as perfiles_privado_router
+# Import/aprobación de Indicadores: SIEMPRE registrado (token + guard admin), como
+# dimensiones_router. NO confundir con indicadores_router (consulta, local-only, abajo).
+from web_comparativas.routers.indicadores_import_router import router as indicadores_import_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
@@ -627,6 +630,7 @@ app.include_router(comments_router)
 app.include_router(forecast_router)
 app.include_router(perfiles_router)
 app.include_router(perfiles_privado_router)
+app.include_router(indicadores_import_router)
 
 # === INDICADORES COMERCIALES (solo local) ===
 # Registro condicional y resiliente:
