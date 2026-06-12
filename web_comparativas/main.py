@@ -86,6 +86,7 @@ from web_comparativas.migrations import (
     backfill_comparativa_rows,
     ensure_dimensionamiento_valorizacion_columns,
     ensure_dimensionamiento_composite_constraints,
+    ensure_indicadores_schema_v2,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -212,6 +213,15 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: dimensionamiento summary perf indexes ensured.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning dimensionamiento summary perf indexes: {e}", flush=True)
+
+    # Esquema v2 de Indicadores: DEBE correr ANTES de create_all — dropea las
+    # tablas ind_* de datos con esquema viejo (sin import_run_id) SOLO si están
+    # vacías, para que create_all las recree con el esquema nuevo.
+    try:
+        ensure_indicadores_schema_v2()
+        print("[MIGRATION] SUCCESS: indicadores schema v2 checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning indicadores schema v2: {e}", flush=True)
 
     # Crear tablas nuevas del módulo Lectura de Pliegos (y cualquier tabla pendiente)
     try:

@@ -1628,3 +1628,71 @@ def ensure_dimensionamiento_composite_constraints():
         print(f"[MIGRATION][DIAG] Error diagnostico final snapshots: {e}", flush=True)
 
 
+
+def ensure_indicadores_schema_v2(target_engine=None):
+    """Recrea las tablas ind_* de DATOS que quedaron con esquema VIEJO (sin
+    import_run_id) tras el deploy del patrón de corridas, y limpia las _staging
+    huérfanas. DEBE correr ANTES de Base.metadata.create_all: create_all no
+    altera tablas existentes, así que acá se DROPEAN las viejas (solo si están
+    VACÍAS) para que create_all las recree con el esquema nuevo.
+
+    Guards (idempotente y a prueba de datos):
+      - tabla no existe                  -> skip (create_all la creará).
+      - tabla ya tiene import_run_id    -> skip (ya migrada).
+      - tabla vieja CON filas           -> NO SE TOCA (warning: migración manual).
+      - tabla vieja vacía               -> DROP.
+      - _staging huérfanas: DROP solo si vacías (create_all NO las recrea).
+    Nunca crashea el arranque: cualquier error se loguea y se sigue.
+    """
+    _PFX = "[MIGRATION ind-schema-v2]"
+    eng = target_engine if target_engine is not None else engine
+    TABLAS_DATOS = [
+        "ind_rentabilidad_lineas",
+        "ind_inflacion_pvp_mensual",
+        "ind_inflacion_facturacion_mensual",
+        "ind_articulos",
+    ]
+    TABLAS_STAGING_HUERFANAS = [
+        "ind_articulos_staging",
+        "ind_rentabilidad_lineas_staging",
+    ]
+    try:
+        insp = inspect(eng)
+        existentes = set(insp.get_table_names())
+
+        def _count(tabla: str) -> int:
+            with eng.connect() as conn:
+                return conn.execute(text(f"SELECT COUNT(*) FROM {tabla}")).scalar() or 0
+
+        for tabla in TABLAS_DATOS:
+            if tabla not in existentes:
+                print(f"{_PFX} {tabla}: no existe, skip (create_all la creará).", flush=True)
+                continue
+            columnas = {c["name"] for c in insp.get_columns(tabla)}
+            if "import_run_id" in columnas:
+                print(f"{_PFX} {tabla}: ya migrada (tiene import_run_id), skip.", flush=True)
+                continue
+            n = _count(tabla)
+            if n > 0:
+                print(f"{_PFX} WARNING: {tabla} tiene esquema viejo y {n} filas — "
+                      f"NO se dropea; requiere migración manual.", flush=True)
+                continue
+            with eng.begin() as conn:
+                conn.execute(text(f"DROP TABLE {tabla}"))
+            print(f"{_PFX} {tabla}: esquema viejo y vacía -> DROP "
+                  f"(create_all la recrea con import_run_id).", flush=True)
+
+        for tabla in TABLAS_STAGING_HUERFANAS:
+            if tabla not in existentes:
+                print(f"{_PFX} {tabla}: no existe, skip.", flush=True)
+                continue
+            n = _count(tabla)
+            if n > 0:
+                print(f"{_PFX} WARNING: {tabla} (staging huérfana) tiene {n} filas — "
+                      f"NO se dropea; revisar a mano.", flush=True)
+                continue
+            with eng.begin() as conn:
+                conn.execute(text(f"DROP TABLE {tabla}"))
+            print(f"{_PFX} {tabla}: staging huérfana vacía -> DROP.", flush=True)
+    except Exception as e:
+        print(f"{_PFX} ERROR (la app sigue, no se crashea el arranque): {e}", flush=True)
