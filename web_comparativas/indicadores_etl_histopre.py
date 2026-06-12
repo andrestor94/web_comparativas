@@ -5,13 +5,13 @@ append-only). La agregación se hace EN SQL SERVER (un mes por consulta, para re
 el timeout del bridge); las fechas vuelven ya formateadas como texto desde el SQL para
 evitar el /Date(epoch)/ que produce ConvertTo-Json en el puente PowerShell.
 
-FASE 2: escribe SOLO en ind_inflacion_pvp_mensual_STAGING (SQLite local). NO toca la
-tabla publicada ni ind_etl_control. El MAX(idhisto) del rango es informativo y NO se
-persiste todavía.
+Patrón de corridas: escribe en ind_inflacion_pvp_mensual etiquetando cada fila con el
+import_run_id recibido (corrida creada en ind_import_run por indicadores_etl_runner).
+No toca filas de otras corridas. El watermark global (MAX(idhisto)) se persiste en
+ind_etl_control en la carga base, igual que antes.
 
-Uso:
-    python web_comparativas/indicadores_etl_histopre.py            # 3 meses completos + recientes
-    python web_comparativas/indicadores_etl_histopre.py 2026-03 3  # desde 2026-03, 3 meses
+Uso (normalmente vía web_comparativas/indicadores_etl_runner.py):
+    python web_comparativas/indicadores_etl_histopre.py base 36 <import_run_id>
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from web_comparativas.indicadores_db import get_fusion_db
 # Registramos los modelos summary y tomamos el engine/Session locales (SQLite).
 import web_comparativas.indicadores_summary_models  # noqa: F401
 from web_comparativas.indicadores_summary_models import (
-    IndInflacionPvpMensualStaging,
+    IndInflacionPvpMensual,
     IndEtlControl,
 )
 from web_comparativas.models import Base, engine, SessionLocal
@@ -103,11 +103,13 @@ def max_idhisto_global():
     return row[0] if row else None
 
 
-def clear_staging() -> int:
-    """Borra TODO ind_inflacion_pvp_mensual_staging (solo staging). Devuelve filas borradas."""
+def clear_run(import_run_id: int) -> int:
+    """Borra las filas de ESTA corrida en ind_inflacion_pvp_mensual (no toca otras corridas)."""
     session = SessionLocal()
     try:
-        n = session.query(IndInflacionPvpMensualStaging).delete()
+        n = (session.query(IndInflacionPvpMensual)
+                    .filter_by(import_run_id=import_run_id)
+                    .delete(synchronize_session=False))
         session.commit()
         return n
     finally:
@@ -133,17 +135,20 @@ def persist_watermark(watermark, ventana_desde: date, ventana_hasta: date, filas
         session.close()
 
 
-def write_month_to_staging(mes: str, rows: list) -> int:
-    """Borra el mes en staging y reinserta (idempotente). Devuelve filas escritas."""
+def write_month(mes: str, rows: list, import_run_id: int) -> int:
+    """Borra el mes DE ESTA CORRIDA y reinserta etiquetado (idempotente dentro de la corrida)."""
     session = SessionLocal()
     try:
-        session.query(IndInflacionPvpMensualStaging).filter_by(mes=mes).delete()
+        (session.query(IndInflacionPvpMensual)
+                .filter_by(mes=mes, import_run_id=import_run_id)
+                .delete(synchronize_session=False))
         objetos = [
-            IndInflacionPvpMensualStaging(
+            IndInflacionPvpMensual(
                 articulo=int(r["articulo"]),
                 mes=r["mes"],
                 fecha_snapshot=date.fromisoformat(r["fecha_snapshot"]) if r.get("fecha_snapshot") else None,
                 pvp=_to_decimal(r.get("pvp")),
+                import_run_id=import_run_id,
             )
             for r in rows
         ]
@@ -157,10 +162,10 @@ def write_month_to_staging(mes: str, rows: list) -> int:
         session.close()
 
 
-def run(meses: list) -> None:
+def run(meses: list, import_run_id: int) -> int:
     """meses: lista de (inicio_mes: date, fin_mes: date, mes_label: str)."""
-    Base.metadata.create_all(bind=engine)  # idempotente; asegura staging local
-    print(f"[ETL histopre] DB destino (staging): {engine.url}", flush=True)
+    Base.metadata.create_all(bind=engine)  # idempotente; asegura tablas locales
+    print(f"[ETL histopre] DB destino: {engine.url}  corrida={import_run_id}", flush=True)
     print(f"[ETL histopre] Meses a procesar: {[m[2] for m in meses]}", flush=True)
 
     total_escritas = 0
@@ -168,43 +173,45 @@ def run(meses: list) -> None:
         t0 = time.monotonic()
         rows = process_month(inicio, fin)
         dt_q = time.monotonic() - t0
-        escritas = write_month_to_staging(label, rows)
+        escritas = write_month(label, rows, import_run_id)
         total_escritas += escritas
         print(
-            f"[ETL histopre] mes={label}  filas={len(rows)}  escritas_staging={escritas}  "
+            f"[ETL histopre] mes={label}  filas={len(rows)}  escritas={escritas}  "
             f"tiempo_query={dt_q:.1f}s",
             flush=True,
         )
 
     session = SessionLocal()
     try:
-        total_staging = session.query(IndInflacionPvpMensualStaging).count()
+        total_corrida = (session.query(IndInflacionPvpMensual)
+                                .filter_by(import_run_id=import_run_id).count())
     finally:
         session.close()
 
     print("[ETL histopre] ---------------- RESUMEN SMOKE TEST ----------------", flush=True)
-    print(f"[ETL histopre] filas escritas en esta corrida: {total_escritas}", flush=True)
-    print(f"[ETL histopre] total filas en ind_inflacion_pvp_mensual_staging: {total_staging}", flush=True)
+    print(f"[ETL histopre] filas escritas en esta ejecución: {total_escritas}", flush=True)
+    print(f"[ETL histopre] total filas de la corrida en ind_inflacion_pvp_mensual: {total_corrida}", flush=True)
     print(f"[ETL histopre] MAX(idhisto) global (informativo, NO persistido): {max_idhisto_global()}", flush=True)
+    return total_escritas
 
 
-def run_base_load(n_meses: int = 36, hoy: "date | None" = None) -> None:
-    """Carga base: watermark global al inicio, limpia staging, loop de n_meses, persiste control."""
+def run_base_load(n_meses: int = 36, hoy: "date | None" = None, *, import_run_id: int) -> int:
+    """Carga base: watermark global al inicio, limpia la corrida, loop de n_meses, persiste control."""
     hoy = hoy or date.today()
-    Base.metadata.create_all(bind=engine)  # idempotente; asegura staging + control locales
+    Base.metadata.create_all(bind=engine)  # idempotente; asegura tablas + control locales
     meses = _ultimos_meses_completos(n_meses, hoy)
     ventana_desde = meses[0][0]
     ventana_hasta = date(hoy.year, hoy.month, 1)  # primer día del mes actual
 
-    print(f"[ETL histopre] DB destino (staging): {engine.url}", flush=True)
+    print(f"[ETL histopre] DB destino: {engine.url}  corrida={import_run_id}", flush=True)
     print(f"[ETL histopre] Ventana retención: {n_meses} meses  [{ventana_desde} .. {ventana_hasta})", flush=True)
 
     # PASO 5: watermark global tomado AL INICIO (no perder altas durante el ETL).
     watermark = max_idhisto_global()
     print(f"[ETL histopre] watermark_idhisto (MAX global al inicio): {watermark}", flush=True)
 
-    borradas = clear_staging()
-    print(f"[ETL histopre] staging limpiado: {borradas} filas borradas", flush=True)
+    borradas = clear_run(import_run_id)
+    print(f"[ETL histopre] corrida limpiada: {borradas} filas borradas", flush=True)
 
     t_total0 = time.monotonic()
     total_escritas = 0
@@ -212,10 +219,10 @@ def run_base_load(n_meses: int = 36, hoy: "date | None" = None) -> None:
         t0 = time.monotonic()
         rows = process_month(inicio, fin)
         dt_q = time.monotonic() - t0
-        escritas = write_month_to_staging(label, rows)
+        escritas = write_month(label, rows, import_run_id)
         total_escritas += escritas
         print(
-            f"[ETL histopre] mes={label}  filas={len(rows)}  escritas_staging={escritas}  "
+            f"[ETL histopre] mes={label}  filas={len(rows)}  escritas={escritas}  "
             f"tiempo_query={dt_q:.1f}s",
             flush=True,
         )
@@ -223,7 +230,8 @@ def run_base_load(n_meses: int = 36, hoy: "date | None" = None) -> None:
 
     session = SessionLocal()
     try:
-        total_staging = session.query(IndInflacionPvpMensualStaging).count()
+        total_corrida = (session.query(IndInflacionPvpMensual)
+                                .filter_by(import_run_id=import_run_id).count())
     finally:
         session.close()
 
@@ -231,10 +239,11 @@ def run_base_load(n_meses: int = 36, hoy: "date | None" = None) -> None:
 
     print("[ETL histopre] ---------------- RESUMEN CARGA BASE ----------------", flush=True)
     print(f"[ETL histopre] meses procesados: {len(meses)}", flush=True)
-    print(f"[ETL histopre] filas escritas en esta corrida: {total_escritas}", flush=True)
-    print(f"[ETL histopre] total filas en ind_inflacion_pvp_mensual_staging: {total_staging}", flush=True)
+    print(f"[ETL histopre] filas escritas en esta ejecución: {total_escritas}", flush=True)
+    print(f"[ETL histopre] total filas de la corrida en ind_inflacion_pvp_mensual: {total_corrida}", flush=True)
     print(f"[ETL histopre] tiempo total loop: {t_total:.1f}s", flush=True)
     print(f"[ETL histopre] watermark persistido en ind_etl_control (fuente='histopre'): {watermark}", flush=True)
+    return total_escritas
 
 
 def _ultimos_meses_completos(n: int, hoy: date) -> list:
@@ -252,22 +261,14 @@ def _ultimos_meses_completos(n: int, hoy: date) -> list:
 
 def main(argv: list) -> None:
     if argv and argv[0] == "base":
-        n = int(argv[1]) if len(argv) >= 2 else 36
-        run_base_load(n_meses=n)
+        if len(argv) < 3:
+            print("Falta import_run_id: python ...etl_histopre.py base <n_meses> <import_run_id>")
+            print("(normalmente se ejecuta vía web_comparativas/indicadores_etl_runner.py)")
+            raise SystemExit(2)
+        run_base_load(n_meses=int(argv[1]), import_run_id=int(argv[2]))
         return
-    if len(argv) >= 2:
-        y, m = argv[0].split("-")
-        inicio0 = date(int(y), int(m), 1)
-        n = int(argv[1])
-        meses = []
-        cur = inicio0
-        for _ in range(n):
-            nxt = _add_month(cur)
-            meses.append((cur, nxt, cur.strftime("%Y-%m")))
-            cur = nxt
-    else:
-        meses = _ultimos_meses_completos(3, date.today())
-    run(meses)
+    print("Ejecutar vía web_comparativas/indicadores_etl_runner.py (requiere import_run_id).")
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":

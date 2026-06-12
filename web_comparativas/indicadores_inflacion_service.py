@@ -22,7 +22,12 @@ from urllib.request import Request, urlopen
 
 from sqlalchemy import bindparam, text
 
-from web_comparativas.indicadores_db import get_db, get_sales_db, _indicadores_summary_available
+from web_comparativas.indicadores_db import (
+    get_db,
+    get_sales_db,
+    _corrida_activa,
+    _indicadores_summary_available,
+)
 from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.inf")
@@ -435,13 +440,17 @@ def _mes_lo_hi(desde: date, hasta: date) -> "tuple[str, str]":
 
 
 def _get_facturacion_por_articulo_summary(desde: date, hasta: date, cadneg: Optional[str] = None) -> dict:
-    """Rama ON de _get_facturacion_por_articulo: SUM por articulo desde el summary."""
+    """Rama ON de _get_facturacion_por_articulo: SUM por articulo desde el summary.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return {}
     mes_lo, mes_hi = _mes_lo_hi(desde, hasta)
     sql = ("SELECT articulo, SUM(unidades) AS unidades, "
            "SUM(facturacion) AS facturacion, MAX(cadneg) AS cadneg "
            "FROM ind_inflacion_facturacion_mensual "
-           "WHERE mes >= :lo AND mes <= :hi ")
-    params = {"lo": mes_lo, "hi": mes_hi}
+           "WHERE import_run_id = :corrida AND mes >= :lo AND mes <= :hi ")
+    params = {"corrida": corrida, "lo": mes_lo, "hi": mes_hi}
     if cadneg:
         sql += "AND LTRIM(RTRIM(cadneg)) = :cad "
         params["cad"] = cadneg.strip()
@@ -460,7 +469,11 @@ def _get_facturacion_por_articulo_summary(desde: date, hasta: date, cadneg: Opti
 
 
 def _get_facturacion_mensual_summary(desde: date, hasta: date, articulos: list) -> list:
-    """Rama ON de get_facturacion_mensual: SUM por articulo×mes desde el summary."""
+    """Rama ON de get_facturacion_mensual: SUM por articulo×mes desde el summary.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve [] limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return []
     arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
     if not arts:
         return []
@@ -468,11 +481,11 @@ def _get_facturacion_mensual_summary(desde: date, hasta: date, articulos: list) 
     stmt = text(
         "SELECT articulo, mes, SUM(unidades) AS unidades, SUM(facturacion) AS facturacion "
         "FROM ind_inflacion_facturacion_mensual "
-        "WHERE mes >= :lo AND mes <= :hi AND articulo IN :arts "
+        "WHERE import_run_id = :corrida AND mes >= :lo AND mes <= :hi AND articulo IN :arts "
         "GROUP BY articulo, mes ORDER BY articulo, mes"
     ).bindparams(bindparam("arts", expanding=True))
     with engine.connect() as conn:
-        rows = [dict(r._mapping) for r in conn.execute(stmt, {"lo": mes_lo, "hi": mes_hi, "arts": arts})]
+        rows = [dict(r._mapping) for r in conn.execute(stmt, {"corrida": corrida, "lo": mes_lo, "hi": mes_hi, "arts": arts})]
     # Mismo shape que el vivo: articulo string, mes string, unidades/facturacion float.
     return [
         {
@@ -535,14 +548,20 @@ def _calc_pvp(pvp_i, fecha_i, pvp_f, cut_ini: date):
 def _build_pvp_rows_from_summary(desde: date, hasta: date) -> list:
     """Reconstruye las filas de QUERY_PRODUCTOS (pre-enriquecimiento) desde el summary.
     Universo unineg=2 + descripcion/laboratorio desde ind_articulos; pvp desde
-    ind_inflacion_pvp_mensual (último snapshot <= corte, día-exacto)."""
+    ind_inflacion_pvp_mensual (último snapshot <= corte, día-exacto).
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve [] limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return []
     with engine.connect() as conn:
         arts = conn.execute(text(
-            "SELECT articulo, descripcion, laboratorio FROM ind_articulos WHERE unineg = 2"
-        )).fetchall()
+            "SELECT articulo, descripcion, laboratorio FROM ind_articulos "
+            "WHERE import_run_id = :corrida AND unineg = 2"
+        ), {"corrida": corrida}).fetchall()
         pvp_raw = conn.execute(text(
-            "SELECT articulo, fecha_snapshot, pvp FROM ind_inflacion_pvp_mensual"
-        )).fetchall()
+            "SELECT articulo, fecha_snapshot, pvp FROM ind_inflacion_pvp_mensual "
+            "WHERE import_run_id = :corrida"
+        ), {"corrida": corrida}).fetchall()
 
     snaps_by_art: dict = {}
     for art, fs, pvp in pvp_raw:

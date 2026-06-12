@@ -41,7 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from web_comparativas.models import User
+from web_comparativas.models import User, RENDER_MODE
 from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 
 logger = logging.getLogger("wc.indicadores")
@@ -69,7 +69,23 @@ templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
-router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"])
+# ─── Gate por rol en producción ──────────────────────────────────────────────
+
+def _require_admin_en_prod(request: Request):
+    """En producción (RENDER_MODE), exige rol admin. En local no restringe (deja
+    pasar; los require_module por ruta siguen aplicando)."""
+    if RENDER_MODE:
+        user = getattr(request.state, "user", None)
+        if not user or not user.is_admin():
+            raise HTTPException(status_code=403, detail="Indicadores Comerciales está disponible solo para administradores.")
+    return None  # no devuelve user; es un guard aditivo, las rutas ya tienen el suyo
+
+
+# Guard a NIVEL router: cubre las 24 rutas de una sola vez, incluido el redirect
+# raíz ("" y "/") que no tiene Depends propio. Se SUMA a los require_module(...)
+# por ruta, que conservan la granularidad por dashboard.
+router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"],
+                   dependencies=[Depends(_require_admin_en_prod)])
 
 
 # ─── Auth helper ─────────────────────────────────────────────────────────────
@@ -102,7 +118,87 @@ def _parse_date(s: str) -> date:
 @router.get("", response_class=RedirectResponse, include_in_schema=False)
 @router.get("/", response_class=RedirectResponse, include_in_schema=False)
 def indicadores_redirect():
-    return RedirectResponse("/indicadores-comerciales/rentabilidad-negativa", status_code=302)
+    # La raíz del módulo aterriza en el Home (antes iba directo a rentabilidad-negativa).
+    return RedirectResponse("/indicadores-comerciales/home", status_code=302)
+
+
+@router.get("/home", response_class=HTMLResponse)
+def indicadores_home(request: Request, user: User = Depends(require_module("indicadores_comerciales.home"))):
+    """Home del módulo: 9 KPIs globales (3 por dashboard), últimos 12 meses.
+
+    Cada bloque de servicio va en su propio try/except: si un resumen falla,
+    sus KPIs quedan en None (el template muestra '—') y la página renderiza
+    igual con los demás. Solo LEE: no toca corridas ni datos.
+    """
+    request.session["market_context"] = "indicadores"
+    hoy = date.today()
+    desde = date(hoy.year - 1, hoy.month, 1)  # últimos 12 meses, desde el 1° del mes
+
+    kpis = {
+        "perdida_total": None, "transacciones": None, "renta_promedio": None,
+        "inflacion_indice": None, "inflacion_ponderada": None, "productos_comparables": None,
+        "total_unidades": None, "promedio_mensual": None, "cantidad_laboratorios": None,
+    }
+
+    try:
+        from web_comparativas.indicadores_service import get_summary as _renta_summary
+        s = _renta_summary(desde=desde, hasta=hoy)
+        kpis["perdida_total"] = s.get("utilidad_total")
+        kpis["transacciones"] = s.get("total_transacciones")
+        kpis["renta_promedio"] = s.get("rentabilidad_promedio")
+    except Exception:
+        logger.exception("home: resumen de rentabilidad no disponible")
+
+    try:
+        from web_comparativas.indicadores_inflacion_service import get_resumen as _infl_resumen
+        s = _infl_resumen(desde=desde, hasta=hoy)
+        kpis["inflacion_indice"] = s.get("inflacion_pvp_indice")
+        kpis["inflacion_ponderada"] = s.get("inflacion_pvp_ponderada_facturacion")
+        kpis["productos_comparables"] = s.get("productos_comparables")
+    except Exception:
+        logger.exception("home: resumen de inflación no disponible")
+
+    try:
+        from web_comparativas.indicadores_laboratorios_service import get_summary as _lab_summary
+        s = _lab_summary(desde=desde, hasta=hoy)
+        kpis["total_unidades"] = s.get("total_unidades")
+        kpis["promedio_mensual"] = s.get("promedio_mensual")
+        kpis["cantidad_laboratorios"] = s.get("cantidad_laboratorios")
+    except Exception:
+        logger.exception("home: resumen de laboratorios no disponible")
+
+    # Botón "Validar actualización": solo admins. hay_pendiente es un chequeo
+    # liviano (EXISTS de una corrida en pending_approval) para el badge; el
+    # detalle real lo trae el modal vía GET /api/indicadores/import/pending.
+    es_admin = bool(user and user.is_admin())
+    hay_pendiente = False
+    if es_admin:
+        try:
+            from web_comparativas.indicadores_summary_models import IndImportRun
+            db = getattr(request.state, "db", None)
+            if db is not None:
+                hay_pendiente = (
+                    db.query(IndImportRun.id)
+                    .filter_by(status="pending_approval")
+                    .first() is not None
+                )
+        except Exception:
+            logger.exception("home: chequeo de corrida pendiente falló")
+            hay_pendiente = False
+
+    return templates.TemplateResponse(
+        "indicadores/home.html",
+        {
+            "request": request,
+            "user": user,
+            "market_context": "indicadores",
+            "kpis": kpis,
+            "rango_desde": desde.isoformat(),
+            "rango_hasta": hoy.isoformat(),
+            "es_admin": es_admin,
+            "hay_pendiente": hay_pendiente,
+        },
+    )
 
 
 @router.get("/rentabilidad-negativa", response_class=HTMLResponse)

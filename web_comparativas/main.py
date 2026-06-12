@@ -216,9 +216,10 @@ def run_startup_migrations_once() -> None:
     # Crear tablas nuevas del módulo Lectura de Pliegos (y cualquier tabla pendiente)
     try:
         from web_comparativas.models import Base, engine as _engine
-        # El router de Indicadores es local-only (no se registra en Render), así que
-        # importamos sus modelos summary explícitamente para que create_all también
-        # los materialice en PostgreSQL en el próximo deploy.
+        # Importamos los modelos summary de Indicadores explícitamente para que
+        # create_all materialice las tablas ind_* en PostgreSQL al desplegar. Los
+        # routers del módulo se registran SIEMPRE: el de consulta es admin-only en
+        # prod (guard _require_admin_en_prod) y el de import va protegido por token.
         import web_comparativas.indicadores_summary_models  # noqa: F401
         Base.metadata.create_all(bind=_engine)
         print("[MIGRATION] Tables ensured via create_all.", flush=True)
@@ -534,12 +535,6 @@ print("DEBUG: TrackingMiddleware ENABLED (robust mode)", flush=True)
 _APP_ENV_MAIN = os.getenv("APP_ENV", "development").strip().lower()
 _IS_PRODUCTION = _APP_ENV_MAIN in {"production", "prod"}
 
-# Tarjeta de Indicadores Comerciales: visible solo fuera de Render. La ruta
-# /indicadores-comerciales/ es trabajo en curso aún no desplegado en prod, así
-# que se oculta cuando corremos en Render (RENDER_MODE) y se muestra en local.
-_SHOW_INDICADORES = not RENDER_MODE
-
-
 def _get_app_secret() -> str:
     secret = os.getenv("APP_SECRET", "").strip()
     if _IS_PRODUCTION:
@@ -618,6 +613,9 @@ from web_comparativas.api_comments import router as comments_router
 from web_comparativas.routers.forecast_router import router as forecast_router
 from web_comparativas.routers.mercado_publico_perfiles_router import router as perfiles_router
 from web_comparativas.routers.mercado_privado_perfiles_router import router as perfiles_privado_router
+# Import/aprobación de Indicadores: SIEMPRE registrado (token + guard admin), como
+# dimensiones_router. NO confundir con indicadores_router (consulta, local-only, abajo).
+from web_comparativas.routers.indicadores_import_router import router as indicadores_import_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
@@ -627,21 +625,22 @@ app.include_router(comments_router)
 app.include_router(forecast_router)
 app.include_router(perfiles_router)
 app.include_router(perfiles_privado_router)
+app.include_router(indicadores_import_router)
 
-# === INDICADORES COMERCIALES (solo local) ===
-# Registro condicional y resiliente:
-#  - if not RENDER_MODE → la ruta /indicadores-comerciales/ solo existe en
-#    local; en Render no se registra (coherente con show_indicadores, que
-#    oculta la tarjeta allá). El módulo aún no está desplegado en prod.
+# === INDICADORES COMERCIALES (siempre registrado, gateado por rol en prod) ===
+# Registro incondicional y resiliente:
+#  - El router se registra SIEMPRE; en producción (RENDER_MODE) su guard a nivel
+#    APIRouter (_require_admin_en_prod) deja pasar solo a admins (403 al resto),
+#    coherente con show_indicadores, que en prod muestra la tarjeta funcional
+#    solo a admins y "Próximamente" a los demás. En local no restringe.
 #  - try/except → si los archivos del módulo (untracked/WIP) no están en este
 #    entorno, la app NO crashea: loguea y sigue.
-if not RENDER_MODE:
-    try:
-        from web_comparativas.routers.indicadores_router import router as indicadores_router
-        app.include_router(indicadores_router)
-        logger.info("Indicadores Comerciales registrado (entorno local).")
-    except Exception as e:
-        logger.warning(f"Indicadores no registrado: {e}")
+try:
+    from web_comparativas.routers.indicadores_router import router as indicadores_router
+    app.include_router(indicadores_router)
+    logger.info("Indicadores Comerciales registrado (gate admin en prod).")
+except Exception as e:
+    logger.warning(f"Indicadores no registrado: {e}")
 
 # === LEGACY ROUTES (Uploads, Groups, Opportunities) ===
 from web_comparativas.legacy_routes import router as legacy_router
@@ -871,10 +870,14 @@ def markets_home(request: Request):
     # accesible. Con 2+ apartados, la Suite se RENDERIZA (no redirige).
     if _accessible_top_count(user) < 2:
         return RedirectResponse(_first_accessible_url(user), 303)
+    # Tarjeta de Indicadores: en local, funcional para todos; en producción
+    # (RENDER_MODE), funcional solo para admins y "Próximamente" para el resto
+    # (coherente con el guard _require_admin_en_prod del router de consulta).
+    show_indicadores = (not RENDER_MODE) or bool(user and user.is_admin())
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
         "user": user,
-        "show_indicadores": _SHOW_INDICADORES,
+        "show_indicadores": show_indicadores,
     })
 
 # === MARKET SWITCHING ===

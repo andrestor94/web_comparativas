@@ -1,8 +1,9 @@
 """ETL de facturación mensual agregada desde ETL_Data.rentabililad_x_cliente.
 
 Grano: articulo × cadneg × mes. La agregación se hace EN SQL SERVER (devuelve poco),
-los 12 meses en UNA sola consulta. Escribe SOLO en ind_inflacion_facturacion_mensual_
-STAGING (SQLite local). NO toca la tabla publicada.
+los 12 meses en UNA sola consulta. Patrón de corridas: escribe en
+ind_inflacion_facturacion_mensual etiquetando cada fila con el import_run_id recibido
+(corrida creada en ind_import_run por indicadores_etl_runner). No toca otras corridas.
 
 NOTA DE DISEÑO: el SQL original de Inflación (indicadores_inflacion_service.QUERY_FACTURACION)
 agrupa SOLO por articulo y hace MAX(cadneg). Acá agrego `cadneg` al GROUP BY para preservar
@@ -13,8 +14,8 @@ Fechas: DECLARE @ini/@fin DATE (nunca comparar string contra datetime directo, p
 bug de DATEFORMAT Español). El mes sale de CONVERT(CHAR(7), fecha, 120) (estilo 120 es
 locale-independiente).
 
-Uso:
-    python web_comparativas/indicadores_etl_facturacion.py base 12   # 12 meses completos recientes
+Uso (normalmente vía web_comparativas/indicadores_etl_runner.py):
+    python web_comparativas/indicadores_etl_facturacion.py base 12 <import_run_id>
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from web_comparativas.indicadores_db import get_etl_db
 
 import web_comparativas.indicadores_summary_models  # noqa: F401
 from web_comparativas.indicadores_summary_models import (
-    IndInflacionFacturacionMensualStaging,
+    IndInflacionFacturacionMensual,
     IndEtlControl,
 )
 from web_comparativas.models import Base, engine, SessionLocal
@@ -75,10 +76,13 @@ def fetch_facturacion(ini: date, fin: date) -> list:
         return _rows_to_dicts(cursor)
 
 
-def clear_staging() -> int:
+def clear_run(import_run_id: int) -> int:
+    """Borra las filas de ESTA corrida (no toca otras corridas)."""
     session = SessionLocal()
     try:
-        n = session.query(IndInflacionFacturacionMensualStaging).delete()
+        n = (session.query(IndInflacionFacturacionMensual)
+                    .filter_by(import_run_id=import_run_id)
+                    .delete(synchronize_session=False))
         session.commit()
         return n
     finally:
@@ -103,9 +107,9 @@ def persist_control(ventana_desde: date, ventana_hasta: date, filas_staging: int
         session.close()
 
 
-def run_base_load(ventana_desde: date, ventana_hasta: date) -> None:
-    Base.metadata.create_all(bind=engine)  # idempotente; asegura staging + control locales
-    print(f"[ETL factur] DB destino (staging): {engine.url}", flush=True)
+def run_base_load(ventana_desde: date, ventana_hasta: date, *, import_run_id: int) -> int:
+    Base.metadata.create_all(bind=engine)  # idempotente; asegura tablas + control locales
+    print(f"[ETL factur] DB destino: {engine.url}  corrida={import_run_id}", flush=True)
     print(f"[ETL factur] Ventana: [{ventana_desde} .. {ventana_hasta})", flush=True)
 
     t0 = time.monotonic()
@@ -113,27 +117,27 @@ def run_base_load(ventana_desde: date, ventana_hasta: date) -> None:
     dt_q = time.monotonic() - t0
     print(f"[ETL factur] filas devueltas por SQL: {len(rows)}  tiempo_query={dt_q:.1f}s", flush=True)
 
-    # Guardas previas a escribir: articulo numérico y cadneg no-nulo (cadneg es parte de la PK).
+    # Guardas previas a escribir: articulo numérico y cadneg no-nulo (clave natural del UNIQUE).
+    # Con el patrón de corridas levantan RuntimeError para que el runner marque 'failed'.
     bad_art = [r.get("articulo") for r in rows
                if not (str(r.get("articulo") or "").strip().lstrip("-").isdigit())]
     null_cadneg = sum(1 for r in rows if (r.get("cadneg") is None or str(r.get("cadneg")).strip() == ""))
     if bad_art:
-        print(f"[ETL factur] STOP: {len(bad_art)} articulos no numéricos. Muestra: {bad_art[:10]}", flush=True)
-        return
+        raise RuntimeError(f"[ETL factur] {len(bad_art)} articulos no numéricos. Muestra: {bad_art[:10]}")
     if null_cadneg:
-        print(f"[ETL factur] STOP: {null_cadneg} filas con cadneg NULL/vacío (no caben en la PK articulo+cadneg+mes).", flush=True)
-        return
+        raise RuntimeError(f"[ETL factur] {null_cadneg} filas con cadneg NULL/vacío (clave natural articulo+cadneg+mes).")
 
-    borradas = clear_staging()
-    print(f"[ETL factur] staging limpiado: {borradas} filas borradas", flush=True)
+    borradas = clear_run(import_run_id)
+    print(f"[ETL factur] corrida limpiada: {borradas} filas borradas", flush=True)
 
     objetos = [
-        IndInflacionFacturacionMensualStaging(
+        IndInflacionFacturacionMensual(
             articulo=int(str(r["articulo"]).strip()),
             cadneg=str(r["cadneg"]).strip(),
             mes=r["mes"],
             unidades=(float(r["unidades"]) if r.get("unidades") is not None else None),
             facturacion=_to_decimal(r.get("facturacion")),
+            import_run_id=import_run_id,
         )
         for r in rows
     ]
@@ -141,7 +145,8 @@ def run_base_load(ventana_desde: date, ventana_hasta: date) -> None:
     try:
         session.bulk_save_objects(objetos)
         session.commit()
-        total_staging = session.query(IndInflacionFacturacionMensualStaging).count()
+        total_corrida = (session.query(IndInflacionFacturacionMensual)
+                                .filter_by(import_run_id=import_run_id).count())
     except Exception:
         session.rollback()
         raise
@@ -151,9 +156,10 @@ def run_base_load(ventana_desde: date, ventana_hasta: date) -> None:
     persist_control(ventana_desde, ventana_hasta, len(objetos))
 
     print("[ETL factur] ---------------- RESUMEN CARGA BASE ----------------", flush=True)
-    print(f"[ETL factur] filas escritas en esta corrida: {len(objetos)}", flush=True)
-    print(f"[ETL factur] total filas en ind_inflacion_facturacion_mensual_staging: {total_staging}", flush=True)
+    print(f"[ETL factur] filas escritas en esta ejecución: {len(objetos)}", flush=True)
+    print(f"[ETL factur] total filas de la corrida en ind_inflacion_facturacion_mensual: {total_corrida}", flush=True)
     print(f"[ETL factur] control persistido en ind_etl_control (fuente='rentabililad_x_cliente')", flush=True)
+    return len(objetos)
 
 
 def _ventana_meses(n: int, hoy: date) -> "tuple[date, date]":
@@ -169,13 +175,15 @@ def _ventana_meses(n: int, hoy: date) -> "tuple[date, date]":
 
 def main(argv: list) -> None:
     if argv and argv[0] == "base":
-        n = int(argv[1]) if len(argv) >= 2 else 12
-        desde, hasta = _ventana_meses(n, date.today())
-        run_base_load(desde, hasta)
+        if len(argv) < 3:
+            print("Falta import_run_id: python ...etl_facturacion.py base <n_meses> <import_run_id>")
+            print("(normalmente se ejecuta vía web_comparativas/indicadores_etl_runner.py)")
+            raise SystemExit(2)
+        desde, hasta = _ventana_meses(int(argv[1]), date.today())
+        run_base_load(desde, hasta, import_run_id=int(argv[2]))
         return
-    # Por defecto: 12 meses completos recientes.
-    desde, hasta = _ventana_meses(12, date.today())
-    run_base_load(desde, hasta)
+    print("Ejecutar vía web_comparativas/indicadores_etl_runner.py (requiere import_run_id).")
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":

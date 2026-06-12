@@ -316,3 +316,33 @@ def _indicadores_summary_available(table: str = "ind_rentabilidad_lineas") -> bo
     with _IND_SUMMARY_AVAIL_LOCK:
         _IND_SUMMARY_AVAIL_CACHE[table] = (now, exists)
     return exists
+
+
+def _corrida_activa() -> "int | None":
+    """Id de la corrida 'approved' ACTIVA en ind_import_run: la más reciente por
+    approved_at (desempate por id). Es la única corrida que deben servir las lecturas
+    summary (rama ON) — las filas de corridas running/pending/discarded/failed conviven
+    en las mismas tablas y se excluyen filtrando por este id.
+
+    Devuelve None si no hay ninguna corrida aprobada (o si la tabla todavía no existe /
+    la consulta falla): el caller debe responder VACÍO de forma limpia, nunca romper.
+
+    Sin cache a propósito: es un SELECT con LIMIT 1 sobre una tabla de pocas filas, y
+    así una corrida recién aprobada (o descartada) se refleja en la lectura siguiente.
+    """
+    try:
+        from sqlalchemy import text as _sa_text
+        from web_comparativas.models import engine
+    except Exception:
+        return None
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(_sa_text(
+                "SELECT id FROM ind_import_run WHERE status = 'approved' "
+                "ORDER BY approved_at DESC, id DESC LIMIT 1"
+            )).fetchone()
+        return int(row[0]) if row else None
+    except Exception:
+        return None

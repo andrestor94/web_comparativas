@@ -679,11 +679,16 @@
                     </a>
                     {% endif %}
 
-                    <!-- Indicadores Comerciales — siempre visible.
-                         En local (show_indicadores): tarjeta funcional, badge "Disponible",
-                         botón "Ingresar" con href real. En producción (RENDER_MODE): mismo
-                         diseño, badge "Próximamente" y botón deshabilitado (sin href). La
-                         ruta /indicadores-comerciales/ tampoco se registra en prod (404). -->
+                    <!-- Indicadores Comerciales — siempre visible en la suite.
+                         show_indicadores = (not RENDER_MODE) or user.is_admin():
+                           - En local: tarjeta funcional para todos (badge "Disponible",
+                             botón "Ingresar" con href real).
+                           - En prod, ADMIN: tarjeta funcional (el router se registra
+                             siempre; sus rutas exigen admin en prod vía guard a nivel
+                             APIRouter, _require_admin_en_prod).
+                           - En prod, NO-admin: tarjeta bloqueada (badge "Próximamente",
+                             botón deshabilitado, sin href); si llegara a la URL directa,
+                             el guard responde 403. -->
                     {% if can_access(user, 'indicadores_comerciales') %}
                     <a {% if show_indicadores %}href="/indicadores-comerciales/"{% endif %}
                        class="module-card module-card--indicadores{% if not show_indicadores %} module-card--disabled{% endif %}">

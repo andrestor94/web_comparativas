@@ -773,6 +773,14 @@
         {% elif market_context == 'indicadores' %}
         <!-- ================= MENÚ INDICADORES COMERCIALES ================= -->
 
+        <!-- Home -->
+        {% if can_access(user, 'indicadores_comerciales.home') %}
+        <a href="/indicadores-comerciales/home"
+          class="nav-link {% if request.url.path == '/indicadores-comerciales/home' %}active{% endif %}">
+          <div><i class="bi bi-house"></i> Home</div>
+        </a>
+        {% endif %}
+
         <!-- Rentabilidad Negativa -->
         {% if can_access(user, 'indicadores_comerciales.rentabilidad_negativa') %}
         <a href="/indicadores-comerciales/rentabilidad-negativa"
