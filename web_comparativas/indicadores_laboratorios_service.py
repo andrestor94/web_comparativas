@@ -12,7 +12,12 @@ import unicodedata
 
 from sqlalchemy import bindparam, text
 
-from web_comparativas.indicadores_db import get_etl_db, get_fusion_db, _indicadores_summary_available
+from web_comparativas.indicadores_db import (
+    get_etl_db,
+    get_fusion_db,
+    _corrida_activa,
+    _indicadores_summary_available,
+)
 from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.lab")
@@ -211,7 +216,11 @@ def _fetch_sales_summary(desde: date, hasta: date, cadneg: Optional[str] = None)
     SUM(cant) por cliente_grupo × nombre_cliente × mes × articulo, mismo universo
     (cadneg 2-x OR artículos monitoreados), mismo HAVING SUM(cant)<>0 y mismo filtro
     opcional de cadneg. cliente_grupo/nombre_cliente salen TAL CUAL del summary
-    (congelados al extract): NO se re-joinea dbo.clientes. Mismo shape que el vivo."""
+    (congelados al extract): NO se re-joinea dbo.clientes. Mismo shape que el vivo.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve vacío limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return []
     sql = (
         'SELECT cliente_grupo AS "Grupo_Cliente", '
         'nombre_cliente AS "Nombre_Grupo_Cliente", '
@@ -219,10 +228,12 @@ def _fetch_sales_summary(desde: date, hasta: date, cadneg: Optional[str] = None)
         'articulo AS "Articulo", '
         'SUM(CAST(cant AS FLOAT)) AS "Unidades" '
         "FROM ind_rentabilidad_lineas "
-        "WHERE fecha >= :desde AND fecha < :hasta "
+        "WHERE import_run_id = :corrida "
+        "AND fecha >= :desde AND fecha < :hasta "
         "AND (cadneg IN :cadnegs OR articulo IN :extras) "
     )
     params = {
+        "corrida": corrida,
         "desde": desde,
         "hasta": hasta,
         "cadnegs": list(CADNEG_VALUES),
@@ -246,18 +257,23 @@ def _fetch_sales_summary(desde: date, hasta: date, cadneg: Optional[str] = None)
 
 def _get_article_map_summary(articulos: list) -> dict:
     """Rama ON de get_article_map: marca/laboratorio/familia desde ind_articulos
-    (no desde vsl_art_alfabeta_full en vivo). Mismo shape y mismos fallbacks."""
+    (no desde vsl_art_alfabeta_full en vivo). Mismo shape y mismos fallbacks.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return {}
     arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
     if not arts:
         return {}
     article_map = {}
     stmt = text(
-        "SELECT articulo, marca, laboratorio, familia FROM ind_articulos WHERE articulo IN :arts"
+        "SELECT articulo, marca, laboratorio, familia FROM ind_articulos "
+        "WHERE import_run_id = :corrida AND articulo IN :arts"
     ).bindparams(bindparam("arts", expanding=True))
     try:
         with engine.connect() as conn:
             for items in _chunk(arts):
-                for articulo, marca, laboratorio, familia in conn.execute(stmt, {"arts": items}):
+                for articulo, marca, laboratorio, familia in conn.execute(stmt, {"corrida": corrida, "arts": items}):
                     article_map[str(int(articulo))] = {
                         "marca": _norm_text(marca) or str(int(articulo)),
                         "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",

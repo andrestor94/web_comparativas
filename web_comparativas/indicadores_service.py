@@ -13,7 +13,12 @@ import unicodedata
 
 from sqlalchemy import bindparam, text
 
-from web_comparativas.indicadores_db import get_etl_db, get_fusion_db, _indicadores_summary_available
+from web_comparativas.indicadores_db import (
+    get_etl_db,
+    get_fusion_db,
+    _corrida_activa,
+    _indicadores_summary_available,
+)
 from web_comparativas.models import engine
 
 logger = logging.getLogger("wc.indicadores.svc")
@@ -310,7 +315,8 @@ SELECT
          ELSE SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
     END AS "Rentabilidad"
 FROM ind_rentabilidad_lineas
-WHERE fecha >= :desde AND fecha < :hasta
+WHERE import_run_id = :corrida
+  AND fecha >= :desde AND fecha < :hasta
   AND UPPER(LTRIM(RTRIM(COALESCE(comprob, '')))) <> 'NC'
   AND cadneg IN :cadnegs
   AND CAST(renta1 AS FLOAT) < 0
@@ -335,7 +341,8 @@ SELECT
          ELSE SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
     END AS "Rentabilidad"
 FROM ind_rentabilidad_lineas
-WHERE fecha >= :desde AND fecha < :hasta
+WHERE import_run_id = :corrida
+  AND fecha >= :desde AND fecha < :hasta
   AND UPPER(LTRIM(RTRIM(COALESCE(comprob, '')))) <> 'NC'
   AND cadneg IN :cadnegs
   {cadneg_filter}
@@ -349,9 +356,13 @@ ORDER BY fecha DESC, "Utilidad" ASC
 def _fetch_rentneg_summary(desde: date, hasta: date, cadneg: Optional[str], grouped: bool) -> list:
     """Rama ON de QUERY_NEGATIVE_ROWS / QUERY_GROUPED_ROWS sobre ind_rentabilidad_lineas.
     Mismo shape que el vivo (la columna fecha del modo agrupado sale como 'YYYY-MM-01',
-    que _date_text deja idéntico al DATEFROMPARTS del vivo). Respeta cadneg_filter."""
+    que _date_text deja idéntico al DATEFROMPARTS del vivo). Respeta cadneg_filter.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve vacío limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return []
     sql_tpl = _RENTNEG_AGRUPADO_SUMMARY_SQL if grouped else _RENTNEG_DETALLE_SUMMARY_SQL
-    params = {"desde": desde, "hasta": hasta, "cadnegs": list(CADNEG_VALUES)}
+    params = {"corrida": corrida, "desde": desde, "hasta": hasta, "cadnegs": list(CADNEG_VALUES)}
     cadneg_filter = ""
     if cadneg:
         cadneg_filter = "AND LTRIM(RTRIM(cadneg)) = :cad"
@@ -365,19 +376,23 @@ def _fetch_rentneg_summary(desde: date, hasta: date, cadneg: Optional[str], grou
 
 def _get_article_map_summary(articulos: list) -> dict:
     """Rama ON de get_article_map: atributos desde ind_articulos (no Fusion en vivo).
-    Mismo shape y mismos fallbacks que la rama OFF, incluido principio_activo."""
+    Mismo shape y mismos fallbacks que la rama OFF, incluido principio_activo.
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio."""
+    corrida = _corrida_activa()
+    if corrida is None:
+        return {}
     arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
     if not arts:
         return {}
     article_map = {}
     stmt = text(
         "SELECT articulo, marca, laboratorio, principio_activo, familia "
-        "FROM ind_articulos WHERE articulo IN :arts"
+        "FROM ind_articulos WHERE import_run_id = :corrida AND articulo IN :arts"
     ).bindparams(bindparam("arts", expanding=True))
     try:
         with engine.connect() as conn:
             for items in _chunk(arts):
-                for articulo, marca, laboratorio, principio_activo, familia in conn.execute(stmt, {"arts": items}):
+                for articulo, marca, laboratorio, principio_activo, familia in conn.execute(stmt, {"corrida": corrida, "arts": items}):
                     article_map[str(int(articulo))] = {
                         "marca": _norm_text(marca) or str(int(articulo)),
                         "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",
