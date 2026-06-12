@@ -89,11 +89,87 @@ def _parameterize_query(query: str, count: int) -> str:
     return query
 
 
+# ── Clasificación de errores del bridge ────────────────────────────────────────
+# El .ps1 separa la apertura de conexión (Open) de la query (Fill) y lo señala
+# con exit codes dedicados. Solo la APERTURA es reintentable: si el Open falló,
+# la query nunca llegó a ejecutarse, así que relanzar el proceso no duplica nada.
+_BRIDGE_EXIT_CONNECTION = 10   # CONNECTION_ERROR: handshake/login/red
+_BRIDGE_EXIT_QUERY = 20        # QUERY_ERROR: conexión abierta, falló la query
+_BRIDGE_MAX_ATTEMPTS = 3
+_BRIDGE_BACKOFF_S = (2, 4)     # espera antes del 2do y 3er intento
+_BRIDGE_TIMEOUT_S = 65         # 65s: el JS AbortController corta al cliente a los 70s
+
+
+class BridgeConnectionError(RuntimeError):
+    """Fallo de APERTURA de conexión (handshake/login/red) tras agotar reintentos."""
+
+    def __init__(self, message: str, attempts: int):
+        super().__init__(message)
+        self.attempts = attempts
+
+
+class BridgeQueryError(RuntimeError):
+    """Fallo de la QUERY con la conexión ya abierta. No reintentable."""
+
+
 class SqlClientCursor:
     def __init__(self, connection_config: dict):
         self.connection_config = connection_config
         self.description: list = []
         self._rows: list = []
+
+    def _run_bridge_with_retry(self, connection_path, query_path, params_path):
+        """Lanza el proceso bridge; reintenta SOLO fallos de apertura de conexión.
+
+        Reintentable: exit 10 (el Open() falló antes del Fill(): la query nunca
+        corrió) y TimeoutExpired (cuelgue de red en el handshake o el transporte).
+        Exit 20 (error de query/datos) u otros códigos propagan de inmediato.
+        """
+        last_message = ""
+        for attempt in range(1, _BRIDGE_MAX_ATTEMPTS + 1):
+            try:
+                completed = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(_BRIDGE_SCRIPT),
+                        "-ConnectionJson",
+                        str(connection_path),
+                        "-QueryFile",
+                        str(query_path),
+                        "-ParamsFile",
+                        str(params_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=_BRIDGE_TIMEOUT_S,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                last_message = f"timeout de {_BRIDGE_TIMEOUT_S}s esperando al proceso bridge"
+            else:
+                if completed.returncode == 0:
+                    return completed
+                message = (completed.stderr or completed.stdout or "").strip()
+                if completed.returncode == _BRIDGE_EXIT_QUERY:
+                    raise BridgeQueryError(message)
+                if completed.returncode != _BRIDGE_EXIT_CONNECTION:
+                    raise RuntimeError(message)
+                last_message = message
+            if attempt < _BRIDGE_MAX_ATTEMPTS:
+                delay = _BRIDGE_BACKOFF_S[attempt - 1]
+                print(
+                    f"[BRIDGE retry] intento {attempt}/{_BRIDGE_MAX_ATTEMPTS}: "
+                    f"conexión falló, reintentando en {delay}s",
+                    flush=True,
+                )
+                time.sleep(delay)
+        raise BridgeConnectionError(last_message, attempts=_BRIDGE_MAX_ATTEMPTS)
 
     def execute(self, query: str, params=None):
         params = list(params or [])
@@ -108,31 +184,7 @@ class SqlClientCursor:
             connection_path.write_text(json.dumps(self.connection_config), encoding="utf-8")
             query_path.write_text(query, encoding="utf-8")
             params_path.write_text(json.dumps([_json_value(v) for v in params]), encoding="utf-8")
-            completed = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(_BRIDGE_SCRIPT),
-                    "-ConnectionJson",
-                    str(connection_path),
-                    "-QueryFile",
-                    str(query_path),
-                    "-ParamsFile",
-                    str(params_path),
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=65,   # 65s: el JS AbortController corta al cliente a los 70s
-                check=False,
-            )
-            if completed.returncode != 0:
-                message = (completed.stderr or completed.stdout or "").strip()
-                raise RuntimeError(message)
+            completed = self._run_bridge_with_retry(connection_path, query_path, params_path)
 
             result = json.loads(completed.stdout or "{}")
             columns = result.get("columns") or []
@@ -200,7 +252,7 @@ def _build_conn_str(server: str, database: str, user: str, password: str, truste
 
 @contextmanager
 def get_etl_db():
-    conn = None
+    # Construcción/apertura (en sqlclient no hay I/O acá; en pyodbc sí conecta).
     try:
         if _use_sqlclient():
             conn = SqlClientConnection(
@@ -218,20 +270,29 @@ def get_etl_db():
                 settings.etl_trusted_connection,
             )
             conn = _pyodbc_connect(conn_str)
-        yield conn
     except Exception as exc:
         raise RuntimeError(f"Error de conexión a ETL_Data: {exc}") from exc
+    # Errores del caller: etiqueta según su clase — solo el fallo de apertura
+    # (BridgeConnectionError, tras agotar reintentos) es "de conexión"; el resto
+    # (query, datos, parseo) NO debe disfrazarse de error de conexión.
+    try:
+        yield conn
+    except BridgeConnectionError as exc:
+        raise RuntimeError(
+            f"Error de conexión a ETL_Data tras {exc.attempts} intentos: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(f"Error al consultar ETL_Data: {exc}") from exc
     finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @contextmanager
 def get_fusion_db():
-    conn = None
+    # Construcción/apertura (en sqlclient no hay I/O acá; en pyodbc sí conecta).
     try:
         if _use_sqlclient():
             conn = SqlClientConnection(
@@ -250,15 +311,24 @@ def get_fusion_db():
                 settings.fusion_trusted_connection,
             )
             conn = _pyodbc_connect(conn_str)
-        yield conn
     except Exception as exc:
         raise RuntimeError(f"Error de conexión a Fusion: {exc}") from exc
+    # Errores del caller: etiqueta según su clase — solo el fallo de apertura
+    # (BridgeConnectionError, tras agotar reintentos) es "de conexión"; el resto
+    # (query, datos, parseo) NO debe disfrazarse de error de conexión.
+    try:
+        yield conn
+    except BridgeConnectionError as exc:
+        raise RuntimeError(
+            f"Error de conexión a Fusion tras {exc.attempts} intentos: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(f"Error al consultar Fusion: {exc}") from exc
     finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def is_available() -> bool:
