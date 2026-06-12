@@ -74,3 +74,4 @@ commit_diff*
 Indicadores Comerciales/
 # Backups locales
 *.bak
+*.db.bak*
