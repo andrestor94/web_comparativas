@@ -31,6 +31,12 @@
     <p class="h-page-header__subtitle">Resumen ejecutivo · últimos 12 meses ({{ rango_desde }} a {{ rango_hasta }})</p>
   </div>
   <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+    {% if es_admin %}
+    <button type="button" class="ind-btn ind-btn--primary" id="btn-validar" onclick="abrirModalAprobacion()">
+      <i class="bi bi-cloud-arrow-down"></i> Validar actualización
+      {% if hay_pendiente %}<span class="ind-badge ind-badge--ambar" id="badge-pendiente">1</span>{% endif %}
+    </button>
+    {% endif %}
     <a href="/markets" class="btn btn-sm btn-outline-secondary">
       <i class="bi bi-grid me-1"></i>Suite SIEM
     </a>
@@ -120,5 +126,137 @@
     </div>
   </a>
 </div>
+
+{% if es_admin %}
+<!-- ── Modal de aprobación (admin-only, oculto por defecto) ──────────── -->
+<div class="ind-modal-overlay" id="ind-modal-overlay" style="display:none;">
+  <div class="ind-modal" role="dialog" aria-modal="true" aria-labelledby="ind-modal-title">
+    <h3 class="ind-modal__title" id="ind-modal-title">Validar actualización</h3>
+    <div id="ind-modal-body">
+      <p class="text-muted"><span class="ind-spinner ind-spinner--sm"></span> Consultando…</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var pendingRunId = null;
+  var TABLAS = [
+    ['ind_rentabilidad_lineas', 'Rentabilidad (líneas)'],
+    ['ind_inflacion_pvp_mensual', 'Inflación — PVP mensual'],
+    ['ind_inflacion_facturacion_mensual', 'Inflación — Facturación mensual'],
+    ['ind_articulos', 'Artículos (dimensión)']
+  ];
+
+  function overlay() { return document.getElementById('ind-modal-overlay'); }
+  function body() { return document.getElementById('ind-modal-body'); }
+
+  function fmt(n) {
+    if (n === null || n === undefined) return '—';
+    return Number(n).toLocaleString('es-AR');
+  }
+
+  function botonesCerrar() {
+    return '<div class="ind-modal__actions">' +
+      '<button type="button" class="ind-btn ind-btn--ghost" onclick="cerrarModalAprobacion()">Cerrar</button></div>';
+  }
+
+  function renderError(msg) {
+    body().innerHTML =
+      '<p class="ind-modal__error"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + msg + '</p>' +
+      botonesCerrar();
+  }
+
+  function renderSinPendiente() {
+    body().innerHTML =
+      '<p><i class="bi bi-check-circle me-1"></i>No hay actualizaciones pendientes de aprobación.</p>' +
+      botonesCerrar();
+  }
+
+  function renderPendiente(data) {
+    var p = data.pending;
+    var activa = (data.activa && data.activa.rows_por_tabla) || {};
+    var pend = p.rows_por_tabla || {};
+    pendingRunId = p.import_run_id;
+
+    var filas = '';
+    for (var i = 0; i < TABLAS.length; i++) {
+      var key = TABLAS[i][0], label = TABLAS[i][1];
+      filas += '<tr><td>' + label + '</td>' +
+        '<td class="text-end">' + fmt(activa[key]) + '</td>' +
+        '<td class="text-center">→</td>' +
+        '<td class="text-end"><strong>' + fmt(pend[key]) + '</strong></td></tr>';
+    }
+
+    body().innerHTML =
+      '<p class="mb-1"><strong>Actualización pendiente de aprobación</strong></p>' +
+      '<p class="text-muted small mb-2">Corrida #' + p.import_run_id +
+      ' · cargada el ' + (p.finalized_at || '—') +
+      (p.nota ? ' · ' + p.nota : '') + '</p>' +
+      '<table class="ind-modal-table">' +
+      '<thead><tr><th>Tabla</th><th class="text-end">Activa (#' + (data.activa ? data.activa.import_run_id : '—') + ')</th><th></th><th class="text-end">Pendiente (#' + p.import_run_id + ')</th></tr></thead>' +
+      '<tbody>' + filas + '</tbody></table>' +
+      '<div id="ind-modal-msg"></div>' +
+      '<div class="ind-modal__actions">' +
+      '<button type="button" class="ind-btn ind-btn--primary" onclick="aprobarPendiente()"><i class="bi bi-check-lg"></i> Aprobar</button>' +
+      '<button type="button" class="ind-btn ind-btn--ghost ind-btn--peligro" onclick="descartarPendiente()"><i class="bi bi-trash"></i> Descartar</button>' +
+      '<button type="button" class="ind-btn ind-btn--ghost" onclick="cerrarModalAprobacion()">Cerrar</button>' +
+      '</div>';
+  }
+
+  function postAccion(url, okMsg, recargar) {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ import_run_id: pendingRunId })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+    }).then(function (res) {
+      if (!res.ok) {
+        var msg = document.getElementById('ind-modal-msg');
+        if (msg) msg.innerHTML = '<p class="ind-modal__error">' + (res.j.detail || 'Error inesperado') + '</p>';
+        return;
+      }
+      var extra = (res.j.filas_borradas !== undefined) ? ' (' + fmt(res.j.filas_borradas) + ' filas borradas)' : '';
+      body().innerHTML = '<p><i class="bi bi-check-circle me-1"></i>' + okMsg + extra + '</p>' + botonesCerrar();
+      var badge = document.getElementById('badge-pendiente');
+      if (badge) badge.remove();
+      if (recargar) location.reload();
+    }).catch(function (e) {
+      var msg = document.getElementById('ind-modal-msg');
+      if (msg) msg.innerHTML = '<p class="ind-modal__error">Error de red: ' + e + '</p>';
+    });
+  }
+
+  window.abrirModalAprobacion = function () {
+    overlay().style.display = 'flex';
+    body().innerHTML = '<p class="text-muted">Consultando actualizaciones pendientes…</p>';
+    fetch('/api/indicadores/import/pending')
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (j) { throw new Error(j.detail || ('HTTP ' + r.status)); });
+        return r.json();
+      })
+      .then(function (data) {
+        if (data.pending) { renderPendiente(data); } else { renderSinPendiente(); }
+      })
+      .catch(function (e) { renderError(String(e.message || e)); });
+  };
+
+  window.cerrarModalAprobacion = function () { overlay().style.display = 'none'; };
+
+  // Confirmación: confirm() nativo (simple y robusto, sin dependencias).
+  window.aprobarPendiente = function () {
+    if (!confirm('¿Confirmás publicar esta actualización? Los datos nuevos pasarán a estar visibles para todos.')) return;
+    postAccion('/api/indicadores/import/approve', 'Actualización publicada. Recargando…', true);
+  };
+
+  window.descartarPendiente = function () {
+    if (!confirm('¿Confirmás descartar esta actualización? Se borrarán los datos cargados y no se podrán recuperar.')) return;
+    postAccion('/api/indicadores/import/discard', 'Actualización descartada', false);
+  };
+})();
+</script>
+{% endif %}
 
 {% endblock %}

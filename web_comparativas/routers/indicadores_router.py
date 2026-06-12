@@ -167,6 +167,25 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
     except Exception:
         logger.exception("home: resumen de laboratorios no disponible")
 
+    # Botón "Validar actualización": solo admins. hay_pendiente es un chequeo
+    # liviano (EXISTS de una corrida en pending_approval) para el badge; el
+    # detalle real lo trae el modal vía GET /api/indicadores/import/pending.
+    es_admin = bool(user and user.is_admin())
+    hay_pendiente = False
+    if es_admin:
+        try:
+            from web_comparativas.indicadores_summary_models import IndImportRun
+            db = getattr(request.state, "db", None)
+            if db is not None:
+                hay_pendiente = (
+                    db.query(IndImportRun.id)
+                    .filter_by(status="pending_approval")
+                    .first() is not None
+                )
+        except Exception:
+            logger.exception("home: chequeo de corrida pendiente falló")
+            hay_pendiente = False
+
     return templates.TemplateResponse(
         "indicadores/home.html",
         {
@@ -176,6 +195,8 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
             "kpis": kpis,
             "rango_desde": desde.isoformat(),
             "rango_hasta": hoy.isoformat(),
+            "es_admin": es_admin,
+            "hay_pendiente": hay_pendiente,
         },
     )
 
