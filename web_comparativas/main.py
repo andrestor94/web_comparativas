@@ -216,9 +216,10 @@ def run_startup_migrations_once() -> None:
     # Crear tablas nuevas del módulo Lectura de Pliegos (y cualquier tabla pendiente)
     try:
         from web_comparativas.models import Base, engine as _engine
-        # El router de Indicadores es local-only (no se registra en Render), así que
-        # importamos sus modelos summary explícitamente para que create_all también
-        # los materialice en PostgreSQL en el próximo deploy.
+        # Importamos los modelos summary de Indicadores explícitamente para que
+        # create_all materialice las tablas ind_* en PostgreSQL al desplegar. Los
+        # routers del módulo se registran SIEMPRE: el de consulta es admin-only en
+        # prod (guard _require_admin_en_prod) y el de import va protegido por token.
         import web_comparativas.indicadores_summary_models  # noqa: F401
         Base.metadata.create_all(bind=_engine)
         print("[MIGRATION] Tables ensured via create_all.", flush=True)
