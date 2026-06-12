@@ -41,7 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from web_comparativas.models import User
+from web_comparativas.models import User, RENDER_MODE
 from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 
 logger = logging.getLogger("wc.indicadores")
@@ -69,7 +69,23 @@ templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
-router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"])
+# ─── Gate por rol en producción ──────────────────────────────────────────────
+
+def _require_admin_en_prod(request: Request):
+    """En producción (RENDER_MODE), exige rol admin. En local no restringe (deja
+    pasar; los require_module por ruta siguen aplicando)."""
+    if RENDER_MODE:
+        user = getattr(request.state, "user", None)
+        if not user or not user.is_admin():
+            raise HTTPException(status_code=403, detail="Indicadores Comerciales está disponible solo para administradores.")
+    return None  # no devuelve user; es un guard aditivo, las rutas ya tienen el suyo
+
+
+# Guard a NIVEL router: cubre las 24 rutas de una sola vez, incluido el redirect
+# raíz ("" y "/") que no tiene Depends propio. Se SUMA a los require_module(...)
+# por ruta, que conservan la granularidad por dashboard.
+router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"],
+                   dependencies=[Depends(_require_admin_en_prod)])
 
 
 # ─── Auth helper ─────────────────────────────────────────────────────────────
