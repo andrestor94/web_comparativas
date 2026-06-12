@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Home — Indicadores Comerciales — SIEM{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=3.0">
+{% endblock %}
+
+{% block header_title %}Indicadores Comerciales{% endblock %}
+
+{# ── Formateo (es-AR): expresiones Jinja estándar, sin filtros nuevos ──
+   num: entero con separador de miles '.'  ·  money_m: $ en millones  ·
+   pct: fracción ×100 con 1 decimal y coma. None → '—' en los tres. #}
+{% macro num(v) -%}
+  {%- if v is none -%}—{%- else -%}{{ '{:,.0f}'.format(v).replace(',', '.') }}{%- endif -%}
+{%- endmacro %}
+{% macro money_m(v) -%}
+  {%- if v is none -%}—{%- else -%}$ {{ '{:,.0f}'.format(v / 1000000).replace(',', '.') }} M{%- endif -%}
+{%- endmacro %}
+{% macro pct(v) -%}
+  {%- if v is none -%}—{%- else -%}{{ '{:.1f}'.format(v * 100).replace('.', ',') }}%{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+
+<!-- ── Encabezado de página ──────────────────────────────────── -->
+<div class="h-page-header mb-3">
+  <div>
+    <p class="h-page-header__eyebrow">Suite SIEM · Indicadores Comerciales</p>
+    <h1 class="h-page-header__title">Home</h1>
+    <p class="h-page-header__subtitle">Resumen ejecutivo · últimos 12 meses ({{ rango_desde }} a {{ rango_hasta }})</p>
+  </div>
+  <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+    <a href="/markets" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-grid me-1"></i>Suite SIEM
+    </a>
+  </div>
+</div>
+
+<!-- ── Rentabilidad Negativa ─────────────────────────────────── -->
+<div class="ind-section-divider">
+  <span class="ind-section-divider__label"><i class="bi bi-graph-down-arrow"></i> Rentabilidad Negativa</span>
+</div>
+<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
+  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-rojo">
+      <span class="kl">Pérdida Total</span>
+      <span class="kv">{{ money_m(kpis.perdida_total) }}</span>
+      <span class="ks">últimos 12 meses</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-azul">
+      <span class="kl">Transacciones Negativas</span>
+      <span class="kv">{{ num(kpis.transacciones) }}</span>
+      <span class="ks">registros con utilidad negativa</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-rojo">
+      <span class="kl">Rentabilidad Promedio</span>
+      <span class="kv">{{ pct(kpis.renta_promedio) }}</span>
+      <span class="ks">sobre facturación afectada</span>
+    </div>
+  </a>
+</div>
+
+<!-- ── Inflación ─────────────────────────────────────────────── -->
+<div class="ind-section-divider">
+  <span class="ind-section-divider__label"><i class="bi bi-arrow-up-right-circle"></i> Inflación</span>
+</div>
+<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
+  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-ambar">
+      <span class="kl">Inflación de Precios</span>
+      <span class="kv">{{ pct(kpis.inflacion_indice) }}</span>
+      <span class="ks">índice PVP simple</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-ambar">
+      <span class="kl">Inflación Ponderada</span>
+      <span class="kv">{{ pct(kpis.inflacion_ponderada) }}</span>
+      <span class="ks">ponderada por facturación</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-gris">
+      <span class="kl">Productos Comparables</span>
+      <span class="kv">{{ num(kpis.productos_comparables) }}</span>
+      <span class="ks">con precio inicial y final</span>
+    </div>
+  </a>
+</div>
+
+<!-- ── Informes de Laboratorio ───────────────────────────────── -->
+<div class="ind-section-divider">
+  <span class="ind-section-divider__label"><i class="bi bi-capsule"></i> Informes de Laboratorio</span>
+</div>
+<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
+  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-azul">
+      <span class="kl">Total Unidades</span>
+      <span class="kv">{{ num(kpis.total_unidades) }}</span>
+      <span class="ks">últimos 12 meses</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-azul">
+      <span class="kl">Promedio Mensual</span>
+      <span class="kv">{{ num(kpis.promedio_mensual) }}</span>
+      <span class="ks">unidades por mes</span>
+    </div>
+  </a>
+  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
+    <div class="kpi-card kpi-card--ind-gris">
+      <span class="kl">Laboratorios</span>
+      <span class="kv">{{ num(kpis.cantidad_laboratorios) }}</span>
+      <span class="ks">con movimiento en el período</span>
+    </div>
+  </a>
+</div>
+
+{% endblock %}

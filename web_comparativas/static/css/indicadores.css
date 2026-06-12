@@ -191,6 +191,20 @@
   grid-template-columns: repeat(4, 1fr);
 }
 
+/* Home: 3 tarjetas por fila. Las media queries de abajo (900px/640px) targetean
+   .ind-kpi-grid y vienen después en el archivo, así que el colapso responsive
+   a 2/1 columnas aplica también a esta variante sin reglas extra. */
+.ind-kpi-grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Home: tarjeta KPI clickeable (link a su dashboard) sin romper la estética */
+.ind-kpi-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
 /* ── KPI Cards — variantes de color para Indicadores ─────────── */
 .kpi-card--ind-rojo   { --kc: #d93025; }
 .kpi-card--ind-azul   { --kc: var(--brand-azul, #06486f); }

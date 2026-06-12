@@ -118,7 +118,66 @@ def _parse_date(s: str) -> date:
 @router.get("", response_class=RedirectResponse, include_in_schema=False)
 @router.get("/", response_class=RedirectResponse, include_in_schema=False)
 def indicadores_redirect():
-    return RedirectResponse("/indicadores-comerciales/rentabilidad-negativa", status_code=302)
+    # La raíz del módulo aterriza en el Home (antes iba directo a rentabilidad-negativa).
+    return RedirectResponse("/indicadores-comerciales/home", status_code=302)
+
+
+@router.get("/home", response_class=HTMLResponse)
+def indicadores_home(request: Request, user: User = Depends(require_module("indicadores_comerciales.home"))):
+    """Home del módulo: 9 KPIs globales (3 por dashboard), últimos 12 meses.
+
+    Cada bloque de servicio va en su propio try/except: si un resumen falla,
+    sus KPIs quedan en None (el template muestra '—') y la página renderiza
+    igual con los demás. Solo LEE: no toca corridas ni datos.
+    """
+    request.session["market_context"] = "indicadores"
+    hoy = date.today()
+    desde = date(hoy.year - 1, hoy.month, 1)  # últimos 12 meses, desde el 1° del mes
+
+    kpis = {
+        "perdida_total": None, "transacciones": None, "renta_promedio": None,
+        "inflacion_indice": None, "inflacion_ponderada": None, "productos_comparables": None,
+        "total_unidades": None, "promedio_mensual": None, "cantidad_laboratorios": None,
+    }
+
+    try:
+        from web_comparativas.indicadores_service import get_summary as _renta_summary
+        s = _renta_summary(desde=desde, hasta=hoy)
+        kpis["perdida_total"] = s.get("utilidad_total")
+        kpis["transacciones"] = s.get("total_transacciones")
+        kpis["renta_promedio"] = s.get("rentabilidad_promedio")
+    except Exception:
+        logger.exception("home: resumen de rentabilidad no disponible")
+
+    try:
+        from web_comparativas.indicadores_inflacion_service import get_resumen as _infl_resumen
+        s = _infl_resumen(desde=desde, hasta=hoy)
+        kpis["inflacion_indice"] = s.get("inflacion_pvp_indice")
+        kpis["inflacion_ponderada"] = s.get("inflacion_pvp_ponderada_facturacion")
+        kpis["productos_comparables"] = s.get("productos_comparables")
+    except Exception:
+        logger.exception("home: resumen de inflación no disponible")
+
+    try:
+        from web_comparativas.indicadores_laboratorios_service import get_summary as _lab_summary
+        s = _lab_summary(desde=desde, hasta=hoy)
+        kpis["total_unidades"] = s.get("total_unidades")
+        kpis["promedio_mensual"] = s.get("promedio_mensual")
+        kpis["cantidad_laboratorios"] = s.get("cantidad_laboratorios")
+    except Exception:
+        logger.exception("home: resumen de laboratorios no disponible")
+
+    return templates.TemplateResponse(
+        "indicadores/home.html",
+        {
+            "request": request,
+            "user": user,
+            "market_context": "indicadores",
+            "kpis": kpis,
+            "rango_desde": desde.isoformat(),
+            "rango_hasta": hoy.isoformat(),
+        },
+    )
 
 
 @router.get("/rentabilidad-negativa", response_class=HTMLResponse)
