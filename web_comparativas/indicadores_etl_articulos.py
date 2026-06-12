@@ -4,15 +4,17 @@ Conductora: dbo.articulos ⋈ dbo.vsl_art_alfabeta_full por codigo (solape 100%,
 único en ambas). `articulos` (BASE TABLE) aporta descrip/unineg; `vsl_art_alfabeta_full`
 (VIEW) aporta marca/lab_nombre/familia/monodroga.
 
-Carga SOLO el universo real: los artículos presentes en los 3 staging (no el catálogo
-completo). El universo se arma desde SQLite local; los atributos se traen desde Fusion en
-lotes (la lista es ~35k, se pasa en chunks con placeholders ?, nunca una IN gigante).
+Carga SOLO el universo real: los artículos presentes en las otras 3 tablas summary DE LA
+MISMA CORRIDA (no el catálogo completo) — por eso corre al final. El universo se arma
+desde SQLite local; los atributos se traen desde Fusion en lotes (la lista es ~35k, se
+pasa en chunks con placeholders ?, nunca una IN gigante).
 
-Escribe SOLO en ind_articulos_staging (reemplazo total: es dimensión, no incremental).
-NO toca la tabla publicada.
+Patrón de corridas: escribe en ind_articulos etiquetando cada fila con el import_run_id
+recibido (reemplazo total dentro de la corrida: es dimensión, no incremental). No toca
+filas de otras corridas.
 
-Uso:
-    python web_comparativas/indicadores_etl_articulos.py
+Uso (normalmente vía web_comparativas/indicadores_etl_runner.py):
+    python web_comparativas/indicadores_etl_articulos.py <import_run_id>
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from web_comparativas.indicadores_db import get_fusion_db
 
 import web_comparativas.indicadores_summary_models  # noqa: F401
 from web_comparativas.indicadores_summary_models import (
-    IndArticulosStaging,
+    IndArticulos,
     IndEtlControl,
 )
 from web_comparativas.models import Base, engine, SessionLocal
@@ -37,9 +39,9 @@ CHUNK = 1000
 
 UNIVERSO_SQL = """
 SELECT DISTINCT articulo FROM (
-    SELECT articulo FROM ind_rentabilidad_lineas_staging
-    UNION SELECT articulo FROM ind_inflacion_facturacion_mensual_staging
-    UNION SELECT articulo FROM ind_inflacion_pvp_mensual_staging
+    SELECT articulo FROM ind_rentabilidad_lineas WHERE import_run_id = :rid
+    UNION SELECT articulo FROM ind_inflacion_facturacion_mensual WHERE import_run_id = :rid
+    UNION SELECT articulo FROM ind_inflacion_pvp_mensual WHERE import_run_id = :rid
 ) u
 """
 
@@ -75,10 +77,10 @@ def _rows_to_dicts(cursor) -> list:
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-def get_universo() -> list:
-    """Lista de articulos distintos (int) desde los 3 staging en SQLite."""
+def get_universo(import_run_id: int) -> list:
+    """Lista de articulos distintos (int) desde las 3 tablas summary DE ESTA corrida."""
     with engine.connect() as conn:
-        rows = conn.execute(text(UNIVERSO_SQL)).fetchall()
+        rows = conn.execute(text(UNIVERSO_SQL), {"rid": import_run_id}).fetchall()
     return [int(r[0]) for r in rows if r[0] is not None]
 
 
@@ -98,10 +100,13 @@ def fetch_atributos(codigos: list) -> list:
     return out, lotes
 
 
-def clear_staging() -> int:
+def clear_run(import_run_id: int) -> int:
+    """Borra las filas de ESTA corrida en ind_articulos (no toca otras corridas)."""
     session = SessionLocal()
     try:
-        n = session.query(IndArticulosStaging).delete()
+        n = (session.query(IndArticulos)
+                    .filter_by(import_run_id=import_run_id)
+                    .delete(synchronize_session=False))
         session.commit()
         return n
     finally:
@@ -126,19 +131,19 @@ def persist_control(filas_staging: int) -> None:
         session.close()
 
 
-def run() -> None:
-    Base.metadata.create_all(bind=engine)  # idempotente; asegura staging + control locales
-    print(f"[ETL articulos] DB destino (staging): {engine.url}", flush=True)
+def run(import_run_id: int) -> int:
+    Base.metadata.create_all(bind=engine)  # idempotente; asegura tablas + control locales
+    print(f"[ETL articulos] DB destino: {engine.url}  corrida={import_run_id}", flush=True)
 
     t0 = time.monotonic()
-    universo = get_universo()
-    print(f"[ETL articulos] universo (articulos distintos en los 3 staging): {len(universo)}", flush=True)
+    universo = get_universo(import_run_id)
+    print(f"[ETL articulos] universo (articulos distintos en las 3 tablas de la corrida): {len(universo)}", flush=True)
 
     rows, lotes = fetch_atributos(universo)
     dt_q = time.monotonic() - t0
 
     objetos = [
-        IndArticulosStaging(
+        IndArticulos(
             articulo=int(r["articulo"]),
             marca=_norm(r.get("marca")),
             descripcion=_norm(r.get("descripcion")),
@@ -146,18 +151,20 @@ def run() -> None:
             familia=_norm(r.get("familia")),
             principio_activo=_norm(r.get("principio_activo")),
             unineg=_to_int(r.get("unineg")),
+            import_run_id=import_run_id,
         )
         for r in rows
     ]
 
-    borradas = clear_staging()
-    print(f"[ETL articulos] staging limpiado: {borradas} filas borradas", flush=True)
+    borradas = clear_run(import_run_id)
+    print(f"[ETL articulos] corrida limpiada: {borradas} filas borradas", flush=True)
 
     session = SessionLocal()
     try:
         session.bulk_save_objects(objetos)
         session.commit()
-        total_staging = session.query(IndArticulosStaging).count()
+        total_corrida = (session.query(IndArticulos)
+                                .filter_by(import_run_id=import_run_id).count())
     except Exception:
         session.rollback()
         raise
@@ -168,14 +175,19 @@ def run() -> None:
 
     print("[ETL articulos] ---------------- RESUMEN CARGA ----------------", flush=True)
     print(f"[ETL articulos] universo: {len(universo)}  lotes: {lotes}  filas Fusion: {len(rows)}", flush=True)
-    print(f"[ETL articulos] filas escritas en staging: {len(objetos)}", flush=True)
-    print(f"[ETL articulos] total filas en ind_articulos_staging: {total_staging}", flush=True)
+    print(f"[ETL articulos] filas escritas en esta ejecución: {len(objetos)}", flush=True)
+    print(f"[ETL articulos] total filas de la corrida en ind_articulos: {total_corrida}", flush=True)
     print(f"[ETL articulos] tiempo total: {dt_q:.1f}s", flush=True)
     print(f"[ETL articulos] control persistido en ind_etl_control (fuente='articulos')", flush=True)
+    return len(objetos)
 
 
 def main() -> None:
-    run()
+    if len(sys.argv) < 2:
+        print("Falta import_run_id: python ...etl_articulos.py <import_run_id>")
+        print("(normalmente se ejecuta vía web_comparativas/indicadores_etl_runner.py)")
+        raise SystemExit(2)
+    run(import_run_id=int(sys.argv[1]))
 
 
 if __name__ == "__main__":
