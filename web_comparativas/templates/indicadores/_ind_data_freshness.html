@@ -1,0 +1,23 @@
+{# ── Indicador de frescura de datos ───────────────────────────────────────────
+   Reemplaza el viejo semáforo de Fusion ("Verificando conexión SQL Server…").
+   Render 100% server-side: SIN JS, SIN fetch, SIN chequeo a SQL Server.
+   Recibe del contexto `data_freshness`: el dict de
+   indicadores_db.corrida_activa_meta() o None.
+─────────────────────────────────────────────────────────────────────────────── #}
+{% if data_freshness %}
+  <div class="ind-sql-banner ind-sql-banner--ok">
+    <span class="bi bi-check-circle-fill"></span>
+    <span>
+      {% if data_freshness.mes_label %}
+        Datos hasta {{ data_freshness.mes_label }} · actualizado el {{ data_freshness.fecha_label }}
+      {% else %}
+        Datos actualizados el {{ data_freshness.fecha_label }}
+      {% endif %}
+    </span>
+  </div>
+{% else %}
+  <div class="ind-sql-banner ind-sql-banner--checking">
+    <span class="bi bi-info-circle-fill"></span>
+    <span>Sin datos cargados aún</span>
+  </div>
+{% endif %}

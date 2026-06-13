@@ -65,7 +65,11 @@ const IND = (() => {
       th.addEventListener('click', () => _sortDetail(th.dataset.sort));
     });
 
-    _checkHealth();
+    // Semáforo de Fusion reemplazado por el indicador de frescura de datos
+    // (server-side, partial _ind_data_freshness.html). Ya no se chequea /health
+    // en el arranque: evitaba el "Verificando conexión SQL Server…" colgado en
+    // modo summary. _checkHealth() queda definida abajo pero sin invocar.
+    // _checkHealth();
   }
 
   // ── Health check SQL ────────────────────────────────────────────────────────

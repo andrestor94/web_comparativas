@@ -39,7 +39,10 @@ const LAB = (() => {
     _cfg = cfg;
     _setupDates();
     _bindEvents();
-    _checkHealth();
+    // Semáforo de Fusion reemplazado por el indicador de frescura de datos
+    // (server-side, partial _ind_data_freshness.html). Ya no se chequea /health
+    // en el arranque. _checkHealth() queda definida abajo pero sin invocar.
+    // _checkHealth();
   }
 
   function _setupDates() {

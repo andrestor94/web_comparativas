@@ -186,12 +186,14 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
             logger.exception("home: chequeo de corrida pendiente falló")
             hay_pendiente = False
 
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/home.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
+            "data_freshness": corrida_activa_meta(),
             "kpis": kpis,
             "rango_desde": desde.isoformat(),
             "rango_hasta": hoy.isoformat(),
@@ -204,14 +206,14 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
 @router.get("/rentabilidad-negativa", response_class=HTMLResponse)
 def indicadores_rentabilidad(request: Request, user: User = Depends(require_module("indicadores_comerciales.rentabilidad_negativa"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/rentabilidad.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "rentabilidad",
@@ -222,14 +224,14 @@ def indicadores_rentabilidad(request: Request, user: User = Depends(require_modu
 @router.get("/informes-laboratorio", response_class=HTMLResponse)
 def indicadores_laboratorios(request: Request, user: User = Depends(require_module("indicadores_comerciales.informes_laboratorio"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/laboratorios.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "laboratorios",
@@ -240,14 +242,14 @@ def indicadores_laboratorios(request: Request, user: User = Depends(require_modu
 @router.get("/inflacion", response_class=HTMLResponse)
 def indicadores_inflacion(request: Request, user: User = Depends(require_module("indicadores_comerciales.inflacion"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/inflacion.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "inflacion",
