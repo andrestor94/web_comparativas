@@ -566,7 +566,7 @@
 <div class="erp-item {{ _cls }}{% if full %} erp-item--full{% endif %}" style="position:relative;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.3rem;">
     <div class="erp-item-label">{{ _label }}</div>
-    {%- if es_admin -%}
+    {%- if puede_editar_ficha -%}
     <button class="edit-btn-inline" title="Editar campo"
       onclick="openEditModal('fusion_campo', null, '{{ key }}', '{{ _label | replace("'","\\'")|replace('"','\\"') }}', '{{ (_val or '') | replace("'","\\'")|replace('"','\\"') }}', '{{ section }}', '{{ caso.id }}')"
     ><i class="bi bi-pencil"></i></button>
@@ -1140,8 +1140,8 @@
   </div>
 </div>
 
-{# ── MODAL DE EDICIÓN (solo para admin) ── #}
-{% if es_admin %}
+{# ── MODAL DE EDICIÓN (todos menos Auditor) ── #}
+{% if puede_editar_ficha %}
 <div class="edit-modal-overlay" id="editModalOverlay" onclick="if(event.target===this)closeEditModal()">
   <div class="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
     <div class="edit-modal-header">

@@ -171,6 +171,22 @@ def has_write_access(user) -> bool:
     return _role_of(user) not in AUDITOR_ROLES
 
 
+def puede_editar_ficha_pliego(user) -> bool:
+    """
+    ¿Puede `user` usar la edición inline de las tarjetas de la Ficha del pliego
+    (Mercado Público → Lectura de Pliegos)?
+
+    Regla: TODOS los roles con acceso a la sección menos Auditor (solo lectura).
+    El acceso a la sección en sí lo gobierna el menú/can_access; esta función
+    decide únicamente el permiso de EDITAR las tarjetas, no el de ver la ficha.
+
+    Fuente única de verdad: delega en has_write_access (role ∉ AUDITOR_ROLES),
+    de modo que Admin, Gerente, Supervisor, Analista y demás roles de escritura
+    ven el lápiz y Auditor/visor/viewer quedan en solo lectura.
+    """
+    return has_write_access(user)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Acción: Uploads — LEER
 # ──────────────────────────────────────────────────────────────────────────────

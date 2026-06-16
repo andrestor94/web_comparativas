@@ -2024,10 +2024,9 @@ def mercado_privado_helpdesk_reply(
 @router.get("/mercado-privado/reporte-perfiles", response_class=HTMLResponse)
 def mercado_privado_reporte_perfiles(
     request: Request,
-    user: User = Depends(
-        require_roles("admin", "supervisor", "auditor", "gerente", "manager")
-    ),
-    _mod: User = Depends(_require_module("mercado_privado.reporte_perfiles")),
+    # Acceso gobernado SOLO por el grant declarativo (module_access via require_module).
+    # Sin require_roles que invalide el grant: granteado = entra; no granteado = rechazado.
+    user: User = Depends(_require_module("mercado_privado.reporte_perfiles")),
 ):
     """
     M├│dulo Reporte de Perfiles (Privado).
@@ -2200,10 +2199,9 @@ def mercado_publico_oportunidades(
 @router.get("/mercado-publico/reporte-perfiles", response_class=HTMLResponse)
 def mercado_publico_reporte_perfiles(
     request: Request,
-    user: User = Depends(
-        require_roles("admin", "supervisor", "auditor", "analista", "analyst", "gerente", "manager")
-    ),
-    _mod: User = Depends(_require_module("mercado_publico.reporte_perfiles")),
+    # Acceso gobernado SOLO por el grant declarativo (module_access via require_module).
+    # Sin require_roles que invalide el grant: granteado = entra; no granteado = rechazado.
+    user: User = Depends(_require_module("mercado_publico.reporte_perfiles")),
 ):
     """
     M├│dulo Reporte de Perfiles (placeholder).

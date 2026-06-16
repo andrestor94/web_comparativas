@@ -138,10 +138,13 @@ MENU: list[dict] = [
      "roles": {"admin", "analista", "supervisor", "auditor"}},
 
     # --- Reporte perfiles (hoja) ---
+    # roles=None a propósito: el acceso a "Reporte de perfiles" se gobierna SOLO por
+    # el grant declarativo (module_access via require_perm). Sin techo de rol que
+    # invalide el grant → granteado = lo ve; no granteado = no lo ve (igual para todo rol).
     {"key": "mercado_publico.reporte_perfiles", "label": "Reporte perfiles",
      "url": "/mercado-publico/reporte-perfiles", "module": "mercado_publico",
      "parent": "mercado_publico", "market": "public",
-     "roles": {"admin", "supervisor", "auditor", "analista", "analyst"},
+     "roles": None,
      "icon": "bi-file-earmark-bar-graph", "pill": "Nuevo"},
 
     # --- Mesa de ayuda (hoja). Admin ve la variante "Mesa de ayuda (SIC)" aparte. ---
@@ -160,10 +163,12 @@ MENU: list[dict] = [
     {"key": "mercado_privado.dimensionamiento", "label": "Dimensionamiento",
      "url": "/mercado-privado/dimensiones", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private", "roles": None, "icon": "bi-pie-chart"},
+    # roles=None: mismo criterio que la entrada de Mercado Público — acceso gobernado
+    # solo por el grant declarativo (module_access via require_perm), sin techo de rol.
     {"key": "mercado_privado.reporte_perfiles", "label": "Reporte perfiles",
      "url": "/mercado-privado/reporte-perfiles", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private",
-     "roles": {"admin", "supervisor", "auditor"}, "icon": "bi-file-earmark-bar-graph",
+     "roles": None, "icon": "bi-file-earmark-bar-graph",
      "pill": "Nuevo"},
     {"key": "mercado_privado.mesa_ayuda", "label": "Mesa de ayuda", "url": "/mercado-privado/helpdesk",
      "module": "mercado_privado", "parent": "mercado_privado", "market": "private",

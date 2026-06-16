@@ -18,7 +18,7 @@ from typing import List
 
 import pandas as pd
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
-from web_comparativas.policy import require_module as _require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
+from web_comparativas.policy import require_module as _require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl, puede_editar_ficha_pliego
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import IntegrityError
@@ -164,6 +164,24 @@ def _require_admin(request: Request):
 def _is_admin(request: Request) -> bool:
     user = getattr(request.state, "user", None)
     return bool(user and (user.role or "").lower() == "admin")
+
+
+def _require_ficha_editor(request: Request):
+    """
+    Gate de la edición inline de las tarjetas de la Ficha del pliego: todos los
+    roles menos Auditor (regla en policy.puede_editar_ficha_pliego).
+
+    A diferencia de _require_admin (que REDIRIGE), aquí devolvemos 403 silencioso
+    en JSON: estos endpoints son llamados por fetch desde la ficha, no por
+    navegación. En la práctica el Auditor nunca llega porque no ve el lápiz.
+    Devuelve None si puede editar; JSONResponse si no.
+    """
+    user = getattr(request.state, "user", None)
+    if not user:
+        return JSONResponse({"error": "No autenticado"}, status_code=401)
+    if not puede_editar_ficha_pliego(user):
+        return JSONResponse({"error": "Acceso denegado"}, status_code=403)
+    return None
 
 
 def _registrar_historial(db: Session, solicitud_id: int, estado_anterior: str,
@@ -1570,6 +1588,8 @@ def _render_pliego_vista_final(request: Request, user: User, caso: PliegoSolicit
         "hallazgos_ordenados": hallazgos_ordenados,
         "proceso_extras": proceso_extras,
         "es_admin": es_admin,
+        # Edición inline de tarjetas: todos menos Auditor (no recorta el acceso a la sección)
+        "puede_editar_ficha": puede_editar_ficha_pliego(user),
         "PLIEGO_ESTADO_LABELS": PLIEGO_ESTADO_LABELS,
         "control_carga": caso.control_carga.datos if caso.control_carga else {},
         "fusion_ctx": fusion_ctx,
@@ -2455,9 +2475,9 @@ def _decode_msgs(s: str) -> list:
 @router.get("/mercado-publico/lectura-pliegos/{caso_id}/api/overrides")
 def api_get_overrides(request: Request, caso_id: int):
     """Lista todos los overrides activos del caso."""
-    blocked = _require_admin(request)
+    blocked = _require_ficha_editor(request)
     if blocked:
-        return JSONResponse({"error": "Acceso denegado"}, status_code=403)
+        return blocked
 
     db: Session = request.state.db
     caso = db.get(PliegoSolicitud, caso_id)
@@ -2480,9 +2500,9 @@ async def api_save_field_override(request: Request, caso_id: int):
         new_value, original_value, original_status, section_key, reason
     }
     """
-    blocked = _require_admin(request)
+    blocked = _require_ficha_editor(request)
     if blocked:
-        return JSONResponse({"error": "Solo admin puede editar"}, status_code=403)
+        return blocked
 
     user: User = request.state.user
     db: Session = request.state.db
@@ -2545,9 +2565,9 @@ async def api_save_row_override(request: Request, caso_id: int):
         reason
     }
     """
-    blocked = _require_admin(request)
+    blocked = _require_ficha_editor(request)
     if blocked:
-        return JSONResponse({"error": "Solo admin puede editar"}, status_code=403)
+        return blocked
 
     user: User = request.state.user
     db: Session = request.state.db
@@ -2632,9 +2652,9 @@ async def api_restore_field(request: Request, caso_id: int):
     Restaura un campo a su valor original (desactiva override).
     Body JSON: {entity_type, entity_id (opcional), field_key, reason}
     """
-    blocked = _require_admin(request)
+    blocked = _require_ficha_editor(request)
     if blocked:
-        return JSONResponse({"error": "Solo admin puede restaurar"}, status_code=403)
+        return blocked
 
     user: User = request.state.user
     db: Session = request.state.db

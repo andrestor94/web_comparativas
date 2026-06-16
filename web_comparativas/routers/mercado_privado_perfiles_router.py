@@ -15,7 +15,7 @@ from fastapi import APIRouter, Body, Depends, Request
 from sqlalchemy import cast, Date, distinct, func, select, Text
 from sqlalchemy.orm import Session
 
-from web_comparativas.auth import require_roles
+from web_comparativas.policy import require_module
 from web_comparativas.dimensionamiento.models import (
     DimensionamientoFamilyMonthlySummary,
     DimensionamientoRecord,
@@ -65,7 +65,9 @@ def _cache_set(key: str, val):
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-AllowedUser = Depends(require_roles("admin", "supervisor", "auditor"))
+# Acceso gobernado SOLO por el grant declarativo (module_access), no por rol.
+# Coincide con la página HTML (legacy_routes: require_module("mercado_privado.reporte_perfiles")).
+AllowedUser = Depends(require_module("mercado_privado.reporte_perfiles"))
 
 
 def _get_db(request: Request) -> Session:
