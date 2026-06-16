@@ -38,6 +38,7 @@ from web_comparativas import indicadores_etl_articulos as etl_articulos
 from web_comparativas import indicadores_etl_facturacion as etl_facturacion
 from web_comparativas import indicadores_etl_histopre as etl_histopre
 from web_comparativas import indicadores_etl_rentabilidad as etl_rentabilidad
+from web_comparativas import indicadores_inflacion_service as inflacion_service
 
 _TABLAS = {
     "ind_inflacion_pvp_mensual": IndInflacionPvpMensual,
@@ -45,6 +46,26 @@ _TABLAS = {
     "ind_inflacion_facturacion_mensual": IndInflacionFacturacionMensual,
     "ind_articulos": IndArticulos,
 }
+
+
+def _poblar_evolucion_inflacion(run_id: int) -> None:
+    """Materializa la serie de evolución de inflación de la corrida en su tabla summary.
+
+    Paso de post-proceso de la corrida (como las demás tablas summary, keyed por
+    import_run_id): precalcula los ~13 puntos que el Home recalculaba al vivo (~16s) para
+    que el sparkline cargue instantáneo. La ventana espeja la del Home (últimos 12 meses
+    desde el 1° del mes). Best-effort: cualquier fallo se loguea y NO corta la corrida ni
+    su aprobación — sin la serie, el Home muestra el fallback discreto."""
+    try:
+        hoy = date.today()
+        desde = date(hoy.year - 1, hoy.month, 1)
+        t0 = time.monotonic()
+        filas = inflacion_service.poblar_evolucion_precalc(run_id, desde, hoy)
+        print(f"[runner] ind_inflacion_evolucion_mensual: {filas} filas precalculadas "
+              f"(corrida {run_id}, {time.monotonic() - t0:.1f}s)", flush=True)
+    except Exception as exc:
+        print(f"[runner] WARNING: no se pudo precalcular la evolución de inflación "
+              f"(corrida {run_id}): {exc}", flush=True)
 
 
 def _set_run(run_id: int, **valores) -> None:
@@ -99,6 +120,8 @@ def run_carga_base(n_pvp: int = 36, n_rentab: int = 12, n_factur: int = 12) -> i
             approved_by="local (aprobación directa, sin flujo humano)",
             rows_por_tabla=json.dumps(conteos),
         )
+        # Serie de evolución precalculada (post-proceso de la corrida ya aprobada).
+        _poblar_evolucion_inflacion(rid)
         print(f"[runner] ---------------- RESUMEN CORRIDA {rid} ----------------", flush=True)
         for nombre, n in conteos.items():
             print(f"[runner] {nombre}: {n} filas", flush=True)
@@ -260,6 +283,8 @@ def run_carga_incremental(meses_refresh: int = 3) -> int:
             approved_by=f"local (incremental sobre corrida {activa_id}, aprobación directa)",
             rows_por_tabla=json.dumps(conteos),
         )
+        # Serie de evolución precalculada (post-proceso de la corrida ya aprobada).
+        _poblar_evolucion_inflacion(rid)
         print(f"[runner incr] ---------------- RESUMEN CORRIDA {rid} (incremental) ----------------", flush=True)
         for nombre, n in conteos.items():
             print(f"[runner incr] {nombre}: {n} filas", flush=True)

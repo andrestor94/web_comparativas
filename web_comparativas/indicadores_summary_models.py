@@ -159,6 +159,34 @@ class IndInflacionFacturacionMensual(Base):
 # ──────────────────────────────────────────────────────────────────────────────
 # (f) Dimensión de artículos (origen: Fusion.dbo.vsl_art_alfabeta_full / articulos)
 # ──────────────────────────────────────────────────────────────────────────────
+class IndInflacionEvolucionMensual(Base):
+    """Serie de evolución mensual de inflación PRECALCULADA por corrida.
+
+    Materializa, una vez por corrida, los 13 puntos que get_evolucion() recalcula
+    mes a mes cruzando ind_inflacion_pvp_mensual (~1M filas) × facturación (~16s al
+    vivo). El Home la lee server-side e instantáneo, igual que las series de rentab/labs.
+
+    UNIQUE (import_run_id, mes): una fila por mes y corrida; idempotente (reemplazo de
+    las filas de la corrida en cada repoblado, sin duplicar). Cada columna espeja una
+    clave del dict que get_evolucion devuelve por mes (mismos tipos compatibles
+    SQLite + PostgreSQL).
+    """
+    __tablename__ = "ind_inflacion_evolucion_mensual"
+    __table_args__ = (
+        UniqueConstraint("import_run_id", "mes", name="uq_ind_infl_evol_run_mes"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    mes = Column(String(7), nullable=False)                       # 'YYYY-MM'
+    inflacion_pvp_indice = Column(Float, nullable=True)           # SUM(pvp_final)/SUM(pvp_inicial)-1
+    inflacion_pvp_ponderada_facturacion = Column(Float, nullable=True)
+    productos_comparables = Column(Integer, nullable=True)
+    productos_comparables_con_facturacion = Column(Integer, nullable=True)
+    facturacion_comparable = Column(Numeric(19, 4), nullable=True)  # money -> NUMERIC(19,4)
+    total_productos = Column(Integer, nullable=True)
+    import_run_id = Column(Integer, ForeignKey("ind_import_run.id"), nullable=True, index=True)
+
+
 class IndArticulos(Base):
     __tablename__ = "ind_articulos"
     __table_args__ = (

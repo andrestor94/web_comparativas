@@ -1033,3 +1033,1016 @@
   background: #fef2f2;
   border-color: #fca5a5;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   IC-DASH — Sistema de diseño del rediseño visual (capa scoped)
+   Todos los selectores van prefijados con .ic-dash (wrapper del
+   contenido de cada vista): nada de esta capa puede alcanzar al
+   sidebar, a la barra global ni a otros módulos de SIEM.
+   indicadores.css carga vía extra_head DESPUÉS de app.theme.css,
+   por lo que estos overrides ganan por orden + especificidad
+   (.ic-dash .x = 0,2,0 > .x = 0,1,0), sin !important.
+═══════════════════════════════════════════════════════════════════ */
+
+/* ── Tokens ─────────────────────────────────────────────────────
+   .ic-dash debe seguir siendo un contenedor "plano": acá solo van
+   custom properties + tipografía. NO agregar transform, filter,
+   backdrop-filter, perspective, will-change, contain ni overflow
+   (romperían el modal position:fixed de Home y el sticky top:56px
+   de la barra de filtros). */
+.ic-dash {
+  /* Marca — apuntan a las variables globales de app.theme.css */
+  --ic-navy:  var(--brand-azul, #06486f);
+  --ic-blue:  var(--brand-azul-2, #5770b0);
+  --ic-amber: var(--color-pending, #d97706);
+  --ic-red:   var(--color-error, #dc2626);
+  --ic-green: var(--color-done, #00A487);
+
+  /* Tints de estado — derivados de la marca, sin hex nuevos */
+  --ic-red-soft:   color-mix(in srgb, var(--ic-red) 9%, white);
+  --ic-amber-soft: color-mix(in srgb, var(--ic-amber) 11%, white);
+  --ic-blue-soft:  color-mix(in srgb, var(--ic-navy) 8%, white);
+
+  /* Neutros */
+  --ic-surface:   var(--brand-white, #ffffff);
+  --ic-surface-2: var(--ink-050, #f8fafc);
+  --ic-border:    var(--ink-200, #e2e8f0);
+  --ic-border-soft: #eef2f7;   /* hairline aún más tenue: deja que la sombra defina la tarjeta */
+  --ic-text-900:  var(--ink-900, #0f172a);
+  --ic-text-700:  var(--ink-700, #334155);
+  --ic-text-500:  var(--ink-500, #64748b);
+  --ic-text-400:  var(--ink-300, #94a3b8);
+
+  /* Radios / sombras */
+  --ic-r-card:  14px;
+  --ic-r-sheet: 16px;   /* hojas hero / secciones / tarjetas flotantes */
+  --ic-r-soft:  12px;   /* callouts, chips, contenedores secundarios */
+  --ic-r-ctrl:  10px;
+  --ic-r-pill: var(--radius-pill, 999px);
+  --ic-shadow-sm: var(--shadow-xs, 0 1px 2px rgba(6, 64, 102, 0.05));
+  --ic-shadow-md: var(--shadow-md, 0 4px 12px -2px rgba(6, 64, 102, 0.08));
+  /* Sombra de tarjeta (doble capa, tinte navy SIEM): da profundidad sin recargar.
+     Token propio para no alterar --ic-shadow-md, que ya se usa en hovers. */
+  --ic-shadow-card: 0 4px 12px -2px rgba(6, 64, 102, 0.10),
+                    0 2px 6px -2px rgba(6, 64, 102, 0.06);
+
+  /* Tipografía — solo dentro del wrapper (el resto de SIEM usa Outfit).
+     Para volver a Outfit basta cambiar el primer nombre de --ic-font. */
+  --ic-font: 'Outfit', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Sin fuente display aparte: todo el módulo usa Outfit (la de la suite SIEM).
+     --ic-font-display queda como alias por compatibilidad con reglas previas. */
+  --ic-font-display: var(--ic-font);
+  font-family: var(--ic-font);
+  color: var(--ic-text-700);
+}
+
+/* ── Encabezado de vista ────────────────────────────────────────── */
+.ic-dash .h-page-header__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ic-text-400);
+}
+.ic-dash .h-page-header__title {
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ic-text-900);
+}
+.ic-dash .h-page-header__subtitle {
+  font-size: 0.875rem;
+  color: var(--ic-text-500);
+}
+
+/* ── Paneles ────────────────────────────────────────────────────── */
+.ic-dash .h-panel {
+  background: var(--ic-surface);
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-r-card);
+  box-shadow: var(--ic-shadow-sm);
+  padding: 1.375rem 1.5rem;
+}
+.ic-dash .h-panel__eyebrow {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ic-text-400);
+}
+.ic-dash .h-panel__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ic-text-900);
+}
+.ic-dash .h-panel__desc {
+  color: var(--ic-text-500);
+}
+
+/* ── Tarjetas KPI ───────────────────────────────────────────────── */
+.ic-dash .kpi-card {
+  background: var(--ic-surface);
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-r-card);
+  box-shadow: var(--ic-shadow-sm);
+  padding: 1.25rem 1.375rem 1.125rem;
+  transition: box-shadow 0.18s ease;
+}
+/* Fuera la barra superior gruesa de color */
+.ic-dash .kpi-card::before {
+  content: none;
+}
+.ic-dash .kpi-card:hover {
+  transform: none;
+  box-shadow: var(--ic-shadow-md);
+}
+/* Acento sutil: punto de color semántico junto al label */
+.ic-dash .kpi-card .kl {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ic-text-500);
+  margin-bottom: 0.6rem;
+}
+.ic-dash .kpi-card .kl::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--kc, var(--ic-navy));
+  flex: none;
+}
+.ic-dash .kpi-card--ind-flat .kl::before,
+.ic-dash .kpi-card--ind-gris .kl::before {
+  content: none;
+}
+/* Número: neutro por defecto; color semántico solo donde aplica */
+.ic-dash .kpi-card .kv {
+  font-size: 2.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ic-text-900);
+  font-variant-numeric: tabular-nums;
+}
+.ic-dash .kpi-card--ind-rojo .kv {
+  color: var(--ic-red);
+}
+.ic-dash .kpi-card .ks {
+  font-size: 0.78rem;
+  color: var(--ic-text-400);
+}
+/* Variantes re-apuntadas a tokens */
+.ic-dash .kpi-card--ind-rojo  { --kc: var(--ic-red); }
+.ic-dash .kpi-card--ind-azul  { --kc: var(--ic-navy); }
+.ic-dash .kpi-card--ind-ambar { --kc: var(--ic-amber); }
+.ic-dash .kpi-card--ind-gris  { --kc: var(--ic-text-500); }
+.ic-dash .kpi-card--ind-flat  { --kc: var(--ic-blue); }
+/* Alturas iguales en grillas de tarjetas (también las clickeables) */
+.ic-dash .ind-kpi-link,
+.ic-dash .ind-kpi-link .kpi-card {
+  height: 100%;
+}
+
+/* ── Tablas ─────────────────────────────────────────────────────── */
+.ic-dash .h-table {
+  font-size: 0.85rem;
+}
+.ic-dash .h-table th {
+  background: var(--ic-surface-2);
+  color: var(--ic-text-500);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0.7rem 1rem;
+}
+.ic-dash .h-table td {
+  padding: 0.85rem 1rem;
+  color: var(--ic-text-700);
+  border-bottom: 1px solid var(--ink-100, #f1f5f9);
+  font-variant-numeric: tabular-nums;
+}
+.ic-dash .h-table tbody tr:hover td {
+  background: var(--ic-surface-2);
+}
+.ic-dash .h-table--sticky-head thead th {
+  background: var(--ic-surface-2);
+}
+.ic-dash .h-table--compact td,
+.ic-dash .h-table--compact th {
+  padding: 0.45rem 0.6rem;
+}
+
+/* ── Botones ────────────────────────────────────────────────────── */
+.ic-dash .ind-btn {
+  border-radius: var(--ic-r-ctrl);
+}
+.ic-dash .ind-btn--primary:hover {
+  background: var(--primary-600, #042d48);
+  border-color: var(--primary-600, #042d48);
+}
+.ic-dash .ind-btn--ghost {
+  background: var(--ic-surface);
+}
+/* Botón Bootstrap "Suite SIEM" → mismo lenguaje ghost */
+.ic-dash .btn-outline-secondary {
+  color: var(--ic-text-700);
+  border-color: var(--ic-border);
+  border-radius: var(--ic-r-ctrl);
+  background: var(--ic-surface);
+}
+.ic-dash .btn-outline-secondary:hover {
+  color: var(--ic-text-900);
+  border-color: var(--ink-300, #94a3b8);
+  background: var(--ic-surface-2);
+}
+
+/* ── Inputs / selects ───────────────────────────────────────────── */
+.ic-dash .ind-input,
+.ic-dash .ind-select {
+  background: var(--ic-surface);
+  border-radius: var(--ic-r-ctrl);
+}
+.ic-dash .ind-input:focus,
+.ic-dash .ind-select:focus {
+  border-color: var(--ic-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ic-blue) 18%, transparent);
+}
+
+/* ── Segmented control (pills de Inflación) ─────────────────────── */
+.ic-dash .ind-pill-group {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-r-ctrl);
+  background: var(--ic-surface);
+  overflow: hidden;
+}
+.ic-dash .ind-pill {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.3rem 0.8rem;
+  color: var(--ic-text-500);
+}
+.ic-dash .ind-pill + .ind-pill {
+  border-left: 1px solid var(--ic-border);
+}
+.ic-dash .ind-pill:hover {
+  background: var(--ic-surface-2);
+  color: var(--ic-text-900);
+}
+.ic-dash .ind-pill--active,
+.ic-dash .ind-pill--active:hover {
+  background: var(--ic-navy);
+  color: #fff;
+}
+
+/* ── Divisor de sección → overline alineado a la izquierda ─────── */
+.ic-dash .ind-section-divider {
+  gap: 0.75rem;
+}
+.ic-dash .ind-section-divider::before {
+  display: none;
+}
+.ic-dash .ind-section-divider__label {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: var(--ic-text-400);
+}
+
+/* ── Badges / píldoras ──────────────────────────────────────────── */
+.ic-dash .ind-badge--ambar {
+  background: var(--ic-amber-soft);
+  color: var(--ic-amber);
+  border-radius: var(--ic-r-pill);
+}
+.ic-dash .ind-badge-modo {
+  background: var(--ic-blue-soft);
+  color: var(--ic-navy);
+  border-radius: var(--ic-r-pill);
+}
+
+/* ── Accesibilidad: foco visible ────────────────────────────────── */
+.ic-dash :is(a, button, input, select, [role="tab"]):focus-visible {
+  outline: 2px solid var(--ic-blue);
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DIRECCIÓN A — "EDITORIAL" (.ic-dash.ic-editorial)
+   Informe financiero premium: una hoja blanca, hairlines en lugar de
+   cajas, una métrica protagonista enorme, ámbar como acento puntual.
+═══════════════════════════════════════════════════════════════════ */
+.ic-dash.ic-editorial {
+  /* Ámbar legible sobre tint (texto): derivado, sin hex nuevo */
+  --ic-amber-text: color-mix(in srgb, var(--ic-amber) 72%, black);
+}
+
+.ic-editorial .h-page-header__title {
+  font-size: 1.85rem;
+  letter-spacing: -0.02em;
+}
+
+.ic-editorial .h-panel {
+  border-radius: var(--ic-r-sheet);
+  box-shadow: none;
+  padding: 1.5rem 1.75rem;
+}
+
+/* ── Hoja hero: hero + franja de stats en una sola superficie ──── */
+.ic-dash .ice-sheet {
+  background: var(--ic-surface);
+  border: 1px solid var(--ic-border-soft);
+  border-radius: var(--ic-r-sheet);
+  padding: 2rem 2.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--ic-shadow-card);   /* profundidad: la tarjeta "flota" */
+}
+
+.ic-dash .ice-hero {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.05fr) 1fr;
+  gap: 2.25rem;
+  padding-bottom: 1.75rem;
+}
+
+.ic-dash .ice-hero__accent {
+  width: 30px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ic-amber);
+  margin-bottom: 0.9rem;
+}
+
+.ic-dash .ice-hero__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ic-text-500);
+  margin-bottom: 0.5rem;
+}
+
+.ic-dash .ice-hero__value {
+  font-family: var(--ic-font-display);
+  font-size: 3.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;   /* Space Grotesk es más ancha que Inter */
+  line-height: 1.02;
+  color: var(--ic-text-900);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.45rem;
+}
+
+.ic-dash .ice-hero__sub {
+  font-size: 0.84rem;
+  color: var(--ic-text-400);
+  margin-bottom: 0;
+}
+
+.ic-dash .ice-hero__secondary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem 2rem;
+  align-content: center;
+  border-left: 1px solid var(--ic-border);
+  padding-left: 2.25rem;
+}
+
+.ic-dash .ice-stat__label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ic-text-400);
+  margin-bottom: 0.3rem;
+}
+
+.ic-dash .ice-stat__value {
+  font-family: var(--ic-font-display);
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ic-text-900);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  margin-bottom: 0.2rem;
+}
+
+.ic-dash .ice-stat__sub {
+  font-size: 0.72rem;
+  color: var(--ic-text-400);
+  margin-bottom: 0;
+}
+
+.ic-dash .ice-callout {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  background: var(--ic-amber-soft);
+  border-radius: var(--ic-r-soft);
+  padding: 0.8rem 1.1rem;
+}
+
+.ic-dash .ice-callout__pct {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ic-amber-text);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.ic-dash .ice-callout__desc {
+  font-size: 0.8rem;
+  color: var(--ic-text-700);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Franja de stats (cobertura) con separadores hairline ──────── */
+.ic-dash .ice-strip {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  border-top: 1px solid var(--ic-border);
+  padding-top: 1.25rem;
+  gap: 1rem 0;
+}
+
+.ic-dash .ice-strip__item {
+  padding: 0 1.1rem;
+  min-width: 0;
+}
+
+.ic-dash .ice-strip__item + .ice-strip__item {
+  border-left: 1px solid var(--ic-border);
+}
+
+/* Variante de 4 columnas (vistas con menos micro-stats) */
+.ic-dash .ice-strip--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.ic-dash .ice-strip__label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ic-text-400);
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ic-dash .ice-strip__value {
+  display: block;
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ic-text-900);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ic-dash .ice-strip__sub {
+  display: block;
+  font-size: 0.66rem;
+  color: var(--ic-text-400);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Tablas editorial: header blanco con hairline, filas con aire ─ */
+.ic-editorial .h-table th {
+  background: var(--ic-surface);
+  border-bottom: 1px solid var(--ic-border);
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  padding: 0.75rem 1rem;
+}
+.ic-editorial .h-table--sticky-head thead th {
+  background: var(--ic-surface);
+}
+.ic-editorial .h-table td {
+  padding: 0.9rem 1rem;
+}
+.ic-editorial .h-table--compact td,
+.ic-editorial .h-table--compact th {
+  padding: 0.5rem 0.7rem;
+}
+
+/* Badges de estado como píldoras suaves */
+.ic-editorial .ind-badge {
+  border-radius: var(--ic-r-pill);
+  padding: 0.2rem 0.65rem;
+  font-weight: 500;
+}
+
+/* Gráficos con un poco más de aire */
+.ic-editorial .ind-chart-container {
+  height: 290px;
+}
+
+/* Responsive editorial */
+@media (max-width: 1200px) {
+  .ic-dash .ice-strip { grid-template-columns: repeat(4, 1fr); }
+  .ic-dash .ice-strip__item:nth-child(4n + 1) { border-left: none; }
+}
+@media (max-width: 1000px) {
+  .ic-dash .ice-hero { grid-template-columns: 1fr; gap: 1.5rem; }
+  .ic-dash .ice-hero__secondary {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--ic-border);
+    padding-top: 1.5rem;
+  }
+}
+@media (max-width: 640px) {
+  .ic-dash .ice-sheet { padding: 1.5rem 1.25rem 1.25rem; }
+  .ic-dash .ice-hero__value { font-size: 2.6rem; }
+  .ic-dash .ice-strip { grid-template-columns: repeat(2, 1fr); }
+  .ic-dash .ice-strip__item { padding: 0 0.75rem; }
+  .ic-dash .ice-strip__item:nth-child(odd) { border-left: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   EDITORIAL — Extensiones para el rollout a las 4 vistas
+   (variantes semánticas, paneles full-bleed, matrices sticky, Home)
+═══════════════════════════════════════════════════════════════════ */
+
+/* ── Variantes semánticas: pérdida en rojo ──────────────────────── */
+.ic-dash .ice-hero__accent--neg { background: var(--ic-red); }
+.ic-dash .ice-hero__value--neg { color: var(--ic-red); }
+.ic-dash .ice-callout--neg { background: var(--ic-red-soft); }
+.ic-dash .ice-callout--neg .ice-callout__pct { color: var(--ic-red); }
+
+/* El slot grande del callout puede ser un nombre largo */
+.ic-dash .ice-callout__pct {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+
+/* ── Paneles full-bleed (matrices / tablas anchas) ──────────────── */
+.ic-editorial .h-panel--flush {
+  padding: 0;
+  overflow: hidden;
+}
+.ic-editorial .h-panel--flush > .h-panel__header {
+  padding: 1.1rem 1.5rem 0.9rem;
+  border-bottom: 1px solid var(--ic-border);
+  margin-bottom: 0;
+}
+.ic-editorial .h-panel--flush .ind-table-footer {
+  padding: 0.6rem 1.5rem 0.8rem;
+  margin-top: 0;
+  border-top: 1px solid var(--ic-border);
+}
+
+/* ── Matrices: columna fija sticky + sombra al scrollear ────────── */
+.ic-editorial th.lab-col-fixed,
+.ic-editorial td.lab-col-fixed {
+  background: var(--ic-surface);
+}
+.ic-editorial .table-responsive.is-scrolled-x th.lab-col-fixed,
+.ic-editorial .table-responsive.is-scrolled-x td.lab-col-fixed {
+  box-shadow: inset -10px 0 8px -10px rgba(15, 23, 42, 0.16);
+}
+.ic-editorial .lab-col-total {
+  background: var(--ic-surface-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--ic-border);
+}
+.ic-editorial .lab-col-year {
+  background: var(--ic-surface);
+}
+.ic-editorial .h-table tbody tr:hover td.lab-col-fixed {
+  background: var(--ic-surface-2);
+}
+.ic-editorial .h-table tbody tr:hover td.lab-col-total {
+  background: var(--ink-100, #f1f5f9);
+}
+
+/* Primera columna sticky genérica (tablas anchas sin clases de matriz) */
+.ic-editorial .ice-stickyfirst th:first-child,
+.ic-editorial .ice-stickyfirst td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--ic-surface);
+}
+.ic-editorial .ice-stickyfirst thead th:first-child {
+  z-index: 3;
+}
+.ic-editorial .ice-stickyfirst.is-scrolled-x th:first-child,
+.ic-editorial .ice-stickyfirst.is-scrolled-x td:first-child {
+  box-shadow: inset -10px 0 8px -10px rgba(15, 23, 42, 0.16);
+}
+.ic-editorial .ice-stickyfirst tbody tr:hover td:first-child {
+  background: var(--ic-surface-2);
+}
+
+/* ── Year controls como segmented ───────────────────────────────── */
+.ic-editorial .ind-year-controls {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-r-ctrl);
+  overflow: hidden;
+  background: var(--ic-surface);
+}
+.ic-editorial .ind-year-btn {
+  border: none;
+  border-radius: 0;
+  padding: 0.25rem 0.7rem;
+  background: transparent;
+}
+.ic-editorial .ind-year-btn + .ind-year-btn {
+  border-left: 1px solid var(--ic-border);
+}
+.ic-editorial .ind-year-btn.active {
+  background: var(--ic-navy);
+  border-color: var(--ic-navy);
+  color: #fff;
+}
+
+/* ── Chips de negocio (Rentabilidad) ────────────────────────────── */
+.ic-editorial .ind-negocio-chip {
+  background: var(--ic-surface);
+  border: 1px solid var(--ic-border);
+  border-radius: var(--ic-r-soft);
+  padding: 0.75rem 1.1rem;
+}
+.ic-editorial .ind-negocio-chip__label {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ic-text-400);
+}
+.ic-editorial .ind-negocio-chip__value {
+  font-weight: 600;
+  color: var(--ic-red);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Barras de ranking inline ───────────────────────────────────── */
+.ic-editorial .ind-rank-bar {
+  height: 5px;
+  border-radius: 999px;
+}
+.ic-editorial .ind-rank-bar-cell {
+  width: 120px;
+}
+
+/* ── Home: hojas compactas por sección ──────────────────────────── */
+.ic-dash .ice-sheet--compact {
+  padding: 1.75rem 2rem;   /* un poco más de aire, alineado a la fila de KPIs */
+}
+.ic-dash .ice-home {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap: 2.25rem;
+  align-items: center;
+}
+.ic-dash .ice-home .ice-hero__value {
+  font-size: 2.45rem;
+  margin-bottom: 0.3rem;
+}
+.ic-dash .ice-home .ice-hero__accent {
+  margin-bottom: 0.6rem;
+}
+.ic-dash .ice-home__stat {
+  border-left: 1px solid var(--ic-border);
+  padding-left: 1.75rem;
+  min-width: 0;
+}
+.ic-dash .ice-home a.ind-kpi-link {
+  display: block;
+  min-width: 0;
+}
+.ic-dash .ice-home .ind-kpi-link:hover .ice-stat__value,
+.ic-dash .ice-home .ind-kpi-link:hover .ice-hero__value {
+  color: var(--ic-navy);
+}
+.ic-dash .ice-home .ind-kpi-link:hover .ice-hero__value--neg {
+  color: var(--ic-red);
+}
+
+@media (max-width: 900px) {
+  .ic-dash .ice-home {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+  .ic-dash .ice-home__stat {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--ic-border);
+    padding-top: 1rem;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   HOME — Editorial: sin cajas. Header + 3 filas separadas por hairlines,
+   cada una con número grande (count-up), métricas al aire y sparkline.
+   Scoped a .ic-home2 (las pestañas no se tocan). Color de sección: --ich-c.
+═════════════════════════════════════════════════════════════════ */
+.ic-dash.ic-home2 {
+  --ich-ink: #0a3a5c;            /* navy editorial para títulos y números */
+  background: transparent;       /* sin panel: las filas van sobre el gris #f4f6f8 del módulo */
+}
+.ic-home2 .ich-row--neg { --ich-c: var(--ic-red); }
+.ic-home2 .ich-row--inf { --ich-c: var(--ic-amber); }
+.ic-home2 .ich-row--lab { --ich-c: var(--ic-navy); }
+
+/* ── Header: eyebrow + título + frescura + Validar (hairline abajo) ── */
+.ic-home2 .ich-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 1.1rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(10, 58, 92, 0.10);   /* hairline visible sobre el gris del módulo */
+}
+.ic-home2 .ich-head__eyebrow {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ic-text-400);
+  margin: 0 0 0.2rem;
+}
+.ic-home2 .ich-head__title {
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--ich-ink);
+  margin: 0;
+}
+.ic-home2 .ich-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+/* Píldora de frescura discreta: solo punto + texto, sin caja */
+.ic-home2 .ich-fresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--ic-green) 68%, black);
+}
+.ic-home2 .ich-fresh__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ic-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ic-green) 18%, transparent);
+}
+/* Botón Validar — gradiente navy */
+.ic-home2 .ich-btn-validar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 38px;
+  padding: 0 1.05rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  border: none;
+  border-radius: var(--ic-r-ctrl);
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--ic-navy), color-mix(in srgb, var(--ic-navy) 60%, #0b6ea8));
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--ic-navy) 70%, transparent);
+  transition: filter 0.18s ease, transform 0.18s ease;
+}
+.ic-home2 .ich-btn-validar:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+/* ── Filas editoriales (sin cajas) ──────────────────── */
+.ic-home2 .ich-rows { margin-top: 0.25rem; }
+
+.ic-home2 .ich-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;     /* DOS NIVELES apilados: encabezado + línea de datos */
+  align-items: stretch;
+  padding: 1.5rem 1.1rem;
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+  opacity: 0;
+  animation: ich-fade-up 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--d, 0s);
+  transition: background 0.18s ease;
+}
+.ic-home2 .ich-row + .ich-row { border-top: 1px solid rgba(10, 58, 92, 0.10); }
+.ic-home2 .ich-row:hover { background: color-mix(in srgb, var(--ich-c) 4%, transparent); }
+
+/* ── NIVEL 1 — ENCABEZADO (ícono + nombre), SIN barrita lateral ── */
+.ic-home2 .ich-row__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 15px;
+  padding-left: 18px;
+}
+.ic-home2 .ich-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 9px;
+  font-size: 0.95rem;
+  color: #fff;
+  background: linear-gradient(135deg, var(--ich-c), color-mix(in srgb, var(--ich-c) 58%, white));
+  box-shadow: 0 6px 14px -7px color-mix(in srgb, var(--ich-c) 65%, transparent);
+}
+.ic-home2 .ich-row__name {
+  font-size: 0.75rem;          /* 12px */
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ich-c);
+}
+
+/* ── NIVEL 2 — LÍNEA DE DATOS, CON la barrita alineada A ESTA línea ── */
+.ic-home2 .ich-row__data {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;  /* reparte el sobrante PAREJO en los 2 huecos (Opción A) */
+  gap: 1.5rem;                     /* respaldo mínimo: en angosto los grupos no se pegan */
+  padding-left: 18px;
+}
+/* Barrita de color: vive en el NIVEL 2 (línea de datos), alineada al número/cifras */
+.ic-home2 .ich-row__accent {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 54px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--ich-c), color-mix(in srgb, var(--ich-c) 45%, white));
+}
+
+/* Grupo 1: número grande + sublabel */
+.ic-home2 .ich-row__lead { flex-shrink: 0; min-width: 0; }
+.ic-home2 .ich-row__num {
+  display: block;
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--ich-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ic-home2 .ich-row__num--neg { color: var(--ic-red); }
+.ic-home2 .ich-row__sub {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.656rem;         /* 10.5px */
+  color: var(--ic-text-400);
+}
+
+/* Grupo 2: las 3 métricas en flex (agrandadas para darles presencia) */
+.ic-home2 .ich-row__metrics {
+  display: flex;
+  gap: 3.2rem;                 /* más aire entre métricas: ayuda a ocupar el ancho natural */
+  flex-shrink: 0;
+  min-width: 0;
+}
+.ic-home2 .ich-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.ic-home2 .ich-metric__k {
+  font-size: 0.656rem;         /* 10.5px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 3px;
+  color: var(--ic-text-400);
+}
+.ic-home2 .ich-metric__v {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--ich-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ic-home2 .ich-metric__v--neg { color: var(--ic-red); }
+.ic-home2 .ich-metric__v--trunc {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Grupo 3: sparkline ENCAPSULADO, compacto (sin margin-left:auto, sin hueco) */
+.ic-home2 .ich-row__spark {
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--ich-c) 15%, transparent);
+  border-radius: 13px;
+  padding: 10px 13px 6px;
+  box-shadow: 0 3px 10px -4px color-mix(in srgb, var(--ich-c) 20%, transparent);
+}
+.ic-home2 .ich-spark__plot {
+  display: block;          /* span → block: que width/height apliquen aun sin SVG (placeholder) */
+  position: relative;
+  width: 230px;
+  height: 44px;
+}
+.ic-home2 .ich-spark__svg {
+  display: block;
+  width: 230px;
+  height: 44px;
+}
+.ic-home2 .ich-spark__line { stroke-linejoin: round; stroke-linecap: round; }
+.ic-home2 .ich-spark__msg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  color: var(--ic-text-400);
+}
+.ic-home2 .ich-spark__msg[hidden] { display: none; }
+/* Fallback discreto del sparkline de inflación: naranja tenue (recuadro visible). */
+.ic-home2 .ich-spark__msg--inf { color: var(--ic-amber); opacity: 0.6; }
+/* Mini-label bajo el sparkline */
+.ic-home2 .ich-spark__cap {
+  display: block;
+  margin-top: 4px;
+  text-align: center;
+  font-size: 0.5rem;        /* 8px */
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ich-c);
+}
+
+/* ── Keyframes ──────────────────────────────── */
+@keyframes ich-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ────────────────────────────── */
+@media (max-width: 1080px) {
+  /* La línea de datos envuelve sus 3 grupos cuando no entran en una sola fila */
+  .ic-home2 .ich-row__data { flex-wrap: wrap; gap: 1.2rem 2.2rem; }
+}
+@media (max-width: 560px) {
+  .ic-home2 .ich-head__title { font-size: 1.7rem; }
+  .ic-home2 .ich-row__metrics { gap: 1.2rem; }
+}
+
+/* ── prefers-reduced-motion: sin animación, valores finales ─── */
+@media (prefers-reduced-motion: reduce) {
+  .ic-home2 .ich-row { opacity: 1; animation: none; }
+}
+
+/* ── Print: neutralizar superficies nuevas del rediseño ────────── */
+@media print {
+  .ic-dash .ice-sheet,
+  .ic-dash .ind-negocio-chip {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    break-inside: avoid;
+  }
+  .ic-dash .ice-hero__value { font-size: 24pt; }
+  .ic-dash .ice-strip { grid-template-columns: repeat(4, 1fr); }
+  .ic-dash .ice-stickyfirst th:first-child,
+  .ic-dash .ice-stickyfirst td:first-child {
+    position: static !important;
+    box-shadow: none !important;
+  }
+}

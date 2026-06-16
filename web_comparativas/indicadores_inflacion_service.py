@@ -439,10 +439,13 @@ def _mes_lo_hi(desde: date, hasta: date) -> "tuple[str, str]":
     return desde.strftime("%Y-%m"), (hasta - timedelta(days=1)).strftime("%Y-%m")
 
 
-def _get_facturacion_por_articulo_summary(desde: date, hasta: date, cadneg: Optional[str] = None) -> dict:
+def _get_facturacion_por_articulo_summary(desde: date, hasta: date, cadneg: Optional[str] = None,
+                                          import_run_id: Optional[int] = None) -> dict:
     """Rama ON de _get_facturacion_por_articulo: SUM por articulo desde el summary.
-    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio."""
-    corrida = _corrida_activa()
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio.
+    import_run_id fija la corrida (lo usa el poblado de la serie precalculada, que
+    corre ANTES de que la corrida esté activa); None => _corrida_activa()."""
+    corrida = import_run_id if import_run_id is not None else _corrida_activa()
     if corrida is None:
         return {}
     mes_lo, mes_hi = _mes_lo_hi(desde, hasta)
@@ -545,12 +548,13 @@ def _calc_pvp(pvp_i, fecha_i, pvp_f, cut_ini: date):
     return estado, 1, (float(pvp_f) / float(pvp_i)) - 1.0
 
 
-def _build_pvp_rows_from_summary(desde: date, hasta: date) -> list:
+def _build_pvp_rows_from_summary(desde: date, hasta: date, import_run_id: Optional[int] = None) -> list:
     """Reconstruye las filas de QUERY_PRODUCTOS (pre-enriquecimiento) desde el summary.
     Universo unineg=2 + descripcion/laboratorio desde ind_articulos; pvp desde
     ind_inflacion_pvp_mensual (último snapshot <= corte, día-exacto).
-    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve [] limpio."""
-    corrida = _corrida_activa()
+    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve [] limpio.
+    import_run_id fija la corrida (None => _corrida_activa())."""
+    corrida = import_run_id if import_run_id is not None else _corrida_activa()
     if corrida is None:
         return []
     with engine.connect() as conn:
@@ -597,12 +601,15 @@ def _get_productos_summary(
     cadneg: Optional[str] = None,
     fact_desde: Optional[date] = None,
     fact_hasta: Optional[date] = None,
+    import_run_id: Optional[int] = None,
 ) -> list:
     """Rama ON de get_productos. Mismo enriquecimiento y filtros que la rama OFF, pero
     PVP desde ind_inflacion_pvp_mensual y facturación desde el summary (no del vivo).
-    fact_desde/fact_hasta desacoplan la ventana de facturación de los cortes de PVP."""
-    rows = _build_pvp_rows_from_summary(desde, hasta)
-    facturacion = _get_facturacion_por_articulo_summary(fact_desde or desde, fact_hasta or hasta, cadneg=cadneg)
+    fact_desde/fact_hasta desacoplan la ventana de facturación de los cortes de PVP.
+    import_run_id fija la corrida (None => _corrida_activa())."""
+    rows = _build_pvp_rows_from_summary(desde, hasta, import_run_id=import_run_id)
+    facturacion = _get_facturacion_por_articulo_summary(fact_desde or desde, fact_hasta or hasta,
+                                                        cadneg=cadneg, import_run_id=import_run_id)
     for row in rows:
         ventas = facturacion.get(str(row.get("articulo")).strip(), {})
         row["unidades"] = ventas.get("unidades", 0)
@@ -681,14 +688,19 @@ def get_productos(
     cadneg: Optional[str] = None,
     fact_desde: Optional[date] = None,
     fact_hasta: Optional[date] = None,
+    import_run_id: Optional[int] = None,
 ) -> list:
     # fact_desde/fact_hasta: ventana de facturación desacoplada de los cortes de PVP.
     # Default = (desde, hasta) => las llamadas del usuario quedan idénticas. La serie
     # mensual (get_evolucion) la usa para que PVP corte a fin de mes y la facturación
     # cubra el mes calendario completo.
-    if _indicadores_summary_available("ind_inflacion_pvp_mensual"):
+    # import_run_id != None FUERZA la rama summary scoped a esa corrida (sin pasar por
+    # el gate): lo usa el poblado de la serie precalculada, que computa contra la corrida
+    # recién cargada ANTES de que esté activa/aprobada.
+    if import_run_id is not None or _indicadores_summary_available("ind_inflacion_pvp_mensual"):
         return _get_productos_summary(desde, hasta, laboratorio=laboratorio, search=search,
-                                      cadneg=cadneg, fact_desde=fact_desde, fact_hasta=fact_hasta)
+                                      cadneg=cadneg, fact_desde=fact_desde, fact_hasta=fact_hasta,
+                                      import_run_id=import_run_id)
 
     t0 = time.monotonic()
     logger.info("inflacion get_productos: START desde=%s hasta=%s", desde, hasta)
@@ -733,9 +745,10 @@ def get_resumen(
     cadneg: Optional[str] = None,
     fact_desde: Optional[date] = None,
     fact_hasta: Optional[date] = None,
+    import_run_id: Optional[int] = None,
 ) -> dict:
     productos = get_productos(desde, hasta, laboratorio=laboratorio, search=search, cadneg=cadneg,
-                              fact_desde=fact_desde, fact_hasta=fact_hasta)
+                              fact_desde=fact_desde, fact_hasta=fact_hasta, import_run_id=import_run_id)
 
     comparables = [p for p in productos if p["es_comparable"] == 1]
     productos_facturados = [p for p in productos if (p.get("facturacion") or 0) > 0]
@@ -849,6 +862,7 @@ def get_evolucion(
     laboratorio: Optional[str] = None,
     search: Optional[str] = None,
     cadneg: Optional[str] = None,
+    import_run_id: Optional[int] = None,
 ) -> list:
     resultados = []
     cursor_mes = date(desde.year, desde.month, 1)
@@ -866,7 +880,8 @@ def get_evolucion(
         corte_ini = cursor_mes - timedelta(days=1)   # último día del mes anterior
         corte_fin = siguiente - timedelta(days=1)     # último día de este mes
         resumen = get_resumen(corte_ini, corte_fin, laboratorio=laboratorio, search=search,
-                              cadneg=cadneg, fact_desde=cursor_mes, fact_hasta=siguiente)
+                              cadneg=cadneg, fact_desde=cursor_mes, fact_hasta=siguiente,
+                              import_run_id=import_run_id)
         resultados.append({
             "mes": cursor_mes.strftime("%Y-%m"),
             "inflacion_pvp_indice": resumen["inflacion_pvp_indice"],
@@ -879,3 +894,119 @@ def get_evolucion(
         cursor_mes = siguiente
 
     return resultados
+
+
+# ---------------------------------------------------------------------------
+# Evolución PRECALCULADA (tabla summary ind_inflacion_evolucion_mensual)
+# ---------------------------------------------------------------------------
+
+# Columnas de la serie precalculada, en el MISMO orden/clave que devuelve get_evolucion()
+# por mes (menos 'mes', que es la clave de la fila). Fuente única de verdad para el
+# poblado (INSERT) y la lectura (SELECT/map) — así no se desincronizan.
+_EVOL_COLS = (
+    "inflacion_pvp_indice",
+    "inflacion_pvp_ponderada_facturacion",
+    "productos_comparables",
+    "productos_comparables_con_facturacion",
+    "facturacion_comparable",
+    "total_productos",
+)
+
+
+def _meses_ventana_evolucion(desde: date, hasta: date) -> list:
+    """Etiquetas 'YYYY-MM' que get_evolucion() recorrería para [desde, hasta).
+    Mismo barrido (primero de mes mientras cursor < hasta) para alinear la lectura
+    precalculada con la serie al vivo sin depender de cómo quedó poblada la tabla."""
+    labels = []
+    cursor_mes = date(desde.year, desde.month, 1)
+    while cursor_mes < hasta:
+        labels.append(cursor_mes.strftime("%Y-%m"))
+        if cursor_mes.month == 12:
+            cursor_mes = date(cursor_mes.year + 1, 1, 1)
+        else:
+            cursor_mes = date(cursor_mes.year, cursor_mes.month + 1, 1)
+    return labels
+
+
+def get_evolucion_precalc(
+    desde: date,
+    hasta: date,
+    import_run_id: Optional[int] = None,
+) -> list:
+    """Lee la serie de evolución ya materializada en ind_inflacion_evolucion_mensual.
+
+    Devuelve la MISMA estructura que get_evolucion() (lista de dicts por mes), pero
+    en milisegundos (un SELECT de ~13 filas) en vez de recalcular mes a mes (~16s).
+    Gate defensivo: sin corrida activa, tabla inexistente, sin filas o ante cualquier
+    error -> devuelve [] (el Home interpreta [] como 'sin datos aún' y renderiza igual).
+
+    import_run_id fija la corrida (None => _corrida_activa(), la última approved, igual
+    que el resto de las lecturas summary del módulo)."""
+    try:
+        corrida = import_run_id if import_run_id is not None else _corrida_activa()
+        if corrida is None:
+            return []
+        labels = _meses_ventana_evolucion(desde, hasta)
+        if not labels:
+            return []
+        stmt = text(
+            f"SELECT mes, {', '.join(_EVOL_COLS)} "
+            "FROM ind_inflacion_evolucion_mensual "
+            "WHERE import_run_id = :corrida AND mes IN :labels "
+            "ORDER BY mes"
+        ).bindparams(bindparam("labels", expanding=True))
+        with engine.connect() as conn:
+            rows = [dict(r._mapping) for r in conn.execute(stmt, {"corrida": corrida, "labels": labels})]
+    except Exception:
+        # Tabla aún no creada/poblada, motor sin la columna, etc.: degradar a vacío.
+        logger.exception("get_evolucion_precalc: lectura de la serie precalculada falló")
+        return []
+
+    serie = []
+    for r in rows:
+        punto = {"mes": r["mes"]}
+        for col in _EVOL_COLS:
+            valor = r.get(col)
+            # facturacion_comparable llega como Numeric/str según motor -> float homogéneo.
+            if col == "facturacion_comparable" and valor is not None:
+                valor = float(valor)
+            punto[col] = valor
+        serie.append(punto)
+    return serie
+
+
+def poblar_evolucion_precalc(import_run_id: int, desde: date, hasta: date) -> int:
+    """Materializa la serie de evolución de UNA corrida en ind_inflacion_evolucion_mensual.
+
+    Reusa get_evolucion() pineado a `import_run_id` (misma lógica/valores que el vivo) y
+    escribe los ~13 puntos etiquetados con esa corrida. IDEMPOTENTE: borra primero las
+    filas de la corrida y reinserta (un repoblado reemplaza, no duplica). Devuelve cuántas
+    filas quedaron. Pensado para el runner del ETL (un paso por corrida) o un backfill puntual.
+
+    NO toca filas de otras corridas ni el flujo de aprobación: solo inserta filas keyed por
+    import_run_id, igual que las demás tablas summary."""
+    serie = get_evolucion(desde, hasta, import_run_id=import_run_id)
+
+    col_list = ", ".join(_EVOL_COLS)
+    placeholders = ", ".join(f":{c}" for c in _EVOL_COLS)
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM ind_inflacion_evolucion_mensual WHERE import_run_id = :corrida"),
+            {"corrida": import_run_id},
+        )
+        for punto in serie:
+            params = {"corrida": import_run_id, "mes": punto["mes"]}
+            for col in _EVOL_COLS:
+                valor = punto.get(col)
+                if col == "facturacion_comparable" and valor is not None:
+                    valor = float(valor)
+                params[col] = valor
+            conn.execute(
+                text(
+                    f"INSERT INTO ind_inflacion_evolucion_mensual "
+                    f"(import_run_id, mes, {col_list}) "
+                    f"VALUES (:corrida, :mes, {placeholders})"
+                ),
+                params,
+            )
+    return len(serie)
