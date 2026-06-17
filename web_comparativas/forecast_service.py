@@ -351,6 +351,28 @@ _FACT_2026_DF_TTL = 3600
 _FACT_2026_DF_LOCK = threading.Lock()
 
 
+def _fact_2026_closed_month_cap(today: "dt.date | None" = None) -> "dt.date":
+    """Tope superior DINÁMICO para la facturación real 2026: primer día del mes EN CURSO.
+
+    La serie del gráfico y el KPI fact_2026 muestran SOLO meses CERRADOS, es decir
+    `fecha < este_tope`. Regla de negocio: un mes se muestra recién cuando ya cerró
+    por calendario (su último día pasó), para no graficar el mes en curso parcial
+    (caída falsa).
+
+    Se calcula contra HOY (`date.today()` del servidor), NO contra MAX(fecha) de
+    forecast_fact_2026: si se basara en MAX, el mes en curso —que puede estar cargado
+    parcialmente en la tabla— se mostraría igual, que es justo lo que se quiere evitar.
+    Es dinámico (se recalcula solo cada mes); no hay fechas hardcodeadas. Ej.: hoy
+    2026-06-17 → tope 2026-06-01 → muestra hasta mayo; el 2026-07-01 → muestra junio.
+
+    Nota TZ: usa la fecha LOCAL del servidor. Render corre en UTC; en el instante del
+    cambio de mes el corte puede adelantarse hasta ~3 h respecto de Argentina (UTC-3).
+    Efecto despreciable (solo afecta unas horas alrededor de la medianoche de fin de mes).
+    """
+    d = today if today is not None else dt.date.today()
+    return d.replace(day=1)
+
+
 def _get_fact_2026_df_cached() -> "pd.DataFrame":
     """Return the parsed facturacion_real_2026 DataFrame, cached in memory for 1 h.
 
@@ -3008,7 +3030,9 @@ def _local_get_chart_data_light(
             # Use in-memory cache: avoids re-reading the 32 MB CSV on every cold request
             df_fact = _get_fact_2026_df_cached().copy()
             if not df_fact.empty:
-                df_fact = df_fact[df_fact["fecha"] >= "2026-01-01"]
+                # Solo meses CERRADOS: tope dinámico = primer día del mes en curso (_fact_2026_closed_month_cap).
+                _cap = _fact_2026_closed_month_cap().isoformat()
+                df_fact = df_fact[(df_fact["fecha"] >= "2026-01-01") & (df_fact["fecha"] < _cap)]
                 if profiles and "perfil" in df_fact.columns:
                     df_fact = df_fact[df_fact["perfil"].isin(profiles)]
                 if allowed_codes is not None:
@@ -3812,11 +3836,12 @@ def _pg_get_chart_data_inner(
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
     logger.debug("[FORECAST INNER] querying fact2026")
-    # Facturación real 2026 — fuente única: forecast_fact_2026 (todos los meses cargados)
+    # Facturación real 2026 — fuente única: forecast_fact_2026.
     # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
     # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
-    # Sin tope superior de fecha: la serie muestra todos los meses presentes en la tabla
-    # (antes cortaba en '2026-05-01', heredado de cuando el dataset solo llegaba a abril).
+    # La query NO capa el mes superior (trae desde 2026-01-01 en adelante) porque df_fact_raw
+    # alimenta también el cálculo de accuracy más abajo (que tiene su propia lógica de "mes
+    # abierto"). El recorte a meses CERRADOS (tope dinámico) se aplica al graficar y al KPI.
     _fact_parts = ["fecha >= '2026-01-01'"]
     if profiles:
         # Filter directly by tipocli (commercial profile enriched at load time from clientes.csv).
@@ -3845,9 +3870,13 @@ def _pg_get_chart_data_inner(
     val_2026_records: list = []
     fact_2026_sum = 0.0
     if not df_fact_raw.empty:
-        fact_2026_sum = float(df_fact_raw["Total_Venta"].sum())
-        # Sin tope superior: incluye todos los meses devueltos por la query (ya filtrada desde 2026-01-01).
-        df_v2026_chart = df_fact_raw.copy()
+        # Solo meses CERRADOS (tope dinámico = primer día del mes en curso; _fact_2026_closed_month_cap).
+        # df_fact_raw queda completo (alimenta accuracy abajo, con su propia lógica de mes abierto);
+        # acá se capa lo que se grafica (val_2026) y el KPI fact_2026.
+        _fact_cap_ts = pd.Timestamp(_fact_2026_closed_month_cap())
+        df_fact_closed = df_fact_raw[df_fact_raw["fecha"] < _fact_cap_ts]
+        fact_2026_sum = float(df_fact_closed["Total_Venta"].sum())
+        df_v2026_chart = df_fact_closed.copy()
         if not df_hist.empty and not df_v2026_chart.empty:
             hist_last = df_hist.sort_values("fecha").iloc[-1]
             brow = pd.DataFrame([{"fecha": hist_last["fecha"],
@@ -5744,12 +5773,14 @@ def get_chart_data(
         # All months aggregated (analytical layer: Jan+Feb+Mar)
         df_v2026_all = df_f2.groupby("fecha").agg(Total_Venta=("imp_hist", "sum")).reset_index()
 
-        # fact_2026_sum = todos los meses disponibles
-        fact_2026_sum = float(df_f2["imp_hist"].sum())
+        # Solo meses CERRADOS (tope dinámico = primer día del mes en curso; _fact_2026_closed_month_cap).
+        # df_v2026_all queda completo para el cálculo de accuracy (usa su propia lógica de mes abierto [:-1]).
+        _fact_cap_ts = pd.Timestamp(_fact_2026_closed_month_cap())
+        fact_2026_sum = float(df_f2.loc[df_f2["fecha"] < _fact_cap_ts, "imp_hist"].sum())
         meta_completeness = (fact_2026_sum / total_proyectado_2026_annual * 100) if total_proyectado_2026_annual > 0 else 0.0
 
-        # Chart line: todos los meses cargados (sin tope superior; antes cortaba en '2026-05-01')
-        df_v2026_chart = df_v2026_all.copy()
+        # Chart line: solo meses cerrados.
+        df_v2026_chart = df_v2026_all[df_v2026_all["fecha"] < _fact_cap_ts].copy()
 
         # Bridge: connect chart line to end of history
         if not df_hist.empty and not df_v2026_chart.empty:
