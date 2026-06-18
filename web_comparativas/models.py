@@ -1366,6 +1366,32 @@ def _ensure_email_notifications_indexes():
         pass
 
 
+def _ensure_crm_envios_table():
+    """
+    Alinea la tabla `crm_envios` (envíos de oportunidades al CRM) en DBs ya existentes.
+
+    `create_all` ya crea la tabla y el UNIQUE en bases nuevas; esto garantiza de forma
+    idempotente el índice ÚNICO sobre `oportunidad_id` (bloqueo PERMANENTE de reenvío)
+    en bases donde la tabla pudo crearse sin el constraint. Compatible SQLite/Postgres
+    (CREATE UNIQUE INDEX IF NOT EXISTS funciona en ambos). NO destructivo.
+
+    Modo alternativo "por período": ver docstring de CrmEnvio. Para activarlo, reemplazar
+    el índice de abajo por uno compuesto sobre (oportunidad_id, periodo_yyyymm).
+    """
+    try:
+        idx_sql = [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_envios_oport ON crm_envios(oportunidad_id)",
+            "CREATE INDEX IF NOT EXISTS idx_crm_envios_periodo ON crm_envios(periodo_yyyymm)",
+            "CREATE INDEX IF NOT EXISTS idx_crm_evt_oport ON crm_envio_eventos(oportunidad_id)",
+        ]
+        with engine.begin() as conn:
+            for sql in idx_sql:
+                conn.execute(text(sql))
+    except Exception:
+        # No bloquear el arranque si algún backend no soporta IF NOT EXISTS.
+        pass
+
+
 def _ensure_upload_uploader_snapshot_columns():
     """
     Añade uploaded_by_name / uploaded_by_email si faltan (por compatibilidad

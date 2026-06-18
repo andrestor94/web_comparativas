@@ -175,6 +175,149 @@ class DimensionamientoFamilyMonthlySummary(Base):
     )
 
 
+class OportunidadSummary(Base):
+    """Tabla precalculada de oportunidades de venta (ventas perdidas recuperables).
+
+    Grano: un par (cliente_visible + codigo_articulo) que califica como oportunidad
+    según el motor en `oportunidades.py`. Run-scoped (una fila por par y corrida),
+    reconstruida desde dimensionamiento_records del run activo.
+    """
+
+    __tablename__ = "oportunidades_summary"
+
+    id = Column(Integer, primary_key=True)
+    import_run_id = Column(
+        Integer,
+        ForeignKey("dimensionamiento_import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Identidad de la oportunidad
+    codigo_articulo = Column(String(120), nullable=False, index=True)
+    cliente_visible = Column(Text, nullable=True, index=True)
+    cuit = Column(String(32), nullable=True)
+    provincia = Column(String(120), nullable=True)
+    producto_nombre = Column(Text, nullable=True)
+    familia = Column(Text, nullable=True)
+    unidad_negocio = Column(Text, nullable=True)
+    plataforma = Column(String(40), nullable=True)
+
+    # Clasificación
+    tipo_oportunidad = Column(String(20), nullable=True, index=True)
+    estado_actividad = Column(String(20), nullable=True, index=True)
+
+    # Demanda (ventana últimos 12 meses)
+    # meses_demanda_cliente_12m: meses con demanda del cliente (TODOS los estados) -> clasifica el tipo.
+    # meses_no_participo_12m:     meses con demanda NO_PARTICIPO (define el monto recuperable).
+    meses_demanda_cliente_12m = Column(Integer, nullable=False, default=0)
+    meses_no_participo_12m = Column(Integer, nullable=False, default=0)
+    ventana_meses = Column(Integer, nullable=False, default=12)
+    consumo_tipico_mensual = Column(Float, nullable=False, default=0)
+    consumo_min_mensual = Column(Float, nullable=False, default=0)
+    consumo_max_mensual = Column(Float, nullable=False, default=0)
+    ultima_demanda = Column(Date, nullable=True)
+    meses_desde_ultima_demanda = Column(Integer, nullable=True)
+
+    # Precio y monto
+    precio_unitario_estimado = Column(Float, nullable=False, default=0)
+    monto_oportunidad = Column(Float, nullable=False, default=0)
+
+    # Efectividad (histórico completo por codigo_articulo)
+    efectividad = Column(Float, nullable=False, default=0)
+    ganados = Column(Integer, nullable=False, default=0)
+    comprado_otra = Column(Integer, nullable=False, default=0)
+    en_espera = Column(Integer, nullable=False, default=0)
+    clientes_distintos = Column(Integer, nullable=False, default=0)
+
+    # Multiplicadores y score
+    tipo_multiplicador = Column(Float, nullable=False, default=0)
+    multiplicador_actividad = Column(Float, nullable=False, default=0)
+    score = Column(Float, nullable=False, default=0, index=True)
+
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_oportunidades_run_score", "import_run_id", "score"),
+        Index("ix_oportunidades_run_codigo", "import_run_id", "codigo_articulo"),
+    )
+
+
+class CrmEnvio(Base):
+    """Registro CANÓNICO de oportunidades enviadas al CRM (idempotencia + trazabilidad).
+
+    Una fila por oportunidad efectivamente enviada. La identidad estable
+    `oportunidad_id` = sha1(cliente_visible + "|" + codigo_articulo) — ver
+    `oportunidades.opportunity_stable_id`. Coincide con el GRANO del motor y NO
+    depende de montos/efectividad/atributos del último renglón (cuit, unidad), de
+    modo que sobrevive a los recálculos mensuales.
+
+    UNIQUE(oportunidad_id) ⇒ bloqueo PERMANENTE de reenvío (default del proyecto).
+    Esta fila guarda al PRIMER emisor (quién/cuándo) y NO se sobrescribe; los
+    reenvíos por override de Admin/Gerente se anotan en `crm_envio_eventos`.
+
+    Compatible SQLite/Postgres: solo TEXT/INTEGER/TIMESTAMP. El UNIQUE lo crea
+    `create_all` en tablas nuevas y `_ensure_crm_envios_table` lo alinea de forma
+    idempotente en bases ya existentes (mismo patrón que el resto de _ensure_*).
+
+    ── Modo alternativo "por período" (NO activo por defecto) ──────────────────
+    Para permitir reenviar en un mes nuevo, el bloqueo debería ser por
+    (oportunidad_id, periodo_yyyymm) en vez de solo oportunidad_id:
+      1. Quitar unique=True de `oportunidad_id`.
+      2. Agregar UniqueConstraint("oportunidad_id", "periodo_yyyymm",
+         name="uq_crm_envio_oport_periodo") a __table_args__.
+      3. En _ensure_crm_envios_table, crear el índice único compuesto.
+    El campo `periodo_yyyymm` ya se persiste para tener todo listo ese día.
+    """
+
+    __tablename__ = "crm_envios"
+
+    id = Column(Integer, primary_key=True)
+    # Identidad estable de la oportunidad (hash corto, 16 hex). UNIQUE = bloqueo permanente.
+    oportunidad_id = Column(String(40), nullable=False, unique=True, index=True)
+    # Período YYYYMM del envío. Hoy informativo; clave del modo "por período".
+    periodo_yyyymm = Column(String(6), nullable=True, index=True)
+
+    # Campos descriptivos (NO forman parte de la identidad: pueden driftear).
+    cliente_visible = Column(Text, nullable=True)
+    cuit = Column(String(32), nullable=True)
+    codigo_articulo = Column(String(120), nullable=True)
+    unidad_negocio = Column(Text, nullable=True)
+
+    # Sello del usuario que envía (server-side; el email es el campo de control).
+    enviado_por = Column(String(255), nullable=False)
+    enviado_por_id = Column(Integer, nullable=True)
+    enviado_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    crm_status = Column(String(40), nullable=False, default="PENDIENTE_ENVIO_REAL")
+    payload_snapshot = Column(Text, nullable=True)  # JSON serializado del payload sellado
+
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+
+class CrmEnvioEvento(Base):
+    """Bitácora (append-only) de TODOS los eventos de envío al CRM.
+
+    A diferencia de `crm_envios` (1 fila canónica por oportunidad, con UNIQUE),
+    esta tabla NO tiene unique: registra el primer ENVIO y cada REENVIO_OVERRIDE
+    de Admin/Gerente, sin romper el bloqueo permanente. Permite auditar quién
+    reenvió y cuándo aunque el bloqueo siga vigente.
+    """
+
+    __tablename__ = "crm_envio_eventos"
+
+    id = Column(Integer, primary_key=True)
+    oportunidad_id = Column(String(40), nullable=False, index=True)
+    evento = Column(String(30), nullable=False, default="ENVIO")  # ENVIO | REENVIO_OVERRIDE
+    periodo_yyyymm = Column(String(6), nullable=True)
+    enviado_por = Column(String(255), nullable=False)
+    enviado_por_id = Column(Integer, nullable=True)
+    enviado_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    crm_status = Column(String(40), nullable=True)
+    payload_snapshot = Column(Text, nullable=True)
+    nota = Column(Text, nullable=True)
+
+
 class DimensionamientoImportError(Base):
     __tablename__ = "dimensionamiento_import_errors"
 
