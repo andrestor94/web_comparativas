@@ -47,6 +47,14 @@ from web_comparativas.policy import can_access as _can_access_tpl, first_accessi
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
+
+def _oportunidades_enabled_tpl() -> bool:
+    from web_comparativas.dimensionamiento.oportunidades import OPORTUNIDADES_ENABLED
+    return OPORTUNIDADES_ENABLED()
+
+
+templates.env.globals["oportunidades_enabled"] = _oportunidades_enabled_tpl
+
 # Logging Console
 logger = logging.getLogger("wc.main")
 logger.setLevel(logging.INFO)
@@ -282,6 +290,13 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: forecast manual client columns checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning forecast manual client columns: {e}", flush=True)
+
+    try:
+        from web_comparativas.models import _ensure_crm_envios_table
+        _ensure_crm_envios_table()
+        print("[MIGRATION] SUCCESS: crm_envios table/indexes checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning crm_envios table: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup
@@ -617,6 +632,7 @@ def favicon():
 # === ROUTERS ===
 from web_comparativas.routers.sic_router import router as sic_router
 from web_comparativas.routers.dimensiones_router import router as dimensiones_router
+from web_comparativas.routers.oportunidades_router import router as oportunidades_router
 from web_comparativas.routers.notifications_router import router as notifications_router
 from web_comparativas.routers.pliegos_router import router as pliegos_router
 from web_comparativas.api_comments import router as comments_router
@@ -629,6 +645,7 @@ from web_comparativas.routers.indicadores_import_router import router as indicad
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
+app.include_router(oportunidades_router)
 app.include_router(notifications_router)
 app.include_router(pliegos_router)
 app.include_router(comments_router)

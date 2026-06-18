@@ -2497,8 +2497,8 @@ def _load_all_data() -> dict[str, Any]:
             logger.warning("importe_historico load error: %s", exc)
     result["df_imp_hist"] = df_imp_hist
 
-    # ── Facturación real 2026 (actual billing Jan+Feb+Mar 2026) ──────────
-    # Source: facturacion_real_2026_sin_neg2.csv (consolidated Jan–Apr 2026)
+    # ── Facturación real 2026 (actual billing, todos los meses cargados) ──
+    # Source: facturacion_real_2026_sin_neg2.csv (todos los meses disponibles, p.ej. Ene–Jun 2026)
     # Robust parser recovers all rows including those with embedded double-quotes.
     # No canonical-series cross-filter here — the full CSV total must be preserved
     # for the "Todos" view; per-filter reduction happens at chart-query time.
@@ -2522,7 +2522,7 @@ def _load_all_data() -> dict[str, Any]:
             _f26_months = df_fact_2026.groupby(df_fact_2026["fecha"].dt.to_period("M"))["imp_hist"].agg(["count", "sum"])
             for _m, _mr in _f26_months.iterrows():
                 logger.info("[FORECAST] facturacion_2026 %s: %d rows | imp_hist $%.0f", _m, _mr["count"], _mr["sum"])
-            logger.info("[FORECAST] facturacion_real CSV (Jan–Apr): %d rows loaded", len(df_fact_2026))
+            logger.info("[FORECAST] facturacion_real CSV (todos los meses): %d rows loaded", len(df_fact_2026))
         except Exception as _csv_exc:
             logger.warning("facturacion_real_2026 CSV load error: %s", _csv_exc)
     if not df_fact_2026.empty:
@@ -3008,7 +3008,7 @@ def _local_get_chart_data_light(
             # Use in-memory cache: avoids re-reading the 32 MB CSV on every cold request
             df_fact = _get_fact_2026_df_cached().copy()
             if not df_fact.empty:
-                df_fact = df_fact[(df_fact["fecha"] >= "2026-01-01") & (df_fact["fecha"] < "2026-05-01")]
+                df_fact = df_fact[df_fact["fecha"] >= "2026-01-01"]
                 if profiles and "perfil" in df_fact.columns:
                     df_fact = df_fact[df_fact["perfil"].isin(profiles)]
                 if allowed_codes is not None:
@@ -3812,10 +3812,12 @@ def _pg_get_chart_data_inner(
         df_fcst = pd.concat([bridge, df_fcst.sort_values("fecha")], ignore_index=True)
 
     logger.debug("[FORECAST INNER] querying fact2026")
-    # Facturación real 2026 — fuente única: forecast_fact_2026 (Jan–Apr 2026)
+    # Facturación real 2026 — fuente única: forecast_fact_2026 (todos los meses cargados)
     # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
     # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
-    _fact_parts = ["fecha >= '2026-01-01'", "fecha < '2026-05-01'"]
+    # Sin tope superior de fecha: la serie muestra todos los meses presentes en la tabla
+    # (antes cortaba en '2026-05-01', heredado de cuando el dataset solo llegaba a abril).
+    _fact_parts = ["fecha >= '2026-01-01'"]
     if profiles:
         # Filter directly by tipocli (commercial profile enriched at load time from clientes.csv).
         # Do NOT use JOIN with forecast_valorizado: that table misses clients that exist in
@@ -3844,7 +3846,8 @@ def _pg_get_chart_data_inner(
     fact_2026_sum = 0.0
     if not df_fact_raw.empty:
         fact_2026_sum = float(df_fact_raw["Total_Venta"].sum())
-        df_v2026_chart = df_fact_raw[df_fact_raw["fecha"] < pd.Timestamp("2026-05-01")].copy()
+        # Sin tope superior: incluye todos los meses devueltos por la query (ya filtrada desde 2026-01-01).
+        df_v2026_chart = df_fact_raw.copy()
         if not df_hist.empty and not df_v2026_chart.empty:
             hist_last = df_hist.sort_values("fecha").iloc[-1]
             brow = pd.DataFrame([{"fecha": hist_last["fecha"],
@@ -5741,12 +5744,12 @@ def get_chart_data(
         # All months aggregated (analytical layer: Jan+Feb+Mar)
         df_v2026_all = df_f2.groupby("fecha").agg(Total_Venta=("imp_hist", "sum")).reset_index()
 
-        # fact_2026_sum = ALL available months (Jan–Apr) — matches KPI 7
+        # fact_2026_sum = todos los meses disponibles
         fact_2026_sum = float(df_f2["imp_hist"].sum())
         meta_completeness = (fact_2026_sum / total_proyectado_2026_annual * 100) if total_proyectado_2026_annual > 0 else 0.0
 
-        # Chart line: Jan–Apr (cutoff at 2026-05-01 so all 4 months render)
-        df_v2026_chart = df_v2026_all[df_v2026_all["fecha"] < pd.Timestamp("2026-05-01")].copy()
+        # Chart line: todos los meses cargados (sin tope superior; antes cortaba en '2026-05-01')
+        df_v2026_chart = df_v2026_all.copy()
 
         # Bridge: connect chart line to end of history
         if not df_hist.empty and not df_v2026_chart.empty:
