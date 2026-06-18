@@ -212,6 +212,17 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
+
+
+def _oportunidades_enabled_tpl() -> bool:
+    """Global Jinja para el kill-switch de Oportunidades en el sidebar.
+    Esta instancia de `templates` es propia de legacy_routes (distinta de la de main),
+    por eso el global debe registrarse también acá para que base.html lo resuelva."""
+    from web_comparativas.dimensionamiento.oportunidades import OPORTUNIDADES_ENABLED
+    return OPORTUNIDADES_ENABLED()
+
+
+templates.env.globals["oportunidades_enabled"] = _oportunidades_enabled_tpl
 router = APIRouter() # Replaced FastAPI app
 
 # --- MIGRACIONES ---
