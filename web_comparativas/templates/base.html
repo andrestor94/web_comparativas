@@ -721,6 +721,14 @@
         </a>
         {% endif %}
 
+        <!-- Oportunidades de Venta -->
+        {% if can_access(user, 'mercado_privado.oportunidades') and oportunidades_enabled() %}
+        <a href="/mercado-privado/oportunidades"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/oportunidades') %}active{% endif %}">
+          <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
+        </a>
+        {% endif %}
+
         <!-- Reporte perfiles (Reutilizado) -->
         {% if can_access(user, 'mercado_privado.reporte_perfiles') %}
         <a href="/mercado-privado/reporte-perfiles"
