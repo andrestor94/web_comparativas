@@ -315,6 +315,11 @@ const INF = (() => {
     const labels = evolucion.map(e => _fmtMonth(e.mes));
     const pvpData = evolucion.map(e => e.inflacion_pvp_indice != null ? (e.inflacion_pvp_indice * 100) : null);
 
+    // Presentación vía IC_CHART_THEME (paleta de marca); fallback al estilo previo
+    const T = window.IC_CHART_THEME;
+    const lineColor = T ? T.colors.navy : 'rgb(239,68,68)';
+    const fillColor = T ? T.alpha(T.colors.navy, 0.07) : 'rgba(239,68,68,0.1)';
+
     _charts.evolucion = new Chart(canvas, {
       type: 'line',
       data: {
@@ -322,26 +327,28 @@ const INF = (() => {
         datasets: [{
           label: 'Inflación PVP Índice',
           data: pvpData,
-          borderColor: 'rgb(239,68,68)',
-          backgroundColor: 'rgba(239,68,68,0.1)',
+          borderColor: lineColor,
+          backgroundColor: fillColor,
           borderWidth: 2,
-          pointRadius: 4,
-          tension: 0.3,
+          pointRadius: 2.5,
+          pointHoverRadius: 5,
+          pointBackgroundColor: lineColor,
+          tension: 0.35,
           fill: true,
         }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'bottom' },
+          legend: { display: false },
           tooltip: { callbacks: { label: ctx => (ctx.raw != null ? ctx.raw.toFixed(2) + '%' : '—') } }
         },
         scales: {
-          y: {
+          y: T ? T.gridY(v => v.toFixed(1) + '%') : {
             ticks: { callback: v => v.toFixed(1) + '%' },
             grid: { color: 'rgba(0,0,0,0.05)' }
           },
-          x: { grid: { display: false } }
+          x: T ? T.gridX() : { grid: { display: false } }
         }
       }
     });

@@ -3,12 +3,14 @@
 {% block title %}Informes de Laboratorio — Indicadores Comerciales — SIEM{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=2.0">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=4.1">
 {% endblock %}
 
 {% block header_title %}Indicadores Comerciales{% endblock %}
 
 {% block content %}
+<div class="ic-dash ic-editorial">
 
 <!-- ── Encabezado ─────────────────────────────────────────────── -->
 <div class="h-page-header mb-3">
@@ -119,51 +121,56 @@
   </div>
 </div>
 
-<!-- ── KPIs ──────────────────────────────────────────────────── -->
-<div class="ind-kpi-grid mb-3" id="lab-kpis-main">
-  <div class="kpi-card kpi-card--ind-azul">
-    <span class="kl">Unidades Totales</span>
-    <span class="kv" id="lab-kv-unidades">—</span>
-    <span class="ks" id="lab-kv-periodo">Período seleccionado</span>
+<!-- ── Hoja hero: unidades protagonistas + secundarias + cobertura ─ -->
+<section class="ice-sheet" id="lab-kpis-main">
+  <div class="ice-hero">
+    <div class="ice-hero__main">
+      <div class="ice-hero__accent"></div>
+      <p class="ice-hero__label">Unidades Totales</p>
+      <p class="ice-hero__value" id="lab-kv-unidades">—</p>
+      <p class="ice-hero__sub" id="lab-kv-periodo">Período seleccionado</p>
+    </div>
+    <div class="ice-hero__secondary">
+      <div class="ice-stat">
+        <p class="ice-stat__label">Promedio Mensual</p>
+        <p class="ice-stat__value" id="lab-kv-promedio">—</p>
+        <p class="ice-stat__sub">unidades por mes activo</p>
+      </div>
+      <div class="ice-stat">
+        <p class="ice-stat__label">Variación Mensual</p>
+        <p class="ice-stat__value" id="lab-kv-variacion">—</p>
+        <p class="ice-stat__sub" id="lab-kv-variacion-sub">último vs anterior</p>
+      </div>
+      <div class="ice-callout">
+        <p class="ice-callout__pct" id="lab-kv-top-lab">—</p>
+        <p class="ice-callout__desc"><span class="text-muted">Mayor laboratorio ·</span> <span id="lab-kv-top-lab-sub">participación en unidades</span></p>
+      </div>
+    </div>
   </div>
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Promedio Mensual</span>
-    <span class="kv" id="lab-kv-promedio">—</span>
-    <span class="ks">unidades por mes activo</span>
+
+  <div class="ice-strip ice-strip--4">
+    <div class="ice-strip__item">
+      <span class="ice-strip__label">Laboratorios</span>
+      <span class="ice-strip__value" id="lab-kv-labs">—</span>
+      <span class="ice-strip__sub">con ventas en el filtro</span>
+    </div>
+    <div class="ice-strip__item">
+      <span class="ice-strip__label">Marcas Comerciales</span>
+      <span class="ice-strip__value" id="lab-kv-marcas">—</span>
+      <span class="ice-strip__sub">productos activos</span>
+    </div>
+    <div class="ice-strip__item">
+      <span class="ice-strip__label">Clientes</span>
+      <span class="ice-strip__value" id="lab-kv-clientes">—</span>
+      <span class="ice-strip__sub">grupos con unidades</span>
+    </div>
+    <div class="ice-strip__item">
+      <span class="ice-strip__label">Marca Líder</span>
+      <span class="ice-strip__value" id="lab-kv-top-marca">—</span>
+      <span class="ice-strip__sub" id="lab-kv-top-marca-sub">top por unidades</span>
+    </div>
   </div>
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Variación Mensual</span>
-    <span class="kv" id="lab-kv-variacion">—</span>
-    <span class="ks" id="lab-kv-variacion-sub">último vs anterior</span>
-  </div>
-  <div class="kpi-card kpi-card--ind-ambar">
-    <span class="kl">Mayor Laboratorio</span>
-    <span class="kv kv--sm" id="lab-kv-top-lab">—</span>
-    <span class="ks" id="lab-kv-top-lab-sub">participación en unidades</span>
-  </div>
-</div>
-<div class="ind-kpi-grid ind-kpi-grid--4 mb-4">
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Laboratorios</span>
-    <span class="kv kv--sm" id="lab-kv-labs">—</span>
-    <span class="ks">con ventas en el filtro</span>
-  </div>
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Marcas Comerciales</span>
-    <span class="kv kv--sm" id="lab-kv-marcas">—</span>
-    <span class="ks">productos activos</span>
-  </div>
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Clientes</span>
-    <span class="kv kv--sm" id="lab-kv-clientes">—</span>
-    <span class="ks">grupos con unidades</span>
-  </div>
-  <div class="kpi-card kpi-card--ind-flat">
-    <span class="kl">Marca Líder</span>
-    <span class="kv kv--sm" id="lab-kv-top-marca">—</span>
-    <span class="ks" id="lab-kv-top-marca-sub">top por unidades</span>
-  </div>
-</div>
+</section>
 
 <!-- ── Gráficos ──────────────────────────────────────────────── -->
 <div class="ind-charts-row mb-4">
@@ -190,8 +197,8 @@
   </div>
 </div>
 
-<!-- ── Tabla: Sell Out por Producto ──────────────────────────── -->
-<div class="h-panel mb-4">
+<!-- ── Matriz: Sell Out por Producto ─────────────────────────── -->
+<div class="h-panel h-panel--flush mb-4">
   <div class="h-panel__header">
     <div>
       <p class="h-panel__eyebrow">Matriz</p>
@@ -210,8 +217,8 @@
   </div>
 </div>
 
-<!-- ── Tabla detalle: Marca × Cliente ────────────────────────── -->
-<div class="h-panel mb-4">
+<!-- ── Matriz detalle: Marca × Cliente ───────────────────────── -->
+<div class="h-panel h-panel--flush mb-4">
   <div class="h-panel__header">
     <div>
       <p class="h-panel__eyebrow">Matriz</p>
@@ -236,8 +243,8 @@
   </div>
 </div>
 
-<!-- ── Tabla: Sell Out por Cliente y Marca Comercial ─────────── -->
-<div class="h-panel mb-4">
+<!-- ── Matriz: Sell Out por Cliente y Marca Comercial ────────── -->
+<div class="h-panel h-panel--flush mb-4">
   <div class="h-panel__header">
     <div>
       <p class="h-panel__eyebrow">Matriz</p>
@@ -264,11 +271,13 @@
   <button class="ind-btn ind-btn--ghost" id="lab-btn-clear2"><i class="bi bi-x-circle me-1"></i>Limpiar filtros</button>
 </div>
 
+</div><!-- /.ic-dash -->
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', path='js/indicadores_laboratorios.js') }}?v=2.1"></script>
+<script src="{{ url_for('static', path='js/indicadores_chart_theme.js') }}?v=1.1"></script>
+<script src="{{ url_for('static', path='js/indicadores_laboratorios.js') }}?v=3.0"></script>
 <script>
   LAB.init({
     desde: "{{ default_desde }}",

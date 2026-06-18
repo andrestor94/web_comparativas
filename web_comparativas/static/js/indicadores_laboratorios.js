@@ -268,6 +268,9 @@ const LAB = (() => {
     const labels = meses.map(m => _fmtMonth(m.mes));
     const data = meses.map(m => m.unidades);
 
+    // Presentación vía IC_CHART_THEME (paleta de marca); fallback al estilo previo
+    const T = window.IC_CHART_THEME;
+
     _charts.evolucion = new Chart(canvas, {
       type: 'bar',
       data: {
@@ -275,10 +278,11 @@ const LAB = (() => {
         datasets: [{
           label: 'Unidades',
           data,
-          backgroundColor: 'rgba(59,130,246,0.7)',
-          borderColor: 'rgba(59,130,246,1)',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: T ? T.alpha(T.colors.blue, 0.82) : 'rgba(59,130,246,0.7)',
+          hoverBackgroundColor: T ? T.colors.blue : 'rgba(59,130,246,1)',
+          borderWidth: 0,
+          borderRadius: 5,
+          maxBarThickness: 36,
         }]
       },
       options: {
@@ -286,8 +290,8 @@ const LAB = (() => {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: ctx => _fmtNum(ctx.raw) + ' unidades' } } },
         scales: {
-          x: { grid: { display: false } },
-          y: { ticks: { callback: v => _fmtNum(v) } }
+          x: T ? T.gridX() : { grid: { display: false } },
+          y: T ? T.gridY(v => _fmtNum(v)) : { ticks: { callback: v => _fmtNum(v) } }
         }
       }
     });
@@ -302,14 +306,18 @@ const LAB = (() => {
     const labs = (_summary?.laboratorios || []).slice(0, 12);
     if (_charts.labs) { _charts.labs.destroy(); }
 
+    // Ranking: rampa de opacidad sobre el navy de marca (IC_CHART_THEME)
+    const T = window.IC_CHART_THEME;
+
     _charts.labs = new Chart(canvas, {
       type: 'bar',
       data: {
         labels: labs.map(l => l.name),
         datasets: [{
           data: labs.map(l => l.value),
-          backgroundColor: labs.map((_, i) => `hsl(${210 + i*12},70%,55%)`),
+          backgroundColor: T ? T.ramp(T.colors.navy, labs.length) : labs.map((_, i) => `hsl(${210 + i*12},70%,55%)`),
           borderRadius: 4,
+          maxBarThickness: 18,
         }]
       },
       options: {
@@ -317,8 +325,8 @@ const LAB = (() => {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: ctx => _fmtNum(ctx.raw) + ' unidades' } } },
         scales: {
-          x: { ticks: { callback: v => _fmtNum(v) } },
-          y: { grid: { display: false } }
+          x: T ? T.gridY(v => _fmtNum(v)) : { ticks: { callback: v => _fmtNum(v) } },
+          y: T ? T.gridX() : { grid: { display: false } }
         }
       }
     });

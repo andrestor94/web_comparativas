@@ -3,12 +3,14 @@
 {% block title %}Rentabilidad Negativa — Indicadores Comerciales — SIEM{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=3.0">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=4.1">
 {% endblock %}
 
 {% block header_title %}Indicadores Comerciales{% endblock %}
 
 {% block content %}
+<div class="ic-dash ic-editorial">
 
 <!-- ── Encabezado de página ──────────────────────────────────── -->
 <div class="h-page-header mb-3">
@@ -139,53 +141,56 @@
 ═══════════════════════════════════════════ -->
 <div id="section-panel">
 
-  <!-- KPIs fila 1 -->
-  <div class="ind-kpi-grid mb-3" id="kpis-main">
-    <div class="kpi-card kpi-card--ind-rojo">
-      <span class="kl">Pérdida Total</span>
-      <span class="kv" id="kv-perdida">—</span>
-      <span class="ks" id="ks-variacion">vs. mes anterior</span>
+  <!-- Hoja hero: pérdida protagonista + secundarias + cobertura -->
+  <section class="ice-sheet" id="kpis-main">
+    <div class="ice-hero">
+      <div class="ice-hero__main">
+        <div class="ice-hero__accent ice-hero__accent--neg"></div>
+        <p class="ice-hero__label">Pérdida Total</p>
+        <p class="ice-hero__value ice-hero__value--neg" id="kv-perdida">—</p>
+        <p class="ice-hero__sub" id="ks-variacion">vs. mes anterior</p>
+      </div>
+      <div class="ice-hero__secondary">
+        <div class="ice-stat">
+          <p class="ice-stat__label">Transacciones Negativas</p>
+          <p class="ice-stat__value" id="kv-transacciones">—</p>
+          <p class="ice-stat__sub">registros con utilidad negativa</p>
+        </div>
+        <div class="ice-stat">
+          <p class="ice-stat__label">Facturación Afectada</p>
+          <p class="ice-stat__value" id="kv-facturacion">—</p>
+          <p class="ice-stat__sub">ventas con rentabilidad negativa</p>
+        </div>
+        <div class="ice-callout ice-callout--neg">
+          <p class="ice-callout__pct" id="kv-mayor-perdida">—</p>
+          <p class="ice-callout__desc"><span class="text-muted">Mayor pérdida ·</span> <span id="ks-mayor-perdida-monto">—</span></p>
+        </div>
+      </div>
     </div>
-    <div class="kpi-card kpi-card--ind-azul">
-      <span class="kl">Transacciones Neg.</span>
-      <span class="kv" id="kv-transacciones">—</span>
-      <span class="ks">registros con utilidad negativa</span>
-    </div>
-    <div class="kpi-card kpi-card--ind-ambar">
-      <span class="kl">Facturación Afectada</span>
-      <span class="kv" id="kv-facturacion">—</span>
-      <span class="ks">ventas con rentabilidad negativa</span>
-    </div>
-    <div class="kpi-card kpi-card--ind-gris">
-      <span class="kl">Rentabilidad Promedio</span>
-      <span class="kv" id="kv-renta-prom">—</span>
-      <span class="ks">sobre facturación afectada</span>
-    </div>
-  </div>
 
-  <!-- KPIs fila 2 -->
-  <div class="ind-kpi-grid ind-kpi-grid--4 mb-4" id="kpis-coverage">
-    <div class="kpi-card kpi-card--ind-flat">
-      <span class="kl">Laboratorios</span>
-      <span class="kv kv--sm" id="kv-labs">—</span>
-      <span class="ks">con casos negativos</span>
+    <div class="ice-strip ice-strip--4" id="kpis-coverage">
+      <div class="ice-strip__item">
+        <span class="ice-strip__label">Rentabilidad Promedio</span>
+        <span class="ice-strip__value" id="kv-renta-prom">—</span>
+        <span class="ice-strip__sub">sobre facturación afectada</span>
+      </div>
+      <div class="ice-strip__item">
+        <span class="ice-strip__label">Laboratorios</span>
+        <span class="ice-strip__value" id="kv-labs">—</span>
+        <span class="ice-strip__sub">con casos negativos</span>
+      </div>
+      <div class="ice-strip__item">
+        <span class="ice-strip__label">Marcas Comerciales</span>
+        <span class="ice-strip__value" id="kv-marcas">—</span>
+        <span class="ice-strip__sub">productos impactados</span>
+      </div>
+      <div class="ice-strip__item">
+        <span class="ice-strip__label">Clientes</span>
+        <span class="ice-strip__value" id="kv-clientes">—</span>
+        <span class="ice-strip__sub">grupos con pérdida</span>
+      </div>
     </div>
-    <div class="kpi-card kpi-card--ind-flat">
-      <span class="kl">Marcas Comerciales</span>
-      <span class="kv kv--sm" id="kv-marcas">—</span>
-      <span class="ks">productos impactados</span>
-    </div>
-    <div class="kpi-card kpi-card--ind-flat">
-      <span class="kl">Clientes</span>
-      <span class="kv kv--sm" id="kv-clientes">—</span>
-      <span class="ks">grupos con pérdida</span>
-    </div>
-    <div class="kpi-card kpi-card--ind-flat">
-      <span class="kl">Mayor Pérdida</span>
-      <span class="kv kv--sm kv--truncate" id="kv-mayor-perdida">—</span>
-      <span class="ks" id="ks-mayor-perdida-monto"></span>
-    </div>
-  </div>
+  </section>
 
   <!-- Gráficos: evolución + top labs -->
   <div class="ind-charts-row mb-4">
@@ -235,7 +240,7 @@
 </div>
 
 <div id="section-laboratorios">
-  <div class="h-panel mb-4">
+  <div class="h-panel h-panel--flush mb-4">
     <div class="h-panel__header">
       <div>
         <p class="h-panel__eyebrow">Ranking</p>
@@ -279,7 +284,7 @@
 </div>
 
 <div id="section-clientes">
-  <div class="h-panel mb-4">
+  <div class="h-panel h-panel--flush mb-4">
     <div class="h-panel__header">
       <div>
         <p class="h-panel__eyebrow">Ranking</p>
@@ -323,7 +328,7 @@
 </div>
 
 <div id="section-detalle">
-  <div class="h-panel">
+  <div class="h-panel h-panel--flush">
     <div class="h-panel__header">
       <div>
         <p class="h-panel__eyebrow">Explorador</p>
@@ -349,7 +354,7 @@
       Aplicá filtros y hacé clic en <strong>Aplicar</strong> para habilitar el detalle de transacciones.
     </div>
 
-    <div class="table-responsive" id="detalle-table-wrapper" style="display:none;max-height:620px;overflow-y:auto;">
+    <div class="table-responsive ice-stickyfirst" id="detalle-table-wrapper" style="display:none;max-height:620px;overflow-y:auto;">
       <table class="h-table h-table--sticky-head" id="table-detalle">
         <thead>
           <tr>
@@ -374,11 +379,13 @@
   </div>
 </div><!-- /section-detalle -->
 
+</div><!-- /.ic-dash -->
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', path='js/indicadores.js') }}?v=3.0"></script>
+<script src="{{ url_for('static', path='js/indicadores_chart_theme.js') }}?v=1.1"></script>
+<script src="{{ url_for('static', path='js/indicadores.js') }}?v=4.0"></script>
 <script>
   IND.init({
     desde: "{{ default_desde }}",
