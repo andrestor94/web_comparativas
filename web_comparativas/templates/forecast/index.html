@@ -1289,7 +1289,15 @@
   #clientGrid .ag-row {
     transition: background-color 0.15s ease;
   }
-  
+
+  /* Snappy expand/collapse row animation (AG-Grid default is 0.4s → too slow). */
+  #clientGrid .ag-row-animation .ag-row {
+    transition: transform 0.18s ease, top 0.18s ease;
+  }
+  #clientGrid .ag-row-animation .ag-row.ag-after-created {
+    transition: transform 0.18s ease, top 0.18s ease, height 0.18s ease;
+  }
+
   #clientGrid .ag-row-level-0.ag-row-group {
     background-color: #f8fafc !important;
     border-bottom: 1px solid #eef1f6 !important;
@@ -4262,11 +4270,34 @@ function _buildGroupedRows(rawRows, months) {
   return result;
 }
 
+/** Capture the grid's scroll position so a full rowData rebuild doesn't jump to top.
+ *  AG-Grid resets its viewport scroll to 0 when rowData is replaced wholesale;
+ *  we snapshot scrollTop/scrollLeft before and restore them after layout. */
+function _withClientGridScrollPreserved(rebuild) {
+  const grid = document.getElementById('clientGrid');
+  const vEl  = grid && grid.querySelector('.ag-body-viewport');
+  const hEl  = grid && (grid.querySelector('.ag-body-horizontal-scroll-viewport') ||
+                        grid.querySelector('.ag-center-cols-viewport'));
+  const top  = vEl ? vEl.scrollTop  : 0;
+  const left = hEl ? hEl.scrollLeft : 0;
+
+  rebuild();
+
+  if (vEl || hEl) {
+    requestAnimationFrame(() => {
+      if (vEl) vEl.scrollTop = top;
+      if (hEl) hEl.scrollLeft = left;
+    });
+  }
+}
+
 /** Toggle expand/collapse of a group and redraw. */
 function _toggleClientGroup(groupKey) {
   const cleanKey = cleanGroupKey(groupKey);
   _groupExpanded[cleanKey] = (_groupExpanded[cleanKey] === true) ? false : true;
-  if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+  _withClientGridScrollPreserved(() => {
+    if (clientGridApi) clientGridApi.setGridOption('rowData', _buildGroupedRows(_clientRawRows, _clientMonths));
+  });
   _persistForecastView();
 }
 
@@ -4518,8 +4549,19 @@ function buildClientGrid() {
   clientGridApi = agGrid.createGrid(document.getElementById('clientGrid'), {
     columnDefs: [], rowData: [],
     defaultColDef: {resizable:true, sortable:false, filter:false, suppressHeaderMenuButton:true},
-    rowHeight: 46, headerHeight: 46, animateRows: false,
+    rowHeight: 46, headerHeight: 46, animateRows: true,
     suppressCellFocus: true, pinnedBottomRowData: [],
+    // Stable unique id per row → AG-Grid treats setGridOption('rowData', …) as an
+    // immutable/transactional update: it diffs old vs new rows, animates the delta
+    // and keeps the viewport scroll (no full repaint, no flash). Group rows and child
+    // (client) rows each get a distinct, content-derived key. The TOTAL row is
+    // pinnedBottomRowData and never passes through getRowId.
+    getRowId: params => {
+      const d = params.data || {};
+      if (d._isGroup) return 'g::' + cleanGroupKey(d._groupKey || d.Cliente || '');
+      // Child/client row: group + client name is globally unique and stable across rebuilds.
+      return 'c::' + cleanGroupKey(d.Grupo || '') + '::' + String(d.Cliente || '').trim();
+    },
     onCellClicked: params => {
       if (params.data && params.data._isGroup) {
         const t = params.event && params.event.target;
