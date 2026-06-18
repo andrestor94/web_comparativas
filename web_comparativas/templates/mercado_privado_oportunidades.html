@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block title %}Oportunidades de Venta - Mercado Privado{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=oportunidades-v9">
+<style>
+/* ====================================================================
+   Oportunidades de Venta — capa visual v5 "consola editorial".
+   Paradigma: la tabla deja de ser planilla → lista de REGISTROS en CSS grid
+   (sin cuadrícula, riel de color por tipo, celda primaria de 2 líneas,
+   mini-medidor de efectividad, monto héroe). KPIs → tira baja sin cajas.
+   Reutiliza tokens SIEM (Outfit, navy, acentos). Tokens locales scopeados:
+     --opp-green   : verde de monto/éxito        --opp-meta : gris meta-línea
+     --opp-hairline: hairline 0.5px entre filas   --rail-*   : color de riel
+   ==================================================================== */
+#oportunidadesApp{
+  --opp-green:#15803d;
+  --opp-meta:#94a3b8;
+  --opp-hairline:rgba(6,72,111,.07);
+  --opp-row-hover:#f7fafc;
+  --rail-ESTABLE:#16a34a;
+  --rail-RECURRENTE:#2563eb;
+  --rail-INTERMITENTE:#d97706;
+  --rail-PUNTUAL:#94a3b8;
+}
+
+/* ── Barra superior: chip de ventana + botón Actualizar (primario navy) ── */
+#oportunidadesApp .opp-window-badge{display:inline-flex;align-items:center;gap:.45rem;font-size:.78rem;font-weight:600;color:var(--tech-blue-dark);background:rgba(30,92,138,.08);border:1px solid rgba(30,92,138,.18);border-radius:999px;padding:.35rem .8rem;line-height:1.2;}
+#oportunidadesApp .opp-window-badge i{color:var(--tech-blue-mid);}
+#oportunidadesApp .btn{border-radius:999px;font-weight:600;font-size:.8rem;transition:background .16s,color .16s,border-color .16s,box-shadow .16s,transform .1s;}
+#oportunidadesApp .btn:active{transform:translateY(1px);}
+#oportunidadesApp .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(87,112,176,.3);}
+#oportunidadesApp #oppReloadBtn{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--tech-blue-dark);background:var(--tech-blue-dark);color:#fff;padding:.34rem .9rem;}
+#oportunidadesApp #oppReloadBtn:hover{background:var(--tech-blue-mid);border-color:var(--tech-blue-mid);}
+
+/* ── Filtros como fila de chips (dropdown-chips con chevron) ── */
+#oportunidadesApp .opp-toolbar{display:flex;flex-wrap:wrap;gap:.6rem .7rem;align-items:flex-end;width:100%;}
+#oportunidadesApp .opp-toolbar .filter-group{display:flex;flex-direction:column;gap:.22rem;}
+#oportunidadesApp .opp-toolbar .filter-group.opp-grow{flex:1 1 220px;}
+#oportunidadesApp .opp-toolbar label{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--opp-meta);margin:0;}
+#oportunidadesApp .tech-select,
+#oportunidadesApp .opp-search{height:34px;border-radius:999px;border:1px solid rgba(6,72,111,.15);background:#fff;font-size:.8rem;font-weight:600;color:var(--tech-blue-dark);transition:border-color .16s,box-shadow .16s;}
+#oportunidadesApp .tech-select{padding:.25rem 1.9rem .25rem .9rem;}
+#oportunidadesApp .opp-search{padding:.25rem .9rem;width:100%;min-width:220px;}
+#oportunidadesApp .opp-search:focus,
+#oportunidadesApp .tech-select:focus{border-color:var(--tech-blue-bright);box-shadow:0 0 0 3px rgba(87,112,176,.18);outline:none;}
+#oportunidadesApp #fReset{padding:.32rem .8rem;color:var(--tech-blue-mid);text-decoration:none;background:transparent;border:1px solid transparent;}
+#oportunidadesApp #fReset:hover{background:rgba(30,92,138,.08);color:var(--tech-blue-dark);}
+
+/* ── KPIs: tira horizontal baja, sin cajas, separadores verticales finos ── */
+#oportunidadesApp .opp-statstrip{grid-column:span 12;display:flex;flex-wrap:wrap;align-items:stretch;background:var(--bg-card);border:1px solid rgba(6,72,111,.06);border-radius:var(--radius-lg);box-shadow:var(--shadow-soft);padding:.35rem .25rem;margin-bottom:.25rem;}
+#oportunidadesApp .opp-stat{flex:1 1 0;min-width:148px;padding:.45rem 1.25rem;display:flex;flex-direction:column;}
+#oportunidadesApp .opp-stat + .opp-stat{border-left:1px solid var(--opp-hairline);}
+/* min-height = 2 líneas del label => el número siempre arranca en la misma Y */
+#oportunidadesApp .opp-stat-label{display:flex;align-items:flex-start;gap:.4rem;min-height:2.4em;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tech-blue-mid);opacity:.78;line-height:1.2;}
+#oportunidadesApp .opp-stat-label i{font-size:.85rem;opacity:.85;}
+#oportunidadesApp .opp-stat-value{font-size:1.45rem;font-weight:600;color:var(--tech-blue-dark);font-variant-numeric:tabular-nums;line-height:1.1;margin-top:.25rem;}
+#oportunidadesApp .opp-stat-value.opp-stat-green{color:var(--opp-green);}
+@media (max-width:760px){ #oportunidadesApp .opp-stat{flex:1 1 45%;} #oportunidadesApp .opp-stat:nth-child(odd){border-left:none;} }
+
+/* ── Card de la lista de oportunidades ── */
+#oportunidadesApp .opp-card-table{grid-column:span 12;display:flex;flex-direction:column;min-width:0;}
+#oportunidadesApp .opp-card-table .tech-card-title{height:auto;margin-bottom:.5rem;}
+#oportunidadesApp #oppShownLabel{font-weight:600;color:var(--tech-blue-mid);background:rgba(30,92,138,.08);border-radius:999px;padding:.2rem .65rem;font-size:.72rem;}
+
+/* overflow-x:auto + min-width interno => en angosto scrollea, nunca aplasta */
+#oportunidadesApp .opp-list-wrap{width:100%;overflow-x:auto;overflow-y:auto;max-height:72vh;}
+#oportunidadesApp .opp-list{min-width:720px;}
+#oportunidadesApp .opp-list-head,
+#oportunidadesApp .opp-row{display:grid;grid-template-columns:minmax(0,1fr) 54px 86px 138px 30px;align-items:center;column-gap:1rem;padding-left:.85rem;padding-right:.6rem;border-left:3px solid transparent;}
+
+/* Micro-headers (sin fondo navy pesado) */
+#oportunidadesApp .opp-list-head{position:sticky;top:0;z-index:2;background:var(--bg-card);padding-top:.4rem;padding-bottom:.55rem;border-bottom:1px solid var(--opp-hairline);}
+#oportunidadesApp .opp-list-head > div{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--opp-meta);}
+#oportunidadesApp .opp-h-num{text-align:right;}
+#oportunidadesApp .opp-h-center{text-align:center;}
+
+/* Filas tipo registro */
+#oportunidadesApp .opp-row{padding-top:.8rem;padding-bottom:.8rem;border-bottom:.5px solid var(--opp-hairline);cursor:pointer;transition:background .14s;}
+#oportunidadesApp .opp-row:hover{background:var(--opp-row-hover);}
+#oportunidadesApp .opp-row:last-child{border-bottom:none;}
+#oportunidadesApp .opp-row:focus-visible{outline:none;background:var(--opp-row-hover);box-shadow:inset 0 0 0 2px rgba(87,112,176,.4);}
+#oportunidadesApp .opp-rail-ESTABLE{border-left-color:var(--rail-ESTABLE);}
+#oportunidadesApp .opp-rail-RECURRENTE{border-left-color:var(--rail-RECURRENTE);}
+#oportunidadesApp .opp-rail-INTERMITENTE{border-left-color:var(--rail-INTERMITENTE);}
+#oportunidadesApp .opp-rail-PUNTUAL{border-left-color:var(--rail-PUNTUAL);}
+
+/* Celda primaria de 2 líneas */
+#oportunidadesApp .opp-primary{min-width:0;}
+#oportunidadesApp .opp-client{font-size:.9rem;font-weight:500;color:var(--tech-blue-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
+/* Badge "Enviada al CRM": chip verde sutil junto al cliente */
+#oportunidadesApp .opp-sent-badge{display:inline-flex;align-items:center;gap:.25rem;margin-left:.45rem;font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#15803d;background:rgba(22,163,74,.12);border-radius:999px;padding:.05rem .4rem;vertical-align:middle;}
+#oportunidadesApp .opp-sent-badge i{font-size:.7rem;}
+#oportunidadesApp .opp-meta{font-size:.75rem;color:var(--opp-meta);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35;margin-top:.05rem;}
+#oportunidadesApp .opp-tl{font-weight:700;text-transform:lowercase;letter-spacing:.01em;}
+#oportunidadesApp .opp-tl-ESTABLE{color:var(--rail-ESTABLE);}
+#oportunidadesApp .opp-tl-RECURRENTE{color:var(--rail-RECURRENTE);}
+#oportunidadesApp .opp-tl-INTERMITENTE{color:var(--rail-INTERMITENTE);}
+#oportunidadesApp .opp-tl-PUNTUAL{color:#64748b;}
+#oportunidadesApp .opp-sep{color:#cbd5e1;margin:0 .35rem;}
+
+/* u/mes */
+#oportunidadesApp .opp-c-umes{text-align:right;font-size:.85rem;font-weight:500;color:#334155;font-variant-numeric:tabular-nums;white-space:nowrap;}
+
+/* Efectividad: mini-medidor (número + barra). track/fill como block para que
+   width/height apliquen (eran <span> inline => la barra no se rellenaba). */
+#oportunidadesApp .opp-c-efect{display:flex;flex-direction:column;align-items:center;gap:.25rem;}
+#oportunidadesApp .opp-ef-num{font-size:.82rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1;}
+#oportunidadesApp .opp-ef-track{display:block;width:58px;height:4px;border-radius:2px;background:#eef1f4;overflow:hidden;}
+#oportunidadesApp .opp-ef-fill{display:block;height:100%;min-width:6px;border-radius:2px;transition:width .2s;}
+#oportunidadesApp .opp-ef-num.ef-lo{color:#dc2626;}  #oportunidadesApp .opp-ef-fill.ef-lo{background:#dc2626;}
+#oportunidadesApp .opp-ef-num.ef-mid{color:#d97706;} #oportunidadesApp .opp-ef-fill.ef-mid{background:#d97706;}
+#oportunidadesApp .opp-ef-num.ef-hi{color:#16a34a;}  #oportunidadesApp .opp-ef-fill.ef-hi{background:#16a34a;}
+
+/* Monto héroe + precio sub-línea */
+#oportunidadesApp .opp-c-monto{text-align:right;min-width:0;}
+#oportunidadesApp .opp-monto-v{font-size:.9rem;font-weight:600;color:var(--opp-green);font-variant-numeric:tabular-nums;line-height:1.2;white-space:nowrap;}
+#oportunidadesApp .opp-precio-sub{font-size:.69rem;color:var(--opp-meta);font-variant-numeric:tabular-nums;margin-top:.05rem;white-space:nowrap;}
+
+/* Icon-button ghost (ojo) */
+#oportunidadesApp .opp-c-action{display:flex;justify-content:flex-end;}
+#oportunidadesApp .opp-detail-btn{width:30px;height:30px;border-radius:8px;border:none;background:transparent;color:#94a3b8;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s;}
+#oportunidadesApp .opp-detail-btn:hover{background:rgba(30,92,138,.1);color:var(--tech-blue-mid);}
+#oportunidadesApp .opp-detail-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(87,112,176,.35);}
+#oportunidadesApp .opp-empty{padding:3rem;text-align:center;color:#6b7280;}
+
+/* ── Modal Detalle: mismo lenguaje que la tabla (superficies blancas, hairlines,
+      riel de tipo, mini-cards sin cajón con realce por fondo suave) ── */
+/* Bloque de identidad con riel de color del tipo a la izquierda */
+.opp-detail-scope .od-identity{border-left:3px solid #94a3b8;padding:0 0 1rem .9rem;margin-bottom:1rem;border-bottom:1px solid rgba(6,72,111,.08);}
+.opp-detail-scope .od-identity.od-rail-ESTABLE{border-left-color:#16a34a;}
+.opp-detail-scope .od-identity.od-rail-RECURRENTE{border-left-color:#2563eb;}
+.opp-detail-scope .od-identity.od-rail-INTERMITENTE{border-left-color:#d97706;}
+.opp-detail-scope .od-identity.od-rail-PUNTUAL{border-left-color:#94a3b8;}
+/* Chip de estado sutil (fondo del tipo ~12% + texto color 800 del mismo tono) */
+.opp-detail-scope .od-chip{display:inline-flex;align-items:center;gap:.4rem;font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;border-radius:999px;padding:.22rem .65rem;margin-bottom:.5rem;}
+.opp-detail-scope .od-chip-ESTABLE{background:rgba(22,163,74,.12);color:#15803d;}
+.opp-detail-scope .od-chip-RECURRENTE{background:rgba(37,99,235,.12);color:#1d4ed8;}
+.opp-detail-scope .od-chip-INTERMITENTE{background:rgba(217,119,6,.12);color:#b45309;}
+.opp-detail-scope .od-chip-PUNTUAL{background:rgba(148,163,184,.18);color:#475569;}
+.opp-detail-scope .od-client{font-size:1.05rem;font-weight:500;color:var(--tech-blue-dark);line-height:1.3;}
+.opp-detail-scope .od-prod{color:#64748b;font-size:.9rem;margin-top:.15rem;}
+.opp-detail-scope .od-prod i{color:#94a3b8;margin-right:.3rem;}
+/* Listado agrupado por secciones (label izq → valor der, sin cajas) */
+.opp-detail-scope .od-section{margin-top:1.15rem;}
+.opp-detail-scope .od-section:first-of-type{margin-top:.25rem;}
+.opp-detail-scope .od-section-title{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9aa7b5;margin-bottom:.1rem;}
+.opp-detail-scope .od-row{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:.6rem 0;border-bottom:.5px solid rgba(6,72,111,.07);}
+.opp-detail-scope .od-row:last-child{border-bottom:none;}
+.opp-detail-scope .od-label{flex:0 0 auto;color:#64748b;font-size:.81rem;}
+.opp-detail-scope .od-value{text-align:right;color:#0f2e52;font-size:.84rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.3;}
+.opp-detail-scope .od-value .od-sub{color:#94a3b8;font-weight:400;font-size:.82em;margin-left:.25rem;}
+/* Fila hero: Monto recuperable / mes en verde */
+.opp-detail-scope .od-row.od-hero{padding:.75rem 0;}
+.opp-detail-scope .od-row.od-hero .od-value{font-size:1rem;font-weight:600;color:#15803d;}
+/* Efectividad coloreada por umbral, coherente con la tabla */
+.opp-detail-scope .od-ef.ef-lo{color:#dc2626;}
+.opp-detail-scope .od-ef.ef-mid{color:#d97706;}
+.opp-detail-scope .od-ef.ef-hi{color:#16a34a;}
+
+/* ── Modal: animación de apertura + footer sticky + overlay con blur ── */
+#detailModal.modal,#crmModal.modal{backdrop-filter:blur(2px);}
+.modal-backdrop.show{opacity:.55;}
+#detailModal .modal-content,#crmModal .modal-content{border:none;border-radius:var(--radius-lg);box-shadow:0 24px 60px -12px rgba(6,72,111,.4);overflow:hidden;}
+#detailModal.fade .modal-dialog,#crmModal.fade .modal-dialog{transform:scale(.96);transition:transform .2s cubic-bezier(.16,1,.3,1),opacity .2s ease;}
+#detailModal.show .modal-dialog,#crmModal.show .modal-dialog{transform:scale(1);}
+/* Modal CRM: conserva su header con gradiente (fuera de alcance) */
+.opp-crm-scope .modal-header{background:linear-gradient(135deg,var(--tech-blue-dark) 0%,var(--tech-blue-mid) 100%);color:#fff;border-bottom:none;}
+.opp-crm-scope .modal-header .modal-title{font-weight:700;}
+.opp-crm-scope .modal-header .modal-title small{color:rgba(255,255,255,.7)!important;}
+.opp-crm-scope .modal-header .btn-close{filter:invert(1) grayscale(1)brightness(1.6);opacity:.85;}
+.opp-detail-scope .modal-footer,.opp-crm-scope .modal-footer{position:sticky;bottom:0;background:#fff;border-top:1px solid rgba(6,72,111,.08);}
+.opp-crm-scope .modal-footer .btn{border-radius:var(--radius-sm);font-weight:600;}
+
+/* Modal Detalle: header limpio blanco + hairline, X ghost; footer con botones planos */
+.opp-detail-scope .modal-header{background:#fff;color:var(--tech-blue-dark);border-bottom:1px solid rgba(6,72,111,.08);}
+.opp-detail-scope .modal-header .modal-title{font-weight:600;font-size:1.05rem;color:var(--tech-blue-dark);}
+.opp-detail-scope .modal-header .btn-close{filter:none;opacity:.55;border-radius:8px;padding:.5rem;transition:background .15s,opacity .15s;}
+.opp-detail-scope .modal-header .btn-close:hover{background:rgba(6,72,111,.08);opacity:1;}
+.opp-detail-scope .modal-header .btn-close:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(87,112,176,.35);}
+.opp-detail-scope .modal-footer .btn{border-radius:var(--radius-sm);font-weight:600;transition:background .15s,color .15s,border-color .15s,box-shadow .15s;}
+.opp-detail-scope #detailCrmBtn{background:var(--tech-blue-dark);border-color:var(--tech-blue-dark);color:#fff;}
+.opp-detail-scope #detailCrmBtn:hover{background:var(--tech-blue-mid);border-color:var(--tech-blue-mid);}
+.opp-detail-scope .modal-footer .btn-secondary{background:#fff;border:1px solid rgba(6,72,111,.2);color:var(--tech-blue-mid);}
+.opp-detail-scope .modal-footer .btn-secondary:hover{background:rgba(6,72,111,.06);color:var(--tech-blue-dark);}
+.opp-detail-scope .modal-footer .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(87,112,176,.35);}
+
+/* ── Modal payload CRM ── */
+.opp-crm-scope .crm-pendiente{background:#fff3cd;color:#7a5b00;border:1px dashed #d8a800;border-radius:6px;padding:.05rem .4rem;font-weight:700;font-size:.72rem;}
+.opp-crm-scope .crm-faltante{background:#f8d7da;color:#842029;border:1px dashed #c44;border-radius:6px;padding:.05rem .4rem;font-weight:700;font-size:.72rem;}
+.opp-crm-scope .crm-field{margin-bottom:.6rem;}
+.opp-crm-scope .crm-field .crm-key{font-size:.72rem;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.03em;}
+.opp-crm-scope .crm-field .crm-val{font-size:.86rem;word-break:break-word;}
+.opp-crm-scope pre.crm-json{background:#0b1f30;color:#cfe8ff;border-radius:8px;padding:1rem;font-size:.78rem;max-height:320px;overflow:auto;}
+</style>
+
+<div class="tech-dashboard-grid animate-enter" id="oportunidadesApp">
+    <!-- ── Header ── -->
+    <div class="tech-header">
+        <div class="tech-title">
+            <h2>Oportunidades de Venta</h2>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="opp-window-badge" id="oppWindowBadge" title="Período de demanda analizado">
+                <i class="bi bi-calendar-range"></i>
+                <span id="oppWindowLabel">Cargando…</span>
+            </span>
+            <button id="oppReloadBtn" class="btn btn-sm">
+                <i class="bi bi-arrow-repeat me-1"></i> Actualizar
+            </button>
+        </div>
+    </div>
+
+    <!-- ── Toolbar de filtros ── -->
+    <div class="tech-toolbar">
+        <div class="opp-toolbar">
+            <div class="filter-group">
+                <label>Tipo</label>
+                <select id="fTipo" class="tech-select">
+                    <option value="">Todos</option>
+                    <option value="ESTABLE">Estable</option>
+                    <option value="RECURRENTE">Recurrente</option>
+                    <option value="INTERMITENTE">Intermitente</option>
+                    <option value="PUNTUAL">Puntual</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Actividad</label>
+                <select id="fActividad" class="tech-select">
+                    <option value="">Todas</option>
+                    <option value="ACTIVA">Activa</option>
+                    <option value="DORMIDA">Dormida</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Familia</label>
+                <select id="fFamilia" class="tech-select"><option value="">Todas</option></select>
+            </div>
+            <div class="filter-group">
+                <label>Unidad de negocio</label>
+                <select id="fUnidad" class="tech-select"><option value="">Todas</option></select>
+            </div>
+            <div class="filter-group opp-grow">
+                <label>Buscar cliente / producto</label>
+                <input type="search" id="fSearch" class="form-control form-control-sm opp-search" placeholder="Ej: Silver Cross, Ceftazidima…" autocomplete="off">
+            </div>
+            <div class="filter-group">
+                <label>Ordenar por</label>
+                <select id="fSort" class="tech-select">
+                    <option value="score">Score</option>
+                    <option value="monto_oportunidad">Monto/mes</option>
+                    <option value="consumo_tipico_mensual">Consumo (u/mes)</option>
+                    <option value="efectividad">Efectividad</option>
+                    <option value="meses_demanda_cliente_12m">Meses con demanda</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button id="fReset" class="btn btn-link btn-sm">Limpiar filtros</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── KPIs: tira horizontal baja (recalcula sobre el conjunto filtrado) ── -->
+    <div class="opp-statstrip">
+        <div class="opp-stat">
+            <div class="opp-stat-label"><i class="bi bi-cash-stack"></i>Monto recuperable / mes</div>
+            <div class="opp-stat-value opp-stat-green" id="kpiMonto">-</div>
+        </div>
+        <div class="opp-stat">
+            <div class="opp-stat-label"><i class="bi bi-lightbulb"></i>Oportunidades</div>
+            <div class="opp-stat-value" id="kpiCount">-</div>
+        </div>
+        <div class="opp-stat">
+            <div class="opp-stat-label"><i class="bi bi-arrow-repeat"></i>Estables + Recurrentes</div>
+            <div class="opp-stat-value" id="kpiRepetida">-</div>
+        </div>
+        <div class="opp-stat">
+            <div class="opp-stat-label"><i class="bi bi-broadcast-pin"></i>Activas</div>
+            <div class="opp-stat-value" id="kpiActivas">-</div>
+        </div>
+        <div class="opp-stat">
+            <div class="opp-stat-label"><i class="bi bi-bullseye"></i>Efectividad promedio</div>
+            <div class="opp-stat-value" id="kpiEfect">-</div>
+        </div>
+    </div>
+
+    <!-- ── Lista de oportunidades (registros en CSS grid, no tabla de celdas) ── -->
+    <div class="tech-card opp-card-table">
+        <div class="tech-card-title d-flex align-items-center justify-content-between">
+            <span>Oportunidades</span>
+            <span class="badge text-bg-light small" id="oppShownLabel"></span>
+        </div>
+        <div class="opp-list-wrap">
+            <div class="opp-list" id="oppList" role="table" aria-label="Oportunidades de venta">
+                <div class="opp-list-head" role="row">
+                    <div role="columnheader" aria-label="Oportunidad"></div>
+                    <div class="opp-h-num" role="columnheader">u/mes</div>
+                    <div class="opp-h-center" role="columnheader">efect.</div>
+                    <div class="opp-h-num" role="columnheader">monto / mes</div>
+                    <div role="columnheader" aria-label="Acciones"></div>
+                </div>
+                <div id="oppBody"></div>
+            </div>
+        </div>
+        <div class="opp-empty" id="oppEmpty" style="display:none;">No hay oportunidades para los filtros actuales.</div>
+    </div>
+</div>
+
+<!-- ── Modal DETALLE de oportunidad ── -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content opp-detail-scope">
+      <div class="modal-header">
+        <h5 class="modal-title">Detalle de la oportunidad</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="detailCrmBtn" aria-label="Enviar a CRM"><i class="bi bi-send me-1"></i>Enviar a CRM</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal payload CRM ── -->
+<div class="modal fade" id="crmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content opp-crm-scope">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-arrow-up-right me-2"></i>Payload CRM <small class="text-muted">(armado — no enviado)</small></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info py-2 small mb-3">
+          <i class="bi bi-info-circle me-1"></i>
+          Este payload se <strong>arma</strong> a partir de la oportunidad. El envío real al CRM
+          está <strong>diferido</strong> (fase futura): al confirmar se <strong>registra</strong> el
+          envío con tu usuario para trazabilidad y control de duplicados. Los campos marcados
+          <span class="crm-pendiente">PENDIENTE</span> se confirman con el equipo del CRM.
+        </div>
+        <!-- Mensaje de estado del envío (duplicado / éxito / error). -->
+        <div id="crmStatusMsg" class="alert py-2 small mb-3" style="display:none;"></div>
+        <div id="crmFields"></div>
+        <hr>
+        <div class="crm-field">
+          <div class="crm-key">JSON</div>
+          <pre class="crm-json" id="crmJson"></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="crmCopyBtn"><i class="bi bi-clipboard me-1"></i>Copiar JSON</button>
+        <button type="button" class="btn btn-primary btn-sm" id="crmSendBtn"><i class="bi bi-send-check me-1"></i>Confirmar envío</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v9"></script>
+{% endblock %}
