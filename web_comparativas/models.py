@@ -61,14 +61,23 @@ DB_FILE = BASE_DIR / "app.db"
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
 
 # ── Guardia de seguridad: bloquea arranque local contra base productiva ──────
+# Detecta hosts de Render tanto EXTERNOS (xxx.render.com) como INTERNOS (dpg-xxxx),
+# estos últimos NO resuelven fuera de la red de Render: si el .env local deja un
+# DATABASE_URL apuntando ahí, cada operación de DB queda colgada en timeouts de DNS
+# (arranque lentísimo / UI que no carga). Mejor fallar rápido con un mensaje claro
+# que dejar el proceso colgado intentando conectar a una base inalcanzable.
 _APP_ENV = os.getenv("APP_ENV", "").strip().lower()
 _is_production_context = RENDER_MODE or _APP_ENV == "production"
-if not _is_production_context and DATABASE_URL and "render.com" in DATABASE_URL.lower():
+_db_url_l = DATABASE_URL.lower()
+_looks_like_render = ("render.com" in _db_url_l) or ("dpg-" in _db_url_l)
+if not _is_production_context and DATABASE_URL and _looks_like_render:
     _host_masked = DATABASE_URL.split("@")[-1].split("/")[0][:30] if "@" in DATABASE_URL else DATABASE_URL[:30]
     raise RuntimeError(
         "\n\n⛔  BLOQUEO DE SEGURIDAD — entorno local apuntando a producción.\n"
-        f"   DATABASE_URL contiene un host de Render ({_host_masked}...)\n"
-        "   Para desarrollo local, quitá DATABASE_URL del .env y usá SQLite.\n"
+        f"   DATABASE_URL apunta a un host de Render ({_host_masked}...).\n"
+        "   Los hosts internos de Render (dpg-...) NO resuelven en local: el proceso\n"
+        "   quedaría colgado en timeouts. Para desarrollo local, quitá/comentá\n"
+        "   DATABASE_URL en web_comparativas/.env y usá SQLite.\n"
         "   Render inyecta su propia DATABASE_URL como variable de entorno real.\n"
     )
 

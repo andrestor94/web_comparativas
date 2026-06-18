@@ -19,6 +19,13 @@ env/
 *.db
 *.sqlite3
 *.sqlite
+# Archivos auxiliares de SQLite (WAL/SHM/journal) — no los cubre *.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# --- Backups de base locales (pueden pesar GB; nunca versionar) ---
+_backups_db_local/
 
 # --- Variables de entorno y secretos ---
 .env
