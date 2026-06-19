@@ -20,5 +20,9 @@ call "venv_webcomparativas\Scripts\activate.bat"
 echo.
 echo  Abriendo en: http://127.0.0.1:8000
 echo.
-python -m uvicorn web_comparativas.main:app --host 127.0.0.1 --port 8000 --reload
+:: --reload QUITADO a proposito (entorno local): el watcher de uvicorn vigila TODO
+:: el arbol del proyecto, incluyendo app.db (~1.1 GB) y app.db-journal, que se reescriben
+:: en CADA request -> tormenta de reloads -> freeze de la maquina. Sin watcher no hay freeze.
+:: Tras cambiar codigo, reinicia el server a mano (cerrar y volver a correr este .bat).
+python -m uvicorn web_comparativas.main:app --host 127.0.0.1 --port 8000
 pause
