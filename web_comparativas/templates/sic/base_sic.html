@@ -211,6 +211,9 @@
     </style>
     {% block extra_css %}{% endblock %}
 
+    <!-- Taxonomía única de secciones (window.SectionTaxonomy) — fuente compartida
+         con el middleware y el labeler; los detectores JS la consumen. -->
+    <script src="/api/section-taxonomy.js"></script>
 </head>
 
 <body>
@@ -484,15 +487,16 @@
             // Helper function to track usage events globally
             window.trackEvent = function(actionType, extraData = {}) {
                 try {
-                    let section = window.location.pathname;
-                    if (section.startsWith('/sic/tracking')) section = 'sic_tracking';
-                    else if (section.startsWith('/sic/helpdesk')) section = 'sic_helpdesk';
-                    else if (section.startsWith('/sic/users')) section = 'sic_usuarios';
-                    else if (section.startsWith('/sic/password-resets')) section = 'sic_usuarios';
-                    else if (section === '/sic') section = 'sic';
-                    else if (section.startsWith('/sic/')) section = 'sic';
-                    else section = window.location.pathname.substring(1).replace(/-/g, '_');
-                    
+                    // Fuente única: taxonomía inyectada (window.SectionTaxonomy).
+                    // Antes este detector tenía su propio mapa (que colapsaba
+                    // users y password-resets en 'sic_usuarios', etc.).
+                    let section;
+                    if (window.SectionTaxonomy && window.SectionTaxonomy.detectKey) {
+                        section = window.SectionTaxonomy.detectKey(window.location.pathname);
+                    } else {
+                        section = window.location.pathname.substring(1).replace(/-/g, '_') || 'home';
+                    }
+
                     const payload = {
                         action_type: actionType,
                         section: section,

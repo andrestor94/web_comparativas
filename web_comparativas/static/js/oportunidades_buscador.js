@@ -769,6 +769,17 @@
       lines.push(row.join(";"));
     }
 
+    // Tracking: exportación client-side (no toca el server). Fire-and-forget.
+    try {
+      if (window.trackUsage) {
+        window.trackUsage("export", {
+          format: "csv",
+          section: "oportunidades_buscador",
+          rows: FILTERED.length,
+        });
+      }
+    } catch (_) {}
+
     const blob = new Blob([lines.join("\n")], {
       type: "text/csv;charset=utf-8;",
     });

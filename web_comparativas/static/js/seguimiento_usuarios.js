@@ -304,6 +304,31 @@
     return (parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? parts[0]?.[1] ?? '');
   }
 
+  /* ── Origen de la sesión (Fase 5): modo de acceso (app/web) + tipo de
+       dispositivo (escritorio/móvil/tablet). HONESTIDAD: cualquier valor que no
+       sea de los conjuntos válidos cae en "desconocido" — nunca se adivina. ── */
+  const ORIGIN_MODES = new Set(['app', 'web']);
+  const ORIGIN_DEVICES = new Set(['escritorio', 'movil', 'tablet']);
+  function normOrigin(v, allowed) {
+    const k = String(v == null ? '' : v).trim().toLowerCase();
+    return allowed.has(k) ? k : 'desconocido';
+  }
+  const ORIGIN_DEVICE_META = {
+    escritorio: { icon: '💻', label: 'Escritorio' },
+    movil:      { icon: '📱', label: 'Móvil' },
+    tablet:     { icon: '📲', label: 'Tablet' },
+  };
+  function originParts(u) {
+    const dev = ORIGIN_DEVICE_META[u && u.device_type];
+    const mode = (u && u.access_mode === 'app') ? 'App' : ((u && u.access_mode === 'web') ? 'Web' : null);
+    if (!dev && !mode) return { icon: '❔', text: 'Desconocido', known: false };
+    return { icon: dev ? dev.icon : '❔', text: [mode, dev ? dev.label : 'Disp. desconocido'].filter(Boolean).join(' · '), known: true };
+  }
+  function originChip(u) {
+    const o = originParts(u);
+    return `<span class="origin-chip${o.known ? '' : ' origin-unknown'}" title="Origen de la sesión: ${esc(o.text)}">${o.icon} ${esc(o.text)}</span>`;
+  }
+
   function scoreInfo(score) {
     const n = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
     if (n >= 80) return { color: '#10b981', label: 'Referente',     gradient: 'linear-gradient(90deg,#059669,#10b981)' };
@@ -504,6 +529,22 @@
     },
   ];
 
+  /* ── Origen de sesión DEMO (solo modo mock; con datos reales lo pisa el
+       backend). Incluye un caso sin determinar → "Desconocido" (honestidad). ── */
+  (function seedDemoOrigin() {
+    const demo = [
+      { access_mode: 'web', device_type: 'escritorio' },
+      { access_mode: 'app', device_type: 'movil' },
+      { access_mode: 'web', device_type: 'tablet' },
+      { access_mode: 'app', device_type: 'escritorio' },
+      null,   // uno sin señal confiable → se mostrará "Desconocido"
+    ];
+    MOCK_USERS.forEach((u, i) => {
+      const d = demo[i % demo.length];
+      if (d) { if (u.access_mode == null) u.access_mode = d.access_mode; if (u.device_type == null) u.device_type = d.device_type; }
+    });
+  })();
+
   /* ── Sustituir por datos reales del servidor cuando están disponibles ── */
   (function mergeRealUsers() {
     const raw = window.TRACKING_USERS_DB;
@@ -514,9 +555,6 @@
       const statusMap = { activo: 'active', active: 'active', inactivo: 'idle', inactive: 'idle' };
       const status = statusMap[(r.status || '').toLowerCase()] || 'offline';
       const score  = Math.max(0, Math.min(100, Math.round(Number(r.score ?? r.adoption_score ?? 50))));
-      /* Genera score_history sintético desde el score actual */
-      const base   = Math.max(0, score - 14);
-      const hist   = Array.from({ length: 8 }, (_, i) => Math.min(100, base + Math.round(i * (score - base) / 7)));
 
       return {
         id:             r.id || (idx + 1),
@@ -529,6 +567,9 @@
         group:          r.group || 'Sin grupo',
         created:        (r.created || r.created_at || '').slice(0, 10),
         score,
+        // Desglose del score (Constancia/Amplitud/Profundidad). Acepta ambos nombres
+        // según la fuente (lista → score_breakdown · resumen → adoption_breakdown).
+        score_breakdown: r.score_breakdown || r.adoption_breakdown || null,
         sessions:       Number(r.sessions || 0),
         active_days:    Number(r.active_days || 0),
         active_hours:   Number(r.active_hours || 0),
@@ -547,26 +588,19 @@
         last_ping:       r.last_ping || r.last_signal || r.last_access || null,
         last_action:     r.last_action || 'Sin actividad registrada',
         activity_type:   r.activity_type || null,
+        // Origen de la sesión (Fase 5): app/web + dispositivo. "desconocido" si el
+        // backend no lo determinó — nunca se inventa.
+        access_mode:     normOrigin(r.access_mode, ORIGIN_MODES),
+        device_type:     normOrigin(r.device_type, ORIGIN_DEVICES),
         nav_trail:       Array.isArray(r.nav_trail) ? r.nav_trail : [],
         sessions_detail: Array.isArray(r.sessions_detail) ? r.sessions_detail : [],
         timeline:        Array.isArray(r.timeline) ? r.timeline : [],
-        score_history:   hist,
       };
     }
 
     MOCK_USERS.length = 0;
     raw.forEach((r, i) => MOCK_USERS.push(normalizeRealUser(r, i)));
   })();
-
-  /* KPI sparkline history (last 7 data points) */
-  const MOCK_KPI_HISTORY = {
-    live:     [1,2,3,2,4,3,3],
-    adoption: [60,63,65,68,70,72,75],
-    inactive: [3,3,2,3,2,2,1],
-    active:   [4,4,5,4,5,5,5],
-    hours:    [42,48,51,55,58,62,68],
-    prod:     [1.1,1.2,1.3,1.2,1.4,1.5,1.6],
-  };
 
   /* Section usage mock data for charts */
   const SECTION_USAGE = [
@@ -610,17 +644,6 @@
     return data;
   })();
 
-  const ADOPTION_WEEKLY = [
-    { week: 'S-7', score: 54 },
-    { week: 'S-6', score: 57 },
-    { week: 'S-5', score: 59 },
-    { week: 'S-4', score: 61 },
-    { week: 'S-3', score: 64 },
-    { week: 'S-2', score: 67 },
-    { week: 'S-1', score: 70 },
-    { week: 'Est',  score: 73 },
-  ];
-
   /* ═══════════════════════════════════════════════════════
      COMPUTED KPIs
   ═══════════════════════════════════════════════════════ */
@@ -636,7 +659,7 @@
   const TOTAL_HOURS = MOCK_USERS.reduce((s, u) => s + u.active_hours, 0);
   const TOTAL_SESSIONS = MOCK_USERS.reduce((s, u) => s + u.sessions, 0);
   const TOTAL_UPLOADS = MOCK_USERS.reduce((s, u) => s + u.uploads, 0);
-  const ADOPTION_RATE = Math.round(MOCK_USERS.filter(u => u.score >= 30).length / MOCK_USERS.length * 100);
+  const ADOPTION_RATE = Math.round(MOCK_USERS.filter(u => u.score >= 50).length / MOCK_USERS.length * 100);
   const PRODUCTIVITY = TOTAL_SESSIONS > 0 ? TOTAL_UPLOADS / TOTAL_SESSIONS : 0;
 
   /* ═══════════════════════════════════════════════════════
@@ -657,8 +680,6 @@
   const userGroupOverrides = new Map();
   let chartsBuilt  = { summary: false };
   let sortState    = { col: 'score', dir: 'desc' };
-  let sparkCharts  = {};
-  let profScoreChart = null;
   let activeMetric = 'events';
   let latestUsageSummary = null;
 
@@ -685,7 +706,6 @@
     'usage-chart-roles',
     'usage-chart-heatmap',
     'usage-chart-sections',
-    'usage-chart-adoption',
     'usage-chart-donut',
   ];
 
@@ -720,8 +740,6 @@
   function normalizeSummaryUser(row, existing = {}) {
     const uid = Number(row.user_id ?? row.id ?? existing.id ?? 0);
     const score = Math.max(0, Math.min(100, Math.round(Number(row.adoption_score ?? row.score ?? existing.score ?? 0))));
-    const base = Math.max(0, score - 14);
-    const hist = Array.from({ length: 8 }, (_, i) => Math.min(100, base + Math.round(i * (score - base) / 7)));
     return {
       ...existing,
       id: uid,
@@ -734,6 +752,7 @@
       group: row.group || existing.group || 'Sin grupo',
       created: String(row.created_at || existing.created || '').slice(0, 10),
       score,
+      score_breakdown: row.score_breakdown || row.adoption_breakdown || existing.score_breakdown || null,
       sessions: Number(row.sessions ?? existing.sessions ?? 0),
       active_days: Number(row.active_days ?? existing.active_days ?? 0),
       active_hours: Number(row.active_hours ?? existing.active_hours ?? 0),
@@ -755,13 +774,32 @@
       nav_trail: existing.nav_trail || [],
       sessions_detail: Array.isArray(row.recent_sessions) ? row.recent_sessions : (existing.sessions_detail || []),
       timeline: existing.timeline || [],
-      score_history: existing.score_history?.length ? existing.score_history : hist,
     };
+  }
+
+  /* ── Poblar el filtro de Rol desde la FUENTE ÚNICA (meta.available_roles, que
+       usage_service deriva de los roles reales de los usuarios). Reemplaza la
+       lista hardcodeada: cualquier rol nuevo (Gerente, etc.) aparece solo. El
+       value es la key normalizada que el backend (_matches_role_filter) entiende,
+       así filtrar por Gerente funciona end-to-end. Preserva la selección actual. ── */
+  function populateRoleFilter(roles) {
+    const sel = document.getElementById('flt-role');
+    if (!sel || !Array.isArray(roles)) return;
+    const current = sel.value;
+    let html = '<option value="">Todos los roles</option>';
+    roles.forEach(r => {
+      const v = String(r.value || '');
+      if (!v) return;
+      html += `<option value="${esc(v)}">${esc(String(r.label || v))}</option>`;
+    });
+    sel.innerHTML = html;
+    if (current && roles.some(r => String(r.value) === current)) sel.value = current;
   }
 
   function syncUsageSummary(summary) {
     if (!summary || typeof summary !== 'object') return;
     latestUsageSummary = summary;
+    populateRoleFilter(summary.meta && summary.meta.available_roles);
 
     if (Array.isArray(summary.per_user)) {
       const existingById = new Map(MOCK_USERS.map(u => [Number(u.id), u]));
@@ -850,7 +888,6 @@
     initTabs();
     initFiltersForm();
     renderKPIs();
-    renderSparklines();
     renderLiveTable();
     startLiveRefresh();
     renderByUserTable();
@@ -906,7 +943,7 @@
             // Panel was already built but hidden — resize ApexCharts
             setTimeout(() => {
               ['usage-chart-weekday','usage-chart-roles','usage-chart-heatmap',
-               'usage-chart-sections','usage-chart-adoption','usage-chart-donut'].forEach(id => {
+               'usage-chart-sections','usage-chart-donut'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el && el._chart) el._chart.updateOptions({}, false, false);
               });
@@ -980,9 +1017,10 @@
     const totalHours = kpiUsers.reduce((s, u) => s + Number(u.active_hours || 0), 0);
     const totalSessions = kpiUsers.reduce((s, u) => s + Number(u.sessions || 0), 0);
     const totalUploads = kpiUsers.reduce((s, u) => s + Number(u.uploads || 0), 0);
+    const adoptionThreshold = Number(latestUsageSummary?.meta?.adoption_threshold ?? 50);
     const adoptionRate = latestUsageSummary?.kpis?.adoption_rate != null
       ? Number(latestUsageSummary.kpis.adoption_rate)
-      : (kpiUsers.length ? Math.round(kpiUsers.filter(u => Number(u.score || 0) >= 30).length / kpiUsers.length * 100) : 0);
+      : (kpiUsers.length ? Math.round(kpiUsers.filter(u => Number(u.score || 0) >= adoptionThreshold).length / kpiUsers.length * 100) : 0);
     const productivity = latestUsageSummary?.kpis?.avg_productivity_index != null
       ? Number(latestUsageSummary.kpis.avg_productivity_index)
       : (totalSessions > 0 ? totalUploads / totalSessions : 0);
@@ -997,6 +1035,11 @@
     animateNumber('card-prod-index', productivity, { decimals: 1, commaDecimal: true });
     animateNumber('live-count-badge', latestUsageSummary?.kpis?.connected_now ?? liveCount);
 
+    // Tendencias KPI (Fase 6): solo donde el backend manda comparación honesta
+    // (Usuarios activos / Horas activas). El resto de KPIs no llevan flecha.
+    renderKpiTrend('trend-active-users', latestUsageSummary?.trends?.active_users);
+    renderKpiTrend('trend-active-hours', latestUsageSummary?.trends?.active_hours, v => fmtInt(v) + ' h');
+
     // KPI state text
     const meta = latestUsageSummary?.meta || {};
     const adminText = meta.metric_scope === 'admin_observed' || meta.admin_filter_selected
@@ -1006,61 +1049,64 @@
       <i class="bi bi-check-circle me-1" style="color:#10b981;"></i>
       ${adminText} · Actualizado ${new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
     `);
-
-    // Trends
-    const trendEl = (id, val, suffix = '') => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.style.display = '';
-      el.className = `kpi-trend ${val >= 0 ? 'up' : 'down'}`;
-      el.textContent = `${val >= 0 ? '↑' : '↓'} ${Math.abs(val)}${suffix}`;
-    };
-    trendEl('kpi-adopt-trend',    5, '%');
-    trendEl('kpi-active-trend',   1, '');
-    trendEl('kpi-hours-trend',    8.2, ' h');
-    trendEl('kpi-prod-trend',     0.1, '');
-    const inact = document.getElementById('kpi-inactive-trend');
-    if (inact) { inact.style.display=''; inact.className='kpi-trend up'; inact.textContent='↓ 1'; }
   }
 
-  /* ═══════════════════════════════════════════════════════
-     SPARKLINES (Chart.js mini)
-  ═══════════════════════════════════════════════════════ */
-  function buildSparkline(canvasId, data, color) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    if (sparkCharts[canvasId]) { sparkCharts[canvasId].destroy(); }
-    sparkCharts[canvasId] = new Chart(canvas, {
-      type: 'line',
-      data: {
-        labels: data.map((_, i) => i),
-        datasets: [{
-          data,
-          borderColor: color,
-          borderWidth: 1.5,
-          fill: true,
-          backgroundColor: color.replace(')', ', 0.15)').replace('rgb', 'rgba'),
-          pointRadius: 0,
-          tension: .4,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false } },
-        animation: { duration: 600 },
-      },
-    });
+  /* ── Flecha de tendencia de un KPI (actual vs período anterior). Si el backend
+       no manda comparación (sin período anterior con datos), muestra "sin
+       comparación" — NUNCA inventa una tendencia. ── */
+  function renderKpiTrend(elId, t, fmt) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const comparable = !!latestUsageSummary?.trends?.comparable;
+    if (!comparable || !t) {
+      el.className = 'kpi-trend none';
+      el.innerHTML = '<i class="bi bi-dash"></i> sin comparación';
+      el.title = 'No hay datos del período anterior de igual duración para comparar.';
+      return;
+    }
+    const dir = t.direction === 'up' ? 'up' : (t.direction === 'down' ? 'down' : 'flat');
+    const arrow = dir === 'up' ? 'bi-arrow-up-short' : (dir === 'down' ? 'bi-arrow-down-short' : 'bi-dash');
+    let mag;
+    if (t.previous > 0) mag = (t.pct > 0 ? '+' : '') + t.pct + '%';
+    else if (dir === 'flat') mag = '=';
+    else mag = (t.delta > 0 ? '+' : '') + (fmt ? fmt(t.delta) : t.delta);
+    el.className = 'kpi-trend ' + dir;
+    el.innerHTML = `<i class="bi ${arrow}"></i> ${esc(mag)}`;
+    const days = latestUsageSummary?.trends?.period_days;
+    const cur = fmt ? fmt(t.current) : t.current, prev = fmt ? fmt(t.previous) : t.previous;
+    el.title = `Actual: ${cur} · Período anterior (${days} d): ${prev}`;
   }
 
-  function renderSparklines() {
-    if (typeof Chart === 'undefined') return;
-    buildSparkline('spark-live',     MOCK_KPI_HISTORY.live,     'rgb(16,185,129)');
-    buildSparkline('spark-adopt',    MOCK_KPI_HISTORY.adoption, 'rgb(59,130,246)');
-    buildSparkline('spark-inactive', MOCK_KPI_HISTORY.inactive, 'rgb(245,158,11)');
-    buildSparkline('spark-active',   MOCK_KPI_HISTORY.active,   'rgb(59,130,246)');
-    buildSparkline('spark-hours',    MOCK_KPI_HISTORY.hours,    'rgb(139,92,246)');
-    buildSparkline('spark-prod',     MOCK_KPI_HISTORY.prod,     'rgb(6,182,212)');
+  /* ── Sparkline de actividad REAL del perfil (barras = eventos/día, 30 d). Datos
+       de usage_events vía /user-profile. Honestidad: si hay <2 días con actividad
+       NO se dibuja una línea (sería engañosa) → se avisa. No rellena días vacíos
+       con valores inventados: quedan en 0 (tick tenue). ── */
+  function renderProfileSparkline(u) {
+    const host = document.getElementById('prof-activity-spark');
+    const sec = document.getElementById('prof-activity-section');
+    if (!host) return;
+    const ad = u.activity_daily;
+    let cap = document.getElementById('prof-spark-cap');
+    if (!ad || !Array.isArray(ad.series) || (ad.days_with_activity || 0) < 2) {
+      host.innerHTML = '<div class="prof-spark-empty"><i class="bi bi-info-circle me-1"></i>Sin histórico suficiente para una tendencia (se necesitan ≥ 2 días con actividad).</div>';
+      if (cap) cap.style.display = 'none';
+      return;
+    }
+    const series = ad.series;
+    const max = Math.max(1, ...series.map(d => Number(d.events) || 0));
+    host.innerHTML = series.map(d => {
+      const n = Number(d.events) || 0;
+      const h = n > 0 ? Math.max(8, Math.round(n / max * 100)) : 6;
+      const t = `${d.date}: ${n} evento${n === 1 ? '' : 's'}`;
+      return `<div class="spark-bar${n > 0 ? '' : ' empty'}" style="height:${h}%;" title="${esc(t)}"></div>`;
+    }).join('');
+    const total = series.reduce((s, d) => s + (Number(d.events) || 0), 0);
+    if (!cap && sec) { cap = document.createElement('div'); cap.id = 'prof-spark-cap'; cap.className = 'prof-spark-cap'; sec.appendChild(cap); }
+    if (cap) {
+      cap.style.display = 'flex';
+      cap.innerHTML = `<span>${esc(series[0].date)} → ${esc(series[series.length - 1].date)}</span>` +
+        `<span>${total} eventos · ${ad.days_with_activity} días activos</span>`;
+    }
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -1149,6 +1195,7 @@
             <div>
               <div style="font-weight:600;color:#e2e8f0;font-size:12.5px;">${esc(u.username)}</div>
               <div style="font-size:10.5px;color:var(--t-muted);">${esc(u.email)}</div>
+              <div style="margin-top:2px;">${originChip(u)}</div>
             </div>
           </div>
         </td>
@@ -1236,6 +1283,9 @@
           if (live.session_start)           existing.session_start   = live.session_start;
           if (Array.isArray(live.nav_trail)) existing.nav_trail       = live.nav_trail;
           if (Array.isArray(live.timeline))  existing.timeline        = live.timeline;
+          // Origen de la sesión (Fase 5): normalizado, "desconocido" si falta
+          existing.access_mode = normOrigin(live.access_mode, ORIGIN_MODES);
+          existing.device_type = normOrigin(live.device_type, ORIGIN_DEVICES);
           // Actualizar estado según señal
           const rawStatus = (live.status || '').toLowerCase();
           const statusMap = { activo: 'active', active: 'active', inactivo: 'idle', inactive: 'idle', ausente: 'idle' };
@@ -1392,28 +1442,6 @@
         },
       });
       c.render(); secEl._chart = c;
-    }
-
-    // 5. Evolución adopción (línea)
-    const adoptEl = document.getElementById('usage-chart-adoption');
-    if (adoptEl && !adoptEl._chart) {
-      const c = new ApexCharts(adoptEl, {
-        ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'area', height: 310, toolbar: { show: false } },
-        series: [{ name: 'Score promedio', data: ADOPTION_WEEKLY.map(d => d.score) }],
-        xaxis: { categories: ADOPTION_WEEKLY.map(d => d.week), labels: { style: { colors: '#64748b', fontSize: '11px' } } },
-        yaxis: { min: 40, max: 100, labels: { style: { colors: '#64748b', fontSize: '11px' }, formatter: v => v + ' pts' } },
-        colors: ['#10b981'],
-        stroke: { curve: 'smooth', width: 2.5 },
-        fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: .35, opacityTo: .02, stops: [0,100] } },
-        markers: { size: 4, strokeWidth: 0 },
-        annotations: {
-          yaxis: [{ y: 60, borderColor: '#f59e0b', borderWidth: 1, strokeDashArray: 4,
-            label: { text: 'Umbral 60%', style: { background: 'transparent', color: '#f59e0b', fontSize: '10px' }, position: 'left' } }],
-        },
-        tooltip: { theme: 'dark', y: { formatter: v => v + ' pts' } },
-      });
-      c.render(); adoptEl._chart = c;
     }
 
     // 6. Donut — distribución por módulo
@@ -1746,7 +1774,6 @@
       populateProfile(uBase);
       loading.style.display = 'none';
       content.style.display = '';
-      buildProfileScoreChart(uBase);
       if (typeof initNavGraph === 'function' && typeof THREE !== 'undefined') {
         setTimeout(() => initNavGraph(uBase), 80);
       }
@@ -1799,7 +1826,10 @@
           uEnriched.modules     = Array.isArray(st.modules_used_list) ? st.modules_used_list : uBase.modules;
         }
         if (p.adoption_score != null) uEnriched.score = p.adoption_score;
+        if (p.adoption_breakdown)     uEnriched.score_breakdown = p.adoption_breakdown;
         if (p.risk_level)             uEnriched.risk  = p.risk_level;
+        // Sparkline real de actividad (eventos/día, 30 d) desde el perfil del backend
+        if (p.activity_daily)         uEnriched.activity_daily = p.activity_daily;
 
         // Sección actual desde live info
         if (p.current_status?.current_section) {
@@ -1808,7 +1838,6 @@
 
         // Actualizar el panel ya visible con datos enriquecidos
         populateProfile(uEnriched);
-        buildProfileScoreChart(uEnriched);
       })
       .catch(() => { /* silencioso: los datos base ya están visibles */ });
   }
@@ -2037,6 +2066,7 @@
 
     // Chips
     const chips = document.getElementById('prof-chips');
+    const _orig = originParts(u);
     if (chips) chips.innerHTML = `
       <span class="chip chip-blue" style="text-transform:capitalize;">${esc(u.role)}</span>
       ${isMetricExcludedUser(u) ? metricExclusionBadge() : ''}
@@ -2044,6 +2074,7 @@
       <span class="chip chip-purple">${esc(u.group)}</span>
       ${trackedUsers.has(Number(u.id)) ? '<span class="chip chip-yellow"><i class="bi bi-flag-fill"></i> En seguimiento</span>' : ''}
       ${statusPill(u.status)}
+      <span class="chip ${_orig.known ? 'chip-blue' : 'chip-gray'}" title="Origen de la sesión actual / más reciente">${_orig.icon} ${esc(_orig.text)}</span>
     `;
 
     // Score
@@ -2052,6 +2083,15 @@
     const scoreFill = document.getElementById('prof-score-fill');
     if (scoreFill) { scoreFill.style.width = u.score + '%'; scoreFill.style.background = si.gradient; }
     setEl('prof-score-label', si.label + ' — ' + u.score + '/100');
+
+    // Desglose del score en 3 dimensiones (Constancia / Amplitud / Profundidad).
+    const bd = u.score_breakdown || {};
+    ['constancia', 'amplitud', 'profundidad'].forEach((dim) => {
+      const v = Math.max(0, Math.min(100, Math.round(Number(bd[dim] ?? 0))));
+      setEl(`prof-dim-${dim}-val`, (bd[dim] == null ? '--' : v));
+      const fill = document.getElementById(`prof-dim-${dim}-fill`);
+      if (fill) fill.style.width = v + '%';
+    });
 
     // Stats
     const stats = {
@@ -2066,6 +2106,9 @@
       modules:  (u.modules || []).length,
     };
     Object.entries(stats).forEach(([k, v]) => setEl(`prof-stat-${k}`, v));
+
+    // Sparkline de actividad real (eventos/día, 30 d) — solo si hay datos
+    renderProfileSparkline(u);
 
     // Counts
     setEl('prof-search-count',   fmtInt(u.searches));
@@ -2258,42 +2301,6 @@
   function evIconBg(a)     { return { view:'59,130,246,.1', search:'139,92,246,.1', upload:'16,185,129,.1', download:'245,158,11,.1', export:'6,182,212,.1' }[a] || '100,116,139,.1'; }
   function evIconBorder(a) { return { view:'59,130,246,.2', search:'139,92,246,.2', upload:'16,185,129,.2', download:'245,158,11,.2', export:'6,182,212,.2' }[a] || '100,116,139,.2'; }
 
-  function buildProfileScoreChart(u) {
-    if (typeof Chart === 'undefined') return;
-    const canvas = document.getElementById('prof-score-chart');
-    if (!canvas) return;
-    if (profScoreChart) { profScoreChart.destroy(); profScoreChart = null; }
-    const history = u.score_history || [u.score];
-    const si = scoreInfo(u.score);
-    profScoreChart = new Chart(canvas, {
-      type: 'line',
-      data: {
-        labels: history.map((_, i) => `S-${history.length - 1 - i}`).reverse().concat(['Actual']).slice(-history.length),
-        datasets: [{
-          data: history,
-          borderColor: si.color,
-          borderWidth: 2,
-          fill: true,
-          backgroundColor: si.color.replace(')', ',0.1)').replace('rgb','rgba'),
-          pointRadius: 3,
-          pointBackgroundColor: si.color,
-          tension: .4,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => ' Score: ' + ctx.parsed.y + ' pts' },
-          backgroundColor: '#0f1729', borderColor: '#1e2d4a', borderWidth: 1,
-        }},
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
-          y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => v + ' pts' } },
-        },
-      },
-    });
-  }
-
   /* ═══════════════════════════════════════════════════════
      FX LAYER - 3D / GSAP / VISUAL POLISH
   ═══════════════════════════════════════════════════════ */
@@ -2326,7 +2333,7 @@
     refreshGlobeUsers();
     animateInitialCascade();
     initVantaBackground();
-    initIsometricOffice();
+    initOfficeMap();
 
     window.addEventListener('beforeunload', destroyAllEffects, { once: true });
   }
@@ -2574,13 +2581,13 @@
           if (!chartsBuilt.summary) setTimeout(buildSummaryCharts, 50);
           else setTimeout(() => {
             ['usage-chart-weekday','usage-chart-roles','usage-chart-heatmap',
-             'usage-chart-sections','usage-chart-adoption','usage-chart-donut'].forEach(id => {
+             'usage-chart-sections','usage-chart-donut'].forEach(id => {
               const el = document.getElementById(id);
               if (el && el._chart) el._chart.updateOptions({}, false, false);
             });
           }, 50);
         }
-        if (targetId === 'usage-tab-live') setTimeout(initIsometricOffice, 60);
+        if (targetId === 'usage-tab-live') setTimeout(initOfficeMap, 60);
       },
     });
   }
@@ -2686,25 +2693,86 @@
 
   /* ═══════════════════════════════════════════════════════
      CAMPUS — Oficina isométrica jerárquica de 2 niveles
-     Nivel 1: 12 módulos del sistema en grilla 6w × 5d
-     Nivel 2: sub-secciones del módulo seleccionado
-     Proyección iso: gx/gy → canvas x/y
-     Algoritmo del pintor: ordenar por gy + sd
+     Nivel 1: salas DERIVADAS de la taxonomía única (nav.TOP_LEVEL_KEYS).
+              Hoy son 5 módulos: mercado_publico, mercado_privado, forecast,
+              indicadores_comerciales y sic. NO hardcodeadas: si nav.py suma un
+              módulo, aparece su sala sin re-coreografiar el layout a mano.
+     Nivel 2: sub-secciones del módulo seleccionado (LEVEL2_SUBS, abajo).
+     Proyección iso: gx/gy → canvas x/y. Algoritmo del pintor: ordenar por gy+sd.
   ═══════════════════════════════════════════════════════ */
 
-  /* ── Nivel 1: campus — 4 módulos principales de SIEM ── */
-  const CAMPUS_ROOMS = [
-    { key: 'mercado_publico', label: 'Mercado Público',  sub: 'Módulo',         gx: 0, gy: 0, sw: 3, sd: 1 },
-    { key: 'mercado_privado', label: 'Mercado Privado',  sub: 'Módulo',         gx: 3, gy: 0, sw: 3, sd: 1 },
-    { key: 'forecast',        label: 'Forecast',         sub: 'Proyecciones',   gx: 0, gy: 1, sw: 3, sd: 1 },
-    { key: 'sic',             label: 'S.I.C.',           sub: 'Control Center', gx: 3, gy: 1, sw: 3, sd: 1, main: true },
+  /* Fallback defensivo si window.SectionTaxonomy aún no está inyectada. En las
+     páginas SIC la taxonomía (/api/section-taxonomy.js) se carga en <head>,
+     antes que este script, así que normalmente NO se usa este fallback. */
+  const _FALLBACK_MODULE_ROOMS = [
+    { moduleKey: 'mercado_publico',         roomKey: 'mercado_publico', label: 'Mercado Público' },
+    { moduleKey: 'mercado_privado',         roomKey: 'mercado_privado', label: 'Mercado Privado' },
+    { moduleKey: 'forecast',                roomKey: 'forecast',        label: 'Forecast' },
+    { moduleKey: 'indicadores_comerciales', roomKey: 'indicadores',     label: 'Indicadores Comerciales' },
+    { moduleKey: 'sic',                     roomKey: 'sic',             label: 'S.I.C.' },
   ];
 
-  const CAMPUS_LINKS = [
-    ['sic', 'mercado_publico'],
-    ['sic', 'mercado_privado'],
-    ['sic', 'forecast'],
-  ];
+  /* Lee módulo→sala de la taxonomía inyectada (única fuente, Fase 1):
+     - lista de módulos y etiqueta  → T.moduleLabels (= nav.MODULES)
+     - sala reservada de cada módulo → T.rooms (= tracking_taxonomy.room_for)
+     No se inventa un mapa propio de "qué salas existen". */
+  function deriveModuleRooms() {
+    const T = window.SectionTaxonomy && window.SectionTaxonomy.data;
+    if (!T || !T.moduleLabels || !T.modules || !T.rooms) return _FALLBACK_MODULE_ROOMS.slice();
+    const moduleToRoom = {};
+    Object.keys(T.modules).forEach(secKey => {
+      const mod = T.modules[secKey], room = T.rooms[secKey];
+      if (mod && room && !moduleToRoom[mod]) moduleToRoom[mod] = room;
+    });
+    const out = Object.keys(T.moduleLabels).map(modKey => ({
+      moduleKey: modKey,
+      roomKey: moduleToRoom[modKey] || modKey,
+      label: T.moduleLabels[modKey],
+    }));
+    return out.length ? out : _FALLBACK_MODULE_ROOMS.slice();
+  }
+
+  /* Presentación por sala (NO define qué salas existen — eso viene de la
+     taxonomía): sub-etiqueta, destaque, orden y, opcional, un label corto
+     cuando el de nav.py es demasiado largo para el cartel de la sala. */
+  const _ROOM_META = {
+    mercado_publico: { sub: 'Módulo',        order: 0 },
+    mercado_privado: { sub: 'Módulo',        order: 1 },
+    forecast:        { sub: 'Proyecciones',  order: 2 },
+    indicadores:     { sub: 'Indicadores',   order: 3 },
+    sic:             { sub: 'Control Center', order: 4, main: true, label: 'S.I.C.' },
+  };
+
+  /* Autolayout: grilla de 2 columnas, salas de 3×1. 5 salas → filas (2,2,1) sin
+     solaparse; una 6ª caería sola en la fila siguiente sin romper el layout. */
+  function _layoutCampusRooms(list) {
+    const COLS = 2, SW = 3, SD = 1;
+    return list.map((r, i) => {
+      const col = i % COLS, row = Math.floor(i / COLS);
+      return { ...r, gx: col * SW, gy: row * SD, sw: SW, sd: SD };
+    });
+  }
+
+  const CAMPUS_ROOMS = _layoutCampusRooms(
+    deriveModuleRooms()
+      .map(r => {
+        const meta = _ROOM_META[r.roomKey] || { sub: 'Módulo', order: 99 };
+        return {
+          key:   r.roomKey,
+          label: meta.label || r.label,
+          sub:   meta.sub,
+          main:  !!meta.main,
+          _order: (meta.order != null ? meta.order : 99),
+        };
+      })
+      .sort((a, b) => a._order - b._order)
+  );
+
+  /* Líneas de conexión hub→resto, derivadas de las salas (incluye Indicadores
+     automáticamente; antes era una lista a mano que la omitía). */
+  const CAMPUS_LINKS = CAMPUS_ROOMS
+    .filter(r => r.key !== 'sic')
+    .map(r => ['sic', r.key]);
 
   /* ── Nivel 2: apartados internos por módulo ── */
   const LEVEL2_SUBS = {
@@ -2726,6 +2794,15 @@
     'forecast': [
       { key: 'forecast',        label: 'Forecast',          sub: 'Panel',    gx: 0, gy: 0, sw: 4, sd: 1, main: true },
       { key: 'forecast_widget', label: 'Panel de Forecast', sub: 'Detalle',  gx: 4, gy: 0, sw: 2, sd: 1 },
+    ],
+    /* Indicadores Comerciales — sub-áreas reales de la taxonomía
+       (tracking_taxonomy.py): Inicio + Rentabilidad Negativa + Inflación +
+       Informes de Laboratorio. Keys = key canónica de cada sección. */
+    'indicadores': [
+      { key: 'indicadores_home',                  label: 'Inicio',                  sub: 'Panel',     gx: 0, gy: 0, sw: 6, sd: 1, main: true },
+      { key: 'indicadores_rentabilidad_negativa', label: 'Rentabilidad Negativa',   sub: 'Análisis',  gx: 0, gy: 1, sw: 2, sd: 1 },
+      { key: 'indicadores_inflacion',             label: 'Inflación',               sub: 'Análisis',  gx: 2, gy: 1, sw: 2, sd: 1 },
+      { key: 'indicadores_informes_laboratorio',  label: 'Informes de Laboratorio', sub: 'Informes',  gx: 4, gy: 1, sw: 2, sd: 1 },
     ],
     'sic': [
       { key: 'sic_general',         label: 'Panel S.I.C.',           sub: 'Hub',       gx: 0, gy: 0, sw: 6, sd: 1, main: true },
@@ -2773,6 +2850,32 @@
     'forecast': {
       'forecast':                        'forecast',
       'forecast_widget':                 'forecast_widget',
+    },
+    'indicadores': {
+      // Inicio / landing del módulo
+      'indicadores_home':                            'indicadores_home',
+      'indicadores_comerciales_home':                'indicadores_home',
+      'indicadores_comerciales':                     'indicadores_home',
+      'indicadores':                                 'indicadores_home',
+      // Rentabilidad Negativa (forma corta + formas largas del historial)
+      'indicadores_rentabilidad_negativa':           'indicadores_rentabilidad_negativa',
+      'indicadores_comerciales_rentabilidad_negativa':'indicadores_rentabilidad_negativa',
+      'rentabilidad_negativa':                       'indicadores_rentabilidad_negativa',
+      // Inflación
+      'indicadores_inflacion':                       'indicadores_inflacion',
+      'indicadores_comerciales_inflacion':           'indicadores_inflacion',
+      'inflacion':                                   'indicadores_inflacion',
+      // Informes de Laboratorio (+ sub-recursos de laboratorio del historial)
+      'indicadores_informes_laboratorio':            'indicadores_informes_laboratorio',
+      'indicadores_comerciales_informes_laboratorio':'indicadores_informes_laboratorio',
+      'informes_laboratorio':                        'indicadores_informes_laboratorio',
+      'informes_de_laboratorio':                     'indicadores_informes_laboratorio',
+      'indicadores_comerciales_laboratorios_resumen':  'indicadores_informes_laboratorio',
+      'indicadores_comerciales_laboratorios_metadata': 'indicadores_informes_laboratorio',
+      'indicadores_comerciales_laboratorios_detalle':  'indicadores_informes_laboratorio',
+      'laboratorios_resumen':                        'indicadores_informes_laboratorio',
+      'laboratorios_metadata':                       'indicadores_informes_laboratorio',
+      'laboratorios_detalle':                        'indicadores_informes_laboratorio',
     },
     'sic': {
       'sic_general':                     'sic_general',
@@ -2830,11 +2933,30 @@
     'sic_helpdesk_tickets':            'Tickets',
   };
 
-  /* ── Mapeo sección → módulo principal (4 claves de CAMPUS_ROOMS) ── */
+  /* ── Mapeo módulo (taxonomía/nav.py) → sala del campus ── */
+  // Derivado de la MISMA fuente que las salas (deriveModuleRooms); ya no es un
+  // mapa paralelo a mano. Garantiza que blockForSection devuelva una key que
+  // EXISTE en CAMPUS_ROOMS. Antes 'indicadores_comerciales'→'indicadores' pero
+  // no había sala 'indicadores' → byKey.get(...) undefined → usuarios descartados.
+  const _TAXO_MODULE_TO_ROOM = (function () {
+    const m = {};
+    deriveModuleRooms().forEach(r => { m[r.moduleKey] = r.roomKey; });
+    return m;
+  })();
+
   function blockForSection(raw) {
     if (!raw) return null;
 
-    // 1. Lookup por etiqueta legible — doble normalización para cubrir variantes
+    // 0. FUENTE ÚNICA: resolver el módulo padre vía la taxonomía inyectada
+    //    (window.SectionTaxonomy). El mapa _LABEL_BLOCK de abajo queda SOLO como
+    //    fallback defensivo (ya no es la fuente de verdad; el 3D no se rediseña
+    //    en esta fase, solo se le quita su mapa propio).
+    if (window.SectionTaxonomy && window.SectionTaxonomy.moduleFor) {
+      const mod = window.SectionTaxonomy.moduleFor(raw);
+      if (mod) return _TAXO_MODULE_TO_ROOM[mod] || mod;
+    }
+
+    // 1. (FALLBACK legacy) Lookup por etiqueta legible — doble normalización
     //    a) versión con doble espacio (formato histórico del replace)
     const labelKeyDS = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
     if (_LABEL_BLOCK[labelKeyDS] !== undefined) return _LABEL_BLOCK[labelKeyDS];
@@ -3039,9 +3161,66 @@
     return { color: '#3b82f6', label: 'normal' };
   }
 
+  /* ── Máximo de avatares dibujados por sala (overflow → "+N") ── */
+  const MAX_ROOM_DOTS = 8;
+
+  /* Indicador SECUNDARIO de acción sobre el avatar (letra en badge neutro).
+     El color del avatar es el ESTADO; esto es solo la acción en curso, sin
+     competir por el mismo canal de color.
+       N navegando · B buscando · C cargando · X exportando · E editando */
+  const ACTIVITY_GLYPH = {
+    navegando:  'N',
+    buscando:   'B',
+    cargando:   'C',
+    exportando: 'X',
+    editando:   'E',
+  };
+
+  /* Aclara un color hex hacia blanco (para el degradé del cuerpo del avatar). */
+  function _lighten(hex, amt) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex));
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * amt);
+    g = Math.round(g + (255 - g) * amt);
+    b = Math.round(b + (255 - b) * amt);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  /* hex (#rrggbb) → rgba(...) con alpha (para glows en canvas-textura). */
+  function _hexA(hex, a) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex));
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  /* ── COLOR POR ESTADO (compartido por el render 2D y el WebGL) ──
+     alerta (rojo) > activo (verde) > idle/inactivo (amarillo) > offline (gris).
+     El estado lo fija el backend con los MISMOS umbrales de "Conectados ahora"
+     (live-users); acá no se reinventan y la acción NO interviene en el color. */
+  function userHasOpenAlert(u) {
+    return MOCK_ALERTS.some(a => !resolvedAlerts.has(a.id) && Number(a.userId) === Number(u && u.id));
+  }
+  function stateColor(u) {
+    if (userHasOpenAlert(u))    return '#ef4444'; // rojo     = alerta
+    if (u && u.status === 'active') return '#10b981'; // verde    = activo
+    if (u && u.status === 'idle')   return '#f59e0b'; // amarillo = idle / inactivo
+    return '#64748b';                             // gris     = offline (no se dibuja)
+  }
+  /* Estado agregado de una sala (mismo orden de prioridad) → {state, color}. */
+  function roomAggState(d) {
+    const users = (d && d.users) || [];
+    if (d && d.alerts > 0)                      return { state: 'alert',  color: '#ef4444' };
+    if (users.some(u => u.status === 'active')) return { state: 'active', color: '#10b981' };
+    if (users.some(u => u.status === 'idle'))   return { state: 'idle',   color: '#f59e0b' };
+    return { state: 'neutral', color: '#1e3a5f' };
+  }
+
   /* ═══════════════════════════════════════════════════════
      ISOMETRIC OFFICE — 2D Canvas renderer, 2 niveles
-     Nivel 1: campus (12 módulos), Nivel 2: detalle módulo
+     Nivel 1: campus (salas por módulo, hoy 5), Nivel 2: detalle del módulo
   ═══════════════════════════════════════════════════════ */
 
   function selectNavigationNode(key) {
@@ -3172,25 +3351,20 @@
       };
     }
 
-    /* ── Paleta de colores por estado ── */
+    /* ── Paleta de la sala por ESTADO agregado (no por acción) ──
+       Prioridad: alerta (rojo) > activo (verde) > idle (amarillo) > neutro. */
     function roomPalette(d) {
       if (d.alerts > 0)
         return { top: '#2a0808', lft: '#1a0505', rgt: '#130404', glow: '#ef4444', acc: '#f87171' };
-      if (d.users.some(u => u.activity_type === 'exportando'))
-        return { top: '#271400', lft: '#190d00', rgt: '#130a00', glow: '#f97316', acc: '#fb923c' };
-      if (d.users.some(u => u.status === 'idle'))
-        return { top: '#201800', lft: '#150f00', rgt: '#100c00', glow: '#f59e0b', acc: '#fbbf24' };
       if (d.users.some(u => u.status === 'active'))
         return { top: '#071b12', lft: '#04120b', rgt: '#030e08', glow: '#10b981', acc: '#34d399' };
+      if (d.users.some(u => u.status === 'idle'))
+        return { top: '#201800', lft: '#150f00', rgt: '#100c00', glow: '#f59e0b', acc: '#fbbf24' };
       return { top: '#0a1726', lft: '#060f18', rgt: '#040c13', glow: '#1e3a5f', acc: '#3b82f6' };
     }
 
-    function uStatusColor(u) {
-      if (u.activity_type === 'exportando') return '#f97316';
-      if (u.status === 'active') return '#10b981';
-      if (u.status === 'idle')   return '#f59e0b';
-      return '#64748b';
-    }
+    /* stateColor() / userHasOpenAlert() son ahora de alcance de módulo
+       (compartidos con el render WebGL); ver definición arriba. */
 
     /* ── Escritorios isométricos sobre la cara del techo ── */
     function drawFurniture(room, A, B, D, lift, col) {
@@ -3327,24 +3501,27 @@
       }
     }
 
-    /* ── Avatares de usuarios ── */
+    /* ── Avatares de usuarios ──
+       Cuerpo = color de ESTADO (señal dominante). Acción = badge neutro con
+       letra (secundario). Se dibujan hasta MAX_ROOM_DOTS; el resto, como "+N". */
     function drawUsers(room, d, t, sel) {
       if (!d.users.length) return;
       const base = room.main ? 6 : 3;
       const lift = (sel ? 10 : base) + Math.sin(t * 1.4) * 2;
+      const drawn = Math.min(d.users.length, MAX_ROOM_DOTS);
 
-      d.users.forEach((u, i) => {
-        const pos  = dotPos(room, i, d.users.length, lift);
+      d.users.slice(0, drawn).forEach((u, i) => {
+        const pos  = dotPos(room, i, drawn, lift);
         const usel = FX_STATE.globe?.selectedUser === u.id;
-        const sc   = uStatusColor(u);
+        const sc   = stateColor(u);                 // color por ESTADO
         const r    = usel ? 11 : 9;
-        const cs   = avatarColor(u.username).match(/#[0-9a-fA-F]{6}/g) || ['#3b82f6', '#8b5cf6'];
 
         if (usel) {
           const p = (Math.sin(t * 3.2) + 1) * .5;
           ctx.beginPath(); ctx.arc(pos.x, pos.y, r + 4 + p * 4, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(59,130,246,${.5 + p * .4})`; ctx.lineWidth = 1.2; ctx.stroke();
         }
+        /* glow por estado */
         ctx.save();
         ctx.shadowColor = sc;
         ctx.shadowBlur  = usel ? 18 : (u.status === 'active' ? 10 : 4);
@@ -3352,24 +3529,44 @@
         ctx.fillStyle = 'rgba(0,0,0,0)'; ctx.fill();
         ctx.restore();
 
-        const ag = ctx.createRadialGradient(pos.x - r * .3, pos.y - r * .3, 0, pos.x, pos.y, r);
-        ag.addColorStop(0, cs[0]); ag.addColorStop(1, cs[1] || cs[0]);
+        /* cuerpo = degradé del color de estado (dominante) */
+        const ag = ctx.createRadialGradient(pos.x - r * .35, pos.y - r * .35, 0, pos.x, pos.y, r);
+        ag.addColorStop(0, _lighten(sc, .35)); ag.addColorStop(1, sc);
         ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
         ctx.fillStyle = ag; ctx.fill();
 
+        /* anillo claro neutro (contraste, no compite con el estado) */
         ctx.beginPath(); ctx.arc(pos.x, pos.y, r + 1.5, 0, Math.PI * 2);
-        ctx.strokeStyle = sc; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.4; ctx.stroke();
 
+        /* iniciales */
         ctx.font = `700 ${r < 10 ? 6 : 7}px system-ui,sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillStyle = '#fff';
         ctx.fillText(initials(u.username), pos.x, pos.y + .5);
 
-        if (u.activity_type) {
-          ctx.beginPath(); ctx.arc(pos.x + r * .72, pos.y + r * .72, 2.5, 0, Math.PI * 2);
-          ctx.fillStyle = sc; ctx.fill();
+        /* INDICADOR SECUNDARIO de acción: badge neutro con letra (no de estado) */
+        const glyph = ACTIVITY_GLYPH[u.activity_type];
+        if (glyph) {
+          const bx = pos.x + r * .8, by = pos.y + r * .8;
+          ctx.beginPath(); ctx.arc(bx, by, 4.2, 0, Math.PI * 2);
+          ctx.fillStyle = '#0f172a'; ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = .8; ctx.stroke();
+          ctx.font = '700 5.5px system-ui,sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(glyph, bx, by + .3);
         }
       });
+
+      /* overflow: si entran más usuarios que MAX_ROOM_DOTS, indicarlo con "+N" */
+      if (d.users.length > MAX_ROOM_DOTS) {
+        const pos = dotPos(room, drawn - 1, drawn, lift);
+        ctx.font = '700 8px system-ui,sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(226,232,240,.92)';
+        ctx.fillText(`+${d.users.length - MAX_ROOM_DOTS}`, pos.x + 12, pos.y);
+      }
     }
 
     /* ── Líneas de conexión (Nivel 1) ── */
@@ -3512,8 +3709,9 @@
         const { A, B, C, D } = roomCorners(room);
         const d    = data[room.key] || { users: [] };
         const lift = FX_STATE.globe?.selectedRoom === room.key ? 10 : (room.main ? 6 : 3);
-        for (let i = 0; i < d.users.length; i++) {
-          const pos = dotPos(room, i, d.users.length, lift);
+        const drawn = Math.min(d.users.length, MAX_ROOM_DOTS);
+        for (let i = 0; i < drawn; i++) {
+          const pos = dotPos(room, i, drawn, lift);
           if (Math.hypot(mx - pos.x, my - pos.y) <= 13)
             return { type: 'user', user: d.users[i], room };
         }
@@ -3632,12 +3830,934 @@
     };
     window.addEventListener('resize', resize, { passive: true });
 
-    FX_STATE.globe = { canvas, resize, syncData, selectedRoom: null, selectedUser: null };
+    FX_STATE.globe = {
+      kind: '2d', canvas, resize, syncData, selectedRoom: null, selectedUser: null,
+      dispose() { window.removeEventListener('resize', resize); },
+    };
     loop(0);
   }
 
   function destroyIsometricOffice() {
+    if (FX_STATE.globe && typeof FX_STATE.globe.dispose === 'function') {
+      try { FX_STATE.globe.dispose(); } catch (_) {}
+    }
     FX_STATE.globe = null;
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     DISPATCHER — elige render WebGL (Three.js) o Canvas 2D (fallback)
+     El mismo canvas #globe-canvas solo puede tener UN tipo de contexto, así que
+     se decide una sola vez por carga. Si WebGL falla tras tocar el canvas, se
+     reemplaza por uno limpio antes de caer al 2D.
+  ═══════════════════════════════════════════════════════ */
+  function initOfficeMap() {
+    if (FX_STATE.globe) return; // ya inicializado (no reconstruir al volver al tab)
+    const canvas = document.getElementById('globe-canvas');
+    if (!canvas || !canvas.parentElement) return;
+    if (canUseThree()) {
+      let ok = false;
+      try { ok = initOfficeWebGL(); }
+      catch (e) { if (window.console) console.warn('[office] WebGL init falló → fallback 2D:', e); ok = false; }
+      if (ok) return;
+      // WebGL pudo haber tomado el contexto del canvas → clonar uno limpio para el 2D
+      const fresh = canvas.cloneNode(false);
+      canvas.parentNode.replaceChild(fresh, canvas);
+    }
+    initIsometricOffice(); // fallback: Canvas 2D isométrico (intacto de 4b-1)
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     OFICINA VIRTUAL — render WebGL (Three.js). La red viva se APOYA sobre un
+     PLANO de oficina isométrico: un PISO con áreas (una por módulo de la
+     taxonomía) delimitadas por paredes BAJAS luminosas, un HALL CENTRAL (SIC /
+     centro de operaciones) y PASILLOS que conectan el hall con cada área. Los
+     usuarios son presencias luminosas DENTRO de su sala (color = estado) y, al
+     cambiar de módulo, VIAJAN por el hall/pasillos hasta su nueva sala.
+     Reusa el patrón de grafo de initNavGraph (raycasting / orbit-drag / zoom /
+     dispose). La LÓGICA de datos (módulos de la taxonomía, stateColor,
+     bucketing, drill-down) NO cambia: solo la representación. La disposición de
+     las áreas se DERIVA de CAMPUS_ROOMS / LEVEL2_SUBS (sala 'main' al centro,
+     el resto en anillo) — no se hardcodean salas nuevas.
+     Devuelve true si arrancó; false → fallback 2D.
+  ═══════════════════════════════════════════════════════ */
+  function initOfficeWebGL() {
+    const canvas = document.getElementById('globe-canvas');
+    const wrap = canvas && canvas.parentElement;
+    if (!canvas || !wrap || FX_STATE.globe) return false;
+    if (typeof THREE === 'undefined') return false;
+
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const ttEl = document.getElementById('globe-tooltip');
+    const now = () => (window.performance && performance.now ? performance.now() : Date.now());
+    let W = canvas.clientWidth || wrap.clientWidth || 640;
+    let H = Math.max(360, W >= 1280 ? 520 : (W >= 900 ? 460 : 380));
+
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: !FX_STATE.lowPower, alpha: true });
+    } catch (e) { return false; }
+    if (!renderer || !renderer.getContext || !renderer.getContext()) return false;
+    renderer.setPixelRatio(DPR);
+    renderer.setSize(W, H, false);
+    canvas.style.height = H + 'px';
+    // Fondo oscuro corporativo (suelo de oficina), gradiente sutil vía CSS,
+    // WebGL transparente encima.
+    canvas.style.background = 'radial-gradient(ellipse at 50% 40%, #0e1a2c 0%, #080f1b 56%, #05080f 100%)';
+    renderer.setClearColor(0x000000, 0);
+
+    const scene = new THREE.Scene();
+    // niebla suave para que el piso se desvanezca en los bordes (no bordes duros)
+    scene.fog = new THREE.FogExp2(0x060b14, 0.018);
+    const camera = new THREE.PerspectiveCamera(48, W / H, 0.1, 200);
+
+    /* ── Iluminación de maqueta: ambiente + direccional en 3/4 que da VOLUMEN a
+         las paredes bajas (caras iluminadas distinto → sensación de relieve). ── */
+    scene.add(new THREE.AmbientLight(0x35527a, 0.85));
+    scene.add(new THREE.HemisphereLight(0x9ec5ff, 0x0a1422, 0.35));
+    const keyLight = new THREE.DirectionalLight(0xcfe4ff, 0.75);
+    keyLight.position.set(7, 13, 5); scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x4a78b8, 0.35);
+    fillLight.position.set(-8, 6, -7); scene.add(fillLight);
+
+    /* ── Texturas radiales compartidas (glow de calidad por sprites) ── */
+    function radialTex(c0, c1) {
+      const s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
+      const x = cv.getContext('2d'), g = x.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      g.addColorStop(0, c0); g.addColorStop(0.45, c1); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g; x.fillRect(0, 0, s, s);
+      return new THREE.CanvasTexture(cv);
+    }
+    const glowTex = radialTex('rgba(255,255,255,0.95)', 'rgba(255,255,255,0.28)');
+    const particleTex = radialTex('rgba(255,255,255,1)', 'rgba(255,255,255,0.30)');
+    const shadowTex = radialTex('rgba(0,0,0,0.55)', 'rgba(0,0,0,0.28)');
+
+    /* ── TEXTURA TÉCNICA DEL PISO (no muebles): retícula fina + marco de panel +
+         ticks de esquina → "estación de trabajo" en lenguaje blueprint. Una sola
+         textura/material COMPARTIDOS (barato), montados como overlay tenue sobre
+         el piso de cada sala. En lowPower no se montan los overlays. ── */
+    function floorPatternTexture() {
+      const s = 256, cv = document.createElement('canvas'); cv.width = cv.height = s;
+      const x = cv.getContext('2d'); x.clearRect(0, 0, s, s);
+      x.strokeStyle = 'rgba(120,200,255,1)';
+      const step = s / 8;
+      x.globalAlpha = 0.14; x.lineWidth = 1;            // retícula fina
+      for (let i = 1; i < 8; i++) {
+        x.beginPath(); x.moveTo(i * step, 0); x.lineTo(i * step, s); x.stroke();
+        x.beginPath(); x.moveTo(0, i * step); x.lineTo(s, i * step); x.stroke();
+      }
+      const m = step * 0.6;
+      x.globalAlpha = 0.4; x.lineWidth = 2;             // marco de panel inset
+      x.strokeRect(m, m, s - 2 * m, s - 2 * m);
+      x.globalAlpha = 0.7; x.lineWidth = 2.5;           // ticks de esquina
+      const t = step * 0.5;
+      [[m, m, 1, 1], [s - m, m, -1, 1], [m, s - m, 1, -1], [s - m, s - m, -1, -1]].forEach(c => {
+        x.beginPath(); x.moveTo(c[0], c[1]); x.lineTo(c[0] + c[2] * t, c[1]);
+        x.moveTo(c[0], c[1]); x.lineTo(c[0], c[1] + c[3] * t); x.stroke();
+      });
+      return new THREE.CanvasTexture(cv);
+    }
+    const floorPatternTex = floorPatternTexture();
+    const floorPatternMat = new THREE.MeshBasicMaterial({ map: floorPatternTex, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false });
+
+    /* ── Capa de "resplandor de ocupación": un decal radial plano del color del
+         estado bajo cada usuario (lo que da vida sin muebles). Geometría
+         compartida; un material por usuario. En lowPower no se crean. ── */
+    const glowLayer = new THREE.Group(); scene.add(glowLayer);
+    const glowPlaneGeo = new THREE.PlaneGeometry(1, 1);
+    const badgeLayer = new THREE.Group(); scene.add(badgeLayer);   // billboards "+N" de overflow (no se pican)
+
+    /* ── EL SUELO: piso de oficina (gran plano grafito) + grilla arquitectónica
+         fina (reemplaza la grilla técnica suelta del cosmos). La red ya NO
+         flota: todo se apoya aquí. ── */
+    const FLOOR_Y = 0;
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0a1320, roughness: 0.95, metalness: 0.0 });
+    const groundGeo = new THREE.PlaneGeometry(70, 70);
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2; ground.position.y = FLOOR_Y - 0.02; scene.add(ground);
+    const grid = new THREE.GridHelper(70, 56, 0x254867, 0x162a40);
+    grid.position.y = FLOOR_Y;
+    grid.material.transparent = true; grid.material.opacity = 0.07; grid.material.depthWrite = false;
+    scene.add(grid);
+
+    /* ── Constantes de la maqueta ── */
+    const TRAIL_LEN = 10, TRANSIT_MS = 1150;
+    const AVATAR_S = 1.05, REF_DIST = 15, AVATAR_CAP = 8;   // ficha ~constante en pantalla; tope visible por sala
+    const WALL_H = 0.5, WALL_T = 0.07, LABEL_Y = 1.25, USER_Y = 0.62;
+    const HALL_CTRL = new THREE.Vector3(0, 0.6, 0);   // control del bézier de tránsito (pasa por el hall)
+
+    /* ── HALL CENTRAL: mobiliario discreto del centro de operaciones (un orbe de
+         datos sobre el piso, NO un sol flotante). Integrado como pieza del hall. ── */
+    const coreGeo = new THREE.SphereGeometry(0.4, 30, 22);
+    const coreMat = new THREE.MeshStandardMaterial({ color: 0x0a1a30, emissive: 0x5fb3f0, emissiveIntensity: 0.85, roughness: 0.28, metalness: 0.25 });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.set(0, 0.55, 0); core.userData = { type: 'core' }; scene.add(core);
+    const coreHaloMat = new THREE.SpriteMaterial({ map: glowTex, color: 0x9ed8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.30 });
+    const coreHalo = new THREE.Sprite(coreHaloMat); coreHalo.scale.set(1.5, 1.5, 1); coreHalo.position.copy(core.position); scene.add(coreHalo);
+    // pedestal sutil bajo el orbe (lo "apoya" en el piso del hall)
+    const pedestalGeo = new THREE.CylinderGeometry(0.34, 0.42, 0.16, 24);
+    const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x10243d, emissive: 0x1d3a5c, emissiveIntensity: 0.25, roughness: 0.6 });
+    const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat); pedestal.position.set(0, 0.08, 0); scene.add(pedestal);
+
+    /* ── GAUGE de panel del hall: anillo PLANO sobre el piso (no flota) con el
+         relleno real = conectados/total. Estética de centro de control. ── */
+    const hudGeos = [], hudMats = [];
+    function floorRing(inner, outer, color, opacity, tStart, tLen) {
+      const g = new THREE.RingGeometry(inner, outer, 72, 1, tStart || 0, tLen != null ? tLen : Math.PI * 2);
+      const m = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide, depthWrite: false });
+      const mesh = new THREE.Mesh(g, m); mesh.rotation.x = -Math.PI / 2; mesh.position.y = FLOOR_Y + 0.05;
+      scene.add(mesh); hudGeos.push(g); hudMats.push(m);
+      return mesh;
+    }
+    floorRing(0.95, 1.02, 0x244b6e, 0.45);                                  // pista del gauge
+    let hudFill = floorRing(0.95, 1.02, 0x7fd0ff, 0.9, Math.PI * 0.5, 0.001); // relleno = conectados/total
+    floorRing(1.18, 1.20, 0x2f5d86, 0.3);                                   // aro exterior fino
+    function setHudGauge(ratio) {
+      const len = Math.max(0.001, Math.min(1, ratio)) * Math.PI * 2;
+      const ng = new THREE.RingGeometry(0.95, 1.02, 72, 1, Math.PI * 0.5, len);
+      hudFill.geometry.dispose(); hudFill.geometry = ng;
+    }
+
+    /* ── Capas ── */
+    const linkLayer = new THREE.Group(), pulseLayer = new THREE.Group(), nodeLayer = new THREE.Group(), trailLayer = new THREE.Group(), particleLayer = new THREE.Group();
+    scene.add(linkLayer, pulseLayer, nodeLayer, trailLayer, particleLayer);
+
+    /* ── Estado ── */
+    let drillDown = null;
+    let nodes = [];
+    let nodeByKey = {};
+    const particleById = new Map();
+    let hoverKey = null, hoverUid = null;
+
+    /* ── ETIQUETAS: overlay HTML 2D de tamaño constante (no 3D, no escalan) ── */
+    if (wrap.style.position !== 'absolute' && wrap.style.position !== 'fixed') wrap.style.position = 'relative';
+    const labelLayer = document.createElement('div');
+    labelLayer.className = 'office-label-layer';
+    labelLayer.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:12;overflow:hidden;';
+    wrap.appendChild(labelLayer);
+    function shortLabel(s) { s = String(s || ''); return s.length > 16 ? s.split(' ')[0] : s; }
+    function makeLabelEl(name, kind) {
+      const el = document.createElement('div');
+      el.className = 'office-room-label';
+      const isCore = kind === 'core';
+      // anclado por su BORDE INFERIOR (translate -100% en Y) → queda justo encima del nodo
+      el.style.cssText = 'position:absolute;transform:translate(-50%,-100%);white-space:nowrap;max-width:190px;overflow:hidden;' +
+        'font:600 ' + (isCore ? '12.5' : '12') + 'px/1.1 Outfit,system-ui,sans-serif;letter-spacing:.3px;' +
+        'color:' + (isCore ? '#dbeafe' : '#cbd5e1') + ';background:rgba(8,14,26,.62);' +
+        'border:1px solid ' + (isCore ? 'rgba(174,224,255,.38)' : 'rgba(108,197,255,.26)') + ';border-radius:7px;padding:2px 9px;' +
+        'box-shadow:0 1px 8px rgba(0,0,0,.5);transition:opacity .25s;';
+      const nm = document.createElement('span'); nm.textContent = name; el.appendChild(nm);
+      // badge de conteo: apagado/oculto si la sala está vacía, "canta" cuando hay gente
+      const badge = document.createElement('span');
+      badge.style.cssText = 'display:none;margin-left:8px;padding:1px 8px;border-radius:9px;font:800 12px/1.4 Outfit,system-ui,sans-serif;vertical-align:middle;';
+      el.appendChild(badge); el._badge = badge;
+      labelLayer.appendChild(el);
+      // leader sutil que vincula el chip con el nodo
+      const leader = document.createElement('div');
+      leader.style.cssText = 'position:absolute;width:2px;transform:translateX(-50%);pointer-events:none;border-radius:1px;' +
+        'background:linear-gradient(to bottom, rgba(108,197,255,.55), rgba(108,197,255,0));';
+      labelLayer.appendChild(leader);
+      el._leader = leader;
+      return el;
+    }
+    function fitLabelLayer() {
+      labelLayer.style.left = canvas.offsetLeft + 'px';
+      labelLayer.style.top = canvas.offsetTop + 'px';
+      labelLayer.style.width = W + 'px';
+      labelLayer.style.height = H + 'px';
+    }
+    const _tmp = new THREE.Vector3();
+    function project(v3) {
+      _tmp.copy(v3).project(camera);
+      return { x: (_tmp.x * 0.5 + 0.5) * W, y: (-_tmp.y * 0.5 + 0.5) * H, vis: _tmp.z < 1 };
+    }
+    const LABEL_GAP = 12;
+    function updateLabels() {
+      // Anclaje EXACTO: proyección 2D del CENTRO del nodo + offset fijo en píxeles
+      // (no en unidades del mundo → no se descoloca al cambiar zoom/nivel).
+      const items = [];
+      nodes.forEach(nd => { if (nd.labelEl) { const s = project(nd.pos); items.push({ el: nd.labelEl, x: s.x, y: s.y, vis: s.vis }); } });
+      items.sort((a, b) => a.y - b.y);
+      const placed = [], LW = 116, LH = 20;
+      items.forEach(it => {
+        const el = it.el, leader = el._leader;
+        if (!it.vis || it.x < -70 || it.x > W + 70 || it.y < -40 || it.y > H + 40) {
+          el.style.display = 'none'; if (leader) leader.style.display = 'none'; return;
+        }
+        let dim = false;   // si chocan, ATENUAR (no alejar) para no perder relación con el nodo
+        for (const p of placed) { if (Math.abs(it.x - p.x) < LW && Math.abs(it.y - p.y) < LH) { dim = true; break; } }
+        placed.push({ x: it.x, y: it.y });
+        el.style.display = 'block';
+        el.style.left = it.x + 'px';
+        el.style.top = (it.y - LABEL_GAP) + 'px';
+        el.style.opacity = dim ? 0.42 : 1;
+        if (leader) {
+          leader.style.display = dim ? 'none' : 'block';
+          leader.style.left = it.x + 'px';
+          leader.style.top = (it.y - LABEL_GAP) + 'px';
+          leader.style.height = LABEL_GAP + 'px';
+        }
+      });
+    }
+
+    /* ── Layout del plano: HALL central + áreas en anillo. Se DERIVA de los defs
+         del nivel (sala 'main' al centro; el resto repartidas en un anillo). No
+         hardcodea posiciones por módulo: si la taxonomía agrega una sala, entra
+         al anillo automáticamente. dir = dirección sala→hall (vano + pasillo). ── */
+    function computePlan(defs) {
+      const plan = {};
+      const mainDef = defs.find(d => d.main) || null;
+      const ring = defs.filter(d => d !== mainDef);
+      const RING_R = drillDown ? 6.4 : 7.2;
+      const HALL = drillDown ? { w: 3.8, d: 3.4 } : { w: 4.8, d: 4.8 };
+      const RW = drillDown ? 3.6 : 4.0, RD = drillDown ? 2.7 : 3.2;
+      if (mainDef) plan[mainDef.key] = { cx: 0, cz: 0, w: HALL.w, d: HALL.d, hall: true, dir: null };
+      const n = ring.length || 1;
+      // arranca arriba (-Z) y reparte en sentido horario; rota medio paso si no hay
+      // hall central para que ninguna sala caiga sobre el orbe
+      const off = mainDef ? 0 : 0.5;
+      ring.forEach((d, i) => {
+        const ang = -Math.PI / 2 + (Math.PI * 2 * (i + off)) / n;
+        const cx = Math.cos(ang) * RING_R, cz = Math.sin(ang) * RING_R;
+        const len = Math.hypot(cx, cz) || 1;
+        plan[d.key] = { cx, cz, w: RW, d: RD, hall: false, ang, dir: new THREE.Vector2(-cx / len, -cz / len) };
+      });
+      return plan;
+    }
+    let planByKey = {};
+
+    /* ── Datos del nivel (lógica 4b-1: bucketing por módulo/sub-sección) ── */
+    function levelDefs() { return drillDown ? (LEVEL2_SUBS[drillDown] || []) : CAMPUS_ROOMS; }
+    function levelData() {
+      if (drillDown) return buildL2Data(drillDown);
+      const o = {}; buildCampusData().forEach(b => { o[b.key] = { users: b.users, alerts: b.alerts }; });
+      return o;
+    }
+    function nodeKeyForUser(u) {
+      if (drillDown) return (blockForSection(u.current_section) === drillDown) ? subRoomForSection(drillDown, u.current_section) : null;
+      return blockForSection(u.current_section);
+    }
+
+    function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+
+    /* ── Paredes BAJAS: cajas finas a lo largo de los lados de la sala. wallSide
+         abre un VANO (doorway) central si gap>0 → por ahí entra el pasillo. ── */
+    function wallSegment(grp, mat, ax, az, bx, bz, store) {
+      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+      if (len < 0.04) return;
+      const geo = new THREE.BoxGeometry(len, WALL_H, WALL_T);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set((ax + bx) / 2, FLOOR_Y + WALL_H / 2, (az + bz) / 2);
+      m.rotation.y = -Math.atan2(dz, dx);
+      grp.add(m); store.push(geo);
+    }
+    function wallSide(grp, mat, x1, z1, x2, z2, gap, store) {
+      if (!gap) { wallSegment(grp, mat, x1, z1, x2, z2, store); return; }
+      const dx = x2 - x1, dz = z2 - z1, len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len, uz = dz / len, h = Math.min(gap, len * 0.7) / 2;
+      const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+      wallSegment(grp, mat, x1, z1, mx - ux * h, mz - uz * h, store);
+      wallSegment(grp, mat, mx + ux * h, mz + uz * h, x2, z2, store);
+    }
+    // ¿qué lado mira al hall? (normal del lado más alineada con dir hacia el centro)
+    function pickDoorSide(dir) {
+      const dots = { N: -dir.y, S: dir.y, W: -dir.x, E: dir.x };
+      let best = 'N', bv = -Infinity;
+      for (const k in dots) if (dots[k] > bv) { bv = dots[k]; best = k; }
+      return { N: best === 'N', S: best === 'S', W: best === 'W', E: best === 'E' };
+    }
+
+    /* ── Crea un ÁREA del plano: piso grafito + contorno cian + paredes bajas con
+         vano + (pasillo aparte) + etiqueta. El piso ES el blanco de raycast. ── */
+    function createNode(def, p) {
+      const grp = new THREE.Group(); grp.position.set(p.cx, 0, p.cz);
+      const store = [];
+      const hw = p.w / 2, hd = p.d / 2;
+      // piso (tono grafito sutilmente distinto por sala para diferenciarlas)
+      const tint = ((Math.abs(hashStr(def.key)) % 5) / 5) * 0.035;
+      const floorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x0d1a2b).offsetHSL(0, 0, tint), emissive: 0x0a1726, emissiveIntensity: 0.22, roughness: 0.92, metalness: 0.0 });
+      const floorGeo = new THREE.PlaneGeometry(p.w, p.d);
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2; floor.position.y = FLOOR_Y + 0.015;
+      floor.userData = { type: 'node', key: def.key }; grp.add(floor); store.push(floorGeo);
+      // sombra de contacto barata (decal): halo oscuro alrededor de la sala → la
+      // "apoya" en el piso y da volumen sin shadow-maps
+      const shGeo = new THREE.PlaneGeometry(p.w * 1.55, p.d * 1.65);
+      const shMat = new THREE.MeshBasicMaterial({ map: shadowTex, color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false });
+      const shadow = new THREE.Mesh(shGeo, shMat); shadow.rotation.x = -Math.PI / 2; shadow.position.y = FLOOR_Y + 0.006;
+      grp.add(shadow); store.push(shGeo);
+      // textura técnica del piso (overlay tenue, material compartido) — no en lowPower
+      if (!FX_STATE.lowPower) {
+        const patGeo = new THREE.PlaneGeometry(p.w * 0.94, p.d * 0.94);
+        const pat = new THREE.Mesh(patGeo, floorPatternMat);
+        pat.rotation.x = -Math.PI / 2; pat.position.y = FLOOR_Y + 0.018;
+        grp.add(pat); store.push(patGeo);
+      }
+      // contorno cian nítido (delineación arquitectónica)
+      const olGeo = new THREE.BufferGeometry();
+      olGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-hw, 0, -hd, hw, 0, -hd, hw, 0, hd, -hw, 0, hd]), 3));
+      const olMat = new THREE.LineBasicMaterial({ color: 0x6cc5ff, transparent: true, opacity: 0.55, depthWrite: false });
+      const outline = new THREE.LineLoop(olGeo, olMat); outline.position.y = FLOOR_Y + 0.04; grp.add(outline); store.push(olGeo);
+      // paredes bajas con vano hacia el hall (4 doorways si es el hall)
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x0d2138, emissive: 0x2a5685, emissiveIntensity: 0.5, roughness: 0.5, metalness: 0.15 });
+      const gap = p.hall ? 1.4 : 1.5;
+      const door = p.hall ? { N: true, S: true, W: true, E: true } : pickDoorSide(p.dir);
+      wallSide(grp, wallMat, -hw, -hd, hw, -hd, door.N ? gap : 0, store); // N (-z)
+      wallSide(grp, wallMat, -hw, hd, hw, hd, door.S ? gap : 0, store);   // S (+z)
+      wallSide(grp, wallMat, -hw, -hd, -hw, hd, door.W ? gap : 0, store); // W (-x)
+      wallSide(grp, wallMat, hw, -hd, hw, hd, door.E ? gap : 0, store);   // E (+x)
+      nodeLayer.add(grp);
+      // pulso que recorre el pasillo hall→sala (salvo el propio hall)
+      let pulse = null, pulseMat = null;
+      if (!p.hall) {
+        pulseMat = new THREE.SpriteMaterial({ map: particleTex, color: 0xbfe6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 });
+        pulse = new THREE.Sprite(pulseMat); pulse.scale.set(0.16, 0.16, 1); pulseLayer.add(pulse);
+      }
+      // billboard "+N" de overflow (oculto hasta que la sala supere AVATAR_CAP)
+      const ovMat = new THREE.SpriteMaterial({ transparent: true, depthTest: true, depthWrite: false });
+      const overflow = new THREE.Sprite(ovMat); overflow.visible = false; overflow.scale.set(AVATAR_S, AVATAR_S, 1);
+      badgeLayer.add(overflow);
+      const baseName = shortLabel(def.label);
+      const labelEl = makeLabelEl(baseName, p.hall ? 'core' : 'room');
+      return {
+        def, group: grp, floor, floorMat, outline, outlineMat: olMat, wallMat, shMat, pulse, pulseMat, store,
+        overflow, ovMat, _ovN: -1, _ovTex: null,
+        cx: p.cx, cz: p.cz, w: p.w, d: p.d, hall: !!p.hall, baseName,
+        pulsePhase: (def.key.length * 1.7) % 6.28,
+        pos: new THREE.Vector3(p.cx, LABEL_Y, p.cz),
+        count: 0, alert: false, _glow: 0.3, labelEl,
+      };
+    }
+
+    /* ── PASILLOS: tira de piso del hall a cada sala (reemplazan las "líneas de
+         gravedad" del cosmos). Por aquí viajan pulsos y usuarios en tránsito. ── */
+    function buildLinks() {
+      clearLayer(linkLayer);
+      nodes.forEach(nd => {
+        if (nd.hall) return;
+        const len = Math.hypot(nd.cx, nd.cz); if (len < 0.1) return;
+        const ang = Math.atan2(nd.cz, nd.cx);
+        const geo = new THREE.PlaneGeometry(len, 1.05);
+        geo.rotateX(-Math.PI / 2);                                  // horneado plano → mesh gira solo en Y
+        const mat = new THREE.MeshStandardMaterial({ color: 0x102338, emissive: 0x16314e, emissiveIntensity: 0.28, roughness: 0.88, transparent: true, opacity: 0.96 });
+        const strip = new THREE.Mesh(geo, mat);
+        strip.position.set(nd.cx / 2, FLOOR_Y + 0.008, nd.cz / 2);
+        strip.rotation.y = -ang;
+        strip._nodeKey = nd.def.key; strip._mat = mat;
+        linkLayer.add(strip);
+        // línea central cian fina (guía del pasillo)
+        const lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, FLOOR_Y + 0.02, 0, nd.cx, FLOOR_Y + 0.02, nd.cz]), 3));
+        const lm = new THREE.LineBasicMaterial({ color: 0x6cc5ff, transparent: true, opacity: 0.18, depthWrite: false });
+        const line = new THREE.Line(lg, lm); line._nodeKey = nd.def.key; line._isCenter = true;
+        linkLayer.add(line);
+      });
+    }
+    function updateNodePositions() { /* salas estáticas: posiciones fijadas al crear */ }
+    function updateNodeVisuals(tsec) {
+      nodes.forEach(nd => {
+        const hov = hoverKey === nd.def.key;
+        const live = nd.count > 0;
+        // ILUMINACIÓN POR OCUPACIÓN: sala dormida (reposo, glow mínimo) vs viva
+        // (sube con el conteo, con techo). El hall nunca duerme del todo.
+        let target = live ? (0.3 + 0.55 * Math.min(1, nd.count / 5)) : 0.05;
+        if (nd.hall) target = Math.max(target, 0.34);
+        const flick = live ? 0.05 * Math.sin(tsec * 1.6 + nd.pulsePhase) : 0;
+        nd._glow += ((target + flick) - nd._glow) * 0.08;
+        if (nd.alert) {
+          const ap = 0.55 + 0.35 * Math.abs(Math.sin(tsec * 2.1));
+          nd.wallMat.emissive.setHex(0xff5a5a); nd.wallMat.emissiveIntensity = 0.5 + ap * 0.5;
+          nd.outlineMat.color.setHex(0xff7a7a); nd.outlineMat.opacity = 0.7 + ap * 0.3;
+          nd.floorMat.emissive.setHex(0x3a0d0d); nd.floorMat.emissiveIntensity = 0.3 + ap * 0.25;
+        } else {
+          nd.wallMat.emissive.setHex(hov ? 0x6cc5ff : (live ? 0x2a5685 : 0x16304a));
+          nd.wallMat.emissiveIntensity = (hov ? 0.85 : 0.28) + nd._glow * 0.7;
+          nd.outlineMat.color.setHex(hov ? 0xbfe4ff : 0x6cc5ff);
+          nd.outlineMat.opacity = (hov ? 0.9 : (live ? 0.5 : 0.26)) + nd._glow * 0.25;
+          nd.floorMat.emissive.setHex(nd.hall ? 0x12365c : (live ? 0x102a44 : 0x081320));
+          nd.floorMat.emissiveIntensity = (nd.hall ? 0.34 : 0.08) + nd._glow * 0.42;
+        }
+        // "+N" de overflow: tamaño ~constante en pantalla (igual que las fichas)
+        if (nd.overflow && nd.overflow.visible) {
+          const os = AVATAR_S * clamp(camera.position.distanceTo(nd.overflow.position) / REF_DIST, 0.8, 1.9);
+          nd.overflow.scale.set(os, os, 1);
+        }
+      });
+    }
+    function updateLinks() {
+      linkLayer.children.forEach(o => {
+        const nd = nodeByKey[o._nodeKey]; if (!nd) return;
+        if (o._isCenter) o.material.opacity = nd.alert ? 0.4 : (0.12 + 0.13 * Math.min(1, nd.count / 4));
+        else if (o._mat) o._mat.emissiveIntensity = 0.24 + (nd.alert ? 0.28 : 0.16 * Math.min(1, nd.count / 4));
+      });
+    }
+    /* ── Pulsos de datos por el pasillo hall→sala (latido del sistema) ── */
+    function updatePulses(tsec) {
+      nodes.forEach(nd => {
+        if (!nd.pulse) return;
+        const period = nd.alert ? 1.7 : (2.6 + 2.0 / (1 + nd.count));   // más usuarios → más frecuente
+        const ph = ((tsec + nd.pulsePhase) % period) / period;          // 0 (hall) → 1 (sala)
+        nd.pulse.position.set(nd.cx * ph, FLOOR_Y + 0.1, nd.cz * ph);
+        const fade = Math.sin(Math.PI * ph);
+        nd.pulseMat.opacity = fade * (nd.alert ? 0.9 : (0.4 + 0.35 * Math.min(1, nd.count / 4)));
+        nd.pulseMat.color.setHex(nd.alert ? 0xff9a9a : 0xbfe6ff);
+        const ps = 0.13 + 0.08 * fade; nd.pulse.scale.set(ps, ps, 1);
+      });
+    }
+
+    /* ── FICHA de avatar: textura canvas (disco oscuro + anillo de estado nítido +
+         iniciales + badge de acción en esquina). Se regenera SOLO al cambiar la
+         firma (estado/acción); cacheada vía p.sig. En lowPower: más simple. ── */
+    function buildAvatarTex(u, col) {
+      const lp = FX_STATE.lowPower;
+      const S = lp ? 96 : 128, cv = document.createElement('canvas'); cv.width = cv.height = S;
+      const x = cv.getContext('2d'), cxp = S / 2, cyp = S / 2, rDisc = S * 0.34;
+      // cuerpo de la ficha: disco oscuro/neutro (contrasta con anillo e iniciales)
+      const g = x.createRadialGradient(cxp, cyp - rDisc * 0.35, rDisc * 0.2, cxp, cyp, rDisc);
+      g.addColorStop(0, '#1b2c46'); g.addColorStop(1, '#0b1525');
+      x.beginPath(); x.arc(cxp, cyp, rDisc, 0, Math.PI * 2); x.fillStyle = g; x.fill();
+      // anillo de ESTADO: nítido y saturado (lo que comunica el estado de un vistazo)
+      x.lineWidth = S * 0.085; x.strokeStyle = col;
+      x.beginPath(); x.arc(cxp, cyp, rDisc + x.lineWidth * 0.5, 0, Math.PI * 2); x.stroke();
+      if (!lp) {   // halo exterior tenue del color (pop, no nebuloso)
+        x.lineWidth = S * 0.03; x.strokeStyle = _hexA(col, 0.4);
+        x.beginPath(); x.arc(cxp, cyp, rDisc + S * 0.125, 0, Math.PI * 2); x.stroke();
+      }
+      // iniciales legibles
+      const ini = initials(u.username).toUpperCase();
+      x.fillStyle = '#eaf2ff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = '800 ' + Math.round(S * (ini.length > 1 ? 0.32 : 0.42)) + 'px Outfit, system-ui, sans-serif';
+      x.fillText(ini, cxp, cyp + S * 0.02);
+      // badge de acción (N/B/C/X/E) en esquina superior derecha
+      const glyph = ACTIVITY_GLYPH[u.activity_type];
+      if (glyph && !lp) {
+        const br = S * 0.16, bx = cxp + rDisc * 0.82, by = cyp - rDisc * 0.82;
+        x.beginPath(); x.arc(bx, by, br, 0, Math.PI * 2); x.fillStyle = '#0a1322'; x.fill();
+        x.lineWidth = S * 0.022; x.strokeStyle = col; x.stroke();
+        x.fillStyle = '#dbeafe'; x.font = '800 ' + Math.round(br * 1.25) + 'px Outfit, system-ui, sans-serif';
+        x.fillText(glyph, bx, by + S * 0.006);
+      }
+      const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 2; return tex;
+    }
+    /* ── Texto billboard genérico (para el "+N" de overflow) ── */
+    function buildChipTex(text) {
+      const S = 96, cv = document.createElement('canvas'); cv.width = cv.height = S;
+      const x = cv.getContext('2d'), c = S / 2, r = S * 0.34;
+      x.beginPath(); x.arc(c, c, r, 0, Math.PI * 2); x.fillStyle = '#16243c'; x.fill();
+      x.lineWidth = S * 0.05; x.strokeStyle = '#6cc5ff'; x.stroke();
+      x.fillStyle = '#dbeafe'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = '800 ' + Math.round(S * 0.3) + 'px Outfit, system-ui, sans-serif';
+      x.fillText(text, c, c + S * 0.01);
+      const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 2; return tex;
+    }
+    /* ── Slot en GRILLA dentro de la sala (sin encimarse). Hasta AVATAR_CAP
+         visibles; el resto es overflow. slot/count derivados en syncScene. ── */
+    function roomSlotPoint(nd, slot, count) {
+      const cap = Math.max(1, Math.min(count, AVATAR_CAP));
+      const cols = Math.ceil(Math.sqrt(cap)), rows = Math.ceil(cap / cols);
+      const col = slot % cols, row = Math.floor(slot / cols);
+      const fx = cols > 1 ? 0.2 + (col / (cols - 1)) * 0.6 : 0.5;
+      const fz = rows > 1 ? 0.22 + (row / (rows - 1)) * 0.56 : 0.5;
+      return new THREE.Vector3(nd.cx + (fx - 0.5) * nd.w * 0.78, USER_Y, nd.cz + (fz - 0.5) * nd.d * 0.78);
+    }
+
+    /* ── Partículas (usuarios) ── */
+    function createParticle(u, key) {
+      const col = stateColor(u), c3 = new THREE.Color(col);
+      const avatarTex = buildAvatarTex(u, col);
+      const mat = new THREE.SpriteMaterial({ map: avatarTex, transparent: true, depthTest: true, depthWrite: false });
+      const sprite = new THREE.Sprite(mat); sprite.scale.set(AVATAR_S, AVATAR_S, 1);
+      sprite.userData = { type: 'user', uid: u.id };
+      const nd = nodeByKey[key];
+      if (nd) sprite.position.copy(roomSlotPoint(nd, 0, 1)); else sprite.position.set(0, USER_Y, 0);
+      particleLayer.add(sprite);
+      const tg = new THREE.BufferGeometry();
+      tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_LEN * 3), 3));
+      const tmat = new THREE.LineBasicMaterial({ color: c3.clone(), transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false });
+      const trail = new THREE.Line(tg, tmat); trailLayer.add(trail);
+      // resplandor de estado: ahora BASE/sombra del avatar (secundario), no protagonista
+      let glow = null, glowMat = null;
+      if (!FX_STATE.lowPower) {
+        glowMat = new THREE.MeshBasicMaterial({ map: glowTex, color: c3.clone(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 });
+        glow = new THREE.Mesh(glowPlaneGeo, glowMat); glow.rotation.x = -Math.PI / 2; glow.scale.set(1.15, 1.15, 1);
+        glowLayer.add(glow);
+      }
+      return {
+        uid: u.id, sprite, mat, avatarTex, trail, trailGeo: tg, trailMat: tmat, trailPts: [], nodeKey: key, transit: null,
+        glow, glowMat, _slot: 0, _slotCount: 1, phase: (u.id * 1.3) % 6.28, orbitSpeed: 0.5 + ((u.id * 3) % 4) * 0.08,
+        ySpeed: 0.55 + ((u.id * 5) % 4) * 0.1, yPhase: (u.id * 2.1) % 6.28, hov: 1, sig: col + '|' + (u.activity_type || ''),
+      };
+    }
+    function pushTrail(p, pos) {
+      p.trailPts.push(pos.x, pos.y, pos.z);
+      const maxLen = TRAIL_LEN * 3;
+      if (p.trailPts.length > maxLen) p.trailPts.splice(0, p.trailPts.length - maxLen);
+      const arr = p.trailGeo.attributes.position.array, have = p.trailPts.length / 3;
+      for (let i = 0; i < TRAIL_LEN; i++) {
+        const src = have - TRAIL_LEN + i;
+        const j = src < 0 ? 0 : src;
+        arr[i * 3] = p.trailPts[j * 3]; arr[i * 3 + 1] = p.trailPts[j * 3 + 1]; arr[i * 3 + 2] = p.trailPts[j * 3 + 2];
+      }
+      p.trailGeo.attributes.position.needsUpdate = true;
+    }
+    function particleHome(p, tsec) {
+      const nd = nodeByKey[p.nodeKey];
+      if (!nd) return p.sprite.position.clone();
+      const h = roomSlotPoint(nd, p._slot, p._slotCount);   // slot en grilla (no se encima)
+      // micro-movimiento (la presencia "respira" parada en su oficina, calmo)
+      h.x += Math.cos(tsec * p.orbitSpeed + p.phase) * 0.03;
+      h.z += Math.sin(tsec * p.orbitSpeed * 0.8 + p.phase) * 0.03;
+      h.y += Math.sin(tsec * p.ySpeed + p.yPhase) * 0.05;
+      return h;
+    }
+    function updateParticle(p, tsec, dtms) {
+      let pos;
+      if (p.transit) {
+        p.transit.t += dtms;
+        const k = clamp(p.transit.t / TRANSIT_MS, 0, 1);
+        const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // easeInOutQuad
+        const nd = nodeByKey[p.transit.toKey];
+        const to = nd ? roomSlotPoint(nd, p._slot, p._slotCount) : p.transit.toPos;
+        // bézier cuadrático con control en el HALL → la presencia "camina" por el
+        // hall/pasillos del plano (no vuela por el vacío)
+        const mt = 1 - e, c = HALL_CTRL;
+        pos = new THREE.Vector3(
+          mt * mt * p.transit.from.x + 2 * mt * e * c.x + e * e * to.x,
+          mt * mt * p.transit.from.y + 2 * mt * e * c.y + e * e * to.y,
+          mt * mt * p.transit.from.z + 2 * mt * e * c.z + e * e * to.z
+        );
+        if (k >= 1) { p.nodeKey = p.transit.toKey; p.transit = null; }
+      } else {
+        pos = p.sprite.position.clone().lerp(particleHome(p, tsec), 0.1);
+      }
+      p.sprite.position.copy(pos);
+      const tHov = (hoverUid === p.uid ? 1.4 : 1) * (FX_STATE.globe && FX_STATE.globe.selectedUser === p.uid ? 1.25 : 1);
+      p.hov += (tHov - p.hov) * 0.2;
+      // tamaño ~constante en pantalla: escala ∝ distancia a la cámara (no se vuelve
+      // minúscula al alejar ni gigante al acercar)
+      const dist = camera.position.distanceTo(pos);
+      const s = AVATAR_S * clamp(dist / REF_DIST, 0.8, 1.9) * p.hov;
+      p.sprite.scale.set(s, s, 1);
+      if (p.glow) {
+        p.glow.position.set(pos.x, FLOOR_Y + 0.03, pos.z);
+        const gp = 0.15 + 0.04 * Math.sin(tsec * 1.5 + p.phase);   // BASE/sombra: tenue, secundario
+        p.glowMat.opacity = gp;
+        const gs = 1.15 + 0.25 * (p.hov - 1); p.glow.scale.set(gs, gs, 1);
+      }
+      pushTrail(p, pos);
+    }
+    function disposeParticle(p) {
+      particleLayer.remove(p.sprite); trailLayer.remove(p.trail);
+      p.mat.dispose(); if (p.avatarTex) p.avatarTex.dispose(); p.trailGeo.dispose(); p.trailMat.dispose();
+      if (p.glow) { glowLayer.remove(p.glow); p.glowMat.dispose(); }
+    }
+
+    /* ── Dispose por nivel ── */
+    function clearLayer(layer) {
+      for (let i = layer.children.length - 1; i >= 0; i--) {
+        const o = layer.children[i];
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x.dispose()); }
+        layer.remove(o);
+      }
+    }
+    function disposeNodes() {
+      nodes.forEach(nd => {
+        if (nd.labelEl && nd.labelEl.parentNode) nd.labelEl.parentNode.removeChild(nd.labelEl);
+        if (nd.labelEl && nd.labelEl._leader && nd.labelEl._leader.parentNode) nd.labelEl._leader.parentNode.removeChild(nd.labelEl._leader);
+        nodeLayer.remove(nd.group);
+        (nd.store || []).forEach(g => g.dispose());            // pisos, contornos, paredes, sombra
+        nd.floorMat.dispose(); nd.wallMat.dispose(); nd.outlineMat.dispose(); if (nd.shMat) nd.shMat.dispose();
+        if (nd.pulse) { pulseLayer.remove(nd.pulse); nd.pulseMat.dispose(); }
+        if (nd.overflow) { badgeLayer.remove(nd.overflow); nd.ovMat.dispose(); if (nd._ovTex) nd._ovTex.dispose(); }
+      });
+      nodes = []; nodeByKey = {}; clearLayer(linkLayer); clearLayer(pulseLayer);
+    }
+    function disposeParticles() {
+      for (const p of particleById.values()) disposeParticle(p);
+      particleById.clear();
+    }
+
+    /* ── Update INCREMENTAL (polling 30s): partículas entran/salen/VIAJAN, sin
+         reconstruir la escena. Las salas/nodos solo cambian tamaño/brillo. ── */
+    function syncScene() {
+      const data = levelData();
+      nodes.forEach(nd => {
+        const d = data[nd.def.key] || { users: [], alerts: 0 };
+        nd.count = (d.users || []).length; nd.alert = (d.alerts > 0);
+        // CONTEO reforzado: el nombre va solo; el N va en un badge que "canta" si
+        // hay gente y queda oculto si la sala está vacía.
+        if (nd.labelEl) {
+          if (nd.labelEl.firstChild) nd.labelEl.firstChild.textContent = nd.baseName;
+          const b = nd.labelEl._badge;
+          if (b) {
+            if (nd.count > 0) {
+              b.style.display = 'inline-block';
+              b.textContent = nd.count;
+              b.style.background = nd.alert ? 'rgba(239,68,68,.22)' : 'rgba(34,211,160,.20)';
+              b.style.color = nd.alert ? '#fca5a5' : '#34e3b0';
+              b.style.boxShadow = '0 0 10px ' + (nd.alert ? 'rgba(239,68,68,.55)' : 'rgba(34,211,160,.5)');
+            } else { b.style.display = 'none'; }
+          }
+        }
+      });
+      const connected = MOCK_USERS.filter(u => u.status !== 'offline').length;
+      setHudGauge(MOCK_USERS.length ? connected / MOCK_USERS.length : 0);
+      const wanted = new Map();
+      MOCK_USERS.filter(u => u.status !== 'offline').forEach(u => {
+        const k = nodeKeyForUser(u);
+        if (k && nodeByKey[k]) wanted.set(u.id, { u, k });
+      });
+      for (const uid of Array.from(particleById.keys())) {
+        if (!wanted.has(uid)) { disposeParticle(particleById.get(uid)); particleById.delete(uid); }
+      }
+      for (const [uid, w] of wanted) {
+        let p = particleById.get(uid);
+        if (!p) { p = createParticle(w.u, w.k); particleById.set(uid, p); continue; }
+        const sig = stateColor(w.u) + '|' + (w.u.activity_type || '');
+        if (sig !== p.sig) {
+          const col = stateColor(w.u), c = new THREE.Color(col);
+          p.trailMat.color.copy(c); if (p.glowMat) p.glowMat.color.copy(c);
+          // regenerar la FICHA (anillo de estado / badge de acción cambiaron)
+          const old = p.avatarTex; p.avatarTex = buildAvatarTex(w.u, col);
+          p.mat.map = p.avatarTex; p.mat.needsUpdate = true; if (old) old.dispose();
+          p.sig = sig;
+        }
+        if (p.nodeKey !== w.k && (!p.transit || p.transit.toKey !== w.k)) {
+          const nd = nodeByKey[w.k];
+          p.transit = { from: p.sprite.position.clone(), toKey: w.k, toPos: nd ? roomSlotPoint(nd, p._slot, p._slotCount) : p.sprite.position.clone(), t: 0 };
+        }
+      }
+      // ── 2ª pasada: agrupar por sala → asignar slot en grilla (sin encimarse),
+      //    ocultar overflow y mostrar "+N". Se hace acá (no por partícula) para
+      //    repartir limpio sin importar el orden de creación. ──
+      const byNode = new Map();
+      for (const p of particleById.values()) {
+        if (p.transit) continue;   // los que viajan se reubican al llegar
+        if (!byNode.has(p.nodeKey)) byNode.set(p.nodeKey, []);
+        byNode.get(p.nodeKey).push(p);
+      }
+      nodes.forEach(nd => {
+        const list = (byNode.get(nd.def.key) || []).sort((a, b) => a.uid - b.uid);
+        const total = list.length, cap = Math.min(total, AVATAR_CAP);
+        list.forEach((p, i) => {
+          p._slot = i; p._slotCount = total;
+          const over = i >= AVATAR_CAP;
+          p.sprite.visible = !over;
+          if (p.glow) p.glow.visible = !over;
+          if (p.trail) p.trail.visible = !over;
+        });
+        // billboard "+N" en el slot siguiente al último visible
+        const ov = total - AVATAR_CAP;
+        if (ov > 0) {
+          if (nd._ovN !== ov) {
+            if (nd._ovTex) nd._ovTex.dispose();
+            nd._ovTex = buildChipTex('+' + ov); nd.ovMat.map = nd._ovTex; nd.ovMat.needsUpdate = true; nd._ovN = ov;
+          }
+          nd.overflow.position.copy(roomSlotPoint(nd, Math.min(cap, AVATAR_CAP), total));
+          nd.overflow.visible = true;
+        } else if (nd.overflow.visible) {
+          nd.overflow.visible = false; nd._ovN = -1;
+        }
+      });
+    }
+
+    /* ── Construcción de un nivel ── */
+    function buildLevel() {
+      disposeNodes(); disposeParticles();
+      const defs = levelDefs();
+      planByKey = computePlan(defs);
+      nodes = defs.map(def => createNode(def, planByKey[def.key]));
+      nodeByKey = {}; nodes.forEach(nd => { nodeByKey[nd.def.key] = nd; });
+      buildLinks();
+      syncScene();
+      flyTo(drillDown ? 12.5 : 15);
+    }
+
+    /* ── Cámara: orbit + zoom (patrón initNavGraph) + deriva idle. phi acotado
+         para que SIEMPRE se lea como "mirando la oficina desde arriba en
+         diagonal" (3/4), nunca de canto. ── */
+    const PHI_MIN = 0.62, PHI_MAX = 1.18;
+    let theta = Math.PI * 0.28, phi = 0.92, radius = 18, tRadius = 15;
+    let lastInteract = now();
+    function flyTo(rad) { tRadius = rad; }
+
+    const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+    raycaster.params.Points = { threshold: 0.2 };
+    function setMouse(e) {
+      const r = canvas.getBoundingClientRect();
+      mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+      mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    }
+    function pick() {
+      raycaster.setFromCamera(mouse, camera);
+      const ph = raycaster.intersectObjects(particleLayer.children.filter(o => o.visible), false);
+      if (ph.length) return { type: 'user', uid: ph[0].object.userData.uid };
+      // el orbe del hall tiene prioridad como "volver" cuando hay drill-down
+      if (drillDown && raycaster.intersectObject(core, false).length) return { type: 'core' };
+      const nh = raycaster.intersectObjects(nodes.map(n => n.floor), false);
+      if (nh.length) return { type: 'node', key: nh[0].object.userData.key };
+      if (raycaster.intersectObject(core, false).length) return { type: 'core' };
+      return null;
+    }
+
+    let dragging = false, lastX = 0, lastY = 0, moved = 0;
+    function onDown(e) { dragging = true; lastX = e.clientX; lastY = e.clientY; moved = 0; lastInteract = now(); canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId); }
+    function onMove(e) {
+      if (dragging) {
+        const dx = e.clientX - lastX, dy = e.clientY - lastY;
+        theta -= dx * 0.005; phi = clamp(phi - dy * 0.005, PHI_MIN, PHI_MAX);
+        lastX = e.clientX; lastY = e.clientY; moved += Math.abs(dx) + Math.abs(dy); lastInteract = now();
+        if (ttEl) ttEl.style.display = 'none';
+      } else { handleHover(e); }
+    }
+    function onUp(e) { dragging = false; canvas.releasePointerCapture && canvas.releasePointerCapture(e.pointerId); }
+    function onLeave() { dragging = false; hoverKey = null; hoverUid = null; if (ttEl) ttEl.style.display = 'none'; }
+    function onWheel(e) { e.preventDefault(); tRadius = clamp(tRadius + Math.sign(e.deltaY) * 1.0, 9, 24); lastInteract = now(); }
+    function onClick(e) { if (moved > 6) return; setMouse(e); handleClick(pick()); }
+
+    function handleHover(e) {
+      setMouse(e);
+      const hit = pick();
+      hoverKey = (hit && hit.type === 'node') ? hit.key : null;
+      hoverUid = (hit && hit.type === 'user') ? hit.uid : null;
+      if (!hit || hit.type === 'core' || !ttEl) { if (ttEl) ttEl.style.display = 'none'; canvas.style.cursor = hit ? 'pointer' : 'default'; return; }
+      canvas.style.cursor = 'pointer';
+      const wrc = wrap.getBoundingClientRect();
+      if (hit.type === 'user') {
+        const u = MOCK_USERS.find(x => x.id === hit.uid); if (!u) { ttEl.style.display = 'none'; return; }
+        ttEl.innerHTML =
+          '<strong>' + esc(u.username) + '</strong><br>' +
+          esc(u.role) + ' · ' + esc(u.unit) + (isMetricExcludedUser(u) ? ' · Admin no computa' : '') + '<br>' +
+          '<span style="color:#94a3b8">📍 ' + esc(userBreadcrumb(u) || sectionLabel(u.current_section)) + '</span><br>' +
+          '<span style="color:#94a3b8">⚡ ' + esc(u.last_action) + (ACTIVITY_GLYPH[u.activity_type] ? ' &nbsp;[' + ACTIVITY_GLYPH[u.activity_type] + ']' : '') + '</span><br>' +
+          '<span style="color:#94a3b8">⏱ ' + esc(timeInCurrentSection(u)) + '</span>';
+      } else {
+        const nd = nodeByKey[hit.key];
+        const cnt = nd ? nd.count : 0;
+        const hint = !drillDown && LEVEL2_SUBS[hit.key] ? ' · Clic para entrar' : '';
+        ttEl.innerHTML = '<strong>' + esc(nd ? nd.def.label : hit.key) + '</strong><br>' +
+          cnt + ' usuario' + (cnt !== 1 ? 's' : '') + ' aquí' + hint;
+      }
+      ttEl.style.left = (e.clientX - wrc.left + 14) + 'px';
+      ttEl.style.top = (e.clientY - wrc.top + 14) + 'px';
+      ttEl.style.display = 'block';
+    }
+    function handleClick(hit) {
+      if (!hit) return;
+      if (hit.type === 'user') { selectNavigationUser(hit.uid); return; }
+      if (hit.type === 'core') { if (drillDown) onBack(); return; }
+      const key = hit.key;
+      if (!drillDown && LEVEL2_SUBS[key]) {
+        flyTo(10); lastInteract = now();   // "zambullida" suave antes de reconstruir el nivel
+        setTimeout(() => { drillDown = key; buildLevel(); selectNavigationNode(key); showBack(true); }, 360);
+      } else {
+        if (FX_STATE.globe) FX_STATE.globe.selectedRoom = key;
+        refreshGlobeUsers(key, null, drillDown);
+        const hd = document.querySelector('.globe-list-hd');
+        const def = levelDefs().find(r => r.key === key);
+        if (hd && def) hd.innerHTML = '<div class="sdot sdot-active"></div> ' + esc(def.label);
+      }
+    }
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointerleave', onLeave);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('click', onClick);
+
+    /* ── Botón "← Sistema" (overlay DOM) ── */
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button'; backBtn.className = 'office-back-btn'; backBtn.textContent = '← Sistema';
+    backBtn.style.cssText = 'position:absolute;top:12px;right:12px;z-index:15;display:none;background:#0b1424;color:#9fc3e8;border:1px solid #2a4a66;border-radius:8px;padding:5px 12px;font:600 12px/1 Outfit,system-ui;cursor:pointer;';
+    wrap.appendChild(backBtn);
+    function showBack(v) { backBtn.style.display = v ? 'block' : 'none'; }
+    function onBack() {
+      drillDown = null; buildLevel(); showBack(false);
+      if (FX_STATE.globe) { FX_STATE.globe.selectedRoom = null; FX_STATE.globe.selectedUser = null; }
+      refreshGlobeUsers(null, null);
+      const hd = document.querySelector('.globe-list-hd');
+      if (hd) hd.innerHTML = '<div class="sdot sdot-active"></div> Todos los módulos';
+    }
+    backBtn.addEventListener('click', onBack);
+
+    /* ── Resize ── */
+    function onResize() {
+      W = canvas.clientWidth || wrap.clientWidth || 640;
+      H = Math.max(360, W >= 1280 ? 520 : (W >= 900 ? 460 : 380));
+      renderer.setSize(W, H, false); canvas.style.height = H + 'px';
+      camera.aspect = W / H; camera.updateProjectionMatrix();
+      fitLabelLayer();
+    }
+    window.addEventListener('resize', onResize, { passive: true });
+
+    /* ── Loop (FPS capado + pausa por visibilidad) ── */
+    let alive = true, lastFrame = 0;
+    const frameMs = 1000 / (FX_STATE.lowPower ? 30 : 48);
+    function loop(time) {
+      if (!alive || !FX_STATE.globe || FX_STATE.globe.kind !== 'webgl') return;
+      const raf = requestAnimationFrame(loop); FX_STATE.rafs.add(raf);
+      if (document.hidden || currentTab !== 'usage-tab-live') return;   // pausa GPU si no visible
+      const dtms = lastFrame ? Math.min(60, time - lastFrame) : 16;
+      if (time - lastFrame < frameMs) return;
+      lastFrame = time;
+      const tsec = time * 0.001;
+      // deriva cinematográfica lentísima cuando no se interactúa
+      if (!dragging && (now() - lastInteract) > 2600) theta += 0.00004 * dtms;
+      radius += (tRadius - radius) * 0.08;
+      const s = Math.sin(phi);
+      // mira un poco por encima del piso → encuadre de maqueta (no al ras)
+      camera.position.set(radius * s * Math.cos(theta), radius * Math.cos(phi), radius * s * Math.sin(theta));
+      camera.lookAt(0, 0.4, 0);
+      // ORBE del hall: leve "respiración" de luz ~5s (centro de operaciones vivo)
+      const br = 0.5 + 0.5 * Math.sin(tsec * (Math.PI * 2 / 5));
+      coreMat.emissiveIntensity = 0.7 + br * 0.45;
+      coreHalo.scale.setScalar(1.35 + br * 0.3); coreHaloMat.opacity = 0.26 + br * 0.16;
+      core.rotation.y += 0.0016;
+      hudFill.material.opacity = 0.75 + br * 0.18;
+      updateNodePositions(tsec); updateNodeVisuals(tsec); updateLinks(); updatePulses(tsec);
+      for (const p of particleById.values()) updateParticle(p, tsec, dtms);
+      updateLabels();
+      renderer.render(scene, camera);
+    }
+
+    /* ── Arranque ── */
+    buildLevel();
+    fitLabelLayer();
+    FX_STATE.globe = {
+      kind: 'webgl', selectedRoom: null, selectedUser: null,
+      syncData: syncScene,
+      resize: onResize,
+      dispose() {
+        alive = false;
+        window.removeEventListener('resize', onResize);
+        canvas.removeEventListener('pointerdown', onDown);
+        canvas.removeEventListener('pointermove', onMove);
+        canvas.removeEventListener('pointerup', onUp);
+        canvas.removeEventListener('pointerleave', onLeave);
+        canvas.removeEventListener('wheel', onWheel);
+        canvas.removeEventListener('click', onClick);
+        backBtn.removeEventListener('click', onBack);
+        if (backBtn.parentNode) backBtn.parentNode.removeChild(backBtn);
+        if (labelLayer.parentNode) labelLayer.parentNode.removeChild(labelLayer);
+        disposeNodes(); disposeParticles();
+        scene.remove(glowLayer); scene.remove(badgeLayer); glowPlaneGeo.dispose();
+        clearLayer(linkLayer); clearLayer(pulseLayer); clearLayer(nodeLayer); clearLayer(trailLayer); clearLayer(particleLayer);
+        coreGeo.dispose(); coreMat.dispose(); coreHaloMat.dispose();
+        pedestalGeo.dispose(); pedestalMat.dispose();
+        hudGeos.forEach(g => g.dispose()); hudMats.forEach(m => m.dispose());
+        if (hudFill && hudFill.geometry) hudFill.geometry.dispose();
+        if (groundGeo) groundGeo.dispose(); if (groundMat) groundMat.dispose();
+        if (grid.geometry) grid.geometry.dispose(); if (grid.material) grid.material.dispose();
+        glowTex.dispose(); particleTex.dispose(); shadowTex.dispose();
+        floorPatternTex.dispose(); floorPatternMat.dispose();
+        renderer.dispose(); try { renderer.forceContextLoss(); } catch (_) {}
+        canvas.style.background = '';
+        if (ttEl) ttEl.style.display = 'none';
+      },
+    };
+    loop(0);
+    return true;
   }
 
   function moduleNodeColor(key, events) {
