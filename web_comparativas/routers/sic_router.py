@@ -677,6 +677,8 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required),
                 "created":  str(getattr(u, "created_at", "") or "")[:10],
                 # Actividad (real si existe, 0 si no hay datos aún)
                 "score":       int(st.get("adoption_score") or 0),
+                # Desglose del score (Fase 3): Constancia / Amplitud / Profundidad (0-100 c/u)
+                "score_breakdown": st.get("adoption_breakdown") or {},
                 "sessions":    int(st.get("sessions") or 0),
                 "active_days": int(st.get("active_days") or 0),
                 "active_hours":float(st.get("active_hours") or 0),

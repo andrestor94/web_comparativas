@@ -9,6 +9,7 @@ from sqlalchemy import func
 
 from .models import db_session, UsageEvent, User, Group, GroupMember
 from .visibility_service import get_visible_user_ids as visible_user_ids  # fuente única de verdad
+from . import tracking_taxonomy  # FUENTE ÚNICA de secciones (clave/etiqueta/módulo/alias)
 
 logger = logging.getLogger("wc.usage")
 _UNMAPPED_SECTION_LOGGED: Set[str] = set()
@@ -60,190 +61,29 @@ def _default_date_range(date_from: str | None, date_to: str | None) -> Tuple[dt.
         d_from = d_to - dt.timedelta(days=30)
         return d_from, d_to
 
-    # ninguno: histórico completo desde inicio del proyecto
+    # ninguno: por defecto, últimos 30 días (alineado con la UI; evita inflar
+    # días/horas activas mezclando años de historia). Solo afecta el rango de
+    # consulta read-only, no escribe nada en DB.
     d_to = today
-    d_from = dt.date(2024, 1, 1)
+    d_from = today - dt.timedelta(days=30)
     return d_from, d_to
 
 
 def _map_section_name(raw: str) -> str:
-    original = (raw or "").strip()
-    mapping = {
-        # Inicio / auth
-        "home":                         "Inicio",
-        "auth":                         "Inicio de Sesión",
-        # S.I.C.
-        "sic":                          "S.I.C. General",
-        "sic_usuarios":                 "Gestión de Usuarios",
-        "sic_helpdesk":                 "Mesa de Ayuda",
-        "sic_tracking":                 "Seguimiento de Usuarios",
-        "sic_tracking_api":             "API Tracking (Interno)",
-        "sic_password_resets":          "Gestión de Contraseñas",
-        # Mercado Público
-        "mercado_publico":              "Mercado Público",
-        "mercado_publico_oportunidades":"Oportunidades — Público",
-        # Mercado Privado
-        "mercado_privado":              "Mercado Privado",
-        "mercado_privado_dimensiones":  "Dimensionamiento",
-        # Oportunidades
-        "oportunidades":                "Oportunidades",
-        "oportunidades_buscador":       "Buscador de Oportunidades",
-        "oportunidades_dimensiones":    "Análisis de Dimensiones",
-        # Cargas / Historial
-        "cargas":                       "Cargas",
-        "cargas_historial":             "Cargas — Historial",
-        # Comparativa
-        "comparativa":                  "Comparativa de Mercado",
-        # Perfiles
-        "reporte_perfiles":             "Reporte de Perfiles",
-        # Forecast
-        "forecast":                     "Proyecciones y Forecast",
-        # Dashboard
-        "dashboard":                    "Panel Principal",
-        # Misceláneos
-        "live_users_dashboard":         "Panel Live",
-        "otro":                         "",
-        "":                             "Sin Sección",
-    }
-    if original in mapping:
-        return mapping[original]
-    return original.replace("_", " ").title()
+    """Clave/etiqueta cruda → etiqueta legible canónica.
 
+    Delega en la taxonomía única ([tracking_taxonomy]). El mapa de alias
+    re-mapea las claves crudas VIEJAS del historial (comparativa /
+    comparativa_mercado / web_comparativas → "Comparativa de Mercado";
+    sic_users / sic_usuarios → "Usuarios"; etc.), de modo que los eventos ya
+    guardados se muestran con la etiqueta canónica sin tocar la DB.
 
-def _humanize_section_key(raw: str) -> str:
-    text = (raw or "").strip()
-    if not text:
+    Las claves genéricas sin sección real ("otro"/"unknown"/"undefined"…)
+    devuelven "" para que los consumidores las omitan (igual que antes).
+    """
+    if tracking_taxonomy.canonical_key(raw) == "otros":
         return ""
-    text = text.split("?", 1)[0].split("#", 1)[0].strip("/")
-    text = re.sub(r"\b\d+\b", "", text)
-    text = re.sub(r"[0-9a-f]{8,}(-[0-9a-f]{4,})*", "", text, flags=re.I)
-    text = text.replace("-", "_").replace("/", "_")
-    words = [word.lower() for word in text.split("_") if word and word.lower() not in {"api"}]
-    if not words:
-        return ""
-    phrases = {
-        "analisis_dimensiones": "Analisis de Dimensiones",
-        "fuentes_externas": "Fuentes Externas",
-        "helpdesk_tickets": "Mesa de Ayuda / Tickets",
-        "users": "Usuarios",
-        "usuarios": "Usuarios",
-        "password_resets": "Reseteo de Contrasenas",
-        "reporte_perfiles": "Reporte de Perfiles",
-        "mercado_publico_reporte_perfiles": "Reporte de Perfiles",
-        "mercado_privado_reporte_perfiles": "Reporte de Perfiles",
-        "cargas_historial": "Cargas Historial",
-        "oportunidades_buscador": "Buscador de Oportunidades",
-    }
-    joined = "_".join(words)
-    if joined in phrases:
-        return phrases[joined]
-    for size in range(min(3, len(words)), 0, -1):
-        suffix = "_".join(words[-size:])
-        if suffix in phrases:
-            return phrases[suffix]
-    acronyms = {"sic": "S.I.C", "siem": "SIEM", "ia": "IA"}
-    display_words = words[-2:] if len(words) > 2 else words
-    return " ".join(acronyms.get(word, word.capitalize()) for word in display_words)
-
-
-def _map_section_name(raw: str) -> str:
-    original = (raw or "").strip()
-    key = original.lower().replace("-", "_").replace("/", "_").strip("_")
-    key = re.sub(r"_+", "_", key)
-
-    generic_aliases = {
-        "otro", "otros", "sin_identificar", "sin_clasificar", "sin clasificar",
-        "sin identificar", "unknown", "undefined", "n/a", "no identificado",
-    }
-    if key in generic_aliases:
-        return ""
-
-    mapping = {
-        "home": "Inicio",
-        "inicio": "Inicio",                      # label re-feed
-        "dashboard": "Inicio — Panel Principal",
-        "markets": "Centro de Mercados",
-        "markets_home": "Centro de Mercados",
-        "centro de mercados": "Centro de Mercados",
-        "sic": "S.I.C",
-        "sic_general": "S.I.C",
-        "sic_home": "S.I.C",
-        "s.i.c general": "S.I.C",               # label re-feed (sin punto final)
-        "s.i.c. general": "S.I.C",              # label re-feed (con punto)
-        "sic_tracking": "Seguimiento de Usuarios",
-        "sic_tracking_api": "API Tracking Interno",
-        "sic_helpdesk": "Mesa de Ayuda",
-        "sic_helpdesk_tickets": "Mesa de Ayuda / Tickets",
-        "sic_users": "Usuarios",
-        "sic_usuarios": "Usuarios",
-        "sic_password_resets": "Reseteo de Contrasenas",
-        "admin_password_resets": "Administracion de Reseteos",
-        "administracion": "Administracion",
-        "grupos": "Grupos",
-        "notificaciones": "Notificaciones",
-        "mercado_publico": "Mercado Público — Inicio",
-        "mercado_publico_home": "Mercado Público — Inicio",
-        "mercado publico home": "Mercado Público — Inicio",   # label re-feed
-        "mercado_publico_helpdesk": "Mesa de Ayuda Mercado Publico",
-        "mercado_publico_oportunidades": "Oportunidades",
-        "mercado_publico_buscador": "Buscador Mercado Publico",
-        "mercado_publico_dimensiones": "Dimensionamiento Mercado Publico",
-        "mercado_publico_analisis_dimensiones": "Analisis de Dimensiones",
-        "mercado_publico_fuentes_externas": "Fuentes Externas",
-        "mercado_privado": "Mercado Privado",
-        "mercado_privado_home": "Mercado Privado Home",
-        "mercado_privado_helpdesk": "Mesa de Ayuda Mercado Privado",
-        "mercado_privado_dimensiones": "Dimensionamiento",
-        "dimensionamiento": "Dimensionamiento",
-        "oportunidades": "Oportunidades",
-        "oportunidades_buscador": "Buscador de Oportunidades",
-        "oportunidades_dimensiones": "Dimensiones de Oportunidades",
-        "lectura_pliegos": "Lectura de Pliegos",
-        "pliegos": "Lectura de Pliegos",
-        "pliego_widget": "Visor de Pliegos",
-        "pliego_detalle": "Detalle de Pliego",
-        "reporte_perfiles": "Reporte de Perfiles",
-        "mercado_publico_reporte_perfiles": "Reporte de Perfiles — Mercado Público",
-        "mercado_privado_reporte_perfiles": "Reporte de Perfiles — Mercado Privado",
-        "perfiles": "Reporte de Perfiles",
-        "comparativa": "Comparativa de Mercado",
-        "comparativa_mercado": "Comparativa de Mercado",
-        "web_comparativas": "Comparativa de Mercado",
-        "tablero": "Tablero de Comparativa",                  # label re-feed corto
-        "tablero_comparativa": "Tablero de Comparativa",
-        "vistas_guardadas": "Vistas Guardadas",
-        "cargas": "Cargas",
-        "cargas_nueva": "Nueva Carga",
-        "cargas_edicion": "Edicion de Carga",
-        "cargas_historial": "Cargas Historial",
-        "fuentes_externas": "Fuentes Externas",
-        "descargas": "Descargas",
-        "reporte_proceso": "Reporte de Proceso",
-        "informes": "Informes",
-        "forecast": "Forecast",
-        "forecast_widget": "Panel de Forecast",
-        "auth": "Inicio de Sesion",
-        "auth_login": "Inicio de Sesion",
-        "auth_logout": "Cierre de Sesion",
-        "auth_password": "Gestion de Contrasena",
-        "inicio de sesion": "Inicio de Sesion",                # label re-feed
-        "cierre de sesion": "Cierre de Sesion",                # label re-feed
-        "gestion de contrasena": "Gestion de Contrasena",      # label re-feed
-        "api tracking interno": "API Tracking Interno",        # label re-feed
-        "api tracking (interno)": "API Tracking Interno",      # label re-feed
-        "seguimiento de usuarios": "Seguimiento de Usuarios",  # label re-feed
-        "comentarios": "Comentarios",
-        "clientes_api": "Consulta de Clientes",
-        "live_users_dashboard": "Panel Live",
-        "": "Inicio",
-    }
-    if key in mapping:
-        return mapping[key]
-    label = _humanize_section_key(original)
-    if label and key not in _UNMAPPED_SECTION_LOGGED:
-        _UNMAPPED_SECTION_LOGGED.add(key)
-        logger.warning("[tracking] ruta sin mapping explicito: %s -> %s", original, label)
-    return label
+    return tracking_taxonomy.label_for(raw)
 
 
 def _map_action_label(action_type: str) -> str:
@@ -379,8 +219,13 @@ def log_usage_event(
                 ua = ""
 
         # Actualizar presencia en vivo (Memoria)
-        is_active = extra_data.get("is_active", True) if extra_data else True
-        update_online_presence(int(user.id), section or "", is_active, action_type)
+        ed = extra_data or {}
+        is_active = ed.get("is_active", True)
+        update_online_presence(
+            int(user.id), section or "", is_active, action_type,
+            access_mode=_norm_origin(ed.get("access_mode"), _ORIGIN_MODES),
+            device_type=_norm_origin(ed.get("device_type"), _ORIGIN_DEVICES),
+        )
 
         # Persistimos heartbeats de forma muestreada para no depender solo de memoria.
         if action_type == "heartbeat" and not _should_persist_heartbeat(
@@ -449,6 +294,21 @@ _LAST_PERSISTED_HEARTBEAT: Dict[int, Dict[str, Any]] = {}
 _PRESENCE_ONLY_ACTIONS = {"heartbeat", "api_call"}
 _GENERIC_SECTIONS = {"", "home", "inicio", "unknown", "otro", "otros", "undefined", "n/a"}
 
+# ── Origen del acceso (Fase 5): modo (app/web) + dispositivo. HONESTIDAD: un
+#    valor presente pero inválido → "desconocido"; AUSENTE → None (no se toca la
+#    presencia, para no pisar un valor ya conocido con un "desconocido"). ──
+_ORIGIN_MODES = {"app", "web"}
+_ORIGIN_DEVICES = {"escritorio", "movil", "tablet"}
+
+
+def _norm_origin(value, allowed):
+    if value is None:
+        return None
+    k = str(value).strip().lower()
+    if not k:
+        return None
+    return k if k in allowed else "desconocido"
+
 
 def _is_meaningful_section(section: str | None) -> bool:
     key = (section or "").strip().lower().replace("-", "_").replace("/", "_").strip("_")
@@ -485,11 +345,16 @@ def update_online_presence(
     section: str,
     is_active: bool,
     action_type: str = "",
+    *,
+    access_mode: Optional[str] = None,
+    device_type: Optional[str] = None,
 ) -> None:
     """
     Actualiza el estado de presencia en memoria del usuario.
     - Mantiene session_start a menos que haya un gap > SESSION_BREAK_MINUTES.
     - Actualiza last_action_type y last_action_ts solo para acciones significativas.
+    - access_mode/device_type (Fase 5): si vienen None, se conserva el valor previo
+      (no se pisa un origen conocido con un "desconocido").
     """
     now = dt.datetime.utcnow()
     existing = ONLINE_USERS.get(user_id)
@@ -518,6 +383,8 @@ def update_online_presence(
     else:
         current_section = section or previous_section
 
+    prev_access = existing.get("access_mode") if existing else None
+    prev_device = existing.get("device_type") if existing else None
     ONLINE_USERS[user_id] = {
         "last_heartbeat": now,
         "last_action_ts": last_action_ts,
@@ -525,6 +392,8 @@ def update_online_presence(
         "is_active": is_active,
         "last_action_type": last_action,
         "session_start": session_start,
+        "access_mode": access_mode if access_mode is not None else prev_access,
+        "device_type": device_type if device_type is not None else prev_device,
     }
 
 
@@ -567,7 +436,12 @@ def _restore_presence_from_db(session, visible_ids: Set[int]) -> None:
             if uid in seen:
                 continue
             seen.add(uid)
-            update_online_presence(uid, ev.section or "", True, ev.action_type or "")
+            _ed = ev.extra_data or {}
+            update_online_presence(
+                uid, ev.section or "", True, ev.action_type or "",
+                access_mode=_norm_origin(_ed.get("access_mode"), _ORIGIN_MODES),
+                device_type=_norm_origin(_ed.get("device_type"), _ORIGIN_DEVICES),
+            )
             # Sobreescribir timestamps con los del evento (más precisos que utcnow)
             entry = ONLINE_USERS.get(uid)
             if entry and ev.timestamp:
@@ -596,7 +470,83 @@ _ADMIN_ROLE_ALIASES = {
 _LIVE_ACTIVE_THRESHOLD = dt.timedelta(minutes=2)
 _LIVE_CONNECTED_THRESHOLD = dt.timedelta(minutes=5)
 _LIVE_ABSENT_THRESHOLD = dt.timedelta(minutes=15)
-_ADOPTION_THRESHOLD = 40
+# ──────────────────────────────────────────────────────────────────────────────
+# SCORE DE ADOPCIÓN (Fase 3) — estructura honesta en 3 dimensiones
+# ──────────────────────────────────────────────────────────────────────────────
+# Umbral ÚNICO de "adoptado" (= categoría Consolidado en adelante). Lo usan TANTO
+# el KPI "Tasa de adopción" como las categorías de color/riesgo. Antes convivían
+# dos (color ≥30, KPI ≥40) → inconsistente. Categorías: ≥80 Referente · ≥50
+# Consolidado(=adoptado) · ≥30 En progreso · <30 Baja adopción.
+_ADOPTION_THRESHOLD = 50
+
+# Pesos de las 3 dimensiones (suman 1.0). Punto de partida RAZONABLE, no calibrado
+# con evidencia (la base local tiene pocas cuentas reales). Afinables con datos de
+# producción sin cambiar la estructura. Justificación:
+#   • Constancia y Amplitud son las señales que HOY discriminan y son alcanzables
+#     por cualquier perfil (no exigen acciones "pesadas") → llevan el mayor peso.
+#   • Profundidad (search/export/upload) aporta valor real pero es más rara y
+#     propia de perfiles operativos; peso MODERADO para no castigar al consultivo
+#     ni volver el score inalcanzable.
+_ADOPT_W_CONSTANCIA = 0.40
+_ADOPT_W_AMPLITUD = 0.35
+_ADOPT_W_PROFUNDIDAD = 0.25
+
+# Saturaciones (target de normalización de cada dimensión a 0-100). Cada una con su
+# propio techo para que ninguna sola tire el score a 0/100 por sí misma.
+_ADOPT_DAYS_TARGET = 12        # días activos para constancia "plena"
+_ADOPT_RECENCY_HORIZON = 21    # días desde el último uso a partir de los cuales la recencia es 0
+_ADOPT_MODULES_TARGET = 10     # secciones canónicas distintas para amplitud "plena"
+_ADOPT_DEPTH_TARGET = 8        # (search+export+upload) para profundidad "plena"
+
+
+def _adoption_breakdown(
+    *,
+    active_days: int,
+    last_seen_days: int,
+    modules_used: int,
+    searches: int,
+    exports: int,
+    uploads: int,
+) -> Dict[str, int]:
+    """Score de adopción 0-100 descompuesto en 3 sub-dimensiones (cada una 0-100).
+
+    Es un cálculo de PRESENTACIÓN: lee señales ya derivadas de usage_events y NO
+    escribe nada en la DB. Devuelve dict con score compuesto + las 3 dimensiones
+    para que la UI muestre el desglose (lo que vuelve el número honesto).
+
+      1) CONSTANCIA  : ¿usa la herramienta de forma sostenida y reciente?
+         = 60% días activos (sat. _ADOPT_DAYS_TARGET) + 40% recencia (decae a 0 en
+           _ADOPT_RECENCY_HORIZON días desde el último uso).
+      2) AMPLITUD    : ¿cuánto de la plataforma explota? = nº de secciones canónicas
+         distintas (taxonomía Fase 1), saturado en _ADOPT_MODULES_TARGET.
+      3) PROFUNDIDAD : ¿realiza acciones de valor? = (search+export+upload) saturado
+         en _ADOPT_DEPTH_TARGET. Peso moderado: no debe dominar ni hacer el score
+         inalcanzable para un perfil consultivo.
+    """
+    active_days = max(0, int(active_days or 0))
+    last_seen_days = max(0, int(last_seen_days if last_seen_days is not None else 999))
+    modules_used = max(0, int(modules_used or 0))
+    depth_actions = max(0, int(searches or 0)) + max(0, int(exports or 0)) + max(0, int(uploads or 0))
+
+    days_norm = min(active_days / float(_ADOPT_DAYS_TARGET), 1.0)
+    recency_norm = max(0.0, min(1.0, 1.0 - last_seen_days / float(_ADOPT_RECENCY_HORIZON)))
+    constancia = 100.0 * (0.6 * days_norm + 0.4 * recency_norm)
+
+    amplitud = 100.0 * min(modules_used / float(_ADOPT_MODULES_TARGET), 1.0)
+
+    profundidad = 100.0 * min(depth_actions / float(_ADOPT_DEPTH_TARGET), 1.0)
+
+    score = (
+        _ADOPT_W_CONSTANCIA * constancia
+        + _ADOPT_W_AMPLITUD * amplitud
+        + _ADOPT_W_PROFUNDIDAD * profundidad
+    )
+    return {
+        "score": int(round(score)),
+        "constancia": int(round(constancia)),
+        "amplitud": int(round(amplitud)),
+        "profundidad": int(round(profundidad)),
+    }
 
 
 def _normalize_role_key(role: str | None) -> str:
@@ -749,6 +699,15 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
             snap["session_start"] = ts
         snap["_previous_ts"] = ts
         snap["last_signal"] = ts
+        # Origen (Fase 5): cualquier evento puede traerlo (incl. heartbeat). Como
+        # los eventos vienen ascendentes por tiempo, el último visto prevalece.
+        _ev_ed = event.extra_data or {}
+        _ev_am = _norm_origin(_ev_ed.get("access_mode"), _ORIGIN_MODES)
+        _ev_dt = _norm_origin(_ev_ed.get("device_type"), _ORIGIN_DEVICES)
+        if _ev_am:
+            snap["access_mode"] = _ev_am
+        if _ev_dt:
+            snap["device_type"] = _ev_dt
         action_norm = (event.action_type or "").lower()
         if event.section and (action_norm not in _PRESENCE_ONLY_ACTIONS or not snap["current_section"]):
             snap["current_section"] = event.section
@@ -796,6 +755,12 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
                 snap["current_section"] = data.get("current_section") or snap["current_section"]
                 _append_nav_step(snap["nav_trail"], data.get("current_section"))
 
+        # Origen: la memoria (presencia en vivo) es más fresca que los eventos.
+        if data.get("access_mode"):
+            snap["access_mode"] = data.get("access_mode")
+        if data.get("device_type"):
+            snap["device_type"] = data.get("device_type")
+
     live_map: Dict[int, Dict[str, Any]] = {}
     for uid, snap in snapshots.items():
         status_info = _status_from_signal(snap.get("last_signal"))
@@ -817,6 +782,9 @@ def _build_live_presence_map(session, user_ids: Set[int]) -> Dict[int, Dict[str,
             "current_section": _map_section_name(snap.get("current_section", "")),
             "nav_trail": snap.get("nav_trail", []),
             "timeline": snap.get("timeline", []),
+            # Origen de la sesión (Fase 5): "desconocido" honesto si no hubo señal.
+            "access_mode": snap.get("access_mode") or "desconocido",
+            "device_type": snap.get("device_type") or "desconocido",
             "session_start": session_start.isoformat() + "Z" if session_start else None,
             "minutes_since_activity": round((now - last_action_ts).total_seconds() / 60.0, 1) if last_action_ts else None,
             "minutes_since_signal": status_info["minutes_since_signal"],
@@ -876,6 +844,9 @@ def get_live_users_data(session, visible_ids: Set[int]) -> List[Dict[str, Any]]:
             "session_minutes": presence["session_minutes"],
             "nav_trail": presence.get("nav_trail", []),
             "timeline": presence.get("timeline", []),
+            # Origen de la sesión (Fase 5)
+            "access_mode": presence.get("access_mode", "desconocido"),
+            "device_type": presence.get("device_type", "desconocido"),
         })
 
     status_order = {"Activo": 0, "Inactivo": 1, "Ausente": 2}
@@ -988,15 +959,25 @@ def _engagement_score(sessions: int, active_days: int, uploads: int, searches: i
     return (sessions * 1.5) + (active_days * 2) + (uploads * 4) + (searches * 2.5) + (exports * 2) + (views * 0.5) + (modules_used * 1.5)
 
 
-def _adoption_score(active_days: int, active_minutes: float, uploads: int, searches: int, exports: int, modules_used: int) -> int:
-    return int(round(
-        min(active_days / 8.0, 1.0) * 20
-        + min(active_minutes / 240.0, 1.0) * 15
-        + min(uploads / 5.0, 1.0) * 25
-        + min(searches / 8.0, 1.0) * 15
-        + min(exports / 4.0, 1.0) * 10
-        + min(modules_used / 4.0, 1.0) * 15
-    ))
+def _adoption_score(
+    active_days: int,
+    uploads: int,
+    searches: int,
+    exports: int,
+    modules_used: int,
+    last_seen_days: int = 999,
+) -> int:
+    """Compatibilidad: devuelve solo el compuesto 0-100 del nuevo score (Fase 3).
+    Para el desglose por dimensión usar `_adoption_breakdown(...)`. `active_minutes`
+    se quitó de la firma: la nueva Constancia usa días activos + recencia, no minutos."""
+    return _adoption_breakdown(
+        active_days=active_days,
+        last_seen_days=last_seen_days,
+        modules_used=modules_used,
+        searches=searches,
+        exports=exports,
+        uploads=uploads,
+    )["score"]
 
 
 def _usage_frequency(active_days: int, period_days: int, sessions: int) -> str:
@@ -1193,6 +1174,9 @@ def _get_usage_summary_impl(
         for event in previous_events:
             by_user_previous[int(event.user_id)].append(event)
 
+        # Acumuladores del PERÍODO ANTERIOR (igual duración) para tendencias KPI.
+        prev_active_users = 0
+        prev_active_minutes = 0.0
         per_user_rows = []
         for user in eligible_users:
             uid = int(user.id)
@@ -1228,7 +1212,13 @@ def _get_usage_summary_impl(
                     if name in section_stats:
                         section_stats[name]["active_minutes"] += active_minutes * (count / events_count)
                         section_stats[name]["sessions"] += sessions * (count / events_count)
-            adoption_score = _adoption_score(active_days, active_minutes, uploads, searches, exports, modules_used)
+            last_seen = last_seen_by_user.get(uid)
+            last_seen_days = (dt.datetime.utcnow() - last_seen).days if last_seen else 999
+            adoption = _adoption_breakdown(
+                active_days=active_days, last_seen_days=last_seen_days,
+                modules_used=modules_used, searches=searches, exports=exports, uploads=uploads,
+            )
+            adoption_score = adoption["score"]
             productivity_index = round(uploads / sessions, 2) if sessions > 0 else 0.0
 
             prev_active_days = len({event.timestamp.date() for event in previous_non_heartbeat if event.timestamp})
@@ -1238,6 +1228,12 @@ def _get_usage_summary_impl(
             prev_exports = sum(1 for event in previous_non_heartbeat if (event.action_type or "").lower() == "export")
             previous_section_names = [_map_section_name(event.section or "") for event in previous_non_heartbeat]
             prev_modules = len(Counter(name for name in previous_section_names if name))
+            # Tendencias KPI: mismas definiciones que el período actual, sobre el
+            # período anterior de IGUAL duración (usuario activo = ≥1 evento; horas
+            # activas = minutos de sesión reconstruidos).
+            if previous_non_heartbeat:
+                prev_active_users += 1
+            prev_active_minutes += float(previous_session["active_minutes"])
             current_engagement = _engagement_score(sessions, active_days, uploads, searches, exports, views, modules_used)
             previous_engagement = _engagement_score(int(previous_session["count"]), prev_active_days, prev_uploads, prev_searches, prev_exports, prev_views, prev_modules)
             if previous_engagement <= 0 and current_engagement <= 0:
@@ -1248,8 +1244,6 @@ def _get_usage_summary_impl(
                 trend_delta_pct = round(((current_engagement - previous_engagement) / previous_engagement) * 100.0, 1)
             trend_direction = "up" if trend_delta_pct >= 15 else ("down" if trend_delta_pct <= -15 else "stable")
 
-            last_seen = last_seen_by_user.get(uid)
-            last_seen_days = (dt.datetime.utcnow() - last_seen).days if last_seen else 999
             live_info = live_by_user.get(uid)
             role_raw = (user.role or "").strip().lower()
             metric_excluded = is_admin_role(role_raw)
@@ -1292,6 +1286,7 @@ def _get_usage_summary_impl(
                 "frequency": _usage_frequency(active_days, period_days, sessions),
                 "productivity_index": productivity_index,
                 "adoption_score": adoption_score,
+                "adoption_breakdown": adoption,
                 "is_inactive_7d": last_seen_days >= 7,
                 "last_seen_days": last_seen_days,
                 "risk_level": risk_level,
@@ -1316,10 +1311,39 @@ def _get_usage_summary_impl(
         adopters = sum(1 for row in adoption_rows if row["adoption_score"] >= _ADOPTION_THRESHOLD)
         adoption_rate = round((adopters / len(adoption_rows)) * 100.0, 1) if adoption_rows else 0.0
 
+        # ── Tendencias KPI (Fase 6): actual vs período INMEDIATAMENTE ANTERIOR de
+        #    IGUAL duración (previous_start_dt..start_dt, ya consultado arriba).
+        #    SOLO se exponen los KPIs que admiten comparación honesta de período:
+        #      · Usuarios activos (≥1 evento en el período)
+        #      · Horas activas (minutos de sesión del período)
+        #    NO se calculan para: Conectados ahora (instantáneo), Inactivos 7d
+        #    (ventana rodante desde hoy) ni Tasa de adopción (su score depende de la
+        #    recencia-a-hoy, no es comparable como agregado de período).
+        #    Si el período anterior NO tiene eventos → comparable=False (sin flecha).
+        prev_active_hours = round(prev_active_minutes / 60.0, 1)
+        prev_has_data = len(previous_events) > 0
+
+        def _kpi_trend(cur: float, prev: float) -> Dict[str, Any]:
+            delta = round(cur - prev, 1)
+            if prev > 0:
+                pct = round((cur - prev) / prev * 100.0, 1)
+            elif cur > 0:
+                pct = 100.0
+            else:
+                pct = 0.0
+            direction = "up" if delta > 0 else ("down" if delta < 0 else "flat")
+            return {"current": cur, "previous": prev, "delta": delta, "pct": pct, "direction": direction}
+
+        trends: Dict[str, Any] = {"comparable": bool(prev_has_data), "period_days": period_days}
+        if prev_has_data:
+            trends["active_users"] = _kpi_trend(active_users, prev_active_users)
+            trends["active_hours"] = _kpi_trend(total_active_hours, prev_active_hours)
+
         weekday_labels = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]
         return {
             "filters": {"date_from": start_date.isoformat(), "date_to": end_date.isoformat(), "role_filter": role_filter or "", "team_filter": team_filter or "", "view": view},
             "kpis": {"connected_now": connected_now, "eligible_users": len(eligible_ids), "adoption_eligible_users": len(adoption_rows), "active_users": active_users, "uploads": uploads_total, "active_hours": total_active_hours, "avg_productivity_index": avg_productivity, "adoption_rate": adoption_rate, "inactive_7d_count": inactive_7d_count},
+            "trends": trends,
             "meta": {"available_groups": [{"value": name, "label": name, "users": count} for name, count in sorted(available_groups.items())], "available_roles": available_roles, "admins_excluded_by_default": True, "admin_filter_selected": admin_filter_selected, "metric_scope": "admin_observed" if admin_filter_selected else "operational", "admin_users_visible": visible_admin_count, "adoption_threshold": _ADOPTION_THRESHOLD, "states": states},
             "charts": {
                 "by_weekday": [{"weekday_index": idx, "weekday_label": weekday_labels[idx], "events": int(weekday_stats[idx]["events"]), "users": len(weekday_stats[idx]["user_ids"]), "uploads": int(weekday_stats[idx]["uploads"]), "sessions": int(weekday_stats[idx]["sessions"]), "active_hours": round(float(weekday_stats[idx]["active_minutes"]) / 60.0, 1)} for idx in range(7)],
@@ -1358,12 +1382,36 @@ def _get_user_profile_timeline_impl(session, user_id: int) -> Dict[str, Any]:
     modules_counter = Counter(name for name in section_names if name)
     active_days = len({event.timestamp.date() for event in non_heartbeat if event.timestamp})
     active_minutes = float(session_data["active_minutes"])
-    adoption_score = _adoption_score(active_days, active_minutes, uploads, searches, exports, len(modules_counter))
-    risk_level = "alto" if last_seen is None or (dt.datetime.utcnow() - last_seen).days >= 7 else ("medio" if adoption_score < _ADOPTION_THRESHOLD else "bajo")
+    last_seen_days = (dt.datetime.utcnow() - last_seen).days if last_seen else 999
+    adoption = _adoption_breakdown(
+        active_days=active_days, last_seen_days=last_seen_days,
+        modules_used=len(modules_counter), searches=searches, exports=exports, uploads=uploads,
+    )
+    adoption_score = adoption["score"]
+    risk_level = "alto" if last_seen is None or last_seen_days >= 7 else ("medio" if adoption_score < _ADOPTION_THRESHOLD else "bajo")
     timeline_events = base_q.filter(func.lower(UsageEvent.action_type) != "heartbeat").order_by(UsageEvent.timestamp.desc()).limit(150).all()
+
+    # Sparkline de actividad REAL (Fase 6): eventos (no-heartbeat) por día en los
+    # últimos 30 días, contados directamente de usage_events. NO se rellena ni se
+    # suaviza: cada barra es el conteo real del día; los días sin eventos quedan en
+    # 0. days_with_activity permite al front decidir si dibuja (≥2) o avisa que no
+    # hay histórico suficiente. Los heartbeats se excluyen (son presencia, no acción).
+    _spark_days = 30
+    _today = dt.date.today()
+    _day_counts: Dict[dt.date, int] = {}
+    for event in non_heartbeat:
+        if event.timestamp:
+            d = event.timestamp.date()
+            _day_counts[d] = _day_counts.get(d, 0) + 1
+    activity_series = []
+    for i in range(_spark_days - 1, -1, -1):
+        d = _today - dt.timedelta(days=i)
+        activity_series.append({"date": d.isoformat(), "events": int(_day_counts.get(d, 0))})
+    days_with_activity = sum(1 for x in activity_series if x["events"] > 0)
 
     return {
         "user_id": user.id,
+        "activity_daily": {"window_days": _spark_days, "days_with_activity": days_with_activity, "series": activity_series},
         "name": user.full_name or user.name or user.email.split("@")[0].title(),
         "email": user.email,
         "role": _role_label(user.role),
@@ -1372,6 +1420,7 @@ def _get_user_profile_timeline_impl(session, user_id: int) -> Dict[str, Any]:
         "group_names": groups,
         "created_at": user.created_at.isoformat() + "Z" if getattr(user, "created_at", None) else None,
         "adoption_score": adoption_score,
+        "adoption_breakdown": adoption,
         "risk_level": risk_level,
         "current_status": {"status": current_status, "status_tone": live_info["status_tone"] if live_info else "muted", "current_section": live_info["current_section"] if live_info else None, "last_action": live_info["last_action"] if live_info else "Sin actividad reciente", "last_action_ts": live_info["last_action_ts"] if live_info else None, "last_signal": live_info["last_signal"] if live_info else (last_seen.isoformat() + "Z" if last_seen else None), "activity_type": live_info["activity_type"] if live_info else "fuera de monitoreo", "session_start": live_info["session_start"] if live_info else None},
         "stats": {"sessions": int(session_data["count"]), "active_hours": round(active_minutes / 60.0, 1), "active_days": active_days, "views": views, "searches": searches, "downloads": exports, "uploads": uploads, "exports": exports, "modules_used": len(modules_counter), "modules_used_list": [name for name, _ in modules_counter.most_common(8)], "frequency": _usage_frequency(active_days, 90, int(session_data["count"])), "last_seen": last_seen.isoformat() + "Z" if last_seen else None},
@@ -1778,25 +1827,26 @@ def get_usage_summary(
                 if st["sessions"] > 0 else 0.0
             )
 
-            adoption_score = _adoption_score(
-                active_days,
-                float(st["active_minutes"]),
-                int(st["uploads"]),
-                int(st["searches"]),
-                int(st["exports"]),
-                len([name for name in st["sections_used"] if name and name != "Sin Sección"]),
-            )
-
-            # Días desde último acceso
+            # Días desde último acceso (necesario para la dimensión Constancia)
             last_seen_days = (today_utc - st["last_seen"]).days if st["last_seen"] else 999
             is_inactive_7d = last_seen_days >= 7
+
+            adoption = _adoption_breakdown(
+                active_days=active_days,
+                last_seen_days=last_seen_days,
+                modules_used=len([name for name in st["sections_used"] if name and name != "Sin Sección"]),
+                searches=int(st["searches"]),
+                exports=int(st["exports"]),
+                uploads=int(st["uploads"]),
+            )
+            adoption_score = adoption["score"]
 
             # Nivel de riesgo
             if is_inactive_7d:
                 risk_level = "alto"
             elif last_seen_days >= 3 or (active_hours >= 1.0 and adoption_score < 15):
                 risk_level = "medio"
-            elif adoption_score >= 30:
+            elif adoption_score >= _ADOPTION_THRESHOLD:
                 risk_level = "bajo"
             else:
                 risk_level = "medio" if (active_hours < 0.5 and adoption_score < 10) else "bajo"
@@ -1855,6 +1905,7 @@ def get_usage_summary(
                 "frequency": _usage_frequency(active_days, period_days, int(st["sessions"])),
                 "productivity_index": prod_idx,
                 "adoption_score": adoption_score,
+                "adoption_breakdown": adoption,
                 "is_inactive_7d": is_inactive_7d,
                 "last_seen_days": last_seen_days,
                 "risk_level": risk_level,
@@ -2005,18 +2056,20 @@ def get_user_profile_timeline(session, user_id: int) -> Dict[str, Any]:
         if section_name and section_name != "Sin Sección":
             modules_counter[section_name] += 1
 
-    adoption_score = _adoption_score(
-        active_days,
-        active_minutes,
-        uploads,
-        searches,
-        exports,
-        len(modules_counter),
+    last_seen_days = (dt.datetime.utcnow() - last_seen).days if last_seen else 999
+    adoption = _adoption_breakdown(
+        active_days=active_days,
+        last_seen_days=last_seen_days,
+        modules_used=len(modules_counter),
+        searches=searches,
+        exports=exports,
+        uploads=uploads,
     )
+    adoption_score = adoption["score"]
 
     live_info = _build_live_presence_map(session, {int(user_id)}).get(int(user_id))
     current_status = live_info["status"] if live_info else ("Sin señal" if last_seen else "Sin acceso")
-    risk_level = "alto" if last_seen is None or (dt.datetime.utcnow() - last_seen).days >= 7 else (
+    risk_level = "alto" if last_seen is None or last_seen_days >= 7 else (
         "medio" if adoption_score < _ADOPTION_THRESHOLD else "bajo"
     )
 
@@ -2089,6 +2142,7 @@ def get_user_profile_timeline(session, user_id: int) -> Dict[str, Any]:
         "group_names": group_names,
         "created_at": u.created_at.isoformat() + "Z" if getattr(u, "created_at", None) else None,
         "adoption_score": adoption_score,
+        "adoption_breakdown": adoption,
         "risk_level": risk_level,
         "current_status": {
             "status": current_status,

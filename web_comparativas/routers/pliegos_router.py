@@ -52,6 +52,7 @@ from web_comparativas.pliegos_rp import (
     build_canonical_output,
 )
 from web_comparativas.pliegos_summary import build_debug_matrix, build_resumen_licitacion
+from web_comparativas.usage_service import log_usage_event  # tracking export (Fase 2b)
 from web_comparativas.pliegos_fusion import (
     calcular_estado_fusion,
     export_fusion_excel_bytes,
@@ -1233,6 +1234,19 @@ def lectura_pliegos_descargar_excel(request: Request, caso_id: int):
     if not carga:
         raise HTTPException(404, "No hay Excel disponible")
 
+    # ── Tracking: EXPORT del Excel del pliego. Fire-and-forget: nunca rompe la descarga.
+    try:
+        log_usage_event(
+            user=getattr(request.state, "user", None),
+            action_type="export",
+            section="lectura_pliegos",
+            request=request,
+            resource_id=(carga.nombre_archivo or f"pliego_{caso_id}.xlsx"),
+            extra_data={"format": "xlsx", "caso_id": int(caso_id)},
+        )
+    except Exception:
+        pass
+
     # Intentar servir desde disco primero
     if carga.url_path:
         path = BASE_DIR / carga.url_path.lstrip("/")
@@ -1769,6 +1783,20 @@ def lectura_pliegos_exportar_rp(request: Request, caso_id: int):
 
     safe_name = _slugify(caso.numero_proceso or caso.titulo or f"caso_{caso.id}")
     filename = f"SIEM_Fusion_{safe_name or caso.id}.xlsx"
+
+    # ── Tracking: EXPORT Requisitos-Proceso (RP). Fire-and-forget: nunca rompe la descarga.
+    try:
+        log_usage_event(
+            user=user,
+            action_type="export",
+            section="lectura_pliegos",
+            request=request,
+            resource_id=filename,
+            extra_data={"format": "xlsx", "caso_id": int(caso.id), "kind": "rp_fusion"},
+        )
+    except Exception:
+        pass
+
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
         "Cache-Control": "no-store, max-age=0",

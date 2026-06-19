@@ -167,16 +167,21 @@ body:has(.trk-page) > .container-fluid {
 
 .kpi-footer { display: flex; align-items: center; gap: 6px; }
 .kpi-sub { font-size: 11px; color: var(--t-muted); line-height: 1.3; }
-.kpi-trend {
-  font-size: 11px; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 2px 6px; border-radius: 4px;
-}
-.kpi-trend.up   { background: rgba(16,185,129,.12); color: #34d399; }
-.kpi-trend.down { background: rgba(239,68,68,.12);  color: #f87171; }
-.kpi-trend.neutral { background: rgba(100,116,139,.1); color: var(--t-muted2); }
-
-.sparkline-wrap { height: 32px; margin-top: 6px; }
+/* Tendencia KPI (Fase 6): actual vs período anterior de igual duración */
+.kpi-trend { margin-left: auto; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 8px; white-space: nowrap; }
+.kpi-trend.up   { color: #34d399; background: rgba(16,185,129,.14); }
+.kpi-trend.down { color: #f87171; background: rgba(239,68,68,.14); }
+.kpi-trend.flat { color: var(--t-muted); background: rgba(148,163,184,.12); }
+.kpi-trend.none { color: var(--t-muted); background: transparent; font-weight: 600; opacity: .7; }
+/* Sparkline de actividad real en el perfil (barras = eventos/día) */
+.prof-spark { display: flex; align-items: flex-end; gap: 2px; height: 46px; padding: 4px 2px 0;
+  border-radius: 8px; background: rgba(255,255,255,.02); }
+.prof-spark .spark-bar { flex: 1 1 0; min-width: 0; border-radius: 1.5px 1.5px 0 0;
+  background: linear-gradient(180deg,#3b82f6,#1d4ed8); }
+.prof-spark .spark-bar.empty { background: rgba(148,163,184,.16); }
+.prof-spark-empty { font-size: 11px; color: var(--t-muted); padding: 12px 4px; text-align: center; }
+.prof-spark-cap { font-size: 10px; color: var(--t-muted); margin-top: 5px; display: flex; justify-content: space-between; }
 
 /* ═══════════════════════════════════════════════════
    TABS
@@ -526,10 +531,14 @@ body:has(.trk-page) > .container-fluid {
   cursor: pointer; font-size: 18px; transition: all var(--transition);
 }
 .profile-close:hover { background: rgba(239,68,68,.15); color: #fca5a5; }
-.profile-body { flex: 1; overflow-y: auto; padding: 20px; }
-.profile-body::-webkit-scrollbar { width: 4px; }
-.profile-body::-webkit-scrollbar-track { background: transparent; }
-.profile-body::-webkit-scrollbar-thumb { background: var(--t-border); border-radius: 2px; }
+.profile-body {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(59,130,246,.45) rgba(15,23,42,.65);
+}
+.profile-body::-webkit-scrollbar { width: 10px; }
+.profile-body::-webkit-scrollbar-track { background: rgba(15,23,42,.65); border-radius: 999px; }
+.profile-body::-webkit-scrollbar-thumb { background: rgba(59,130,246,.45); border-radius: 999px; border: 2px solid rgba(15,23,42,.65); }
 
 .prof-avatar-lg {
   width: 64px; height: 64px; border-radius: 50%;
@@ -558,6 +567,13 @@ body:has(.trk-page) > .container-fluid {
 .prof-score-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); margin: 8px 0 4px; overflow: hidden; }
 .prof-score-fill { height: 100%; border-radius: 3px; transition: width .8s; }
 .prof-score-label { font-size: 11px; color: var(--t-muted); }
+/* Desglose del score (Constancia / Amplitud / Profundidad) — Fase 3 */
+.prof-dims { margin-top: 12px; display: flex; flex-direction: column; gap: 9px; }
+.prof-dim-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; font-weight: 700; color: var(--t-text); }
+.prof-dim-val { font-variant-numeric: tabular-nums; color: var(--t-blue); }
+.prof-dim-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.08); margin: 4px 0 2px; overflow: hidden; }
+.prof-dim-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg,#2563eb,#3b82f6); transition: width .7s; }
+.prof-dim-help { font-size: 10px; color: var(--t-muted); }
 
 .prof-stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 16px; }
 .prof-stat { text-align: center; padding: 10px 8px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05); border-radius: var(--radius-sm); }
@@ -666,11 +682,6 @@ body:has(.trk-page) > .container-fluid {
 .trk-toast.toast-success .toast-icon { color: #4ade80; }
 .trk-toast.toast-info .toast-icon { color: #60a5fa; }
 .trk-toast.toast-warn .toast-icon { color: #fde047; }
-
-/* ═══════════════════════════════════════════════════
-   SCORE CHART (weekly evolution)
-═══════════════════════════════════════════════════ */
-.prof-score-chart-wrap { height: 80px; }
 
 /* ═══════════════════════════════════════════════════
    EMPTY STATE
@@ -910,12 +921,11 @@ body:has(.trk-page) > .container-fluid {
       </div>
       <div class="col-6 col-md-3 col-lg-2">
         <label class="form-label">Rol</label>
+        <!-- Opciones pobladas dinámicamente desde meta.available_roles (fuente
+             única: roles reales de los usuarios vía usage_service). Cualquier rol
+             nuevo (p.ej. Gerente) aparece solo, sin hardcodear. Ver populateRoleFilter(). -->
         <select id="flt-role" name="role" class="form-select form-select-sm">
           <option value="">Todos los roles</option>
-          <option value="analista">Analistas</option>
-          <option value="supervisor">Supervisores</option>
-          <option value="auditor">Auditores</option>
-          <option value="admin">Admin</option>
         </select>
       </div>
       <div class="col-6 col-md-3 col-lg-2">
@@ -952,23 +962,19 @@ body:has(.trk-page) > .container-fluid {
       <div class="kpi-value kpi-green count-anim" id="card-live-users">0</div>
       <div class="kpi-footer">
         <div class="kpi-sub">en este momento</div>
-        <span class="kpi-trend up" id="kpi-live-trend" style="display:none;"></span>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-live" height="32"></canvas></div>
     </div>
 
     <div class="kpi-card kpi-blue">
       <div class="kpi-label">
         <i class="bi bi-graph-up-arrow"></i> Tasa de adopción
         <span class="kpi-help" data-bs-toggle="tooltip" data-bs-placement="bottom"
-          data-bs-title="Porcentaje de usuarios operativos con score de adopción ≥ 30/100. Los Admin se muestran en vivo, pero no impactan esta métrica.">?</span>
+          data-bs-title="Porcentaje de usuarios operativos con score de adopción ≥ 50/100 (categoría Consolidado o superior). Los Admin se muestran en vivo, pero no impactan esta métrica.">?</span>
       </div>
       <div class="kpi-value kpi-blue count-anim" id="card-adoption-val">0<span style="font-size:16px;font-weight:500;">%</span></div>
       <div class="kpi-footer">
-        <div class="kpi-sub">score ≥ 30 pts</div>
-        <span class="kpi-trend" id="kpi-adopt-trend"></span>
+        <div class="kpi-sub">score ≥ 50 pts</div>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-adopt" height="32"></canvas></div>
     </div>
 
     <div class="kpi-card kpi-yellow">
@@ -980,9 +986,7 @@ body:has(.trk-page) > .container-fluid {
       <div class="kpi-value kpi-yellow count-anim" id="card-inactive-users">0</div>
       <div class="kpi-footer">
         <div class="kpi-sub">sin actividad &gt; 7 días</div>
-        <span class="kpi-trend down" id="kpi-inactive-trend" style="display:none;"></span>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-inactive" height="32"></canvas></div>
     </div>
 
     <div class="kpi-card kpi-blue">
@@ -994,9 +998,8 @@ body:has(.trk-page) > .container-fluid {
       <div class="kpi-value kpi-white count-anim" id="card-active-users">0</div>
       <div class="kpi-footer">
         <div class="kpi-sub">en el período</div>
-        <span class="kpi-trend" id="kpi-active-trend"></span>
+        <span class="kpi-trend" id="trend-active-users"></span>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-active" height="32"></canvas></div>
     </div>
 
     <div class="kpi-card kpi-blue">
@@ -1008,9 +1011,8 @@ body:has(.trk-page) > .container-fluid {
       <div class="kpi-value kpi-white count-anim" id="card-active-hours">0</div>
       <div class="kpi-footer">
         <div class="kpi-sub">suma de sesiones</div>
-        <span class="kpi-trend" id="kpi-hours-trend"></span>
+        <span class="kpi-trend" id="trend-active-hours"></span>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-hours" height="32"></canvas></div>
     </div>
 
     <div class="kpi-card kpi-blue">
@@ -1022,9 +1024,7 @@ body:has(.trk-page) > .container-fluid {
       <div class="kpi-value kpi-white count-anim" id="card-prod-index">0,0</div>
       <div class="kpi-footer">
         <div class="kpi-sub">cargas / sesión</div>
-        <span class="kpi-trend" id="kpi-prod-trend"></span>
       </div>
-      <div class="sparkline-wrap"><canvas id="spark-prod" height="32"></canvas></div>
     </div>
 
   </div><!-- /kpi-grid -->
@@ -1072,10 +1072,11 @@ body:has(.trk-page) > .container-fluid {
           <canvas id="globe-canvas"></canvas>
           <div id="globe-tooltip" class="globe-tooltip"></div>
           <div class="nav-map-legend">
-            <span>12 módulos del sistema</span>
+            <span>Color del avatar = estado:</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:3px;"></span>Verde = activo</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:3px;"></span>Amarillo = idle</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:3px;"></span>Amarillo = idle / inactivo</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:3px;"></span>Rojo = alerta</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#0f172a;border:1px solid rgba(255,255,255,.7);margin-right:3px;"></span>Letra en el avatar = acción en curso (N navegando · B buscando · C cargando · X exportando · E editando)</span>
             <span>Clic en sala = ver detalle de secciones</span>
           </div>
         </div>
@@ -1188,18 +1189,6 @@ body:has(.trk-page) > .container-fluid {
             </div>
           </div>
         </div>
-        <!-- Evolución adopción -->
-        <div class="col-12 col-lg-6">
-          <div class="trk-card">
-            <div class="trk-card-body">
-              <div class="trk-card-hd">
-                <h6 class="trk-card-title">Evolución de adopción en el tiempo</h6>
-              </div>
-              <p class="trk-card-sub">Score de adopción promedio por semana — últimas 8 semanas.</p>
-              <div class="chart-container" id="usage-chart-adoption"></div>
-            </div>
-          </div>
-        </div>
         <!-- Distribución módulos -->
         <div class="col-12 col-lg-6">
           <div class="trk-card">
@@ -1230,9 +1219,11 @@ body:has(.trk-page) > .container-fluid {
       <div class="score-legend">
         <span style="font-size:11px;font-weight:700;color:var(--t-text);margin-right:4px;">Score adopción:</span>
         <span class="score-legend-item"><span class="score-leg-dot" style="background:#10b981;"></span> ≥ 80 — Referente</span>
-        <span class="score-legend-item"><span class="score-leg-dot" style="background:#3b82f6;"></span> 50–79 — Consolidado</span>
+        <span class="score-legend-item"><span class="score-leg-dot" style="background:#3b82f6;"></span> 50–79 — Consolidado (adoptado)</span>
         <span class="score-legend-item"><span class="score-leg-dot" style="background:#f59e0b;"></span> 30–49 — En progreso</span>
         <span class="score-legend-item"><span class="score-leg-dot" style="background:#ef4444;"></span> &lt; 30 — Baja adopción</span>
+        <span style="flex-basis:100%;height:0;"></span>
+        <span style="font-size:10.5px;color:var(--t-muted);">Combina <strong>Constancia</strong> (uso sostenido y reciente), <strong>Amplitud</strong> (secciones distintas que explora) y <strong>Profundidad</strong> (búsquedas, exportaciones y cargas). El desglose por persona se ve en su perfil.</span>
         <span class="ms-auto" style="font-size:10px;color:var(--t-muted);">Fórmula: días activos (20) + cargas (40) + búsquedas (20) + exportaciones (20) → normalizado a 100</span>
       </div>
 
@@ -1364,7 +1355,25 @@ body:has(.trk-page) > .container-fluid {
         <div class="prof-score-val" id="prof-score-val">--</div>
         <div class="prof-score-bar"><div class="prof-score-fill" id="prof-score-fill" style="width:0%;"></div></div>
         <div class="prof-score-label" id="prof-score-label">--</div>
-        <div class="prof-score-chart-wrap mt-2"><canvas id="prof-score-chart" height="80"></canvas></div>
+
+        <!-- Desglose del score en 3 dimensiones (Fase 3): lo que vuelve el número honesto -->
+        <div class="prof-dims" id="prof-dims">
+          <div class="prof-dim">
+            <div class="prof-dim-head"><span>Constancia</span><span class="prof-dim-val" id="prof-dim-constancia-val">--</span></div>
+            <div class="prof-dim-bar"><div class="prof-dim-fill" id="prof-dim-constancia-fill" style="width:0%;"></div></div>
+            <div class="prof-dim-help">Uso sostenido y reciente</div>
+          </div>
+          <div class="prof-dim">
+            <div class="prof-dim-head"><span>Amplitud</span><span class="prof-dim-val" id="prof-dim-amplitud-val">--</span></div>
+            <div class="prof-dim-bar"><div class="prof-dim-fill" id="prof-dim-amplitud-fill" style="width:0%;"></div></div>
+            <div class="prof-dim-help">Secciones distintas que explora</div>
+          </div>
+          <div class="prof-dim">
+            <div class="prof-dim-head"><span>Profundidad</span><span class="prof-dim-val" id="prof-dim-profundidad-val">--</span></div>
+            <div class="prof-dim-bar"><div class="prof-dim-fill" id="prof-dim-profundidad-fill" style="width:0%;"></div></div>
+            <div class="prof-dim-help">Búsquedas, exportaciones y cargas</div>
+          </div>
+        </div>
       </div>
 
       <!-- Stats -->
@@ -1378,6 +1387,12 @@ body:has(.trk-page) > .container-fluid {
         <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-exports">--</div><div class="prof-stat-lbl">Exportaciones</div></div>
         <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-downloads">--</div><div class="prof-stat-lbl">Descargas</div></div>
         <div class="prof-stat"><div class="prof-stat-val" id="prof-stat-modules">--</div><div class="prof-stat-lbl">Módulos</div></div>
+      </div>
+
+      <!-- Sparkline de actividad REAL (eventos/día, últimos 30 días) -->
+      <div class="prof-section" id="prof-activity-section">
+        <div class="prof-section-title"><i class="bi bi-bar-chart-line me-1"></i> Actividad — eventos por día (30 d)</div>
+        <div id="prof-activity-spark" class="prof-spark"></div>
       </div>
 
       <!-- Ruta de navegación más reciente -->
