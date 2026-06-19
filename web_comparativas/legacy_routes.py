@@ -2503,6 +2503,35 @@ def api_oportunidades_buscador(
     tipo_col   = _opp_pick(df_filtered, ["Tipo", "Modalidad", "Procedimiento"])
 
     total = int(len(df_filtered))
+
+    # ── Tracking: registrar BÚSQUEDA real (no la carga inicial ni la paginación) ──
+    # Condición: hay término o algún filtro Y es la primera página (la paginación
+    # reusa la misma búsqueda → no se re-cuenta). Fire-and-forget: nunca rompe.
+    try:
+        _is_real_search = bool(
+            (q or "").strip() or (buyer or "").strip() or (platform or "").strip()
+            or (province or "").strip() or (date_from or "").strip()
+            or (date_to or "").strip() or (process_type or "").strip()
+        )
+        if _is_real_search and page == 1:
+            log_usage_event(
+                user=user,
+                action_type="search",
+                section="oportunidades_buscador",
+                resource_id=((q or "").strip()[:100] or None),
+                extra_data={
+                    "buyer": (buyer or "").strip()[:80],
+                    "platform": (platform or "").strip()[:80],
+                    "province": (province or "").strip()[:80],
+                    "date_from": (date_from or "").strip()[:20],
+                    "date_to": (date_to or "").strip()[:20],
+                    "process_type": (process_type or "").strip()[:80],
+                    "results": total,
+                },
+            )
+    except Exception:
+        pass
+
     pages = max(1, int(np.ceil(total / page_size)))
     if page > pages:
         page = pages
@@ -4213,6 +4242,39 @@ def historial_cargas(
         },
     )
 
+    # ── Tracking: BÚSQUEDA real (además del page_view) cuando hay término/filtro
+    # y es la primera página. Fire-and-forget: nunca rompe el historial.
+    try:
+        _hist_real_search = bool(
+            (q or "").strip() or (status or "").strip() or (created_from or "").strip()
+            or (created_to or "").strip() or (uploader_id or "").strip()
+            or (proceso or "").strip() or (cuenta or "").strip()
+            or (platform or "").strip() or (buyer or "").strip()
+            or (province or "").strip() or (filename or "").strip()
+        )
+        if _hist_real_search and page == 1:
+            log_usage_event(
+                user=user,
+                action_type="search",
+                section="cargas_historial",
+                request=request,
+                resource_id=((q or "").strip()[:100] or None),
+                extra_data={
+                    "status": (status or "").strip()[:40],
+                    "proceso": (proceso or "").strip()[:80],
+                    "cuenta": (cuenta or "").strip()[:80],
+                    "platform": (platform or "").strip()[:80],
+                    "buyer": (buyer or "").strip()[:80],
+                    "province": (province or "").strip()[:80],
+                    "filename": (filename or "").strip()[:120],
+                    "created_from": (created_from or "").strip()[:20],
+                    "created_to": (created_to or "").strip()[:20],
+                    "results": total,
+                },
+            )
+    except Exception:
+        pass
+
     return response
 
 
@@ -5023,15 +5085,18 @@ def api_descargar_final(
 
     safe_filename = f"normalized_{upload_id}.xlsx"
 
-    # Log usage
-    log_usage_event(
-        user=user,
-        action_type="download_normalized_api",
-        section="normalized_download",
-        request=request,
-        resource_id=str(up.id),
-        extra_data={"filename": safe_filename},
-    )
+    # ── Tracking: EXPORT (reclasificado desde 'download_normalized_api'). Fire-and-forget.
+    try:
+        log_usage_event(
+            user=user,
+            action_type="export",
+            section="descargas",
+            request=request,
+            resource_id=safe_filename,
+            extra_data={"format": "xlsx", "upload_id": int(up.id), "filename": safe_filename},
+        )
+    except Exception:
+        pass
 
     logger.info(f"Descargando archivo para upload_id={upload_id} ({len(norm_bytes)} bytes)")
 
@@ -7344,14 +7409,19 @@ def descargar_normalizado(
     if not norm_bytes:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
-    log_usage_event(
-        user=user,
-        action_type="download_normalized",
-        section="normalized_download",
-        request=request,
-        resource_id=str(up.id),
-        extra_data={"filename": f"normalized_{upload_id}.xlsx"},
-    )
+    # ── Tracking: EXPORT (reclasificado desde 'download_normalized'). Fire-and-forget.
+    try:
+        _fname = f"normalized_{upload_id}.xlsx"
+        log_usage_event(
+            user=user,
+            action_type="export",
+            section="descargas",
+            request=request,
+            resource_id=_fname,
+            extra_data={"format": "xlsx", "upload_id": int(up.id), "filename": _fname},
+        )
+    except Exception:
+        pass
 
     return Response(
         content=norm_bytes,
@@ -7500,15 +7570,18 @@ def descargar_reporte_proceso(
     filename = f"informe_proceso_{upload_id}.pdf"
         # ... despu├®s de generar pdf_bytes = render_informe_comparativas(data_pdf)
 
-    # ­ƒæç NUEVO: log de descarga de reporte PDF
-    log_usage_event(
-        user=user,
-        action_type="download_pdf",
-        section="reporte_proceso",
-        request=request,
-        resource_id=str(up.id),
-        extra_data={"proceso_nro": proceso_nro},
-    )
+    # ── Tracking: EXPORT (reclasificado desde 'download_pdf'). Fire-and-forget.
+    try:
+        log_usage_event(
+            user=user,
+            action_type="export",
+            section="reporte_proceso",
+            request=request,
+            resource_id=f"reporte_proceso_{upload_id}.pdf",
+            extra_data={"format": "pdf", "upload_id": int(up.id), "proceso_nro": proceso_nro},
+        )
+    except Exception:
+        pass
 
     return Response(
         content=pdf_bytes,
@@ -7556,6 +7629,20 @@ def informe_pdf(
 
     buffer.seek(0)
     filename = f"informe_{upload_id}.pdf"
+
+    # ── Tracking: EXPORT (informe PDF de licitación). Fire-and-forget.
+    try:
+        log_usage_event(
+            user=user,
+            action_type="export",
+            section="informes",
+            request=request,
+            resource_id=filename,
+            extra_data={"format": "pdf", "upload_id": int(up.id)},
+        )
+    except Exception:
+        pass
+
     return StreamingResponse(
         buffer,
         media_type="application/pdf",

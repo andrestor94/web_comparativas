@@ -15,7 +15,7 @@ from threading import Lock, Thread
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, StreamingResponse, FileResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -918,6 +918,22 @@ def ping():
     return {"status": "ok", "stage": "full_restore_lazy_load"}
 
 
+@app.get("/api/section-taxonomy.js")
+def section_taxonomy_js():
+    """
+    Sirve la taxonomía única de secciones como módulo JS (window.SectionTaxonomy).
+    Es la MISMA fuente que usan el middleware (_detect_section) y el labeler
+    (_map_section_name): el front no mantiene copias propias. Se genera desde
+    tracking_taxonomy.to_js() y se incluye en base.html / base_sic.html.
+    """
+    from web_comparativas import tracking_taxonomy
+    return Response(
+        content=tracking_taxonomy.to_js(),
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.post("/api/heartbeat")
 async def user_heartbeat(request: Request):
     """
@@ -979,6 +995,20 @@ async def track_activity(request: Request):
         except Exception:
             section = "unknown"
 
+    # extra_data del payload (p.ej. {"format":"csv"} de una exportación client-side).
+    # Se sanea: solo claves/escalares simples, acotado; nunca vuelca datasets.
+    extra = {"path": path, "title": title, "source": "frontend"}
+    try:
+        raw_extra = payload.get("extra_data")
+        if isinstance(raw_extra, dict):
+            for k, v in list(raw_extra.items())[:10]:
+                if isinstance(v, str):
+                    extra[str(k)[:40]] = v[:200]
+                elif isinstance(v, (int, float, bool)) or v is None:
+                    extra[str(k)[:40]] = v
+    except Exception:
+        pass
+
     try:
         from web_comparativas.usage_service import log_usage_event
         log_usage_event(
@@ -986,7 +1016,7 @@ async def track_activity(request: Request):
             action_type=action_type,
             section=section,
             request=request,
-            extra_data={"path": path, "title": title, "source": "frontend"},
+            extra_data=extra,
         )
     except Exception as exc:
         print(f"[TRACK-ACTIVITY] Error: {exc}", flush=True)

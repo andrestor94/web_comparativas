@@ -514,9 +514,6 @@
       const statusMap = { activo: 'active', active: 'active', inactivo: 'idle', inactive: 'idle' };
       const status = statusMap[(r.status || '').toLowerCase()] || 'offline';
       const score  = Math.max(0, Math.min(100, Math.round(Number(r.score ?? r.adoption_score ?? 50))));
-      /* Genera score_history sintético desde el score actual */
-      const base   = Math.max(0, score - 14);
-      const hist   = Array.from({ length: 8 }, (_, i) => Math.min(100, base + Math.round(i * (score - base) / 7)));
 
       return {
         id:             r.id || (idx + 1),
@@ -550,23 +547,12 @@
         nav_trail:       Array.isArray(r.nav_trail) ? r.nav_trail : [],
         sessions_detail: Array.isArray(r.sessions_detail) ? r.sessions_detail : [],
         timeline:        Array.isArray(r.timeline) ? r.timeline : [],
-        score_history:   hist,
       };
     }
 
     MOCK_USERS.length = 0;
     raw.forEach((r, i) => MOCK_USERS.push(normalizeRealUser(r, i)));
   })();
-
-  /* KPI sparkline history (last 7 data points) */
-  const MOCK_KPI_HISTORY = {
-    live:     [1,2,3,2,4,3,3],
-    adoption: [60,63,65,68,70,72,75],
-    inactive: [3,3,2,3,2,2,1],
-    active:   [4,4,5,4,5,5,5],
-    hours:    [42,48,51,55,58,62,68],
-    prod:     [1.1,1.2,1.3,1.2,1.4,1.5,1.6],
-  };
 
   /* Section usage mock data for charts */
   const SECTION_USAGE = [
@@ -610,17 +596,6 @@
     return data;
   })();
 
-  const ADOPTION_WEEKLY = [
-    { week: 'S-7', score: 54 },
-    { week: 'S-6', score: 57 },
-    { week: 'S-5', score: 59 },
-    { week: 'S-4', score: 61 },
-    { week: 'S-3', score: 64 },
-    { week: 'S-2', score: 67 },
-    { week: 'S-1', score: 70 },
-    { week: 'Est',  score: 73 },
-  ];
-
   /* ═══════════════════════════════════════════════════════
      COMPUTED KPIs
   ═══════════════════════════════════════════════════════ */
@@ -657,8 +632,6 @@
   const userGroupOverrides = new Map();
   let chartsBuilt  = { summary: false };
   let sortState    = { col: 'score', dir: 'desc' };
-  let sparkCharts  = {};
-  let profScoreChart = null;
   let activeMetric = 'events';
   let latestUsageSummary = null;
 
@@ -685,7 +658,6 @@
     'usage-chart-roles',
     'usage-chart-heatmap',
     'usage-chart-sections',
-    'usage-chart-adoption',
     'usage-chart-donut',
   ];
 
@@ -720,8 +692,6 @@
   function normalizeSummaryUser(row, existing = {}) {
     const uid = Number(row.user_id ?? row.id ?? existing.id ?? 0);
     const score = Math.max(0, Math.min(100, Math.round(Number(row.adoption_score ?? row.score ?? existing.score ?? 0))));
-    const base = Math.max(0, score - 14);
-    const hist = Array.from({ length: 8 }, (_, i) => Math.min(100, base + Math.round(i * (score - base) / 7)));
     return {
       ...existing,
       id: uid,
@@ -755,7 +725,6 @@
       nav_trail: existing.nav_trail || [],
       sessions_detail: Array.isArray(row.recent_sessions) ? row.recent_sessions : (existing.sessions_detail || []),
       timeline: existing.timeline || [],
-      score_history: existing.score_history?.length ? existing.score_history : hist,
     };
   }
 
@@ -850,7 +819,6 @@
     initTabs();
     initFiltersForm();
     renderKPIs();
-    renderSparklines();
     renderLiveTable();
     startLiveRefresh();
     renderByUserTable();
@@ -906,7 +874,7 @@
             // Panel was already built but hidden — resize ApexCharts
             setTimeout(() => {
               ['usage-chart-weekday','usage-chart-roles','usage-chart-heatmap',
-               'usage-chart-sections','usage-chart-adoption','usage-chart-donut'].forEach(id => {
+               'usage-chart-sections','usage-chart-donut'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el && el._chart) el._chart.updateOptions({}, false, false);
               });
@@ -1006,61 +974,6 @@
       <i class="bi bi-check-circle me-1" style="color:#10b981;"></i>
       ${adminText} · Actualizado ${new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
     `);
-
-    // Trends
-    const trendEl = (id, val, suffix = '') => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.style.display = '';
-      el.className = `kpi-trend ${val >= 0 ? 'up' : 'down'}`;
-      el.textContent = `${val >= 0 ? '↑' : '↓'} ${Math.abs(val)}${suffix}`;
-    };
-    trendEl('kpi-adopt-trend',    5, '%');
-    trendEl('kpi-active-trend',   1, '');
-    trendEl('kpi-hours-trend',    8.2, ' h');
-    trendEl('kpi-prod-trend',     0.1, '');
-    const inact = document.getElementById('kpi-inactive-trend');
-    if (inact) { inact.style.display=''; inact.className='kpi-trend up'; inact.textContent='↓ 1'; }
-  }
-
-  /* ═══════════════════════════════════════════════════════
-     SPARKLINES (Chart.js mini)
-  ═══════════════════════════════════════════════════════ */
-  function buildSparkline(canvasId, data, color) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    if (sparkCharts[canvasId]) { sparkCharts[canvasId].destroy(); }
-    sparkCharts[canvasId] = new Chart(canvas, {
-      type: 'line',
-      data: {
-        labels: data.map((_, i) => i),
-        datasets: [{
-          data,
-          borderColor: color,
-          borderWidth: 1.5,
-          fill: true,
-          backgroundColor: color.replace(')', ', 0.15)').replace('rgb', 'rgba'),
-          pointRadius: 0,
-          tension: .4,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: { x: { display: false }, y: { display: false } },
-        animation: { duration: 600 },
-      },
-    });
-  }
-
-  function renderSparklines() {
-    if (typeof Chart === 'undefined') return;
-    buildSparkline('spark-live',     MOCK_KPI_HISTORY.live,     'rgb(16,185,129)');
-    buildSparkline('spark-adopt',    MOCK_KPI_HISTORY.adoption, 'rgb(59,130,246)');
-    buildSparkline('spark-inactive', MOCK_KPI_HISTORY.inactive, 'rgb(245,158,11)');
-    buildSparkline('spark-active',   MOCK_KPI_HISTORY.active,   'rgb(59,130,246)');
-    buildSparkline('spark-hours',    MOCK_KPI_HISTORY.hours,    'rgb(139,92,246)');
-    buildSparkline('spark-prod',     MOCK_KPI_HISTORY.prod,     'rgb(6,182,212)');
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -1394,28 +1307,6 @@
       c.render(); secEl._chart = c;
     }
 
-    // 5. Evolución adopción (línea)
-    const adoptEl = document.getElementById('usage-chart-adoption');
-    if (adoptEl && !adoptEl._chart) {
-      const c = new ApexCharts(adoptEl, {
-        ...CHART_DEFAULTS,
-        chart: { ...CHART_DEFAULTS.chart, type: 'area', height: 310, toolbar: { show: false } },
-        series: [{ name: 'Score promedio', data: ADOPTION_WEEKLY.map(d => d.score) }],
-        xaxis: { categories: ADOPTION_WEEKLY.map(d => d.week), labels: { style: { colors: '#64748b', fontSize: '11px' } } },
-        yaxis: { min: 40, max: 100, labels: { style: { colors: '#64748b', fontSize: '11px' }, formatter: v => v + ' pts' } },
-        colors: ['#10b981'],
-        stroke: { curve: 'smooth', width: 2.5 },
-        fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: .35, opacityTo: .02, stops: [0,100] } },
-        markers: { size: 4, strokeWidth: 0 },
-        annotations: {
-          yaxis: [{ y: 60, borderColor: '#f59e0b', borderWidth: 1, strokeDashArray: 4,
-            label: { text: 'Umbral 60%', style: { background: 'transparent', color: '#f59e0b', fontSize: '10px' }, position: 'left' } }],
-        },
-        tooltip: { theme: 'dark', y: { formatter: v => v + ' pts' } },
-      });
-      c.render(); adoptEl._chart = c;
-    }
-
     // 6. Donut — distribución por módulo
     const donutEl = document.getElementById('usage-chart-donut');
     if (donutEl && !donutEl._chart) {
@@ -1746,7 +1637,6 @@
       populateProfile(uBase);
       loading.style.display = 'none';
       content.style.display = '';
-      buildProfileScoreChart(uBase);
       if (typeof initNavGraph === 'function' && typeof THREE !== 'undefined') {
         setTimeout(() => initNavGraph(uBase), 80);
       }
@@ -1808,7 +1698,6 @@
 
         // Actualizar el panel ya visible con datos enriquecidos
         populateProfile(uEnriched);
-        buildProfileScoreChart(uEnriched);
       })
       .catch(() => { /* silencioso: los datos base ya están visibles */ });
   }
@@ -2258,42 +2147,6 @@
   function evIconBg(a)     { return { view:'59,130,246,.1', search:'139,92,246,.1', upload:'16,185,129,.1', download:'245,158,11,.1', export:'6,182,212,.1' }[a] || '100,116,139,.1'; }
   function evIconBorder(a) { return { view:'59,130,246,.2', search:'139,92,246,.2', upload:'16,185,129,.2', download:'245,158,11,.2', export:'6,182,212,.2' }[a] || '100,116,139,.2'; }
 
-  function buildProfileScoreChart(u) {
-    if (typeof Chart === 'undefined') return;
-    const canvas = document.getElementById('prof-score-chart');
-    if (!canvas) return;
-    if (profScoreChart) { profScoreChart.destroy(); profScoreChart = null; }
-    const history = u.score_history || [u.score];
-    const si = scoreInfo(u.score);
-    profScoreChart = new Chart(canvas, {
-      type: 'line',
-      data: {
-        labels: history.map((_, i) => `S-${history.length - 1 - i}`).reverse().concat(['Actual']).slice(-history.length),
-        datasets: [{
-          data: history,
-          borderColor: si.color,
-          borderWidth: 2,
-          fill: true,
-          backgroundColor: si.color.replace(')', ',0.1)').replace('rgb','rgba'),
-          pointRadius: 3,
-          pointBackgroundColor: si.color,
-          tension: .4,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: ctx => ' Score: ' + ctx.parsed.y + ' pts' },
-          backgroundColor: '#0f1729', borderColor: '#1e2d4a', borderWidth: 1,
-        }},
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
-          y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,.04)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => v + ' pts' } },
-        },
-      },
-    });
-  }
-
   /* ═══════════════════════════════════════════════════════
      FX LAYER - 3D / GSAP / VISUAL POLISH
   ═══════════════════════════════════════════════════════ */
@@ -2574,7 +2427,7 @@
           if (!chartsBuilt.summary) setTimeout(buildSummaryCharts, 50);
           else setTimeout(() => {
             ['usage-chart-weekday','usage-chart-roles','usage-chart-heatmap',
-             'usage-chart-sections','usage-chart-adoption','usage-chart-donut'].forEach(id => {
+             'usage-chart-sections','usage-chart-donut'].forEach(id => {
               const el = document.getElementById(id);
               if (el && el._chart) el._chart.updateOptions({}, false, false);
             });
@@ -2831,10 +2684,30 @@
   };
 
   /* ── Mapeo sección → módulo principal (4 claves de CAMPUS_ROOMS) ── */
+  // Módulo de la taxonomía (claves de nav.py) → sala del CAMPUS 3D.
+  // Las 4 salas actuales coinciden 1:1; 'indicadores_comerciales' aún NO tiene
+  // sala (se agrega en Fase 4) → devuelve 'indicadores' (clave reservada).
+  const _TAXO_MODULE_TO_ROOM = {
+    mercado_publico: 'mercado_publico',
+    mercado_privado: 'mercado_privado',
+    forecast: 'forecast',
+    sic: 'sic',
+    indicadores_comerciales: 'indicadores',
+  };
+
   function blockForSection(raw) {
     if (!raw) return null;
 
-    // 1. Lookup por etiqueta legible — doble normalización para cubrir variantes
+    // 0. FUENTE ÚNICA: resolver el módulo padre vía la taxonomía inyectada
+    //    (window.SectionTaxonomy). El mapa _LABEL_BLOCK de abajo queda SOLO como
+    //    fallback defensivo (ya no es la fuente de verdad; el 3D no se rediseña
+    //    en esta fase, solo se le quita su mapa propio).
+    if (window.SectionTaxonomy && window.SectionTaxonomy.moduleFor) {
+      const mod = window.SectionTaxonomy.moduleFor(raw);
+      if (mod) return _TAXO_MODULE_TO_ROOM[mod] || mod;
+    }
+
+    // 1. (FALLBACK legacy) Lookup por etiqueta legible — doble normalización
     //    a) versión con doble espacio (formato histórico del replace)
     const labelKeyDS = _noAccent(String(raw).toLowerCase().trim()).replace(/\s*[—–-]\s*/g, '  ');
     if (_LABEL_BLOCK[labelKeyDS] !== undefined) return _LABEL_BLOCK[labelKeyDS];
