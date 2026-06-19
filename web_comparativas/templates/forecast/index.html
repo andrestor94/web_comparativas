@@ -5494,6 +5494,17 @@ function buildDownloadLink(data) {
         });
       });
     });
+    // Tracking: exportación client-side (no toca el server). Fire-and-forget.
+    try {
+      if (window.trackUsage) {
+        window.trackUsage("export", {
+          format: "csv",
+          section: "forecast",
+          client_id: String(data.client_id || "").slice(0, 60),
+        });
+      }
+    } catch (_) {}
+
     const blob = new Blob([csvRows.join('\n')], {type:'text/csv;charset=utf-8;'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

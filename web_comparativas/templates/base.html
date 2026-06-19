@@ -635,6 +635,10 @@
 
   {% block extra_head %}{% endblock %}
   {% block page_skin %}{% endblock %}
+
+  <!-- Taxonomía única de secciones (window.SectionTaxonomy) — fuente compartida
+       con el middleware y el labeler; los detectores JS la consumen. -->
+  <script src="/api/section-taxonomy.js"></script>
 </head>
 
 <body class="{% block body_class %}{% endblock %}">
@@ -1418,45 +1422,14 @@
   <script>
   (function () {
     function _detectTrackingSection(path) {
-      var p = (path || window.location.pathname || "/").toLowerCase();
-      if (p === "/" || p === "") return "home";
-      if (p.indexOf("/api/mercado-privado/dimensiones") === 0) return "dimensionamiento";
-      if (p.indexOf("/api/mercado-publico/perfiles") === 0) return "mercado_publico_reporte_perfiles";
-      if (p.indexOf("/api/mercado-publico") === 0) {
-        if (p.indexOf("lectura-pliegos") !== -1 || p.indexOf("/pliegos") !== -1) return "lectura_pliegos";
-        if (p.indexOf("web-comparativas") !== -1 || p.indexOf("comparativas") !== -1) return "comparativa_mercado";
-        if (p.indexOf("oportunidades") !== -1) return "mercado_publico_oportunidades";
-        return "mercado_publico_home";
+      // Fuente única: la taxonomía inyectada (window.SectionTaxonomy). Misma
+      // lógica/orden que el middleware Python — NO se mantiene un mapa propio.
+      var p = path || window.location.pathname || "/";
+      if (window.SectionTaxonomy && window.SectionTaxonomy.detectKey) {
+        return window.SectionTaxonomy.detectKey(p);
       }
-      if (p.indexOf("/sic/tracking") !== -1) return "sic_tracking";
-      if (p.indexOf("/sic/users") !== -1 || p.indexOf("/sic/usuarios") !== -1) return "sic_users";
-      if (p.indexOf("/sic/password-resets") !== -1) return "sic_password_resets";
-      if (p.indexOf("/sic/helpdesk") !== -1) return "sic_helpdesk";
-      if (p.indexOf("/sic") !== -1) return "sic_general";
-      if (p.indexOf("/mercado-privado/reporte-perfiles") !== -1) return "mercado_privado_reporte_perfiles";
-      if (p.indexOf("/mercado-privado/dimensiones") !== -1) return "mercado_privado_dimensiones";
-      if (p.indexOf("/mercado-privado/helpdesk") !== -1) return "mercado_privado_helpdesk";
-      if (p.indexOf("/mercado-privado") !== -1) return "mercado_privado_home";
-      if (p.indexOf("/mercado-publico/lectura-pliegos") !== -1 || p.indexOf("/mercado-publico/pliegos") !== -1) return "lectura_pliegos";
-      if (p.indexOf("/mercado-publico/reporte-perfiles") !== -1) return "mercado_publico_reporte_perfiles";
-      if (p.indexOf("/mercado-publico/web-comparativas") !== -1 || p.indexOf("/mercado-publico/comparativas") !== -1) return "comparativa_mercado";
-      if (p.indexOf("/mercado-publico/oportunidades") !== -1) return "mercado_publico_oportunidades";
-      if (p.indexOf("/mercado-publico/helpdesk") !== -1) return "mercado_publico_helpdesk";
-      if (p.indexOf("/mercado-publico") !== -1) return "mercado_publico_home";
-      if (p.indexOf("/oportunidades/dimensiones") !== -1) return "oportunidades_dimensiones";
-      if (p.indexOf("/oportunidades/buscador") !== -1) return "oportunidades_buscador";
-      if (p.indexOf("/oportunidades") !== -1) return "oportunidades";
-      if (p.indexOf("/cargas/historial") !== -1) return "cargas_historial";
-      if (p.indexOf("/cargas/nueva") !== -1) return "cargas_nueva";
-      if (p.indexOf("/cargas/editar") !== -1) return "cargas_edicion";
-      if (p.indexOf("/cargas") !== -1) return "cargas";
-      if (p.indexOf("/otras-fuentes") !== -1) return "fuentes_externas";
-      if (p.indexOf("/tablero") !== -1) return "tablero_comparativa";
-      if (p.indexOf("/forecast") !== -1) return "forecast";
-      if (p.indexOf("/notifications") !== -1) return "notificaciones";
-      if (p.indexOf("/mi/password") !== -1 || p.indexOf("/password") !== -1) return "auth_password";
-      if (p.indexOf("/markets") !== -1 || p.indexOf("/switch-market") !== -1) return "markets_home";
-      return p.replace(/^\/+|\/+$/g, "").replace(/[\/-]+/g, "_") || "home";
+      // Fallback defensivo si la taxonomía no cargó (no debería ocurrir).
+      return (p === "/" || p === "") ? "home" : "otros";
     }
     var _hbInFlight = false;
     var _lastTrackedPath = "";
@@ -1488,6 +1461,41 @@
         keepalive: true,
       }).catch(function () {});
     }
+
+    // Helper global para emitir eventos de uso con action_type explícito (p.ej.
+    // exportaciones client-side). Un solo punto de mantenimiento; reusa
+    // /api/track-activity (acepta action_type arbitrario + extra_data saneado).
+    // `extra` puede incluir `section` para forzar la sección; si no, se detecta.
+    window.trackUsage = function (actionType, extra) {
+      try {
+        extra = extra || {};
+        var path = window.location.pathname + window.location.search;
+        var section = extra.section ||
+          (window.SectionTaxonomy && window.SectionTaxonomy.detectKey
+            ? window.SectionTaxonomy.detectKey(window.location.pathname)
+            : "");
+        var payload = JSON.stringify({
+          action_type: actionType || "page_view",
+          section: section,
+          path: path,
+          title: document.title || "",
+          source: "frontend",
+          extra_data: extra
+        });
+        if (navigator.sendBeacon) {
+          try {
+            var blob = new Blob([payload], { type: "application/json" });
+            if (navigator.sendBeacon("/api/track-activity", blob)) return;
+          } catch (_) {}
+        }
+        fetch("/api/track-activity", {
+          method: "POST",
+          headers: { "Accept": "application/json", "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(function () {});
+      } catch (_) { /* nunca romper la acción del usuario */ }
+    };
 
     function _sendHeartbeat() {
       if (_hbInFlight) return;

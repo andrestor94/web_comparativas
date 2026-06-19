@@ -9,6 +9,7 @@ from sqlalchemy import func
 
 from .models import db_session, UsageEvent, User, Group, GroupMember
 from .visibility_service import get_visible_user_ids as visible_user_ids  # fuente única de verdad
+from . import tracking_taxonomy  # FUENTE ÚNICA de secciones (clave/etiqueta/módulo/alias)
 
 logger = logging.getLogger("wc.usage")
 _UNMAPPED_SECTION_LOGGED: Set[str] = set()
@@ -60,190 +61,29 @@ def _default_date_range(date_from: str | None, date_to: str | None) -> Tuple[dt.
         d_from = d_to - dt.timedelta(days=30)
         return d_from, d_to
 
-    # ninguno: histórico completo desde inicio del proyecto
+    # ninguno: por defecto, últimos 30 días (alineado con la UI; evita inflar
+    # días/horas activas mezclando años de historia). Solo afecta el rango de
+    # consulta read-only, no escribe nada en DB.
     d_to = today
-    d_from = dt.date(2024, 1, 1)
+    d_from = today - dt.timedelta(days=30)
     return d_from, d_to
 
 
 def _map_section_name(raw: str) -> str:
-    original = (raw or "").strip()
-    mapping = {
-        # Inicio / auth
-        "home":                         "Inicio",
-        "auth":                         "Inicio de Sesión",
-        # S.I.C.
-        "sic":                          "S.I.C. General",
-        "sic_usuarios":                 "Gestión de Usuarios",
-        "sic_helpdesk":                 "Mesa de Ayuda",
-        "sic_tracking":                 "Seguimiento de Usuarios",
-        "sic_tracking_api":             "API Tracking (Interno)",
-        "sic_password_resets":          "Gestión de Contraseñas",
-        # Mercado Público
-        "mercado_publico":              "Mercado Público",
-        "mercado_publico_oportunidades":"Oportunidades — Público",
-        # Mercado Privado
-        "mercado_privado":              "Mercado Privado",
-        "mercado_privado_dimensiones":  "Dimensionamiento",
-        # Oportunidades
-        "oportunidades":                "Oportunidades",
-        "oportunidades_buscador":       "Buscador de Oportunidades",
-        "oportunidades_dimensiones":    "Análisis de Dimensiones",
-        # Cargas / Historial
-        "cargas":                       "Cargas",
-        "cargas_historial":             "Cargas — Historial",
-        # Comparativa
-        "comparativa":                  "Comparativa de Mercado",
-        # Perfiles
-        "reporte_perfiles":             "Reporte de Perfiles",
-        # Forecast
-        "forecast":                     "Proyecciones y Forecast",
-        # Dashboard
-        "dashboard":                    "Panel Principal",
-        # Misceláneos
-        "live_users_dashboard":         "Panel Live",
-        "otro":                         "",
-        "":                             "Sin Sección",
-    }
-    if original in mapping:
-        return mapping[original]
-    return original.replace("_", " ").title()
+    """Clave/etiqueta cruda → etiqueta legible canónica.
 
+    Delega en la taxonomía única ([tracking_taxonomy]). El mapa de alias
+    re-mapea las claves crudas VIEJAS del historial (comparativa /
+    comparativa_mercado / web_comparativas → "Comparativa de Mercado";
+    sic_users / sic_usuarios → "Usuarios"; etc.), de modo que los eventos ya
+    guardados se muestran con la etiqueta canónica sin tocar la DB.
 
-def _humanize_section_key(raw: str) -> str:
-    text = (raw or "").strip()
-    if not text:
+    Las claves genéricas sin sección real ("otro"/"unknown"/"undefined"…)
+    devuelven "" para que los consumidores las omitan (igual que antes).
+    """
+    if tracking_taxonomy.canonical_key(raw) == "otros":
         return ""
-    text = text.split("?", 1)[0].split("#", 1)[0].strip("/")
-    text = re.sub(r"\b\d+\b", "", text)
-    text = re.sub(r"[0-9a-f]{8,}(-[0-9a-f]{4,})*", "", text, flags=re.I)
-    text = text.replace("-", "_").replace("/", "_")
-    words = [word.lower() for word in text.split("_") if word and word.lower() not in {"api"}]
-    if not words:
-        return ""
-    phrases = {
-        "analisis_dimensiones": "Analisis de Dimensiones",
-        "fuentes_externas": "Fuentes Externas",
-        "helpdesk_tickets": "Mesa de Ayuda / Tickets",
-        "users": "Usuarios",
-        "usuarios": "Usuarios",
-        "password_resets": "Reseteo de Contrasenas",
-        "reporte_perfiles": "Reporte de Perfiles",
-        "mercado_publico_reporte_perfiles": "Reporte de Perfiles",
-        "mercado_privado_reporte_perfiles": "Reporte de Perfiles",
-        "cargas_historial": "Cargas Historial",
-        "oportunidades_buscador": "Buscador de Oportunidades",
-    }
-    joined = "_".join(words)
-    if joined in phrases:
-        return phrases[joined]
-    for size in range(min(3, len(words)), 0, -1):
-        suffix = "_".join(words[-size:])
-        if suffix in phrases:
-            return phrases[suffix]
-    acronyms = {"sic": "S.I.C", "siem": "SIEM", "ia": "IA"}
-    display_words = words[-2:] if len(words) > 2 else words
-    return " ".join(acronyms.get(word, word.capitalize()) for word in display_words)
-
-
-def _map_section_name(raw: str) -> str:
-    original = (raw or "").strip()
-    key = original.lower().replace("-", "_").replace("/", "_").strip("_")
-    key = re.sub(r"_+", "_", key)
-
-    generic_aliases = {
-        "otro", "otros", "sin_identificar", "sin_clasificar", "sin clasificar",
-        "sin identificar", "unknown", "undefined", "n/a", "no identificado",
-    }
-    if key in generic_aliases:
-        return ""
-
-    mapping = {
-        "home": "Inicio",
-        "inicio": "Inicio",                      # label re-feed
-        "dashboard": "Inicio — Panel Principal",
-        "markets": "Centro de Mercados",
-        "markets_home": "Centro de Mercados",
-        "centro de mercados": "Centro de Mercados",
-        "sic": "S.I.C",
-        "sic_general": "S.I.C",
-        "sic_home": "S.I.C",
-        "s.i.c general": "S.I.C",               # label re-feed (sin punto final)
-        "s.i.c. general": "S.I.C",              # label re-feed (con punto)
-        "sic_tracking": "Seguimiento de Usuarios",
-        "sic_tracking_api": "API Tracking Interno",
-        "sic_helpdesk": "Mesa de Ayuda",
-        "sic_helpdesk_tickets": "Mesa de Ayuda / Tickets",
-        "sic_users": "Usuarios",
-        "sic_usuarios": "Usuarios",
-        "sic_password_resets": "Reseteo de Contrasenas",
-        "admin_password_resets": "Administracion de Reseteos",
-        "administracion": "Administracion",
-        "grupos": "Grupos",
-        "notificaciones": "Notificaciones",
-        "mercado_publico": "Mercado Público — Inicio",
-        "mercado_publico_home": "Mercado Público — Inicio",
-        "mercado publico home": "Mercado Público — Inicio",   # label re-feed
-        "mercado_publico_helpdesk": "Mesa de Ayuda Mercado Publico",
-        "mercado_publico_oportunidades": "Oportunidades",
-        "mercado_publico_buscador": "Buscador Mercado Publico",
-        "mercado_publico_dimensiones": "Dimensionamiento Mercado Publico",
-        "mercado_publico_analisis_dimensiones": "Analisis de Dimensiones",
-        "mercado_publico_fuentes_externas": "Fuentes Externas",
-        "mercado_privado": "Mercado Privado",
-        "mercado_privado_home": "Mercado Privado Home",
-        "mercado_privado_helpdesk": "Mesa de Ayuda Mercado Privado",
-        "mercado_privado_dimensiones": "Dimensionamiento",
-        "dimensionamiento": "Dimensionamiento",
-        "oportunidades": "Oportunidades",
-        "oportunidades_buscador": "Buscador de Oportunidades",
-        "oportunidades_dimensiones": "Dimensiones de Oportunidades",
-        "lectura_pliegos": "Lectura de Pliegos",
-        "pliegos": "Lectura de Pliegos",
-        "pliego_widget": "Visor de Pliegos",
-        "pliego_detalle": "Detalle de Pliego",
-        "reporte_perfiles": "Reporte de Perfiles",
-        "mercado_publico_reporte_perfiles": "Reporte de Perfiles — Mercado Público",
-        "mercado_privado_reporte_perfiles": "Reporte de Perfiles — Mercado Privado",
-        "perfiles": "Reporte de Perfiles",
-        "comparativa": "Comparativa de Mercado",
-        "comparativa_mercado": "Comparativa de Mercado",
-        "web_comparativas": "Comparativa de Mercado",
-        "tablero": "Tablero de Comparativa",                  # label re-feed corto
-        "tablero_comparativa": "Tablero de Comparativa",
-        "vistas_guardadas": "Vistas Guardadas",
-        "cargas": "Cargas",
-        "cargas_nueva": "Nueva Carga",
-        "cargas_edicion": "Edicion de Carga",
-        "cargas_historial": "Cargas Historial",
-        "fuentes_externas": "Fuentes Externas",
-        "descargas": "Descargas",
-        "reporte_proceso": "Reporte de Proceso",
-        "informes": "Informes",
-        "forecast": "Forecast",
-        "forecast_widget": "Panel de Forecast",
-        "auth": "Inicio de Sesion",
-        "auth_login": "Inicio de Sesion",
-        "auth_logout": "Cierre de Sesion",
-        "auth_password": "Gestion de Contrasena",
-        "inicio de sesion": "Inicio de Sesion",                # label re-feed
-        "cierre de sesion": "Cierre de Sesion",                # label re-feed
-        "gestion de contrasena": "Gestion de Contrasena",      # label re-feed
-        "api tracking interno": "API Tracking Interno",        # label re-feed
-        "api tracking (interno)": "API Tracking Interno",      # label re-feed
-        "seguimiento de usuarios": "Seguimiento de Usuarios",  # label re-feed
-        "comentarios": "Comentarios",
-        "clientes_api": "Consulta de Clientes",
-        "live_users_dashboard": "Panel Live",
-        "": "Inicio",
-    }
-    if key in mapping:
-        return mapping[key]
-    label = _humanize_section_key(original)
-    if label and key not in _UNMAPPED_SECTION_LOGGED:
-        _UNMAPPED_SECTION_LOGGED.add(key)
-        logger.warning("[tracking] ruta sin mapping explicito: %s -> %s", original, label)
-    return label
+    return tracking_taxonomy.label_for(raw)
 
 
 def _map_action_label(action_type: str) -> str:
