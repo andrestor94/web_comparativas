@@ -391,7 +391,7 @@
             
             <div class="cc-detail-item" title="{{ _org }}">
               <i class="bi bi-building"></i>
-              <span>Organismo: <strong>{{ _org if _org and _org|lower not in ['none','nan','-','--',''] else 'No especificado' }}</strong></span>
+              <span>Organismo: <strong>{{ _org if _org and _org|lower not in ['none','nan','-','--',''] else ('En revisión' if caso.estado == 'pendiente_revision' else 'No especificado') }}</strong></span>
             </div>
 
             {% if es_admin and caso.creado_por %}
