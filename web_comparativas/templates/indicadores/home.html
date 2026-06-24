@@ -3,7 +3,8 @@
 {% block title %}Home — Indicadores Comerciales — SIEM{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=3.0">
+{# Outfit (fuente de SIEM) ya se carga global en base.html; el módulo vuelve a ella vía --ic-font. #}
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=5.2">
 {% endblock %}
 
 {% block header_title %}Indicadores Comerciales{% endblock %}
@@ -22,109 +23,120 @@
 {%- endmacro %}
 
 {% block content %}
+<div class="ic-dash ic-editorial ic-home2">
 
-<!-- ── Encabezado de página ──────────────────────────────────── -->
-<div class="h-page-header mb-3">
-  <div>
-    <p class="h-page-header__eyebrow">Suite SIEM · Indicadores Comerciales</p>
-    <h1 class="h-page-header__title">Home</h1>
-    <p class="h-page-header__subtitle">Resumen ejecutivo · últimos 12 meses ({{ rango_desde }} a {{ rango_hasta }})</p>
+<!-- ── Header editorial: eyebrow + título + frescura (píldora) + Validar ── -->
+<div class="ich-head">
+  <div class="ich-head__titles">
+    <p class="ich-head__eyebrow">Suite SIEM · Indicadores Comerciales</p>
+    <h1 class="ich-head__title">Home</h1>
   </div>
-  <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
+  <div class="ich-head__actions">
+    {% if data_freshness %}
+    <span class="ich-fresh" title="Actualizado el {{ data_freshness.fecha_label }}">
+      <span class="ich-fresh__dot"></span>
+      {% if data_freshness.mes_label %}Datos hasta {{ data_freshness.mes_label }}{% else %}Datos actualizados{% endif %}
+    </span>
+    {% endif %}
     {% if es_admin %}
-    <button type="button" class="ind-btn ind-btn--primary" id="btn-validar" onclick="abrirModalAprobacion()">
-      <i class="bi bi-cloud-arrow-down"></i> Validar actualización
+    <button type="button" class="ich-btn-validar" id="btn-validar" onclick="abrirModalAprobacion()">
+      <i class="bi bi-cloud-arrow-down"></i> Validar
       {% if hay_pendiente %}<span class="ind-badge ind-badge--ambar" id="badge-pendiente">1</span>{% endif %}
     </button>
     {% endif %}
-    <a href="/markets" class="btn btn-sm btn-outline-secondary">
-      <i class="bi bi-grid me-1"></i>Suite SIEM
-    </a>
   </div>
 </div>
 
-<!-- ── Rentabilidad Negativa ─────────────────────────────────── -->
-<div class="ind-section-divider">
-  <span class="ind-section-divider__label"><i class="bi bi-graph-down-arrow"></i> Rentabilidad Negativa</span>
-</div>
-<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
-  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-rojo">
-      <span class="kl">Pérdida Total</span>
-      <span class="kv">{{ money_m(kpis.perdida_total) }}</span>
-      <span class="ks">últimos 12 meses</span>
-    </div>
-  </a>
-  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-azul">
-      <span class="kl">Transacciones Negativas</span>
-      <span class="kv">{{ num(kpis.transacciones) }}</span>
-      <span class="ks">registros con utilidad negativa</span>
-    </div>
-  </a>
-  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-rojo">
-      <span class="kl">Rentabilidad Promedio</span>
-      <span class="kv">{{ pct(kpis.renta_promedio) }}</span>
-      <span class="ks">sobre facturación afectada</span>
-    </div>
-  </a>
-</div>
+<!-- ── 3 filas editoriales (sin cajas), cada una con DOS NIVELES apilados:
+     NIVEL 1 = encabezado (ícono + nombre, sin barrita);
+     NIVEL 2 = línea de datos (barrita lateral + número + métricas + sparkline).
+     Datos server-side; el sparkline de inflación usa la serie precalculada (Etapa 1). -->
+<div class="ich-rows">
 
-<!-- ── Inflación ─────────────────────────────────────────────── -->
-<div class="ind-section-divider">
-  <span class="ind-section-divider__label"><i class="bi bi-arrow-up-right-circle"></i> Inflación</span>
-</div>
-<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
-  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-ambar">
-      <span class="kl">Inflación de Precios</span>
-      <span class="kv">{{ pct(kpis.inflacion_indice) }}</span>
-      <span class="ks">índice PVP simple</span>
-    </div>
+  <!-- ═══ RENTABILIDAD (rojo) ═══ -->
+  <a href="/indicadores-comerciales/rentabilidad-negativa" class="ind-kpi-link ich-row ich-row--neg" style="--d:.10s">
+    <span class="ich-row__head">
+      <span class="ich-row__icon"><i class="bi bi-graph-down-arrow"></i></span>
+      <span class="ich-row__name">Rentabilidad</span>
+    </span>
+    <span class="ich-row__data">
+      <span class="ich-row__accent"></span>
+      <span class="ich-row__lead">
+        <span class="ich-row__num ich-row__num--neg ich-num" data-cv="{{ kpis.perdida_total or 0 }}" data-fmt="money_m">{{ money_m(kpis.perdida_total) }}</span>
+        <span class="ich-row__sub">pérdida total · 12 meses</span>
+      </span>
+      <span class="ich-row__metrics">
+        <span class="ich-metric"><span class="ich-metric__k">Transacc.</span><span class="ich-metric__v">{{ num(kpis.transacciones) }}</span></span>
+        <span class="ich-metric"><span class="ich-metric__k">Rent. prom.</span><span class="ich-metric__v ich-metric__v--neg">{{ pct(kpis.renta_promedio) }}</span></span>
+        {% if rentab_labs %}
+        <span class="ich-metric"><span class="ich-metric__k">Mayor pérdida</span><span class="ich-metric__v ich-metric__v--trunc" title="{{ rentab_labs[0].name }}">{{ rentab_labs[0].name }}</span></span>
+        {% endif %}
+      </span>
+      <span class="ich-row__spark" id="ich-spark-rentab">
+        <span class="ich-spark__plot">
+          <span class="ich-spark__msg" id="ich-spark-rentab-msg" hidden>Sin datos</span>
+        </span>
+        <span class="ich-spark__cap">evolución 12m</span>
+      </span>
+    </span>
   </a>
-  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-ambar">
-      <span class="kl">Inflación Ponderada</span>
-      <span class="kv">{{ pct(kpis.inflacion_ponderada) }}</span>
-      <span class="ks">ponderada por facturación</span>
-    </div>
-  </a>
-  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-gris">
-      <span class="kl">Productos Comparables</span>
-      <span class="kv">{{ num(kpis.productos_comparables) }}</span>
-      <span class="ks">con precio inicial y final</span>
-    </div>
-  </a>
-</div>
 
-<!-- ── Informes de Laboratorio ───────────────────────────────── -->
-<div class="ind-section-divider">
-  <span class="ind-section-divider__label"><i class="bi bi-capsule"></i> Informes de Laboratorio</span>
-</div>
-<div class="ind-kpi-grid ind-kpi-grid--3 mb-4">
-  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-azul">
-      <span class="kl">Total Unidades</span>
-      <span class="kv">{{ num(kpis.total_unidades) }}</span>
-      <span class="ks">últimos 12 meses</span>
-    </div>
+  <!-- ═══ INFLACIÓN (naranja · número navy) ═══ -->
+  <a href="/indicadores-comerciales/inflacion" class="ind-kpi-link ich-row ich-row--inf" style="--d:.25s">
+    <span class="ich-row__head">
+      <span class="ich-row__icon"><i class="bi bi-graph-up-arrow"></i></span>
+      <span class="ich-row__name">Inflación</span>
+    </span>
+    <span class="ich-row__data">
+      <span class="ich-row__accent"></span>
+      <span class="ich-row__lead">
+        <span class="ich-row__num ich-num" data-cv="{{ kpis.inflacion_ponderada or 0 }}" data-fmt="pct">{{ pct(kpis.inflacion_ponderada) }}</span>
+        <span class="ich-row__sub">ponderada por facturación</span>
+      </span>
+      <span class="ich-row__metrics">
+        <span class="ich-metric"><span class="ich-metric__k">Índice</span><span class="ich-metric__v">{{ pct(kpis.inflacion_indice) }}</span></span>
+        <span class="ich-metric"><span class="ich-metric__k">Comparables</span><span class="ich-metric__v">{{ num(kpis.productos_comparables) }}</span></span>
+        {% if inflacion_mayor_aumento %}
+        <span class="ich-metric"><span class="ich-metric__k">Mayor aumento</span><span class="ich-metric__v">{{ pct(inflacion_mayor_aumento.variacion) }}</span></span>
+        {% endif %}
+      </span>
+      <span class="ich-row__spark" id="ich-spark-inflacion">
+        <span class="ich-spark__plot">
+          <span class="ich-spark__msg ich-spark__msg--inf" id="ich-spark-inflacion-msg" hidden>sin datos aún</span>
+        </span>
+        <span class="ich-spark__cap">evolución 12m</span>
+      </span>
+    </span>
   </a>
-  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-azul">
-      <span class="kl">Promedio Mensual</span>
-      <span class="kv">{{ num(kpis.promedio_mensual) }}</span>
-      <span class="ks">unidades por mes</span>
-    </div>
+
+  <!-- ═══ LABORATORIO (navy) ═══ -->
+  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link ich-row ich-row--lab" style="--d:.40s">
+    <span class="ich-row__head">
+      <span class="ich-row__icon"><i class="bi bi-capsule"></i></span>
+      <span class="ich-row__name">Laboratorio</span>
+    </span>
+    <span class="ich-row__data">
+      <span class="ich-row__accent"></span>
+      <span class="ich-row__lead">
+        <span class="ich-row__num ich-num" data-cv="{{ kpis.total_unidades or 0 }}" data-fmt="num">{{ num(kpis.total_unidades) }}</span>
+        <span class="ich-row__sub">total unidades · 12 meses</span>
+      </span>
+      <span class="ich-row__metrics">
+        <span class="ich-metric"><span class="ich-metric__k">Prom./mes</span><span class="ich-metric__v">{{ num(kpis.promedio_mensual) }}</span></span>
+        <span class="ich-metric"><span class="ich-metric__k">Laboratorios</span><span class="ich-metric__v">{{ num(kpis.cantidad_laboratorios) }}</span></span>
+        {% if labs_labs %}
+        <span class="ich-metric"><span class="ich-metric__k">Líder</span><span class="ich-metric__v ich-metric__v--trunc" title="{{ labs_labs[0].name }}">{{ labs_labs[0].name }}</span></span>
+        {% endif %}
+      </span>
+      <span class="ich-row__spark" id="ich-spark-labs">
+        <span class="ich-spark__plot">
+          <span class="ich-spark__msg" id="ich-spark-labs-msg" hidden>Sin datos</span>
+        </span>
+        <span class="ich-spark__cap">evolución 12m</span>
+      </span>
+    </span>
   </a>
-  <a href="/indicadores-comerciales/informes-laboratorio" class="ind-kpi-link">
-    <div class="kpi-card kpi-card--ind-gris">
-      <span class="kl">Laboratorios</span>
-      <span class="kv">{{ num(kpis.cantidad_laboratorios) }}</span>
-      <span class="ks">con movimiento en el período</span>
-    </div>
-  </a>
+
 </div>
 
 {% if es_admin %}
@@ -259,4 +271,20 @@
 </script>
 {% endif %}
 
+</div><!-- /.ic-dash -->
+{% endblock %}
+
+{% block extra_js %}
+{# Sparklines en SVG nativo (sin Chart.js); chart_theme.js solo aporta la paleta. #}
+<script src="{{ url_for('static', path='js/indicadores_chart_theme.js') }}?v=1.1"></script>
+{# Series de los sparklines server-side (rentab + labs + inflación). Bloque JSON: sin escape.
+   La serie de inflación sale PRECALCULADA (get_evolucion_precalc) → instantánea. #}
+<script id="ic-home-data" type="application/json">
+{{ {
+  "rentabMeses": rentab_meses,
+  "labsMeses": labs_meses,
+  "inflacionMeses": inflacion_evolucion
+} | tojson }}
+</script>
+<script src="{{ url_for('static', path='js/indicadores_home.js') }}?v=7.3"></script>
 {% endblock %}

@@ -255,35 +255,6 @@ def _fetch_sales_summary(desde: date, hasta: date, cadneg: Optional[str] = None)
         return [dict(r._mapping) for r in conn.execute(stmt, params)]
 
 
-def _get_article_map_summary(articulos: list) -> dict:
-    """Rama ON de get_article_map: marca/laboratorio/familia desde ind_articulos
-    (no desde vsl_art_alfabeta_full en vivo). Mismo shape y mismos fallbacks.
-    Lee SOLO la corrida approved activa; sin corrida aprobada devuelve {} limpio."""
-    corrida = _corrida_activa()
-    if corrida is None:
-        return {}
-    arts = [int(a) for a in (str(x).strip() for x in articulos) if a.lstrip("-").isdigit()]
-    if not arts:
-        return {}
-    article_map = {}
-    stmt = text(
-        "SELECT articulo, marca, laboratorio, familia FROM ind_articulos "
-        "WHERE import_run_id = :corrida AND articulo IN :arts"
-    ).bindparams(bindparam("arts", expanding=True))
-    try:
-        with engine.connect() as conn:
-            for items in _chunk(arts):
-                for articulo, marca, laboratorio, familia in conn.execute(stmt, {"corrida": corrida, "arts": items}):
-                    article_map[str(int(articulo))] = {
-                        "marca": _norm_text(marca) or str(int(articulo)),
-                        "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",
-                        "familia": _norm_text(familia) or "SIN FAMILIA",
-                    }
-    except Exception:
-        pass
-    return article_map
-
-
 def get_health() -> dict:
     result = {"status": "ok", "etl": False, "fusion": False, "error": None}
     try:
@@ -307,26 +278,19 @@ def get_health() -> dict:
 
 
 def get_article_map(articulos: list) -> dict:
-    if not articulos:
-        return {}
-    if _indicadores_summary_available("ind_articulos"):
-        return _get_article_map_summary(articulos)
-    article_map = {}
-    try:
-        with get_fusion_db() as conn:
-            cursor = conn.cursor()
-            for items in _chunk(articulos):
-                placeholders = ",".join("?" for _ in items)
-                cursor.execute(QUERY_ARTICLES_BASE.format(placeholders=placeholders), items)
-                for row in _rows_to_dicts(cursor):
-                    article_map[str(row["articulo"])] = {
-                        "marca": _norm_text(row.get("marca")) or str(row["articulo"]),
-                        "laboratorio": _norm_text(row.get("laboratorio")) or "SIN LABORATORIO",
-                        "familia": _norm_text(row.get("familia")) or "SIN FAMILIA",
-                    }
-    except Exception:
-        pass
-    return article_map
+    """Resolución de nombre de artículo COMPARTIDA con Rentabilidad Negativa.
+
+    Delega en indicadores_service.get_article_map para que el MISMO artículo
+    muestre el MISMO nombre en ambos módulos (coherencia). Esa resolución usa
+    COALESCE(marca, descripcion, código) sobre ind_articulos (rama ON) / maestro
+    (rama OFF): el nombre que se muestra es la marca real si existe, si no la
+    DESCRIPCIÓN del producto, y el código solo como último recurso. Devuelve
+    marca/laboratorio/familia (+principio_activo, que este módulo ignora); el
+    laboratorio sale crudo y se consolida después con group_laboratorio(), igual
+    que antes. (Reemplaza la resolución propia que mostraba código cuando marca
+    venía NULL — ~14k artículos.)"""
+    from web_comparativas.indicadores_service import get_article_map as _shared_article_map
+    return _shared_article_map(articulos)
 
 
 def get_rows(

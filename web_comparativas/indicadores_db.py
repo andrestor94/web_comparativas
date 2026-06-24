@@ -416,3 +416,91 @@ def _corrida_activa() -> "int | None":
         return int(row[0]) if row else None
     except Exception:
         return None
+
+
+# Nombres de mes en español (es-AR) para el indicador de frescura de datos.
+# Local a propósito: no dependemos del locale del sistema operativo del server.
+_MESES_ES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def _coerce_fecha(value):
+    """Normaliza approved_at/ventana_hasta a date/datetime sea cual sea el motor.
+
+    PostgreSQL (prod) devuelve date/datetime nativos; SQLite (local, el .bat de
+    prueba) los devuelve como str ('YYYY-MM-DD' o 'YYYY-MM-DD HH:MM:SS[.ffffff]').
+    Devuelve None si el valor es vacío o no parsea — el partial maneja el None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date)):
+        return value
+    if isinstance(value, str):
+        s = value.strip().replace("T", " ")
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def corrida_activa_meta() -> "dict | None":
+    """Metadata de la corrida 'approved' ACTIVA para el indicador de frescura de datos.
+
+    Selecciona la MISMA corrida que _corrida_activa() (la más reciente por approved_at,
+    desempate por id) pero en vez del solo id devuelve un dict listo para el template:
+      - approved_at   : datetime de aprobación (crudo, normalizado)
+      - ventana_hasta : MAX(ventana_hasta) entre las fuentes de ind_etl_control (el mes
+                        más reciente cubierto); None si no se puede resolver
+      - fecha_label   : approved_at como 'dd/mm/aaaa' (sin hora)
+      - mes_label     : ventana_hasta como 'mayo 2026' (es-AR); None si no hay ventana
+
+    Devuelve None si no hay corrida aprobada o si la consulta falla (mismo contrato
+    defensivo que _corrida_activa(): el caller/partial nunca rompe).
+    """
+    try:
+        from sqlalchemy import text as _sa_text
+        from web_comparativas.models import engine
+    except Exception:
+        return None
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(_sa_text(
+                "SELECT id, approved_at FROM ind_import_run WHERE status = 'approved' "
+                "ORDER BY approved_at DESC, id DESC LIMIT 1"
+            )).fetchone()
+            if not row:
+                return None
+            run_id = int(row[0])
+            approved_at = _coerce_fecha(row[1])
+            # ventana_hasta: el mes más reciente cubierto entre TODAS las fuentes.
+            # Aislado en su propio try: si la tabla/columna falta o está vacía,
+            # degradamos a None sin perder la fecha de aprobación.
+            ventana_hasta = None
+            try:
+                vh = conn.execute(_sa_text(
+                    "SELECT MAX(ventana_hasta) FROM ind_etl_control"
+                )).fetchone()
+                ventana_hasta = _coerce_fecha(vh[0]) if vh else None
+            except Exception:
+                ventana_hasta = None
+
+        fecha_label = approved_at.strftime("%d/%m/%Y") if approved_at else None
+        mes_label = None
+        if ventana_hasta is not None:
+            mes_label = f"{_MESES_ES[ventana_hasta.month - 1]} {ventana_hasta.year}"
+
+        return {
+            "id": run_id,
+            "approved_at": approved_at,
+            "ventana_hasta": ventana_hasta,
+            "fecha_label": fecha_label,
+            "mes_label": mes_label,
+        }
+    except Exception:
+        return None

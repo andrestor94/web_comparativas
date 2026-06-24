@@ -39,7 +39,10 @@ const LAB = (() => {
     _cfg = cfg;
     _setupDates();
     _bindEvents();
-    _checkHealth();
+    // Semáforo de Fusion reemplazado por el indicador de frescura de datos
+    // (server-side, partial _ind_data_freshness.html). Ya no se chequea /health
+    // en el arranque. _checkHealth() queda definida abajo pero sin invocar.
+    // _checkHealth();
   }
 
   function _setupDates() {
@@ -265,6 +268,9 @@ const LAB = (() => {
     const labels = meses.map(m => _fmtMonth(m.mes));
     const data = meses.map(m => m.unidades);
 
+    // Presentación vía IC_CHART_THEME (paleta de marca); fallback al estilo previo
+    const T = window.IC_CHART_THEME;
+
     _charts.evolucion = new Chart(canvas, {
       type: 'bar',
       data: {
@@ -272,10 +278,11 @@ const LAB = (() => {
         datasets: [{
           label: 'Unidades',
           data,
-          backgroundColor: 'rgba(59,130,246,0.7)',
-          borderColor: 'rgba(59,130,246,1)',
-          borderWidth: 1,
-          borderRadius: 4,
+          backgroundColor: T ? T.alpha(T.colors.blue, 0.82) : 'rgba(59,130,246,0.7)',
+          hoverBackgroundColor: T ? T.colors.blue : 'rgba(59,130,246,1)',
+          borderWidth: 0,
+          borderRadius: 5,
+          maxBarThickness: 36,
         }]
       },
       options: {
@@ -283,8 +290,8 @@ const LAB = (() => {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: ctx => _fmtNum(ctx.raw) + ' unidades' } } },
         scales: {
-          x: { grid: { display: false } },
-          y: { ticks: { callback: v => _fmtNum(v) } }
+          x: T ? T.gridX() : { grid: { display: false } },
+          y: T ? T.gridY(v => _fmtNum(v)) : { ticks: { callback: v => _fmtNum(v) } }
         }
       }
     });
@@ -299,14 +306,18 @@ const LAB = (() => {
     const labs = (_summary?.laboratorios || []).slice(0, 12);
     if (_charts.labs) { _charts.labs.destroy(); }
 
+    // Ranking: rampa de opacidad sobre el navy de marca (IC_CHART_THEME)
+    const T = window.IC_CHART_THEME;
+
     _charts.labs = new Chart(canvas, {
       type: 'bar',
       data: {
         labels: labs.map(l => l.name),
         datasets: [{
           data: labs.map(l => l.value),
-          backgroundColor: labs.map((_, i) => `hsl(${210 + i*12},70%,55%)`),
+          backgroundColor: T ? T.ramp(T.colors.navy, labs.length) : labs.map((_, i) => `hsl(${210 + i*12},70%,55%)`),
           borderRadius: 4,
+          maxBarThickness: 18,
         }]
       },
       options: {
@@ -314,8 +325,8 @@ const LAB = (() => {
         plugins: { legend: { display: false },
           tooltip: { callbacks: { label: ctx => _fmtNum(ctx.raw) + ' unidades' } } },
         scales: {
-          x: { ticks: { callback: v => _fmtNum(v) } },
-          y: { grid: { display: false } }
+          x: T ? T.gridY(v => _fmtNum(v)) : { ticks: { callback: v => _fmtNum(v) } },
+          y: T ? T.gridX() : { grid: { display: false } }
         }
       }
     });
@@ -341,30 +352,32 @@ const LAB = (() => {
       fixedCell: (row) => escHtml(row.marca || '—'),
     }, ctx);
 
-    // 2) Sell Out por Marca Comercial y Cliente (comportamiento existente)
+    // 2) Sell Out por Marca Comercial y Cliente — CLIENTE y MARCA en columnas separadas
     _renderMatrixTable({
       headYearsId: 'lab-head-years',
       headMonthsId: 'lab-head-months',
       tbodyId: 'lab-tbody',
       countId: 'lab-table-count',
-      fixedLabel: 'Marca / Cliente',
       rows: _detail,
-      fixedCell: (row) =>
-        `${escHtml(row.marca || '—')}<br><small class="text-muted">${escHtml(row.cliente || '—')}</small>`,
+      fixedCols: [
+        { label: 'Cliente',         cls: 'lab-col-fixed--1', cell: (row) => escHtml(row.cliente || '—') },
+        { label: 'Marca Comercial', cls: 'lab-col-fixed--2', cell: (row) => escHtml(row.marca || '—') },
+      ],
     }, ctx);
     setText('lab-footer-count', `${_detail.length} combinaciones`);
     if ($('lab-table-footer')) $('lab-table-footer').style.display = _detail.length ? '' : 'none';
 
-    // 3) Sell Out por Cliente y Marca Comercial
+    // 3) Sell Out por Cliente y Marca Comercial — CLIENTE y MARCA en columnas separadas
     _renderMatrixTable({
       headYearsId: 'lab-cli-head-years',
       headMonthsId: 'lab-cli-head-months',
       tbodyId: 'lab-cli-tbody',
       countId: 'lab-cli-count',
-      fixedLabel: 'Cliente / Marca',
       rows: _sortRows(_detail, 'cliente', 'marca'),
-      fixedCell: (row) =>
-        `${escHtml(row.cliente || '—')}<br><small class="text-muted">${escHtml(row.marca || '—')}</small>`,
+      fixedCols: [
+        { label: 'Cliente',         cls: 'lab-col-fixed--1', cell: (row) => escHtml(row.cliente || '—') },
+        { label: 'Marca Comercial', cls: 'lab-col-fixed--2', cell: (row) => escHtml(row.marca || '—') },
+      ],
     }, ctx);
   }
 
@@ -390,7 +403,13 @@ const LAB = (() => {
     const tbody = $(cfg.tbodyId);
     if (!headYears || !headMonths || !tbody) return;
 
-    headYears.innerHTML = `<th rowspan="2" class="lab-col-fixed">${escHtml(cfg.fixedLabel)}</th>` +
+    // Columnas fijas: 1 (Producto) o 2 SEPARADAS (Cliente y Marca Comercial).
+    // cfg.fixedCols = [{label, cell, cls}]; compat con el viejo fixedLabel/fixedCell.
+    const fixedCols = cfg.fixedCols ||
+      [{ label: cfg.fixedLabel, cell: cfg.fixedCell, cls: '' }];
+
+    headYears.innerHTML =
+      fixedCols.map(fc => `<th rowspan="2" class="lab-col-fixed ${fc.cls || ''}">${escHtml(fc.label)}</th>`).join('') +
       ctx.yearsArr.filter(y => ctx.yearGroups[y]).map(y =>
         `<th colspan="${ctx.yearGroups[y]}" class="text-center lab-col-year">${y}</th>`
       ).join('') +
@@ -403,20 +422,20 @@ const LAB = (() => {
     if (cfg.countId) setText(cfg.countId, `${cfg.rows.length} combinaciones`);
 
     if (!cfg.rows.length) {
-      tbody.innerHTML = '<tr><td colspan="50" class="text-center text-muted py-4">Sin datos para los filtros seleccionados</td></tr>';
+      const span = fixedCols.length + ctx.visMonths.length + 1;
+      tbody.innerHTML = `<tr><td colspan="${span}" class="text-center text-muted py-4">Sin datos para los filtros seleccionados</td></tr>`;
       return;
     }
 
     tbody.innerHTML = cfg.rows.slice(0, 1500).map(row => {
+      const fixedCells = fixedCols.map(fc =>
+        `<td class="lab-col-fixed ${fc.cls || ''}">${fc.cell(row)}</td>`
+      ).join('');
       const cells = ctx.visMonths.map(m => {
         const v = row.mensual?.[m];
         return `<td class="text-end">${(v == null || isNaN(v) || v === 0) ? '' : _fmtNum(v)}</td>`;
       }).join('');
-      return `<tr>
-        <td class="lab-col-fixed">${cfg.fixedCell(row)}</td>
-        ${cells}
-        <td class="text-end fw-semibold">${_fmtNum(row.unidades)}</td>
-      </tr>`;
+      return `<tr>${fixedCells}${cells}<td class="text-end fw-semibold">${_fmtNum(row.unidades)}</td></tr>`;
     }).join('');
   }
 
@@ -484,9 +503,9 @@ const LAB = (() => {
   // ── Export CSV ───────────────────────────────────────────────────────────────
   function exportCSV() {
     if (!_detail.length) return;
-    const rows = [['Laboratorio','Familia','Marca','Cliente','Unidades','Meses']];
+    const rows = [['Laboratorio','Familia','Cliente','Marca Comercial','Unidades','Meses']];
     _detail.forEach(r => {
-      rows.push([r.laboratorio||'', r.familia||'', r.marca||'', r.cliente||'',
+      rows.push([r.laboratorio||'', r.familia||'', r.cliente||'', r.marca||'',
         Math.round(r.unidades||0), r.meses||0]);
     });
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
