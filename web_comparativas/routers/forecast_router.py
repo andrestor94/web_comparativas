@@ -27,7 +27,13 @@ from pydantic import BaseModel, Field
 
 from web_comparativas.models import User, Ticket, TicketMessage
 from web_comparativas import forecast_service as svc
-from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
+from web_comparativas.policy import (
+    require_module,
+    can_access as _can_access_tpl,
+    can_switch_market as _can_switch_market_tpl,
+    puede_ver_aprobaciones_forecast,
+    puede_editar_aprobaciones_forecast,
+)
 
 logger = logging.getLogger("wc.forecast.router")
 logger.setLevel(logging.INFO)
@@ -126,7 +132,15 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
 def forecast_home(request: Request, user: User = Depends(require_module("forecast"))):
     return templates.TemplateResponse(
         "forecast/index.html",
-        {"request": request, "user": user, "market_context": "forecast"},
+        {
+            "request": request,
+            "user": user,
+            "market_context": "forecast",
+            # Aprobaciones Forecast: visibilidad/edición por rol (autoridad = policy).
+            # El template SOLO refleja; el backend reenforza igual en cada endpoint.
+            "can_view_approvals": puede_ver_aprobaciones_forecast(user),
+            "can_edit_approvals": puede_editar_aprobaciones_forecast(user),
+        },
     )
 
 
@@ -1002,7 +1016,13 @@ def _is_sqlite_db() -> bool:
 
 
 def _require_admin_only(user: User) -> None:
-    """Aprobaciones Forecast: acceso EXCLUSIVO de Admin (frontend + backend)."""
+    """Guard admin-only de la sección *Auditoría de ajustes* (/api/audit*).
+
+    NOTA: ya NO gobierna "Aprobaciones Forecast" — esa sección pasó a permisos por
+    rol (ver _require_aprobaciones_view / _require_aprobaciones_edit). Este guard
+    queda como la regla real de la sección de Auditoría de ajustes, vía
+    _require_audit_access, que es admin-only y está fuera del alcance de este cambio.
+    """
     try:
         is_admin = bool(user) and user.is_admin()
     except Exception:
@@ -1015,8 +1035,35 @@ def _require_admin_only(user: User) -> None:
 
 
 def _require_audit_access(user: User) -> None:
-    # Defensa en profundidad: la sección pasó a ser exclusiva de Admin.
+    # Sección "Auditoría de ajustes Forecast" (/api/audit*): admin-only.
+    # Distinta de "Aprobaciones Forecast". Comportamiento sin cambios.
     _require_admin_only(user)
+
+
+def _require_aprobaciones_view(user: User) -> None:
+    """Aprobaciones Forecast — LECTURA: Admin, Gerente y Auditor. Resto → 403.
+
+    Autoridad server-side de los endpoints GET de la sección. La fuente de verdad
+    de la matriz es policy.puede_ver_aprobaciones_forecast.
+    """
+    if not puede_ver_aprobaciones_forecast(user):
+        raise HTTPException(
+            status_code=403,
+            detail="No tiene acceso a Aprobaciones Forecast.",
+        )
+
+
+def _require_aprobaciones_edit(user: User) -> None:
+    """Aprobaciones Forecast — EDICIÓN (aprobar/rechazar): SOLO Admin y Gerente.
+
+    Auditor, Analista y Supervisor → 403, aunque le peguen directo al endpoint.
+    La fuente de verdad de la matriz es policy.puede_editar_aprobaciones_forecast.
+    """
+    if not puede_editar_aprobaciones_forecast(user):
+        raise HTTPException(
+            status_code=403,
+            detail="No tiene permiso para aprobar o rechazar modificaciones de Forecast.",
+        )
 
 
 # ── Textos de limitación incluidos en cada fila del export ──────────────────
@@ -1949,8 +1996,9 @@ def api_approvals(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ):
-    """Lista de modificaciones para revisión + KPIs ejecutivos. Solo Admin."""
-    _require_admin_only(user)
+    """Lista de modificaciones para revisión + KPIs ejecutivos.
+    Lectura: Admin, Gerente y Auditor."""
+    _require_aprobaciones_view(user)
     from web_comparativas.models import SessionLocal
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
@@ -2006,8 +2054,8 @@ def api_approvals_filter_options(
     general superior de Forecast (svc.get_filter_options() → dataset valorizado),
     de modo que el listado coincida exactamente. Usuario (cotizador) y Período
     son específicos de las modificaciones, por lo que se derivan de la propia
-    tabla forecast_change_requests."""
-    _require_admin_only(user)
+    tabla forecast_change_requests. Lectura: Admin, Gerente y Auditor."""
+    _require_aprobaciones_view(user)
     from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
     if SessionLocal is None or CR is None:
         return JSONResponse({"ok": False, "perfiles": [], "negocios": [], "subneg": [], "comerciales": [], "periodos": []})
@@ -2078,8 +2126,8 @@ def api_approvals_approve(
     request: Request,
     user: User = Depends(require_module("forecast")),
 ):
-    """Aprueba una modificación pendiente. Solo Admin. No revierte el override."""
-    _require_admin_only(user)
+    """Aprueba una modificación pendiente. Solo Admin/Gerente. No revierte el override."""
+    _require_aprobaciones_edit(user)
     from web_comparativas.models import SessionLocal, ForecastChangeRequest as CR
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
@@ -2105,8 +2153,8 @@ def api_approvals_reject(
     request: Request,
     user: User = Depends(require_module("forecast")),
 ):
-    """Rechaza una modificación con motivo. Solo Admin. No revierte el override."""
-    _require_admin_only(user)
+    """Rechaza una modificación con motivo. Solo Admin/Gerente. No revierte el override."""
+    _require_aprobaciones_edit(user)
     motivo = (payload.motivo or "").strip()
     if not motivo:
         raise HTTPException(400, "Debe indicar un motivo para rechazar la modificación.")
@@ -2190,9 +2238,10 @@ def api_approvals_grouped(
     page_size: int = Query(25, ge=1, le=200),
 ):
     """Modificaciones agrupadas por grupo de clientes (clientes sueltos al final).
-    Paginación por UNIDAD (un grupo entero = 1 unidad → nunca se parte). Solo Admin.
+    Paginación por UNIDAD (un grupo entero = 1 unidad → nunca se parte).
+    Lectura: Admin, Gerente y Auditor.
     KPIs/matriz se calculan sobre TODO el conjunto filtrado."""
-    _require_admin_only(user)
+    _require_aprobaciones_view(user)
     from web_comparativas.models import SessionLocal
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
@@ -2316,8 +2365,8 @@ def api_approvals_group_approve(
     request: Request,
     user: User = Depends(require_module("forecast")),
 ):
-    """Aprueba todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
-    _require_admin_only(user)
+    """Aprueba todas las modificaciones pendientes del grupo (contexto actual). Solo Admin/Gerente."""
+    _require_aprobaciones_edit(user)
     try:
         n = _review_group(payload, status="aprobado", user=user)
         return JSONResponse({"ok": True, "grupo": payload.grupo, "status": "aprobado", "afectados": n})
@@ -2334,8 +2383,8 @@ def api_approvals_group_reject(
     request: Request,
     user: User = Depends(require_module("forecast")),
 ):
-    """Rechaza con motivo todas las modificaciones pendientes del grupo (contexto actual). Solo Admin."""
-    _require_admin_only(user)
+    """Rechaza con motivo todas las modificaciones pendientes del grupo (contexto actual). Solo Admin/Gerente."""
+    _require_aprobaciones_edit(user)
     if not (payload.motivo or "").strip():
         raise HTTPException(400, "Debe indicar un motivo para rechazar el grupo.")
     try:
@@ -2396,8 +2445,9 @@ def api_approvals_export(
     impacto: Optional[str] = Query(None),
     alto_impacto: Optional[str] = Query(None),
 ):
-    """Informe ejecutivo de modificaciones (CSV/Excel). Solo Admin."""
-    _require_admin_only(user)
+    """Informe ejecutivo de modificaciones (CSV/Excel).
+    Lectura: Admin, Gerente y Auditor."""
+    _require_aprobaciones_view(user)
     from web_comparativas.models import SessionLocal
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
