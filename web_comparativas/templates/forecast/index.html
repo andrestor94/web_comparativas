@@ -2319,11 +2319,11 @@
         Detalle Operativo
         <span class="fc-tab-badge">Vista 2</span>
       </button>
-      {% if user.is_admin() %}
+      {% if can_view_approvals %}
       <button class="fc-view-tab" id="tab-aprobaciones" onclick="switchTab('aprobaciones')">
         <i class="bi bi-clipboard-check"></i>
         Aprobaciones Forecast
-        <span class="fc-tab-badge">Admin</span>
+        <span class="fc-tab-badge">{{ 'Control' if can_edit_approvals else 'Solo lectura' }}</span>
       </button>
       {% endif %}
     </div>
@@ -2558,10 +2558,10 @@
       </div><!-- /panel-detalle -->
 
       <!-- ════════════════════════════════════════════════════════════ -->
-      <!-- PANEL 3 — APROBACIONES FORECAST (solo Admin)                -->
+      <!-- PANEL 3 — APROBACIONES FORECAST (Admin/Gerente: edición · Auditor: solo lectura) -->
       <!-- ════════════════════════════════════════════════════════════ -->
-      {% if user.is_admin() %}
-      <div class="fc-tab-panel" id="panel-aprobaciones">
+      {% if can_view_approvals %}
+      <div class="fc-tab-panel" id="panel-aprobaciones" data-can-edit="{{ 'true' if can_edit_approvals else 'false' }}">
 
         <!-- ── Resumen ejecutivo (KPIs) ── -->
         <div class="fc-table-card" style="margin-bottom:18px;">
@@ -3031,6 +3031,9 @@ const STATE = {
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
 const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}';
 const _FC_IS_ADMIN   = {{ 'true' if user.is_admin() else 'false' }};
+// Aprobaciones Forecast: ¿este usuario puede aprobar/rechazar? (Admin/Gerente sí; Auditor no).
+// Solo UX — el backend reenforza igual (403) aunque se invoque el endpoint a mano.
+const _FC_APPR_CAN_EDIT = {{ 'true' if can_edit_approvals else 'false' }};
 const _FC_CV         = 'c4';  // content version — increment when payload contract changes
 const _FC_PFX        = 'fc_' + _FC_CV + '_' + _FC_V + '_' + _FC_USER_KEY + '_';
 const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
@@ -6747,11 +6750,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Fila individual (cliente/modificación) — sirve para sueltos y para hijos de grupo
   function _apprRowHtml(r, isChild) {
     const pend = r.status === 'pendiente';
-    const actions = pend
+    // Auditor (solo lectura): nunca se muestran Aprobar/Rechazar, solo Ver detalle.
+    const detailBtn = `<button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`;
+    const actions = (pend && _FC_APPR_CAN_EDIT)
       ? `<button class="appr-act appr-act--ok" title="Aprobar" onclick="_apprApprove(${r.id})"><i class="bi bi-check-lg"></i></button>
          <button class="appr-act appr-act--no" title="Rechazar" onclick="_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i></button>
-         <button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`
-      : `<button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`;
+         ${detailBtn}`
+      : detailBtn;
     const estadoCell = pend
       ? statusBadge(r.status)
       : `${statusBadge(r.status)}<div class="appr-cell-sub" style="margin-top:4px;">${esc(r.revisado_por)} · ${esc(r.revisado_el)}</div>`;
@@ -6789,10 +6794,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const est = u.estados || {};
     const cons = statusBadge(u.estado_consolidado);
     const hasPend = (u.pendientes || 0) > 0;
-    const groupActs = hasPend
+    // Auditor (solo lectura): sin botones de aprobación/rechazo por grupo.
+    const groupActs = (hasPend && _FC_APPR_CAN_EDIT)
       ? `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar todo el grupo" onclick="event.stopPropagation();_apprApproveGroupIdx(${idx})"><i class="bi bi-check2-all"></i> Aprobar grupo</button>
          <button class="appr-gbtn appr-gbtn--no" title="Rechazar todo el grupo" onclick="event.stopPropagation();_apprOpenRejectGroupIdx(${idx})"><i class="bi bi-x-octagon"></i> Rechazar grupo</button>`
-      : `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">Sin pendientes</span>`;
+      : (hasPend
+          ? `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">${u.pendientes} pendiente(s)</span>`
+          : `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">Sin pendientes</span>`);
     const baja = (u.impacto_baja || 0)
       ? `<span class="appr-impact appr-impact--neg" title="Total bajas estimado">↓ ${fmtMoney(u.impacto_baja)}</span>` : '';
     const suba = (u.impacto_suba || 0)
@@ -7137,7 +7145,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     ].join('');
     const foot = document.getElementById('appr-detail-foot');
     if (foot) {
-      foot.innerHTML = (r.status === 'pendiente')
+      // Auditor (solo lectura): el detalle no ofrece Aprobar/Rechazar, solo Cerrar.
+      foot.innerHTML = (r.status === 'pendiente' && _FC_APPR_CAN_EDIT)
         ? `<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" onclick="_apprCloseDetail();_apprApprove(${r.id})"><i class="bi bi-check-lg"></i> Aprobar</button>
            <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprCloseDetail();_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i> Rechazar</button>
            <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`

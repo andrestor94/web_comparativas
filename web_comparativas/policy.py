@@ -188,6 +188,46 @@ def puede_editar_ficha_pliego(user) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Sección: Aprobaciones Forecast (pestaña dentro del módulo Forecast) — VER / EDITAR
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Matriz por rol (ÚNICA fuente de verdad de esta sección):
+#   Admin      → ver + editar
+#   Gerente    → ver + editar
+#   Auditor    → ver (solo lectura, NO edita)
+#   Analista   → sin acceso
+#   Supervisor → sin acceso
+#
+# IMPORTANTE: NO se reutiliza has_write_access para "editar" — ese predicado
+# (role ∉ AUDITOR_ROLES) habilitaría también a Supervisor y Analista, que aquí NO
+# deben editar. La regla de Aprobaciones es más restrictiva, por eso son predicados
+# dedicados, en el mismo patrón sección-específico que puede_editar_ficha_pliego.
+# Se construyen sobre los role-sets canónicos (sin inventar vocabulario nuevo).
+
+def puede_ver_aprobaciones_forecast(user) -> bool:
+    """
+    ¿Puede `user` VER la pestaña/lectura de "Aprobaciones Forecast"?
+    Admin, Gerente y Auditor: SÍ. Analista y Supervisor: NO.
+    Gobierna el render del tab/panel y los endpoints GET de la sección.
+    """
+    if not user:
+        return False
+    return _role_of(user) in (ADMIN_ROLES | MANAGER_ROLES | AUDITOR_ROLES)
+
+
+def puede_editar_aprobaciones_forecast(user) -> bool:
+    """
+    ¿Puede `user` EJECUTAR acciones que cambian estado (aprobar/rechazar, individual
+    o por grupo) en "Aprobaciones Forecast"?
+    SOLO Admin y Gerente. Auditor (solo lectura), Analista y Supervisor: NO.
+    Gobierna los endpoints POST de mutación y la visibilidad de los controles de edición.
+    """
+    if not user:
+        return False
+    return _role_of(user) in (ADMIN_ROLES | MANAGER_ROLES)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Acción: Uploads — LEER
 # ──────────────────────────────────────────────────────────────────────────────
 
