@@ -38,8 +38,22 @@ from web_comparativas.indicadores_summary_models import (
 from web_comparativas.models import Base, engine, SessionLocal
 
 
-# SQL por mes. Filtro COMÚN únicamente: ventana de fecha + universo cadneg/artículos.
-# NO incluye renta1<0 ni comprob<>'NC' (se aplican en la lectura).
+# SQL por mes. FUENTE: dbo.rentabililad_x_cliente (renta1 REAL por comprobante, validado
+# por negocio vs Excel). La tabla vieja dbo.rentabilidad_cliente traía renta1 como un total
+# agregado repetido por línea y quedó descartada.
+#
+# PRE-DEDUP al GRANO DE TRANSACCIÓN = (ctacte, articulo, cadneg, comprob, letra, terminal,
+# numero). renta1 es CONSTANTE dentro de ese grano (verificado: 0 transacciones con renta1
+# múltiple); cadneg DEBE ir en el grano (un comprobante puede tener 2 cadneg con renta1
+# distinto). Por eso:
+#   • renta1 de la transacción = MIN(renta1)  (el valor único, NO SUM por línea).
+#   • cant/importe = SUM de las líneas físicas de la transacción.
+# La tabla ind_rentabilidad_lineas queda CORRECTA POR CONSTRUCCIÓN: 1 fila = 1 transacción,
+# renta1 una sola vez. Cualquier lectura que SUME renta1 obtiene el valor bien SIN deduplicar.
+# letra/terminal/numero se usan SOLO en el GROUP BY (no se persisten: esquema mínimo).
+#
+# Filtro COMÚN únicamente: ventana de fecha + universo cadneg/artículos. NO incluye renta1<0
+# ni comprob<>'NC' (se aplican en la lectura; comprob se conserva por fila para esos filtros).
 QUERY_RENTABILIDAD_MES = """
 DECLARE @ini DATE = ?;
 DECLARE @fin DATE = ?;
@@ -55,19 +69,22 @@ SELECT
     cb.NombreCliente                AS nombre_cliente,
     rc.articulo                     AS articulo,
     LTRIM(RTRIM(rc.cadneg))         AS cadneg,
-    rc.fecha                        AS fecha,
-    rc.cant                         AS cant,
-    rc.importe                      AS importe,
-    rc.renta1                       AS renta1,
+    MIN(rc.fecha)                   AS fecha,
+    SUM(CAST(rc.cant AS FLOAT))     AS cant,
+    SUM(CAST(rc.importe AS FLOAT))  AS importe,
+    MIN(CAST(rc.renta1 AS FLOAT))   AS renta1,
     rc.comprob                      AS comprob
-FROM dbo.rentabilidad_cliente rc
+FROM dbo.rentabililad_x_cliente rc
 LEFT JOIN ClientesBase cb ON rc.ctacte = cb.codigo
 WHERE rc.fecha IS NOT NULL
   AND rc.fecha >= @ini AND rc.fecha < @fin
   AND (
         LTRIM(RTRIM(rc.cadneg)) IN ('2 - 1','2 - 2','2 - 3','2 - 4','2 - 5')
         OR CAST(rc.articulo AS VARCHAR(20)) IN ('8111612','8142146','8134261')
-  );
+  )
+GROUP BY
+    rc.ctacte, cb.cliente_grupo, cb.NombreCliente, rc.articulo,
+    LTRIM(RTRIM(rc.cadneg)), rc.comprob, rc.letra, rc.terminal, rc.numero;
 """
 
 _Q4 = Decimal("0.0001")

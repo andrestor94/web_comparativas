@@ -140,23 +140,45 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
         "total_unidades": None, "promedio_mensual": None, "cantidad_laboratorios": None,
     }
 
+    # Series + destacados para las 3 tarjetas del Home. Salen de los MISMOS dicts
+    # que ya se piden para los KPIs → costo CERO (no se llama get_evolucion, que es
+    # la query pesada de ~15s; el sparkline de inflación va por fetch en la Parte 2).
+    rentab_meses, rentab_labs = [], []
+    labs_meses, labs_labs = [], []
+    labs_cant_marcas = None
+    inflacion_mayor_aumento = None
+
     try:
         from web_comparativas.indicadores_service import get_summary as _renta_summary
         s = _renta_summary(desde=desde, hasta=hoy)
         kpis["perdida_total"] = s.get("utilidad_total")
         kpis["transacciones"] = s.get("total_transacciones")
         kpis["renta_promedio"] = s.get("rentabilidad_promedio")
+        rentab_meses = s.get("meses", [])
+        rentab_labs = s.get("laboratorios", [])
     except Exception:
         logger.exception("home: resumen de rentabilidad no disponible")
 
+    inflacion_evolucion = []
     try:
         from web_comparativas.indicadores_inflacion_service import get_resumen as _infl_resumen
         s = _infl_resumen(desde=desde, hasta=hoy)
         kpis["inflacion_indice"] = s.get("inflacion_pvp_indice")
         kpis["inflacion_ponderada"] = s.get("inflacion_pvp_ponderada_facturacion")
         kpis["productos_comparables"] = s.get("productos_comparables")
+        inflacion_mayor_aumento = s.get("mayor_aumento")
     except Exception:
         logger.exception("home: resumen de inflación no disponible")
+
+    # Serie del sparkline de inflación: LECTURA PRECALCULADA (instantánea), no get_evolucion
+    # (que recalcula mes a mes ~16s). Si la tabla aún no está poblada o falla, queda [] y
+    # el Home dibuja el fallback discreto en vez de "cargando…".
+    try:
+        from web_comparativas.indicadores_inflacion_service import get_evolucion_precalc
+        inflacion_evolucion = get_evolucion_precalc(desde=desde, hasta=hoy)
+    except Exception:
+        logger.exception("home: serie precalculada de inflación no disponible")
+        inflacion_evolucion = []
 
     try:
         from web_comparativas.indicadores_laboratorios_service import get_summary as _lab_summary
@@ -164,6 +186,9 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
         kpis["total_unidades"] = s.get("total_unidades")
         kpis["promedio_mensual"] = s.get("promedio_mensual")
         kpis["cantidad_laboratorios"] = s.get("cantidad_laboratorios")
+        labs_meses = s.get("meses", [])
+        labs_labs = s.get("laboratorios", [])
+        labs_cant_marcas = s.get("cantidad_marcas")
     except Exception:
         logger.exception("home: resumen de laboratorios no disponible")
 
@@ -186,13 +211,25 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
             logger.exception("home: chequeo de corrida pendiente falló")
             hay_pendiente = False
 
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/home.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
+            "data_freshness": corrida_activa_meta(),
             "kpis": kpis,
+            # Series para los sparklines (rentab + labs, server-side) y datos de la
+            # franja. El sparkline de inflación se carga por fetch en la Parte 2.
+            "rentab_meses": rentab_meses,
+            "labs_meses": labs_meses,
+            "rentab_labs": rentab_labs,
+            "labs_labs": labs_labs,
+            "labs_cant_marcas": labs_cant_marcas,
+            "inflacion_mayor_aumento": inflacion_mayor_aumento,
+            # Serie precalculada del sparkline de inflación (server-side, instantánea).
+            "inflacion_evolucion": inflacion_evolucion,
             "rango_desde": desde.isoformat(),
             "rango_hasta": hoy.isoformat(),
             "es_admin": es_admin,
@@ -204,14 +241,14 @@ def indicadores_home(request: Request, user: User = Depends(require_module("indi
 @router.get("/rentabilidad-negativa", response_class=HTMLResponse)
 def indicadores_rentabilidad(request: Request, user: User = Depends(require_module("indicadores_comerciales.rentabilidad_negativa"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/rentabilidad.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "rentabilidad",
@@ -222,14 +259,14 @@ def indicadores_rentabilidad(request: Request, user: User = Depends(require_modu
 @router.get("/informes-laboratorio", response_class=HTMLResponse)
 def indicadores_laboratorios(request: Request, user: User = Depends(require_module("indicadores_comerciales.informes_laboratorio"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/laboratorios.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "laboratorios",
@@ -240,14 +277,14 @@ def indicadores_laboratorios(request: Request, user: User = Depends(require_modu
 @router.get("/inflacion", response_class=HTMLResponse)
 def indicadores_inflacion(request: Request, user: User = Depends(require_module("indicadores_comerciales.inflacion"))):
     request.session["market_context"] = "indicadores"
-    from web_comparativas.indicadores_db import is_available
+    from web_comparativas.indicadores_db import corrida_activa_meta
     return templates.TemplateResponse(
         "indicadores/inflacion.html",
         {
             "request": request,
             "user": user,
             "market_context": "indicadores",
-            "sql_available": is_available(),
+            "data_freshness": corrida_activa_meta(),
             "default_desde": _year_start_str(),
             "default_hasta": _today_str(),
             "active_dashboard": "inflacion",

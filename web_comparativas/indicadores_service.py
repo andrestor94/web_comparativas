@@ -58,11 +58,30 @@ def _cache_set(key: str, data: list) -> None:
 
 CADNEG_VALUES = ("2 - 1", "2 - 2", "2 - 3", "2 - 4", "2 - 5")
 
-QUERY_NEGATIVE_ROWS = """
-DECLARE @FechaInicio DATE = ?;
-DECLARE @FechaFin DATE = ?;
-
-WITH ClientesBase AS (
+# ─────────────────────────────────────────────────────────────────────────────
+# RAMA OFF (vivo SQL Server) — FUENTE: dbo.rentabililad_x_cliente.
+#
+# IMPORTANTE: esta rama (flag INDICADORES_USE_SUMMARY apagado) lee de
+# `rentabililad_x_cliente`, que expone `renta1` REAL POR COMPROBANTE (validado por
+# negocio contra el Excel). La tabla vieja `rentabilidad_cliente` traía `renta1`
+# como un TOTAL agregado repetido por línea (no por transacción) y quedó descartada.
+# La utilidad Y el importe salen de esta misma fuente.
+#
+# GRANO DE TRANSACCIÓN = (ctacte + articulo + cadneg + comprob + letra + terminal +
+# numero). `renta1` es CONSTANTE dentro de ese grano (verificado: 0 transacciones con
+# renta1 múltiple) y VARÍA entre transacciones. cadneg DEBE ir en el grano: un mismo
+# comprobante puede tener 2 cadneg con renta1 distinto. Por eso:
+#   • utilidad de la transacción = renta1 ÚNICO  →  MIN(renta1) (NO SUM).
+#   • unidades/facturación = SUM(cant)/SUM(importe) de las líneas físicas de la transacción.
+# Filtro de negatividad a nivel transacción (renta1 < 0).
+#
+# CTE compartido (TxBase): detalle = 1 fila por transacción; agrupado = SUMA de las
+# utilidades por transacción por (mes+cliente+articulo+negocio). Σagrupado == Σdetalle
+# por construcción. NOTA: la rama ON/summary (_RENTNEG_*_SUMMARY_SQL) NO se tocó y
+# sigue leyendo la fuente vieja agregada — queda incorrecta hasta el rework de ETL.
+# ─────────────────────────────────────────────────────────────────────────────
+_TX_CTE_OFF = """
+ClientesBase AS (
     SELECT
         codigo,
         fantasia,
@@ -73,16 +92,16 @@ WITH ClientesBase AS (
         END AS NombreCliente
     FROM dbo.clientes
 ),
-RentabilidadBase AS (
+TxBase AS (
     SELECT
         rc.ctacte,
-        rc.fecha,
         rc.articulo,
         LTRIM(RTRIM(rc.cadneg)) AS cadneg,
-        rc.cant,
-        rc.importe AS facturacion,
-        rc.renta1 AS utilidad
-    FROM dbo.rentabilidad_cliente rc
+        MIN(rc.fecha) AS fecha,
+        SUM(CAST(ISNULL(rc.cant, 0) AS FLOAT))    AS Unidades,
+        SUM(CAST(ISNULL(rc.importe, 0) AS FLOAT)) AS Facturacion,
+        MIN(CAST(rc.renta1 AS FLOAT))             AS Utilidad
+    FROM dbo.rentabililad_x_cliente rc
     WHERE
         rc.fecha IS NOT NULL
         AND CAST(rc.fecha AS DATE) >= @FechaInicio
@@ -91,32 +110,40 @@ RentabilidadBase AS (
         AND LTRIM(RTRIM(rc.cadneg)) IN ('2 - 1', '2 - 2', '2 - 3', '2 - 4', '2 - 5')
         AND TRY_CONVERT(FLOAT, rc.renta1) < 0
         {cadneg_filter}
+    GROUP BY
+        rc.ctacte,
+        rc.articulo,
+        LTRIM(RTRIM(rc.cadneg)),
+        rc.comprob,
+        rc.letra,
+        rc.terminal,
+        rc.numero
 )
+"""
+
+
+QUERY_NEGATIVE_ROWS = """
+DECLARE @FechaInicio DATE = ?;
+DECLARE @FechaFin DATE = ?;
+
+WITH """ + _TX_CTE_OFF + """
 SELECT
-    rb.ctacte AS Cliente,
+    tx.ctacte AS Cliente,
     cb.cliente_grupo AS Cliente_Grupo,
     cb.NombreCliente AS Nombre_Cliente_Grupo,
-    rb.fecha,
-    rb.articulo AS Articulo,
-    rb.cadneg AS Negocio,
-    SUM(CAST(ISNULL(rb.cant, 0) AS FLOAT)) AS Unidades,
-    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) AS Facturacion,
-    SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) AS Utilidad,
+    tx.fecha,
+    tx.articulo AS Articulo,
+    tx.cadneg AS Negocio,
+    tx.Unidades AS Unidades,
+    tx.Facturacion AS Facturacion,
+    tx.Utilidad AS Utilidad,
     CASE
-        WHEN SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) = 0 THEN NULL
-        ELSE SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0)
+        WHEN tx.Facturacion = 0 THEN NULL
+        ELSE tx.Utilidad / NULLIF(tx.Facturacion, 0)
     END AS Rentabilidad
-FROM RentabilidadBase rb
-LEFT JOIN ClientesBase cb ON rb.ctacte = cb.codigo
-GROUP BY
-    rb.ctacte,
-    cb.cliente_grupo,
-    cb.NombreCliente,
-    rb.fecha,
-    rb.articulo,
-    rb.cadneg
-HAVING SUM(CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) < 0
-ORDER BY rb.fecha DESC, Utilidad ASC;
+FROM TxBase tx
+LEFT JOIN ClientesBase cb ON tx.ctacte = cb.codigo
+ORDER BY tx.fecha DESC, Utilidad ASC;
 """
 
 
@@ -124,73 +151,45 @@ QUERY_GROUPED_ROWS = """
 DECLARE @FechaInicio DATE = ?;
 DECLARE @FechaFin DATE = ?;
 
-WITH ClientesBase AS (
-    SELECT
-        codigo,
-        fantasia,
-        cliente_grupo,
-        CASE
-            WHEN nombre_grupo = 'SIN GRUPO' OR nombre_grupo IS NULL THEN fantasia
-            ELSE nombre_grupo
-        END AS NombreCliente
-    FROM dbo.clientes
-),
-RentabilidadBase AS (
-    SELECT
-        rc.ctacte,
-        rc.fecha,
-        rc.articulo,
-        LTRIM(RTRIM(rc.cadneg)) AS cadneg,
-        rc.cant,
-        rc.importe AS facturacion,
-        rc.renta1 AS utilidad
-    FROM dbo.rentabilidad_cliente rc
-    WHERE
-        rc.fecha IS NOT NULL
-        AND CAST(rc.fecha AS DATE) >= @FechaInicio
-        AND CAST(rc.fecha AS DATE) < @FechaFin
-        AND UPPER(LTRIM(RTRIM(ISNULL(rc.comprob, '')))) <> 'NC'
-        AND LTRIM(RTRIM(rc.cadneg)) IN ('2 - 1', '2 - 2', '2 - 3', '2 - 4', '2 - 5')
-        {cadneg_filter}
-)
+WITH """ + _TX_CTE_OFF + """
 SELECT
-    rb.ctacte AS Cliente,
+    tx.ctacte AS Cliente,
     cb.cliente_grupo AS Cliente_Grupo,
     cb.NombreCliente AS Nombre_Cliente_Grupo,
-    DATEFROMPARTS(YEAR(rb.fecha), MONTH(rb.fecha), 1) AS fecha,
-    rb.articulo AS Articulo,
-    MIN(rb.cadneg) AS Negocio,
-    SUM(CAST(ISNULL(rb.cant, 0) AS FLOAT)) AS Unidades,
-    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) AS Facturacion,
-    SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) AS Utilidad,
+    DATEFROMPARTS(YEAR(tx.fecha), MONTH(tx.fecha), 1) AS fecha,
+    tx.articulo AS Articulo,
+    tx.cadneg AS Negocio,
+    SUM(tx.Unidades) AS Unidades,
+    SUM(tx.Facturacion) AS Facturacion,
+    SUM(tx.Utilidad) AS Utilidad,
     CASE
-        WHEN SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) = 0 THEN NULL
-        ELSE SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0)
+        WHEN SUM(tx.Facturacion) = 0 THEN NULL
+        ELSE SUM(tx.Utilidad) / NULLIF(SUM(tx.Facturacion), 0)
     END AS Rentabilidad
-FROM RentabilidadBase rb
-LEFT JOIN ClientesBase cb ON rb.ctacte = cb.codigo
+FROM TxBase tx
+LEFT JOIN ClientesBase cb ON tx.ctacte = cb.codigo
 GROUP BY
-    rb.ctacte,
+    tx.ctacte,
     cb.cliente_grupo,
     cb.NombreCliente,
-    DATEFROMPARTS(YEAR(rb.fecha), MONTH(rb.fecha), 1),
-    rb.articulo
-HAVING
-    SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)) <> 0
-    AND SUM(DISTINCT CAST(ISNULL(rb.utilidad, 0) AS FLOAT)) / NULLIF(SUM(CAST(ISNULL(rb.facturacion, 0) AS FLOAT)), 0) < 0
+    DATEFROMPARTS(YEAR(tx.fecha), MONTH(tx.fecha), 1),
+    tx.articulo,
+    tx.cadneg
 ORDER BY fecha DESC, Utilidad ASC;
 """
 
 
 QUERY_ARTICLES_BASE = """
 SELECT
-    codigo AS articulo,
-    nombre AS marca,
-    lab_nombre AS laboratorio,
-    monodroga AS principio_activo,
-    familia
-FROM dbo.vsl_art_alfabeta_full
-WHERE codigo IN ({placeholders});
+    a.codigo     AS articulo,
+    f.marca      AS marca,
+    a.descrip    AS descripcion,
+    f.lab_nombre AS laboratorio,
+    f.monodroga  AS principio_activo,
+    f.familia    AS familia
+FROM dbo.articulos a
+LEFT JOIN dbo.vsl_art_alfabeta_full f ON f.codigo = a.codigo
+WHERE a.codigo IN ({placeholders});
 """
 
 
@@ -300,6 +299,21 @@ def _build_grouped_query(cadneg: Optional[str]) -> tuple:
 # NO toca la rama OFF.
 # ---------------------------------------------------------------------------
 
+# ─────────────────────────────────────────────────────────────────────────────
+# RAMA ON / SUMMARY — lee ind_rentabilidad_lineas YA PRE-DEDUPLICADA al grano de
+# transacción por el ETL (camino b: ver indicadores_etl_rentabilidad.py). Cada fila
+# de la tabla = 1 transacción con renta1 UNA sola vez (cant/importe sumados).
+#
+# ⚠️ ACOPLAMIENTO ETL↔LECTURA: estas consultas ASUMEN una tabla pre-deduplicada.
+# Solo son correctas leyendo una corrida generada por el ETL nuevo (fuente
+# rentabililad_x_cliente). NO volver a cargar ind_rentabilidad_lineas con un ETL que
+# escriba a nivel línea: el detalle (sin GROUP BY) y el agrupado (SUM(renta1)) sobre
+# datos a nivel línea volverían a sobre-contar. ETL y read-SQL se mueven JUNTOS.
+# Espejan exactamente la rama OFF (_TX_CTE_OFF): mismo grano, misma utilidad.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# DETALLE: la tabla ya trae 1 fila por transacción -> SELECT directo, SIN GROUP BY
+# (agrupar y SUM(renta1) volvería a colapsar/sobre-contar transacciones).
 _RENTNEG_DETALLE_SUMMARY_SQL = """
 SELECT
     ctacte            AS "Cliente",
@@ -308,11 +322,11 @@ SELECT
     fecha,
     articulo          AS "Articulo",
     cadneg            AS "Negocio",
-    SUM(CAST(COALESCE(cant, 0) AS FLOAT))    AS "Unidades",
-    SUM(CAST(COALESCE(importe, 0) AS FLOAT)) AS "Facturacion",
-    SUM(CAST(COALESCE(renta1, 0) AS FLOAT))  AS "Utilidad",
-    CASE WHEN SUM(CAST(COALESCE(importe, 0) AS FLOAT)) = 0 THEN NULL
-         ELSE SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
+    CAST(COALESCE(cant, 0) AS FLOAT)    AS "Unidades",
+    CAST(COALESCE(importe, 0) AS FLOAT) AS "Facturacion",
+    CAST(COALESCE(renta1, 0) AS FLOAT)  AS "Utilidad",
+    CASE WHEN CAST(COALESCE(importe, 0) AS FLOAT) = 0 THEN NULL
+         ELSE CAST(COALESCE(renta1, 0) AS FLOAT) / NULLIF(CAST(importe AS FLOAT), 0)
     END AS "Rentabilidad"
 FROM ind_rentabilidad_lineas
 WHERE import_run_id = :corrida
@@ -321,11 +335,12 @@ WHERE import_run_id = :corrida
   AND cadneg IN :cadnegs
   AND CAST(renta1 AS FLOAT) < 0
   {cadneg_filter}
-GROUP BY ctacte, cliente_grupo, nombre_cliente, fecha, articulo, cadneg
-HAVING SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) < 0
 ORDER BY fecha DESC, "Utilidad" ASC
 """
 
+# AGRUPADO: SUMA de las utilidades por transacción (renta1 ya una vez por fila) por
+# (mes + cliente + articulo + cadneg). SUM(renta1) directo — el viejo SUM(DISTINCT)
+# queda ELIMINADO (sub-contaba). Negocio = cadneg (está en el grano), no MIN.
 _RENTNEG_AGRUPADO_SUMMARY_SQL = """
 SELECT
     ctacte            AS "Cliente",
@@ -333,22 +348,21 @@ SELECT
     nombre_cliente    AS "Nombre_Cliente_Grupo",
     substr(CAST(fecha AS VARCHAR(32)), 1, 7) || '-01' AS fecha,
     articulo          AS "Articulo",
-    MIN(cadneg)       AS "Negocio",
-    SUM(CAST(COALESCE(cant, 0) AS FLOAT))             AS "Unidades",
-    SUM(CAST(COALESCE(importe, 0) AS FLOAT))          AS "Facturacion",
-    SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT))  AS "Utilidad",
+    cadneg            AS "Negocio",
+    SUM(CAST(COALESCE(cant, 0) AS FLOAT))    AS "Unidades",
+    SUM(CAST(COALESCE(importe, 0) AS FLOAT)) AS "Facturacion",
+    SUM(CAST(COALESCE(renta1, 0) AS FLOAT))  AS "Utilidad",
     CASE WHEN SUM(CAST(COALESCE(importe, 0) AS FLOAT)) = 0 THEN NULL
-         ELSE SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT))
+         ELSE SUM(CAST(COALESCE(renta1, 0) AS FLOAT)) / NULLIF(SUM(CAST(COALESCE(importe, 0) AS FLOAT)), 0)
     END AS "Rentabilidad"
 FROM ind_rentabilidad_lineas
 WHERE import_run_id = :corrida
   AND fecha >= :desde AND fecha < :hasta
   AND UPPER(LTRIM(RTRIM(COALESCE(comprob, '')))) <> 'NC'
   AND cadneg IN :cadnegs
+  AND CAST(renta1 AS FLOAT) < 0
   {cadneg_filter}
-GROUP BY ctacte, cliente_grupo, nombre_cliente, substr(CAST(fecha AS VARCHAR(32)), 1, 7) || '-01', articulo
-HAVING SUM(CAST(COALESCE(importe, 0) AS FLOAT)) <> 0
-   AND SUM(DISTINCT CAST(COALESCE(renta1, 0) AS FLOAT)) / SUM(CAST(COALESCE(importe, 0) AS FLOAT)) < 0
+GROUP BY ctacte, cliente_grupo, nombre_cliente, substr(CAST(fecha AS VARCHAR(32)), 1, 7) || '-01', articulo, cadneg
 ORDER BY fecha DESC, "Utilidad" ASC
 """
 
@@ -386,15 +400,19 @@ def _get_article_map_summary(articulos: list) -> dict:
         return {}
     article_map = {}
     stmt = text(
-        "SELECT articulo, marca, laboratorio, principio_activo, familia "
+        "SELECT articulo, marca, descripcion, laboratorio, principio_activo, familia "
         "FROM ind_articulos WHERE import_run_id = :corrida AND articulo IN :arts"
     ).bindparams(bindparam("arts", expanding=True))
     try:
         with engine.connect() as conn:
             for items in _chunk(arts):
-                for articulo, marca, laboratorio, principio_activo, familia in conn.execute(stmt, {"corrida": corrida, "arts": items}):
+                for articulo, marca, descripcion, laboratorio, principio_activo, familia in conn.execute(stmt, {"corrida": corrida, "arts": items}):
                     article_map[str(int(articulo))] = {
-                        "marca": _norm_text(marca) or str(int(articulo)),
+                        # Nombre de producto: SIEMPRE la descripcion del maestro
+                        # (dbo.articulos.descrip, presente en el 100% del universo); la marca
+                        # queda como fallback (en ~167 articulos traia el nombre del laboratorio
+                        # y tapaba la descripcion real) y el codigo solo como ultimo recurso.
+                        "marca": _norm_text(descripcion) or _norm_text(marca) or str(int(articulo)),
                         "laboratorio": _norm_text(laboratorio) or "SIN LABORATORIO",
                         "principio_activo": _norm_text(principio_activo) or "",
                         "familia": _norm_text(familia) or "SIN FAMILIA",
@@ -440,7 +458,9 @@ def get_article_map(articulos: list) -> dict:
                 cursor.execute(QUERY_ARTICLES_BASE.format(placeholders=placeholders), items)
                 for row in _rows_to_dicts(cursor):
                     article_map[str(row["articulo"])] = {
-                        "marca": _norm_text(row.get("marca")) or str(row["articulo"]),
+                        # Misma prelación que la rama ON: descripcion del producto SIEMPRE,
+                        # marca como fallback, codigo como último recurso.
+                        "marca": _norm_text(row.get("descripcion")) or _norm_text(row.get("marca")) or str(row["articulo"]),
                         "laboratorio": _norm_text(row.get("laboratorio")) or "SIN LABORATORIO",
                         "principio_activo": _norm_text(row.get("principio_activo")) or "",
                         "familia": _norm_text(row.get("familia")) or "SIN FAMILIA",

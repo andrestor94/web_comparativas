@@ -65,7 +65,17 @@ const IND = (() => {
       th.addEventListener('click', () => _sortDetail(th.dataset.sort));
     });
 
-    _checkHealth();
+    // Botón "Agrupar por mes" <-> dropdown MODO AGRUPACIÓN: si cambia el dropdown,
+    // el botón refleja el estado (y viceversa). No duplica lógica: ambos usan f-modo.
+    const modoSel = $('f-modo');
+    if (modoSel) modoSel.addEventListener('change', _syncAgrupadoControls);
+    _syncAgrupadoControls();
+
+    // Semáforo de Fusion reemplazado por el indicador de frescura de datos
+    // (server-side, partial _ind_data_freshness.html). Ya no se chequea /health
+    // en el arranque: evitaba el "Verificando conexión SQL Server…" colgado en
+    // modo summary. _checkHealth() queda definida abajo pero sin invocar.
+    // _checkHealth();
   }
 
   // ── Health check SQL ────────────────────────────────────────────────────────
@@ -196,6 +206,38 @@ const IND = (() => {
     }
   }
 
+  // ── Toggle "Agrupar por mes" (atajo del dropdown f-modo) ─────────────────────
+  // No duplica lógica: togglea el MISMO f-modo que el dropdown MODO AGRUPACIÓN y
+  // dispara el mismo refetch que "Aplicar" con el modo cambiado, recargando el
+  // detalle (que ya está visible al togglear) para mostrar el modo nuevo.
+  function toggleAgrupado() {
+    if (_loading) return;
+    const sel = $('f-modo');
+    if (!sel) return;
+    sel.value = (sel.value === 'agrupado') ? 'detalle' : 'agrupado';
+    _syncAgrupadoControls();
+    applyFilters().then(() => loadDetail());
+  }
+
+  // Sincroniza botón + badge con el estado actual de f-modo. Lo llaman el toggle,
+  // el listener 'change' del dropdown y los renders, para que botón y dropdown
+  // queden siempre reflejando el mismo estado.
+  function _syncAgrupadoControls() {
+    const agr = ($('f-modo')?.value === 'agrupado');
+    const btn = $('btn-toggle-agrupado');
+    if (btn) {
+      const lbl = $('btn-toggle-agrupado-label');
+      if (lbl) lbl.textContent = agr ? 'Ver detalle' : 'Agrupar por mes';
+      const icon = btn.querySelector('i');
+      if (icon) icon.className = (agr ? 'bi bi-list-ul' : 'bi bi-calendar-month') + ' me-1';
+      btn.classList.toggle('ind-btn--primary', agr);
+      btn.classList.toggle('ind-btn--ghost', !agr);
+      btn.title = agr ? 'Volver a ver cada transacción' : 'Agrupar transacciones por mes';
+    }
+    const badge = $('badge-modo');
+    if (badge) badge.textContent = agr ? 'Agrupado' : 'Detalle';
+  }
+
   // ── Cargar detalle (lazy, por botón) ────────────────────────────────────────
   async function loadDetail() {
     if (_detailLoaded) return;
@@ -234,8 +276,11 @@ const IND = (() => {
       if (btn) btn.style.display = 'none';
       const csvBtn = $('btn-export-csv');
       const printBtn = $('btn-print');
+      const toggleBtn = $('btn-toggle-agrupado');
       if (csvBtn) csvBtn.style.display = '';
       if (printBtn) printBtn.style.display = '';
+      if (toggleBtn) toggleBtn.style.display = '';
+      _syncAgrupadoControls();
     } catch (err) {
       const tbody = $('tbody-detalle');
       if (tbody) {
@@ -380,6 +425,11 @@ const IND = (() => {
     if (emptyEl) emptyEl.style.display = 'none';
     if (_charts.evolucion) _charts.evolucion.destroy();
 
+    // Presentación vía IC_CHART_THEME (rojo = pérdida); fallback al estilo previo
+    const T = window.IC_CHART_THEME;
+    const lineColor = T ? T.colors.red : '#d93025';
+    const fillColor = T ? T.alpha(T.colors.red, 0.06) : 'rgba(217,48,37,0.07)';
+
     _charts.evolucion = new Chart(canvas, {
       type: 'line',
       data: {
@@ -388,11 +438,12 @@ const IND = (() => {
           label: 'Utilidad (ARS)',
           data: meses.map(m => m.utilidad),
           fill: true,
-          borderColor: '#d93025',
-          backgroundColor: 'rgba(217,48,37,0.07)',
-          borderWidth: 2.5,
-          pointBackgroundColor: '#d93025',
-          pointRadius: 4,
+          borderColor: lineColor,
+          backgroundColor: fillColor,
+          borderWidth: 2,
+          pointBackgroundColor: lineColor,
+          pointRadius: 2.5,
+          pointHoverRadius: 5,
           tension: 0.35,
         }],
       },
@@ -404,8 +455,8 @@ const IND = (() => {
           tooltip: { callbacks: { label: ctx => ' ' + _fmtARSFull(ctx.raw) } },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-          y: { ticks: { font: { size: 11 }, callback: v => _fmtARS(v) }, grid: { color: 'rgba(0,0,0,0.05)' } },
+          x: T ? T.gridX() : { grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: T ? T.gridY(v => _fmtARS(v)) : { ticks: { font: { size: 11 }, callback: v => _fmtARS(v) }, grid: { color: 'rgba(0,0,0,0.05)' } },
         },
       },
     });
@@ -425,7 +476,7 @@ const IND = (() => {
     canvas.style.display = '';
     if (emptyEl) emptyEl.style.display = 'none';
     if (_charts.labs) _charts.labs.destroy();
-    _charts.labs = _buildHBarChart(canvas, labs, '#06486f');
+    _charts.labs = _buildHBarChart(canvas, labs, window.IC_CHART_THEME?.colors.navy || '#06486f');
   }
 
   // ── Gráfico top 12 labs (sección laboratorios) ─────────────────────────────
@@ -434,7 +485,7 @@ const IND = (() => {
     if (!canvas) return;
     const labs = (_summary?.laboratorios || []).slice(0, 12);
     if (_charts.labs2) _charts.labs2.destroy();
-    _charts.labs2 = _buildHBarChart(canvas, labs, '#d93025');
+    _charts.labs2 = _buildHBarChart(canvas, labs, window.IC_CHART_THEME?.colors.red || '#d93025');
   }
 
   // ── Gráfico clientes ────────────────────────────────────────────────────────
@@ -443,15 +494,23 @@ const IND = (() => {
     if (!canvas) return;
     const cli = (_summary?.clientes || []).slice(0, 12);
     if (_charts.clientes) _charts.clientes.destroy();
-    _charts.clientes = _buildHBarChart(canvas, cli, '#5770b0');
+    _charts.clientes = _buildHBarChart(canvas, cli, window.IC_CHART_THEME?.colors.blue || '#5770b0');
   }
 
   function _buildHBarChart(canvas, items, color) {
+    // Rampa de opacidad sobre el color de marca (IC_CHART_THEME); fallback plano
+    const T = window.IC_CHART_THEME;
     return new Chart(canvas, {
       type: 'bar',
       data: {
         labels: items.map(i => i.name.length > 30 ? i.name.slice(0, 29) + '…' : i.name),
-        datasets: [{ data: items.map(i => i.value), backgroundColor: color + 'cc', borderColor: color, borderWidth: 1, borderRadius: 4 }],
+        datasets: [{
+          data: items.map(i => i.value),
+          backgroundColor: T ? T.ramp(color, items.length, 0.95, 0.45) : color + 'cc',
+          borderWidth: 0,
+          borderRadius: 4,
+          maxBarThickness: 18,
+        }],
       },
       options: {
         indexAxis: 'y',
@@ -462,8 +521,8 @@ const IND = (() => {
           tooltip: { callbacks: { label: ctx => ' ' + _fmtARSFull(ctx.raw) } },
         },
         scales: {
-          x: { ticks: { font: { size: 10 }, callback: v => _fmtARS(v) }, grid: { color: 'rgba(0,0,0,0.04)' } },
-          y: { ticks: { font: { size: 11 } }, grid: { display: false } },
+          x: T ? T.gridY(v => _fmtARS(v)) : { ticks: { font: { size: 10 }, callback: v => _fmtARS(v) }, grid: { color: 'rgba(0,0,0,0.04)' } },
+          y: T ? T.gridX() : { ticks: { font: { size: 11 } }, grid: { display: false } },
         },
       },
     });
@@ -647,8 +706,10 @@ const IND = (() => {
     if (footer) footer.style.display = 'none';
     const csvBtn = $('btn-export-csv');
     const printBtn = $('btn-print');
+    const toggleBtn = $('btn-toggle-agrupado');
     if (csvBtn) csvBtn.style.display = 'none';
     if (printBtn) printBtn.style.display = 'none';
+    if (toggleBtn) toggleBtn.style.display = 'none';
   }
 
   function _resetDetailSection() {
@@ -667,8 +728,10 @@ const IND = (() => {
     if (footer) footer.style.display = 'none';
     const csvBtn = $('btn-export-csv');
     const printBtn = $('btn-print');
+    const toggleBtn = $('btn-toggle-agrupado');
     if (csvBtn) csvBtn.style.display = 'none';
     if (printBtn) printBtn.style.display = 'none';
+    if (toggleBtn) toggleBtn.style.display = 'none';
   }
 
   // ── Info período ────────────────────────────────────────────────────────────
@@ -869,6 +932,7 @@ const IND = (() => {
     exportCSV,
     loadDetail,
     printReport,
+    toggleAgrupado,
     _loadDetailRetry,
   };
 })();
