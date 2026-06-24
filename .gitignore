@@ -16,9 +16,16 @@ venv/
 env/
 
 # --- Bases de datos locales ---
-*.db
+# OJO: usar *.db* (con wildcard final) para cubrir tambien los sidecar/copias
+# de SQLite: app.db-journal, app.db-wal, app.db-shm, app.db.backup, etc.
+# Si esto vuelve a quedar en "*.db" pelado, esos archivos pesados se cuelan al
+# arbol y, con --reload, tildan la maquina.
+*.db*
 *.sqlite3
 *.sqlite
+
+# --- Backups locales de DB (deben vivir FUERA del arbol del proyecto) ---
+_backups_db_local/
 
 # --- Variables de entorno y secretos ---
 .env
