@@ -431,11 +431,34 @@ def admin_import_finalize(
         db.commit()
 
         logger.info("[IND][IMPORT] Run %d finalized: %s", run.id, rows_por_tabla)
+
+        # 5ª tabla summary (sparkline "Evolución 12M" del Home): se RECALCULA acá, en el
+        # server, a partir de las tablas recién recibidas (pvp/facturación/artículos),
+        # keyed por ESTA corrida. El upload por chunks transporta solo 4 tablas y el ETL
+        # no corre en prod, así que sin este paso ind_inflacion_evolucion_mensual nunca se
+        # puebla allá (sparkline "sin datos aún"). El servicio lo soporta pre-aprobación
+        # (import_run_id fuerza la rama summary scoped a esa corrida). Best-effort:
+        #   - usa su propia conexión (engine) sobre datos YA commiteados de esta corrida,
+        #   - es idempotente (DELETE+INSERT de esta corrida, no duplica en reintentos),
+        #   - si falla NO corta el finalize ni la aprobación (el Home degrada al fallback).
+        evolucion_filas = None
+        try:
+            from web_comparativas.indicadores_inflacion_service import poblar_evolucion_precalc
+            hoy = dt.date.today()
+            desde = dt.date(hoy.year - 1, hoy.month, 1)  # últimos 12 meses, espeja Home/ETL
+            evolucion_filas = poblar_evolucion_precalc(run.id, desde, hoy)
+            logger.info("[IND][IMPORT] Run %d: evolución de inflación precalculada (%s filas)",
+                        run.id, evolucion_filas)
+        except Exception:
+            logger.exception("[IND][IMPORT] Run %d: no se pudo precalcular la evolución de "
+                             "inflación (no bloquea el finalize ni la aprobación)", run.id)
+
         return {
             "ok": True,
             "import_run_id": run.id,
             "status": "pending_approval",
             "rows_por_tabla": rows_por_tabla,
+            "evolucion_filas": evolucion_filas,
         }
     except Exception as e:
         db.rollback()
