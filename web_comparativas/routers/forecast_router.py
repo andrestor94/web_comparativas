@@ -2218,6 +2218,51 @@ def _build_group_unit(grupo: str, recs: list[dict]) -> dict:
     }
 
 
+# ── Agrupación por dimensión alternativa (perfil / negocio / subnegocio) ──────
+_VALID_DIMENSIONS = ("grupo", "perfil", "neg", "subneg")
+# dimension → clave en el dict de _cr_to_dict
+_DIM_DICT_KEY = {"perfil": "perfil", "neg": "negocio", "subneg": "subnegocio"}
+# dimension → columna del modelo ForecastChangeRequest (para la mutación)
+_DIM_MODEL_COL = {"perfil": "perfil", "neg": "neg", "subneg": "subneg"}
+# dimension → label del bucket NULL/vacío
+_DIM_SIN_LABEL = {"perfil": "Sin perfil", "neg": "Sin negocio", "subneg": "Sin subnegocio"}
+
+
+def _build_dimension_units(records: list[dict], dimension: str) -> list[dict]:
+    """Agrupa por una dimensión del registro (perfil/neg/subneg).
+
+    Clave de bucket = LOWER(TRIM(valor)); el label/value canónico es el primer
+    valor original no vacío visto. NULL/vacío/'—' caen en un ÚNICO bucket "Sin X"
+    (value canónico ""). Reutiliza _build_group_unit para los agregados (impacto
+    baja/suba/neto, estado consolidado, conteos). Orden: por |impacto neto| desc;
+    el bucket "Sin X" SIEMPRE al final.
+    """
+    dkey = _DIM_DICT_KEY[dimension]
+    sin_label = _DIM_SIN_LABEL[dimension]
+    buckets: dict[str, dict] = {}  # norm -> {"label", "value", "recs"}
+    for r in records:
+        raw = str(r.get(dkey) or "").strip()
+        if raw in ("", "—"):
+            norm, label, value = "", sin_label, ""
+        else:
+            norm, label, value = raw.lower(), raw, raw
+        b = buckets.get(norm)
+        if b is None:
+            b = buckets[norm] = {"label": label, "value": value, "recs": []}
+        b["recs"].append(r)
+
+    units: list[dict] = []
+    for norm, b in buckets.items():
+        unit = _build_group_unit(b["label"], b["recs"])
+        unit["value"] = b["value"]       # valor canónico para la mutación server-side
+        unit["is_sin"] = (norm == "")
+        units.append(unit)
+
+    # |impacto neto| desc; "Sin X" al final (is_sin True ordena después).
+    units.sort(key=lambda u: (u["is_sin"], -abs(u.get("impacto_neto") or 0.0)))
+    return units
+
+
 @router.get("/api/approvals/grouped", response_class=JSONResponse)
 def api_approvals_grouped(
     request: Request,
@@ -2234,11 +2279,13 @@ def api_approvals_grouped(
     change_type: Optional[str] = Query(None),
     impacto: Optional[str] = Query(None),
     alto_impacto: Optional[str] = Query(None),
+    dimension: Optional[str] = Query("grupo"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
 ):
-    """Modificaciones agrupadas por grupo de clientes (clientes sueltos al final).
-    Paginación por UNIDAD (un grupo entero = 1 unidad → nunca se parte).
+    """Modificaciones agrupadas por la DIMENSIÓN elegida (una a la vez):
+    grupo de clientes (default) | perfil | negocio | subnegocio.
+    Paginación por UNIDAD (una unidad nunca se parte).
     Lectura: Admin, Gerente y Auditor.
     KPIs/matriz se calculan sobre TODO el conjunto filtrado."""
     _require_aprobaciones_view(user)
@@ -2246,13 +2293,18 @@ def api_approvals_grouped(
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
 
+    dim = (dimension or "grupo").strip().lower()
+    if dim not in _VALID_DIMENSIONS:
+        dim = "grupo"  # fallback robusto ante valores inválidos
+
     filters = dict(
         estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
         perfil=perfil, negocio=negocio, subneg=subneg, articulo=articulo, period=period,
         change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
     )
     try:
-        group_map = svc.get_client_group_map()
+        # El mapa cliente→grupo solo hace falta para la dimensión "grupo".
+        group_map = svc.get_client_group_map() if dim == "grupo" else None
         with SessionLocal() as session:
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
             records = [_cr_to_dict(r, group_map) for r in rows]
@@ -2264,22 +2316,29 @@ def api_approvals_grouped(
             _impacts = None
         kpis = _compute_approval_kpis(records, override_impacts=_impacts or None)
 
-        # Agrupar: grupo → registros ; sin grupo → sueltos
-        grouped: dict[str, list[dict]] = {}
-        singles: list[dict] = []
-        for r in records:
-            g = (r.get("grupo") or "").strip()
-            if g:
-                grouped.setdefault(g, []).append(r)
-            else:
-                r.pop("_created_sort", None)
-                singles.append(r)
+        if dim == "grupo":
+            # Comportamiento histórico: grupo → registros ; sin grupo → sueltos.
+            grouped: dict[str, list[dict]] = {}
+            singles: list[dict] = []
+            for r in records:
+                g = (r.get("grupo") or "").strip()
+                if g:
+                    grouped.setdefault(g, []).append(r)
+                else:
+                    r.pop("_created_sort", None)
+                    singles.append(r)
 
-        units: list[dict] = []
-        for gname in sorted(grouped.keys(), key=lambda s: s.lower()):
-            units.append(_build_group_unit(gname, grouped[gname]))
-        for r in singles:
-            units.append({"type": "single", "record": r})
+            units: list[dict] = []
+            for gname in sorted(grouped.keys(), key=lambda s: s.lower()):
+                units.append(_build_group_unit(gname, grouped[gname]))
+            for r in singles:
+                units.append({"type": "single", "record": r})
+            total_groups = len(grouped)
+        else:
+            # perfil / negocio / subnegocio: buckets por la columna del registro
+            # (sin sección de "sueltos"; NULL/vacío → bucket "Sin X" al final).
+            units = _build_dimension_units(records, dim)
+            total_groups = len(units)
 
         total_units = len(units)
         total_records = len(records)
@@ -2289,12 +2348,13 @@ def api_approvals_grouped(
 
         return JSONResponse({
             "ok": True,
+            "dimension": dim,
             "page": page,
             "page_size": page_size,
             "pages": pages,
             "total_units": total_units,
             "total_records": total_records,
-            "total_groups": len(grouped),
+            "total_groups": total_groups,
             "kpis": kpis,
             "high_impact_threshold": _HIGH_IMPACT_THRESHOLD,
             "units": page_units,
@@ -2306,7 +2366,9 @@ def api_approvals_grouped(
 
 
 class _GroupReviewPayload(BaseModel):
-    grupo: str
+    grupo: Optional[str] = None       # dimension=grupo: nombre del grupo (compat)
+    dimension: Optional[str] = "grupo"  # grupo | perfil | neg | subneg
+    value: Optional[str] = None       # valor canónico del bucket (dimensiones ≠ grupo; "" = "Sin X")
     motivo: Optional[str] = Field(default=None, max_length=2000)
     # Contexto/filtros actuales: la acción solo afecta lo que el Admin está viendo
     estado: Optional[str] = "todos"
@@ -2333,26 +2395,45 @@ def _group_filters(payload: "_GroupReviewPayload") -> dict:
 
 
 def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) -> int:
-    """Aplica revisión (aprobado/rechazado) a las modificaciones PENDIENTES del grupo,
-    dentro del contexto/filtros actuales. No toca registros ya decididos."""
+    """Aplica revisión (aprobado/rechazado) a las modificaciones PENDIENTES de la
+    UNIDAD elegida (grupo de clientes o bucket de perfil/negocio/subnegocio),
+    dentro del contexto/filtros actuales. Re-deriva el conjunto en el servidor
+    (no recibe IDs del front). No toca registros ya decididos."""
     from web_comparativas.models import SessionLocal
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
-    gkey = (payload.grupo or "").strip().lower()
-    if not gkey:
-        raise HTTPException(400, "Grupo no especificado.")
+
+    dim = (payload.dimension or "grupo").strip().lower()
+    if dim not in _VALID_DIMENSIONS:
+        dim = "grupo"
     motivo = (payload.motivo or "").strip() or None
-    group_map = svc.get_client_group_map()
     filters = _group_filters(payload)
+
+    if dim == "grupo":
+        gkey = (payload.grupo or payload.value or "").strip().lower()
+        if not gkey:
+            raise HTTPException(400, "Grupo no especificado.")
+        group_map = svc.get_client_group_map()
+    else:
+        if payload.value is None:
+            raise HTTPException(400, "Valor de agrupación no especificado.")
+        vkey = (payload.value or "").strip().lower()  # "" → bucket "Sin X" (NULL/vacío)
+        col = _DIM_MODEL_COL[dim]
+
     n = 0
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
         for cr in rows:
             if cr.status != "pendiente":
                 continue
-            g = _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map)
-            if (g or "").strip().lower() != gkey:
-                continue
+            if dim == "grupo":
+                g = _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map)
+                if (g or "").strip().lower() != gkey:
+                    continue
+            else:
+                colval = str(getattr(cr, col, None) or "").strip().lower()
+                if colval != vkey:  # vkey "" matchea NULL/vacío (Sin X)
+                    continue
             _apply_review(session, cr, status=status, user=user, motivo=motivo)
             n += 1
         session.commit()
@@ -2369,7 +2450,7 @@ def api_approvals_group_approve(
     _require_aprobaciones_edit(user)
     try:
         n = _review_group(payload, status="aprobado", user=user)
-        return JSONResponse({"ok": True, "grupo": payload.grupo, "status": "aprobado", "afectados": n})
+        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value, "status": "aprobado", "afectados": n})
     except HTTPException:
         raise
     except Exception as exc:
@@ -2389,7 +2470,7 @@ def api_approvals_group_reject(
         raise HTTPException(400, "Debe indicar un motivo para rechazar el grupo.")
     try:
         n = _review_group(payload, status="rechazado", user=user)
-        return JSONResponse({"ok": True, "grupo": payload.grupo, "status": "rechazado", "afectados": n})
+        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value, "status": "rechazado", "afectados": n})
     except HTTPException:
         raise
     except Exception as exc:
