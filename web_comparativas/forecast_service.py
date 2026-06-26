@@ -1404,6 +1404,74 @@ def get_client_perfil_map() -> dict[str, str]:
     return {k: v["perfil"] for k, v in dim.items() if v.get("perfil")}
 
 
+# ── Mapa subnegocio → negocio (derivación 1:1 confirmada en el maestro) ───────
+_SUBNEG_NEG_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_SUBNEG_NEG_TTL = 600  # segundos
+
+
+def build_subneg_neg_map() -> dict[str, str]:
+    """Mapa subnegocio(normalizado lower/trim) → negocio.
+
+    MISMA fuente y criterio que build_client_dim_map: en producción usa PG
+    forecast_valorizado; en local el parquet df_valorizado. La relación subneg→neg
+    es 1:1 en el maestro (verificado). Best-effort: {} si la fuente falla.
+
+    Solo se incluyen subnegocios con un ÚNICO negocio asociado: si un subneg fuese
+    ambiguo (>1 neg) se OMITE, y subnegocios sin match (p. ej. 'General') tampoco
+    aparecen → el lookup devuelve None y el registro queda con neg NULL sin romper.
+    """
+    out: dict[str, str] = {}
+    is_pg = engine is not None and "postgresql" in str(engine.url)
+    try:
+        if is_pg:
+            df = _query_agg(
+                "SELECT LOWER(TRIM(subneg)) AS s, MAX(TRIM(neg)) AS neg "
+                "FROM forecast_valorizado "
+                "WHERE subneg IS NOT NULL AND TRIM(subneg) <> '' "
+                "AND neg IS NOT NULL AND TRIM(neg) <> '' "
+                "GROUP BY 1 HAVING COUNT(DISTINCT TRIM(neg)) = 1"
+            )
+            if df is None or df.empty:
+                return out
+            for _, r in df.iterrows():
+                s = str(r.get("s") or "").strip()
+                neg = str(r.get("neg") or "").strip()
+                if s and neg:
+                    out[s] = neg
+        else:
+            df = get_data().get("df_valorizado", pd.DataFrame())
+            if df is None or df.empty or "subneg" not in df.columns or "neg" not in df.columns:
+                return out
+            sub = df[["subneg", "neg"]].dropna()
+            grp: dict[str, set] = {}
+            for _, r in sub.iterrows():
+                s = str(r.get("subneg") or "").strip().lower()
+                neg = str(r.get("neg") or "").strip()
+                if not s or not neg:
+                    continue
+                grp.setdefault(s, set()).add(neg)
+            for s, negs in grp.items():
+                if len(negs) == 1:  # solo 1:1, ambiguos omitidos
+                    out[s] = next(iter(negs))
+    except Exception as exc:
+        logger.warning("build_subneg_neg_map error: %s", exc)
+        return {}
+    return out
+
+
+def get_subneg_neg_map(force: bool = False) -> dict[str, str]:
+    """Mapa subneg→neg cacheado (TTL). Lookup por LOWER(TRIM(subneg))."""
+    now = time.time()
+    cached = _SUBNEG_NEG_CACHE.get("data")
+    if (not force) and cached is not None and (now - _SUBNEG_NEG_CACHE.get("ts", 0) < _SUBNEG_NEG_TTL):
+        return cached
+    data = build_subneg_neg_map()
+    if data:
+        _SUBNEG_NEG_CACHE["data"] = data
+        _SUBNEG_NEG_CACHE["ts"] = now
+    return data
+
+
 def _classify_change_type(old_pct: float | None, new_pct: float | None) -> str:
     if old_pct is None:
         return "ajuste"  # alta de override
@@ -1614,6 +1682,19 @@ def save_client_overrides(
     subneg_overrides = subneg_overrides or []
     client_key = _clean_override_text(client_id)
 
+    # Forward-fix de dimensiones: derivar perfil (1 por cliente) y neg (1:1 desde
+    # subneg) UNA sola vez por guardado, para que tanto forecast_user_overrides
+    # como su change-request nazcan poblados. Best-effort: None si no hay match
+    # (p. ej. subneg 'General') → el registro queda con neg/perfil NULL, sin romper.
+    try:
+        _perfil_for_client = get_client_perfil_map().get(str(client_key or "").strip().lower()) or None
+    except Exception:
+        _perfil_for_client = None
+    try:
+        _subneg_neg_map = get_subneg_neg_map()
+    except Exception:
+        _subneg_neg_map = {}
+
     # Backend is the source of truth for the effective month cutoff
     effective_from_month = get_forecast_effective_month()
 
@@ -1650,6 +1731,8 @@ def save_client_overrides(
                     client_id=client_key,
                     scope=FORECAST_SCOPE_SUBNEG,
                     subneg=subneg,
+                    perfil=_perfil_for_client,
+                    neg=_subneg_neg_map.get(subneg.strip().lower()),
                     base_growth_pct=growth_pct,
                     override_growth_pct=annual_growth,
                     effective_monthly_pct=monthly_growth,
@@ -1718,6 +1801,8 @@ def save_client_overrides(
                 client_id=client_key,
                 scope=FORECAST_SCOPE_CELL,
                 subneg=subneg,
+                perfil=_perfil_for_client,
+                neg=_subneg_neg_map.get(subneg.strip().lower()),
                 codigo_serie=codigo,
                 forecast_month=month,
                 base_growth_pct=growth_pct,
