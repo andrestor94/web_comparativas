@@ -1898,6 +1898,12 @@
   }
   .appr-seg button:last-child { border-right: none; }
   .appr-seg button:hover { background: var(--g-blue-hover); color: var(--g-blue); }
+  .appr-seg button.active { background: var(--g-blue); color: #fff; }
+  .appr-seg button.active:hover { background: var(--g-blue); color: #fff; }
+
+  /* Barra de selección de dimensión de agrupación */
+  .appr-dimbar { display: flex; align-items: center; gap: 12px; padding: 13px 24px 0; flex-wrap: wrap; }
+  .appr-dimbar-label { font-size: .72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
 
   /* ── Resumen superior: KPIs (izq) + matriz ejecutiva (der) ── */
   .appr-summary {
@@ -2058,6 +2064,10 @@
     border-left: 3px solid var(--g-blue);
   }
   table.appr-table tbody tr.appr-group-row:hover .appr-group-bar { background: linear-gradient(180deg, #eef3fb 0%, #e6eefb 100%); }
+  /* Bucket "Sin perfil/negocio/subnegocio": tono apagado (siempre al final) */
+  table.appr-table tbody tr.appr-group-row--sin .appr-group-bar { background: var(--bg-primary); border-left-color: #c2c7cf; }
+  table.appr-table tbody tr.appr-group-row--sin .appr-group-name { color: var(--text-muted); font-style: italic; }
+  table.appr-table tbody tr.appr-group-row--sin .appr-group-tag { background: #9aa0a6; }
   .appr-group-caret { color: var(--g-blue); font-size: .95rem; flex: none; transition: transform .12s; }
   .appr-group-tag {
     background: linear-gradient(135deg, var(--g-blue) 0%, #4f93f7 100%); color: #fff;
@@ -2735,6 +2745,17 @@
                 </div>
               </div>
             </details>
+          </div>
+
+          <!-- Selector de dimensión de agrupación (una a la vez) -->
+          <div class="appr-dimbar">
+            <span class="appr-dimbar-label">Agrupar por</span>
+            <div class="appr-seg" id="appr-dim-seg" role="group" aria-label="Agrupar modificaciones por">
+              <button type="button" data-dim="grupo" class="active" onclick="_apprSetDimension('grupo')"><i class="bi bi-collection"></i> Grupo de clientes</button>
+              <button type="button" data-dim="perfil" onclick="_apprSetDimension('perfil')"><i class="bi bi-person-badge"></i> Perfil</button>
+              <button type="button" data-dim="neg" onclick="_apprSetDimension('neg')"><i class="bi bi-briefcase"></i> Negocio</button>
+              <button type="button" data-dim="subneg" onclick="_apprSetDimension('subneg')"><i class="bi bi-diagram-3"></i> Subnegocio</button>
+            </div>
           </div>
 
           <!-- Barra superior: conteo / estado + paginación accesible -->
@@ -6535,7 +6556,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   let _rejectGroup = null;
   let _apprUnits = [];            // unidades de la página actual (grupos + sueltos)
   const _apprGroupExpanded = {};  // nombre de grupo → bool (default colapsado)
+  let _apprDimension = 'grupo';   // grupo | perfil | neg | subneg
   const _NC = 8;
+
+  // Etiquetas de la dimensión activa (encabezado de sección + sustantivo de unidad).
+  const _APPR_DIM_META = {
+    grupo:  { plural: 'Grupos de clientes', noun: 'grupo',      nounPl: 'grupos' },
+    perfil: { plural: 'Perfiles',           noun: 'perfil',     nounPl: 'perfiles' },
+    neg:    { plural: 'Negocios',           noun: 'negocio',    nounPl: 'negocios' },
+    subneg: { plural: 'Subnegocios',        noun: 'subnegocio', nounPl: 'subnegocios' },
+  };
+
+  // Cambia la dimensión de agrupación y re-fetch (re-render completo).
+  window._apprSetDimension = function(dim) {
+    if (!_APPR_DIM_META[dim] || dim === _apprDimension) return;
+    _apprDimension = dim;
+    const seg = document.getElementById('appr-dim-seg');
+    if (seg) seg.querySelectorAll('button[data-dim]').forEach(b =>
+      b.classList.toggle('active', b.getAttribute('data-dim') === dim));
+    _apprPage = 1;
+    _apprFetch();
+  };
 
   function _apprInitials(name) {
     const s = (name || '').replace(/@.*/, '').trim();
@@ -6794,10 +6835,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const est = u.estados || {};
     const cons = statusBadge(u.estado_consolidado);
     const hasPend = (u.pendientes || 0) > 0;
-    // Auditor (solo lectura): sin botones de aprobación/rechazo por grupo.
+    const isGrupoDim = _apprDimension === 'grupo';
+    const dimMeta = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
+    const tagLabel = isGrupoDim ? 'Grupo' : (dimMeta.noun.charAt(0).toUpperCase() + dimMeta.noun.slice(1));
+    const okLabel = isGrupoDim ? 'Aprobar grupo' : 'Aprobar';
+    const noLabel = isGrupoDim ? 'Rechazar grupo' : 'Rechazar';
+    const okTitle = isGrupoDim ? 'Aprobar todo el grupo' : `Aprobar todo el ${dimMeta.noun}`;
+    const noTitle = isGrupoDim ? 'Rechazar todo el grupo' : `Rechazar todo el ${dimMeta.noun}`;
+    const sinCls = u.is_sin ? ' appr-group-row--sin' : '';
+    // Auditor (solo lectura): sin botones de aprobación/rechazo.
     const groupActs = (hasPend && _FC_APPR_CAN_EDIT)
-      ? `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar todo el grupo" onclick="event.stopPropagation();_apprApproveGroupIdx(${idx})"><i class="bi bi-check2-all"></i> Aprobar grupo</button>
-         <button class="appr-gbtn appr-gbtn--no" title="Rechazar todo el grupo" onclick="event.stopPropagation();_apprOpenRejectGroupIdx(${idx})"><i class="bi bi-x-octagon"></i> Rechazar grupo</button>`
+      ? `<button class="appr-gbtn appr-gbtn--ok" title="${okTitle}" onclick="event.stopPropagation();_apprApproveGroupIdx(${idx})"><i class="bi bi-check2-all"></i> ${okLabel}</button>
+         <button class="appr-gbtn appr-gbtn--no" title="${noTitle}" onclick="event.stopPropagation();_apprOpenRejectGroupIdx(${idx})"><i class="bi bi-x-octagon"></i> ${noLabel}</button>`
       : (hasPend
           ? `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">${u.pendientes} pendiente(s)</span>`
           : `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">Sin pendientes</span>`);
@@ -6807,11 +6856,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       ? `<span class="appr-impact appr-impact--pos" title="Total subas estimado">↑ ${fmtMoney(u.impacto_suba)}</span>` : '';
     const imp = (baja || suba) ? (baja + suba)
       : `<span class="appr-impact appr-impact--na" title="Sin base valorizada">N/D</span>`;
-    return `<tr class="appr-group-row" onclick="_apprToggleGroupIdx(${idx})">
+    return `<tr class="appr-group-row${sinCls}" onclick="_apprToggleGroupIdx(${idx})">
       <td colspan="${_NC}">
         <div class="appr-group-bar">
           <i class="bi ${caret} appr-group-caret"></i>
-          <span class="appr-group-tag">Grupo</span>
+          <span class="appr-group-tag">${tagLabel}</span>
           <div class="appr-group-id">
             <div class="appr-group-name" title="${esc(u.grupo)}">${esc(u.grupo)}</div>
             <div class="appr-group-meta">${u.clientes} cuenta${u.clientes!==1?'s':''} · ${u.modificaciones} modificación${u.modificaciones!==1?'es':''}</div>
@@ -6858,14 +6907,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     const html = [];
     let groupSecDone = false, singleSecDone = false;
 
+    const dimMeta = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
+    const isGrupoDim = _apprDimension === 'grupo';
     units.forEach((u, i) => {
       if (u.type === 'group') {
         if (!groupSecDone) {
           groupSecDone = true;
+          const secIcon = isGrupoDim ? 'bi-collection' : 'bi-tags';
+          const secHint = isGrupoDim
+            ? `<span class="appr-sec-hint">— resumen por grupo; desplegá para ver el detalle de cuentas</span>`
+            : `<span class="appr-sec-hint">— resumen por ${dimMeta.noun}; desplegá para ver el detalle</span>`;
+          const secCount = `${nGroups} ${nGroups!==1 ? dimMeta.nounPl : dimMeta.noun}`;
           html.push(`<tr class="appr-sec appr-sec--group"><td colspan="${_NC}">
-            <div class="appr-sec-bar"><i class="bi bi-collection"></i> Grupos de clientes
-              <span class="appr-sec-hint">— resumen por grupo; desplegá para ver el detalle de cuentas</span>
-              <span class="appr-sec-count">${nGroups} grupo${nGroups!==1?'s':''}</span>
+            <div class="appr-sec-bar"><i class="bi ${secIcon}"></i> ${dimMeta.plural}
+              ${secHint}
+              <span class="appr-sec-count">${secCount}</span>
             </div></td></tr>`);
         }
         html.push(_apprGroupRowHtml(u, i));
@@ -6960,6 +7016,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const f = _apprGetFilters();
     const p = new URLSearchParams();
     p.set('page', page); p.set('page_size', _apprGroupedPageSize);
+    p.set('dimension', _apprDimension);
     Object.keys(f).forEach(k => { if (f[k]) p.set(k, f[k]); });
     return `/forecast/api/approvals/grouped?${p.toString()}`;
   }
@@ -6997,9 +7054,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       _apprRenderPagination();
       const grupos = d.total_groups || 0;
       const sueltos = (d.total_units || 0) - grupos;
+      const _dm = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
+      const _resumen = (_apprDimension === 'grupo')
+        ? `${grupos} grupo(s) · ${sueltos} suelta(s)`
+        : `${grupos} ${_dm.nounPl}`;
       _apprSetStatus(
         d.total_records
-          ? `${d.total_records} modificaciones · ${grupos} grupo(s) · ${sueltos} suelta(s) — Pág. ${_apprPage}/${_apprPages}`
+          ? `${d.total_records} modificaciones · ${_resumen} — Pág. ${_apprPage}/${_apprPages}`
           : 'Sin modificaciones',
         'var(--text-muted)'
       );
@@ -7040,10 +7101,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     return d;
   }
 
-  // Construye el cuerpo con los filtros actuales (para acotar la acción de grupo al contexto)
-  function _apprGroupBody(grupo, extra) {
+  // Valor canónico de una unidad para la mutación server-side:
+  // dimension=grupo → nombre del grupo; resto → u.value (""=bucket "Sin X").
+  function _apprUnitValue(u) {
+    return (_apprDimension === 'grupo') ? (u.grupo || '') : (u.value || '');
+  }
+
+  // Construye el cuerpo con dimension + value canónico + TODOS los filtros
+  // actuales (coherente con la re-derivación server-side por clave + filtros).
+  function _apprGroupBody(value, extra) {
     const f = _apprGetFilters();
-    return Object.assign({ grupo: grupo }, f, extra || {});
+    return Object.assign({ grupo: value, dimension: _apprDimension, value: value }, f, extra || {});
   }
 
   // ── Acciones individuales ──────────────────────────────────────
@@ -7059,11 +7127,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const u = _apprUnits[i];
     if (!u || u.type !== 'group') return;
     const n = u.pendientes || 0;
-    if (!confirm(`¿Aprobar las ${n} modificación(es) pendiente(s) del grupo "${u.grupo}"?\nQuedarán registradas como aprobadas por Dirección.`)) return;
-    _apprSetStatus('Aprobando grupo…', 'var(--g-blue)');
+    const dm = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
+    if (!confirm(`¿Aprobar las ${n} modificación(es) pendiente(s) del ${dm.noun} "${u.grupo}"?\nQuedarán registradas como aprobadas por Dirección.`)) return;
+    _apprSetStatus('Aprobando…', 'var(--g-blue)');
     try {
-      const d = await _apprPost('/forecast/api/approvals/group/approve', _apprGroupBody(u.grupo));
-      _apprSetStatus(`Grupo aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
+      const d = await _apprPost('/forecast/api/approvals/group/approve', _apprGroupBody(_apprUnitValue(u)));
+      _apprSetStatus(`Aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
       _apprFetch();
     } catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
   };
@@ -7071,10 +7140,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   window._apprOpenRejectGroupIdx = function(i) {
     const u = _apprUnits[i];
     if (!u || u.type !== 'group') return;
+    const dm = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
     _rejectMode = 'group';
-    _rejectGroup = u.grupo;
-    _apprOpenRejectModal(`Rechazar grupo “${u.grupo}”`,
-      `Se rechazarán las ${u.pendientes || 0} modificación(es) pendiente(s) de este grupo bajo los filtros actuales.`);
+    _rejectGroup = _apprUnitValue(u);   // valor canónico para el body
+    _apprOpenRejectModal(`Rechazar ${dm.noun} “${u.grupo}”`,
+      `Se rechazarán las ${u.pendientes || 0} modificación(es) pendiente(s) de este ${dm.noun} bajo los filtros actuales.`);
   };
 
   // ── Rechazo (individual o grupo) ───────────────────────────────
@@ -7104,7 +7174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (_rejectMode === 'group') {
         const d = await _apprPost('/forecast/api/approvals/group/reject', _apprGroupBody(_rejectGroup, { motivo }));
         _apprCloseReject();
-        _apprSetStatus(`Grupo rechazado: ${d.afectados} modificación(es).`, 'var(--g-red)');
+        _apprSetStatus(`Rechazado: ${d.afectados} modificación(es).`, 'var(--g-red)');
         _apprFetch();
       } else {
         await _apprPost(`/forecast/api/approvals/${_rejectId}/reject`, { motivo });
