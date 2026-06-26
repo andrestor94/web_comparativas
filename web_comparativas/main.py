@@ -55,6 +55,14 @@ def _oportunidades_enabled_tpl() -> bool:
 
 templates.env.globals["oportunidades_enabled"] = _oportunidades_enabled_tpl
 
+
+def _match_enabled_tpl() -> bool:
+    from web_comparativas.match import MATCH_ENABLED
+    return MATCH_ENABLED()
+
+
+templates.env.globals["match_enabled"] = _match_enabled_tpl
+
 # Logging Console
 logger = logging.getLogger("wc.main")
 logger.setLevel(logging.INFO)
@@ -239,10 +247,27 @@ def run_startup_migrations_once() -> None:
         # routers del módulo se registran SIEMPRE: el de consulta es admin-only en
         # prod (guard _require_admin_en_prod) y el de import va protegido por token.
         import web_comparativas.indicadores_summary_models  # noqa: F401
+        # Módulo Match (Mercado Privado): import explícito para que create_all
+        # materialice match_* (propuestas/homologaciones/eventos/import_runs).
+        import web_comparativas.match.models  # noqa: F401
         Base.metadata.create_all(bind=_engine)
         print("[MIGRATION] Tables ensured via create_all.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] create_all warning: {e}", flush=True)
+
+    try:
+        from web_comparativas.match.service import ensure_negocio_map
+        _nm = ensure_negocio_map()
+        print(f"[STARTUP] match_negocio_map checked (total={_nm['total']}, filled={_nm['filled']}).", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] match_negocio_map warning: {e}", flush=True)
+
+    try:
+        from web_comparativas.match.service import ensure_match_demanda_desc
+        _dd = ensure_match_demanda_desc()
+        print(f"[STARTUP] match_demanda_desc checked (total={_dd['total']}, filled={_dd['filled']}).", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] match_demanda_desc warning: {e}", flush=True)
 
     try:
         maybe_run_startup_ingestion()
@@ -642,10 +667,12 @@ from web_comparativas.routers.mercado_privado_perfiles_router import router as p
 # Import/aprobación de Indicadores: SIEMPRE registrado (token + guard admin), como
 # dimensiones_router. NO confundir con indicadores_router (consulta, local-only, abajo).
 from web_comparativas.routers.indicadores_import_router import router as indicadores_import_router
+from web_comparativas.routers.match_router import router as match_router
 
 app.include_router(sic_router)
 app.include_router(dimensiones_router)
 app.include_router(oportunidades_router)
+app.include_router(match_router)
 app.include_router(notifications_router)
 app.include_router(pliegos_router)
 app.include_router(comments_router)

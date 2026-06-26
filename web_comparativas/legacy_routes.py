@@ -223,6 +223,17 @@ def _oportunidades_enabled_tpl() -> bool:
 
 
 templates.env.globals["oportunidades_enabled"] = _oportunidades_enabled_tpl
+
+
+def _match_enabled_tpl() -> bool:
+    """Global Jinja para el kill-switch del módulo Match en el sidebar (base.html).
+    Esta instancia de `templates` es propia de legacy_routes (distinta de la de main),
+    por eso el global debe registrarse también acá para que base.html lo resuelva."""
+    from web_comparativas.match import MATCH_ENABLED
+    return MATCH_ENABLED()
+
+
+templates.env.globals["match_enabled"] = _match_enabled_tpl
 router = APIRouter() # Replaced FastAPI app
 
 # --- MIGRACIONES ---
@@ -1761,6 +1772,29 @@ def mercado_privado_oportunidades(
         "market_context": "private",
     }
     return templates.TemplateResponse("mercado_privado_oportunidades.html", ctx)
+
+
+@router.get("/mercado-privado/match", response_class=HTMLResponse)
+def mercado_privado_match(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
+    ),
+    _mod: User = Depends(_require_module("mercado_privado.match")),
+):
+    """Match (Mercado Privado) — homologación asistida. Renderiza la vista de dos
+    columnas (maestro de artículos Suizo + candidatas) que consume la API paginada
+    /api/mercado-privado/match/*. Gobernada por el mismo sistema de permisos que el
+    resto de Mercado Privado + kill-switch MATCH_ENABLED."""
+    from web_comparativas.match import MATCH_ENABLED
+    if not MATCH_ENABLED():
+        raise HTTPException(status_code=404, detail="Módulo Match deshabilitado.")
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("mercado_privado_match.html", ctx)
 
 
 @router.get("/mercado-publico/helpdesk", response_class=HTMLResponse)

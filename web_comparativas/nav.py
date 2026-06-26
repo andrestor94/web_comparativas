@@ -167,6 +167,16 @@ MENU: list[dict] = [
      "url": "/mercado-privado/oportunidades", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private",
      "roles": {"admin", "analista", "supervisor", "auditor"}, "icon": "bi-lightbulb"},
+    # --- Match (homologación asistida) ---
+    # Módulo nuevo (clave de permiso "mercado_privado.match"). roles=None a propósito:
+    # mismo criterio que Reporte perfiles — el acceso lo gobierna SOLO el grant
+    # declarativo (module_access via require_perm); la asignación a roles la define el
+    # arquitecto después. Visibilidad adicional gateada por el flag MATCH_ENABLED en el
+    # sidebar (global Jinja match_enabled()) y por MATCH_ENABLED() en la ruta/API.
+    {"key": "mercado_privado.match", "label": "Match",
+     "url": "/mercado-privado/match", "module": "mercado_privado",
+     "parent": "mercado_privado", "market": "private",
+     "roles": None, "icon": "bi-link-45deg", "pill": "Nuevo"},
     # roles=None: mismo criterio que la entrada de Mercado Público — acceso gobernado
     # solo por el grant declarativo (module_access via require_perm), sin techo de rol.
     {"key": "mercado_privado.reporte_perfiles", "label": "Reporte perfiles",

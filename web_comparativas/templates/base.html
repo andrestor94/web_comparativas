@@ -733,6 +733,14 @@
         </a>
         {% endif %}
 
+        <!-- Match (homologación asistida) -->
+        {% if can_access(user, 'mercado_privado.match') and match_enabled() %}
+        <a href="/mercado-privado/match"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/match') %}active{% endif %}">
+          <div><i class="bi bi-link-45deg"></i> Match <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
+        </a>
+        {% endif %}
+
         <!-- Reporte perfiles (Reutilizado) -->
         {% if can_access(user, 'mercado_privado.reporte_perfiles') %}
         <a href="/mercado-privado/reporte-perfiles"
