@@ -87,7 +87,10 @@ else:
     SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE.as_posix()}"
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
+    # cached_statements=0: desactiva el cache de prepared statements de sqlite3.
+    # El StaticPool comparte UNA conexión entre threads y ese cache (no thread-safe
+    # en CPython) se corrompía bajo requests concurrentes → KeyError persistente.
+    connect_args = {"check_same_thread": False, "cached_statements": 0}
 else:
     # Auto-detect Render internal vs external PostgreSQL connection.
     # External URL contains ".render.com" in the host — requires SSL and is prone to
