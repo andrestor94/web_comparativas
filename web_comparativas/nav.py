@@ -163,6 +163,19 @@ MENU: list[dict] = [
     {"key": "mercado_privado.dimensionamiento", "label": "Dimensionamiento",
      "url": "/mercado-privado/dimensiones", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private", "roles": None, "icon": "bi-pie-chart"},
+    # --- Match (homologación asistida) ---
+    # Módulo CENTRALIZADO/TRANSVERSAL: una sola clave de permiso ("mercado_privado.match"),
+    # una sola vista y una sola data (Dimensionamiento), navegable desde el sidebar de
+    # Mercado Privado Y de Mercado Público (ver "extra_markets"). Habilitarlo a un usuario
+    # lo habilita en ambos mercados. roles=None a propósito: mismo criterio que Reporte
+    # perfiles — el acceso lo gobierna SOLO el grant declarativo (module_access via
+    # require_perm). Visibilidad adicional gateada por el flag MATCH_ENABLED en el
+    # sidebar (global Jinja match_enabled()) y por MATCH_ENABLED() en la ruta/API.
+    {"key": "mercado_privado.match", "label": "Match",
+     "url": "/mercado-privado/match", "module": "mercado_privado",
+     "parent": "mercado_privado", "market": "private",
+     "extra_markets": ["public"],
+     "roles": None, "icon": "bi-link-45deg", "pill": "Nuevo"},
     # roles=None: mismo criterio que la entrada de Mercado Público — acceso gobernado
     # solo por el grant declarativo (module_access via require_perm), sin techo de rol.
     {"key": "mercado_privado.reporte_perfiles", "label": "Reporte perfiles",
