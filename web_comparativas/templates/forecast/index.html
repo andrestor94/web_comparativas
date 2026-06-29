@@ -2659,87 +2659,79 @@
             <span class="appr-chip appr-note">Los importes son <strong>estimados</strong> (cruce del % con la base valorizada).</span>
           </div>
 
-          <!-- ════════ MEDIDOR DE META · DATOS DE MUESTRA ════════ -->
+          <!-- ════════ MEDIDOR DE META · ARCO RADIAL ════════ -->
           <style>
             .mg-section{margin-top:18px;border-top:1px solid var(--border-color);padding-top:16px;}
             .mg-section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
             .mg-section-head h4{font-size:.98rem;font-weight:700;color:var(--text-primary);margin:0;}
-            .mg-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:26px 28px 24px;box-shadow:var(--shadow-card);}
 
-            /* ── HÉROE (signature): el número protagonista ── */
-            .mg-hero2{text-align:center;margin:0 auto 26px;}
-            .mg-hero-eyebrow{font-size:.62rem;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:var(--text-muted);margin-bottom:5px;}
-            .mg-hero-num{font-family:var(--font-family);font-weight:700;font-size:2rem;line-height:1;color:var(--text-primary);
+            /* Tarjeta: layout horizontal (arco izquierda · columna derecha) */
+            .mg-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);
+              box-shadow:var(--shadow-card);padding:30px 38px;
+              display:flex;align-items:center;gap:48px;flex-wrap:wrap;justify-content:center;}
+
+            /* ── IZQUIERDA: arco SVG ── */
+            .mg-arc-wrap{position:relative;width:344px;max-width:100%;flex:0 0 auto;}
+            .mg-arc-svg{display:block;width:100%;height:auto;overflow:visible;}
+            .mg-arc-track{fill:none;stroke:var(--border-color);stroke-width:22;stroke-linecap:round;}
+            /* Pendiente (aprob+pend): verde institucional translúcido — claramente más
+               tenue que el aprobado, para diferenciarlos sin ambigüedad. */
+            .mg-arc-pend{fill:none;stroke:var(--g-green);stroke-opacity:.26;stroke-width:22;stroke-linecap:round;}
+            /* Aprobado: degradado verde profundo→brillante + sombra proyectada (el aire premium). */
+            .mg-arc-aprob{fill:none;stroke:url(#mgArcGrad);stroke-width:22;stroke-linecap:round;filter:url(#mgArcShadow);}
+            .mg-arc-dot{fill:var(--g-green);stroke:#fff;stroke-width:3;filter:drop-shadow(0 2px 5px rgba(15,157,88,.5));}
+
+            /* Número-héroe centrado dentro del arco */
+            .mg-arc-hero{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+              display:flex;flex-direction:column;align-items:center;pointer-events:none;}
+            .mg-arc-heronum{font-family:var(--font-family);font-weight:500;font-size:88px;line-height:.86;
+              color:var(--text-primary);font-variant-numeric:tabular-nums;letter-spacing:-.03em;
+              display:inline-flex;align-items:flex-start;}
+            .mg-arc-heronum .u{font-size:.33em;font-weight:500;color:var(--text-muted);margin-top:.2em;margin-left:3px;letter-spacing:0;}
+            .mg-arc-heronum.na{font-size:48px;font-weight:600;color:var(--text-muted);letter-spacing:0;}
+            .mg-arc-cap{font-size:.6rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--text-muted);margin-top:7px;}
+
+            /* ── DERECHA: columna ── */
+            .mg-col{flex:1 1 280px;min-width:240px;max-width:390px;}
+            .mg-col-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:22px;}
+            .mg-col-title{font-family:var(--font-family);font-size:1.2rem;font-weight:600;color:var(--text-primary);margin:0;}
+            .mg-pace{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;font-weight:600;
+              padding:4px 11px;border-radius:var(--radius-pill);border:1px solid transparent;}
+            .mg-pace.ahead{color:#fff;background:var(--g-green);border-color:var(--g-green);}
+            .mg-pace.behind{color:#b06000;background:#fef7e0;border-color:#fde293;}
+            .mg-pace.none{display:none;}
+
+            .mg-metric{display:flex;align-items:center;gap:11px;padding:3px 0;}
+            .mg-metric-dot{width:11px;height:11px;border-radius:50%;flex:none;}
+            .mg-metric-dot.strong{background:var(--g-green);}
+            .mg-metric-dot.soft{background:var(--g-green);opacity:.3;}
+            .mg-metric-lbl{font-size:.84rem;color:var(--text-secondary);}
+            .mg-metric-val{margin-left:auto;font-family:var(--font-family);font-size:31px;font-weight:600;line-height:1;
               font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
-            .mg-hero-num .u{font-size:.5em;font-weight:600;color:var(--text-muted);margin-left:2px;letter-spacing:0;}
-            .mg-hero-pace{display:inline-flex;align-items:center;gap:6px;margin-top:12px;font-size:.74rem;font-weight:600;
-              padding:4px 12px;border-radius:9999px;border:1px solid transparent;transition:color .35s ease,background .35s ease;}
-            .mg-hero-pace.ahead{color:var(--g-green);background:var(--g-green-light);border-color:#bfe6cd;}
-            .mg-hero-pace.behind{color:#b06000;background:#fef7e0;border-color:#fde293;}
-            .mg-hero-pace.none{display:none;}
+            .mg-metric-val.strong{color:var(--text-primary);}
+            .mg-metric-val.soft{color:var(--g-green);}
+            .mg-metric-val.na{color:var(--text-muted);font-size:1.05rem;font-weight:600;}
+            .mg-divider{height:1px;background:var(--border-color);margin:12px 0;}
 
-            /* ── Riel (NEUTRO — sin semáforo) ── */
-            .mg-bar-area{max-width:680px;margin:0 auto;}
-            .mg-bar-wrap{padding:34px 14px 4px;}
-            .mg-bar-track{position:relative;height:16px;border-radius:9999px;background:#eef1f5;
-              box-shadow:inset 0 1.5px 3px rgba(31,41,55,.16);}
-            .mg-bar-fill{position:absolute;left:0;top:0;width:0;height:100%;border-radius:9999px;overflow:hidden;
-              transition:width .6s cubic-bezier(.22,1,.36,1),background .35s ease;}
-            .mg-bar-fill::after{content:"";position:absolute;inset:0;border-radius:inherit;
-              background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,0) 60%);}
-            .mg-bar-ghost{position:absolute;top:0;height:100%;border-radius:9999px;
-              background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 5px,transparent 5px 10px);
-              outline:1.5px dashed currentColor;outline-offset:-1.5px;
-              transition:left .6s cubic-bezier(.22,1,.36,1),width .6s cubic-bezier(.22,1,.36,1);}
-            /* marca Meta (objetivo): línea fina ink + bandera sólida */
-            .mg-marker-meta{position:absolute;top:-9px;bottom:-9px;width:1.5px;background:var(--text-primary);border-radius:2px;z-index:3;
-              transition:left .6s cubic-bezier(.22,1,.36,1);}
-            .mg-flag{position:absolute;top:-31px;transform:translateX(-50%);white-space:nowrap;font-size:.62rem;font-weight:600;letter-spacing:.02em;
-              color:#fff;background:var(--text-primary);padding:3px 8px;border-radius:6px;box-shadow:var(--shadow-soft);}
-            .mg-flag::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);
-              border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--text-primary);}
-            /* Meta fija en el extremo derecho (100%): anclo el flag a la izquierda para no clipear */
-            .mg-marker-meta .mg-flag{left:auto;right:-1px;transform:none;}
-            .mg-marker-meta .mg-flag::after{left:auto;right:7px;transform:none;}
-            /* marca temporal "Hoy" — DISTINTA de Meta: azul Suizo, punteada, pill suave */
-            .mg-marker-time{position:absolute;top:-6px;bottom:-6px;width:0;border-left:2px dashed var(--g-blue);z-index:2;
-              transition:left .6s cubic-bezier(.22,1,.36,1);}
-            .mg-time-lbl{position:absolute;top:-31px;transform:translateX(-50%);white-space:nowrap;font-size:.6rem;font-weight:600;
-              color:var(--g-blue-dark);background:var(--g-blue-light);border:1px solid #c5dafb;padding:2px 8px;border-radius:6px;
-              display:inline-flex;align-items:center;gap:4px;}
-            .mg-time-lbl::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);
-              border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--g-blue-light);}
-            .mg-dot{position:absolute;top:50%;width:16px;height:16px;border-radius:50%;transform:translate(-50%,-50%);
-              border:3px solid #fff;box-shadow:0 1px 4px rgba(31,41,55,.28);z-index:4;
-              transition:left .6s cubic-bezier(.22,1,.36,1),background .35s ease,border-color .35s ease;}
-            .mg-dot-ghost{width:14px;height:14px;background:#fff;border:2px dashed var(--text-secondary);box-shadow:none;z-index:3;}
-            .mg-scale{display:flex;justify-content:space-between;font-size:.64rem;font-weight:500;color:var(--text-muted);margin-top:12px;font-variant-numeric:tabular-nums;letter-spacing:.02em;}
+            .mg-foot{font-size:.72rem;color:var(--text-muted);margin:22px 0 0;line-height:1.5;
+              display:flex;align-items:flex-start;gap:6px;}
+            .mg-foot i{color:var(--text-secondary);margin-top:1px;flex:none;}
 
-            /* ── Leyenda ─────────────────────────────────────────────────── */
-            .mg-legend{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin:18px auto 0;max-width:560px;}
-            @media(max-width:560px){.mg-legend{grid-template-columns:1fr;}}
-            .mg-leg{display:flex;align-items:center;gap:9px;font-size:.8rem;color:var(--text-secondary);}
-            .mg-leg strong{margin-left:auto;font-variant-numeric:tabular-nums;font-size:.88rem;color:var(--text-primary);}
-            .mg-sw{width:26px;height:11px;border-radius:9999px;flex:none;}
-            .mg-sw-ghost{background-image:repeating-linear-gradient(45deg,var(--text-secondary) 0 4px,transparent 4px 8px);
-              border:1px dashed var(--text-secondary);height:13px;}
-            .mg-meta-note{font-size:.69rem;color:var(--text-muted);margin:16px auto 0;display:flex;align-items:center;justify-content:center;gap:6px;}
-            .mg-meta-note i{color:var(--text-primary);}
-            /* Estado sin base valorizada (local incompleto) */
-            .mg-track-na{background:#eceff1 !important;box-shadow:inset 0 1px 2px rgba(60,64,67,.10) !important;}
             /* Cartelito honesto (N/D o sin efecto detectable) */
             .mg-note{font-size:.72rem;color:#8a5a00;background:#fef7e0;border:1px solid #fde293;border-radius:8px;
-              padding:7px 12px;margin:12px auto 0;max-width:560px;text-align:center;display:none;align-items:center;justify-content:center;gap:7px;}
+              padding:7px 12px;margin:14px 0 0;display:none;align-items:flex-start;gap:7px;}
             .mg-note.show{display:flex;}
-            .mg-note i{flex:none;}
-            /* Reveal de carga: UN solo momento orquestado (la tarjeta sube y aparece;
-               adentro el fill barre 0→pos y el número héroe hace count-up). */
+            .mg-note i{flex:none;margin-top:1px;}
+
+            /* Reveal de carga: la tarjeta sube y aparece (1 sola vez) */
             @keyframes mgFadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
             .mg-reveal{animation:mgFadeIn .55s cubic-bezier(.22,1,.36,1) both;}
-            @media (prefers-reduced-motion: reduce){
-              .mg-bar-fill,.mg-bar-ghost,.mg-marker-meta,.mg-marker-time,.mg-dot,.mg-hero-pace{transition:none !important;}
-              .mg-reveal{animation:none !important;}
+
+            @media(max-width:760px){
+              .mg-card{gap:26px;padding:24px;}
+              .mg-arc-heronum{font-size:74px;}
             }
+            @media (prefers-reduced-motion: reduce){ .mg-reveal{animation:none !important;} }
           </style>
 
           <div class="mg-section" id="mg-section">
@@ -2748,138 +2740,167 @@
             </div>
 
             <div class="mg-card" id="mgA-card">
-              <!-- Héroe: el número protagonista (señal del medidor) -->
-              <div class="mg-hero2">
-                <div class="mg-hero-eyebrow">De la meta · aprobado</div>
-                <div class="mg-hero-num"><span id="mgA-heroNum">—</span><span class="u">%</span></div>
-                <div class="mg-hero-pace none" id="mgA-pace"></div>
+              <!-- IZQUIERDA: arco radial con el número-héroe centrado adentro -->
+              <div class="mg-arc-wrap">
+                <svg class="mg-arc-svg" viewBox="0 0 344 200" role="img" aria-label="Avance de la meta anual">
+                  <defs>
+                    <linearGradient id="mgArcGrad" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%"   stop-color="#0b7a44"/>
+                      <stop offset="55%"  stop-color="#119e57"/>
+                      <stop offset="100%" stop-color="#1ac375"/>
+                    </linearGradient>
+                    <filter id="mgArcShadow" x="-25%" y="-25%" width="150%" height="165%">
+                      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0f9d58" flood-opacity="0.42"/>
+                    </filter>
+                  </defs>
+                  <path class="mg-arc-track" d="M 22 180 A 150 150 0 0 1 322 180"/>
+                  <path class="mg-arc-pend"  id="mgA-arcPend"  d="M 22 180 A 150 150 0 0 1 322 180"/>
+                  <path class="mg-arc-aprob" id="mgA-arcAprob" d="M 22 180 A 150 150 0 0 1 322 180"/>
+                  <circle class="mg-arc-dot" id="mgA-dot" r="9" cx="22" cy="180" style="display:none;"/>
+                </svg>
+                <div class="mg-arc-hero">
+                  <div class="mg-arc-heronum" id="mgA-heroBox"><span id="mgA-heroNum">—</span><span class="u" id="mgA-heroU">%</span></div>
+                  <div class="mg-arc-cap">de la meta anual</div>
+                </div>
               </div>
-              <div class="mg-bar-area">
-                <div class="mg-bar-wrap">
-                  <div class="mg-bar-track" id="mgA-track">
-                    <div class="mg-bar-fill" id="mgA-fill"></div>
-                    <div class="mg-bar-ghost" id="mgA-ghost"></div>
-                    <div class="mg-marker-time" id="mgA-time"><span class="mg-time-lbl" id="mgA-timeLbl"><i class="bi bi-clock"></i> Hoy</span></div>
-                    <div class="mg-marker-meta" id="mgA-meta"><span class="mg-flag">Meta anual</span></div>
-                    <div class="mg-dot mg-dot-solid" id="mgA-dotAprob"></div>
-                    <div class="mg-dot mg-dot-ghost" id="mgA-dotSi"></div>
-                  </div>
-                  <div class="mg-scale"><span id="mgA-scaleLo">0%</span><span id="mgA-scaleHi">100%</span></div>
+
+              <!-- DERECHA: columna -->
+              <div class="mg-col">
+                <div class="mg-col-head">
+                  <h3 class="mg-col-title">Avance meta</h3>
+                  <span class="mg-pace none" id="mgA-pace"></span>
                 </div>
-                <div class="mg-legend">
-                  <div class="mg-leg"><span class="mg-sw mg-sw-solid" id="mgA-swAprob"></span> Aprobado <strong id="mgA-aprobPct">—</strong></div>
-                  <div class="mg-leg"><span class="mg-sw mg-sw-ghost"></span> Si aprobás lo pendiente <strong id="mgA-siPct">—</strong></div>
+
+                <div class="mg-metric">
+                  <span class="mg-metric-dot strong"></span>
+                  <span class="mg-metric-lbl">Aprobado</span>
+                  <span class="mg-metric-val strong" id="mgA-aprobVal">—</span>
                 </div>
-                <div class="mg-meta-note"><i class="bi bi-flag-fill"></i> Meta = base + 25%</div>
+                <div class="mg-divider"></div>
+                <div class="mg-metric">
+                  <span class="mg-metric-dot soft"></span>
+                  <span class="mg-metric-lbl">Si aprobás lo pendiente</span>
+                  <span class="mg-metric-val soft" id="mgA-siVal">—</span>
+                </div>
+
+                <p class="mg-foot"><i class="bi bi-flag-fill"></i> <span id="mgA-foot">Meta = proyección base + 25%</span></p>
                 <div class="mg-note" id="mgA-note"><i class="bi bi-info-circle"></i> <span id="mgA-noteTxt"></span></div>
               </div>
             </div>
           </div>
 
           <script>
-          // Medidor de meta (termómetro). Datos REALES: window.mgRender(gauge),
+          // Medidor de meta (ARCO RADIAL). Datos REALES: window.mgRender(gauge),
           // llamado desde _apprFetchTree con d.gauge en cada carga/aprobación/rechazo.
           // gauge = {disponible, efecto_detectado, base, meta, proy_aprobados,
-          //          proy_aprob_pend, pct_aprobados, pct_si_pendientes}
+          //          proy_aprob_pend, pct_aprobados, pct_si_pendientes, forecast_year}
+          // SOLO presentación: no cambia el cálculo del gauge ni el cableado externo.
           (function(){
-            const GREEN = '#0f9d58', AMBER = '#f29900', RED = '#d93025';
             const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-            const colorOf = pct => { const d = Math.abs(pct - 100); return d <= 5 ? GREEN : d <= 15 ? AMBER : RED; };
             const fmtN = v => v.toFixed(1).replace('.', ',');        // número es-AR (sin %)
             const fmt1 = v => fmtN(v) + '%';
             const REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-            let _mgFirst = true;                                     // el reveal/count-up corre UNA sola vez
+            let _mgFirst = true;                                     // el draw/count-up corre UNA sola vez
             const showNote = (txt) => { set('mgA-noteTxt', el => el.textContent = txt);
               set('mgA-note', el => el.classList.toggle('show', !!txt)); };
+            const frac = pct => Math.max(0, Math.min(1, pct / 100));  // escala FIJA 0–100
 
-            // Avance del año del forecast (marca temporal). forecast_year viene del
-            // PERÍODO del forecast (backend), NO de date.today(); "hoy" sí es del browser.
+            // Geometría del arco (semicírculo). getTotalLength es robusto a la geometría real.
+            const arc     = document.getElementById('mgA-arcAprob');
+            const arcPend = document.getElementById('mgA-arcPend');
+            const dot     = document.getElementById('mgA-dot');
+            const P = (arc && arc.getTotalLength) ? arc.getTotalLength() : 471.24;
+            if (arc)     { arc.style.strokeDasharray = P;     arc.style.strokeDashoffset = P; }     // arranca vacío
+            if (arcPend) { arcPend.style.strokeDasharray = P; arcPend.style.strokeDashoffset = P; }
+            function _dotAt(f){
+              if (!dot || !arc || !arc.getPointAtLength) return;
+              const pt = arc.getPointAtLength(P * Math.max(0, Math.min(1, f)));
+              dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+            }
+
+            // Avance del año del forecast. forecast_year viene del PERÍODO (backend),
+            // NO de date.today(); "hoy" sí es del browser. Alimenta chip de ritmo + nota.
             function _yearPct(g){
               const fy = g && (typeof g.forecast_year === 'number') ? g.forecast_year : null;
               if (!fy) return null;
               const now = new Date(), start = new Date(fy, 0, 1), end = new Date(fy + 1, 0, 1);
               return Math.max(0, Math.min(100, (now - start) / (end - start) * 100));
             }
-            function _setTime(yp){
-              set('mgA-time', el => { if (yp === null) { el.style.display = 'none'; }
-                else { el.style.display = ''; el.style.left = yp + '%'; } });
-              set('mgA-timeLbl', el => { if (yp !== null) el.innerHTML = '<i class="bi bi-clock"></i> Hoy · ' + Math.round(yp) + '% del año'; });
-            }
+            const _footText = (yp) => 'Meta = proyección base + 25%' +
+              (yp !== null ? ' · ' + Math.round(yp) + '% del año transcurrido' : '');
 
-            // Count-up del número héroe (easeOutCubic). Reduced-motion → valor directo.
-            function _countUp(el, to){
-              if (REDUCE || !window.requestAnimationFrame) { el.textContent = fmtN(to); return; }
-              const t0 = performance.now(), dur = 650;
-              (function tick(t){
-                const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-                el.textContent = fmtN(to * e);
-                if (k < 1) requestAnimationFrame(tick);
-              })(t0);
-            }
-            // Reveal de carga: una sola vez, la tarjeta sube y aparece (orquestado).
+            // Reveal de carga: una sola vez, la tarjeta sube y aparece.
             function _revealOnce(){
               if (REDUCE) return;
               set('mgA-card', el => { el.classList.remove('mg-reveal'); void el.offsetWidth; el.classList.add('mg-reveal'); });
             }
+            // Dibuja arco aprobado + dot + número, 0→valor en sync. animated=false → directo.
+            function _draw(fA, pA, animated){
+              if (!animated || !window.requestAnimationFrame){
+                if (arc) arc.style.strokeDashoffset = P * (1 - fA);
+                _dotAt(fA);
+                set('mgA-heroNum', el => el.textContent = fmtN(pA));
+                return;
+              }
+              const t0 = performance.now(), dur = 950;
+              (function tick(t){
+                const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+                if (arc) arc.style.strokeDashoffset = P * (1 - fA * e);
+                _dotAt(fA * e);
+                set('mgA-heroNum', el => el.textContent = fmtN(pA * e));
+                if (k < 1) requestAnimationFrame(tick);
+              })(t0);
+            }
 
             // Estado "sin base valorizada" (local incompleto): N/D honesto, no 0% falso.
-            // La marca temporal SÍ se mantiene (no depende de la base valorizada).
-            function _na(){
+            function _na(yp){
+              set('mgA-heroBox', el => el.classList.add('na'));
               set('mgA-heroNum', el => el.textContent = 'N/D');
-              set('mgA-pace', el => { el.className = 'mg-hero-pace none'; });
-              ['mgA-fill','mgA-ghost'].forEach(id => set(id, el => el.style.width = '0%'));
-              ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = 'none'));
-              set('mgA-meta', el => el.style.display = 'none');
-              set('mgA-track', el => el.classList.add('mg-track-na'));
-              set('mgA-aprobPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
-              set('mgA-siPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
-              set('mgA-swAprob', el => el.style.background = 'var(--border-hover)');
+              set('mgA-heroU', el => el.style.display = 'none');
+              set('mgA-pace', el => { el.className = 'mg-pace none'; });
+              if (arc)     arc.style.strokeDashoffset = P;     // arcos vacíos
+              if (arcPend) arcPend.style.strokeDashoffset = P;
+              set('mgA-dot', el => el.style.display = 'none');
+              set('mgA-aprobVal', el => { el.textContent = 'N/D'; el.className = 'mg-metric-val na'; });
+              set('mgA-siVal',    el => { el.textContent = 'N/D'; el.className = 'mg-metric-val na'; });
               showNote('Sin base valorizada para estimar la meta en este entorno (disponible en producción).');
             }
 
             window.mgRender = function(g){
               const yp = _yearPct(g);
-              _setTime(yp);                                  // marca temporal (independiente de la meta)
               if (_mgFirst) _revealOnce();
+              set('mgA-foot', el => el.textContent = _footText(yp));   // nota al pie (independiente de la meta)
 
-              if (!g || !g.disponible || !(g.meta > 0)) { _na(); _mgFirst = false; return; }
+              if (!g || !g.disponible || !(g.meta > 0)) { _na(yp); _mgFirst = false; return; }
               // restaurar estado normal (por si venía de N/D)
-              ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = ''));
-              set('mgA-meta', el => el.style.display = '');
-              set('mgA-track', el => el.classList.remove('mg-track-na'));
+              set('mgA-heroBox', el => el.classList.remove('na'));
+              set('mgA-heroU', el => el.style.display = '');
+              set('mgA-dot', el => el.style.display = '');
+              set('mgA-aprobVal', el => el.className = 'mg-metric-val strong');
+              set('mgA-siVal',    el => el.className = 'mg-metric-val soft');
 
               const pA = (typeof g.pct_aprobados === 'number') ? g.pct_aprobados : (g.proy_aprobados / g.meta * 100);
               const pS = (typeof g.pct_si_pendientes === 'number') ? g.pct_si_pendientes : (g.proy_aprob_pend / g.meta * 100);
-              const cA = colorOf(pA), cS = colorOf(pS);
+              const fA = frac(pA), fS = frac(pS);   // pS ≥ pA (aprob+pend ≥ aprob)
 
-              // Escala FIJA 0%–100% de la meta. >100% → clamp visual al borde; el número
-              // real se sigue mostrando para no perder "por encima de la meta".
-              const frac = pct => Math.max(0, Math.min(1, pct / 100));
-              const fA = frac(pA), fS = frac(pS);
-
-              // HÉROE: número protagonista (count-up en la carga; luego directo).
-              if (_mgFirst) set('mgA-heroNum', el => _countUp(el, pA));
-              else          set('mgA-heroNum', el => el.textContent = fmtN(pA));
+              // Arco pendiente: estático (refleja aprob+pend, debajo del aprobado).
+              if (arcPend) arcPend.style.strokeDashoffset = P * (1 - fS);
 
               // Chip de ritmo: ¿adelantado o atrasado respecto del año?
               set('mgA-pace', el => {
-                if (yp === null) { el.className = 'mg-hero-pace none'; return; }
+                if (yp === null) { el.className = 'mg-pace none'; return; }
                 const ahead = pA >= yp;
-                el.className = 'mg-hero-pace ' + (ahead ? 'ahead' : 'behind');
+                el.className = 'mg-pace ' + (ahead ? 'ahead' : 'behind');
                 el.innerHTML = (ahead ? '<i class="bi bi-arrow-up-right"></i> Adelantado' : '<i class="bi bi-arrow-down-right"></i> Atrasado')
                   + ' · ' + Math.round(yp) + '% del año';
               });
 
-              // El "fantasma" puede ir antes o después del aprobado → tramo entre ambos.
-              const gFrom = Math.min(fA, fS), gTo = Math.max(fA, fS);
-              set('mgA-fill', el => { el.style.width = (fA*100)+'%'; el.style.background = cA; });
-              set('mgA-ghost', el => { el.style.left = (gFrom*100)+'%'; el.style.width = ((gTo-gFrom)*100)+'%'; el.style.color = cS; });
-              set('mgA-meta', el => { el.style.left = '100%'; });            // meta SIEMPRE en el extremo derecho
-              set('mgA-dotAprob', el => { el.style.left = (fA*100)+'%'; el.style.background = cA; });
-              set('mgA-dotSi', el => { el.style.left = (fS*100)+'%'; el.style.borderColor = cS; });
-              set('mgA-aprobPct', el => { el.textContent = fmt1(pA); el.style.color = cA; });
-              set('mgA-siPct', el => { el.textContent = fmt1(pS); el.style.color = cS; });
-              set('mgA-swAprob', el => { el.style.background = cA; });
+              // Métricas (cifras es-AR).
+              set('mgA-aprobVal', el => el.textContent = fmt1(pA));
+              set('mgA-siVal',    el => el.textContent = fmt1(pS));
+
+              // Arco aprobado + dot + número: animado en la 1ª carga, directo después.
+              _draw(fA, pA, _mgFirst && !REDUCE);
 
               // Honestidad: hay meta pero los overrides no cruzan el valorizado (local).
               showNote(g.efecto_detectado ? '' :
