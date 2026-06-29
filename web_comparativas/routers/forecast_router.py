@@ -2656,6 +2656,18 @@ def _compute_meta_gauge(session) -> dict:
             return {"disponible": False, "efecto_detectado": False}
 
         base = meta / 1.25
+
+        # Año del forecast: del PERÍODO del forecast (años máximos de la serie de
+        # proyección), NO de date.today(). Si seguís viendo el forecast 2026 en 2027,
+        # la marca temporal del medidor mide contra 2026.
+        forecast_year = None
+        try:
+            _yrs = [int(str(r.get("fecha"))[:4])
+                    for r in ((cd or {}).get("forecast") or []) if r.get("fecha")]
+            forecast_year = max(_yrs) if _yrs else None
+        except Exception:
+            forecast_year = None
+
         impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
         rows_all = _query_change_requests(session, {}, cap=_MAX_CR_POOL)   # TODOS los CRs
         records_all = [_cr_to_dict(r) for r in rows_all]
@@ -2667,6 +2679,7 @@ def _compute_meta_gauge(session) -> dict:
         return {
             "disponible": True,
             "efecto_detectado": bool(efecto),
+            "forecast_year": forecast_year,
             "base": round(base, 0),
             "meta": round(meta, 0),
             "proy_aprobados": round(proy_aprobados, 0),
