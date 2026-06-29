@@ -1657,6 +1657,38 @@ def _deactivate_override(
     rec.updated_at = dt.datetime.utcnow()
 
 
+def deactivate_override_by_id(
+    session,
+    override_id: Any,
+    *,
+    reviewer_email: str | None = None,
+) -> int | None:
+    """Desactiva (is_active=False) el override vigente identificado por id, DENTRO
+    de la sesión recibida (atómico con el cambio de estado del change_request).
+
+    Compuerta de aprobación: al RECHAZAR un change_request, el override vigente de
+    ese alcance se revierte → el alcance vuelve a la BASE del modelo. Opera al grano
+    del override tal cual (override_scope): un subnegocio revierte todas sus celdas;
+    un override de celda más fino, separado, sobrevive.
+
+    Devuelve el user_id DUEÑO del override (para invalidar su caché) o None si no
+    hay nada que desactivar: id None/inexistente, o override YA inactivo → no-op sin
+    error (idempotente).
+    """
+    if override_id is None or ForecastUserOverride is None:
+        return None
+    try:
+        rec = session.get(ForecastUserOverride, int(override_id))
+    except Exception:
+        return None
+    if rec is None or not getattr(rec, "is_active", False):
+        return None
+    rec.is_active = False
+    rec.updated_by = reviewer_email
+    rec.updated_at = dt.datetime.utcnow()
+    return int(rec.user_id) if getattr(rec, "user_id", None) is not None else None
+
+
 def save_client_overrides(
     *,
     user_id: int,

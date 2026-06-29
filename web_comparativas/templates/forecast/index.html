@@ -3037,7 +3037,37 @@
           </div>
         </div>
 
-        <!-- ── Modal: rechazar con motivo ── -->
+        <!-- ── Modal: rechazar con motivo (enriquecido con aviso de reversión) ── -->
+        <style>
+          .appr-reject-impact{
+            background: var(--g-red-light, #fdecea);
+            border-left: 3px solid var(--g-red, #d93025);
+            border-radius: 8px;
+            padding: 11px 13px;
+            margin: 0 0 14px;
+          }
+          .appr-reject-impact-head{
+            display:flex; align-items:center; gap:8px;
+            font-weight:700; font-size:0.85rem; color: var(--g-red, #d93025);
+            margin-bottom:9px; line-height:1.25;
+          }
+          .appr-reject-impact-head i{ font-size:1rem; flex:0 0 auto; }
+          .appr-reject-impact-figures{
+            display:flex; align-items:baseline; justify-content:space-between;
+            gap:12px; flex-wrap:wrap;
+          }
+          .appr-reject-impact-count{ font-size:0.8rem; color: var(--text-strong, #202124); }
+          .appr-reject-impact-count b{ font-weight:700; font-size:1.05rem; }
+          .appr-reject-impact-money{ font-weight:700; font-size:1.12rem; line-height:1.2; }
+          .appr-reject-impact-money .ri-baja{ color: var(--g-red, #d93025); }
+          .appr-reject-impact-money .ri-suba{ color: var(--g-green, #1e8e3e); }
+          .appr-reject-impact-money .ri-nd{
+            color: var(--text-muted, #5f6368); font-weight:600; font-size:0.82rem;
+          }
+          .appr-reject-impact-note{
+            margin:10px 0 0; font-size:0.77rem; color: var(--text-muted, #5f6368); line-height:1.45;
+          }
+        </style>
         <div id="appr-reject-overlay" class="appr-modal-overlay" style="display:none;" onclick="if(event.target===this)_apprCloseReject()">
           <div class="appr-modal appr-modal--sm">
             <div class="appr-modal-head">
@@ -3046,15 +3076,32 @@
             </div>
             <div class="appr-modal-body">
               <p id="appr-reject-sub" style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;"></p>
+              <!-- Aviso de reversión: rechazar revierte ajustes reales. Se rellena en _apprFillRejectImpact(). -->
+              <div id="appr-reject-impact" class="appr-reject-impact" style="display:none;">
+                <div class="appr-reject-impact-head">
+                  <i class="bi bi-exclamation-triangle"></i>
+                  <span id="appr-reject-impact-scope"></span>
+                </div>
+                <div class="appr-reject-impact-figures">
+                  <div class="appr-reject-impact-count">
+                    <b id="appr-reject-impact-count-n">0</b> <span>modificación(es) se revertirán</span>
+                  </div>
+                  <div id="appr-reject-impact-money" class="appr-reject-impact-money"></div>
+                </div>
+                <p class="appr-reject-impact-note">
+                  Los ajustes vuelven a su valor original (la base del modelo). Si los cotizadores
+                  querían mantenerlos, deberán volver a cargarlos.
+                </p>
+              </div>
               <label style="font-size:0.82rem;font-weight:600;display:block;margin-bottom:6px;">Motivo del rechazo</label>
               <textarea id="appr-reject-motivo" class="form-control form-control-sm" rows="4"
-                        placeholder="Indique el motivo por el cual se rechaza esta modificación…"></textarea>
+                        placeholder="Indique el motivo del rechazo…"></textarea>
               <div id="appr-reject-error" style="color:#d93025;font-size:0.78rem;margin-top:6px;display:none;"></div>
             </div>
             <div class="appr-modal-foot">
               <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseReject()">Cancelar</button>
               <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprConfirmReject()">
-                <i class="bi bi-x-circle"></i> Confirmar rechazo
+                <i class="bi bi-exclamation-triangle me-2"></i>Rechazar y revertir
               </button>
             </div>
           </div>
@@ -7413,8 +7460,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     _rejectMode = 'node';
     _rejectAccountNode = node;   // (reutiliza la var del modal; ahora guarda el nodo)
     const lbl = _apprNodeLabel(node);
-    _apprOpenRejectModal(`Rechazar ${lbl}`,
-      `Se rechazarán las ${node.pending_count || 0} modificación(es) pendiente(s) que cuelgan de ${lbl} bajo los filtros actuales.`);
+    _apprOpenRejectModal(`Rechazar ${lbl}`, '',
+      { scope: lbl, count: node.pending_count || 0, baja: node.impacto_baja || 0, suba: node.impacto_suba || 0 });
   };
 
   // Controles de paginación reutilizables (Anterior · Pág. N de M · [N] Ir · Siguiente).
@@ -7614,14 +7661,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     const dm = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
     _rejectMode = 'group';
     _rejectGroup = _apprUnitValue(u);   // valor canónico para el body
-    _apprOpenRejectModal(`Rechazar ${dm.noun} “${u.grupo}”`,
-      `Se rechazarán las ${u.pendientes || 0} modificación(es) pendiente(s) de este ${dm.noun} bajo los filtros actuales.`);
+    _apprOpenRejectModal(`Rechazar ${dm.noun} “${u.grupo}”`, '',
+      { scope: `${dm.noun} “${u.grupo}”`, count: u.pendientes || 0, baja: u.impacto_baja || 0, suba: u.impacto_suba || 0 });
   };
 
   // ── Rechazo (individual o grupo) ───────────────────────────────
-  function _apprOpenRejectModal(titleHtml, subHtml) {
+  // Aviso de reversión: rechazar revierte ajustes reales (vuelven a la base).
+  // detail = {scope, count, baja, suba} (todo ya en el front; sin llamada nueva).
+  // baja viene negativa (↓), suba positiva (↑); si ambas 0 → impacto no estimable.
+  function _apprFillRejectImpact(detail) {
+    const box = document.getElementById('appr-reject-impact');
+    if (!box) return;
+    if (!detail) { box.style.display = 'none'; return; }
+    const scopeEl = document.getElementById('appr-reject-impact-scope');
+    const nEl     = document.getElementById('appr-reject-impact-count-n');
+    const moneyEl = document.getElementById('appr-reject-impact-money');
+    if (scopeEl) scopeEl.textContent = detail.scope || 'Alcance seleccionado';
+    if (nEl)     nEl.textContent = (detail.count || 0);
+    if (moneyEl) {
+      const baja = Number(detail.baja || 0), suba = Number(detail.suba || 0);
+      if (!baja && !suba) {
+        moneyEl.innerHTML = `<span class="ri-nd">Impacto no estimable (sin base valorizada)</span>`;
+      } else {
+        const parts = [];
+        if (baja) parts.push(`<span class="ri-baja">↓ ${fmtMoney(baja)}</span>`);
+        if (suba) parts.push(`<span class="ri-suba">↑ ${fmtMoney(suba)}</span>`);
+        moneyEl.innerHTML = parts.join(' · ');
+      }
+    }
+    box.style.display = 'block';
+  }
+  function _apprOpenRejectModal(titleHtml, subHtml, detail) {
     const t = document.getElementById('appr-reject-title'); if (t) t.innerHTML = titleHtml;
-    const s = document.getElementById('appr-reject-sub'); if (s) s.innerHTML = subHtml || '';
+    // Subtítulo opcional: si va vacío se OCULTA (sin hueco). El panel rojo de abajo
+    // es la fuente única del alcance + conteo, así no se repite con el título.
+    const s = document.getElementById('appr-reject-sub');
+    if (s) { s.innerHTML = subHtml || ''; s.style.display = subHtml ? 'block' : 'none'; }
+    _apprFillRejectImpact(detail);
     const ta = document.getElementById('appr-reject-motivo'); if (ta) ta.value = '';
     const er = document.getElementById('appr-reject-error'); if (er) er.style.display = 'none';
     const ov = document.getElementById('appr-reject-overlay'); if (ov) ov.style.display = 'flex';
@@ -7630,7 +7706,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   window._apprOpenReject = function(id) {
     _rejectMode = 'single';
     _rejectId = id;
-    _apprOpenRejectModal('Rechazar modificación', 'Esta acción rechaza una única modificación e indica el motivo.');
+    const r = _apprById[id] || {};
+    const scope = [r.client_name, (r.codigo_serie && r.codigo_serie !== '—') ? r.codigo_serie : '']
+      .filter(Boolean).join(' · ') || 'Modificación seleccionada';
+    const amt = Number(r.impacto_estimado || 0);
+    _apprOpenRejectModal('Rechazar modificación', '',
+      { scope, count: 1, baja: amt < 0 ? amt : 0, suba: amt > 0 ? amt : 0 });
   };
   window._apprCloseReject = function() {
     const ov = document.getElementById('appr-reject-overlay'); if (ov) ov.style.display = 'none';

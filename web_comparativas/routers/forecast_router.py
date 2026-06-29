@@ -2127,13 +2127,53 @@ class _ReviewPayload(BaseModel):
     motivo: Optional[str] = Field(default=None, max_length=2000)
 
 
-def _apply_review(session, cr, *, status: str, user: User, motivo: Optional[str]):
-    cr.status = status
-    cr.reviewed_by_user_id = getattr(user, "id", None)
-    cr.reviewed_by_username = getattr(user, "email", None) or getattr(user, "display_name", None)
-    cr.reviewed_at = dt.datetime.utcnow()
-    if motivo is not None:
-        cr.review_comment = motivo.strip() or None
+def _apply_review(session, cr, *, status: str, user: User, motivo: Optional[str]) -> Optional[int]:
+    """Aplica la revisión a un change_request. Devuelve el user_id DUEÑO del override
+    revertido (para invalidar su caché tras el commit), o None.
+
+    APROBAR  → solo cambia status (el override ya está aplicado, ahora avalado).
+    RECHAZAR → además:
+      (a) desactiva el override vigente vinculado (cr.override_id) → el alcance vuelve
+          a la BASE del modelo. Al grano del override (un subneg revierte sus celdas;
+          un override de celda más fino, separado, sobrevive).
+      (b) marca TODAS las CR pendientes HERMANAS del mismo override como rechazadas
+          con el mismo motivo (sin pendientes fantasma).
+    Idempotente: si el override ya está inactivo, o las hermanas ya no están
+    pendientes, no rompe ni re-procesa (los loops grupo/by-ids saltan las ya
+    decididas por su guard `status != 'pendiente'`)."""
+    reviewer_id = getattr(user, "id", None)
+    reviewer_email = getattr(user, "email", None) or getattr(user, "display_name", None)
+    now = dt.datetime.utcnow()
+    comment = (motivo.strip() or None) if motivo is not None else None
+
+    def _stamp(c) -> None:
+        c.status = status
+        c.reviewed_by_user_id = reviewer_id
+        c.reviewed_by_username = reviewer_email
+        c.reviewed_at = now
+        if motivo is not None:
+            c.review_comment = comment
+
+    if status != "rechazado":
+        _stamp(cr)
+        return None
+
+    # RECHAZAR → revertir override vigente + cascada a hermanas pendientes.
+    owner_uid = svc.deactivate_override_by_id(
+        session, getattr(cr, "override_id", None), reviewer_email=reviewer_email
+    )
+    if getattr(cr, "override_id", None) is not None:
+        from web_comparativas.models import ForecastChangeRequest as _CR
+        siblings = (
+            session.query(_CR)
+            .filter(_CR.override_id == cr.override_id)
+            .filter(_CR.status == "pendiente")
+            .all()
+        )
+        for sib in siblings:
+            _stamp(sib)
+    _stamp(cr)  # asegura el cr actual (cubre override_id NULL y cualquier borde)
+    return owner_uid
 
 
 @router.post("/api/approvals/{request_id:int}/approve", response_class=JSONResponse)
@@ -2170,7 +2210,8 @@ def api_approvals_reject(
     request: Request,
     user: User = Depends(require_module("forecast")),
 ):
-    """Rechaza una modificación con motivo. Solo Admin/Gerente. No revierte el override."""
+    """Rechaza una modificación con motivo. Solo Admin/Gerente. Revierte el override
+    vigente del alcance (vuelve a la base) y cascada a sus CR pendientes hermanas."""
     _require_aprobaciones_edit(user)
     motivo = (payload.motivo or "").strip()
     if not motivo:
@@ -2179,12 +2220,16 @@ def api_approvals_reject(
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
     try:
+        owner_uid = None
         with SessionLocal() as session:
             cr = session.get(CR, request_id)
             if cr is None:
                 raise HTTPException(404, "Modificación no encontrada")
-            _apply_review(session, cr, status="rechazado", user=user, motivo=motivo)
+            owner_uid = _apply_review(session, cr, status="rechazado", user=user, motivo=motivo)
             session.commit()
+        # Caché del DUEÑO del override (cotizador), no del admin que rechaza.
+        if owner_uid is not None:
+            svc._clear_cache_for_override_save(owner_uid)
         return JSONResponse({"ok": True, "id": request_id, "status": "rechazado"})
     except HTTPException:
         raise
@@ -2842,6 +2887,7 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
         col = _DIM_MODEL_COL[dim]
 
     n = 0
+    reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
         for cr in rows:
@@ -2860,9 +2906,13 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
                 colval = str(getattr(cr, col, None) or "").strip().lower()
                 if colval != vkey:  # vkey "" matchea NULL/vacío (Sin X)
                     continue
-            _apply_review(session, cr, status=status, user=user, motivo=motivo)
+            owner = _apply_review(session, cr, status=status, user=user, motivo=motivo)
+            if owner is not None:
+                reverted_owner_ids.add(owner)
             n += 1
         session.commit()
+    for uid in reverted_owner_ids:
+        svc._clear_cache_for_override_save(uid)
     return n
 
 
@@ -2950,13 +3000,18 @@ def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -
     motivo = (payload.motivo or "").strip() or None
     filters = _ids_filters(payload)
     n = 0
+    reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
         for cr in rows:
             if cr.id in requested and cr.status == "pendiente":
-                _apply_review(session, cr, status=status, user=user, motivo=motivo)
+                owner = _apply_review(session, cr, status=status, user=user, motivo=motivo)
+                if owner is not None:
+                    reverted_owner_ids.add(owner)
                 n += 1
         session.commit()
+    for uid in reverted_owner_ids:
+        svc._clear_cache_for_override_save(uid)
     return n
 
 
