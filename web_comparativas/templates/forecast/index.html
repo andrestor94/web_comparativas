@@ -2663,36 +2663,57 @@
           <style>
             .mg-section{margin-top:18px;border-top:1px solid var(--border-color);padding-top:16px;}
             .mg-section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
-            .mg-section-head .mg-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--g-blue-light);color:var(--g-blue);font-size:1rem;}
             .mg-section-head h4{font-size:.98rem;font-weight:700;color:var(--text-primary);margin:0;}
-            .mg-section-head .mg-sub{font-size:.74rem;color:var(--text-muted);margin:1px 0 0;}
-            .mg-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:22px 26px 22px;box-shadow:var(--shadow-card);}
+            .mg-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:26px 28px 24px;box-shadow:var(--shadow-card);}
 
-            /* Frase-resumen (captar de un vistazo) */
-            .mg-hero{font-size:.9rem;color:var(--text-secondary);text-align:center;margin:0 auto 4px;max-width:640px;line-height:1.5;}
-            .mg-hero b{font-variant-numeric:tabular-nums;font-weight:800;}
+            /* ── HÉROE (signature): el número protagonista ── */
+            .mg-hero2{text-align:center;margin:0 auto 26px;}
+            .mg-hero-eyebrow{font-size:.62rem;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:var(--text-muted);margin-bottom:5px;}
+            .mg-hero-num{font-family:var(--font-family);font-weight:700;font-size:2rem;line-height:1;color:var(--text-primary);
+              font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+            .mg-hero-num .u{font-size:.5em;font-weight:600;color:var(--text-muted);margin-left:2px;letter-spacing:0;}
+            .mg-hero-pace{display:inline-flex;align-items:center;gap:6px;margin-top:12px;font-size:.74rem;font-weight:600;
+              padding:4px 12px;border-radius:9999px;border:1px solid transparent;transition:color .35s ease,background .35s ease;}
+            .mg-hero-pace.ahead{color:var(--g-green);background:var(--g-green-light);border-color:#bfe6cd;}
+            .mg-hero-pace.behind{color:#b06000;background:#fef7e0;border-color:#fde293;}
+            .mg-hero-pace.none{display:none;}
 
-            /* ── Barra termómetro ────────────────────────────────────────── */
+            /* ── Riel (NEUTRO — sin semáforo) ── */
             .mg-bar-area{max-width:680px;margin:0 auto;}
-            .mg-bar-wrap{padding:36px 12px 4px;}
-            .mg-bar-track{position:relative;height:18px;border-radius:9999px;
-              background:linear-gradient(90deg,#fce8e6 0%,#fef7e0 52%,#e6f4ea 100%);
-              box-shadow:inset 0 1px 2px rgba(60,64,67,.14);}
-            .mg-bar-fill{position:absolute;left:0;top:0;height:100%;border-radius:9999px;transition:width .5s cubic-bezier(.4,0,.2,1),background .35s ease;}
+            .mg-bar-wrap{padding:34px 14px 4px;}
+            .mg-bar-track{position:relative;height:16px;border-radius:9999px;background:#eef1f5;
+              box-shadow:inset 0 1.5px 3px rgba(31,41,55,.16);}
+            .mg-bar-fill{position:absolute;left:0;top:0;width:0;height:100%;border-radius:9999px;overflow:hidden;
+              transition:width .6s cubic-bezier(.22,1,.36,1),background .35s ease;}
+            .mg-bar-fill::after{content:"";position:absolute;inset:0;border-radius:inherit;
+              background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,0) 60%);}
             .mg-bar-ghost{position:absolute;top:0;height:100%;border-radius:9999px;
-              background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 5px,transparent 5px 10px);
-              outline:2px dashed currentColor;outline-offset:-2px;
-              transition:left .5s cubic-bezier(.4,0,.2,1),width .5s cubic-bezier(.4,0,.2,1);}
-            .mg-marker-meta{position:absolute;top:-10px;bottom:-10px;width:2px;background:var(--text-primary);border-radius:2px;z-index:3;
-              transition:left .5s cubic-bezier(.4,0,.2,1);}
-            .mg-flag{position:absolute;top:-32px;transform:translateX(-50%);white-space:nowrap;font-size:.64rem;font-weight:700;
+              background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 5px,transparent 5px 10px);
+              outline:1.5px dashed currentColor;outline-offset:-1.5px;
+              transition:left .6s cubic-bezier(.22,1,.36,1),width .6s cubic-bezier(.22,1,.36,1);}
+            /* marca Meta (objetivo): línea fina ink + bandera sólida */
+            .mg-marker-meta{position:absolute;top:-9px;bottom:-9px;width:1.5px;background:var(--text-primary);border-radius:2px;z-index:3;
+              transition:left .6s cubic-bezier(.22,1,.36,1);}
+            .mg-flag{position:absolute;top:-31px;transform:translateX(-50%);white-space:nowrap;font-size:.62rem;font-weight:600;letter-spacing:.02em;
               color:#fff;background:var(--text-primary);padding:3px 8px;border-radius:6px;box-shadow:var(--shadow-soft);}
             .mg-flag::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);
               border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--text-primary);}
-            .mg-dot{position:absolute;top:50%;width:18px;height:18px;border-radius:50%;transform:translate(-50%,-50%);
-              border:3px solid #fff;box-shadow:var(--shadow-soft);z-index:2;transition:left .5s cubic-bezier(.4,0,.2,1),background .35s ease,border-color .35s ease;}
-            .mg-dot-ghost{width:16px;height:16px;background:#fff;border:2px dashed var(--text-secondary);box-shadow:none;}
-            .mg-scale{display:flex;justify-content:space-between;font-size:.66rem;color:var(--text-muted);margin-top:10px;font-variant-numeric:tabular-nums;}
+            /* Meta fija en el extremo derecho (100%): anclo el flag a la izquierda para no clipear */
+            .mg-marker-meta .mg-flag{left:auto;right:-1px;transform:none;}
+            .mg-marker-meta .mg-flag::after{left:auto;right:7px;transform:none;}
+            /* marca temporal "Hoy" — DISTINTA de Meta: azul Suizo, punteada, pill suave */
+            .mg-marker-time{position:absolute;top:-6px;bottom:-6px;width:0;border-left:2px dashed var(--g-blue);z-index:2;
+              transition:left .6s cubic-bezier(.22,1,.36,1);}
+            .mg-time-lbl{position:absolute;top:-31px;transform:translateX(-50%);white-space:nowrap;font-size:.6rem;font-weight:600;
+              color:var(--g-blue-dark);background:var(--g-blue-light);border:1px solid #c5dafb;padding:2px 8px;border-radius:6px;
+              display:inline-flex;align-items:center;gap:4px;}
+            .mg-time-lbl::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);
+              border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--g-blue-light);}
+            .mg-dot{position:absolute;top:50%;width:16px;height:16px;border-radius:50%;transform:translate(-50%,-50%);
+              border:3px solid #fff;box-shadow:0 1px 4px rgba(31,41,55,.28);z-index:4;
+              transition:left .6s cubic-bezier(.22,1,.36,1),background .35s ease,border-color .35s ease;}
+            .mg-dot-ghost{width:14px;height:14px;background:#fff;border:2px dashed var(--text-secondary);box-shadow:none;z-index:3;}
+            .mg-scale{display:flex;justify-content:space-between;font-size:.64rem;font-weight:500;color:var(--text-muted);margin-top:12px;font-variant-numeric:tabular-nums;letter-spacing:.02em;}
 
             /* ── Leyenda ─────────────────────────────────────────────────── */
             .mg-legend{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin:18px auto 0;max-width:560px;}
@@ -2702,7 +2723,7 @@
             .mg-sw{width:26px;height:11px;border-radius:9999px;flex:none;}
             .mg-sw-ghost{background-image:repeating-linear-gradient(45deg,var(--text-secondary) 0 4px,transparent 4px 8px);
               border:1px dashed var(--text-secondary);height:13px;}
-            .mg-meta-note{font-size:.7rem;color:var(--text-muted);margin:14px auto 0;display:flex;align-items:center;justify-content:center;gap:6px;}
+            .mg-meta-note{font-size:.69rem;color:var(--text-muted);margin:16px auto 0;display:flex;align-items:center;justify-content:center;gap:6px;}
             .mg-meta-note i{color:var(--text-primary);}
             /* Estado sin base valorizada (local incompleto) */
             .mg-track-na{background:#eceff1 !important;box-shadow:inset 0 1px 2px rgba(60,64,67,.10) !important;}
@@ -2711,35 +2732,45 @@
               padding:7px 12px;margin:12px auto 0;max-width:560px;text-align:center;display:none;align-items:center;justify-content:center;gap:7px;}
             .mg-note.show{display:flex;}
             .mg-note i{flex:none;}
+            /* Reveal de carga: UN solo momento orquestado (la tarjeta sube y aparece;
+               adentro el fill barre 0→pos y el número héroe hace count-up). */
+            @keyframes mgFadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+            .mg-reveal{animation:mgFadeIn .55s cubic-bezier(.22,1,.36,1) both;}
+            @media (prefers-reduced-motion: reduce){
+              .mg-bar-fill,.mg-bar-ghost,.mg-marker-meta,.mg-marker-time,.mg-dot,.mg-hero-pace{transition:none !important;}
+              .mg-reveal{animation:none !important;}
+            }
           </style>
 
           <div class="mg-section" id="mg-section">
             <div class="mg-section-head">
-              <span class="mg-ic"><i class="bi bi-speedometer2"></i></span>
-              <div>
-                <h4>Avance hacia la meta anual</h4>
-                <div class="mg-sub">Dónde queda la empresa al aprobar — y hasta dónde llegaría si aprobás lo pendiente.</div>
-              </div>
+              <h4>Avance Meta</h4>
             </div>
 
-            <div class="mg-card">
-              <div class="mg-hero" id="mgA-hero">—</div>
+            <div class="mg-card" id="mgA-card">
+              <!-- Héroe: el número protagonista (señal del medidor) -->
+              <div class="mg-hero2">
+                <div class="mg-hero-eyebrow">De la meta · aprobado</div>
+                <div class="mg-hero-num"><span id="mgA-heroNum">—</span><span class="u">%</span></div>
+                <div class="mg-hero-pace none" id="mgA-pace"></div>
+              </div>
               <div class="mg-bar-area">
                 <div class="mg-bar-wrap">
-                  <div class="mg-bar-track">
+                  <div class="mg-bar-track" id="mgA-track">
                     <div class="mg-bar-fill" id="mgA-fill"></div>
                     <div class="mg-bar-ghost" id="mgA-ghost"></div>
+                    <div class="mg-marker-time" id="mgA-time"><span class="mg-time-lbl" id="mgA-timeLbl"><i class="bi bi-clock"></i> Hoy</span></div>
                     <div class="mg-marker-meta" id="mgA-meta"><span class="mg-flag">Meta anual</span></div>
                     <div class="mg-dot mg-dot-solid" id="mgA-dotAprob"></div>
                     <div class="mg-dot mg-dot-ghost" id="mgA-dotSi"></div>
                   </div>
-                  <div class="mg-scale"><span id="mgA-scaleLo">—</span><span id="mgA-scaleHi">Meta 100%</span></div>
+                  <div class="mg-scale"><span id="mgA-scaleLo">0%</span><span id="mgA-scaleHi">100%</span></div>
                 </div>
                 <div class="mg-legend">
                   <div class="mg-leg"><span class="mg-sw mg-sw-solid" id="mgA-swAprob"></span> Aprobado <strong id="mgA-aprobPct">—</strong></div>
                   <div class="mg-leg"><span class="mg-sw mg-sw-ghost"></span> Si aprobás lo pendiente <strong id="mgA-siPct">—</strong></div>
                 </div>
-                <div class="mg-meta-note"><i class="bi bi-flag-fill"></i> Meta anual = proyección base + 25%.</div>
+                <div class="mg-meta-note"><i class="bi bi-flag-fill"></i> Meta = base + 25%</div>
                 <div class="mg-note" id="mgA-note"><i class="bi bi-info-circle"></i> <span id="mgA-noteTxt"></span></div>
               </div>
             </div>
@@ -2754,61 +2785,106 @@
             const GREEN = '#0f9d58', AMBER = '#f29900', RED = '#d93025';
             const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
             const colorOf = pct => { const d = Math.abs(pct - 100); return d <= 5 ? GREEN : d <= 15 ? AMBER : RED; };
-            const fmt1 = pct => pct.toFixed(1) + '%';
+            const fmtN = v => v.toFixed(1).replace('.', ',');        // número es-AR (sin %)
+            const fmt1 = v => fmtN(v) + '%';
+            const REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+            let _mgFirst = true;                                     // el reveal/count-up corre UNA sola vez
             const showNote = (txt) => { set('mgA-noteTxt', el => el.textContent = txt);
               set('mgA-note', el => el.classList.toggle('show', !!txt)); };
 
+            // Avance del año del forecast (marca temporal). forecast_year viene del
+            // PERÍODO del forecast (backend), NO de date.today(); "hoy" sí es del browser.
+            function _yearPct(g){
+              const fy = g && (typeof g.forecast_year === 'number') ? g.forecast_year : null;
+              if (!fy) return null;
+              const now = new Date(), start = new Date(fy, 0, 1), end = new Date(fy + 1, 0, 1);
+              return Math.max(0, Math.min(100, (now - start) / (end - start) * 100));
+            }
+            function _setTime(yp){
+              set('mgA-time', el => { if (yp === null) { el.style.display = 'none'; }
+                else { el.style.display = ''; el.style.left = yp + '%'; } });
+              set('mgA-timeLbl', el => { if (yp !== null) el.innerHTML = '<i class="bi bi-clock"></i> Hoy · ' + Math.round(yp) + '% del año'; });
+            }
+
+            // Count-up del número héroe (easeOutCubic). Reduced-motion → valor directo.
+            function _countUp(el, to){
+              if (REDUCE || !window.requestAnimationFrame) { el.textContent = fmtN(to); return; }
+              const t0 = performance.now(), dur = 650;
+              (function tick(t){
+                const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+                el.textContent = fmtN(to * e);
+                if (k < 1) requestAnimationFrame(tick);
+              })(t0);
+            }
+            // Reveal de carga: una sola vez, la tarjeta sube y aparece (orquestado).
+            function _revealOnce(){
+              if (REDUCE) return;
+              set('mgA-card', el => { el.classList.remove('mg-reveal'); void el.offsetWidth; el.classList.add('mg-reveal'); });
+            }
+
             // Estado "sin base valorizada" (local incompleto): N/D honesto, no 0% falso.
-            function _na(msg){
-              set('mgA-hero', el => el.innerHTML = '<span style="color:var(--text-muted)">Meta no disponible en este entorno.</span>');
+            // La marca temporal SÍ se mantiene (no depende de la base valorizada).
+            function _na(){
+              set('mgA-heroNum', el => el.textContent = 'N/D');
+              set('mgA-pace', el => { el.className = 'mg-hero-pace none'; });
               ['mgA-fill','mgA-ghost'].forEach(id => set(id, el => el.style.width = '0%'));
               ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = 'none'));
               set('mgA-meta', el => el.style.display = 'none');
-              set('mgA-fill', el => el.parentElement && el.parentElement.classList.add('mg-track-na'));
+              set('mgA-track', el => el.classList.add('mg-track-na'));
               set('mgA-aprobPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
               set('mgA-siPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
               set('mgA-swAprob', el => el.style.background = 'var(--border-hover)');
-              set('mgA-scaleLo', el => el.textContent = '');
-              showNote(msg || 'Sin base valorizada para estimar la meta en este entorno (disponible en producción).');
+              showNote('Sin base valorizada para estimar la meta en este entorno (disponible en producción).');
             }
 
             window.mgRender = function(g){
-              if (!g || !g.disponible || !(g.meta > 0)) { _na(); return; }
+              const yp = _yearPct(g);
+              _setTime(yp);                                  // marca temporal (independiente de la meta)
+              if (_mgFirst) _revealOnce();
+
+              if (!g || !g.disponible || !(g.meta > 0)) { _na(); _mgFirst = false; return; }
               // restaurar estado normal (por si venía de N/D)
               ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = ''));
               set('mgA-meta', el => el.style.display = '');
-              set('mgA-fill', el => el.parentElement && el.parentElement.classList.remove('mg-track-na'));
+              set('mgA-track', el => el.classList.remove('mg-track-na'));
 
               const pA = (typeof g.pct_aprobados === 'number') ? g.pct_aprobados : (g.proy_aprobados / g.meta * 100);
               const pS = (typeof g.pct_si_pendientes === 'number') ? g.pct_si_pendientes : (g.proy_aprob_pend / g.meta * 100);
               const cA = colorOf(pA), cS = colorOf(pS);
 
-              // Dominio adaptativo: meta (100) y ambas posiciones siempre legibles, con margen.
-              const lo = Math.floor(Math.min(pA, pS, 100) - 8);
-              const hi = Math.ceil(Math.max(pA, pS, 100) + 8);
-              const span = Math.max(1, hi - lo);
-              const frac = pct => Math.max(0, Math.min(1, (pct - lo) / span));
-              const fA = frac(pA), fS = frac(pS), fM = frac(100);
+              // Escala FIJA 0%–100% de la meta. >100% → clamp visual al borde; el número
+              // real se sigue mostrando para no perder "por encima de la meta".
+              const frac = pct => Math.max(0, Math.min(1, pct / 100));
+              const fA = frac(pA), fS = frac(pS);
 
-              set('mgA-hero', el => {
-                el.innerHTML = `Hoy, con lo aprobado, estás en <b style="color:${cA}">${fmt1(pA)}</b> de la meta`
-                  + ` · si aprobás lo pendiente llegás a <b style="color:${cS}">${fmt1(pS)}</b>.`;
+              // HÉROE: número protagonista (count-up en la carga; luego directo).
+              if (_mgFirst) set('mgA-heroNum', el => _countUp(el, pA));
+              else          set('mgA-heroNum', el => el.textContent = fmtN(pA));
+
+              // Chip de ritmo: ¿adelantado o atrasado respecto del año?
+              set('mgA-pace', el => {
+                if (yp === null) { el.className = 'mg-hero-pace none'; return; }
+                const ahead = pA >= yp;
+                el.className = 'mg-hero-pace ' + (ahead ? 'ahead' : 'behind');
+                el.innerHTML = (ahead ? '<i class="bi bi-arrow-up-right"></i> Adelantado' : '<i class="bi bi-arrow-down-right"></i> Atrasado')
+                  + ' · ' + Math.round(yp) + '% del año';
               });
+
               // El "fantasma" puede ir antes o después del aprobado → tramo entre ambos.
               const gFrom = Math.min(fA, fS), gTo = Math.max(fA, fS);
               set('mgA-fill', el => { el.style.width = (fA*100)+'%'; el.style.background = cA; });
               set('mgA-ghost', el => { el.style.left = (gFrom*100)+'%'; el.style.width = ((gTo-gFrom)*100)+'%'; el.style.color = cS; });
-              set('mgA-meta', el => { el.style.left = (fM*100)+'%'; });
+              set('mgA-meta', el => { el.style.left = '100%'; });            // meta SIEMPRE en el extremo derecho
               set('mgA-dotAprob', el => { el.style.left = (fA*100)+'%'; el.style.background = cA; });
               set('mgA-dotSi', el => { el.style.left = (fS*100)+'%'; el.style.borderColor = cS; });
               set('mgA-aprobPct', el => { el.textContent = fmt1(pA); el.style.color = cA; });
               set('mgA-siPct', el => { el.textContent = fmt1(pS); el.style.color = cS; });
               set('mgA-swAprob', el => { el.style.background = cA; });
-              set('mgA-scaleLo', el => { el.textContent = lo + '% meta'; });
 
               // Honestidad: hay meta pero los overrides no cruzan el valorizado (local).
               showNote(g.efecto_detectado ? '' :
                 'No se detecta efecto de las modificaciones en este entorno (las cuentas con ajustes no están en la base valorizada local).');
+              _mgFirst = false;
             };
           })();
           </script>
