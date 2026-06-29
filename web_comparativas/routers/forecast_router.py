@@ -1797,19 +1797,19 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
     Dos vistas del mismo conjunto:
       • CONTEOS (cuántas modificaciones) → set bruto ``records`` (chips subas/
         bajas/ajustes y conteos por estatus).
-      • IMPORTES en $ (matriz + impacto por estatus + mayor cuenta):
+      • IMPORTES en $ (matriz + impacto por estatus + mayor cuenta) → se calculan
+        desde los MISMOS ``records`` que alimentan los nodos del árbol
+        (``estimated_amount_delta`` = delta REAL del cambio), deduplicados por celda
+        vigente, clasificados por ``change_type`` (baja_pct/suba_pct, espejo exacto de
+        ``_agg_amounts``) y segmentados por el ``status`` de cada change request (→ el
+        monto migra Pendiente→Aprobado/Rechazado al revisar). Esto reemplaza el cálculo
+        contra la curva +25% (que medía distancia al 25%, no el cambio real, y no
+        migraba bajo el filtro de Estado).
 
-        - Si se pasa ``override_impacts`` (dict de
-          ``svc.compute_approval_curve_impacts``): los importes se calculan con la
-          MISMA lógica que la curva visible (Proyección ajustada − Proyección +25%),
-          por override ACTIVO, y se segmentan por el status de su request vigente
-          coincidente. NO usa ``estimated_amount_delta`` persistido. Reglas de borde:
-            · override activo con request vigente coincidente → entra con ese status;
-            · override activo sin request coincidente → ``override_sin_request``
-              (solo diagnóstico, NO suma en la matriz);
-            · request sin override activo coincidente → excluida (no aparece).
-        - Si ``override_impacts`` es None (red de seguridad, p.ej. curva no
-          disponible): cae al neto deduplicado del log. Degradado, no preferente.
+    ``override_impacts``: parámetro RETIRADO de uso (los call-sites ya no lo pasan).
+    La rama que lo consumía —impacto de curva vía ``svc.compute_approval_curve_impacts``—
+    queda INACCESIBLE (no se borra; ``compute_approval_curve_impacts`` puede usarse en
+    otro lado). Si algún día se vuelve a pasar, ejecutaría esa lógica vieja.
     """
     def _amt(r):
         v = r.get("impacto_estimado")
@@ -1923,22 +1923,44 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
         )
         sin_estimar_total = 0
     else:
-        # ── FALLBACK (sin impactos de curva disponibles): set neto sumando el
-        #    estimated_amount_delta persistido. Solo como red de seguridad. ─────
+        # ── MATRIZ desde los MISMOS records que alimentan los nodos del árbol ──
+        # (impacto_estimado = estimated_amount_delta = delta REAL del cambio).
+        # Consistencia EXACTA con _agg_amounts de los nodos:
+        #   • dedup por celda vigente (_dedupe_and_resolve_overlap) → mismos survivors;
+        #   • clasificación por change_type ESTRICTO: baja_pct→baja, suba_pct→suba;
+        #     ajuste/alta_manual NO entran a las columnas baja/suba (igual que los
+        #     nodos, que solo suman esos dos tipos en sus columnas);
+        #   • segmentación por status del CR → el monto MIGRA Pendiente→Aprobado/
+        #     Rechazado al revisar (el status sale del propio change request).
+        # N/D honesto: si no hay base valorizada (impacto None) se cuenta como
+        # sin_estimar de la celda y NO se inventa monto.
         neto = _dedupe_and_resolve_overlap(records)
 
         def _impact_value(r):
             v = r.get("impacto_estimado")
             return float(v) if isinstance(v, (int, float)) else None
 
+        def _column(r):
+            ct = r.get("change_type")
+            if ct == "baja_pct":
+                return "baja"
+            if ct == "suba_pct":
+                return "suba"
+            return None  # ajuste / alta_manual → fuera de las columnas baja/suba
+
         for r in neto:
-            v = _impact_value(r)
-            if v is None or v == 0:
+            direction = _column(r)
+            if direction is None:
                 continue
             st = r.get("status") or "pendiente"
             if st not in matrix:
                 st = "pendiente"
-            direction = "baja" if v < 0 else "suba"
+            v = _impact_value(r)
+            if v is None:
+                matrix[st][direction]["sin_estimar"] += 1   # N/D honesto, sin monto
+                continue
+            if v == 0:
+                continue
             matrix[st][direction]["monto"] += v
             matrix[st][direction]["n"] += 1
             imp_status[st] += v
@@ -1949,7 +1971,7 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
             for d in ("baja", "suba"):
                 matrix[st][d]["monto"] = round(matrix[st][d]["monto"], 2)
         sin_estimar_total = sum(
-            1 for r in neto if not isinstance(r.get("impacto_estimado"), (int, float))
+            matrix[st][d]["sin_estimar"] for st in matrix for d in ("baja", "suba")
         )
 
     mayor_cuenta, mayor_cuenta_monto = ("—", 0.0)
@@ -2013,14 +2035,9 @@ def api_approvals(
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
             records = [_cr_to_dict(r) for r in rows]
 
-        # Impacto curva-consistente (Ajustada − +25%) por override activo. Si no
-        # se puede calcular, None → fallback degradado en _compute_approval_kpis.
-        try:
-            _impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
-        except Exception as _imp_exc:
-            logger.warning("approval curve impacts failed: %s", _imp_exc)
-            _impacts = None
-        kpis = _compute_approval_kpis(records, override_impacts=_impacts or None)
+        # Matriz/impactos desde los propios change requests (delta real, por status).
+        # Ya NO usa la curva +25% (ver _compute_approval_kpis).
+        kpis = _compute_approval_kpis(records)
         total = len(records)
         start = (page - 1) * page_size
         page_records = records[start: start + page_size]
@@ -2220,6 +2237,11 @@ def _build_group_unit(grupo: str, recs: list[dict]) -> dict:
 
 # ── Agrupación por dimensión alternativa (perfil / negocio / subnegocio) ──────
 _VALID_DIMENSIONS = ("grupo", "perfil", "neg", "subneg")
+# Dimensiones aceptadas SOLO por la revisión en bloque (_review_group). Incluye
+# "cuenta" (usada por el árbol Perfil→Grupo→Cuenta para aprobar/rechazar una
+# cuenta entera). NO se agrega a _VALID_DIMENSIONS para no habilitarla en el
+# endpoint /grouped, que no sabe agrupar por cuenta.
+_REVIEW_DIMENSIONS = _VALID_DIMENSIONS + ("cuenta",)
 # dimension → clave en el dict de _cr_to_dict
 _DIM_DICT_KEY = {"perfil": "perfil", "neg": "negocio", "subneg": "subnegocio"}
 # dimension → columna del modelo ForecastChangeRequest (para la mutación)
@@ -2261,6 +2283,204 @@ def _build_dimension_units(records: list[dict], dimension: str) -> list[dict]:
     # |impacto neto| desc; "Sin X" al final (is_sin True ordena después).
     units.sort(key=lambda u: (u["is_sin"], -abs(u.get("impacto_neto") or 0.0)))
     return units
+
+
+# ── Árbol jerárquico Perfil → Grupo → Cuenta (vista consolidada) ──────────────
+# Reutiliza _dedupe_and_resolve_overlap (estado vigente por celda) y la misma
+# semántica de subtotales que _build_group_unit, pero anidando 3 niveles y
+# mostrando UNA línea por cuenta (no una por evento). Los eventos crudos se
+# conservan en cada cuenta (records) para el detalle de nivel 4.
+
+def _agg_amounts(recs: list[dict]) -> tuple[float, float, float]:
+    baja = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "baja_pct"), 2)
+    suba = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "suba_pct"), 2)
+    neto = round(sum(_amt_of(r) for r in recs), 2)
+    return baja, suba, neto
+
+
+def _estados_consolidado(estados: dict) -> str:
+    presentes = [k for k, v in estados.items() if v > 0]
+    if len(presentes) == 1:
+        return presentes[0]
+    return "mixto" if presentes else "pendiente"
+
+
+def _build_account_unit(cuenta: str, recs: list[dict]) -> dict:
+    """Línea consolidada de una cuenta (nivel 3).
+
+    El estado VIGENTE de cada celda = el último change request de esa celda
+    (vía _dedupe_and_resolve_overlap, que ya resuelve recencia + solapamiento
+    subnegocio⊃celda). Los agregados (celdas vigentes, impacto neto, estado
+    consolidado) se calculan sobre ese conjunto neto. `records` conserva TODOS
+    los eventos crudos para el detalle de nivel 4 (no se pierde nada).
+    """
+    # IMPORTANTE: deduplicar ANTES de tocar _created_sort (lo usa el dedupe).
+    survivors = _dedupe_and_resolve_overlap(recs)
+    baja, suba, neto = _agg_amounts(survivors)
+    estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
+    for r in survivors:
+        st = r.get("status") or "pendiente"
+        estados[st] = estados.get(st, 0) + 1
+    consolidado = _estados_consolidado(estados)
+
+    selector = ""
+    for r in recs:
+        if r.get("client_selector"):
+            selector = r.get("client_selector")
+            break
+
+    periodos = sorted({r.get("periodo") for r in survivors if r.get("periodo") and r.get("periodo") != "—"})
+
+    # Eventos crudos: ordenados por recencia, luego sin _created_sort.
+    # (La cuenta es la HOJA del árbol; estos eventos ya no se muestran en el front,
+    #  pero se usan para derivar los IDs pendientes que cuelgan de la cuenta.)
+    eventos = sorted(recs, key=lambda r: (r.get("_created_sort") or dt.datetime.min), reverse=True)
+    for r in recs:
+        r.pop("_created_sort", None)
+
+    # IDs concretos de los CR PENDIENTES (crudos) de esta cuenta en ESTE camino.
+    # Base de la aprobación/rechazo por nodo (selección por IDs, no por valor).
+    pending_ids = [r.get("id") for r in recs
+                   if (r.get("status") or "pendiente") == "pendiente" and r.get("id") is not None]
+
+    return {
+        "type": "account",
+        "cuenta": cuenta,
+        "client_selector": selector,
+        "celdas_vigentes": len(survivors),
+        "modificaciones": len(survivors),     # vigentes (subtotal de niveles superiores)
+        "eventos_totales": len(recs),          # eventos crudos
+        "impacto_baja": baja,
+        "impacto_suba": suba,
+        "impacto_neto": neto,
+        "estados": estados,
+        "estado_consolidado": consolidado,
+        "pendientes": estados["pendiente"],
+        "pending_ids": pending_ids,
+        "pending_count": len(pending_ids),
+        "periodo_desde": periodos[0] if periodos else None,
+        "periodo_hasta": periodos[-1] if periodos else None,
+        "records": eventos,
+    }
+
+
+# Jerarquía DEFINITIVA por pestaña: cada dimensión arranca por sí misma y baja
+# la cadena hasta Cuenta. El ÚLTIMO nivel de la lista deriva en cuentas. El nivel
+# "grupo" aparece en las CUATRO dimensiones (por eso el group_map se resuelve para
+# todas, no solo dimension=="grupo").
+_DIM_LEVELS = {
+    "grupo":  ["grupo"],
+    "perfil": ["perfil", "grupo"],
+    "neg":    ["neg", "perfil", "grupo"],
+    "subneg": ["subneg", "perfil", "grupo"],
+}
+# Por nivel: clave en el dict de _cr_to_dict + label del bucket NULL/vacío.
+# "grupo" sale de la resolución de get_client_group_map (no es columna de la tabla).
+_LEVEL_DICT_KEY  = {"grupo": "grupo", "perfil": "perfil", "neg": "negocio", "subneg": "subnegocio"}
+_LEVEL_SIN_LABEL = {"grupo": "Sin grupo", "perfil": "Sin perfil", "neg": "Sin negocio", "subneg": "Sin subnegocio"}
+
+
+def _build_node(level: str, label: str, value: str, is_sin: bool, children: list[dict]) -> dict:
+    """Nodo intermedio (un nivel de la jerarquía) que agrega sus hijos ya
+    construidos. Los hijos pueden ser cuentas (hoja) u otros nodos. La agregación
+    es recursiva: suma impacto/estados/modificaciones de los hijos y cuenta las
+    cuentas hacia arriba sin asumir profundidad fija."""
+    baja = round(sum(c.get("impacto_baja") or 0.0 for c in children), 2)
+    suba = round(sum(c.get("impacto_suba") or 0.0 for c in children), 2)
+    neto = round(sum(c.get("impacto_neto") or 0.0 for c in children), 2)
+    estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
+    for c in children:
+        for k in estados:
+            estados[k] += (c.get("estados") or {}).get(k, 0)
+    consolidado = _estados_consolidado(estados)
+    # cuentas: si los hijos son cuentas, cada uno cuenta 1; si son nodos
+    # intermedios, sumamos las suyas (recursión hacia arriba).
+    if children and children[0].get("type") == "account":
+        cuentas = len(children)
+    else:
+        cuentas = sum(c.get("cuentas") or 0 for c in children)
+    modificaciones = sum(c.get("modificaciones") or 0 for c in children)
+    # IDs pendientes que cuelgan de ESTE nodo en ESTE camino = unión recursiva de
+    # los de sus hijos (hojas o sub-nodos). Selección por IDs concretos → aprobar
+    # este nodo no toca CR de otro camino (otro perfil/grupo bajo otra rama).
+    pending_ids: list = []
+    for c in children:
+        pending_ids.extend(c.get("pending_ids") or [])
+    return {
+        "type": "node",
+        "level": level,         # grupo|perfil|neg|subneg → tag del front
+        "label": label,
+        "value": value,
+        "is_sin": is_sin,
+        "cuentas": cuentas,
+        "modificaciones": modificaciones,
+        "impacto_baja": baja,
+        "impacto_suba": suba,
+        "impacto_neto": neto,
+        "estados": estados,
+        "estado_consolidado": consolidado,
+        "pendientes": estados["pendiente"],
+        "pending_ids": pending_ids,
+        "pending_count": len(pending_ids),
+        "children": children,
+    }
+
+
+def _build_accounts(records: list[dict]) -> list[dict]:
+    """Hoja: agrupa por cuenta → _build_account_unit (estado vigente por celda).
+    Orden por |impacto neto| desc."""
+    cuentas: dict[str, list[dict]] = {}
+    for r in records:
+        cname = r.get("client_name") or r.get("client_selector") or "—"
+        cuentas.setdefault(cname, []).append(r)
+    units = [_build_account_unit(cname, crecs) for cname, crecs in cuentas.items()]
+    units.sort(key=lambda u: -abs(u.get("impacto_neto") or 0.0))
+    return units
+
+
+def _build_levels(records: list[dict], levels: list[str], idx: int) -> list[dict]:
+    """Construcción RECURSIVA de la jerarquía siguiendo `levels` de afuera hacia
+    adentro. Cuando se agotan los niveles, el contenido se resuelve en cuentas.
+    Bucketing por nivel: clave LOWER(TRIM); NULL/vacío/'—' → bucket único "Sin X"
+    (label según el nivel); orden por |impacto neto| desc, "Sin X" al final."""
+    if idx >= len(levels):
+        return _build_accounts(records)
+
+    level = levels[idx]
+    dkey = _LEVEL_DICT_KEY[level]
+    sin_label = _LEVEL_SIN_LABEL[level]
+
+    buckets: dict[str, dict] = {}  # norm -> {"label", "value", "is_sin", "recs"}
+    for r in records:
+        raw = str(r.get(dkey) or "").strip()
+        if raw in ("", "—"):
+            norm, label, value = "", sin_label, ""
+        else:
+            norm, label, value = raw.lower(), raw, raw
+        b = buckets.get(norm)
+        if b is None:
+            b = buckets[norm] = {"label": label, "value": value, "is_sin": norm == "", "recs": []}
+        b["recs"].append(r)
+
+    nodes: list[dict] = []
+    for norm, b in buckets.items():
+        children = _build_levels(b["recs"], levels, idx + 1)
+        nodes.append(_build_node(level, b["label"], b["value"], b["is_sin"], children))
+
+    nodes.sort(key=lambda u: (u["is_sin"], -abs(u.get("impacto_neto") or 0.0)))
+    return nodes
+
+
+def _build_tree(records: list[dict], dimension: str) -> list[dict]:
+    """Árbol consolidado de profundidad variable (2-4 niveles) según la pestaña:
+    Grupo→Cuenta · Perfil→Grupo→Cuenta · Negocio→Perfil→Grupo→Cuenta ·
+    Subnegocio→Perfil→Grupo→Cuenta. La hoja es siempre la cuenta consolidada.
+
+    REQUISITO: cada record debe traer 'grupo' resuelto vía _cr_to_dict(r, group_map)
+    porque "grupo" es un nivel en las CUATRO dimensiones (si no, ese nivel caería
+    todo en "Sin grupo")."""
+    levels = _DIM_LEVELS.get(dimension, _DIM_LEVELS["grupo"])
+    return _build_levels(records, levels, 0)
 
 
 @router.get("/api/approvals/grouped", response_class=JSONResponse)
@@ -2309,12 +2529,8 @@ def api_approvals_grouped(
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
             records = [_cr_to_dict(r, group_map) for r in rows]
 
-        try:
-            _impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
-        except Exception as _imp_exc:
-            logger.warning("approval curve impacts failed: %s", _imp_exc)
-            _impacts = None
-        kpis = _compute_approval_kpis(records, override_impacts=_impacts or None)
+        # KPIs/matriz desde los propios change requests (delta real, por status).
+        kpis = _compute_approval_kpis(records)
 
         if dim == "grupo":
             # Comportamiento histórico: grupo → registros ; sin grupo → sueltos.
@@ -2365,6 +2581,192 @@ def api_approvals_grouped(
         raise HTTPException(500, f"Error al agrupar modificaciones: {exc}")
 
 
+# ── Medidor de meta (global, company-wide) ───────────────────────────────────
+# Mide el EFECTO REAL de las decisiones sobre la META anual (Total_Adj = base×1.25):
+#   • proy. APROBADOS         = meta + Σ delta de overrides cuyo CR está aprobado
+#   • proy. APROBADOS+PEND.   = meta + Σ delta de aprobados + pendientes
+# Los rechazados NO se suman (camino visual; el override real no se revierte).
+# GLOBAL: corre sobre TODOS los CRs (sin los filtros de la tabla) para clasificar
+# bien por estado y evitar el bug A′. Reusa compute_approval_curve_impacts (delta
+# por override) + el linking impacto→estado del CR (mismo patrón que la matriz).
+
+def _impacts_by_status(records_all: list[dict], impacts: dict) -> dict:
+    """Suma los deltas de `impacts` (de compute_approval_curve_impacts) segmentados
+    por el estado del change request vigente coincidente. Devuelve
+    {"aprobado","pendiente","rechazado"}. Sin CR coincidente → "pendiente"
+    (ajuste vigente aún sin revisar)."""
+    out = {"aprobado": 0.0, "pendiente": 0.0, "rechazado": 0.0}
+
+    def _ck(scope, sel, sub, cod, month):
+        if scope == "subnegocio":
+            return (scope, sel, sub, "", "")
+        if scope == "producto":
+            return (scope, sel, "", cod, "")
+        if scope == "celda":
+            return (scope, sel, sub, cod, month)
+        return None
+
+    # Índice de CRs por identidad de alcance → [(sort, status, new_value)].
+    cr_index: dict[tuple, list] = {}
+    for r in records_all:
+        scope = _vig_norm(r.get("scope_type"))
+        sub = _vig_norm(r.get("subnegocio"))
+        cod = _vig_norm(r.get("codigo_serie"))
+        month = _vig_norm(r.get("periodo"))
+        nv = r.get("valor_nuevo")
+        nvr = round(float(nv), 2) if isinstance(nv, (int, float)) else None
+        st = r.get("status") or "pendiente"
+        so = r.get("_created_sort") or dt.datetime.min
+        for sel in {_vig_norm(r.get("client_selector")), _vig_norm(r.get("client_name"))}:
+            if not sel:
+                continue
+            k = _ck(scope, sel, sub, cod, month)
+            if k:
+                cr_index.setdefault(k, []).append((so, st, nvr))
+
+    for key, info in (impacts or {}).items():
+        impact = float(info.get("impact") or 0.0)
+        if impact == 0.0:
+            continue
+        ogp = round(float(info.get("ogp") or 0.0), 2)
+        cands = [c for c in cr_index.get(key, []) if c[2] is not None and abs(c[2] - ogp) < 0.01]
+        if cands:
+            cands.sort(key=lambda c: c[0])
+            status = cands[-1][1]
+            if status not in out:
+                status = "pendiente"
+        else:
+            status = "pendiente"
+        out[status] += impact
+    return out
+
+
+def _compute_meta_gauge(session) -> dict:
+    """Números del medidor de meta (global). best-effort: ante cualquier falla
+    devuelve {"disponible": False} sin romper el árbol."""
+    try:
+        # Meta global = misma definición que el KPI "Meta Anual" del resto de la UI
+        # (Total_Adj = base × 1.25). Reusa get_chart_data sin filtros; puede volver
+        # bytes en cache-hit → json.loads (igual que api_approvals_filter_options).
+        cd = svc.get_chart_data(is_admin=True, growth_pct=25.0)
+        if isinstance(cd, (bytes, bytearray)):
+            cd = _json.loads(cd.decode("utf-8"))
+        meta = float(((cd or {}).get("kpis") or {}).get("total_proyeccion_adj") or 0.0)
+        if not meta or meta <= 0:
+            return {"disponible": False, "efecto_detectado": False}
+
+        base = meta / 1.25
+        impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
+        rows_all = _query_change_requests(session, {}, cap=_MAX_CR_POOL)   # TODOS los CRs
+        records_all = [_cr_to_dict(r) for r in rows_all]
+        by = _impacts_by_status(records_all, impacts)
+
+        proy_aprobados = meta + by["aprobado"]
+        proy_aprob_pend = meta + by["aprobado"] + by["pendiente"]
+        efecto = (abs(by["aprobado"]) + abs(by["pendiente"]) + abs(by["rechazado"])) > 0.5
+        return {
+            "disponible": True,
+            "efecto_detectado": bool(efecto),
+            "base": round(base, 0),
+            "meta": round(meta, 0),
+            "proy_aprobados": round(proy_aprobados, 0),
+            "proy_aprob_pend": round(proy_aprob_pend, 0),
+            "pct_aprobados": round(proy_aprobados / meta * 100, 1),
+            "pct_si_pendientes": round(proy_aprob_pend / meta * 100, 1),
+        }
+    except Exception as exc:
+        logger.warning("meta gauge failed: %s", exc)
+        return {"disponible": False, "efecto_detectado": False}
+
+
+@router.get("/api/approvals/tree", response_class=JSONResponse)
+def api_approvals_tree(
+    request: Request,
+    user: User = Depends(require_module("forecast")),
+    estado: Optional[str] = Query("todos"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    comercial: Optional[str] = Query(None),
+    perfil: Optional[str] = Query(None),
+    negocio: Optional[str] = Query(None),
+    subneg: Optional[str] = Query(None),
+    articulo: Optional[str] = Query(None),
+    period: Optional[str] = Query(None),
+    change_type: Optional[str] = Query(None),
+    impacto: Optional[str] = Query(None),
+    alto_impacto: Optional[str] = Query(None),
+    dimension: Optional[str] = Query("grupo"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=200),
+):
+    """Aprobaciones en árbol consolidado de 2 niveles: <dimensión> → Cuenta.
+
+    La dimensión de nivel 1 (grupo | perfil | neg | subneg) la elige el selector
+    de pestañas. Nivel 2 = una sola línea por CUENTA (consolida sus eventos al
+    estado vigente por celda); los eventos crudos quedan en cada cuenta para el
+    detalle de nivel 3. Lectura: Admin, Gerente y Auditor. Los KPIs/matriz se
+    calculan sobre TODO el conjunto filtrado. Paginación por nodo de nivel 1
+    (un bucket de la dimensión nunca se parte)."""
+    _require_aprobaciones_view(user)
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+
+    dim = (dimension or "grupo").strip().lower()
+    if dim not in _VALID_DIMENSIONS:
+        dim = "grupo"  # fallback robusto ante valores inválidos
+
+    filters = dict(
+        estado=estado, date_from=date_from, date_to=date_to, comercial=comercial,
+        perfil=perfil, negocio=negocio, subneg=subneg, articulo=articulo, period=period,
+        change_type=change_type, impacto=impacto, alto_impacto=alto_impacto,
+    )
+    try:
+        # CRÍTICO: el nivel "grupo" aparece en las CUATRO dimensiones, así que el
+        # mapa cliente→grupo se resuelve SIEMPRE (no solo si dim=="grupo"); cada
+        # registro se resuelve vía _cr_to_dict(r, group_map) ANTES de bucketizar.
+        # Sin esto, el nivel grupo de Perfil/Negocio/Subnegocio caería en "Sin grupo".
+        group_map = svc.get_client_group_map()
+        with SessionLocal() as session:
+            rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+            records = [_cr_to_dict(r, group_map) for r in rows]
+
+            # Medidor de meta: GLOBAL (sobre TODOS los CRs, no `records` filtrado).
+            gauge = _compute_meta_gauge(session)
+
+        # KPIs/matriz desde los propios change requests (delta real, por status).
+        kpis = _compute_approval_kpis(records)
+
+        # _build_tree consume _created_sort (vía dedupe) y luego lo descarta;
+        # por eso se construye DESPUÉS de _compute_approval_kpis.
+        tree = _build_tree(records, dim)
+        total_units = len(tree)
+        total_accounts = sum(n.get("cuentas") or 0 for n in tree)
+        total_records = len(records)
+        pages = max(1, -(-total_units // page_size))
+        start = (page - 1) * page_size
+        page_nodes = tree[start: start + page_size]
+
+        return JSONResponse({
+            "ok": True,
+            "dimension": dim,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "total_units": total_units,
+            "total_accounts": total_accounts,
+            "total_records": total_records,
+            "kpis": kpis,
+            "gauge": gauge,
+            "high_impact_threshold": _HIGH_IMPACT_THRESHOLD,
+            "tree": page_nodes,
+            "pool_capped": total_records >= _MAX_CR_POOL,
+        })
+    except Exception as exc:
+        logger.error("approvals tree error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al construir árbol de aprobaciones: {exc}")
+
+
 class _GroupReviewPayload(BaseModel):
     grupo: Optional[str] = None       # dimension=grupo: nombre del grupo (compat)
     dimension: Optional[str] = "grupo"  # grupo | perfil | neg | subneg
@@ -2404,7 +2806,7 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
         raise HTTPException(503, "Almacenamiento no disponible")
 
     dim = (payload.dimension or "grupo").strip().lower()
-    if dim not in _VALID_DIMENSIONS:
+    if dim not in _REVIEW_DIMENSIONS:
         dim = "grupo"
     motivo = (payload.motivo or "").strip() or None
     filters = _group_filters(payload)
@@ -2414,6 +2816,12 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
         if not gkey:
             raise HTTPException(400, "Grupo no especificado.")
         group_map = svc.get_client_group_map()
+    elif dim == "cuenta":
+        # Aprobar/rechazar una CUENTA entera (árbol Perfil→Grupo→Cuenta): matchea
+        # contra client_name O client_selector. value="" no es válido aquí.
+        ckey = (payload.value or payload.grupo or "").strip().lower()
+        if not ckey:
+            raise HTTPException(400, "Cuenta no especificada.")
     else:
         if payload.value is None:
             raise HTTPException(400, "Valor de agrupación no especificado.")
@@ -2429,6 +2837,11 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
             if dim == "grupo":
                 g = _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map)
                 if (g or "").strip().lower() != gkey:
+                    continue
+            elif dim == "cuenta":
+                name = str(cr.client_name or "").strip().lower()
+                sel = str(cr.client_selector or "").strip().lower()
+                if ckey not in (name, sel):
                     continue
             else:
                 colval = str(getattr(cr, col, None) or "").strip().lower()
@@ -2476,6 +2889,100 @@ def api_approvals_group_reject(
     except Exception as exc:
         logger.error("group reject error: %s", exc, exc_info=True)
         raise HTTPException(500, f"Error al rechazar grupo: {exc}")
+
+
+# ── Aprobación/rechazo por IDs concretos (árbol: un nodo cualquiera) ──────────
+# Cada nodo del árbol expone los IDs pendientes que cuelgan de él en SU camino
+# (pending_ids). El cliente manda esos IDs; el server RE-VALIDA que estén dentro
+# de los filtros vigentes y pendientes (no confía ciegamente en el cliente).
+
+class _ByIdsReviewPayload(BaseModel):
+    ids: List[int] = Field(default_factory=list)
+    motivo: Optional[str] = Field(default=None, max_length=2000)
+    # Contexto/filtros actuales: la acción solo afecta lo que el usuario ve.
+    estado: Optional[str] = "todos"
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    comercial: Optional[str] = None
+    perfil: Optional[str] = None
+    negocio: Optional[str] = None
+    subneg: Optional[str] = None
+    articulo: Optional[str] = None
+    period: Optional[str] = None
+    change_type: Optional[str] = None
+    impacto: Optional[str] = None
+    alto_impacto: Optional[str] = None
+
+
+def _ids_filters(payload: "_ByIdsReviewPayload") -> dict:
+    return dict(
+        estado=payload.estado, date_from=payload.date_from, date_to=payload.date_to,
+        comercial=payload.comercial, perfil=payload.perfil, negocio=payload.negocio,
+        subneg=payload.subneg, articulo=payload.articulo, period=payload.period,
+        change_type=payload.change_type, impacto=payload.impacto, alto_impacto=payload.alto_impacto,
+    )
+
+
+def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -> int:
+    """Aplica revisión (aprobado/rechazado) SOLO a los CR cuyo id viene en
+    payload.ids Y que, re-derivados server-side desde los filtros vigentes, sigan
+    PENDIENTES. Re-validación: no se confía en los ids del cliente — se intersecan
+    con el pool filtrado (mismo que ve la UI) y se exige status pendiente."""
+    from web_comparativas.models import SessionLocal
+    if SessionLocal is None:
+        raise HTTPException(503, "Almacenamiento no disponible")
+    requested = {int(i) for i in (payload.ids or [])}
+    if not requested:
+        return 0
+    motivo = (payload.motivo or "").strip() or None
+    filters = _ids_filters(payload)
+    n = 0
+    with SessionLocal() as session:
+        rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+        for cr in rows:
+            if cr.id in requested and cr.status == "pendiente":
+                _apply_review(session, cr, status=status, user=user, motivo=motivo)
+                n += 1
+        session.commit()
+    return n
+
+
+@router.post("/api/approvals/by-ids/approve", response_class=JSONResponse)
+def api_approvals_by_ids_approve(
+    payload: _ByIdsReviewPayload,
+    request: Request,
+    user: User = Depends(require_module("forecast")),
+):
+    """Aprueba los CR pendientes indicados por id (un nodo del árbol). Solo Admin/Gerente."""
+    _require_aprobaciones_edit(user)
+    try:
+        n = _review_by_ids(payload, status="aprobado", user=user)
+        return JSONResponse({"ok": True, "status": "aprobado", "afectados": n})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("by-ids approve error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al aprobar: {exc}")
+
+
+@router.post("/api/approvals/by-ids/reject", response_class=JSONResponse)
+def api_approvals_by_ids_reject(
+    payload: _ByIdsReviewPayload,
+    request: Request,
+    user: User = Depends(require_module("forecast")),
+):
+    """Rechaza con motivo los CR pendientes indicados por id (un nodo del árbol). Solo Admin/Gerente."""
+    _require_aprobaciones_edit(user)
+    if not (payload.motivo or "").strip():
+        raise HTTPException(400, "Debe indicar un motivo para rechazar.")
+    try:
+        n = _review_by_ids(payload, status="rechazado", user=user)
+        return JSONResponse({"ok": True, "status": "rechazado", "afectados": n})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("by-ids reject error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Error al rechazar: {exc}")
 
 
 _CR_EXPORT_ORDER = [

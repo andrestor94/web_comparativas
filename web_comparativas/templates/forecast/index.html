@@ -2658,6 +2658,160 @@
             <span class="appr-chip"><i class="bi bi-sliders"></i> Ajustes: <strong id="kpi-ajustes">0</strong></span>
             <span class="appr-chip appr-note">Los importes son <strong>estimados</strong> (cruce del % con la base valorizada).</span>
           </div>
+
+          <!-- ════════ MEDIDOR DE META · DATOS DE MUESTRA ════════ -->
+          <style>
+            .mg-section{margin-top:18px;border-top:1px solid var(--border-color);padding-top:16px;}
+            .mg-section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+            .mg-section-head .mg-ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--g-blue-light);color:var(--g-blue);font-size:1rem;}
+            .mg-section-head h4{font-size:.98rem;font-weight:700;color:var(--text-primary);margin:0;}
+            .mg-section-head .mg-sub{font-size:.74rem;color:var(--text-muted);margin:1px 0 0;}
+            .mg-card{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:22px 26px 22px;box-shadow:var(--shadow-card);}
+
+            /* Frase-resumen (captar de un vistazo) */
+            .mg-hero{font-size:.9rem;color:var(--text-secondary);text-align:center;margin:0 auto 4px;max-width:640px;line-height:1.5;}
+            .mg-hero b{font-variant-numeric:tabular-nums;font-weight:800;}
+
+            /* ── Barra termómetro ────────────────────────────────────────── */
+            .mg-bar-area{max-width:680px;margin:0 auto;}
+            .mg-bar-wrap{padding:36px 12px 4px;}
+            .mg-bar-track{position:relative;height:18px;border-radius:9999px;
+              background:linear-gradient(90deg,#fce8e6 0%,#fef7e0 52%,#e6f4ea 100%);
+              box-shadow:inset 0 1px 2px rgba(60,64,67,.14);}
+            .mg-bar-fill{position:absolute;left:0;top:0;height:100%;border-radius:9999px;transition:width .5s cubic-bezier(.4,0,.2,1),background .35s ease;}
+            .mg-bar-ghost{position:absolute;top:0;height:100%;border-radius:9999px;
+              background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 5px,transparent 5px 10px);
+              outline:2px dashed currentColor;outline-offset:-2px;
+              transition:left .5s cubic-bezier(.4,0,.2,1),width .5s cubic-bezier(.4,0,.2,1);}
+            .mg-marker-meta{position:absolute;top:-10px;bottom:-10px;width:2px;background:var(--text-primary);border-radius:2px;z-index:3;
+              transition:left .5s cubic-bezier(.4,0,.2,1);}
+            .mg-flag{position:absolute;top:-32px;transform:translateX(-50%);white-space:nowrap;font-size:.64rem;font-weight:700;
+              color:#fff;background:var(--text-primary);padding:3px 8px;border-radius:6px;box-shadow:var(--shadow-soft);}
+            .mg-flag::after{content:"";position:absolute;left:50%;bottom:-4px;transform:translateX(-50%);
+              border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--text-primary);}
+            .mg-dot{position:absolute;top:50%;width:18px;height:18px;border-radius:50%;transform:translate(-50%,-50%);
+              border:3px solid #fff;box-shadow:var(--shadow-soft);z-index:2;transition:left .5s cubic-bezier(.4,0,.2,1),background .35s ease,border-color .35s ease;}
+            .mg-dot-ghost{width:16px;height:16px;background:#fff;border:2px dashed var(--text-secondary);box-shadow:none;}
+            .mg-scale{display:flex;justify-content:space-between;font-size:.66rem;color:var(--text-muted);margin-top:10px;font-variant-numeric:tabular-nums;}
+
+            /* ── Leyenda ─────────────────────────────────────────────────── */
+            .mg-legend{display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;margin:18px auto 0;max-width:560px;}
+            @media(max-width:560px){.mg-legend{grid-template-columns:1fr;}}
+            .mg-leg{display:flex;align-items:center;gap:9px;font-size:.8rem;color:var(--text-secondary);}
+            .mg-leg strong{margin-left:auto;font-variant-numeric:tabular-nums;font-size:.88rem;color:var(--text-primary);}
+            .mg-sw{width:26px;height:11px;border-radius:9999px;flex:none;}
+            .mg-sw-ghost{background-image:repeating-linear-gradient(45deg,var(--text-secondary) 0 4px,transparent 4px 8px);
+              border:1px dashed var(--text-secondary);height:13px;}
+            .mg-meta-note{font-size:.7rem;color:var(--text-muted);margin:14px auto 0;display:flex;align-items:center;justify-content:center;gap:6px;}
+            .mg-meta-note i{color:var(--text-primary);}
+            /* Estado sin base valorizada (local incompleto) */
+            .mg-track-na{background:#eceff1 !important;box-shadow:inset 0 1px 2px rgba(60,64,67,.10) !important;}
+            /* Cartelito honesto (N/D o sin efecto detectable) */
+            .mg-note{font-size:.72rem;color:#8a5a00;background:#fef7e0;border:1px solid #fde293;border-radius:8px;
+              padding:7px 12px;margin:12px auto 0;max-width:560px;text-align:center;display:none;align-items:center;justify-content:center;gap:7px;}
+            .mg-note.show{display:flex;}
+            .mg-note i{flex:none;}
+          </style>
+
+          <div class="mg-section" id="mg-section">
+            <div class="mg-section-head">
+              <span class="mg-ic"><i class="bi bi-speedometer2"></i></span>
+              <div>
+                <h4>Avance hacia la meta anual</h4>
+                <div class="mg-sub">Dónde queda la empresa al aprobar — y hasta dónde llegaría si aprobás lo pendiente.</div>
+              </div>
+            </div>
+
+            <div class="mg-card">
+              <div class="mg-hero" id="mgA-hero">—</div>
+              <div class="mg-bar-area">
+                <div class="mg-bar-wrap">
+                  <div class="mg-bar-track">
+                    <div class="mg-bar-fill" id="mgA-fill"></div>
+                    <div class="mg-bar-ghost" id="mgA-ghost"></div>
+                    <div class="mg-marker-meta" id="mgA-meta"><span class="mg-flag">Meta anual</span></div>
+                    <div class="mg-dot mg-dot-solid" id="mgA-dotAprob"></div>
+                    <div class="mg-dot mg-dot-ghost" id="mgA-dotSi"></div>
+                  </div>
+                  <div class="mg-scale"><span id="mgA-scaleLo">—</span><span id="mgA-scaleHi">Meta 100%</span></div>
+                </div>
+                <div class="mg-legend">
+                  <div class="mg-leg"><span class="mg-sw mg-sw-solid" id="mgA-swAprob"></span> Aprobado <strong id="mgA-aprobPct">—</strong></div>
+                  <div class="mg-leg"><span class="mg-sw mg-sw-ghost"></span> Si aprobás lo pendiente <strong id="mgA-siPct">—</strong></div>
+                </div>
+                <div class="mg-meta-note"><i class="bi bi-flag-fill"></i> Meta anual = proyección base + 25%.</div>
+                <div class="mg-note" id="mgA-note"><i class="bi bi-info-circle"></i> <span id="mgA-noteTxt"></span></div>
+              </div>
+            </div>
+          </div>
+
+          <script>
+          // Medidor de meta (termómetro). Datos REALES: window.mgRender(gauge),
+          // llamado desde _apprFetchTree con d.gauge en cada carga/aprobación/rechazo.
+          // gauge = {disponible, efecto_detectado, base, meta, proy_aprobados,
+          //          proy_aprob_pend, pct_aprobados, pct_si_pendientes}
+          (function(){
+            const GREEN = '#0f9d58', AMBER = '#f29900', RED = '#d93025';
+            const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
+            const colorOf = pct => { const d = Math.abs(pct - 100); return d <= 5 ? GREEN : d <= 15 ? AMBER : RED; };
+            const fmt1 = pct => pct.toFixed(1) + '%';
+            const showNote = (txt) => { set('mgA-noteTxt', el => el.textContent = txt);
+              set('mgA-note', el => el.classList.toggle('show', !!txt)); };
+
+            // Estado "sin base valorizada" (local incompleto): N/D honesto, no 0% falso.
+            function _na(msg){
+              set('mgA-hero', el => el.innerHTML = '<span style="color:var(--text-muted)">Meta no disponible en este entorno.</span>');
+              ['mgA-fill','mgA-ghost'].forEach(id => set(id, el => el.style.width = '0%'));
+              ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = 'none'));
+              set('mgA-meta', el => el.style.display = 'none');
+              set('mgA-fill', el => el.parentElement && el.parentElement.classList.add('mg-track-na'));
+              set('mgA-aprobPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
+              set('mgA-siPct', el => { el.textContent = 'N/D'; el.style.color = 'var(--text-muted)'; });
+              set('mgA-swAprob', el => el.style.background = 'var(--border-hover)');
+              set('mgA-scaleLo', el => el.textContent = '');
+              showNote(msg || 'Sin base valorizada para estimar la meta en este entorno (disponible en producción).');
+            }
+
+            window.mgRender = function(g){
+              if (!g || !g.disponible || !(g.meta > 0)) { _na(); return; }
+              // restaurar estado normal (por si venía de N/D)
+              ['mgA-dotAprob','mgA-dotSi'].forEach(id => set(id, el => el.style.display = ''));
+              set('mgA-meta', el => el.style.display = '');
+              set('mgA-fill', el => el.parentElement && el.parentElement.classList.remove('mg-track-na'));
+
+              const pA = (typeof g.pct_aprobados === 'number') ? g.pct_aprobados : (g.proy_aprobados / g.meta * 100);
+              const pS = (typeof g.pct_si_pendientes === 'number') ? g.pct_si_pendientes : (g.proy_aprob_pend / g.meta * 100);
+              const cA = colorOf(pA), cS = colorOf(pS);
+
+              // Dominio adaptativo: meta (100) y ambas posiciones siempre legibles, con margen.
+              const lo = Math.floor(Math.min(pA, pS, 100) - 8);
+              const hi = Math.ceil(Math.max(pA, pS, 100) + 8);
+              const span = Math.max(1, hi - lo);
+              const frac = pct => Math.max(0, Math.min(1, (pct - lo) / span));
+              const fA = frac(pA), fS = frac(pS), fM = frac(100);
+
+              set('mgA-hero', el => {
+                el.innerHTML = `Hoy, con lo aprobado, estás en <b style="color:${cA}">${fmt1(pA)}</b> de la meta`
+                  + ` · si aprobás lo pendiente llegás a <b style="color:${cS}">${fmt1(pS)}</b>.`;
+              });
+              // El "fantasma" puede ir antes o después del aprobado → tramo entre ambos.
+              const gFrom = Math.min(fA, fS), gTo = Math.max(fA, fS);
+              set('mgA-fill', el => { el.style.width = (fA*100)+'%'; el.style.background = cA; });
+              set('mgA-ghost', el => { el.style.left = (gFrom*100)+'%'; el.style.width = ((gTo-gFrom)*100)+'%'; el.style.color = cS; });
+              set('mgA-meta', el => { el.style.left = (fM*100)+'%'; });
+              set('mgA-dotAprob', el => { el.style.left = (fA*100)+'%'; el.style.background = cA; });
+              set('mgA-dotSi', el => { el.style.left = (fS*100)+'%'; el.style.borderColor = cS; });
+              set('mgA-aprobPct', el => { el.textContent = fmt1(pA); el.style.color = cA; });
+              set('mgA-siPct', el => { el.textContent = fmt1(pS); el.style.color = cS; });
+              set('mgA-swAprob', el => { el.style.background = cA; });
+              set('mgA-scaleLo', el => { el.textContent = lo + '% meta'; });
+
+              // Honestidad: hay meta pero los overrides no cruzan el valorizado (local).
+              showNote(g.efecto_detectado ? '' :
+                'No se detecta efecto de las modificaciones en este entorno (las cuentas con ajustes no están en la base valorizada local).');
+            };
+          })();
+          </script>
         </div>
 
         <div class="fc-table-card" style="margin-bottom:24px;">
@@ -6552,12 +6706,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   let _apprKpis = {};
   let _apprThreshold = 1000000;
   let _rejectId = null;
-  let _rejectMode = 'single';     // 'single' | 'group'
+  let _rejectMode = 'single';     // 'single' | 'group' | 'account'
   let _rejectGroup = null;
+  let _rejectAccountNode = null;  // nodo cuenta (modo 'account')
   let _apprUnits = [];            // unidades de la página actual (grupos + sueltos)
   const _apprGroupExpanded = {};  // nombre de grupo → bool (default colapsado)
-  let _apprDimension = 'grupo';   // grupo | perfil | neg | subneg
+  let _apprDimension = 'grupo';   // grupo | perfil | neg | subneg (cada una = árbol consolidado)
   const _NC = 8;
+
+  // ── Árbol consolidado de 2 niveles: <dimensión> → Cuenta → eventos ────────
+  let _apprTree = [];             // nodos de nivel 1 (la dimensión) de la página actual
+  let _apprNodeByUid = {};        // uid → nodo (dimensión/cuenta) para handlers
+  let _apprTreeExpanded = {};     // uid → bool (expandido). Se reinicia en cada fetch.
 
   // Etiquetas de la dimensión activa (encabezado de sección + sustantivo de unidad).
   const _APPR_DIM_META = {
@@ -6951,6 +7111,236 @@ document.addEventListener('DOMContentLoaded', async () => {
     _apprRenderGrouped(_apprUnits);   // re-render local, sin refetch
   };
 
+  // ════════════════════════════════════════════════════════════════════════
+  // ÁRBOL CONSOLIDADO de profundidad VARIABLE (2-4 niveles) → Cuenta → eventos
+  //   Grupo:      Grupo → Cuenta
+  //   Perfil:     Perfil → Grupo → Cuenta
+  //   Negocio:    Negocio → Perfil → Grupo → Cuenta
+  //   Subnegocio: Subnegocio → Perfil → Grupo → Cuenta
+  // El tag de cada nodo refleja SU nivel (node.level), no la dimensión raíz.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // Etiqueta visible por nivel (lo que ES ese nodo, no la pestaña).
+  const _APPR_LEVEL_LABEL = { grupo: 'Grupo', perfil: 'Perfil', neg: 'Negocio', subneg: 'Subnegocio' };
+
+  // Asigna un uid estable a CADA nodo y CADA cuenta (recursivo, profundidad
+  // variable), para togglear/aprobar sin pasar strings frágiles por onclick.
+  function _apprAssignUids(tree) {
+    _apprNodeByUid = {};
+    let uid = 0;
+    (function walk(items) {
+      (items || []).forEach(it => {
+        it.__uid = uid++; _apprNodeByUid[it.__uid] = it;
+        if (it.type === 'account') return;       // hoja: no desciende
+        walk(it.children || []);
+      });
+    })(tree || []);
+  }
+
+  window._apprToggleNode = function(uid) {
+    _apprTreeExpanded[uid] = !(_apprTreeExpanded[uid] === true);
+    _apprRenderTree(_apprTree);   // re-render local, sin refetch
+  };
+
+  // Impacto neto de un nodo (↓ baja / ↑ suba; N/D honesto si no hay base).
+  function _apprNodeImpact(node) {
+    const baja = (node.impacto_baja || 0)
+      ? `<span class="appr-impact appr-impact--neg" title="Total bajas estimado">↓ ${fmtMoney(node.impacto_baja)}</span>` : '';
+    const suba = (node.impacto_suba || 0)
+      ? `<span class="appr-impact appr-impact--pos" title="Total subas estimado">↑ ${fmtMoney(node.impacto_suba)}</span>` : '';
+    return (baja || suba) ? (baja + suba)
+      : `<span class="appr-impact appr-impact--na" title="Sin base valorizada">N/D</span>`;
+  }
+
+  function _apprStatusCluster(node) {
+    const est = node.estados || {};
+    return `<div class="appr-gfield">
+        <span class="appr-glabel">Impacto neto</span>
+        <div class="appr-group-impact">${_apprNodeImpact(node)}</div>
+      </div>
+      <div class="appr-gfield">
+        <span class="appr-glabel">Estado consolidado</span>
+        <div class="appr-group-status">${statusBadge(node.estado_consolidado)}<span class="appr-group-breakdown">Pend ${est.pendiente||0} · Aprob ${est.aprobado||0} · Rech ${est.rechazado||0}</span></div>
+      </div>`;
+  }
+
+  // Botones Aprobar/Rechazar de CUALQUIER nodo (intermedio o cuenta). Operan
+  // sobre los pending_ids que cuelgan del nodo en ESE camino. Gateados por
+  // _FC_APPR_CAN_EDIT y por pending_count>0 (solo-lectura → sin botones).
+  function _apprNodeActions(node, nounSingular) {
+    const pend = node.pending_count || 0;
+    if (pend > 0 && _FC_APPR_CAN_EDIT) {
+      return `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar ${nounSingular}" onclick="event.stopPropagation();_apprApproveNode(${node.__uid})"><i class="bi bi-check2-all"></i> Aprobar</button>
+         <button class="appr-gbtn appr-gbtn--no" title="Rechazar ${nounSingular}" onclick="event.stopPropagation();_apprOpenRejectNode(${node.__uid})"><i class="bi bi-x-octagon"></i> Rechazar</button>`;
+    }
+    return pend > 0
+      ? `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">${pend} pendiente(s)</span>`
+      : `<span class="appr-cell-sub" style="font-style:italic;white-space:nowrap;">Sin pendientes</span>`;
+  }
+
+  // Fila de nodo intermedio (cualquier nivel de la cadena). El tag refleja QUÉ
+  // es ese nivel (node.level → Grupo/Perfil/Negocio/Subnegocio), no la pestaña.
+  // Lleva botones Aprobar/Rechazar (sobre los pending_ids de su subárbol).
+  function _apprTreeNodeHtml(node, depth) {
+    const expanded = _apprTreeExpanded[node.__uid] === true;
+    const caret = expanded ? 'bi-chevron-down' : 'bi-chevron-right';
+    const kind = node.level || _apprDimension;
+    const tagLabel = _APPR_LEVEL_LABEL[kind] || kind;
+    const sinCls = node.is_sin ? ' appr-group-row--sin' : '';
+    const meta = `${node.cuentas} cuenta${node.cuentas!==1?'s':''} · ${node.modificaciones} ajuste${node.modificaciones!==1?'s':''} vigente${node.modificaciones!==1?'s':''}`;
+    return `<tr class="appr-group-row appr-tree-${kind}${sinCls}" onclick="_apprToggleNode(${node.__uid})">
+      <td colspan="${_NC}">
+        <div class="appr-group-bar" style="padding-left:${depth*22}px;">
+          <i class="bi ${caret} appr-group-caret"></i>
+          <span class="appr-group-tag">${tagLabel}</span>
+          <div class="appr-group-id">
+            <div class="appr-group-name" title="${esc(node.label)}">${esc(node.label)}</div>
+            <div class="appr-group-meta">${meta}</div>
+          </div>
+          <div class="appr-group-cluster">
+            ${_apprStatusCluster(node)}
+            <div class="appr-group-actions">${_apprNodeActions(node, (_APPR_LEVEL_LABEL[kind]||kind).toLowerCase())}</div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  // Fila de CUENTA consolidada: HOJA del árbol (no expandible → sin chevron ni
+  // toggle; ya no despliega eventos). Muestra resumen + botones por cuenta.
+  function _apprAccountRowHtml(a, depth) {
+    const meta = `${a.celdas_vigentes} celda${a.celdas_vigentes!==1?'s':''} vigente${a.celdas_vigentes!==1?'s':''}`;
+    return `<tr class="appr-group-row appr-tree-cuenta appr-tree-leaf">
+      <td colspan="${_NC}">
+        <div class="appr-group-bar" style="padding-left:${depth*22}px;">
+          <span class="appr-leaf-dot"><i class="bi bi-dot"></i></span>
+          <span class="appr-group-tag">Cuenta</span>
+          <div class="appr-group-id">
+            <div class="appr-group-name" title="${esc(a.cuenta)}">${esc(a.cuenta)}</div>
+            <div class="appr-group-meta">${meta}</div>
+          </div>
+          <div class="appr-group-cluster">
+            ${_apprStatusCluster(a)}
+            <div class="appr-group-actions">${_apprNodeActions(a, 'cuenta')}</div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  // Render del árbol completo, RECURSIVO (profundidad variable). Respeta el
+  // estado de expansión por uid. La sangría refleja la profundidad (depth).
+  function _apprRenderTree(tree) {
+    const tbody = document.getElementById('appr-tbody');
+    if (!tbody) return;
+    if (!tree || !tree.length) { tbody.innerHTML = _apprEmptyHtml(); return; }
+    const html = [];
+    (function walk(items, depth) {
+      (items || []).forEach(it => {
+        if (it.type === 'account') {
+          // HOJA: la cuenta no despliega nada por debajo (los eventos
+          // individuales ya no se muestran — la unidad mínima es la cuenta).
+          html.push(_apprAccountRowHtml(it, depth));
+        } else {
+          html.push(_apprTreeNodeHtml(it, depth));
+          if (_apprTreeExpanded[it.__uid] !== true) return;
+          walk(it.children || [], depth + 1);   // desciende un nivel
+        }
+      });
+    })(tree, 0);
+    tbody.innerHTML = html.join('') || _apprEmptyHtml();
+  }
+
+  function _apprBuildTreeURL(page) {
+    const f = _apprGetFilters();
+    const p = new URLSearchParams();
+    p.set('page', page); p.set('page_size', _apprGroupedPageSize);
+    p.set('dimension', _apprDimension);
+    Object.keys(f).forEach(k => { if (f[k]) p.set(k, f[k]); });
+    return `/forecast/api/approvals/tree?${p.toString()}`;
+  }
+
+  async function _apprFetchTree() {
+    _apprSetStatus('Cargando…', 'var(--g-blue)');
+    const tbody = document.getElementById('appr-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:24px;"><span class="fc-spinner"></span></td></tr>`;
+    try {
+      const r = await fetch(_apprBuildTreeURL(_apprPage), {credentials:'same-origin'});
+      if (r.status === 403) {
+        _apprSetStatus('Solo usuarios Admin pueden acceder a esta sección.', '#d93025');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:#d93025;"><i class="bi bi-lock"></i> Sin permisos</td></tr>`;
+        return;
+      }
+      if (r.status === 401) { _apprSetStatus('Sesión expirada. Recargá la página.', '#d93025'); return; }
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.detail || 'Error desconocido');
+      _apprPages = d.pages;
+      _apprTree = d.tree || [];
+      _apprAssignUids(_apprTree);
+      _apprTreeExpanded = {};   // colapsado por defecto tras cada carga
+      // RETIRADO (Cambio 1: cuenta = hoja, sin eventos individuales): el indexado
+      // de eventos (_apprById/_apprRecords) para "Ver detalle"/impresión por evento
+      // ya no se usa. Se deja inicializado vacío y rotulado para limpieza posterior.
+      _apprById = {};
+      _apprRecords = [];
+      _apprTotal = d.total_records || 0;
+      _apprThreshold = d.high_impact_threshold || _apprThreshold;
+      _apprRenderKpis(d.kpis || {});
+      if (window.mgRender) mgRender(d.gauge);   // medidor de meta (global)
+      _apprRenderTree(_apprTree);
+      _apprRenderPagination();
+      const _dm = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
+      _apprSetStatus(
+        d.total_records
+          ? `${d.total_records} modificaciones · ${d.total_accounts||0} cuenta(s) · ${d.total_units||0} ${_dm.nounPl} — Pág. ${_apprPage}/${_apprPages}`
+          : 'Sin modificaciones',
+        'var(--text-muted)'
+      );
+    } catch (err) {
+      _apprSetStatus('Error al cargar: ' + (err.message || err), '#d93025');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:32px;color:#d93025;">Error: ${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  // Etiqueta legible de un nodo (para confirmaciones/títulos).
+  function _apprNodeLabel(node) {
+    if (node.type === 'account') return `cuenta “${node.cuenta}”`;
+    const kind = (_APPR_LEVEL_LABEL[node.level] || node.level || '').toLowerCase();
+    return `${kind} “${node.label}”`;
+  }
+
+  // Cuerpo para aprobar/rechazar por IDs concretos (un nodo cualquiera del árbol).
+  // Manda los pending_ids del nodo + los filtros actuales; el server RE-VALIDA
+  // (intersección con el pool filtrado + status pendiente) antes de aplicar.
+  function _apprByIdsBody(node, extra) {
+    const f = _apprGetFilters();
+    return Object.assign({ ids: node.pending_ids || [] }, f, extra || {});
+  }
+
+  window._apprApproveNode = async function(uid) {
+    const node = _apprNodeByUid[uid];
+    if (!node) return;
+    const n = node.pending_count || 0;
+    if (n <= 0) return;
+    if (!confirm(`¿Aprobar las ${n} modificación(es) pendiente(s) de ${_apprNodeLabel(node)}?\nQuedarán registradas como aprobadas por Dirección.`)) return;
+    _apprSetStatus('Aprobando…', 'var(--g-blue)');
+    try {
+      const d = await _apprPost('/forecast/api/approvals/by-ids/approve', _apprByIdsBody(node));
+      _apprSetStatus(`Aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
+      _apprFetch();
+    } catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
+  };
+
+  window._apprOpenRejectNode = function(uid) {
+    const node = _apprNodeByUid[uid];
+    if (!node || (node.pending_count || 0) <= 0) return;
+    _rejectMode = 'node';
+    _rejectAccountNode = node;   // (reutiliza la var del modal; ahora guarda el nodo)
+    const lbl = _apprNodeLabel(node);
+    _apprOpenRejectModal(`Rechazar ${lbl}`,
+      `Se rechazarán las ${node.pending_count || 0} modificación(es) pendiente(s) que cuelgan de ${lbl} bajo los filtros actuales.`);
+  };
+
   // Controles de paginación reutilizables (Anterior · Pág. N de M · [N] Ir · Siguiente).
   // inputId distingue el pager superior del inferior para que el "Ir a página"
   // funcione en ambos sin colisión de IDs.
@@ -7022,6 +7412,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   async function _apprFetch() {
+    // Las 4 dimensiones (grupo/perfil/neg/subneg) renderizan el árbol consolidado.
+    // NOTA: el cuerpo plano que sigue quedó INACCESIBLE a propósito (vista plana
+    // retirada). Se elimina físicamente en una limpieza posterior junto con el
+    // endpoint /grouped. No borrar todavía.
+    return _apprFetchTree();
     _apprSetStatus('Cargando modificaciones…', 'var(--g-blue)');
     const tbody = document.getElementById('appr-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="${_NC}" style="text-align:center;padding:24px;"><span class="fc-spinner"></span></td></tr>`;
@@ -7163,7 +7558,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   window._apprCloseReject = function() {
     const ov = document.getElementById('appr-reject-overlay'); if (ov) ov.style.display = 'none';
-    _rejectId = null; _rejectGroup = null; _rejectMode = 'single';
+    _rejectId = null; _rejectGroup = null; _rejectAccountNode = null; _rejectMode = 'single';
   };
   window._apprConfirmReject = async function() {
     const ta = document.getElementById('appr-reject-motivo');
@@ -7171,7 +7566,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const motivo = (ta?.value || '').trim();
     if (!motivo) { if (er) { er.textContent = 'Debe indicar un motivo para rechazar.'; er.style.display = 'block'; } return; }
     try {
-      if (_rejectMode === 'group') {
+      if (_rejectMode === 'node') {
+        // Rechazo por IDs concretos del nodo (intermedio o cuenta).
+        const d = await _apprPost('/forecast/api/approvals/by-ids/reject', _apprByIdsBody(_rejectAccountNode, { motivo }));
+        _apprCloseReject();
+        _apprSetStatus(`Rechazado: ${d.afectados} modificación(es).`, 'var(--g-red)');
+        _apprFetch();
+      } else if (_rejectMode === 'group') {
         const d = await _apprPost('/forecast/api/approvals/group/reject', _apprGroupBody(_rejectGroup, { motivo }));
         _apprCloseReject();
         _apprSetStatus(`Rechazado: ${d.afectados} modificación(es).`, 'var(--g-red)');
