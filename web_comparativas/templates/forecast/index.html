@@ -2809,9 +2809,24 @@
             const arc     = document.getElementById('mgA-arcAprob');
             const arcPend = document.getElementById('mgA-arcPend');
             const dot     = document.getElementById('mgA-dot');
-            const P = (arc && arc.getTotalLength) ? arc.getTotalLength() : 471.24;
-            if (arc)     { arc.style.strokeDasharray = P;     arc.style.strokeDashoffset = P; }     // arranca vacío
-            if (arcPend) { arcPend.style.strokeDasharray = P; arcPend.style.strokeDashoffset = P; }
+            // Largo real del path. Si el panel está en display:none al evaluarse (tab no
+            // activo al cargar), getTotalLength() devuelve 0 en Blink → NUNCA aceptar 0/NaN,
+            // porque strokeDashoffset = P*(1-f) colapsaría a 0 y el arco quedaría fijo/lleno.
+            function _mgLen(){
+              const L = (arc && arc.getTotalLength) ? arc.getTotalLength() : 0;
+              return (L && L > 0) ? L : 471.24;   // fallback real ante 0/NaN/display:none
+            }
+            let P = _mgLen();                              // mutable: se recomputa al mostrar el panel
+            function _mgApplyDash(){                        // re-aplica dasharray con el P vigente (arc + pend)
+              if (arc)     arc.style.strokeDasharray = P;
+              if (arcPend) arcPend.style.strokeDasharray = P;
+            }
+            _mgApplyDash();
+            if (arc)     arc.style.strokeDashoffset = P;    // arranca vacío
+            if (arcPend) arcPend.style.strokeDashoffset = P;
+            // Expuesto para el switchTab parcheado: al hacerse visible el panel, el path ya
+            // tiene layout → recalcular el largo real y re-aplicar dasharray antes del render.
+            window._mgRecalcLen = function(){ P = _mgLen(); _mgApplyDash(); };
             function _dotAt(f){
               if (!dot || !arc || !arc.getPointAtLength) return;
               const pt = arc.getPointAtLength(P * Math.max(0, Math.min(1, f)));
@@ -2834,21 +2849,31 @@
               if (REDUCE) return;
               set('mgA-card', el => { el.classList.remove('mg-reveal'); void el.offsetWidth; el.classList.add('mg-reveal'); });
             }
-            // Dibuja arco aprobado + dot + número, 0→valor en sync. animated=false → directo.
+            // Estado del arco aprobado, para animar SIEMPRE desde el valor anterior al nuevo
+            // (primera carga: 0→valor; approve/reject: valor_viejo→valor_nuevo).
+            let _mgPrevFrac = 0, _mgPrevPct = 0;
+            let _mgAnim = 0;   // generación de tween: cancela cualquier tween previo en curso
+            // Dibuja arco aprobado + dot + número. animated=false (REDUCE) → salto directo.
             function _draw(fA, pA, animated){
+              const myGen = ++_mgAnim;
               if (!animated || !window.requestAnimationFrame){
                 if (arc) arc.style.strokeDashoffset = P * (1 - fA);
                 _dotAt(fA);
                 set('mgA-heroNum', el => el.textContent = fmtN(pA));
+                _mgPrevFrac = fA; _mgPrevPct = pA;
                 return;
               }
+              const f0 = _mgPrevFrac, p0 = _mgPrevPct;   // interpola DESDE el valor anterior
               const t0 = performance.now(), dur = 950;
               (function tick(t){
+                if (myGen !== _mgAnim) return;            // un tween más nuevo tomó el control
                 const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
-                if (arc) arc.style.strokeDashoffset = P * (1 - fA * e);
-                _dotAt(fA * e);
-                set('mgA-heroNum', el => el.textContent = fmtN(pA * e));
+                const f = f0 + (fA - f0) * e, p = p0 + (pA - p0) * e;
+                if (arc) arc.style.strokeDashoffset = P * (1 - f);
+                _dotAt(f);
+                set('mgA-heroNum', el => el.textContent = fmtN(p));
                 if (k < 1) requestAnimationFrame(tick);
+                else { _mgPrevFrac = fA; _mgPrevPct = pA; }
               })(t0);
             }
 
@@ -2867,6 +2892,7 @@
             }
 
             window.mgRender = function(g){
+              if (!P || P <= 0) { P = _mgLen(); _mgApplyDash(); }   // guarda barata: cubre cualquier orden de eventos
               const yp = _yearPct(g);
               if (_mgFirst) _revealOnce();
               set('mgA-foot', el => el.textContent = _footText(yp));   // nota al pie (independiente de la meta)
@@ -2899,8 +2925,9 @@
               set('mgA-aprobVal', el => el.textContent = fmt1(pA));
               set('mgA-siVal',    el => el.textContent = fmt1(pS));
 
-              // Arco aprobado + dot + número: animado en la 1ª carga, directo después.
-              _draw(fA, pA, _mgFirst && !REDUCE);
+              // Arco aprobado + dot + número: anima del valor anterior al nuevo en CADA
+              // cambio (carga, approve, reject); REDUCE → salto directo al valor final.
+              _draw(fA, pA, !REDUCE);
 
               // Honestidad: hay meta pero los overrides no cruzan el valorizado (local).
               showNote(g.efecto_detectado ? '' :
@@ -7888,6 +7915,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.querySelectorAll('.fc-tab-panel').forEach(p => p.classList.remove('active'));
       const panel = document.getElementById('panel-aprobaciones');
       if (panel) panel.classList.add('active');
+      // Panel ya visible → el path del arco tiene layout: recalcular su largo real
+      // (evita P=0 cacheado desde el init con display:none) ANTES del primer render.
+      if (typeof window._mgRecalcLen === 'function') window._mgRecalcLen();
       if (!_apprOptsLoaded) { _apprOptsLoaded = true; _apprLoadOptions(); }
       _apprFetch();
     }
