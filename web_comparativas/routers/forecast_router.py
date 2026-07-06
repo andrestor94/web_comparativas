@@ -1633,6 +1633,7 @@ def _cr_to_dict(cr, group_map: dict | None = None) -> dict:
     return {
         "_created_sort": cr.created_at or dt.datetime.min,
         "id": cr.id,
+        "override_id": getattr(cr, "override_id", None),
         "grupo": _lookup_grupo(cr.client_name or cr.client_selector, cr.client_selector, group_map),
         "created_at": cr.created_at.strftime("%Y-%m-%d %H:%M:%S") if cr.created_at else "—",
         "source": cr.source or "—",
@@ -2637,10 +2638,28 @@ def api_approvals_grouped(
 
 def _impacts_by_status(records_all: list[dict], impacts: dict) -> dict:
     """Suma los deltas de `impacts` (de compute_approval_curve_impacts) segmentados
-    por el estado del change request vigente coincidente. Devuelve
-    {"aprobado","pendiente","rechazado"}. Sin CR coincidente → "pendiente"
-    (ajuste vigente aún sin revisar)."""
+    por el estado del change request. Devuelve {"aprobado","pendiente","rechazado"}.
+
+    Clasificación PRIMARIA: vínculo directo impacto→override_id→cr.status (el impacto
+    ya trae `override_id` del override efectivo del alcance; se lee el status del CR
+    más reciente de ese override). FALLBACK (impactos sin override_id: backfill/manual):
+    cruce por valor abs(cr.valor_nuevo − ogp)<0.01 sobre el alcance, como antes.
+    Default final → "pendiente" (ajuste vigente aún sin revisar). Solo RECLASIFICA:
+    la suma total de impactos entre buckets se conserva."""
     out = {"aprobado": 0.0, "pendiente": 0.0, "rechazado": 0.0}
+
+    # Índice PRIMARIO por override_id → (sort, status) del CR MÁS RECIENTE de ese
+    # override (un mismo override re-guardado puede tener varios CRs).
+    ovr_status: dict = {}
+    for r in records_all:
+        oid = r.get("override_id")
+        if oid is None:
+            continue
+        so = r.get("_created_sort") or dt.datetime.min
+        st = r.get("status") or "pendiente"
+        prev = ovr_status.get(oid)
+        if prev is None or so >= prev[0]:
+            ovr_status[oid] = (so, st)
 
     def _ck(scope, sel, sub, cod, month):
         if scope == "subnegocio":
@@ -2673,15 +2692,24 @@ def _impacts_by_status(records_all: list[dict], impacts: dict) -> dict:
         impact = float(info.get("impact") or 0.0)
         if impact == 0.0:
             continue
-        ogp = round(float(info.get("ogp") or 0.0), 2)
-        cands = [c for c in cr_index.get(key, []) if c[2] is not None and abs(c[2] - ogp) < 0.01]
-        if cands:
-            cands.sort(key=lambda c: c[0])
-            status = cands[-1][1]
+        status = None
+        # PRIMARIO: estado por vínculo directo override_id→cr.status.
+        oid = info.get("override_id")
+        if oid is not None and oid in ovr_status:
+            status = ovr_status[oid][1]
             if status not in out:
                 status = "pendiente"
-        else:
-            status = "pendiente"
+        # FALLBACK (sin override_id vinculado): cruce por valor como antes.
+        if status is None:
+            ogp = round(float(info.get("ogp") or 0.0), 2)
+            cands = [c for c in cr_index.get(key, []) if c[2] is not None and abs(c[2] - ogp) < 0.01]
+            if cands:
+                cands.sort(key=lambda c: c[0])
+                status = cands[-1][1]
+                if status not in out:
+                    status = "pendiente"
+            else:
+                status = "pendiente"
         out[status] += impact
     return out
 
