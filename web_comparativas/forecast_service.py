@@ -1264,6 +1264,31 @@ def compute_approval_curve_impacts(growth_pct: float = 25.0, *, is_admin: bool =
                 return c
         return cands[0]  # fallback (no deberia ocurrir si la fila matcheó un override)
 
+    # Vínculo impacto→override: mapa clave-de-alcance → id del override. `recs` ya
+    # está consolidado a UNO por alcance (el efectivo/más reciente), así que la clave
+    # es 1:1. Se arma con la MISMA normalización que la clave `key` del loop de abajo
+    # (sel/sub/cod lowercased, _normalize_scope/_normalize_month_key), para que el
+    # match cierre exacto. Permite al router leer cr.status vía override_id en vez de
+    # adivinar por valor. NO altera la consolidación ni el cálculo del impacto (_delta).
+    _oid_by_key: dict[tuple, Any] = {}
+    for _rec in recs:
+        _rid = getattr(_rec, "id", None)
+        if _rid is None:
+            continue
+        _sc = _normalize_scope(getattr(_rec, "override_scope", None))
+        _sel = _clean_override_text(getattr(_rec, "client_selector", "") or "").lower()
+        if not _sel:
+            continue
+        _sub = _clean_override_text(getattr(_rec, "subneg", "") or "").lower()
+        _cod = _clean_override_text(getattr(_rec, "codigo_serie", "") or "").lower()
+        _mon = _normalize_month_key(getattr(_rec, "forecast_month", "") or "")
+        if _sc == FORECAST_SCOPE_SUBNEG:
+            _oid_by_key[(_sc, _sel, _sub, "", "")] = _rid
+        elif _sc == FORECAST_SCOPE_PRODUCT:
+            _oid_by_key[(_sc, _sel, "", _cod, "")] = _rid
+        elif _sc == FORECAST_SCOPE_CELL:
+            _oid_by_key[(_sc, _sel, _sub, _cod, _mon)] = _rid
+
     out: dict[tuple, dict] = {}
     for _, r in ov.iterrows():
         d = float(r.get("_delta") or 0.0)
@@ -1290,7 +1315,8 @@ def compute_approval_curve_impacts(growth_pct: float = 25.0, *, is_admin: bool =
         agg = out.get(key)
         if agg is None:
             out[key] = {"impact": d, "ogp": round((ae - 1.0) * 100.0, 2),
-                        "scope": scope, "selector": sel, **ident}
+                        "scope": scope, "selector": sel,
+                        "override_id": _oid_by_key.get(key), **ident}
         else:
             agg["impact"] += d
     for v in out.values():
