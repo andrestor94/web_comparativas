@@ -1376,27 +1376,48 @@
   .fc-group-sel-apply { font-size: 0.78rem; padding: 2px 10px; }
 
   /* == Group adj icon (inside Cliente cell — subtle, no pill) == */
-  .fc-group-adj-ico {
+  /* == Expectativa de crecimiento vigente (celda Cliente) == */
+  /* Crecimiento: SOLO el numero en color, sin burbuja ni borde. Es ademas el disparador
+     de edicion, por eso es un <button> real (accesible por teclado, con foco visible).
+     El override pesa mas; la heredada queda deliberadamente tenue y recede. */
+  .fc-growth-pill {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    font-size: 0.7rem;
-    color: #94A3B8;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: color 0.12s, background 0.12s;
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     flex-shrink: 0;
-    pointer-events: all;
-    padding: 0;
-    line-height: 1;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 2px 5px;
+    cursor: pointer;
+    transition: background var(--transition-smooth);
   }
-  .fc-group-adj-ico:hover {
-    color: var(--g-blue);
-    background: #e8f0fe;
+  .fc-growth-pill:hover { background: var(--g-blue-light); }
+  .fc-growth-pill:focus-visible {
+    outline: 2px solid var(--g-blue);
+    outline-offset: 1px;
+    background: var(--g-blue-light);
+  }
+  .fc-growth-pill--up   { color: var(--g-green); }
+  .fc-growth-pill--down { color: var(--g-red); }
+  .fc-growth-pill--mix  { color: #6c3fe0; }
+  /* Heredada: contexto, no protagonista — mismo gris que el conteo, sin peso. */
+  .fc-growth-pill--inherited { color: var(--text-muted); font-weight: 500; }
+  @media (prefers-reduced-motion: reduce) { .fc-growth-pill { transition: none; } }
+
+  /* Conteo de cuentas: texto tenue que recede, no badge. */
+  .fc-group-count {
+    font-size: 0.68rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0.8;
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
   }
 
   /* == Group checkbox (inside _edit cell) — subtle == */
@@ -4564,6 +4585,89 @@ function getChildClientIdsForGroup(groupName) {
     .filter(Boolean);
 }
 
+/** Crecimiento GENERAL de una fila de GRUPO: promedio de las tasas de sus cuentas hijas
+ *  ponderado por el peso $ de cada una. SIEMPRE devuelve un número.
+ *  El color lo deciden dos flags aparte:
+ *   - _growth_mixed (violeta): las hijas difieren entre sí, alguna ya es un blend, o hay
+ *     cobertura parcial (unas con override propio y otras heredando).
+ *   - _growth_inherited (gris): ninguna hija tiene ajuste propio.
+ *  Con tasas uniformes el promedio devuelve esa misma tasa, sea cual sea el peso. */
+function _groupGrowthState(clients, months) {
+  const list = clients || [];
+  if (!list.length) return { _growth_pct: null, _growth_mixed: false, _growth_inherited: true };
+
+  // Peso $ de cada hija = su total proyectado en la ventana. El peso solo reparte el
+  // blend entre hijas; cuando todas tienen la misma tasa el resultado es esa tasa
+  // exacta, sea cual sea el peso (invariante).
+  const weightOf = c => (months || []).reduce((s, m) => s + (Number(c[m]) || 0), 0);
+
+  let sumW = 0, sumRW = 0, anyMixed = false, ownCount = 0, haveRate = 0;
+  let first = null, diverge = false;
+  list.forEach(c => {
+    if (c._growth_mixed === true) anyMixed = true;
+    if (c._growth_inherited !== true) ownCount++;
+    const r = Number(c._growth_pct);
+    if (!isFinite(r)) return;
+    haveRate++;
+    if (first === null) first = r;
+    else if (Math.abs(r - first) > 1e-3) diverge = true;
+    const w = Math.abs(weightOf(c));
+    sumW += w; sumRW += r * w;
+  });
+  if (!haveRate) return { _growth_pct: null, _growth_mixed: false, _growth_inherited: true };
+
+  // Sin peso util (todas en cero) -> promedio simple; con tasas uniformes da lo mismo.
+  const value = sumW > 0
+    ? sumRW / sumW
+    : list.reduce((s, c) => s + (Number(c._growth_pct) || 0), 0) / haveRate;
+
+  // Violeta = blend: tasas divergentes, alguna hija ya mixta, o cobertura parcial
+  // (unas con override propio y otras heredando).
+  const partial = ownCount !== 0 && ownCount !== list.length;
+  const mixed = diverge || anyMixed || partial;
+  return { _growth_pct: value, _growth_mixed: mixed, _growth_inherited: !mixed && ownCount === 0 };
+}
+
+/** Pill con la tasa de crecimiento RESUELTA de la fila — siempre visible.
+ *  Dos ejes independientes:
+ *   - FUENTE: heredada (global o wildcard de grupo) -> gris; override propio -> color.
+ *   - DIRECCION: solo aplica al override propio (verde sube / rojo baja). La heredada
+ *     va gris siempre; el signo se lee en el numero.
+ *  El texto es identico entre variantes: solo cambian color y tooltip. */
+function _growthPill(row, edit) {
+  if (!row) return '';
+  // `edit` = {kind:'group'|'client', key} -> el numero es el disparador del modal.
+  const _wrap = (cls, label, title) => {
+    const act = edit
+      ? ` onclick="event.stopPropagation();${edit.kind === 'group'
+            ? `openGroupEditModal('${edit.key}')`
+            : `openEditModal('${edit.key}')`}"`
+      : '';
+    const hint = edit ? ' — clic para editar' : '';
+    return `<button type="button" class="fc-growth-pill ${cls}"${act} title="${title}${hint}">${label}</button>`;
+  };
+  // Sin tasa en el payload (cliente manual, respuesta cacheada vieja, early-return del
+  // backend) -> la fila igual proyecta la tasa global: mostrarla como heredada.
+  const hasPct = row._growth_pct !== null && row._growth_pct !== undefined;
+  const pct    = hasPct ? row._growth_pct : STATE.growthPct;
+  const n      = Number(pct);
+  if (!isFinite(n)) return '';
+  const sign      = n > 0 ? '+' : '';
+  const mixed     = row._growth_mixed === true;
+  const inherited = !mixed && (!hasPct || row._growth_inherited === true);
+  // Violeta = blend de tasas distintas; gris = heredada; verde/rojo = override propio.
+  // En los tres se ve el numero: "mixto" como palabra ya no existe.
+  const cls = mixed ? 'fc-growth-pill--mix'
+            : inherited ? 'fc-growth-pill--inherited'
+            : (n < 0 ? 'fc-growth-pill--down' : 'fc-growth-pill--up');
+  const title = mixed
+    ? `Crecimiento general ${sign}${n.toFixed(1)}% anual — promedio de sus subnegocios ponderado por facturación`
+    : inherited
+    ? `Crecimiento ${sign}${n.toFixed(1)}% anual — tasa heredada, sin ajuste propio`
+    : `Crecimiento ${sign}${n.toFixed(1)}% anual — expectativa vigente`;
+  return _wrap(cls, `${sign}${n.toFixed(0)}%`, title);
+}
+
 /** Build interleaved rows: group-header rows + client rows (respects _groupExpanded + _clientSearchTerm). */
 function _buildGroupedRows(rawRows, months) {
   const grouped   = new Map();   // groupName → client rows[]
@@ -4603,6 +4707,7 @@ function _buildGroupedRows(rawRows, months) {
       _isGroup: true, _groupKey: groupName,
       _expanded: isExpanded, _childCount: clients.length,
       _lab: 0, ...totals,
+      ..._groupGrowthState(clients, months),   // blend por $ sobre TODAS las hijas, no sólo las visibles
     });
 
     if (isExpanded) {
@@ -4915,28 +5020,11 @@ function buildClientGrid() {
       if (params.data && params.data._isGroup) {
         const t = params.event && params.event.target;
         if (t) {
-          const groupBtn = t.closest?.('.fc-group-adj-ico');
-          if (groupBtn) {
-            params.event.preventDefault();
-            params.event.stopPropagation();
-            const groupName =
-              groupBtn.dataset.groupName ||
-              params.data?._groupKey ||
-              params.data?.Grupo ||
-              params.node?.key;
-            openGroupEditModal(groupName);
-            return;
-          }
+          // La pill de crecimiento es ahora el disparador de edicion: tiene su propio
+          // onclick con stopPropagation, asi que si el click salio de ahi no togglear.
+          if (t.closest?.('.fc-growth-pill')) return;
           // Checkbox: handled by its own onclick, nothing more to do
           if (t.classList.contains('fc-group-check') || t.type === 'checkbox') return;
-          // % icon button OR the <i> inside it — open individual group modal
-          const adjBtn = t.classList.contains('fc-group-adj-ico')
-            ? t
-            : t.closest?.('.fc-group-adj-ico');
-          if (adjBtn) {
-            openGroupEditModal(params.data._groupKey);
-            return;
-          }
         }
         _toggleClientGroup(params.data._groupKey);
         return;
@@ -5027,18 +5115,25 @@ function updateClientGrid(tableData) {
           const count = params.data._childCount || 0;
           const groupKey = cleanGroupKey(params.data._groupKey);
           const gk    = _escapeJsSingle(groupKey);
-          // Two-zone layout: left = icon+name+count (can shrink), right = small icon (fixed)
-          return `<span style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:4px;cursor:pointer;">` +
-            `<span style="display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden;">` +
+          // Dos zonas: izquierda = flecha+nombre+conteo (puede encogerse), derecha = el
+          // numero de crecimiento (fijo), que es tambien el disparador de edicion.
+          return `<span style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;cursor:pointer;">` +
+            `<span style="display:flex;align-items:center;gap:5px;flex:1;min-width:0;overflow:hidden;">` +
             `<span style="font-size:0.8rem;color:#94A3B8;user-select:none;flex-shrink:0;">${icon}</span>` +
             `<span style="font-weight:600;color:#1E293B;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.83rem;">${params.value || ''}</span>` +
-            `<span style="font-size:0.65rem;color:#CBD5E1;font-weight:400;flex-shrink:0;">(${count})</span>` +
+            `<span class="fc-group-count" title="${count} cuenta${count === 1 ? '' : 's'} en el grupo">· ${count} ${count === 1 ? 'cta' : 'ctas'}</span>` +
             `</span>` +
-            `<button class="fc-group-adj-ico" data-group-name="${groupKey.replace(/"/g, '&quot;')}" onclick="event.stopPropagation();openGroupEditModal('${gk}')" title="Editar expectativa de crecimiento del grupo">` +
-            `<i class="bi bi-percent"></i></button>` +
+            _growthPill(params.data, { kind: 'group', key: gk }) +
             `</span>`;
         }
-        return `<span style="padding-left:24px;font-weight:500;color:#334155;">${params.value || ''}</span>`;
+        // La fila TOTAL es pinnedBottomRowData y ya rotula su ajuste en el propio nombre.
+        const _pill = params.node && params.node.rowPinned
+          ? ''
+          : _growthPill(params.data, { kind: 'client', key: _escapeJsSingle(params.value || '') });
+        return `<span style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;padding-left:24px;">` +
+          `<span style="font-weight:500;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${params.value || ''}</span>` +
+          _pill +
+          `</span>`;
       },
       cellStyle: params => {
         if (params.data && params.data._isGroup)
@@ -5054,6 +5149,9 @@ function updateClientGrid(tableData) {
 
   clientGridApi.setGridOption('columnDefs', colDefs);
   clientGridApi.setGridOption('rowData', _buildGroupedRows(rows, months));
+  // La pill de crecimiento se deriva de _growth_pct/_growth_mixed, no del valor de la
+  // columna 'Cliente' — forzamos el refresh como ya se hace con '_edit' (ver _toggleGroupSelection).
+  clientGridApi.refreshCells({ columns: ['Cliente'], force: true });
   clientGridApi.setGridOption('pinnedBottomRowData', [totalRow]);
   clientGridApi.setGridOption('getRowStyle', params => {
     if (params.node.rowPinned) return null;
@@ -5221,14 +5319,25 @@ async function saveModalChanges() {
         subneg_overrides: subnegOverrides,
       }),
     });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    // Validar el body: un 200 OK con {ok:false} NO es un guardado exitoso.
+    let respData = null;
+    try { respData = await resp.json(); } catch (_) {}
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + (respData?.error ? ': ' + respData.error : ''));
+    if (!respData || respData.ok !== true) {
+      throw new Error(respData?.error || 'El servidor no confirmó el guardado.');
+    }
     _setModalDirty(false);
     closeModal();
     _fcClear();   // Overrides altered the dataset — force fresh data on next render
     await _refreshAfterSave();  // sequential — avoids parallel 502 on Render
+    // Force table reload if already on detalle tab (stale flag alone won't trigger it)
+    if (STATE.activeTab === 'detalle') {
+      _tableIsStale = false;
+      await loadTable();
+    }
   } catch (err) {
     console.error('Save error', err);
-    alert('Error al guardar los cambios. Por favor intente nuevamente.');
+    alert('Error al guardar los cambios: ' + (err?.message || 'intente nuevamente.'));
     if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<i class="bi bi-check-lg me-1"></i> Guardar'; }
   }
 }

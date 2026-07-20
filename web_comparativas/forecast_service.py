@@ -566,10 +566,27 @@ def get_forecast_effective_month(today: dt.date | None = None, cutoff_day: int =
     return f"{y}-{m:02d}"
 
 
-def _is_effective_override_pct(pct: float, growth_pct: float, tol: float = _OVERRIDE_PCT_TOL) -> bool:
-    """Return True only when an override differs materially from the current default growth."""
+def _is_effective_override_pct(
+    pct: float,
+    growth_pct: float,
+    tol: float = _OVERRIDE_PCT_TOL,
+    *,
+    baseline_monthly_pct: float | None = None,
+) -> bool:
+    """Return True only when an override differs materially from the current default growth.
+
+    baseline_monthly_pct — baseline ya expresado en % MENSUAL. Cuando se pasa, se usa en
+    lugar de derivarlo de growth_pct. Hace falta porque el baseline real de una fila no
+    siempre es la tasa global del tablero: puede venir de un override de menor prioridad
+    (p. ej. el wildcard de grupo). Comparar siempre contra la global desactivaba overrides
+    legitimos y dejaba la fila proyectando la tasa del grupo en vez de la pedida.
+    """
     pct = float(pct)
-    default_pct = _monthly_pct_from_annual_growth(growth_pct)
+    default_pct = (
+        _monthly_pct_from_annual_growth(growth_pct)
+        if baseline_monthly_pct is None
+        else float(baseline_monthly_pct)
+    )
     return bool(np.isfinite(pct)) and abs(pct - default_pct) > tol
 
 
@@ -1774,6 +1791,34 @@ def save_client_overrides(
             for rec in existing
         }
 
+        # Baseline REAL por subnegocio para el guard de efectividad.
+        #
+        # El baseline correcto no es la tasa global del tablero: es lo que la fila
+        # resolveria SI ESTE override de subnegocio no existiera. Puede caer al
+        # wildcard de grupo (subneg="") y no a la global — desactivar comparando
+        # contra la global dejaba la fila proyectando la tasa del grupo en vez de
+        # la pedida por el usuario. Espeja el bloque de celdas mas abajo, que ya
+        # saca su propio override de los maps antes de resolver la referencia.
+        _pre_maps = _build_override_maps(
+            [rec for rec in existing if getattr(rec, "is_active", False)]
+        )
+
+        def _baseline_monthly_for_subneg(subneg_key: str) -> float:
+            maps_wo = dict(_pre_maps)
+            # Sacar SOLO el override propio de este subnegocio; el wildcard ("") queda.
+            maps_wo["subneg"] = {
+                k: v for k, v in _pre_maps.get("subneg", {}).items() if k[1] != subneg_key
+            }
+            resolved = _resolve_override_for_row(
+                selector_candidates=[client_key],
+                subneg=subneg_key,
+                codigo_serie="",
+                forecast_month=effective_from_month,
+                maps=maps_wo,
+                base_growth_pct=growth_pct,
+            )
+            return float(resolved.get("monthly_pct", 0.0))
+
         subneg_monthly_lookup: dict[str, float] = {}
         for item in subneg_overrides:
             subneg = _clean_override_text(item.get("subneg"))
@@ -1781,7 +1826,11 @@ def save_client_overrides(
                 continue
             annual_growth = float(item.get("growth_pct") or 0.0)
             monthly_growth = _monthly_pct_from_annual_growth(annual_growth)
-            if _is_effective_override_pct(monthly_growth, growth_pct):
+            if _is_effective_override_pct(
+                monthly_growth,
+                growth_pct,
+                baseline_monthly_pct=_baseline_monthly_for_subneg(subneg),
+            ):
                 _upsert_override_record(
                     session,
                     existing_map,
@@ -2189,6 +2238,212 @@ def _derive_visible_client_growth_state(
         "mixed": False,
         "visible_subnegs": visible_subnegs,
     }
+
+
+# Mes centinela para resolver la EXPECTATIVA CONFIGURADA: con un mes lo bastante futuro
+# todos los overrides ya estan vigentes, asi que la tasa no depende del filtro de fechas
+# ni de cuantos meses previos al effective_from_month haya en la ventana visible.
+_CONFIGURED_RATE_MONTH = "9999-12"
+
+
+def _override_effective_floor_by_client(override_records: list[Any]) -> dict[str, str]:
+    """Cliente -> primer mes "YYYY-MM" en que alguno de sus overrides entra en vigencia."""
+    out: dict[str, str] = {}
+    for rec in override_records or []:
+        selector = _clean_override_text(getattr(rec, "client_selector", ""))
+        efm = _clean_override_text(getattr(rec, "effective_from_month", ""))
+        if not selector or not efm:
+            continue
+        prev = out.get(selector)
+        if prev is None or efm < prev:
+            out[selector] = efm
+    return out
+
+
+def _subneg_base_weights(
+    df: "pd.DataFrame | None",
+    *,
+    client_col: str,
+    value_col: str,
+    max_hist_date: Any = None,
+    floor_by_client: dict[str, str] | None = None,
+) -> dict[tuple[str, str], float]:
+    """Base $ por (cliente, subnegocio) sobre los meses en que el override RIGE.
+
+    Es el peso del blend de la pill. Usa la BASE (sin el factor de override aplicado):
+    en local sale de df_valorizado crudo y en PG de base_val — ambos ya en memoria, sin
+    queries nuevas.
+
+    El piso por cliente (effective_from_month) NO es cosmetico: pesar tambien los meses
+    previos a la vigencia mete en la mezcla meses que ese override todavia no toca, y el
+    blend deja de coincidir con la proyeccion (medido: 2,64 pp de desvio). Con el piso
+    puesto, coincide a ~1e-14.
+
+    Devuelve {} ante cualquier forma inesperada: sin pesos el blend cae a promedio simple,
+    que sigue siendo exacto para filas uniformes.
+    """
+    import pandas as pd
+
+    if df is None or getattr(df, "empty", True):
+        return {}
+    if not {client_col, "subneg", value_col}.issubset(df.columns):
+        return {}
+    sub = df
+    if max_hist_date is not None and "fecha" in df.columns:
+        sub = df[df["fecha"] > max_hist_date]
+    if sub.empty:
+        return {}
+
+    sub = sub.assign(
+        _c=sub[client_col].astype(str).str.strip(),
+        _s=sub["subneg"].astype(str).str.strip(),
+        _v=pd.to_numeric(sub[value_col], errors="coerce").fillna(0.0).astype(float),
+    )
+    if floor_by_client and "fecha" in sub.columns:
+        _floor = sub["_c"].map(floor_by_client)
+        _month = pd.to_datetime(sub["fecha"], errors="coerce").dt.strftime("%Y-%m")
+        sub = sub[_floor.isna() | (_month >= _floor)]
+        if sub.empty:
+            return {}
+
+    grouped = sub.groupby(["_c", "_s"], dropna=False)["_v"].sum()
+    return {
+        (str(c), str(s)): float(v)
+        for (c, s), v in grouped.items()
+        if float(v) > 0
+    }
+
+
+def _client_growth_pct_map(
+    override_records: list[Any],
+    weights: dict[tuple[str, str], float] | None = None,
+    global_growth_pct: float = 0.0,
+) -> dict[str, dict]:
+    """Map client_selector -> {"value": float, "mixed": bool, "inherited": bool}.
+
+    "value" es la tasa GENERAL de la fila: promedio de las tasas anuales de sus
+    subnegocios PONDERADO POR SU BASE $. Siempre es numerico — no hay mas "mixto" sin
+    numero. Con tasas uniformes el promedio devuelve exactamente esa tasa (invariante,
+    sea cual sea el peso), y con tasas distintas devuelve el blend, que coincide con la
+    proyeccion porque el factor aplicado es plano (1 + r/100).
+
+    Los otros dos ejes se mantienen como flags de color:
+    * "mixed"     — las tasas de los subnegocios difieren (violeta).
+    * "inherited" — el cliente no tiene override propio de subnegocio; su tasa viene del
+                    wildcard de grupo o de la global (gris).
+
+    Las tasas se resuelven con _resolve_override_for_row sobre _CONFIGURED_RATE_MONTH:
+    interesa la EXPECTATIVA CONFIGURADA, estable ante el filtro de fechas, no el
+    crecimiento realizado de la ventana visible.
+
+    Read-only helper — never mutates records nor participates in persistence.
+    """
+    weights = weights or {}
+    maps = _build_override_maps(override_records or [])
+    try:
+        global_pct = float(global_growth_pct or 0.0)
+    except (TypeError, ValueError):
+        global_pct = 0.0
+
+    # Subnegocios a considerar por cliente: los que tienen override propio + los que
+    # aportan base $ (esos heredan, pero pesan en el blend).
+    per_client: dict[str, set[str]] = {}
+    own_subnegs: dict[str, set[str]] = {}
+    for rec in override_records or []:
+        # _normalize_scope: los registros pueden traer alias ("subneg" | "subnegocio").
+        if _normalize_scope(getattr(rec, "override_scope", None)) != FORECAST_SCOPE_SUBNEG:
+            continue
+        selector = _clean_override_text(getattr(rec, "client_selector", ""))
+        if not selector or getattr(rec, "override_growth_pct", None) is None:
+            continue
+        per_client.setdefault(selector, set())
+        subneg = _clean_override_text(getattr(rec, "subneg", ""))
+        if subneg:
+            per_client[selector].add(subneg)
+            own_subnegs.setdefault(selector, set()).add(subneg)
+    for (client, subneg) in weights:
+        if client in per_client and subneg:
+            per_client[client].add(subneg)
+
+    def _rate_for(selector: str, subneg: str) -> float:
+        resolved = _resolve_override_for_row(
+            selector_candidates=[selector],
+            subneg=subneg,
+            codigo_serie="",
+            forecast_month=_CONFIGURED_RATE_MONTH,
+            maps=maps,
+            base_growth_pct=global_pct,
+        )
+        return float(resolved.get("annual_pct") or 0.0)
+
+    out: dict[str, dict] = {}
+    for selector, subnegs in per_client.items():
+        inherited = not own_subnegs.get(selector)
+        if not subnegs:
+            # Solo wildcard y sin detalle de subnegocios: su tasa ES la del wildcard.
+            out[selector] = {"value": _rate_for(selector, ""), "mixed": False, "inherited": True}
+            continue
+        rates, ws = [], []
+        for subneg in sorted(subnegs):
+            rates.append(_rate_for(selector, subneg))
+            ws.append(float(weights.get((selector, subneg), 0.0)))
+        total_w = sum(ws)
+        # Sin pesos (dataset sin base $ para ese cliente) -> promedio simple: sigue
+        # siendo exacto cuando las tasas son uniformes, que es el caso invariante.
+        value = (
+            sum(r * w for r, w in zip(rates, ws)) / total_w
+            if total_w > 0
+            else sum(rates) / len(rates)
+        )
+        first = rates[0]
+        mixed = any(abs(r - first) > _OVERRIDE_PCT_TOL for r in rates)
+        out[selector] = {"value": value, "mixed": mixed, "inherited": inherited}
+    return out
+
+
+def _override_records_for_pill(user_id: int | None, *, is_admin: bool = False) -> list[Any]:
+    """Records de override listos para anotar la pill: fetch + consolidacion.
+
+    La consolidacion NO es opcional: con all_users=True (visor admin) el fetch devuelve
+    un registro por usuario para el mismo alcance, y sin colapsarlos la pill lee dos
+    tasas distintas del mismo subnegocio y cae en "mixto" mientras la proyeccion usa la
+    consolidada. Se usa el mismo _consolidate_override_records que client-table PG,
+    chart-data, treemap y approvals, para que los caminos no vuelvan a divergir.
+    """
+    records = _fetch_override_records(user_id, all_users=is_admin)
+    if not records:
+        return []
+    return _consolidate_override_records(records, "client-table-pill")
+
+
+def _annotate_rows_with_growth_pct(
+    rows: list[dict],
+    override_records: list[Any],
+    global_growth_pct: float = 0.0,
+    weights: dict[tuple[str, str], float] | None = None,
+) -> None:
+    """Add _growth_pct / _growth_mixed / _growth_inherited to each row, in place.
+
+    Siempre emite una tasa numerica: las filas con tasas dispares entre subnegocios traen
+    el blend ponderado por base $, y las que no tienen override propio ni wildcard caen a
+    la tasa global del tablero (el mismo piso que usa _resolve_override_for_row via
+    base_growth_pct), marcadas como heredadas para que la grilla las pinte en gris.
+    """
+    try:
+        gmap = _client_growth_pct_map(override_records, weights, global_growth_pct)
+    except Exception as exc:  # never break the table over a decorative pill
+        logger.warning("[FORECAST] _annotate_rows_with_growth_pct failed: %s", exc)
+        gmap = {}
+    try:
+        _global = float(global_growth_pct or 0.0)
+    except (TypeError, ValueError):
+        _global = 0.0
+    fallback = {"value": _global, "mixed": False, "inherited": True}
+    for row in rows or []:
+        info = gmap.get(_clean_override_text(row.get("Cliente"))) or fallback
+        row["_growth_pct"] = info["value"]
+        row["_growth_mixed"] = bool(info["mixed"])
+        row["_growth_inherited"] = bool(info["inherited"])
 
 
 def _get_patched_df_val(user_id: int | None = None, df_source=None, *, is_admin: bool = False) -> "pd.DataFrame":
@@ -4281,6 +4536,10 @@ def _pg_get_client_table_inner(
     if _ovr_records_ct:
         _ovr_records_ct = _consolidate_override_records(_ovr_records_ct, "client-table")
     overrides_active = bool(_ovr_records_ct)
+    # Peso $ por subnegocio para el blend de la pill; se llena con las filas delta, que
+    # ya se levantan mas abajo a nivel subneg. Vacio si no hay overrides: esos clientes
+    # son uniformes (heredan la global) y el blend no necesita pesos.
+    _pill_weights: dict[tuple[str, str], float] = {}
     _forecast_diag(
         "[CLIENT_TABLE] user=%s overrides_active=%s override_count=%s effective_override_count=%s is_admin=%s",
         user_id, overrides_active, _ct_ovr_original_count, len(_ovr_records_ct), is_admin,
@@ -4329,6 +4588,15 @@ def _pg_get_client_table_inner(
                 _ct_rows_loaded = len(df_ovr_rows)
                 _forecast_diag("[CLIENT_TABLE] delta_rows=%s selectors=%s", _ct_rows_loaded, len(_selectors_ct))
                 if not df_ovr_rows.empty:
+                    # base_val es la BASE (antes de multiplicar por el factor): el peso
+                    # correcto para el blend. Se toma aca, sin query adicional.
+                    _pill_weights = _subneg_base_weights(
+                        df_ovr_rows,
+                        client_col="fantasia",
+                        value_col="base_val",
+                        max_hist_date=max_hist_date,
+                        floor_by_client=_override_effective_floor_by_client(_ovr_records_ct),
+                    )
                     _ct_apply_t0 = time.perf_counter()
                     df_ovr_rows, _override_maps = _apply_override_effects_to_dataframe(
                         df_ovr_rows,
@@ -4512,6 +4780,8 @@ def _pg_get_client_table_inner(
         {**r, "Cliente": str(r["Cliente"]), "Grupo": str(r["Grupo"])}
         for r in pivot_reset[["Cliente", "Grupo", "_lab"] + col_names].to_dict("records")
     ]
+    # Growth expectation per row — drives the "Crec." pill in the grid.
+    _annotate_rows_with_growth_pct(rows, _ovr_records_ct, growth_pct, _pill_weights)
 
     result = {
         "months": col_names, "rows": rows, "totals": totals,
@@ -6148,18 +6418,20 @@ def get_client_table(
     if growth_pct != 0 and not df_main.empty and "tipo" in df_main.columns and "fecha" in df_main.columns:
         _max_hist = df_main[df_main["tipo"] == "hist"]["fecha"].max()
         if pd.notna(_max_hist):
-            _future_dates_pre = sorted(df_c.loc[df_c["fecha"] > _max_hist, "fecha"].unique())
-            if _future_dates_pre:
-                _start_proj = _future_dates_pre[0]
-                _has_ov_col = "_has_override" in df_c.columns
-                for _fd in _future_dates_pre:
-                    _months_diff = (_fd.year - _start_proj.year) * 12 + (_fd.month - _start_proj.month)
-                    _quarters = (_months_diff // 3) + 1
-                    _factor = 1.0 + (growth_pct * _quarters / 100.0)
-                    _dm = df_c["fecha"] == _fd
-                    if _has_ov_col:
-                        _dm = _dm & (~df_c["_has_override"].fillna(False))
-                    df_c.loc[_dm, val_col] = df_c.loc[_dm, val_col].astype(float) * _factor
+            # Factor PLANO, identico al de produccion (_pg_get_client_table_inner) y al que
+            # ya usan los overrides (_annual_eff = 1 + r/100).
+            #
+            # Antes escalaba por trimestre (_quarters -> x1.25/1.50/1.75/2.00), asi que con
+            # la misma global local proyectaba ~27% mas que prod sobre el mismo dato y una
+            # fila heredada al 25% terminaba creciendo +59% en el anio. El ramp era el bug:
+            # ningun otro camino (chart local, chart PG, client-table PG) lo aplicaba.
+            _factor = 1.0 + growth_pct / 100.0
+            _dm = df_c["fecha"] > _max_hist
+            if "_has_override" in df_c.columns:
+                # Los overrides ya vienen multiplicados por su propio factor desde
+                # _get_patched_df_val: aplicarles ademas la global seria doble conteo.
+                _dm = _dm & (~df_c["_has_override"].fillna(False))
+            df_c.loc[_dm, val_col] = df_c.loc[_dm, val_col].astype(float) * _factor
 
     # Pivot
     grp = df_c.groupby(["_cliente", "_grupo", "fecha"])[val_col].sum().reset_index()
@@ -6199,6 +6471,22 @@ def get_client_table(
         {**r, "Cliente": str(r["Cliente"]), "Grupo": str(r["Grupo"])}
         for r in pivot_reset[["Cliente", "Grupo", "_lab"] + new_col_names].to_dict("records")
     ]
+    # Growth expectation per row — drives the "Crec." pill in the grid.
+    # Peso $ del blend: base CRUDA por (cliente, subnegocio). Sale de df_valorizado tal
+    # como esta cacheado en memoria — no del parcheado, que ya viene multiplicado por el
+    # factor de override. Sin queries nuevas.
+    _pill_records = _override_records_for_pill(user_id, is_admin=is_admin)
+    _pill_weights = _subneg_base_weights(
+        data.get("df_valorizado"),
+        client_col="fantasia",
+        value_col="monto_yhat" if view_money else "yhat_cliente",
+        max_hist_date=(
+            df_main[df_main["tipo"] == "hist"]["fecha"].max()
+            if not df_main.empty and "tipo" in df_main.columns else None
+        ),
+        floor_by_client=_override_effective_floor_by_client(_pill_records),
+    )
+    _annotate_rows_with_growth_pct(rows, _pill_records, growth_pct, _pill_weights)
 
     base_result = {
         "months": new_col_names,
