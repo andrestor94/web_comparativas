@@ -98,6 +98,19 @@ _BRIDGE_EXIT_QUERY = 20        # QUERY_ERROR: conexión abierta, falló la query
 _BRIDGE_MAX_ATTEMPTS = 3
 _BRIDGE_BACKOFF_S = (2, 4)     # espera antes del 2do y 3er intento
 _BRIDGE_TIMEOUT_S = 65         # 65s: el JS AbortController corta al cliente a los 70s
+_BRIDGE_TIMEOUT_WEB_S = 8      # path web (INDICADORES_USE_SUMMARY on): 1 intento corto
+
+
+def _summary_mode_on() -> bool:
+    """True si INDICADORES_USE_SUMMARY está encendido (mismo criterio que el gate de
+    summary). En ese modo el proceso es el WEB: TODO se lee del summary y el bridge en
+    vivo NO debería usarse. Si por un fallback se llega igual (flag on pero tabla aún
+    no publicada, o red del ETL caída), debe fallar RÁPIDO — 1 intento, timeout corto,
+    sin backoff — para no bloquear el request del usuario colgado esperando al ETL_Data.
+
+    El ETL de la VM corre con USE_SUMMARY=0 (extracción real por VPN) y conserva el
+    retry/backoff/timeout completos: esta rama NO lo toca."""
+    return os.environ.get("INDICADORES_USE_SUMMARY", "0").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class BridgeConnectionError(RuntimeError):
@@ -125,8 +138,15 @@ class SqlClientCursor:
         corrió) y TimeoutExpired (cuelgue de red en el handshake o el transporte).
         Exit 20 (error de query/datos) u otros códigos propagan de inmediato.
         """
+        # Path web (INDICADORES_USE_SUMMARY on): 1 intento + timeout corto, sin backoff,
+        # para no colgar el request si por fallback se llega al bridge. ETL de la VM
+        # (USE_SUMMARY=0): retry/backoff/timeout completos, sin cambios.
+        web_fast = _summary_mode_on()
+        max_attempts = 1 if web_fast else _BRIDGE_MAX_ATTEMPTS
+        timeout_s = _BRIDGE_TIMEOUT_WEB_S if web_fast else _BRIDGE_TIMEOUT_S
+
         last_message = ""
-        for attempt in range(1, _BRIDGE_MAX_ATTEMPTS + 1):
+        for attempt in range(1, max_attempts + 1):
             try:
                 completed = subprocess.run(
                     [
@@ -147,11 +167,17 @@ class SqlClientCursor:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=_BRIDGE_TIMEOUT_S,
+                    timeout=timeout_s,
                     check=False,
                 )
             except subprocess.TimeoutExpired:
-                last_message = f"timeout de {_BRIDGE_TIMEOUT_S}s esperando al proceso bridge"
+                last_message = f"timeout de {timeout_s}s esperando al proceso bridge"
+            except FileNotFoundError as exc:
+                # En Render (Linux) no hay 'powershell' ni el .ps1: falla de inmediato,
+                # sin reintentar. Es un fallo de apertura → BridgeConnectionError.
+                raise BridgeConnectionError(
+                    f"bridge no disponible en este entorno: {exc}", attempts=attempt
+                )
             else:
                 if completed.returncode == 0:
                     return completed
@@ -161,15 +187,15 @@ class SqlClientCursor:
                 if completed.returncode != _BRIDGE_EXIT_CONNECTION:
                     raise RuntimeError(message)
                 last_message = message
-            if attempt < _BRIDGE_MAX_ATTEMPTS:
+            if attempt < max_attempts:
                 delay = _BRIDGE_BACKOFF_S[attempt - 1]
                 print(
-                    f"[BRIDGE retry] intento {attempt}/{_BRIDGE_MAX_ATTEMPTS}: "
+                    f"[BRIDGE retry] intento {attempt}/{max_attempts}: "
                     f"conexión falló, reintentando en {delay}s",
                     flush=True,
                 )
                 time.sleep(delay)
-        raise BridgeConnectionError(last_message, attempts=_BRIDGE_MAX_ATTEMPTS)
+        raise BridgeConnectionError(last_message, attempts=max_attempts)
 
     def execute(self, query: str, params=None):
         params = list(params or [])

@@ -467,7 +467,13 @@ def api_laboratorios_metadata(request: Request, _user: User = Depends(require_mo
         return JSONResponse(data)
     except Exception as exc:
         logger.error("laboratorios metadata error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=_safe_error(exc))
+        # Degradá con gracia: la página de Informes de Laboratorio debe cargar igual,
+        # con los selectores en su placeholder ("Todos/Todas"), en vez de romper con
+        # 500 si la fuente de opciones no está disponible. NUNCA bloquea el request.
+        return JSONResponse({
+            "laboratorios": [], "familias": [], "clientes": [],
+            "marcas": [], "meses": [], "total_registros": 0,
+        })
 
 
 @router.get("/api/laboratorios/resumen")
