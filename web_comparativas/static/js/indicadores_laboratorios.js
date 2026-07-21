@@ -43,6 +43,11 @@ const LAB = (() => {
     // (server-side, partial _ind_data_freshness.html). Ya no se chequea /health
     // en el arranque. _checkHealth() queda definida abajo pero sin invocar.
     // _checkHealth();
+    // Poblar los selectores Laboratorio/Familia desde el summary (Postgres/SQLite)
+    // vía /api/laboratorios/metadata. NO depende del ETL en vivo: antes esto solo
+    // se disparaba dentro de _checkHealth() (deshabilitado), por eso los dropdowns
+    // quedaban vacíos aunque el dashboard sí tenía datos del summary.
+    _loadMetadata();
   }
 
   function _setupDates() {
