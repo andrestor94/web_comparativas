@@ -26,7 +26,7 @@ from sqlalchemy import func
 
 # === PROYECTO ===
 from web_comparativas.models import (
-    SessionLocal, db_session, User, init_db, RENDER_MODE,
+    SessionLocal, db_session, User, init_db,
 )
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
@@ -880,10 +880,13 @@ def markets_home(request: Request):
     # accesible. Con 2+ apartados, la Suite se RENDERIZA (no redirige).
     if _accessible_top_count(user) < 2:
         return RedirectResponse(_first_accessible_url(user), 303)
-    # Tarjeta de Indicadores: en local, funcional para todos; en producción
-    # (RENDER_MODE), funcional solo para admins y "Próximamente" para el resto
-    # (coherente con el guard _require_admin_en_prod del router de consulta).
-    show_indicadores = (not RENDER_MODE) or bool(user and user.is_admin())
+    # Tarjeta de Indicadores: el módulo ya está en producción y testeado OK, por lo
+    # que deja de estar "Próximamente". La tarjeta solo se renderiza cuando
+    # can_access(user, 'indicadores_comerciales') es True (gate por module_access),
+    # así que si el usuario la ve es porque ya la tiene habilitada → siempre
+    # "Disponible" y clickeable, tanto en local como en prod. La disponibilidad del
+    # módulo NO otorga acceso: el acceso lo sigue gobernando module_access.
+    show_indicadores = True
     return templates.TemplateResponse("markets_home.html", {
         "request": request,
         "user": user,

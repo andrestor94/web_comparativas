@@ -1545,7 +1545,8 @@ def _apply_visibility(qry, user: User):
     La visibilidad real ahora se logra con uploads_visible_query(...).
     """
     role = (getattr(user, "role", "") or getattr(user, "rol", "") or "").lower()
-    if role in ("admin", "supervisor", "auditor"):
+    # Gerente/manager con visibilidad total igual que auditor (consistencia; función obsoleta).
+    if role in ("admin", "supervisor", "auditor", "gerente", "manager"):
         return qry
     return qry.filter(UploadModel.user_id == user.id)
 
@@ -1741,7 +1742,7 @@ def mercado_publico_helpdesk(
     Muestra tickets propios (o todos si es admin/supervisor/auditor) usando template nativo.
     """
     # Roles que ven todo (Auditor added as per read-only req, though usually read-only implies viewing)
-    is_privileged = user.has_role("admin", "auditor")
+    is_privileged = user.has_role("admin", "auditor", "gerente", "manager")
     
     q = db_session.query(Ticket)
     if not is_privileged:
@@ -1824,7 +1825,7 @@ def mercado_publico_helpdesk_detail(
         return RedirectResponse("/mercado-publico/helpdesk?err=not_found", status_code=303)
     
     # Permission Check: Must own ticket or be privileged
-    is_privileged = user.has_role("admin", "auditor")
+    is_privileged = user.has_role("admin", "auditor", "gerente", "manager")
     if ticket.user_id != user.id and not is_privileged:
          return RedirectResponse("/mercado-publico/helpdesk?err=access_denied", status_code=303)
 
@@ -1877,7 +1878,7 @@ def mercado_privado_helpdesk(
     ),
     _mod: User = Depends(_require_module("mercado_privado.mesa_ayuda")),
 ):
-    is_privileged = user.has_role("admin", "auditor")
+    is_privileged = user.has_role("admin", "auditor", "gerente", "manager")
     
     q = db_session.query(Ticket)
     if not is_privileged:
@@ -1961,7 +1962,7 @@ def mercado_privado_helpdesk_detail(
         return RedirectResponse("/mercado-privado/helpdesk?err=not_found", status_code=303)
     
     # Permission Check
-    is_privileged = user.has_role("admin", "auditor")
+    is_privileged = user.has_role("admin", "auditor", "gerente", "manager")
     if ticket.user_id != user.id and not is_privileged:
          return RedirectResponse("/mercado-privado/helpdesk?err=access_denied", status_code=303)
 

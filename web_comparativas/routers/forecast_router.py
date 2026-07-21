@@ -110,7 +110,8 @@ def _forecast_role_key(user: User) -> str:
 
 
 def _can_view_global_forecast_adjustments(user: User) -> bool:
-    """Admin and Auditor can read consolidated Forecast overrides from all users."""
+    """Admin, Auditor y Gerente can read consolidated Forecast overrides from all users.
+    Gerente/manager iguala el alcance de datos del Auditor (visibilidad total)."""
     role_key = _forecast_role_key(user)
     return role_key in {
         "admin",
@@ -120,6 +121,8 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
         "audit",
         "aud",
         "auditor_siem",
+        "gerente",
+        "manager",
     }
 
 
