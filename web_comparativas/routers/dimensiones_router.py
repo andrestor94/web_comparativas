@@ -814,6 +814,11 @@ class SummaryItem(BaseModel):
 class SummaryChunkPayload(BaseModel):
     import_run_id: int
     summaries: list[SummaryItem]
+    # Idempotencia de la subida de summaries: el cliente lo manda en True SOLO en
+    # el primer chunk para hacer un DELETE run-scoped previo. Sin esto, un
+    # re-upload (--fresh) o reintentos podían dejar filas viejas/duplicadas
+    # (NULLS DISTINCT ⇒ ON CONFLICT no deduplica columnas NULL).
+    reset: bool = False
 
 
 class FinalizePayload(BaseModel):
@@ -984,6 +989,21 @@ def admin_import_chunk_summaries(
         raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
 
     try:
+        # Idempotencia: en el primer chunk borramos cualquier summary previo de
+        # ESTA corrida (re-upload / reintento) para arrancar de cero. Los NULL en
+        # columnas del unique no se deduplican con ON CONFLICT (NULLS DISTINCT),
+        # así que el reset run-scoped es lo que garantiza una subida limpia.
+        if payload.reset:
+            deleted = db.execute(
+                delete(DimensionamientoFamilyMonthlySummary).where(
+                    DimensionamientoFamilyMonthlySummary.import_run_id == payload.import_run_id
+                )
+            ).rowcount
+            logger.info(
+                "[DIM][IMPORT] Run %d: reset de summaries antes del primer chunk (borrados=%s)",
+                payload.import_run_id, deleted,
+            )
+
         mappings = []
         for s in payload.summaries:
             month_val = _parse_date(s.month)
@@ -1051,6 +1071,13 @@ def _rebuild_summary_for_run(db: Session, run_id: int) -> int:
             DimensionamientoFamilyMonthlySummary.import_run_id == run_id
         )
     )
+    # Defensivo: con el DELETE run-scoped de arriba no debería haber conflicto,
+    # pero el ON CONFLICT hace el INSERT reanudable si quedara algún residuo.
+    conflict_clause = (
+        "ON CONFLICT ON CONSTRAINT uq_dim_family_monthly_summary DO NOTHING"
+        if IS_POSTGRES
+        else "ON CONFLICT DO NOTHING"
+    )
     db.execute(
         text(
             f"""
@@ -1075,16 +1102,58 @@ def _rebuild_summary_for_run(db: Session, run_id: int) -> int:
             GROUP BY {month_sql}, plataforma, cliente_nombre_homologado,
                 cliente_visible, provincia, familia, unidad_negocio, subunidad_negocio,
                 resultado_participacion, is_identified, is_client
+            {conflict_clause}
             """
         ),
         {"rid": run_id},
     )
+    return _count_summary_rows(db, run_id)
+
+
+def _count_summary_rows(db: Session, run_id: int) -> int:
     return int(
         db.query(func.count(DimensionamientoFamilyMonthlySummary.id))
         .filter_by(import_run_id=run_id)
         .scalar()
         or 0
     )
+
+
+def _summary_reconciles_with_records(db: Session, run_id: int) -> bool:
+    """Opción A: el cliente ya subió el summary (dedup en SQLite). Si reconcilia
+    con los records de la corrida, evitamos el rebuild pesado (INSERT...SELECT de
+    cientos de miles de filas, cercano al timeout de 600s de Render).
+
+    Reconcilia si: hay summary subido, la suma de total_registros == cantidad de
+    records, y la valorización agregada coincide (tolerancia de redondeo). Si hubo
+    inflación por NULLS DISTINCT en reintentos de chunk, SUM(total_registros) queda
+    > COUNT(records) y NO reconcilia ⇒ se cae al rebuild como fallback seguro.
+    """
+    rec = db.execute(
+        text(
+            "SELECT COUNT(*) AS c, COALESCE(SUM(valorizacion_estimada), 0) AS v "
+            "FROM dimensionamiento_records WHERE import_run_id = :r"
+        ),
+        {"r": run_id},
+    ).one()
+    summ = db.execute(
+        text(
+            "SELECT COALESCE(SUM(total_registros), 0) AS c, "
+            "COALESCE(SUM(total_valorizacion), 0) AS v "
+            "FROM dimensionamiento_family_monthly_summary WHERE import_run_id = :r"
+        ),
+        {"r": run_id},
+    ).one()
+    if int(summ.c) == 0:
+        return False  # no se subió summary → hay que reconstruir
+    # Check fuerte: conteo entero EXACTO (SUM(total_registros) == COUNT(records)).
+    # Cualquier inflación por duplicación de filas rompe esta igualdad. La
+    # valorización es un chequeo secundario con tolerancia relativa para absorber
+    # el ruido de coma flotante al sumar cientos de miles de floats.
+    if int(summ.c) != int(rec.c):
+        return False
+    tol = max(1.0, abs(float(rec.v)) * 1e-7)
+    return abs(float(summ.v) - float(rec.v)) <= tol
 
 
 @router.post("/admin/import/finalize")
@@ -1101,15 +1170,45 @@ def admin_import_finalize(
     run = db.query(DimensionamientoImportRun).filter_by(id=payload.import_run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Import run not found")
+
+    # Serializa finalizes concurrentes del MISMO run SIN bloquear la conexión: si
+    # otro finalize ya lo tiene tomado, respondemos 409 y liberamos la conexión de
+    # inmediato. Un lock bloqueante mantendría una conexión ocupada hasta 600s y
+    # Render tiene pocas conexiones ⇒ riesgo de agotar el pool. El lock es
+    # transaccional: se libera solo al commit/rollback de este request.
+    if IS_POSTGRES:
+        got_lock = db.execute(
+            text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": int(run.id)}
+        ).scalar()
+        if not got_lock:
+            raise HTTPException(
+                status_code=409, detail="Finalize already in progress for this run"
+            )
+        db.refresh(run)  # estado fresco tras adquirir el lock
+
+    # Idempotencia (punto 3, lado server): si un intento previo ya la dejó en
+    # 'success' (commiteó aunque el cliente haya visto un timeout), devolver ÉXITO
+    # en vez de 400, para que el retry del cliente no se convierta en error.
+    if run.status == "success":
+        return {"ok": True, "message": "Import run already finalized.", "idempotent": True}
     if run.status != "running":
         raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
 
     try:
-        # Fuente de verdad: reconstruir el resumen desde los registros de la corrida.
-        # Reemplaza cualquier summary subido por chunks (que podría venir inflado por
-        # duplicación de filas NULL bajo ON CONFLICT DO NOTHING) y lo deja consistente.
-        summary_rows = _rebuild_summary_for_run(db, run.id)
-        logger.info("[DIM][IMPORT] Run %d: summary rebuilt from records rows=%d", run.id, summary_rows)
+        # Opción A: el cliente ya subió el summary (dedup en SQLite). Si reconcilia
+        # con los records, salteamos el rebuild pesado (cercano al timeout de 600s
+        # y que empeora al crecer el dataset). Si NO reconcilia (inflación por
+        # NULLS DISTINCT en reintentos de chunk) o no se subió summary, se
+        # reconstruye desde los records como fallback seguro (fuente de verdad).
+        if _summary_reconciles_with_records(db, run.id):
+            summary_rows = _count_summary_rows(db, run.id)
+            logger.info(
+                "[DIM][IMPORT] Run %d: summary subido reconcilia con records, se saltea rebuild rows=%d",
+                run.id, summary_rows,
+            )
+        else:
+            summary_rows = _rebuild_summary_for_run(db, run.id)
+            logger.info("[DIM][IMPORT] Run %d: summary reconstruido desde records rows=%d", run.id, summary_rows)
 
         if payload.snapshot:
             snap = db.query(DimensionamientoDashboardSnapshot).filter_by(
