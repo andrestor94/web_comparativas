@@ -1514,19 +1514,19 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             )
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
             total_rows, total_families, total_provincias, total_valorizacion = session.execute(main_stmt).one()
-            # Query 2: nombres únicos respetando el filtro activo de is_client.
-            # Si no hay filtro explícito, contar solo filas con is_client=True
-            # (comportamiento por defecto que excluye "SIN DATO" y no-clientes).
-            # Con filtro is_client=False, _apply_common_filters ya restringe las
-            # filas, y contamos los nombres disponibles en esa selección.
+            # Query 2: clientes = TODOS los cliente_visible distintos.
+            # Esta KPI cuenta el universo completo de clientes visibles y debe ser
+            # idéntica al camino detalle (DimensionamientoRecord). NO se fuerza
+            # is_client=True: hacerlo devolvía un subconjunto angosto (p.ej. 159 en
+            # vez de 374) y hacía que el titular de la card cambiara según si el
+            # summary estaba usable o no. El filtro is_client solo se aplica si el
+            # usuario lo pidió explícitamente, vía _apply_common_filters.
             visible_client = model.cliente_visible
             base_client_stmt = (
                 select(func.count(distinct(visible_client)))
                 .where(visible_client.isnot(None))
                 .where(visible_client != "")
             )
-            if filters.is_client is None:
-                base_client_stmt = base_client_stmt.where(model.is_client == True)  # noqa: E712
             client_stmt = _apply_common_filters(base_client_stmt, model, filters)
             total_clients = session.execute(client_stmt).scalar_one()
             total_records = total_rows
