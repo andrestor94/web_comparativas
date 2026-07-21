@@ -53,21 +53,37 @@ def clear_state():
         except Exception:
             pass
 
-def post_with_retry(url: str, headers: dict, json_data: dict, description: str, max_retries: int = 5) -> dict:
-    """Realiza un POST HTTP con reintentos exponenciales y reporte claro."""
+def post_with_retry(url: str, headers: dict, json_data: dict, description: str, max_retries: int = 5, ok_if_already_final: bool = False) -> dict:
+    """Realiza un POST HTTP con reintentos exponenciales y reporte claro.
+
+    ok_if_already_final: para el finalize. Trata como ÉXITO idempotente el caso en
+    que el server responde 400 'Import run is not running (status=success)' (un
+    intento previo ya finalizó), y trata el 409 'Finalize already in progress' como
+    reintentable (otro finalize del mismo run está corriendo).
+    """
     retry_delay = 1.0
     for attempt in range(1, max_retries + 1):
         try:
             response = requests.post(url, headers=headers, json=json_data, timeout=600)
             if response.status_code == 200:
                 return response.json()
+
+            try:
+                err_detail = response.json().get("detail", response.text)
+            except Exception:
+                err_detail = response.text
+
+            # Finalize idempotente: la corrida ya quedó 'success'.
+            if ok_if_already_final and response.status_code == 400 and "status=success" in str(err_detail):
+                print(f"  ✅ {description}: la corrida ya estaba finalizada (idempotente).")
+                return {"ok": True, "idempotent": True, "message": str(err_detail)}
+
+            # Finalize en progreso en el server (try-lock no adquirido): reintentar.
+            if ok_if_already_final and response.status_code == 409:
+                print(f"  ⏳ {description}: finalize en progreso en el server (Intento {attempt}/{max_retries}).")
             else:
                 print(f"  ⚠️  Falló {description} (Intento {attempt}/{max_retries}). HTTP Status: {response.status_code}")
-                try:
-                    err_detail = response.json().get("detail", response.text)
-                    print(f"      Detalle: {err_detail}")
-                except Exception:
-                    print(f"      Respuesta: {response.text[:200]}")
+                print(f"      Detalle: {str(err_detail)[:200]}")
         except requests.RequestException as e:
             print(f"  ⚠️  Error de red al enviar {description} (Intento {attempt}/{max_retries}): {e}")
         
@@ -357,9 +373,12 @@ def handle_upload(args):
                 
                 chunk_payload = {
                     "import_run_id": remote_run_id,
-                    "summaries": summaries_list
+                    "summaries": summaries_list,
+                    # Idempotencia: solo el primer chunk hace DELETE run-scoped en
+                    # el server para arrancar de cero (evita filas viejas/infladas).
+                    "reset": summaries_offset == 0,
                 }
-                
+
                 desc = f"chunk resúmenes [{summaries_offset:,} a {summaries_offset + len(db_chunk):,}]"
                 post_with_retry(summaries_url, headers, chunk_payload, desc)
                 
@@ -397,7 +416,12 @@ def handle_upload(args):
         }
         
         finalize_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/finalize"
-        finalize_res = post_with_retry(finalize_url, headers, finalize_payload, "Finalización de importación")
+        # Más reintentos que los chunks: si el server cae al rebuild (fallback) y
+        # tarda, el 409 'en progreso' se reintenta con backoff hasta que finalice.
+        finalize_res = post_with_retry(
+            finalize_url, headers, finalize_payload, "Finalización de importación",
+            max_retries=8, ok_if_already_final=True,
+        )
         
         # Limpieza de estado local
         clear_state()
