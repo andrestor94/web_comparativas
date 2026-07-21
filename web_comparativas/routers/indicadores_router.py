@@ -41,7 +41,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from web_comparativas.models import User, RENDER_MODE
+from web_comparativas.models import User
 from web_comparativas.policy import require_module, can_access as _can_access_tpl, can_switch_market as _can_switch_market_tpl
 
 logger = logging.getLogger("wc.indicadores")
@@ -69,15 +69,26 @@ templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
 templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
-# ─── Gate por rol en producción ──────────────────────────────────────────────
+# ─── Gate por module_access a nivel router ───────────────────────────────────
 
-def _require_admin_en_prod(request: Request):
-    """En producción (RENDER_MODE), exige rol admin. En local no restringe (deja
-    pasar; los require_module por ruta siguen aplicando)."""
-    if RENDER_MODE:
-        user = getattr(request.state, "user", None)
-        if not user or not user.is_admin():
-            raise HTTPException(status_code=403, detail="Indicadores Comerciales está disponible solo para administradores.")
+def _require_indicadores_access(request: Request):
+    """Guard a NIVEL router: exige acceso al módulo vía module_access (misma regla
+    que la tarjeta de la suite y que require_module).
+
+    El módulo ya está en producción y testeado OK: la disponibilidad dejó de estar
+    condicionada al rol admin (antes _require_admin_en_prod restringía en RENDER_MODE).
+    Ahora el acceso lo gobierna EXCLUSIVAMENTE module_access, igual que cualquier otro
+    módulo del catálogo — un usuario sin 'indicadores_comerciales' concedido recibe 403,
+    tanto en local como en prod.
+
+    Cubre también el redirect raíz ("" y "/"), que no tiene require_module propio.
+    Se SUMA a los require_module(...) por ruta, que conservan la granularidad por
+    dashboard."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    if not _can_access_tpl(user, "indicadores_comerciales"):
+        raise HTTPException(status_code=403, detail="Sección no autorizada para este usuario.")
     return None  # no devuelve user; es un guard aditivo, las rutas ya tienen el suyo
 
 
@@ -85,7 +96,7 @@ def _require_admin_en_prod(request: Request):
 # raíz ("" y "/") que no tiene Depends propio. Se SUMA a los require_module(...)
 # por ruta, que conservan la granularidad por dashboard.
 router = APIRouter(prefix="/indicadores-comerciales", tags=["indicadores"],
-                   dependencies=[Depends(_require_admin_en_prod)])
+                   dependencies=[Depends(_require_indicadores_access)])
 
 
 # ─── Auth helper ─────────────────────────────────────────────────────────────

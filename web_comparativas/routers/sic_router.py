@@ -80,8 +80,8 @@ def sic_home(request: Request, user: User = Depends(sic_access_required)):
 @router.get("/helpdesk", response_class=HTMLResponse)
 def sic_helpdesk(request: Request, user: User = Depends(sic_access_required),
                  _perm: User = Depends(require_perm("sic.mesa_ayuda"))):
-    # Admin y Auditor ven todos los tickets; el resto solo los propios.
-    full_access_roles = {"admin", "auditor"}
+    # Admin, Auditor y Gerente ven todos los tickets; el resto solo los propios.
+    full_access_roles = {"admin", "auditor", "gerente", "manager"}
     user_role = (user.role or "").strip().lower()
     has_full_access = user_role in full_access_roles
 
@@ -436,10 +436,9 @@ def sic_helpdesk_detail(
     if not ticket:
         raise HTTPException(status_code=404, detail="Consulta no encontrada")
     
-    # Access check: owner or admin/supervisor
-    # Access check: owner or admin/auditor
+    # Access check: owner or admin/auditor/gerente (visibilidad total como Auditor)
     user_role = (user.role or "").lower()
-    has_full_access = user_role in ["admin", "auditor"]
+    has_full_access = user_role in ["admin", "auditor", "gerente", "manager"]
     
     if ticket.user_id != user.id and not has_full_access:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -587,7 +586,7 @@ def sic_tracking(request: Request, user: User = Depends(sic_access_required),
                  _perm: User = Depends(require_perm("sic.seguimiento"))):
     import json as _json_mod
     user_role = (user.role or "").lower()
-    has_access = user_role in ["admin", "supervisor", "auditor"]
+    has_access = user_role in ["admin", "supervisor", "auditor", "gerente", "manager"]
     if not has_access:
         raise HTTPException(status_code=403, detail="Access Denied: Admins Only")
 
@@ -735,7 +734,7 @@ def sic_api_usage_summary(
     Proxy to get_usage_summary logic, protected by sic_access_required.
     """
     user_role = (user.role or "").lower()
-    has_access = user_role in ["admin", "supervisor", "auditor"]
+    has_access = user_role in ["admin", "supervisor", "auditor", "gerente", "manager"]
     if not has_access:
         raise HTTPException(status_code=403, detail="Access Denied")
 
@@ -812,7 +811,7 @@ def sic_api_user_profile(
     Solo accesible por admin, supervisor y auditor, respetando visibilidad.
     """
     user_role = (user.role or "").lower()
-    has_access = user_role in ["admin", "supervisor", "auditor"]
+    has_access = user_role in ["admin", "supervisor", "auditor", "gerente", "manager"]
     if not has_access:
         return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
 
@@ -837,7 +836,7 @@ def sic_api_tracking_send_message(
     user: User = Depends(sic_access_required),
 ):
     user_role = (user.role or "").lower()
-    if user_role not in ["admin", "supervisor", "auditor"]:
+    if user_role not in ["admin", "supervisor", "auditor", "gerente", "manager"]:
         return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
 
     message = (payload.message or "").strip()
@@ -1011,7 +1010,7 @@ def sic_api_usage_live_users(
     Revisando permisos: solo Admin, Supervisor y Auditor pueden ver esta info fina.
     """
     user_role = (user.role or "").lower()
-    has_access = user_role in ["admin", "supervisor", "auditor"]
+    has_access = user_role in ["admin", "supervisor", "auditor", "gerente", "manager"]
     if not has_access:
          return JSONResponse({"ok": False, "error": "Acceso denegado"}, status_code=403)
          
