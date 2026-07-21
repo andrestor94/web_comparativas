@@ -1037,7 +1037,7 @@ def require_roles(*roles: str):
 @router.get("/api/clientes/{n_cuenta}", response_class=JSONResponse)
 def api_get_cliente_por_cuenta(
     n_cuenta: str,
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")),
 ):
     """Devuelve los datos del cliente para autocompletar el formulario."""
     data = _cliente_hints_por_cuenta(n_cuenta)
@@ -1123,7 +1123,7 @@ templates.env.globals["user_display"] = user_display
 def comentarios_alias(
     request: Request,
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     return RedirectResponse("/api/comments/ui", status_code=307)
@@ -1817,7 +1817,7 @@ def mercado_publico_helpdesk_detail(
     request: Request,
     ticket_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -1954,7 +1954,7 @@ def mercado_privado_helpdesk_detail(
     request: Request,
     ticket_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     ticket = db_session.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -2401,7 +2401,7 @@ def api_oportunidades_buscador(
     process_type: str = Query(""),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=10, le=200),
-    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    user: User = Depends(require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")),
 ):
     """
     API JSON para el Buscador de Oportunidades.
@@ -2774,7 +2774,7 @@ def _opp_agg_stacked(df: pd.DataFrame, main_col: str | None, state_col: str | No
 def api_oportunidades_dimensiones_filter(
     body: Dict[str, Any] = Body(...),
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     """
@@ -3040,7 +3040,7 @@ def api_oportunidades_dimensiones(
     evaluation: str = Query(""), # por compatibilidad si se llama por GET
 
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     """
@@ -4414,7 +4414,7 @@ def view_upload(
     request: Request,
     upload_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     """
@@ -4474,7 +4474,7 @@ def view_upload(
 def api_carga_status(
     upload_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "supervisor", "auditor")
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
 ):
     """
@@ -4593,7 +4593,7 @@ def _parse_payload_any(p) -> dict:
 def api_views_list(
     view_id: str = Query("dashboard"),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     """
@@ -4610,7 +4610,7 @@ def api_views_list(
 def api_views_default(
     view_id: str = Query("dashboard"),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     """
@@ -4629,7 +4629,7 @@ def api_views_get(
     id: Optional[int] = Query(None),
     name: str = Query(""),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     """
@@ -5030,7 +5030,7 @@ def api_descargar_final(
     upload_id: int,
     filename: str,
     request: Request,
-    user: User = Depends(require_roles("admin", "analista", "auditor", "supervisor")),
+    user: User = Depends(require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")),
 ):
     """
     Ruta alternativa para forzar descarga correcta.
@@ -5153,7 +5153,7 @@ def api_tablero_ranking(
         None, description="Limitar cantidad de puestos por rengl├│n"
     ),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     """
@@ -6337,7 +6337,7 @@ def tablero_show(
     request: Request,
     upload_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     up = db_session.get(UploadModel, upload_id)
@@ -7340,7 +7340,7 @@ def descargar_normalizado(
     request: Request,
     upload_id: int,
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     up = db_session.get(UploadModel, upload_id)
@@ -7417,7 +7417,7 @@ def descargar_reporte_proceso(
     upload_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles("admin", "analista", "auditor", "supervisor")),
+    user: User = Depends(require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")),
 ):
     # 1) Traer el proceso / upload (usar UploadModel, no Upload)
     up = (
@@ -8115,7 +8115,7 @@ def _sanitize_filters_dict(d: Dict[str, Any]) -> Dict[str, Any]:
 def api_presets_list(
     view: str = Query("historial"),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     items = [
@@ -8209,7 +8209,7 @@ def api_presets_apply_redirect(
     pid: str,
     view: str = Query("historial"),
     user: User = Depends(
-        require_roles("admin", "analista", "auditor", "supervisor")
+        require_roles("admin", "analista", "auditor", "supervisor", "gerente", "manager")
     ),
 ):
     presets = _load_user_presets(user.id)

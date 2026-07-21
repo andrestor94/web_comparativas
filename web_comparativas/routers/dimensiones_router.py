@@ -155,7 +155,7 @@ def _load_negocio_labels() -> dict[str, Any]:
 
 AllowedUser = Annotated[
     User,
-    Depends(require_roles("admin", "analista", "supervisor", "auditor")),
+    Depends(require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")),
 ]
 
 
