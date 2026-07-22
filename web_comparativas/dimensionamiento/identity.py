@@ -41,11 +41,51 @@ from typing import Any, Iterable
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import IS_SQLITE
+from web_comparativas.models import IS_POSTGRES, IS_SQLITE
+from .models import DimensionamientoImportRun
 
 logger = logging.getLogger("wc.dimensionamiento.identity")
 
 _SIN_DATO = "SIN DATO"
+
+
+def latest_success_run_id(session: Session) -> int | None:
+    """Único lookup del run activo (corrida success más reciente). Fuente de verdad
+    compartida por el endpoint de estado, el POST y el backfill de arranque."""
+    return session.execute(
+        text("SELECT id FROM dimensionamiento_import_runs WHERE status = 'success' "
+             "ORDER BY finished_at DESC, id DESC LIMIT 1")
+    ).scalar_one_or_none()
+
+
+def _set_unlimited_timeout(session: Session) -> None:
+    """SET LOCAL statement_timeout = 0 SOLO para esta transacción (Postgres). El backfill
+    es mantenimiento administrativo y no debe morir por el timeout global de 55s. SET LOCAL
+    se resetea al commitear, por eso se reaplica en cada fase."""
+    if IS_POSTGRES:
+        session.execute(text("SET LOCAL statement_timeout = 0"))
+
+
+def _record_identidad_estado(session: Session, run_id: int, *, ok: bool = False, error: str | None = None) -> None:
+    """Persiste en import_run.summary el estado de la última resolución de identidad,
+    para que un fallo se vea desde el endpoint de estado sin ir a los logs de Render."""
+    try:
+        run = session.get(DimensionamientoImportRun, run_id)
+        if run is None:
+            return
+        s = dict(run.summary or {})
+        now_iso = dt.datetime.utcnow().isoformat()
+        s["identidad_ultimo_intento"] = now_iso
+        if error is not None:
+            s["identidad_ultimo_error"] = str(error)[:2000]
+        if ok:
+            s["identidad_ultima_resolucion"] = now_iso
+            s["identidad_ultimo_error"] = None
+        run.summary = s
+        session.commit()
+    except Exception:
+        logger.exception("[DIM][IDENTITY] no se pudo registrar estado de identidad run=%s", run_id)
+        session.rollback()
 
 # Datos de prueba (MEDOX). Se excluyen SOLO si DIM_EXCLUDE_TEST_ENTITIES está activo.
 # Se comparan por canon del nombre original. NO se borran filas del dataset.
@@ -299,62 +339,93 @@ def persist_records_and_registry(
 ) -> dict[str, int]:
     """Resuelve y persiste la parte PESADA: registry + records.cliente_entidad_id.
 
-    NO toca el summary. La propagación al summary la hace ensure_entidad_columns_populated
-    (capa C, barata) o el rebuild que preserva columnas (capa A). Se corre donde se
-    (re)construyen los records: finalize de ingesta y finalize del push a prod.
+    SETEADO, no por loop. El resolvedor (Python) YA decidió la asignación por prioridad
+    (cuit → exacto → canon(original) → canon(homologado)); acá el SQL SOLO la APLICA:
+    los mapeos cuit→entidad y nombre_original→entidad se cargan en tablas TEMP y se aplican
+    con 2 `UPDATE ... FROM` (una pasada cada uno) en vez de ~373 sentencias. Esto evita el
+    statement_timeout de 55s de Postgres que cancelaba el loop.
 
-    Los UPDATE por CUIT / nombre original son indexados (ver índices en migrations.py:
-    ix_dim_records_run_cuit / ix_dim_records_run_original), no full scans.
+    Las TEMP son por-conexión y viven dentro de UNA sola transacción (se crean, pueblan y
+    aplican sin commit intermedio), así no cruzan un commit ni el cambio de conexión del
+    pool, y dos backfills simultáneos no colisionan. Con commit=True hay commits POR FASE
+    (registry, records) para que el progreso parcial sobreviva; con commit=False (finalize)
+    todo va en la transacción del llamador.
+
+    NO toca el summary (eso lo hace ensure_entidad_columns_populated / capa A).
     """
     result = resolve_entities(session, import_run_id, exclude_test=exclude_test)
+    now = dt.datetime.utcnow()
 
-    # 1) Registry: reemplazo total para la corrida
+    # ── Fase 1: registry (reemplazo total, INSERT por lotes) ──
+    _set_unlimited_timeout(session)
     session.execute(
         text("DELETE FROM dimensionamiento_cliente_entidad WHERE import_run_id = :run"),
         {"run": import_run_id},
     )
-    now = dt.datetime.utcnow()
-    for e in result.entities:
+    registry_rows = [
+        {
+            "run": import_run_id, "key": e.entidad_key, "cli": bool(e.es_cliente),
+            "vis": e.nombre_visible, "prov": e.provincia, "cuits": json.dumps(e.cuits),
+            "nf": len(e.forms), "tot": e.total_registros, "ts": now,
+        }
+        for e in result.entities
+    ]
+    if registry_rows:
         session.execute(
             text(
-                """
-                INSERT INTO dimensionamiento_cliente_entidad
-                    (import_run_id, entidad_key, es_cliente, nombre_visible, provincia,
-                     cuits, n_formas, total_registros, created_at)
-                VALUES (:run, :key, :cli, :vis, :prov, :cuits, :nf, :tot, :ts)
-                """
+                "INSERT INTO dimensionamiento_cliente_entidad "
+                "(import_run_id, entidad_key, es_cliente, nombre_visible, provincia, "
+                " cuits, n_formas, total_registros, created_at) "
+                "VALUES (:run, :key, :cli, :vis, :prov, :cuits, :nf, :tot, :ts)"
             ),
-            {
-                "run": import_run_id, "key": e.entidad_key, "cli": bool(e.es_cliente),
-                "vis": e.nombre_visible, "prov": e.provincia, "cuits": json.dumps(e.cuits),
-                "nf": len(e.forms), "tot": e.total_registros, "ts": now,
-            },
+            registry_rows,  # executemany
         )
-
-    # 2) records.cliente_entidad_id — anclas por CUIT
-    for cu, k in result.cuit_to_key.items():
-        session.execute(
-            text(
-                "UPDATE dimensionamiento_records SET cliente_entidad_id = :k "
-                "WHERE import_run_id = :run AND cuit = :cu"
-            ),
-            {"k": k, "run": import_run_id, "cu": cu},
-        )
-    #    huérfanos (filas sin CUIT) por nombre original exacto
-    for name, k in result.orphan_name_to_key.items():
-        session.execute(
-            text(
-                "UPDATE dimensionamiento_records SET cliente_entidad_id = :k "
-                "WHERE import_run_id = :run "
-                "AND (cuit IS NULL OR TRIM(cuit) = '' OR UPPER(TRIM(cuit)) = :sin) "
-                "AND COALESCE(cliente_nombre_original, '') = :name"
-            ),
-            {"k": k, "run": import_run_id, "sin": _SIN_DATO, "name": name},
-        )
-
     if commit:
         session.commit()
-    logger.info("[DIM][IDENTITY] records+registry persistidos run=%s stats=%s", import_run_id, result.stats)
+
+    # ── Fase 2: records.cliente_entidad_id (SETEADO, TEMP confinadas a esta transacción) ──
+    _set_unlimited_timeout(session)
+    # DROP IF EXISTS por si una corrida previa dejó residuo en una conexión reutilizada.
+    session.execute(text("DROP TABLE IF EXISTS _dim_cuit_map"))
+    session.execute(text("DROP TABLE IF EXISTS _dim_ori_map"))
+    session.execute(text("CREATE TEMP TABLE _dim_cuit_map (cuit TEXT PRIMARY KEY, eid INTEGER)"))
+    session.execute(text("CREATE TEMP TABLE _dim_ori_map (name TEXT PRIMARY KEY, eid INTEGER)"))
+    cuit_rows = [{"cuit": cu, "eid": k} for cu, k in result.cuit_to_key.items()]
+    ori_rows = [{"name": name, "eid": k} for name, k in result.orphan_name_to_key.items()]
+    if cuit_rows:
+        session.execute(text("INSERT INTO _dim_cuit_map (cuit, eid) VALUES (:cuit, :eid)"), cuit_rows)
+    if ori_rows:
+        session.execute(text("INSERT INTO _dim_ori_map (name, eid) VALUES (:name, :eid)"), ori_rows)
+
+    # Anclas por CUIT (una sola pasada). Aplica el mapeo ya resuelto por igualdad de cuit.
+    session.execute(
+        text(
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_cuit_map.eid "
+            "FROM _dim_cuit_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND dimensionamiento_records.cuit = _dim_cuit_map.cuit"
+        ),
+        {"run": import_run_id},
+    )
+    # Huérfanos (filas SIN cuit) por nombre original EXACTO. El mapeo orphan_name_to_key ya
+    # codifica la prioridad de 3 niveles del resolvedor; acá solo se aplica por igualdad.
+    session.execute(
+        text(
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_ori_map.eid "
+            "FROM _dim_ori_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND (dimensionamiento_records.cuit IS NULL OR TRIM(dimensionamiento_records.cuit) = '' "
+            "     OR UPPER(TRIM(dimensionamiento_records.cuit)) = :sin) "
+            "AND COALESCE(dimensionamiento_records.cliente_nombre_original, '') = _dim_ori_map.name"
+        ),
+        {"run": import_run_id, "sin": _SIN_DATO},
+    )
+    session.execute(text("DROP TABLE IF EXISTS _dim_cuit_map"))
+    session.execute(text("DROP TABLE IF EXISTS _dim_ori_map"))
+    if commit:
+        session.commit()
+
+    logger.info("[DIM][IDENTITY] records+registry persistidos (seteado) run=%s stats=%s", import_run_id, result.stats)
     return result.stats
 
 
@@ -388,6 +459,9 @@ def ensure_entidad_columns_populated(session: Session, import_run_id: int, *, co
     if missing == 0:
         return 0
 
+    # Sin límite de timeout: el UPDATE toca ~300k filas del summary y en Postgres puede
+    # cruzar los 55s globales. SET LOCAL aplica solo a esta transacción.
+    _set_unlimited_timeout(session)
     S = "dimensionamiento_family_monthly_summary"
     # a) cliente_entidad_id desde records por (import_run_id, cliente_visible)
     session.execute(

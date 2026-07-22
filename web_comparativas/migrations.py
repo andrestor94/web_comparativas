@@ -1550,20 +1550,20 @@ def ensure_dimensionamiento_entidad_backfill():
     """
     try:
         from web_comparativas.models import SessionLocal
-        from web_comparativas.dimensionamiento.identity import rebuild_client_entities
+        from web_comparativas.dimensionamiento.identity import (
+            rebuild_client_entities,
+            latest_success_run_id,
+            _record_identidad_estado,
+        )
         from web_comparativas.dimensionamiento.query_service import (
             refresh_default_dashboard_snapshot,
             invalidate_query_cache,
         )
 
         session = SessionLocal()
+        active_run_id = None
         try:
-            active_run_id = session.execute(
-                text(
-                    "SELECT id FROM dimensionamiento_import_runs WHERE status = 'success' "
-                    "ORDER BY finished_at DESC, id DESC LIMIT 1"
-                )
-            ).scalar_one_or_none()
+            active_run_id = latest_success_run_id(session)
             if active_run_id is None:
                 return
             registry_count = session.execute(
@@ -1587,11 +1587,17 @@ def ensure_dimensionamiento_entidad_backfill():
                 invalidate_query_cache()
             except Exception as e:
                 print(f"[MIGRATION] entidad_backfill: refresh snapshot advertencia - {e}", flush=True)
+            _record_identidad_estado(session, active_run_id, ok=True)
             print(f"[MIGRATION] entidad_backfill: COMPLETADO run {active_run_id} stats={stats}", flush=True)
+        except Exception as e:
+            session.rollback()
+            if active_run_id is not None:
+                _record_identidad_estado(session, active_run_id, error=str(e))
+            print(f"[MIGRATION] entidad_backfill: FALLO run {active_run_id} - {e}", flush=True)
         finally:
             session.close()
     except Exception as e:
-        print(f"[MIGRATION] entidad_backfill: advertencia – {e}", flush=True)
+        print(f"[MIGRATION] entidad_backfill: advertencia - {e}", flush=True)
 
 
 def ensure_dimensionamiento_entidad_populated():

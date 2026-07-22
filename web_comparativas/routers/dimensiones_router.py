@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import logging
 import os
 import shutil
@@ -1350,36 +1351,31 @@ def admin_import_finalize(
         raise HTTPException(status_code=500, detail=f"Error finalizing import run: {e}")
 
 
-def _run_entity_backfill_task(run_id: int | None) -> None:
+def _run_entity_backfill_task(run_id: int) -> None:
     """Tarea de background: resuelve identidad (records+registry+summary) + refresca
-    snapshot + invalida caché. Abre su PROPIA sesión (la del request ya se cerró)."""
+    snapshot + invalida caché. Recibe el run YA RESUELTO por el endpoint. Abre su PROPIA
+    sesión (la del request ya se cerró). Registra éxito/fallo en el estado de identidad."""
     from web_comparativas.models import SessionLocal
-    from web_comparativas.dimensionamiento.identity import rebuild_client_entities
+    from web_comparativas.dimensionamiento.identity import rebuild_client_entities, _record_identidad_estado
     from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
     session = SessionLocal()
     try:
-        target = run_id
-        if target is None:
-            target = session.execute(text(
-                "SELECT id FROM dimensionamiento_import_runs WHERE status='success' "
-                "ORDER BY finished_at DESC, id DESC LIMIT 1"
-            )).scalar_one_or_none()
-        if target is None:
-            logger.warning("[DIM][IMPORT] resolve-entities: no hay corrida success.")
-            return
-        logger.info("[DIM][IMPORT] resolve-entities: backfill de identidad run=%s ...", target)
-        stats = rebuild_client_entities(session, target, commit=True)
+        logger.info("[DIM][IMPORT] resolve-entities: backfill de identidad run=%s ...", run_id)
+        stats = rebuild_client_entities(session, run_id, commit=True)
         # Invalidar ANTES de refrescar el snapshot (el registry cambió; si no, el snapshot
         # se generaría con el número del fallback en vez del resuelto).
         invalidate_query_cache()
         try:
-            refresh_default_dashboard_snapshot(session, import_run_id=target, commit=True)
+            refresh_default_dashboard_snapshot(session, import_run_id=run_id, commit=True)
             invalidate_query_cache()
         except Exception:
-            logger.exception("[DIM][IMPORT] resolve-entities: refresh snapshot fallo run=%s", target)
-        logger.info("[DIM][IMPORT] resolve-entities: COMPLETADO run=%s stats=%s", target, stats)
-    except Exception:
-        logger.exception("[DIM][IMPORT] resolve-entities: backfill FALLÓ run=%s", run_id)
+            logger.exception("[DIM][IMPORT] resolve-entities: refresh snapshot fallo run=%s", run_id)
+        _record_identidad_estado(session, run_id, ok=True)
+        logger.info("[DIM][IMPORT] resolve-entities: COMPLETADO run=%s stats=%s", run_id, stats)
+    except Exception as exc:
+        session.rollback()
+        logger.exception("[DIM][IMPORT] resolve-entities: backfill FALLO run=%s", run_id)
+        _record_identidad_estado(session, run_id, error=str(exc))
     finally:
         session.close()
 
@@ -1394,13 +1390,27 @@ def admin_estado_identidad(
     Protegido con el mismo token del push. Distingue 'sirviendo por identidad' de 'fallback'
     (número provisorio viejo), que a ojo se ven iguales (ambos pueden dar 374).
     """
-    active_run = db.execute(
-        text("SELECT id FROM dimensionamiento_import_runs WHERE status='success' "
-             "ORDER BY finished_at DESC, id DESC LIMIT 1")
-    ).scalar_one_or_none()
+    from web_comparativas.dimensionamiento.identity import latest_success_run_id
+    # Listado de índices reales sobre dimensionamiento_records (para verificar con el mismo
+    # curl si los índices se crearon en prod, sin ir a la consola de la base).
+    try:
+        if IS_POSTGRES:
+            idx_rows = db.execute(text(
+                "SELECT indexname FROM pg_indexes WHERE tablename = 'dimensionamiento_records' ORDER BY indexname"
+            )).scalars().all()
+        else:
+            idx_rows = db.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='dimensionamiento_records' "
+                "AND name IS NOT NULL ORDER BY name"
+            )).scalars().all()
+        indices = [i for i in idx_rows if i]
+    except Exception:
+        indices = []
+
+    active_run = latest_success_run_id(db)
     if active_run is None:
         return {"ok": True, "run_activo": None, "registry_poblado": False,
-                "modo_card": "sin_datos", "entidades": 0}
+                "modo_card": "sin_datos", "entidades": 0, "indices_records": indices}
     reg = db.execute(
         text("SELECT COUNT(*), COALESCE(SUM(CASE WHEN es_cliente THEN 1 ELSE 0 END),0), "
              "MAX(created_at) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
@@ -1415,6 +1425,16 @@ def admin_estado_identidad(
         text("SELECT COUNT(*) FROM dimensionamiento_records "
              "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"), {"r": active_run}
     ).scalar_one())
+    # Estado de la última resolución (persistido en import_run.summary por el backfill).
+    run_summary = db.execute(
+        text("SELECT summary FROM dimensionamiento_import_runs WHERE id=:r"), {"r": active_run}
+    ).scalar_one_or_none()
+    if isinstance(run_summary, str):
+        try:
+            run_summary = json.loads(run_summary)
+        except (ValueError, TypeError):
+            run_summary = {}
+    run_summary = run_summary or {}
     resuelto = entidades > 0
     return {
         "ok": True,
@@ -1427,6 +1447,9 @@ def admin_estado_identidad(
         "summary_filas_identidad_null": sum_null,
         "records_filas_identidad_null": rec_null,
         "ultima_resolucion": ultima.isoformat() if hasattr(ultima, "isoformat") else ultima,
+        "ultimo_error": run_summary.get("identidad_ultimo_error"),
+        "ultimo_intento": run_summary.get("identidad_ultimo_intento"),
+        "indices_records": indices,
     }
 
 
@@ -1434,23 +1457,37 @@ def admin_estado_identidad(
 def admin_resolve_entities(
     background_tasks: BackgroundTasks,
     _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+    run_id: int | None = Query(default=None),
     payload: dict[str, Any] | None = Body(default=None),
 ):
     """Dispara el backfill de identidad de clientes (records+registry+summary) en background.
 
-    Protegido con el mismo token del push (X-Import-Token). Es la red de seguridad manual:
-    el arranque en frío ya lo dispara automático, pero este endpoint permite forzarlo sin
-    consola. Devuelve de inmediato; la card pasa del número anterior (fallback) al resuelto
-    cuando termina, sin reiniciar.
+    Protegido con el mismo token del push (X-Import-Token). Red de seguridad manual: el
+    arranque en frío ya lo dispara automático, pero este endpoint permite forzarlo sin
+    consola. Devuelve de inmediato con el RUN realmente resuelto; la card pasa del número
+    anterior (fallback) al resuelto cuando termina, sin reiniciar.
+
+    El run se puede fijar con ?run_id=67 (escape hatch); si no, se resuelve la corrida
+    success más reciente (mismo lookup que el endpoint de estado). Devuelve error si no hay.
     """
-    run_id = None
-    if payload:
+    from web_comparativas.dimensionamiento.identity import latest_success_run_id
+    body_run = None
+    if payload and payload.get("run_id") is not None:
         try:
-            run_id = int(payload.get("run_id")) if payload.get("run_id") is not None else None
+            body_run = int(payload.get("run_id"))
         except (TypeError, ValueError):
-            run_id = None
-    background_tasks.add_task(_run_entity_backfill_task, run_id)
-    return {"ok": True, "message": "Backfill de identidad de clientes encolado en background.", "run_id": run_id}
+            body_run = None
+    resolved_run = run_id or body_run or latest_success_run_id(db)
+    if resolved_run is None:
+        raise HTTPException(status_code=400, detail="No hay corrida success sobre la cual resolver identidad.")
+    background_tasks.add_task(_run_entity_backfill_task, int(resolved_run))
+    logger.info("[DIM][IMPORT] resolve-entities: encolado backfill run=%s", resolved_run)
+    return {
+        "ok": True,
+        "message": "Backfill de identidad de clientes encolado en background.",
+        "run_id": int(resolved_run),
+    }
 
 
 @router.post("/admin/import/rollback")
