@@ -1582,33 +1582,18 @@ def admin_resolve_entities(
     run_id: int | None = Query(default=None),
     payload: dict[str, Any] | None = Body(default=None),
 ):
-    """Dispara el backfill de identidad de clientes (records+registry+summary) en background.
+    """DESHABILITADO. El server ya NO calcula identidad de clientes.
 
-    Protegido con el mismo token del push (X-Import-Token). Red de seguridad manual: el
-    arranque en frío ya lo dispara automático, pero este endpoint permite forzarlo sin
-    consola. Devuelve de inmediato con el RUN realmente resuelto; la card pasa del número
-    anterior (fallback) al resuelto cuando termina, sin reiniciar.
-
-    El run se puede fijar con ?run_id=67 (escape hatch); si no, se resuelve la corrida
-    success más reciente (mismo lookup que el endpoint de estado). Devuelve error si no hay.
+    Este endpoint (y el auto-backfill de arranque) resolvían la identidad server-side en una
+    tarea de background que, con commit=False, sostenía locks pesados sobre las tablas de
+    dimensionamiento durante todo el UPDATE, bloqueando el push. La identidad ahora se
+    resuelve LOCAL y viaja como dato: usar apply-identity / apply-identity-chunk.
     """
-    from web_comparativas.dimensionamiento.identity import latest_success_run_id
-    body_run = None
-    if payload and payload.get("run_id") is not None:
-        try:
-            body_run = int(payload.get("run_id"))
-        except (TypeError, ValueError):
-            body_run = None
-    resolved_run = run_id or body_run or latest_success_run_id(db)
-    if resolved_run is None:
-        raise HTTPException(status_code=400, detail="No hay corrida success sobre la cual resolver identidad.")
-    background_tasks.add_task(_run_entity_backfill_task, int(resolved_run))
-    logger.info("[DIM][IMPORT] resolve-entities: encolado backfill run=%s", resolved_run)
-    return {
-        "ok": True,
-        "message": "Backfill de identidad de clientes encolado en background.",
-        "run_id": int(resolved_run),
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="resolve-entities está deshabilitado: el server no calcula identidad. "
+               "Usá apply-identity (o apply-identity-chunk) que aplican la identidad resuelta localmente.",
+    )
 
 
 @router.post("/admin/import/rollback")

@@ -86,8 +86,6 @@ from web_comparativas.migrations import (
     backfill_comparativa_rows,
     ensure_dimensionamiento_valorizacion_columns,
     ensure_dimensionamiento_entidad_columns,
-    ensure_dimensionamiento_entidad_backfill,
-    ensure_dimensionamiento_entidad_populated,
     ensure_dimensionamiento_composite_constraints,
     ensure_indicadores_schema_v2,
 )
@@ -318,20 +316,13 @@ def _background_dimensionamiento_maintenance() -> None:
     except Exception as e:
         print(f"[BACKGROUND] Warning dimensionamiento summary: {e}", flush=True)
 
-    try:
-        # ARRANQUE EN FRÍO: si el registry está vacío (post-deploy, antes del backfill),
-        # resolver identidad en background. Mientras corre, la card muestra el número
-        # anterior vía fallback (nunca 0). No sincrónico: evita el port-bind timeout.
-        ensure_dimensionamiento_entidad_backfill()
-    except Exception as e:
-        print(f"[BACKGROUND] Warning dimensionamiento entidad backfill: {e}", flush=True)
-
-    try:
-        # CAPA C: tras el (posible) rebuild del summary, garantizar identidad de clientes
-        # poblada. Cubre también el push a prod (rebuild salteado). Barata si ya está OK.
-        ensure_dimensionamiento_entidad_populated()
-    except Exception as e:
-        print(f"[BACKGROUND] Warning dimensionamiento entidad populated: {e}", flush=True)
+    # NOTA: el server NO calcula identidad de clientes en el arranque. Antes acá corrían
+    # ensure_dimensionamiento_entidad_backfill (resolvía records+registry) y
+    # ensure_dimensionamiento_entidad_populated (capa C sobre summary). Ambos tomaban locks
+    # pesados sobre las tablas de dimensionamiento y, con commit=False, los sostenían durante
+    # todo el UPDATE lento, bloqueando el push de identidad. La identidad ahora se resuelve
+    # LOCAL (máquina del operador) y viaja como dato: el server SOLO la aplica vía
+    # apply-identity / apply-identity-chunk. Ver dimensionamiento/identity.py.
 
     try:
         ensure_dimensionamiento_indexes()
