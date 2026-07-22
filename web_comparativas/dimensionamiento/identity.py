@@ -515,3 +515,114 @@ def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_tes
     if commit:
         session.commit()
     return stats
+
+
+# ── Identidad como DATO: se resuelve en la máquina del operador y viaja con el push ──
+# El resolvedor NO corre en el server. El cliente resuelve local, serializa con
+# serialize_identity() y el server SOLO aplica con apply_client_identity(). Esto elimina
+# la dependencia de que el server recalcule (y de tareas en background invisibles).
+
+def serialize_identity(result: "ResolveResult") -> dict[str, Any]:
+    """Empaqueta la identidad ya resuelta para enviarla al server (payload chico ~40KB)."""
+    return {
+        "registry": [
+            {
+                "entidad_key": e.entidad_key, "es_cliente": bool(e.es_cliente),
+                "nombre_visible": e.nombre_visible, "provincia": e.provincia,
+                "cuits": list(e.cuits), "n_formas": len(e.forms), "total_registros": e.total_registros,
+            }
+            for e in result.entities
+        ],
+        "cuit_map": [[cu, k] for cu, k in result.cuit_to_key.items()],
+        "ori_map": [[name, k] for name, k in result.orphan_name_to_key.items()],
+        "stats": result.stats,
+    }
+
+
+def apply_client_identity(
+    session: Session, run_id: int, *, registry: list[dict], cuit_map: list, ori_map: list, commit: bool = True
+) -> dict[str, int]:
+    """APLICA una identidad YA RESUELTA (subida por el cliente). No calcula NADA.
+
+    Escribe el registry, aplica los mapeos cuit→entidad y nombre_original→entidad con las 2
+    UPDATE...FROM seteadas, y propaga al summary (capa C). Síncrono, sin background. Con
+    SET LOCAL statement_timeout=0 para no morir por el límite global de 55s de Postgres.
+    Devuelve el conteo de entidades y de filas que quedaron sin cubrir (records/summary NULL):
+    si el dataset de prod difiere del local, esos NULL lo delatan.
+    """
+    _set_unlimited_timeout(session)
+    # Registry
+    session.execute(text("DELETE FROM dimensionamiento_cliente_entidad WHERE import_run_id = :run"), {"run": run_id})
+    now = dt.datetime.utcnow()
+    reg_rows = [
+        {
+            "run": run_id, "key": int(e["entidad_key"]), "cli": bool(e.get("es_cliente")),
+            "vis": e.get("nombre_visible") or "", "prov": e.get("provincia"),
+            "cuits": json.dumps(e.get("cuits") or []), "nf": int(e.get("n_formas") or 0),
+            "tot": int(e.get("total_registros") or 0), "ts": now,
+        }
+        for e in (registry or [])
+    ]
+    if reg_rows:
+        session.execute(
+            text(
+                "INSERT INTO dimensionamiento_cliente_entidad "
+                "(import_run_id, entidad_key, es_cliente, nombre_visible, provincia, "
+                " cuits, n_formas, total_registros, created_at) "
+                "VALUES (:run, :key, :cli, :vis, :prov, :cuits, :nf, :tot, :ts)"
+            ),
+            reg_rows,
+        )
+    if commit:
+        session.commit()
+
+    # records.cliente_entidad_id (mismas 2 UPDATE...FROM seteadas)
+    _set_unlimited_timeout(session)
+    session.execute(text("DROP TABLE IF EXISTS _dim_cuit_map"))
+    session.execute(text("DROP TABLE IF EXISTS _dim_ori_map"))
+    session.execute(text("CREATE TEMP TABLE _dim_cuit_map (cuit TEXT PRIMARY KEY, eid INTEGER)"))
+    session.execute(text("CREATE TEMP TABLE _dim_ori_map (name TEXT PRIMARY KEY, eid INTEGER)"))
+    cuit_rows = [{"cuit": c, "eid": int(k)} for c, k in (cuit_map or [])]
+    ori_rows = [{"name": n, "eid": int(k)} for n, k in (ori_map or [])]
+    if cuit_rows:
+        session.execute(text("INSERT INTO _dim_cuit_map (cuit, eid) VALUES (:cuit, :eid)"), cuit_rows)
+    if ori_rows:
+        session.execute(text("INSERT INTO _dim_ori_map (name, eid) VALUES (:name, :eid)"), ori_rows)
+    session.execute(
+        text(
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_cuit_map.eid "
+            "FROM _dim_cuit_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND dimensionamiento_records.cuit = _dim_cuit_map.cuit"
+        ),
+        {"run": run_id},
+    )
+    session.execute(
+        text(
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_ori_map.eid "
+            "FROM _dim_ori_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND (dimensionamiento_records.cuit IS NULL OR TRIM(dimensionamiento_records.cuit) = '' "
+            "     OR UPPER(TRIM(dimensionamiento_records.cuit)) = :sin) "
+            "AND COALESCE(dimensionamiento_records.cliente_nombre_original, '') = _dim_ori_map.name"
+        ),
+        {"run": run_id, "sin": _SIN_DATO},
+    )
+    session.execute(text("DROP TABLE IF EXISTS _dim_cuit_map"))
+    session.execute(text("DROP TABLE IF EXISTS _dim_ori_map"))
+    if commit:
+        session.commit()
+
+    # summary (capa C: propaga records+registry → summary)
+    ensure_entidad_columns_populated(session, run_id, commit=commit)
+
+    reg_count = int(session.execute(
+        text("SELECT COUNT(*) FROM dimensionamiento_cliente_entidad WHERE import_run_id = :r"), {"r": run_id}
+    ).scalar_one())
+    rec_null = int(session.execute(
+        text("SELECT COUNT(*) FROM dimensionamiento_records WHERE import_run_id = :r AND cliente_entidad_id IS NULL"), {"r": run_id}
+    ).scalar_one())
+    sum_null = _count_summary_entidad_null(session, run_id)
+    logger.info("[DIM][IDENTITY] identidad APLICADA (cliente) run=%s registry=%s records_null=%s summary_null=%s",
+                run_id, reg_count, rec_null, sum_null)
+    return {"registry": reg_count, "records_null": rec_null, "summary_null": sum_null}

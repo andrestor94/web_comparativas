@@ -1453,6 +1453,57 @@ def admin_estado_identidad(
     }
 
 
+@router.post("/admin/apply-identity")
+def admin_apply_identity(
+    payload: dict[str, Any] = Body(...),
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """APLICA una identidad de clientes YA RESUELTA por el cliente (push por chunks). El
+    server NO calcula nada: escribe el registry y aplica los mapeos con 2 UPDATE...FROM +
+    capa C. SÍNCRONO (sin background): el error, si lo hay, vuelve en esta misma respuesta.
+
+    Payload: {"run_id": 67, "registry": [...], "cuit_map": [[cuit,eid],...], "ori_map": [[name,eid],...]}
+    Devuelve {ok, run_id, registry, records_null, summary_null}. records_null/summary_null > 0
+    significa que prod tiene cuit/nombres que el mapeo del cliente no cubre (dataset distinto).
+    """
+    from web_comparativas.dimensionamiento.identity import (
+        apply_client_identity, latest_success_run_id, _record_identidad_estado,
+    )
+    from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
+
+    run_id = payload.get("run_id")
+    try:
+        run_id = int(run_id) if run_id is not None else latest_success_run_id(db)
+    except (TypeError, ValueError):
+        run_id = latest_success_run_id(db)
+    if run_id is None:
+        raise HTTPException(status_code=400, detail="No hay corrida success sobre la cual aplicar identidad.")
+
+    registry = payload.get("registry") or []
+    cuit_map = payload.get("cuit_map") or []
+    ori_map = payload.get("ori_map") or []
+    if not registry:
+        raise HTTPException(status_code=400, detail="Payload sin 'registry'. No hay identidad para aplicar.")
+
+    try:
+        result = apply_client_identity(db, run_id, registry=registry, cuit_map=cuit_map, ori_map=ori_map, commit=True)
+        invalidate_query_cache()
+        try:
+            refresh_default_dashboard_snapshot(db, import_run_id=run_id, commit=True)
+            invalidate_query_cache()
+        except Exception:
+            logger.exception("[DIM][IMPORT] apply-identity: refresh snapshot fallo run=%s", run_id)
+        _record_identidad_estado(db, run_id, ok=True)
+        logger.info("[DIM][IMPORT] apply-identity: run=%s aplicado %s", run_id, result)
+        return {"ok": True, "run_id": run_id, **result}
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] apply-identity: FALLO run=%s", run_id)
+        _record_identidad_estado(db, run_id, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Error aplicando identidad: {exc}")
+
+
 @router.post("/admin/resolve-entities")
 def admin_resolve_entities(
     background_tasks: BackgroundTasks,
