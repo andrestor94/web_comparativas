@@ -1082,9 +1082,9 @@ def _rebuild_summary_for_run(db: Session, run_id: int) -> int:
     """
     if IS_POSTGRES:
         db.execute(text("SET LOCAL statement_timeout = 0"))
-        month_sql = "date_trunc('month', fecha)::date"
+        month_sql = "date_trunc('month', r.fecha)::date"
     else:
-        month_sql = "date(fecha, 'start of month')"
+        month_sql = "date(r.fecha, 'start of month')"
 
     db.execute(
         delete(DimensionamientoFamilyMonthlySummary).where(
@@ -1105,23 +1105,29 @@ def _rebuild_summary_for_run(db: Session, run_id: int) -> int:
                 month, plataforma, cliente_nombre_homologado, cliente_visible, provincia,
                 familia, unidad_negocio, subunidad_negocio, resultado_participacion,
                 is_identified, is_client, total_cantidad, total_valorizacion,
-                total_registros, clientes_unicos, import_run_id
+                total_registros, clientes_unicos, import_run_id,
+                cliente_entidad_id, es_cliente_entidad
             )
             SELECT
                 {month_sql} AS month,
-                plataforma, cliente_nombre_homologado, cliente_visible, provincia,
-                familia, unidad_negocio, subunidad_negocio, resultado_participacion,
-                is_identified, is_client,
-                COALESCE(SUM(cantidad_demandada), 0),
-                COALESCE(SUM(valorizacion_estimada), 0),
-                COUNT(id),
-                COUNT(DISTINCT cliente_visible),
-                :rid
-            FROM dimensionamiento_records
-            WHERE import_run_id = :rid
-            GROUP BY {month_sql}, plataforma, cliente_nombre_homologado,
-                cliente_visible, provincia, familia, unidad_negocio, subunidad_negocio,
-                resultado_participacion, is_identified, is_client
+                r.plataforma, r.cliente_nombre_homologado, r.cliente_visible, r.provincia,
+                r.familia, r.unidad_negocio, r.subunidad_negocio, r.resultado_participacion,
+                r.is_identified, r.is_client,
+                COALESCE(SUM(r.cantidad_demandada), 0),
+                COALESCE(SUM(r.valorizacion_estimada), 0),
+                COUNT(r.id),
+                COUNT(DISTINCT r.cliente_visible),
+                :rid,
+                -- Capa A: preservar identidad resuelta (cliente_visible→entidad 1:1).
+                r.cliente_entidad_id, ce.es_cliente
+            FROM dimensionamiento_records r
+            LEFT JOIN dimensionamiento_cliente_entidad ce
+                ON ce.import_run_id = r.import_run_id AND ce.entidad_key = r.cliente_entidad_id
+            WHERE r.import_run_id = :rid
+            GROUP BY {month_sql}, r.plataforma, r.cliente_nombre_homologado,
+                r.cliente_visible, r.provincia, r.familia, r.unidad_negocio, r.subunidad_negocio,
+                r.resultado_participacion, r.is_identified, r.is_client,
+                r.cliente_entidad_id, ce.es_cliente
             {conflict_clause}
             """
         ),
@@ -1137,6 +1143,44 @@ def _count_summary_rows(db: Session, run_id: int) -> int:
         .scalar()
         or 0
     )
+
+
+def _resolve_entities_for_push_safe(db: Session, run_id: int) -> None:
+    """Resuelve records+registry en el finalize del push. Defensivo: un fallo NO rompe el
+    finalize (capa C en el próximo arranque repara). Ver dimensionamiento/identity.py."""
+    try:
+        from web_comparativas.dimensionamiento.identity import persist_records_and_registry
+        db.flush()
+        stats = persist_records_and_registry(db, run_id, commit=False)
+        logger.info("[DIM][IMPORT] identidad: records+registry resueltos run=%s stats=%s", run_id, stats)
+    except Exception:
+        logger.exception("[DIM][IMPORT] identidad: resolución FALLÓ run=%s (no bloquea el finalize)", run_id)
+
+
+def _ensure_entidad_summary_for_push_safe(db: Session, run_id: int) -> None:
+    """Capa C en el finalize del push: propaga identidad al summary si quedó en NULL
+    (crítico cuando se salteó el rebuild porque el summary subido reconcilió)."""
+    try:
+        from web_comparativas.dimensionamiento.identity import ensure_entidad_columns_populated
+        db.flush()
+        repaired = ensure_entidad_columns_populated(db, run_id, commit=False)
+        if repaired:
+            logger.info("[DIM][IMPORT] identidad: capa C reparó %d filas de summary run=%s", repaired, run_id)
+    except Exception:
+        logger.exception("[DIM][IMPORT] identidad: capa C FALLÓ run=%s (no bloquea el finalize)", run_id)
+
+
+def _refresh_snapshot_for_push_safe(db: Session, run_id: int) -> None:
+    """Regenera el snapshot del dashboard server-side tras resolver la identidad. Debe
+    correr DESPUÉS de guardar el snapshot subido por el cliente (que trae el 'clientes'
+    sin resolución de identidad), para sobrescribirlo con el valor correcto."""
+    try:
+        from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
+        db.flush()
+        refresh_default_dashboard_snapshot(db, import_run_id=run_id, commit=False)
+        logger.info("[DIM][IMPORT] identidad: snapshot del dashboard regenerado server-side run=%s", run_id)
+    except Exception:
+        logger.exception("[DIM][IMPORT] identidad: refresh snapshot FALLÓ run=%s (no bloquea el finalize)", run_id)
 
 
 def _summary_reconciles_with_records(db: Session, run_id: int) -> bool:
@@ -1220,6 +1264,13 @@ def admin_import_finalize(
         # y que empeora al crecer el dataset). Si NO reconcilia (inflación por
         # NULLS DISTINCT en reintentos de chunk) o no se subió summary, se
         # reconstruye desde los records como fallback seguro (fuente de verdad).
+        # Identidad de clientes: resolver records+registry ANTES de decidir el rebuild.
+        # Los chunks subidos por el cliente NO traen cliente_entidad_id/es_cliente_entidad,
+        # así que hay que resolver acá. Si luego se reconstruye (else), capa A copia la
+        # identidad; si se saltea (Opción A), el summary subido queda sin identidad y capa
+        # C la propaga. Cualquiera de las dos rutas termina con el summary poblado.
+        _resolve_entities_for_push_safe(db, run.id)
+
         if _summary_reconciles_with_records(db, run.id):
             summary_rows = _count_summary_rows(db, run.id)
             logger.info(
@@ -1229,6 +1280,10 @@ def admin_import_finalize(
         else:
             summary_rows = _rebuild_summary_for_run(db, run.id)
             logger.info("[DIM][IMPORT] Run %d: summary reconstruido desde records rows=%d", run.id, summary_rows)
+
+        # Capa C: garantizar que el summary del run quede con identidad, venga del rebuild
+        # (A) o del summary subido (skip). Idempotente/barata si ya está poblado.
+        _ensure_entidad_summary_for_push_safe(db, run.id)
 
         if payload.snapshot:
             snap = db.query(DimensionamientoDashboardSnapshot).filter_by(
@@ -1251,7 +1306,11 @@ def admin_import_finalize(
             run_sum = dict(run.summary or {})
             run_sum.update(payload.summary_metadata)
             run.summary = run_sum
-            
+
+        # DESPUÉS de guardar el snapshot del cliente: regenerarlo server-side con la
+        # identidad resuelta, para que la card no sirva el 'clientes' sin resolución.
+        _refresh_snapshot_for_push_safe(db, run.id)
+
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()
         db.commit()

@@ -338,17 +338,34 @@ def ensure_dimensionamiento_summary_populated():
             summary_count = session.execute(
                 select(sa_func.count()).select_from(DimensionamientoFamilyMonthlySummary)
             ).scalar_one()
+            # Run activo (el que sirve el dashboard) para comparar valorización LIKE-FOR-LIKE.
+            # Antes se comparaba records (1 run) contra summary (TODOS los runs), lo que
+            # disparaba needs_rebuild en CADA arranque (y reconstruía 300k+ filas al pedo,
+            # pisando cliente_entidad_id). Ahora ambos SUM se scopean al mismo run: si el
+            # summary del run activo está genuinamente desactualizado, sigue reconstruyendo.
+            active_run_id = session.execute(
+                text(
+                    "SELECT id FROM dimensionamiento_import_runs WHERE status = 'success' "
+                    "ORDER BY finished_at DESC, id DESC LIMIT 1"
+                )
+            ).scalar_one_or_none()
+            if active_run_id is None:
+                active_run_id = session.execute(
+                    text("SELECT MAX(import_run_id) FROM dimensionamiento_records")
+                ).scalar_one_or_none()
             records_total_valorizacion = session.execute(
                 text(
                     "SELECT COALESCE(SUM(valorizacion_estimada), 0) "
-                    "FROM dimensionamiento_records"
-                )
+                    "FROM dimensionamiento_records WHERE import_run_id = :run"
+                ),
+                {"run": active_run_id},
             ).scalar_one() if raw_has_valorizacion else 0
             summary_total_valorizacion = session.execute(
                 text(
                     "SELECT COALESCE(SUM(total_valorizacion), 0) "
-                    "FROM dimensionamiento_family_monthly_summary"
-                )
+                    "FROM dimensionamiento_family_monthly_summary WHERE import_run_id = :run"
+                ),
+                {"run": active_run_id},
             ).scalar_one() if summary_has_valorizacion else 0
             raw_min_month, raw_max_month = session.execute(
                 text(
@@ -1508,9 +1525,65 @@ def ensure_dimensionamiento_entidad_columns():
             ("CREATE INDEX IF NOT EXISTS ix_dim_records_entidad ON dimensionamiento_records (import_run_id, cliente_entidad_id)", "ix_dim_records_entidad"),
             ("CREATE INDEX IF NOT EXISTS ix_dim_summary_entidad ON dimensionamiento_family_monthly_summary (import_run_id, cliente_entidad_id)", "ix_dim_summary_entidad"),
             ("CREATE INDEX IF NOT EXISTS ix_dim_summary_es_cliente_entidad ON dimensionamiento_family_monthly_summary (import_run_id, es_cliente_entidad)", "ix_dim_summary_es_cliente_entidad"),
+            # Aceleran el resolvedor (UPDATE por CUIT / por nombre original) y la capa C
+            # (propagación summary→records por cliente_visible). Evitan full scans.
+            ("CREATE INDEX IF NOT EXISTS ix_dim_records_run_cuit ON dimensionamiento_records (import_run_id, cuit)", "ix_dim_records_run_cuit"),
+            ("CREATE INDEX IF NOT EXISTS ix_dim_records_run_original ON dimensionamiento_records (import_run_id, cliente_nombre_original)", "ix_dim_records_run_original"),
+            ("CREATE INDEX IF NOT EXISTS ix_dim_records_run_visible ON dimensionamiento_records (import_run_id, cliente_visible)", "ix_dim_records_run_visible"),
         ):
             _add_column_safe(conn, ddl, desc)
     print("[MIGRATION] SUCCESS: columnas de identidad de clientes verificadas/creadas.", flush=True)
+
+
+def ensure_dimensionamiento_entidad_populated():
+    """CAPA C en el arranque: asegura que el summary del run activo tenga poblada la
+    identidad de clientes (cliente_entidad_id / es_cliente_entidad).
+
+    Debe correr DESPUÉS de ensure_dimensionamiento_summary_populated (que puede reconstruir
+    el summary) y cubre también el camino del push a prod donde el rebuild se saltea y el
+    summary subido no trae identidad. Es barata: si no hay filas en NULL, es un COUNT y
+    retorna. NO corre el resolvedor pesado (records ya está resuelto de una corrida previa
+    o del backfill). Nunca interrumpe el arranque.
+    """
+    try:
+        from web_comparativas.models import SessionLocal
+        from web_comparativas.dimensionamiento.identity import ensure_entidad_columns_populated
+        from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
+
+        session = SessionLocal()
+        try:
+            active_run_id = session.execute(
+                text(
+                    "SELECT id FROM dimensionamiento_import_runs WHERE status = 'success' "
+                    "ORDER BY finished_at DESC, id DESC LIMIT 1"
+                )
+            ).scalar_one_or_none()
+            if active_run_id is None:
+                print("[MIGRATION] entidad_populated: no hay corrida success. (Saltando)", flush=True)
+                return
+            repaired = ensure_entidad_columns_populated(session, active_run_id, commit=True)
+            if repaired:
+                print(
+                    f"[MIGRATION] entidad_populated: CAPA C reparó {repaired} filas de summary "
+                    f"del run {active_run_id} (identidad en NULL). Si se repite en cada arranque, "
+                    f"hay una ruta que puebla el summary sin identidad.",
+                    flush=True,
+                )
+            else:
+                print(f"[MIGRATION] entidad_populated: summary run {active_run_id} OK (identidad completa).", flush=True)
+            # El snapshot del dashboard es una 3ra capa de caché: pudo haberse generado con
+            # la identidad en NULL (0 entidades) durante una ventana de wipe, o venir del
+            # push a prod con el clientes del cliente (sin resolución). Lo regeneramos SIEMPRE
+            # server-side desde la summary ya reparada, para que la card no sirva un valor viejo.
+            try:
+                refresh_default_dashboard_snapshot(session, import_run_id=active_run_id, commit=True)
+                print(f"[MIGRATION] entidad_populated: snapshot del dashboard regenerado (run {active_run_id}).", flush=True)
+            except Exception as e:
+                print(f"[MIGRATION] entidad_populated: refresh snapshot advertencia – {e}", flush=True)
+        finally:
+            session.close()
+    except Exception as e:
+        print(f"[MIGRATION] entidad_populated: advertencia – {e}", flush=True)
 
 
 def ensure_forecast_effective_month_column():

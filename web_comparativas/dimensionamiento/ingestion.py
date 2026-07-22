@@ -18,13 +18,14 @@ from threading import Lock
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import Date, case, cast, delete, func, insert, or_, select, text
+from sqlalchemy import Date, and_, case, cast, delete, func, insert, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE, SessionLocal, engine
 
 from .models import (
+    DimensionamientoClienteEntidad,
     DimensionamientoFamilyMonthlySummary,
     DimensionamientoImportError,
     DimensionamientoImportRun,
@@ -785,20 +786,33 @@ def _build_upsert_statement(rows: list[dict[str, Any]]):
     return stmt
 
 
-def _resolve_client_entities_safe(session: Session, run_id: int) -> None:
-    """Corre la resolución de identidad de clientes tras el finalize (paso independiente).
+def _resolve_records_entities_safe(session: Session, run_id: int) -> None:
+    """Resuelve y persiste records.cliente_entidad_id + registry (parte pesada).
 
-    NO depende de que el rebuild del summary haya ocurrido: mapea las filas de summary
-    existentes por cliente_visible. Defensivo: un fallo acá NO rompe el import (las
-    entidades se pueden re-backfillear después). Ver dimensionamiento/identity.py.
+    Se corre ANTES del rebuild del summary, para que el rebuild (capa A) pueda copiar la
+    identidad ya resuelta. Defensivo: un fallo NO rompe el import (se puede re-backfillear).
     """
     try:
-        from .identity import rebuild_client_entities
-        session.flush()  # asegura que records/summary de esta corrida sean visibles al SQL
-        stats = rebuild_client_entities(session, run_id, commit=False)
-        logger.info("[DIM] resolución de entidades run=%s stats=%s", run_id, stats)
+        from .identity import persist_records_and_registry
+        session.flush()  # asegura que los records de esta corrida sean visibles al SQL
+        stats = persist_records_and_registry(session, run_id, commit=False)
+        logger.info("[DIM] identidad: records+registry resueltos run=%s stats=%s", run_id, stats)
     except Exception:
-        logger.exception("[DIM] resolución de entidades FALLÓ en finalize run=%s (no bloquea el import)", run_id)
+        logger.exception("[DIM] identidad: resolución records+registry FALLÓ run=%s (no bloquea el import)", run_id)
+
+
+def _ensure_entidad_summary_safe(session: Session, run_id: int) -> None:
+    """Capa C tras el rebuild: propaga la identidad al summary si quedó algo en NULL.
+
+    Barata cuando el rebuild (A) ya dejó las columnas pobladas (chequeo COUNT y retorna)."""
+    try:
+        from .identity import ensure_entidad_columns_populated
+        session.flush()
+        repaired = ensure_entidad_columns_populated(session, run_id, commit=False)
+        if repaired:
+            logger.info("[DIM] identidad: capa C reparó %d filas de summary run=%s", repaired, run_id)
+    except Exception:
+        logger.exception("[DIM] identidad: capa C FALLÓ run=%s (no bloquea el import)", run_id)
 
 
 def _rebuild_summary_table(session: Session, run_id: int) -> None:
@@ -836,39 +850,50 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
                     total_valorizacion,
                     total_registros,
                     clientes_unicos,
-                    import_run_id
+                    import_run_id,
+                    cliente_entidad_id,
+                    es_cliente_entidad
                 )
                 SELECT
-                    date(fecha, 'start of month') AS month,
-                    plataforma,
-                    cliente_nombre_homologado,
-                    cliente_visible,
-                    provincia,
-                    familia,
-                    unidad_negocio,
-                    subunidad_negocio,
-                    resultado_participacion,
-                    is_identified,
-                    is_client,
-                    COALESCE(SUM(cantidad_demandada), 0) AS total_cantidad,
-                    COALESCE(SUM(valorizacion_estimada), 0) AS total_valorizacion,
-                    COUNT(id) AS total_registros,
-                    COUNT(DISTINCT cliente_visible) AS clientes_unicos,
-                    :run_id AS import_run_id
-                FROM dimensionamiento_records
-                WHERE import_run_id = :run_id
+                    date(r.fecha, 'start of month') AS month,
+                    r.plataforma,
+                    r.cliente_nombre_homologado,
+                    r.cliente_visible,
+                    r.provincia,
+                    r.familia,
+                    r.unidad_negocio,
+                    r.subunidad_negocio,
+                    r.resultado_participacion,
+                    r.is_identified,
+                    r.is_client,
+                    COALESCE(SUM(r.cantidad_demandada), 0) AS total_cantidad,
+                    COALESCE(SUM(r.valorizacion_estimada), 0) AS total_valorizacion,
+                    COUNT(r.id) AS total_registros,
+                    COUNT(DISTINCT r.cliente_visible) AS clientes_unicos,
+                    :run_id AS import_run_id,
+                    -- Capa A: preservar la identidad resuelta. cliente_visible→entidad es 1:1,
+                    -- así que agrupar por cliente_entidad_id/es_cliente no parte grupos.
+                    r.cliente_entidad_id,
+                    ce.es_cliente AS es_cliente_entidad
+                FROM dimensionamiento_records r
+                LEFT JOIN dimensionamiento_cliente_entidad ce
+                    ON ce.import_run_id = r.import_run_id
+                   AND ce.entidad_key = r.cliente_entidad_id
+                WHERE r.import_run_id = :run_id
                 GROUP BY
-                    date(fecha, 'start of month'),
-                    plataforma,
-                    cliente_nombre_homologado,
-                    cliente_visible,
-                    provincia,
-                    familia,
-                    unidad_negocio,
-                    subunidad_negocio,
-                    resultado_participacion,
-                    is_identified,
-                    is_client
+                    date(r.fecha, 'start of month'),
+                    r.plataforma,
+                    r.cliente_nombre_homologado,
+                    r.cliente_visible,
+                    r.provincia,
+                    r.familia,
+                    r.unidad_negocio,
+                    r.subunidad_negocio,
+                    r.resultado_participacion,
+                    r.is_identified,
+                    r.is_client,
+                    r.cliente_entidad_id,
+                    ce.es_cliente
                 """
             ),
             {"run_id": run_id},
@@ -895,6 +920,17 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             func.count(DimensionamientoRecord.id).label("total_registros"),
             func.count(func.distinct(DimensionamientoRecord.cliente_visible)).label("clientes_unicos"),
             func.cast(run_id, DimensionamientoFamilyMonthlySummary.import_run_id.type).label("import_run_id"),
+            # Capa A: preservar la identidad resuelta (cliente_visible→entidad es 1:1).
+            DimensionamientoRecord.cliente_entidad_id.label("cliente_entidad_id"),
+            DimensionamientoClienteEntidad.es_cliente.label("es_cliente_entidad"),
+        )
+        .select_from(DimensionamientoRecord)
+        .outerjoin(
+            DimensionamientoClienteEntidad,
+            and_(
+                DimensionamientoClienteEntidad.import_run_id == DimensionamientoRecord.import_run_id,
+                DimensionamientoClienteEntidad.entidad_key == DimensionamientoRecord.cliente_entidad_id,
+            ),
         )
         .where(DimensionamientoRecord.import_run_id == run_id)
         .group_by(
@@ -909,6 +945,8 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             DimensionamientoRecord.resultado_participacion,
             DimensionamientoRecord.is_identified,
             DimensionamientoRecord.is_client,
+            DimensionamientoRecord.cliente_entidad_id,
+            DimensionamientoClienteEntidad.es_cliente,
         )
     )
 
@@ -930,6 +968,8 @@ def _rebuild_summary_table(session: Session, run_id: int) -> None:
             "total_registros",
             "clientes_unicos",
             "import_run_id",
+            "cliente_entidad_id",
+            "es_cliente_entidad",
         ],
         summary_select,
     ).on_conflict_do_nothing(
@@ -1241,8 +1281,11 @@ def _ingest_dimensionamiento_csv_legacy(
                 )
             )
 
+        # Identidad de clientes: resolver records+registry ANTES del rebuild para que el
+        # rebuild (capa A) copie la identidad; capa C después como red de seguridad.
+        _resolve_records_entities_safe(session, run.id)
         _rebuild_summary_table(session, run.id)
-        _resolve_client_entities_safe(session, run.id)
+        _ensure_entidad_summary_safe(session, run.id)
 
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()
@@ -1409,8 +1452,11 @@ def ingest_dimensionamiento_csv(
                 )
             )
 
+        # Identidad de clientes: resolver records+registry ANTES del rebuild para que el
+        # rebuild (capa A) copie la identidad; capa C después como red de seguridad.
+        _resolve_records_entities_safe(session, run.id)
         _rebuild_summary_table(session, run.id)
-        _resolve_client_entities_safe(session, run.id)
+        _ensure_entidad_summary_safe(session, run.id)
 
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()

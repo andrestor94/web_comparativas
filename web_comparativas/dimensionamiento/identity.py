@@ -229,23 +229,20 @@ def resolve_entities(session: Session, import_run_id: int, *, exclude_test: bool
         )
     entities.sort(key=lambda e: e.entidad_key)
 
-    # Mapa visible→key para poblar el summary. Si un cliente_visible cae en >1 entidad,
-    # se registra conflicto (no debería pasar) y se elige la de mayor peso.
+    # Mapa visible→key para poblar el summary.
+    # ASSERT PERMANENTE del invariante 1:1 (cliente_visible → UNA sola entidad). A (rebuild
+    # con GROUP BY) y C (repair por cliente_visible) dependen de que esto sea una función.
+    # Si se rompe, el propagado al summary sería ambiguo: cortamos en vez de adivinar.
     visible_to_key: dict[str, int] = {}
+    conflicts = {v: sorted(ks) for v, ks in visible_to_keys.items() if len(ks) > 1}
+    if conflicts:
+        raise ValueError(
+            "[DIM][IDENTITY] INVARIANTE 1:1 ROTO en run=%s: %d cliente_visible mapean a >1 entidad. "
+            "A/C no son válidos así. Ejemplos: %s"
+            % (import_run_id, len(conflicts), dict(list(conflicts.items())[:5]))
+        )
     for v, ks in visible_to_keys.items():
-        if len(ks) == 1:
-            visible_to_key[v] = next(iter(ks))
-        else:
-            weights = {k: 0 for k in ks}
-            for e in entities:
-                if e.entidad_key in weights and v in e.forms:
-                    weights[e.entidad_key] = e.total_registros
-            chosen = max(weights.items(), key=lambda kv: kv[1])[0]
-            visible_to_key[v] = chosen
-            logger.warning(
-                "[DIM][IDENTITY] cliente_visible %r cae en %d entidades %s; asignado a %d",
-                v, len(ks), sorted(ks), chosen,
-            )
+        visible_to_key[v] = next(iter(ks))
 
     _log_defensive_checks(entities, exclude_test)
 
@@ -297,12 +294,17 @@ def _log_defensive_checks(entities: list[ClientEntity], exclude_test: bool) -> N
                     )
 
 
-def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_test: bool | None = None, commit: bool = True) -> dict[str, int]:
-    """Resuelve y PERSISTE: registry + records.cliente_entidad_id + summary (entidad_id/es_cliente).
+def persist_records_and_registry(
+    session: Session, import_run_id: int, *, exclude_test: bool | None = None, commit: bool = True
+) -> dict[str, int]:
+    """Resuelve y persiste la parte PESADA: registry + records.cliente_entidad_id.
 
-    Diseñado para correr como paso independiente del finalize de ingesta: NO depende de
-    que el rebuild del summary se haya ejecutado; mapea las filas de summary existentes
-    por `cliente_visible`.
+    NO toca el summary. La propagación al summary la hace ensure_entidad_columns_populated
+    (capa C, barata) o el rebuild que preserva columnas (capa A). Se corre donde se
+    (re)construyen los records: finalize de ingesta y finalize del push a prod.
+
+    Los UPDATE por CUIT / nombre original son indexados (ver índices en migrations.py:
+    ix_dim_records_run_cuit / ix_dim_records_run_original), no full scans.
     """
     result = resolve_entities(session, import_run_id, exclude_test=exclude_test)
 
@@ -323,20 +325,13 @@ def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_tes
                 """
             ),
             {
-                "run": import_run_id,
-                "key": e.entidad_key,
-                "cli": bool(e.es_cliente),
-                "vis": e.nombre_visible,
-                "prov": e.provincia,
-                "cuits": json.dumps(e.cuits),
-                "nf": len(e.forms),
-                "tot": e.total_registros,
-                "ts": now,
+                "run": import_run_id, "key": e.entidad_key, "cli": bool(e.es_cliente),
+                "vis": e.nombre_visible, "prov": e.provincia, "cuits": json.dumps(e.cuits),
+                "nf": len(e.forms), "tot": e.total_registros, "ts": now,
             },
         )
 
-    # 2) records.cliente_entidad_id
-    #    anclas por CUIT
+    # 2) records.cliente_entidad_id — anclas por CUIT
     for cu, k in result.cuit_to_key.items():
         session.execute(
             text(
@@ -357,19 +352,92 @@ def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_tes
             {"k": k, "run": import_run_id, "sin": _SIN_DATO, "name": name},
         )
 
-    # 3) summary por cliente_visible → entidad_key + es_cliente_entidad
-    es_cliente_by_key = {e.entidad_key: e.es_cliente for e in result.entities}
-    for v, k in result.visible_to_key.items():
-        session.execute(
-            text(
-                "UPDATE dimensionamiento_family_monthly_summary "
-                "SET cliente_entidad_id = :k, es_cliente_entidad = :cli "
-                "WHERE import_run_id = :run AND cliente_visible = :v"
-            ),
-            {"k": k, "cli": bool(es_cliente_by_key.get(k, False)), "run": import_run_id, "v": v},
-        )
-
     if commit:
         session.commit()
-    logger.info("[DIM][IDENTITY] persistido run=%s stats=%s", import_run_id, result.stats)
+    logger.info("[DIM][IDENTITY] records+registry persistidos run=%s stats=%s", import_run_id, result.stats)
     return result.stats
+
+
+def _count_summary_entidad_null(session: Session, import_run_id: int) -> int:
+    return int(
+        session.execute(
+            text(
+                "SELECT COUNT(*) FROM dimensionamiento_family_monthly_summary "
+                "WHERE import_run_id = :run AND cliente_entidad_id IS NULL"
+            ),
+            {"run": import_run_id},
+        ).scalar_one()
+    )
+
+
+def ensure_entidad_columns_populated(session: Session, import_run_id: int, *, commit: bool = True) -> int:
+    """CAPA C — invariante con auto-reparación del summary.
+
+    Chequeo barato: ¿hay filas de summary del run con cliente_entidad_id NULL? Si no, no
+    hace nada. Si sí, REPARA propagando desde records (cliente_visible→cliente_entidad_id,
+    invariante 1:1) y desde el registry (entidad_key→es_cliente). NO corre el resolvedor
+    completo (records ya está resuelto): son dos UPDATE indexados.
+
+    Debe llamarse DESPUÉS de CADA ruta que puebla el summary: rebuild de arranque, finalize
+    de ingesta y finalize del push a prod (incluso cuando el rebuild se saltea porque el
+    summary subido por el cliente reconcilia — ese es el caso crítico que A no cubre).
+
+    Devuelve cuántas filas estaban NULL (0 = ya estaba consistente).
+    """
+    missing = _count_summary_entidad_null(session, import_run_id)
+    if missing == 0:
+        return 0
+
+    S = "dimensionamiento_family_monthly_summary"
+    # a) cliente_entidad_id desde records por (import_run_id, cliente_visible)
+    session.execute(
+        text(
+            f"""
+            UPDATE {S}
+            SET cliente_entidad_id = (
+                SELECT r.cliente_entidad_id FROM dimensionamiento_records r
+                WHERE r.import_run_id = {S}.import_run_id
+                  AND r.cliente_visible = {S}.cliente_visible
+                  AND r.cliente_entidad_id IS NOT NULL
+                LIMIT 1
+            )
+            WHERE import_run_id = :run AND cliente_entidad_id IS NULL
+            """
+        ),
+        {"run": import_run_id},
+    )
+    # b) es_cliente_entidad desde el registry por entidad_key
+    session.execute(
+        text(
+            f"""
+            UPDATE {S}
+            SET es_cliente_entidad = (
+                SELECT ce.es_cliente FROM dimensionamiento_cliente_entidad ce
+                WHERE ce.import_run_id = {S}.import_run_id
+                  AND ce.entidad_key = {S}.cliente_entidad_id
+                LIMIT 1
+            )
+            WHERE import_run_id = :run AND cliente_entidad_id IS NOT NULL
+              AND es_cliente_entidad IS NULL
+            """
+        ),
+        {"run": import_run_id},
+    )
+    if commit:
+        session.commit()
+    still_null = _count_summary_entidad_null(session, import_run_id)
+    logger.warning(
+        "[DIM][IDENTITY] CAPA C auto-reparó summary run=%s: %d filas estaban en NULL, quedan %d. "
+        "Si esto se dispara seguido, hay un cuarto camino que puebla el summary sin entidad.",
+        import_run_id, missing, still_null,
+    )
+    return missing
+
+
+def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_test: bool | None = None, commit: bool = True) -> dict[str, int]:
+    """Backfill completo (para script/one-off): records+registry (pesado) + summary (C)."""
+    stats = persist_records_and_registry(session, import_run_id, exclude_test=exclude_test, commit=False)
+    ensure_entidad_columns_populated(session, import_run_id, commit=False)
+    if commit:
+        session.commit()
+    return stats
