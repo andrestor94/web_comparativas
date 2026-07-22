@@ -29,6 +29,12 @@
             <p>Análisis de competencia sobre datos persistidos (Bionexo, Medox y Portada)</p>
         </div>
         <div class="dim-header-actions">
+            {% if user and (user.role or '')|lower == 'admin' %}
+            <span id="identidadFallbackPill" class="badge text-bg-warning" style="display:none;"
+                  title="La identidad de clientes todavía no está resuelta para la corrida activa. La card muestra el número anterior (provisorio). Correr el backfill y verificar /admin/estado-identidad.">
+                <i class="bi bi-exclamation-triangle me-1"></i> Identidad sin resolver — números provisorios
+            </span>
+            {% endif %}
             <span id="lastUpdateBadge" class="dim-update-badge" style="display:none;">
                 <i class="bi bi-clock-history"></i>
                 <span id="datasetUpdatedAt">-</span>
@@ -381,5 +387,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v29"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v30"></script>
 {% endblock %}

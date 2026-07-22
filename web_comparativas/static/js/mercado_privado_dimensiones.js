@@ -486,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         platformsLabel:     document.getElementById('platformsLabel'),
         kpiClients:  document.getElementById('kpiClients'),
         kpiClientsBreak: document.getElementById('kpiClientsBreak'),
+        identidadFallbackPill: document.getElementById('identidadFallbackPill'),
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
         kpiProvinces: document.getElementById('kpiProvinces'),
@@ -1235,6 +1236,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─────────────────────────────────────────────────────────────────────────
     function renderKpis(kpis) {
         elements.kpiClients.textContent  = formatInteger(kpis.clientes || 0);
+        // Aviso de FALLBACK (identidad no resuelta) — el elemento solo existe para Admin.
+        if (elements.identidadFallbackPill) {
+            const fallback = kpis.entities_resolved === false;
+            elements.identidadFallbackPill.style.display = fallback ? '' : 'none';
+        }
         if (elements.kpiClientsBreak) {
             // Desglose del universo de entidades: clientes (Sí) · no clientes (No).
             // Respeta los filtros activos igual que el número grande.

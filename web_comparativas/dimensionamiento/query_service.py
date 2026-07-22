@@ -28,7 +28,7 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"__all__", "__todos__", "todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v9"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v10"
 _SUMMARY_REQUIRED_COLUMNS = frozenset(
     {
         "month",
@@ -1749,6 +1749,9 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             "familias": int(total_families or 0),
             "provincias": int(total_provincias or 0),
             "valorizacion": float(total_valorizacion or 0),
+            # False = card en FALLBACK (identidad no resuelta): número provisorio. La UI
+            # muestra un aviso solo para Admin.
+            "entities_resolved": bool(filters.entities_resolved),
         }
         _log_query_success(
             "get_kpis", started_at, total_rows=payload["total_rows"],
@@ -2585,6 +2588,7 @@ def _get_aggregated_dashboard_bootstrap(
     payload["kpis"]["clientes"] = int(headline_clients)
     payload["kpis"]["clientes_si"] = int(clientes_si)
     payload["kpis"]["clientes_no"] = int(clientes_no)
+    payload["kpis"]["entities_resolved"] = bool(filters.entities_resolved)
     payload.setdefault("filters", {})
     payload["filters"]["clientes"] = _client_dropdown(session, filters)
 

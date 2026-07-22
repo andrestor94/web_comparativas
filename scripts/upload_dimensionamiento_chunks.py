@@ -425,12 +425,36 @@ def handle_upload(args):
         
         # Limpieza de estado local
         clear_state()
-        
+
+        # Estado EXPLÍCITO de la resolución de identidad de clientes (el server lo devuelve
+        # en el finalize). Un push NO es realmente exitoso si la identidad quedó sin resolver.
+        identidad = None
+        try:
+            identidad = (finalize_res.json() or {}).get("identidad")
+        except Exception:
+            identidad = None
+
         print("\n🎉 ========================================================")
         print("🎉 ¡ACTUALIZACIÓN COMPLETADA CON ÉXITO!")
         print(f"🎉 Corrida remota activada: ID {remote_run_id}")
         print(f"🎉 El dashboard en producción ya está operativo con los nuevos datos.")
-        print("🎉 ========================================================\n")
+        print("🎉 ========================================================")
+        if identidad is None:
+            print("⚠️  IDENTIDAD DE CLIENTES: el server no reportó estado (¿versión vieja?).")
+            print("    Verificá con: GET .../admin/estado-identidad")
+        elif identidad.get("resuelta"):
+            print(f"✅ IDENTIDAD DE CLIENTES: RESUELTA — {identidad.get('entidades')} entidades. "
+                  "La card cuenta por identidad.")
+        else:
+            print("🛑 ========================================================")
+            print("🛑 IDENTIDAD DE CLIENTES: NO RESUELTA. La card está en FALLBACK")
+            print("🛑 (muestra el número anterior, provisorio). El push NO está completo.")
+            print(f"🛑   entidades={identidad.get('entidades')} summary_identidad_null={identidad.get('summary_identidad_null')}")
+            print("🛑   Correr el backfill:")
+            print(f"🛑   curl -s -X POST \"{args.url}/api/mercado-privado/dimensiones/admin/resolve-entities\" -H \"X-Import-Token: <TOKEN>\"")
+            print("🛑   Y confirmar con: GET .../admin/estado-identidad")
+            print("🛑 ========================================================")
+        print("")
         
     finally:
         session.close()

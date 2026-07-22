@@ -1314,10 +1314,36 @@ def admin_import_finalize(
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()
         db.commit()
-        
+
         invalidate_query_cache()
-        logger.info("[DIM][IMPORT] Finalized run_id=%d successfully.", run.id)
-        return {"ok": True, "message": "Import run finalized successfully."}
+
+        # Estado EXPLÍCITO de la resolución de identidad: un push NO debe terminar en "OK"
+        # si la identidad quedó sin resolver. El cliente lo imprime visible al final.
+        ident_count = int(db.execute(
+            text("SELECT COUNT(*) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
+            {"r": run.id},
+        ).scalar_one())
+        ident_null = int(db.execute(
+            text("SELECT COUNT(*) FROM dimensionamiento_family_monthly_summary "
+                 "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"),
+            {"r": run.id},
+        ).scalar_one())
+        identidad_resuelta = ident_count > 0 and ident_null == 0
+        if not identidad_resuelta:
+            logger.warning(
+                "[DIM][IMPORT] Run %d finalizado pero IDENTIDAD SIN RESOLVER "
+                "(entidades=%d, summary_null=%d). Correr backfill.", run.id, ident_count, ident_null,
+            )
+        logger.info("[DIM][IMPORT] Finalized run_id=%d successfully. identidad_resuelta=%s", run.id, identidad_resuelta)
+        return {
+            "ok": True,
+            "message": "Import run finalized successfully.",
+            "identidad": {
+                "resuelta": identidad_resuelta,
+                "entidades": ident_count,
+                "summary_identidad_null": ident_null,
+            },
+        }
     except Exception as e:
         db.rollback()
         logger.exception("[DIM][IMPORT] Error finalizing import run")
@@ -1356,6 +1382,52 @@ def _run_entity_backfill_task(run_id: int | None) -> None:
         logger.exception("[DIM][IMPORT] resolve-entities: backfill FALLÓ run=%s", run_id)
     finally:
         session.close()
+
+
+@router.get("/admin/estado-identidad")
+def admin_estado_identidad(
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Señal POSITIVA de estado de la resolución de identidad (no la ausencia de error).
+
+    Protegido con el mismo token del push. Distingue 'sirviendo por identidad' de 'fallback'
+    (número provisorio viejo), que a ojo se ven iguales (ambos pueden dar 374).
+    """
+    active_run = db.execute(
+        text("SELECT id FROM dimensionamiento_import_runs WHERE status='success' "
+             "ORDER BY finished_at DESC, id DESC LIMIT 1")
+    ).scalar_one_or_none()
+    if active_run is None:
+        return {"ok": True, "run_activo": None, "registry_poblado": False,
+                "modo_card": "sin_datos", "entidades": 0}
+    reg = db.execute(
+        text("SELECT COUNT(*), COALESCE(SUM(CASE WHEN es_cliente THEN 1 ELSE 0 END),0), "
+             "MAX(created_at) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
+        {"r": active_run},
+    ).one()
+    entidades, entidades_si, ultima = int(reg[0]), int(reg[1]), reg[2]
+    sum_null = int(db.execute(
+        text("SELECT COUNT(*) FROM dimensionamiento_family_monthly_summary "
+             "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"), {"r": active_run}
+    ).scalar_one())
+    rec_null = int(db.execute(
+        text("SELECT COUNT(*) FROM dimensionamiento_records "
+             "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"), {"r": active_run}
+    ).scalar_one())
+    resuelto = entidades > 0
+    return {
+        "ok": True,
+        "run_activo": active_run,
+        "registry_poblado": resuelto,
+        "modo_card": "identidad" if resuelto else "fallback",
+        "entidades": entidades,
+        "entidades_si": entidades_si,
+        "entidades_no": entidades - entidades_si,
+        "summary_filas_identidad_null": sum_null,
+        "records_filas_identidad_null": rec_null,
+        "ultima_resolucion": ultima.isoformat() if hasattr(ultima, "isoformat") else ultima,
+    }
 
 
 @router.post("/admin/resolve-entities")
