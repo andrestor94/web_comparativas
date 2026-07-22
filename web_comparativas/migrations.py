@@ -1535,6 +1535,65 @@ def ensure_dimensionamiento_entidad_columns():
     print("[MIGRATION] SUCCESS: columnas de identidad de clientes verificadas/creadas.", flush=True)
 
 
+def ensure_dimensionamiento_entidad_backfill():
+    """Backfill AUTOMÁTICO de identidad si el registry está VACÍO para el run activo
+    (arranque en frío post-deploy: las columnas existen pero nadie resolvió todavía).
+
+    Corre dentro del hilo de mantenimiento (background), NUNCA sincrónico en el arranque:
+    resolver 300k+ filas bloquearía el port-bind y Render mataría el deploy (mismo motivo
+    por el que el backfill de cliente_visible se difirió a background). Mientras tanto, la
+    card muestra el número anterior vía el fallback (no 0). Al terminar refresca el snapshot
+    e invalida el caché para que la card pase al número resuelto sin reiniciar.
+
+    En arranques normales (registry ya poblado) es un COUNT y retorna: los wipes del summary
+    los cubre la capa C (ensure_dimensionamiento_entidad_populated).
+    """
+    try:
+        from web_comparativas.models import SessionLocal
+        from web_comparativas.dimensionamiento.identity import rebuild_client_entities
+        from web_comparativas.dimensionamiento.query_service import (
+            refresh_default_dashboard_snapshot,
+            invalidate_query_cache,
+        )
+
+        session = SessionLocal()
+        try:
+            active_run_id = session.execute(
+                text(
+                    "SELECT id FROM dimensionamiento_import_runs WHERE status = 'success' "
+                    "ORDER BY finished_at DESC, id DESC LIMIT 1"
+                )
+            ).scalar_one_or_none()
+            if active_run_id is None:
+                return
+            registry_count = session.execute(
+                text("SELECT COUNT(*) FROM dimensionamiento_cliente_entidad WHERE import_run_id = :r"),
+                {"r": active_run_id},
+            ).scalar_one()
+            if registry_count > 0:
+                return  # ya resuelto; los wipes los cubre la capa C
+            print(
+                f"[MIGRATION] entidad_backfill: registry VACIO para run {active_run_id} "
+                f"(arranque en frio) -> resolviendo identidad en background...",
+                flush=True,
+            )
+            stats = rebuild_client_entities(session, active_run_id, commit=True)
+            # Invalidar el caché ANTES de refrescar el snapshot: el registry cambió y el
+            # cache de _entity_registry quedó viejo (vacío); si refrescáramos antes, el
+            # snapshot se generaría con el número del fallback en vez del resuelto.
+            invalidate_query_cache()
+            try:
+                refresh_default_dashboard_snapshot(session, import_run_id=active_run_id, commit=True)
+                invalidate_query_cache()
+            except Exception as e:
+                print(f"[MIGRATION] entidad_backfill: refresh snapshot advertencia - {e}", flush=True)
+            print(f"[MIGRATION] entidad_backfill: COMPLETADO run {active_run_id} stats={stats}", flush=True)
+        finally:
+            session.close()
+    except Exception as e:
+        print(f"[MIGRATION] entidad_backfill: advertencia – {e}", flush=True)
+
+
 def ensure_dimensionamiento_entidad_populated():
     """CAPA C en el arranque: asegura que el summary del run activo tenga poblada la
     identidad de clientes (cliente_entidad_id / es_cliente_entidad).

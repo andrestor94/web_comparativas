@@ -164,6 +164,12 @@ class DimensionamientoFilters:
     # Exclusión de unidades de negocio: proviene de la interacción con la leyenda del gráfico
     unidades_negocio_excluir: list[str] = field(default_factory=list)
     import_run_id: int | None = None
+    # ¿La identidad de clientes está resuelta (registry poblado) para el run activo?
+    # Lo setea _normalize_dashboard_filters. Si es False (p.ej. arranque en frío post-deploy,
+    # antes del backfill), TODO el camino de clientes cae a la lógica anterior por
+    # cliente_visible/is_client (fila) en vez de contar sobre columnas de entidad en NULL.
+    # Protección PERMANENTE contra "card en 0", no un parche de deploy.
+    entities_resolved: bool = True
 
 
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
@@ -181,6 +187,7 @@ def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
         "fecha_hasta": filters.fecha_hasta.isoformat() if filters.fecha_hasta else None,
         "is_client": filters.is_client,
         "import_run_id": filters.import_run_id,
+        "entities_resolved": filters.entities_resolved,
     }
 
 
@@ -212,6 +219,7 @@ def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
         fecha_hasta=filters.fecha_hasta,
         is_client=filters.is_client,
         import_run_id=filters.import_run_id,
+        entities_resolved=filters.entities_resolved,
     )
 
 
@@ -459,7 +467,18 @@ def _normalize_dashboard_filters(
         normalized.fecha_desde = None
     if max_date is not None and normalized.fecha_hasta is not None and normalized.fecha_hasta >= max_date:
         normalized.fecha_hasta = None
+
+    # ¿Identidad resuelta para el run activo? Si el registry está vacío (arranque en frío
+    # post-deploy, antes del backfill), todo el camino de clientes cae al conteo anterior.
+    normalized.entities_resolved = _entities_resolved(session, normalized.import_run_id)
     return normalized
+
+
+def _entities_resolved(session: Session, import_run_id: int | None) -> bool:
+    """True si el registry de entidades tiene filas para el run (identidad ya resuelta)."""
+    if import_run_id is None:
+        return False
+    return bool(_entity_registry(session, import_run_id)["by_key"])
 
 
 def _resolve_aggregate_model(
@@ -867,20 +886,27 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
                 if applied_conditions is not None:
                     applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
     if filters.is_client is not None:
-        # ¿Cliente? es a nivel ENTIDAD (no fila): una entidad es "Sí" si tiene ≥1 fila
-        # homologada. En el summary usamos la columna denormalizada es_cliente_entidad;
-        # en records, un subquery contra el registry de entidades.
-        if use_direct_match:
-            stmt = stmt.where(model.es_cliente_entidad.is_(filters.is_client))
+        if not filters.entities_resolved:
+            # FALLBACK (identidad aún no resuelta): filtrar por is_client de FILA (lógica
+            # anterior), nunca por es_cliente_entidad que estaría en NULL.
+            stmt = stmt.where(model.is_client.is_(filters.is_client))
+            if applied_conditions is not None:
+                applied_conditions.append(f"is_client IS {filters.is_client} (fallback)")
         else:
-            _reg_sub = (
-                select(DimensionamientoClienteEntidad.entidad_key)
-                .where(DimensionamientoClienteEntidad.import_run_id == filters.import_run_id)
-                .where(DimensionamientoClienteEntidad.es_cliente.is_(filters.is_client))
-            )
-            stmt = stmt.where(model.cliente_entidad_id.in_(_reg_sub))
-        if applied_conditions is not None:
-            applied_conditions.append(f"es_cliente_entidad IS {filters.is_client}")
+            # ¿Cliente? es a nivel ENTIDAD (no fila): una entidad es "Sí" si tiene ≥1 fila
+            # homologada. En el summary usamos la columna denormalizada es_cliente_entidad;
+            # en records, un subquery contra el registry de entidades.
+            if use_direct_match:
+                stmt = stmt.where(model.es_cliente_entidad.is_(filters.is_client))
+            else:
+                _reg_sub = (
+                    select(DimensionamientoClienteEntidad.entidad_key)
+                    .where(DimensionamientoClienteEntidad.import_run_id == filters.import_run_id)
+                    .where(DimensionamientoClienteEntidad.es_cliente.is_(filters.is_client))
+                )
+                stmt = stmt.where(model.cliente_entidad_id.in_(_reg_sub))
+            if applied_conditions is not None:
+                applied_conditions.append(f"es_cliente_entidad IS {filters.is_client}")
     if filters.fecha_desde is not None:
         date_column = _get_date_column(model)
         stmt = stmt.where(date_column >= filters.fecha_desde)
@@ -1141,6 +1167,11 @@ def refresh_default_dashboard_snapshot(
     commit: bool = True,
 ) -> dict[str, Any]:
     started_at = _log_query_start("refresh_default_dashboard_snapshot", import_run_id=import_run_id)
+    # Regenerar SIEMPRE con datos frescos: invalidar los cachés (registry de entidades,
+    # resultados de query, aggregated-bootstrap) antes de reconstruir. Si no, tras un
+    # backfill/resolución el snapshot se generaría con el número viejo del cache (p.ej. el
+    # fallback de "arranque en frío") en vez del resuelto.
+    invalidate_query_cache()
     latest = _latest_success_import_run(session)
     target_run_id = import_run_id if import_run_id is not None else (latest.id if latest else None)
 
@@ -1565,8 +1596,46 @@ def _present_entity_ids(session: Session, filters: DimensionamientoFilters) -> s
     return {r for (r,) in session.execute(stmt) if r is not None}
 
 
+def _client_counts_fallback(session: Session, filters: DimensionamientoFilters) -> tuple[int, int, int]:
+    """Conteo ANTERIOR (por cliente_visible / is_client de fila), sin tocar columnas de
+    entidad. Se usa cuando la identidad todavía no está resuelta (registry vacío)."""
+    model = _resolve_aggregate_model(session, "CLIENT_FALLBACK", filters.import_run_id)
+    f = _clone_filters(filters)
+    f.is_client = None  # el split Sí/No se hace aparte, por is_client de fila
+    visible = model.cliente_visible
+
+    def _count(extra_is_client):
+        base = (
+            select(func.count(distinct(visible)))
+            .where(visible.isnot(None))
+            .where(visible != "")
+        )
+        stmt = _apply_common_filters(base, model, f)
+        if extra_is_client is not None:
+            stmt = stmt.where(model.is_client.is_(extra_is_client))
+        return int(session.execute(stmt).scalar_one() or 0)
+
+    total = _count(None)
+    si = _count(True)
+    no = _count(False)
+    return total, si, no
+
+
 def _client_entity_counts(session: Session, filters: DimensionamientoFilters) -> tuple[int, int, int]:
-    """(total, si, no) de entidades-cliente bajo los filtros (Sí/No por registry)."""
+    """(total, si, no) de entidades-cliente bajo los filtros (Sí/No por registry).
+
+    FALLBACK PERMANENTE: si el registry está vacío para el run activo (identidad aún no
+    resuelta), NO cuenta sobre columnas en NULL (daría 0); cae al conteo anterior y loguea.
+    La condición es 'registry vacío', no 'la cuenta dio 0', para distinguir 'no resuelto'
+    de 'genuinamente 0'.
+    """
+    if not filters.entities_resolved:
+        logger.warning(
+            "[DIM][IDENTITY] registry VACÍO para run=%s: card cae al conteo anterior por "
+            "cliente_visible (identidad aún no resuelta; correr backfill).",
+            filters.import_run_id,
+        )
+        return _client_counts_fallback(session, filters)
     reg = _entity_registry(session, filters.import_run_id)
     present = _present_entity_ids(session, filters)
     si = len(present & reg["client_keys"])
@@ -1575,9 +1644,26 @@ def _client_entity_counts(session: Session, filters: DimensionamientoFilters) ->
     return total, si, no
 
 
+def _client_dropdown_fallback(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    """Dropdown ANTERIOR (nombres cliente_visible distintos) cuando la identidad no está
+    resuelta. value=label=nombre; durante esta ventana transitoria el filtro por cliente
+    puede no aplicar (el front manda id), pero la lista no queda vacía."""
+    model = _resolve_aggregate_model(session, "CLIENT_DROPDOWN_FALLBACK", filters.import_run_id)
+    f = _clone_filters(filters)
+    f.cliente_entidad_ids = []
+    f.clientes = []
+    visible = model.cliente_visible
+    base = select(distinct(visible)).where(visible.isnot(None)).where(visible != "")
+    stmt = _apply_common_filters(base, model, f)
+    names = sorted(v for (v,) in session.execute(stmt) if v)
+    return [{"value": v, "label": v} for v in names]
+
+
 def _client_dropdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    """Opciones del desplegable Cliente: [{id, label}] de entidades presentes bajo los
-    filtros activos (ignorando la propia selección de cliente), restringidas por ¿Cliente?."""
+    """Opciones del desplegable Cliente: [{value:entidad_id, label}] de entidades presentes
+    bajo los filtros activos (ignorando la propia selección), restringidas por ¿Cliente?."""
+    if not filters.entities_resolved:
+        return _client_dropdown_fallback(session, filters)
     reg = _entity_registry(session, filters.import_run_id)
     f = _clone_filters(filters)
     f.cliente_entidad_ids = []

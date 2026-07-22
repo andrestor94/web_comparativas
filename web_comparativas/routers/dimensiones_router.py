@@ -1324,6 +1324,63 @@ def admin_import_finalize(
         raise HTTPException(status_code=500, detail=f"Error finalizing import run: {e}")
 
 
+def _run_entity_backfill_task(run_id: int | None) -> None:
+    """Tarea de background: resuelve identidad (records+registry+summary) + refresca
+    snapshot + invalida caché. Abre su PROPIA sesión (la del request ya se cerró)."""
+    from web_comparativas.models import SessionLocal
+    from web_comparativas.dimensionamiento.identity import rebuild_client_entities
+    from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
+    session = SessionLocal()
+    try:
+        target = run_id
+        if target is None:
+            target = session.execute(text(
+                "SELECT id FROM dimensionamiento_import_runs WHERE status='success' "
+                "ORDER BY finished_at DESC, id DESC LIMIT 1"
+            )).scalar_one_or_none()
+        if target is None:
+            logger.warning("[DIM][IMPORT] resolve-entities: no hay corrida success.")
+            return
+        logger.info("[DIM][IMPORT] resolve-entities: backfill de identidad run=%s ...", target)
+        stats = rebuild_client_entities(session, target, commit=True)
+        # Invalidar ANTES de refrescar el snapshot (el registry cambió; si no, el snapshot
+        # se generaría con el número del fallback en vez del resuelto).
+        invalidate_query_cache()
+        try:
+            refresh_default_dashboard_snapshot(session, import_run_id=target, commit=True)
+            invalidate_query_cache()
+        except Exception:
+            logger.exception("[DIM][IMPORT] resolve-entities: refresh snapshot fallo run=%s", target)
+        logger.info("[DIM][IMPORT] resolve-entities: COMPLETADO run=%s stats=%s", target, stats)
+    except Exception:
+        logger.exception("[DIM][IMPORT] resolve-entities: backfill FALLÓ run=%s", run_id)
+    finally:
+        session.close()
+
+
+@router.post("/admin/resolve-entities")
+def admin_resolve_entities(
+    background_tasks: BackgroundTasks,
+    _token: str = Depends(verify_import_token),
+    payload: dict[str, Any] | None = Body(default=None),
+):
+    """Dispara el backfill de identidad de clientes (records+registry+summary) en background.
+
+    Protegido con el mismo token del push (X-Import-Token). Es la red de seguridad manual:
+    el arranque en frío ya lo dispara automático, pero este endpoint permite forzarlo sin
+    consola. Devuelve de inmediato; la card pasa del número anterior (fallback) al resuelto
+    cuando termina, sin reiniciar.
+    """
+    run_id = None
+    if payload:
+        try:
+            run_id = int(payload.get("run_id")) if payload.get("run_id") is not None else None
+        except (TypeError, ValueError):
+            run_id = None
+    background_tasks.add_task(_run_entity_backfill_task, run_id)
+    return {"ok": True, "message": "Backfill de identidad de clientes encolado en background.", "run_id": run_id}
+
+
 @router.post("/admin/import/rollback")
 def admin_import_rollback(
     payload: RollbackPayload,
