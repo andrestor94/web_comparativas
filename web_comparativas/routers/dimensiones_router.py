@@ -1453,6 +1453,76 @@ def admin_estado_identidad(
     }
 
 
+@router.post("/admin/apply-identity-chunk")
+def admin_apply_identity_chunk(
+    payload: dict[str, Any] = Body(...),
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Aplica UN LOTE de identidad (troceo desde el cliente). Síncrono, commit por lote,
+    reanudable (los UPDATE solo tocan filas NULL). kind:
+      - 'registry'    : payload.registry [...]  → escribe el registry (chico).
+      - 'summary'     : payload.rows [[visible,eid,escli],...] → puebla summary DIRECTO (sin records).
+      - 'records-cuit': payload.pairs [[cuit,eid],...]  → records por CUIT (FASE 2).
+      - 'records-ori' : payload.pairs [[name,eid],...]  → records huérfanos (FASE 2).
+      - 'finalize'    : refresca snapshot + invalida caché + devuelve el estado.
+    """
+    from web_comparativas.dimensionamiento.identity import (
+        apply_registry, apply_summary_chunk, apply_records_map_chunk,
+        latest_success_run_id, _record_identidad_estado,
+    )
+    from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
+
+    kind = payload.get("kind")
+    rid = payload.get("run_id")
+    try:
+        run_id = int(rid) if rid is not None else latest_success_run_id(db)
+    except (TypeError, ValueError):
+        run_id = latest_success_run_id(db)
+    if run_id is None:
+        raise HTTPException(status_code=400, detail="No hay corrida success.")
+
+    def _nulls():
+        sn = int(db.execute(text("SELECT COUNT(*) FROM dimensionamiento_family_monthly_summary "
+                                 "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"), {"r": run_id}).scalar_one())
+        rn = int(db.execute(text("SELECT COUNT(*) FROM dimensionamiento_records "
+                                 "WHERE import_run_id=:r AND cliente_entidad_id IS NULL"), {"r": run_id}).scalar_one())
+        return sn, rn
+
+    try:
+        if kind == "registry":
+            n = apply_registry(db, run_id, payload.get("registry") or [], commit=True)
+            invalidate_query_cache()
+            return {"ok": True, "kind": kind, "run_id": run_id, "registry": n}
+        elif kind == "summary":
+            n = apply_summary_chunk(db, run_id, payload.get("rows") or [], commit=True)
+            sn, rn = _nulls()
+            return {"ok": True, "kind": kind, "run_id": run_id, "updated": n, "summary_null": sn}
+        elif kind in ("records-cuit", "records-ori"):
+            n = apply_records_map_chunk(db, run_id, kind.split("-", 1)[1], payload.get("pairs") or [], commit=True)
+            sn, rn = _nulls()
+            return {"ok": True, "kind": kind, "run_id": run_id, "updated": n, "records_null": rn}
+        elif kind == "finalize":
+            invalidate_query_cache()
+            try:
+                refresh_default_dashboard_snapshot(db, import_run_id=run_id, commit=True)
+                invalidate_query_cache()
+            except Exception:
+                logger.exception("[DIM][IMPORT] apply-identity-chunk finalize: refresh snapshot fallo run=%s", run_id)
+            sn, rn = _nulls()
+            _record_identidad_estado(db, run_id, ok=(sn == 0))
+            return {"ok": True, "kind": kind, "run_id": run_id, "summary_null": sn, "records_null": rn}
+        else:
+            raise HTTPException(status_code=400, detail=f"kind inválido: {kind!r}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[DIM][IMPORT] apply-identity-chunk kind=%s FALLO run=%s", kind, run_id)
+        _record_identidad_estado(db, run_id, error=f"{kind}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Error en lote {kind}: {exc}")
+
+
 @router.post("/admin/apply-identity")
 def admin_apply_identity(
     payload: dict[str, Any] = Body(...),

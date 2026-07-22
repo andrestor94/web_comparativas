@@ -523,7 +523,12 @@ def rebuild_client_entities(session: Session, import_run_id: int, *, exclude_tes
 # la dependencia de que el server recalcule (y de tareas en background invisibles).
 
 def serialize_identity(result: "ResolveResult") -> dict[str, Any]:
-    """Empaqueta la identidad ya resuelta para enviarla al server (payload chico ~40KB)."""
+    """Empaqueta la identidad ya resuelta para enviarla al server (payload chico).
+
+    visible_map (cliente_visible → [entidad_key, es_cliente]) permite poblar el summary
+    DIRECTO, sin pasar por records: es lo único que la página necesita (path SUMMARY).
+    """
+    es_by_key = {e.entidad_key: bool(e.es_cliente) for e in result.entities}
     return {
         "registry": [
             {
@@ -533,10 +538,113 @@ def serialize_identity(result: "ResolveResult") -> dict[str, Any]:
             }
             for e in result.entities
         ],
+        "visible_map": [[v, k, es_by_key.get(k, False)] for v, k in result.visible_to_key.items()],
         "cuit_map": [[cu, k] for cu, k in result.cuit_to_key.items()],
         "ori_map": [[name, k] for name, k in result.orphan_name_to_key.items()],
         "stats": result.stats,
     }
+
+
+def apply_registry(session: Session, run_id: int, registry: list[dict], *, commit: bool = True) -> int:
+    """Escribe el registry de entidades (reemplazo total del run). Chico e instantáneo."""
+    _set_unlimited_timeout(session)
+    session.execute(text("DELETE FROM dimensionamiento_cliente_entidad WHERE import_run_id = :run"), {"run": run_id})
+    now = dt.datetime.utcnow()
+    rows = [
+        {
+            "run": run_id, "key": int(e["entidad_key"]), "cli": bool(e.get("es_cliente")),
+            "vis": e.get("nombre_visible") or "", "prov": e.get("provincia"),
+            "cuits": json.dumps(e.get("cuits") or []), "nf": int(e.get("n_formas") or 0),
+            "tot": int(e.get("total_registros") or 0), "ts": now,
+        }
+        for e in (registry or [])
+    ]
+    if rows:
+        session.execute(
+            text(
+                "INSERT INTO dimensionamiento_cliente_entidad "
+                "(import_run_id, entidad_key, es_cliente, nombre_visible, provincia, "
+                " cuits, n_formas, total_registros, created_at) "
+                "VALUES (:run, :key, :cli, :vis, :prov, :cuits, :nf, :tot, :ts)"
+            ),
+            rows,
+        )
+    if commit:
+        session.commit()
+    return len(rows)
+
+
+def apply_summary_chunk(session: Session, run_id: int, rows: list, *, commit: bool = True) -> int:
+    """Aplica un LOTE del mapeo cliente_visible→(entidad, es_cliente) al summary, SIN records.
+
+    Idempotente/REANUDABLE: solo toca filas con cliente_entidad_id NULL (re-correr continúa).
+    Commitea por su cuenta. Devuelve filas de summary actualizadas en este lote.
+    """
+    if not rows:
+        return 0
+    _set_unlimited_timeout(session)
+    session.execute(text("DROP TABLE IF EXISTS _dim_vis_map"))
+    session.execute(text("CREATE TEMP TABLE _dim_vis_map (visible TEXT, eid INTEGER, escli BOOLEAN)"))
+    session.execute(
+        text("INSERT INTO _dim_vis_map (visible, eid, escli) VALUES (:visible, :eid, :escli)"),
+        [{"visible": v, "eid": int(k), "escli": bool(c)} for v, k, c in rows],
+    )
+    res = session.execute(
+        text(
+            "UPDATE dimensionamiento_family_monthly_summary "
+            "SET cliente_entidad_id = _dim_vis_map.eid, es_cliente_entidad = _dim_vis_map.escli "
+            "FROM _dim_vis_map "
+            "WHERE dimensionamiento_family_monthly_summary.import_run_id = :run "
+            "AND dimensionamiento_family_monthly_summary.cliente_visible = _dim_vis_map.visible "
+            "AND dimensionamiento_family_monthly_summary.cliente_entidad_id IS NULL"
+        ),
+        {"run": run_id},
+    )
+    session.execute(text("DROP TABLE IF EXISTS _dim_vis_map"))
+    updated = res.rowcount or 0
+    if commit:
+        session.commit()
+    return updated
+
+
+def apply_records_map_chunk(session: Session, run_id: int, kind: str, pairs: list, *, commit: bool = True) -> int:
+    """FASE 2: aplica un LOTE del mapeo a records. kind='cuit' (ancla por CUIT) o 'ori'
+    (huérfanos por nombre original, filas sin CUIT). Reanudable (solo filas NULL)."""
+    if not pairs:
+        return 0
+    _set_unlimited_timeout(session)
+    session.execute(text("DROP TABLE IF EXISTS _dim_rec_map"))
+    session.execute(text("CREATE TEMP TABLE _dim_rec_map (k TEXT, eid INTEGER)"))
+    session.execute(
+        text("INSERT INTO _dim_rec_map (k, eid) VALUES (:k, :eid)"),
+        [{"k": a, "eid": int(b)} for a, b in pairs],
+    )
+    if kind == "cuit":
+        sql = (
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_rec_map.eid "
+            "FROM _dim_rec_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND dimensionamiento_records.cuit = _dim_rec_map.k "
+            "AND dimensionamiento_records.cliente_entidad_id IS NULL"
+        )
+        params = {"run": run_id}
+    else:
+        sql = (
+            "UPDATE dimensionamiento_records SET cliente_entidad_id = _dim_rec_map.eid "
+            "FROM _dim_rec_map "
+            "WHERE dimensionamiento_records.import_run_id = :run "
+            "AND (dimensionamiento_records.cuit IS NULL OR TRIM(dimensionamiento_records.cuit) = '' "
+            "     OR UPPER(TRIM(dimensionamiento_records.cuit)) = :sin) "
+            "AND COALESCE(dimensionamiento_records.cliente_nombre_original, '') = _dim_rec_map.k "
+            "AND dimensionamiento_records.cliente_entidad_id IS NULL"
+        )
+        params = {"run": run_id, "sin": _SIN_DATO}
+    res = session.execute(text(sql), params)
+    session.execute(text("DROP TABLE IF EXISTS _dim_rec_map"))
+    updated = res.rowcount or 0
+    if commit:
+        session.commit()
+    return updated
 
 
 def apply_client_identity(
