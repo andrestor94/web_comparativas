@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 
 from web_comparativas.models import IS_POSTGRES, IS_SQLITE
 
+from .identity import canon as _entity_canon
 from .models import (
+    DimensionamientoClienteEntidad,
     DimensionamientoDashboardSnapshot,
     DimensionamientoFamilyMonthlySummary,
     DimensionamientoImportRun,
@@ -26,7 +28,7 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"__all__", "__todos__", "todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v7"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v8"
 _SUMMARY_REQUIRED_COLUMNS = frozenset(
     {
         "month",
@@ -77,12 +79,16 @@ _SUMMARY_HEALTH_CACHE: dict[int | None, dict] = {}
 _STATUS_CACHE: dict[int | None, dict] = {}
 _TTL_STATUS = 30.0
 
+# Registro de entidades-cliente resueltas por corrida (identity.py), con etiquetas ya
+# desambiguadas. Cache pequeño; se invalida en invalidate_query_cache().
+_ENTITY_REGISTRY_CACHE: dict[int | None, dict[str, Any]] = {}
+
 
 def _make_cache_key(fn_name: str, filters: "DimensionamientoFilters", **extra: Any) -> str:
     """Clave MD5 determinista a partir del nombre de función + filtros + params extra."""
     d = _filters_debug_dict(filters)
     # Normalizar listas para que el orden no genere keys distintas
-    for k in ("clientes", "provincias", "familias", "plataformas",
+    for k in ("clientes", "cliente_entidad_ids", "provincias", "familias", "plataformas",
               "unidades_negocio", "unidades_negocio_excluir", "subunidades_negocio", "resultados"):
         if isinstance(d.get(k), list):
             d[k] = sorted(d[k])
@@ -120,6 +126,7 @@ def invalidate_query_cache() -> None:
     # Resetear también los micro-caches de salud y status
     _SUMMARY_HEALTH_CACHE.clear()
     _STATUS_CACHE.clear()
+    _ENTITY_REGISTRY_CACHE.clear()
     logger.info("[DIM][CACHE] Caché invalidado. %d entradas eliminadas.", count)
 
 
@@ -141,6 +148,10 @@ def _get_date_column(model):
 @dataclass
 class DimensionamientoFilters:
     clientes: list[str] = field(default_factory=list)
+    # Selección de entidades-cliente por id (resolución de identidad). Es la vía canónica
+    # del filtro "Cliente": el desplegable manda entidad_id, el WHERE filtra por
+    # cliente_entidad_id. `clientes` (strings) queda como compat/legacy.
+    cliente_entidad_ids: list[int] = field(default_factory=list)
     provincias: list[str] = field(default_factory=list)
     familias: list[str] = field(default_factory=list)
     plataformas: list[str] = field(default_factory=list)
@@ -158,6 +169,7 @@ class DimensionamientoFilters:
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
     return {
         "clientes": filters.clientes,
+        "cliente_entidad_ids": filters.cliente_entidad_ids,
         "provincias": filters.provincias,
         "familias": filters.familias,
         "plataformas": filters.plataformas,
@@ -188,6 +200,7 @@ def _empty_filter_options() -> dict[str, Any]:
 def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
     return DimensionamientoFilters(
         clientes=list(filters.clientes),
+        cliente_entidad_ids=list(filters.cliente_entidad_ids),
         provincias=list(filters.provincias),
         familias=list(filters.familias),
         plataformas=list(filters.plataformas),
@@ -206,6 +219,7 @@ def _has_active_filters(filters: DimensionamientoFilters) -> bool:
     return any(
         [
             filters.clientes,
+            filters.cliente_entidad_ids,
             filters.provincias,
             filters.familias,
             filters.plataformas,
@@ -725,9 +739,11 @@ def build_filters(
     fecha_desde: dt.date | None = None,
     fecha_hasta: dt.date | None = None,
     is_client: bool | None = None,
+    cliente_entidad_ids: Iterable[int] | None = None,
 ) -> DimensionamientoFilters:
     return DimensionamientoFilters(
         clientes=_normalize_list(clientes),
+        cliente_entidad_ids=[int(x) for x in (cliente_entidad_ids or []) if str(x).strip() != ""],
         provincias=_normalize_list(provincias),
         familias=_normalize_list(familias),
         plataformas=_normalize_list(plataformas),
@@ -747,18 +763,21 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
         if applied_conditions is not None:
             applied_conditions.append(f"import_run_id = {filters.import_run_id}")
     use_direct_match = model is DimensionamientoFamilyMonthlySummary
-    if filters.clientes:
+    # Filtro "Cliente" por ENTIDAD resuelta (vía canónica): trae todas las filas de la
+    # entidad, en todas las plataformas, homologadas y no homologadas. Ambas tablas tienen
+    # cliente_entidad_id.
+    if filters.cliente_entidad_ids:
+        stmt = stmt.where(model.cliente_entidad_id.in_(filters.cliente_entidad_ids))
+        if applied_conditions is not None:
+            applied_conditions.append(f"cliente_entidad_id IN ({len(filters.cliente_entidad_ids)} entidades)")
+    elif filters.clientes:
+        # Compat legacy: selección por string de cliente_visible (una sola forma).
         if use_direct_match:
-            # Tabla resumen: cliente_visible ya contiene el valor correcto para ambos
-            # universos (homologado para is_client=True, original para is_client=False).
             _visible = model.cliente_visible
             stmt = stmt.where(_visible.in_(filters.clientes))
             if applied_conditions is not None:
                 applied_conditions.append(f"cliente_visible IN {filters.clientes}")
         else:
-            # Tabla base: seleccionar la columna correcta según el universo.
-            # Universo "Sí" (is_client=True o None): cliente_nombre_homologado.
-            # Universo "No" (is_client=False):        cliente_visible (=nombre_original).
             if filters.is_client is False:
                 _filter_col = model.cliente_visible
                 col_label = "cliente_visible"
@@ -848,9 +867,20 @@ def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied
                 if applied_conditions is not None:
                     applied_conditions.append(f"resultado_participacion IN {normalized_resultados}")
     if filters.is_client is not None:
-        stmt = stmt.where(model.is_client.is_(filters.is_client))
+        # ¿Cliente? es a nivel ENTIDAD (no fila): una entidad es "Sí" si tiene ≥1 fila
+        # homologada. En el summary usamos la columna denormalizada es_cliente_entidad;
+        # en records, un subquery contra el registry de entidades.
+        if use_direct_match:
+            stmt = stmt.where(model.es_cliente_entidad.is_(filters.is_client))
+        else:
+            _reg_sub = (
+                select(DimensionamientoClienteEntidad.entidad_key)
+                .where(DimensionamientoClienteEntidad.import_run_id == filters.import_run_id)
+                .where(DimensionamientoClienteEntidad.es_cliente.is_(filters.is_client))
+            )
+            stmt = stmt.where(model.cliente_entidad_id.in_(_reg_sub))
         if applied_conditions is not None:
-            applied_conditions.append(f"is_client IS {filters.is_client}")
+            applied_conditions.append(f"es_cliente_entidad IS {filters.is_client}")
     if filters.fecha_desde is not None:
         date_column = _get_date_column(model)
         stmt = stmt.where(date_column >= filters.fecha_desde)
@@ -1360,11 +1390,11 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                 summary_state["min_month"].isoformat(),
                 summary_state["max_month"].isoformat(),
             )
-            # Sin filtros activos: el dropdown Cliente siempre muestra el universo
-            # de clientes reales (is_client=True / Homologados). El filtro ¿Cliente?
-            # no está activo en este path por definición (has_active_filters=False).
+            # Sin filtros activos: el dropdown Cliente lista TODAS las entidades resueltas
+            # (256: [{id,label}]), una por entidad, con etiqueta desambiguada. Misma fuente
+            # y resolución que la card (única fuente de verdad).
             payload = {
-                "clientes": _distinct_summary_clients(session, filters.import_run_id),
+                "clientes": _client_dropdown(session, filters),
                 "provincias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.provincia, filters.import_run_id),
                 "familias": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.familia, filters.import_run_id),
                 "plataformas": _distinct_summary_values(session, DimensionamientoFamilyMonthlySummary.plataforma, filters.import_run_id),
@@ -1407,18 +1437,10 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
 
             if use_summary:
                 s = DimensionamientoFamilyMonthlySummary
-                # Despachar al universe correcto según el filtro ¿Cliente? (is_client):
-                # is_client=True  → fuente: cliente_nombre_homologado (clientes reales)
-                # is_client=False → fuente: cliente_visible de filas no homologadas (no-clientes)
-                # is_client=None  → sin filtro de universo: mostrar solo clientes homologados
-                #                   (universo predeterminado más útil para descobrimiento)
-                if filters.is_client is False:
-                    logger.info("[DIM][FILTERS] client dropdown: universo No (is_client=False), using non-client names")
-                    clientes_payload = _distinct_filtered_summary_non_clients(session, filters)
-                else:
-                    # True o None: mostrar clientes homologados
-                    logger.info("[DIM][FILTERS] client dropdown: universo Sí (is_client=%s), using homologated names", filters.is_client)
-                    clientes_payload = _distinct_filtered_summary_clients(session, filters)
+                # Dropdown Cliente: entidades resueltas presentes bajo los filtros activos,
+                # restringidas por ¿Cliente? (None=256 · Sí=158 · No=98). Fuente única.
+                clientes_payload = _client_dropdown(session, filters)
+                logger.info("[DIM][FILTERS] client dropdown (summary): %d entidades (is_client=%s)", len(clientes_payload), filters.is_client)
                 payload = {
                     "clientes": clientes_payload,
                     "provincias": _distinct_filtered_summary_values(session, s.provincia, filters),
@@ -1430,13 +1452,9 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
                     "date_range": _date_range_payload(min_date, max_date),
                 }
             else:
-                # Tabla base (summary no disponible)
-                if filters.is_client is False:
-                    logger.info("[DIM][FILTERS] client dropdown (base table): universo No, using non-client names")
-                    clientes_payload = _distinct_visible_non_clients(session, filters)
-                else:
-                    logger.info("[DIM][FILTERS] client dropdown (base table): universo Sí, using homologated names")
-                    clientes_payload = _distinct_visible_clients(session, filters)
+                # Tabla base (summary no disponible): misma lógica de entidades resueltas.
+                clientes_payload = _client_dropdown(session, filters)
+                logger.info("[DIM][FILTERS] client dropdown (base table): %d entidades (is_client=%s)", len(clientes_payload), filters.is_client)
                 payload = {
                     "clientes": clientes_payload,
                     "provincias": _distinct_values(session, DimensionamientoRecord.provincia, filters),
@@ -1466,6 +1484,118 @@ def get_filter_options(session: Session, filters: DimensionamientoFilters) -> di
         raise
 
 
+def _entity_registry(session: Session, import_run_id: int | None) -> dict[str, Any]:
+    """Registro de entidades resueltas de la corrida, con etiquetas desambiguadas.
+
+    Cacheado por corrida. Desambiguación cuando dos entidades comparten nombre canónico
+    (ignorando espacios): sufijo por provincia si difieren; si no, por CUIT (últimos 4);
+    huérfana sin CUIT → "(sin CUIT)".
+    """
+    cached = _ENTITY_REGISTRY_CACHE.get(import_run_id)
+    if cached is not None:
+        return cached
+    by_key: dict[int, dict[str, Any]] = {}
+    if import_run_id is not None:
+        rows = session.execute(
+            select(
+                DimensionamientoClienteEntidad.entidad_key,
+                DimensionamientoClienteEntidad.es_cliente,
+                DimensionamientoClienteEntidad.nombre_visible,
+                DimensionamientoClienteEntidad.provincia,
+                DimensionamientoClienteEntidad.cuits,
+            ).where(DimensionamientoClienteEntidad.import_run_id == import_run_id)
+        ).all()
+        for key, es_cli, vis, prov, cuits in rows:
+            try:
+                cuit_list = json.loads(cuits) if cuits else []
+            except (ValueError, TypeError):
+                cuit_list = []
+            by_key[key] = {
+                "key": key,
+                "es_cliente": bool(es_cli),
+                "nombre": vis or "",
+                "provincia": prov,
+                "cuits": cuit_list,
+                "label": vis or "",
+            }
+    # Desambiguación por nombre canónico sin espacios
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in by_key.values():
+        groups[_entity_canon(e["nombre"]).replace(" ", "")].append(e)
+    for grp in groups.values():
+        if len(grp) <= 1:
+            continue
+        def _real_prov(e):
+            p = (e["provincia"] or "").strip()
+            return p if p and p.upper() != "SIN DATO" else ""
+        provs = [_real_prov(e) for e in grp]
+        provs_disambiguate = all(provs) and len(set(provs)) == len(provs)
+        for e in grp:
+            p = _real_prov(e)
+            if provs_disambiguate:
+                e["label"] = f"{e['nombre']} ({p})"
+            elif e["cuits"]:
+                e["label"] = f"{e['nombre']} (CUIT …{str(e['cuits'][0])[-4:]})"
+            elif p:
+                e["label"] = f"{e['nombre']} ({p})"
+            else:
+                e["label"] = f"{e['nombre']} (sin CUIT)"
+    result = {
+        "by_key": by_key,
+        "client_keys": {k for k, e in by_key.items() if e["es_cliente"]},
+        "noclient_keys": {k for k, e in by_key.items() if not e["es_cliente"]},
+    }
+    _ENTITY_REGISTRY_CACHE[import_run_id] = result
+    return result
+
+
+def _present_entity_ids(session: Session, filters: DimensionamientoFilters) -> set[int]:
+    """Ids de entidad presentes bajo los filtros activos, IGNORANDO ¿Cliente?.
+
+    Se ignora is_client para poder computar total/Sí/No de una sola pasada (la
+    clasificación Sí/No sale del registry, no de la fila)."""
+    model = _resolve_aggregate_model(session, "CLIENT_ENTITY", filters.import_run_id)
+    f = _clone_filters(filters)
+    f.is_client = None
+    stmt = _apply_common_filters(
+        select(distinct(model.cliente_entidad_id)).where(model.cliente_entidad_id.isnot(None)),
+        model,
+        f,
+    )
+    return {r for (r,) in session.execute(stmt) if r is not None}
+
+
+def _client_entity_counts(session: Session, filters: DimensionamientoFilters) -> tuple[int, int, int]:
+    """(total, si, no) de entidades-cliente bajo los filtros (Sí/No por registry)."""
+    reg = _entity_registry(session, filters.import_run_id)
+    present = _present_entity_ids(session, filters)
+    si = len(present & reg["client_keys"])
+    no = len(present & reg["noclient_keys"])
+    total = len(present)
+    return total, si, no
+
+
+def _client_dropdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
+    """Opciones del desplegable Cliente: [{id, label}] de entidades presentes bajo los
+    filtros activos (ignorando la propia selección de cliente), restringidas por ¿Cliente?."""
+    reg = _entity_registry(session, filters.import_run_id)
+    f = _clone_filters(filters)
+    f.cliente_entidad_ids = []
+    f.clientes = []
+    present = _present_entity_ids(session, f)
+    if filters.is_client is True:
+        present &= reg["client_keys"]
+    elif filters.is_client is False:
+        present &= reg["noclient_keys"]
+    items = [
+        {"value": k, "label": reg["by_key"][k]["label"]}
+        for k in present
+        if k in reg["by_key"]
+    ]
+    items.sort(key=lambda d: d["label"].upper())
+    return items
+
+
 def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
     filters = _normalize_dashboard_filters(session, filters)
     _ck = _make_cache_key("get_kpis", filters)
@@ -1481,12 +1611,10 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
         applied_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
-            # Tabla de detalle: query única con CASE WHEN para cliente visible
-            _visible = model.cliente_visible
+            # Tabla de detalle: KPIs por fila (los clientes se cuentan por entidad, aparte).
             stmt = _apply_common_filters(
                 select(
                     func.count(model.id),
-                    func.count(distinct(_visible)),
                     func.count(model.id),
                     func.count(distinct(model.familia)),
                     func.count(distinct(model.provincia)),
@@ -1497,10 +1625,9 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
                 applied_conditions,
             )
             _log_query_statement(session, "get_kpis", model, stmt, filters, applied_conditions)
-            total_rows, total_clients, total_records, total_families, total_provincias, total_valorizacion = session.execute(stmt).one()
+            total_rows, total_records, total_families, total_provincias, total_valorizacion = session.execute(stmt).one()
         else:
-            # Tabla resumen: 2 queries rápidas evitan full scan de 400k+ filas
-            # Query 1: totales y familias
+            # Tabla resumen: 1 query para totales/familias (clientes = entidades, aparte).
             main_stmt = _apply_common_filters(
                 select(
                     func.coalesce(func.sum(model.total_registros), 0),
@@ -1514,32 +1641,33 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
             )
             _log_query_statement(session, "get_kpis", model, main_stmt, filters, applied_conditions)
             total_rows, total_families, total_provincias, total_valorizacion = session.execute(main_stmt).one()
-            # Query 2: clientes = TODOS los cliente_visible distintos.
-            # Esta KPI cuenta el universo completo de clientes visibles y debe ser
-            # idéntica al camino detalle (DimensionamientoRecord). NO se fuerza
-            # is_client=True: hacerlo devolvía un subconjunto angosto (p.ej. 159 en
-            # vez de 374) y hacía que el titular de la card cambiara según si el
-            # summary estaba usable o no. El filtro is_client solo se aplica si el
-            # usuario lo pidió explícitamente, vía _apply_common_filters.
-            visible_client = model.cliente_visible
-            base_client_stmt = (
-                select(func.count(distinct(visible_client)))
-                .where(visible_client.isnot(None))
-                .where(visible_client != "")
-            )
-            client_stmt = _apply_common_filters(base_client_stmt, model, filters)
-            total_clients = session.execute(client_stmt).scalar_one()
             total_records = total_rows
+
+        # Clientes = ENTIDADES resueltas (cada entidad cuenta una vez, colapsando plataformas
+        # y formas de escritura). El desglose Sí/No sale del registry; el filtro ¿Cliente?
+        # elige qué número encabeza la card y el desglose muestra la composición completa.
+        total_entities, clientes_si, clientes_no = _client_entity_counts(session, filters)
+        if filters.is_client is True:
+            total_clients = clientes_si
+        elif filters.is_client is False:
+            total_clients = clientes_no
+        else:
+            total_clients = total_entities
 
         payload = {
             "total_rows": int(total_rows or 0),
             "clientes": int(total_clients or 0),
+            "clientes_si": int(clientes_si),
+            "clientes_no": int(clientes_no),
             "renglones": int(total_records or 0),
             "familias": int(total_families or 0),
             "provincias": int(total_provincias or 0),
             "valorizacion": float(total_valorizacion or 0),
         }
-        _log_query_success("get_kpis", started_at, total_rows=payload["total_rows"], clientes=payload["clientes"])
+        _log_query_success(
+            "get_kpis", started_at, total_rows=payload["total_rows"],
+            clientes=payload["clientes"], clientes_si=clientes_si, clientes_no=clientes_no,
+        )
         _cache_set(_ck, payload)
         return payload
     except Exception:
@@ -2355,6 +2483,25 @@ def _get_aggregated_dashboard_bootstrap(
 
     rows = _fetch_summary_rows_for_bootstrap(session, filters)
     payload = _aggregate_bootstrap_from_summary_rows(rows, series_rows=series_rows)
+
+    # La agregación single-pass contaba clientes por cliente_visible (374). El conteo
+    # canónico es por ENTIDAD resuelta: sobreescribimos card + desglose + desplegable
+    # con las MISMAS funciones que usan get_kpis y get_filter_options, para que /kpis y
+    # la vista nunca diverjan.
+    total_entities, clientes_si, clientes_no = _client_entity_counts(session, filters)
+    if filters.is_client is True:
+        headline_clients = clientes_si
+    elif filters.is_client is False:
+        headline_clients = clientes_no
+    else:
+        headline_clients = total_entities
+    payload.setdefault("kpis", {})
+    payload["kpis"]["clientes"] = int(headline_clients)
+    payload["kpis"]["clientes_si"] = int(clientes_si)
+    payload["kpis"]["clientes_no"] = int(clientes_no)
+    payload.setdefault("filters", {})
+    payload["filters"]["clientes"] = _client_dropdown(session, filters)
+
     if include_status:
         payload["status"] = get_status(session, filters.import_run_id)
     payload["meta"] = {

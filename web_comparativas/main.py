@@ -85,6 +85,7 @@ from web_comparativas.migrations import (
     ensure_comparativa_rows_table,
     backfill_comparativa_rows,
     ensure_dimensionamiento_valorizacion_columns,
+    ensure_dimensionamiento_entidad_columns,
     ensure_dimensionamiento_composite_constraints,
     ensure_indicadores_schema_v2,
 )
@@ -201,6 +202,11 @@ def run_startup_migrations_once() -> None:
         ensure_dimensionamiento_valorizacion_columns()
     except Exception as e:
         print(f"[MIGRATION] Warning dimensionamiento valorizacion columns: {e}", flush=True)
+
+    try:
+        ensure_dimensionamiento_entidad_columns()
+    except Exception as e:
+        print(f"[MIGRATION] Warning dimensionamiento entidad columns: {e}", flush=True)
 
     try:
         ensure_dimensionamiento_composite_constraints()

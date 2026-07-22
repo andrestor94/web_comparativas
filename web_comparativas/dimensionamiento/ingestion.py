@@ -785,6 +785,22 @@ def _build_upsert_statement(rows: list[dict[str, Any]]):
     return stmt
 
 
+def _resolve_client_entities_safe(session: Session, run_id: int) -> None:
+    """Corre la resolución de identidad de clientes tras el finalize (paso independiente).
+
+    NO depende de que el rebuild del summary haya ocurrido: mapea las filas de summary
+    existentes por cliente_visible. Defensivo: un fallo acá NO rompe el import (las
+    entidades se pueden re-backfillear después). Ver dimensionamiento/identity.py.
+    """
+    try:
+        from .identity import rebuild_client_entities
+        session.flush()  # asegura que records/summary de esta corrida sean visibles al SQL
+        stats = rebuild_client_entities(session, run_id, commit=False)
+        logger.info("[DIM] resolución de entidades run=%s stats=%s", run_id, stats)
+    except Exception:
+        logger.exception("[DIM] resolución de entidades FALLÓ en finalize run=%s (no bloquea el import)", run_id)
+
+
 def _rebuild_summary_table(session: Session, run_id: int) -> None:
     logger.info("Rebuilding monthly summary table for import_run_id=%s", run_id)
     if IS_POSTGRES:
@@ -1226,6 +1242,7 @@ def _ingest_dimensionamiento_csv_legacy(
             )
 
         _rebuild_summary_table(session, run.id)
+        _resolve_client_entities_safe(session, run.id)
 
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()
@@ -1393,6 +1410,7 @@ def ingest_dimensionamiento_csv(
             )
 
         _rebuild_summary_table(session, run.id)
+        _resolve_client_entities_safe(session, run.id)
 
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()

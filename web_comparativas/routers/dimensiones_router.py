@@ -214,6 +214,7 @@ def _safe_dashboard_response(request: Request, endpoint_name: str, fn, fallback_
 
 def _filters_from_query(
     cliente: list[str] | None = Query(default=None),
+    cliente_entidad_id: list[int] | None = Query(default=None),
     provincia: list[str] | None = Query(default=None),
     familia: list[str] | None = Query(default=None),
     plataforma: list[str] | None = Query(default=None),
@@ -227,6 +228,7 @@ def _filters_from_query(
 ):
     return build_filters(
         clientes=cliente,
+        cliente_entidad_ids=cliente_entidad_id,
         provincias=provincia,
         familias=familia,
         plataformas=plataforma,
@@ -289,9 +291,23 @@ def _payload_int(payload: dict[str, Any] | None, key: str, default: int) -> int:
         return default
 
 
+def _payload_int_list(payload: dict[str, Any] | None, *keys: str) -> list[int] | None:
+    raw = _payload_list(payload, *keys)
+    if not raw:
+        return None
+    out: list[int] = []
+    for v in raw:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out or None
+
+
 def _filters_from_payload(payload: dict[str, Any] | None):
     return build_filters(
         clientes=_payload_list(payload, "cliente", "clientes"),
+        cliente_entidad_ids=_payload_int_list(payload, "cliente_entidad_id", "cliente_entidad_ids"),
         provincias=_payload_list(payload, "provincia", "provincias"),
         familias=_payload_list(payload, "familia", "familias"),
         plataformas=_payload_list(payload, "plataforma", "plataformas"),
@@ -365,6 +381,8 @@ def dimensionamiento_bootstrap(
             "kpis": {
                 "total_rows": 0,
                 "clientes": 0,
+                "clientes_si": 0,
+                "clientes_no": 0,
                 "renglones": 0,
                 "familias": 0,
                 "provincias": 0,
@@ -479,6 +497,8 @@ def dimensionamiento_kpis(
         {
             "total_rows": 0,
             "clientes": 0,
+            "clientes_si": 0,
+            "clientes_no": 0,
             "renglones": 0,
             "familias": 0,
             "provincias": 0,

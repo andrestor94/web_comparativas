@@ -1475,6 +1475,44 @@ def ensure_dimensionamiento_valorizacion_columns():
     print("[MIGRATION] SUCCESS: valorizacion columns schema checks done.", flush=True)
 
 
+def ensure_dimensionamiento_entidad_columns():
+    """Columnas de resolución de identidad de clientes (ver dimensionamiento/identity.py).
+
+    - dimensionamiento_records.cliente_entidad_id
+    - dimensionamiento_family_monthly_summary.cliente_entidad_id / es_cliente_entidad
+
+    La tabla registry `dimensionamiento_cliente_entidad` la crea Base.metadata.create_all
+    (es un modelo ORM nuevo). Acá solo se hacen los ALTER ADD COLUMN no destructivos +
+    índices, idempotentes en SQLite y Postgres. NO se backfillea acá: el poblado corre en
+    el finalize de ingesta / script de backfill (rebuild_client_entities).
+    """
+    print("[MIGRATION] Verificando columnas de identidad de clientes en Dimensionamiento...", flush=True)
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_records ADD COLUMN cliente_entidad_id INTEGER",
+            "dimensionamiento_records.cliente_entidad_id",
+        )
+        _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_family_monthly_summary ADD COLUMN cliente_entidad_id INTEGER",
+            "dimensionamiento_family_monthly_summary.cliente_entidad_id",
+        )
+        _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_family_monthly_summary ADD COLUMN es_cliente_entidad BOOLEAN",
+            "dimensionamiento_family_monthly_summary.es_cliente_entidad",
+        )
+        # Índices (IF NOT EXISTS válido en SQLite y Postgres)
+        for ddl, desc in (
+            ("CREATE INDEX IF NOT EXISTS ix_dim_records_entidad ON dimensionamiento_records (import_run_id, cliente_entidad_id)", "ix_dim_records_entidad"),
+            ("CREATE INDEX IF NOT EXISTS ix_dim_summary_entidad ON dimensionamiento_family_monthly_summary (import_run_id, cliente_entidad_id)", "ix_dim_summary_entidad"),
+            ("CREATE INDEX IF NOT EXISTS ix_dim_summary_es_cliente_entidad ON dimensionamiento_family_monthly_summary (import_run_id, es_cliente_entidad)", "ix_dim_summary_es_cliente_entidad"),
+        ):
+            _add_column_safe(conn, ddl, desc)
+    print("[MIGRATION] SUCCESS: columnas de identidad de clientes verificadas/creadas.", flush=True)
+
+
 def ensure_forecast_effective_month_column():
     """
     Agrega la columna effective_from_month a forecast_user_overrides.

@@ -85,6 +85,10 @@ class DimensionamientoRecord(Base):
     is_identified = Column(Boolean, nullable=False, default=False, index=True)
     is_client = Column(Boolean, nullable=False, default=False, index=True)
 
+    # Resolución de identidad (identity.py): id de entidad canónica dentro de la corrida.
+    # Poblado en el finalize / backfill; NULL en filas aún no resueltas.
+    cliente_entidad_id = Column(Integer, nullable=True, index=True)
+
     import_run_id = Column(
         Integer,
         ForeignKey("dimensionamiento_import_runs.id", ondelete="SET NULL"),
@@ -133,6 +137,10 @@ class DimensionamientoFamilyMonthlySummary(Base):
     resultado_participacion = Column(String(120), nullable=True, index=True)
     is_identified = Column(Boolean, nullable=False, default=False, index=True)
     is_client = Column(Boolean, nullable=False, default=False, index=True)
+    # Resolución de identidad (identity.py) denormalizada en el summary (fast-path del
+    # dashboard, que no tiene cuit/original para resolver por sí solo).
+    cliente_entidad_id = Column(Integer, nullable=True, index=True)
+    es_cliente_entidad = Column(Boolean, nullable=True, index=True)
     total_cantidad = Column(Float, nullable=False, default=0)
     total_valorizacion = Column(Float, nullable=False, default=0)
     total_registros = Column(Integer, nullable=False, default=0)
@@ -212,4 +220,34 @@ class DimensionamientoDashboardSnapshot(Base):
 
     __table_args__ = (
         UniqueConstraint("snapshot_key", "import_run_id", name="uq_dim_dashboard_snapshots_key_run"),
+    )
+
+
+class DimensionamientoClienteEntidad(Base):
+    """Registro de entidades-cliente resueltas (1 fila por entidad por corrida).
+
+    Fuente única de verdad para: card de entidades, desglose Sí/No, filtro ¿Cliente?,
+    desplegable "Cliente" y matcheo del WHERE (vía entidad_key). Ver identity.py.
+    """
+    __tablename__ = "dimensionamiento_cliente_entidad"
+
+    id = Column(Integer, primary_key=True)
+    import_run_id = Column(
+        Integer,
+        ForeignKey("dimensionamiento_import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    entidad_key = Column(Integer, nullable=False)        # id estable dentro de la corrida
+    es_cliente = Column(Boolean, nullable=False, default=False, index=True)
+    nombre_visible = Column(Text, nullable=False)
+    provincia = Column(String(120), nullable=True)       # provincia dominante (desambiguación)
+    cuits = Column(Text, nullable=True)                  # JSON: lista de CUITs del componente
+    n_formas = Column(Integer, nullable=False, default=0)
+    total_registros = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("import_run_id", "entidad_key", name="uq_dim_cliente_entidad_run_key"),
+        Index("ix_dim_cliente_entidad_run_cli", "import_run_id", "es_cliente"),
     )

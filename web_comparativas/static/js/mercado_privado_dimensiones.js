@@ -55,7 +55,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const QUERY_WARN_LENGTH = 7000;
     const POST_URL_LENGTH_THRESHOLD = 1800;
     const POST_ARRAY_LENGTH_THRESHOLD = 50;
-    const MULTI_FILTER_QUERY_KEYS = new Set(['cliente', 'provincia', 'familia', 'unidad_negocio', 'subunidad_negocio', 'plataforma']);
+    // 'cliente_entidad_id' reemplaza a 'cliente': el desplegable manda ids de entidad
+    // resuelta (no strings), para filtrar por cliente_entidad_id en el backend.
+    const MULTI_FILTER_QUERY_KEYS = new Set(['cliente_entidad_id', 'provincia', 'familia', 'unidad_negocio', 'subunidad_negocio', 'plataforma']);
 
     // AbortController activo para cancelar request /bootstrap en vuelo
     let _loadAbortController = null;
@@ -770,7 +772,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rawFechaHasta = dateRangeCtrl.getAppliedMax();
 
         return {
-            cliente:                normalizeMultiSelectParam('cliente', msClient),
+            cliente_entidad_id:     normalizeMultiSelectParam('cliente_entidad_id', msClient),
             provincia:              normalizeMultiSelectParam('provincia', msProvince),
             familia:                normalizeMultiSelectParam('familia', msFamily),
             unidad_negocio:         normalizeMultiSelectParam('unidad_negocio', msUnit),
@@ -1103,7 +1105,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Universo completo (monotónico), no las opciones estrechadas: misma razón que en
         // normalizeMultiSelectParam — evita el colapso accidental de un filtro a "Todos".
         if (key === 'familia' && msFamily) return msFamily.getUniverseValues();
-        if (key === 'cliente' && msClient) return msClient.getUniverseValues();
+        if (key === 'cliente_entidad_id' && msClient) return msClient.getUniverseValues();
         if (key === 'provincia' && msProvince) return msProvince.getUniverseValues();
         if (key === 'unidad_negocio' && msUnit) return msUnit.getUniverseValues();
         if (key === 'subunidad_negocio' && msSubunit) return msSubunit.getUniverseValues();
@@ -1111,7 +1113,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const filters = state.lastBootstrap && state.lastBootstrap.filters ? state.lastBootstrap.filters : {};
         if (key === 'familia') return filters.familias || [];
-        if (key === 'cliente') return filters.clientes || [];
+        if (key === 'cliente_entidad_id') return (filters.clientes || []).map(o => (o && typeof o === 'object') ? o.value : o);
         if (key === 'provincia') return filters.provincias || [];
         if (key === 'unidad_negocio') return filters.unidades_negocio || [];
         if (key === 'subunidad_negocio') return filters.subunidades_negocio || [];
@@ -1126,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
             urlLength,
             queryLength: queryString.length,
             familia: Array.isArray(params.familia) ? params.familia.length : 0,
-            cliente: Array.isArray(params.cliente) ? params.cliente.length : 0,
+            cliente_entidad_id: Array.isArray(params.cliente_entidad_id) ? params.cliente_entidad_id.length : 0,
             provincia: Array.isArray(params.provincia) ? params.provincia.length : 0,
             unidad_negocio: Array.isArray(params.unidad_negocio) ? params.unidad_negocio.length : 0,
             subunidad_negocio: Array.isArray(params.subunidad_negocio) ? params.subunidad_negocio.length : 0,
