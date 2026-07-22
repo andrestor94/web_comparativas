@@ -485,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
         platformsLimpiarBtn: document.getElementById('platformsLimpiarBtn'),
         platformsLabel:     document.getElementById('platformsLabel'),
         kpiClients:  document.getElementById('kpiClients'),
+        kpiClientsBreak: document.getElementById('kpiClientsBreak'),
         kpiRecords:  document.getElementById('kpiRecords'),
         kpiFamilies: document.getElementById('kpiFamilies'),
         kpiProvinces: document.getElementById('kpiProvinces'),
@@ -991,6 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderKpisError() {
         [elements.kpiClients, elements.kpiRecords, elements.kpiFamilies, elements.kpiProvinces, elements.kpiValorizacion]
             .forEach(el => { if (el) el.textContent = '--'; });
+        if (elements.kpiClientsBreak) elements.kpiClientsBreak.textContent = '';
     }
 
     function showCanvasError(canvasId, chartStateKey, msg) {
@@ -1233,6 +1235,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─────────────────────────────────────────────────────────────────────────
     function renderKpis(kpis) {
         elements.kpiClients.textContent  = formatInteger(kpis.clientes || 0);
+        if (elements.kpiClientsBreak) {
+            // Desglose del universo de entidades: clientes (Sí) · no clientes (No).
+            // Respeta los filtros activos igual que el número grande.
+            const si = kpis.clientes_si;
+            const no = kpis.clientes_no;
+            if (typeof si === 'number' && typeof no === 'number') {
+                elements.kpiClientsBreak.textContent = `${formatInteger(si)} clientes · ${formatInteger(no)} no clientes`;
+            } else {
+                elements.kpiClientsBreak.textContent = '';
+            }
+        }
         elements.kpiRecords.textContent  = formatInteger(kpis.renglones || 0);
         elements.kpiFamilies.textContent = formatInteger(kpis.familias || 0);
         if (elements.kpiProvinces) {

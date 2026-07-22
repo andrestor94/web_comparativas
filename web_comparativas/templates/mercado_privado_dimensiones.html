@@ -17,6 +17,8 @@
 #dimensionamientoApp .dim-filter-vista .dim-metric-btn+.dim-metric-btn{margin-left:2px;}
 #dimensionamientoApp .dim-filter-vista .dim-metric-btn.active{background:var(--tech-blue-mid,#1e5c8a);color:#fff;box-shadow:0 4px 10px rgba(30,92,138,.18);}
 #dimensionamientoApp .dim-filter-vista .dim-metric-btn:hover:not(.active){background:rgba(30,92,138,.08);}
+#dimensionamientoApp .kpi-subbreak{margin-top:2px;font-size:.7rem;font-weight:600;line-height:1.1;color:var(--tech-text-muted,#6b7280);white-space:nowrap;}
+#dimensionamientoApp .kpi-subbreak:empty{display:none;}
 </style>
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
@@ -263,7 +265,8 @@
                 <div class="kpi-icon dim-kpi-icon"><i class="bi bi-people"></i></div>
                 <div class="kpi-content">
                     <div class="kpi-value" id="kpiClients">-</div>
-                    <div class="kpi-label">Clientes</div>
+                    <div class="kpi-label">Entidades</div>
+                    <div class="kpi-subbreak" id="kpiClientsBreak"></div>
                 </div>
             </div>
             <div class="tech-card kpi-modern dim-kpi-card">
@@ -378,5 +381,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v28"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v29"></script>
 {% endblock %}
