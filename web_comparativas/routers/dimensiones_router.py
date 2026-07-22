@@ -1407,10 +1407,49 @@ def admin_estado_identidad(
     except Exception:
         indices = []
 
+    # Verdad-de-esquema para las tablas de identidad: índices del summary + presencia real
+    # de columnas. Sin esto no se puede distinguir "el apply nunca corrió" de "el esquema
+    # nunca se creó" (los ALTER de arranque se salteaban por InFailedSqlTransaction).
+    try:
+        if IS_POSTGRES:
+            idx_summary = db.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE tablename = 'dimensionamiento_family_monthly_summary' ORDER BY indexname"
+            )).scalars().all()
+        else:
+            idx_summary = db.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='dimensionamiento_family_monthly_summary' AND name IS NOT NULL ORDER BY name"
+            )).scalars().all()
+        indices_summary = [i for i in idx_summary if i]
+    except Exception:
+        indices_summary = []
+
+    def _col_exists(table: str, col: str) -> bool:
+        try:
+            if IS_POSTGRES:
+                return db.execute(text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = :t AND column_name = :c LIMIT 1"
+                ), {"t": table, "c": col}).scalar() is not None
+            rows = db.execute(text(f"PRAGMA table_info({table})")).all()
+            return any(r[1] == col for r in rows)
+        except Exception:
+            return False
+
+    esquema_identidad = {
+        "records.cliente_entidad_id": _col_exists("dimensionamiento_records", "cliente_entidad_id"),
+        "summary.cliente_entidad_id": _col_exists("dimensionamiento_family_monthly_summary", "cliente_entidad_id"),
+        "summary.es_cliente_entidad": _col_exists("dimensionamiento_family_monthly_summary", "es_cliente_entidad"),
+        "ix_dim_summary_entidad": "ix_dim_summary_entidad" in indices_summary,
+        "ix_dim_summary_es_cliente_entidad": "ix_dim_summary_es_cliente_entidad" in indices_summary,
+    }
+
     active_run = latest_success_run_id(db)
     if active_run is None:
         return {"ok": True, "run_activo": None, "registry_poblado": False,
-                "modo_card": "sin_datos", "entidades": 0, "indices_records": indices}
+                "modo_card": "sin_datos", "entidades": 0, "indices_records": indices,
+                "indices_summary": indices_summary, "esquema_identidad": esquema_identidad}
     reg = db.execute(
         text("SELECT COUNT(*), COALESCE(SUM(CASE WHEN es_cliente THEN 1 ELSE 0 END),0), "
              "MAX(created_at) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
@@ -1450,6 +1489,8 @@ def admin_estado_identidad(
         "ultimo_error": run_summary.get("identidad_ultimo_error"),
         "ultimo_intento": run_summary.get("identidad_ultimo_intento"),
         "indices_records": indices,
+        "indices_summary": indices_summary,
+        "esquema_identidad": esquema_identidad,
     }
 
 

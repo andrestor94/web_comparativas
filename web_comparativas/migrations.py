@@ -1,24 +1,49 @@
 import datetime as dt
+import logging
+import traceback
 from pathlib import Path
 from sqlalchemy import inspect, text
 from web_comparativas.models import engine, IS_SQLITE, ForecastUserOverride
 
+logger = logging.getLogger(__name__)
 
-def _add_column_safe(conn, ddl: str, description: str):
-    """
-    Ejecuta un ALTER TABLE. Ignora silenciosamente si la columna ya existe.
+
+def _add_column_safe(conn, ddl: str, description: str) -> bool:
+    """Ejecuta UNA sentencia DDL (ALTER TABLE ADD COLUMN, CREATE INDEX, ...) AISLADA.
+
+    En Postgres una sentencia fallida aborta TODA la transacción: las siguientes caen
+    con InFailedSqlTransaction. Atrapar la excepción en Python NO desenvenena la
+    transacción. Por eso cada sentencia corre dentro de un SAVEPOINT (begin_nested): si
+    falla, se hace ROLLBACK TO SAVEPOINT y la transacción EXTERIOR sigue sana para las
+    sentencias que vengan después. (En SQLite el SAVEPOINT también funciona.)
+
+    Devuelve True si se aplicó, o si el objeto ya existía / la tabla aún no existe (ambos
+    benignos e idempotentes). Devuelve False ante un error REAL, que se hace VISIBLE con
+    su traceback completo — nunca más un fallo tragado como "advertencia" ni un SUCCESS
+    mentiroso aguas arriba.
+
+    Requiere que `conn` tenga una transacción activa (viene de `engine.begin()`).
     """
     try:
-        conn.execute(text(ddl))
-        print(f"[MIGRATION] {description}: columna/tabla agregada.", flush=True)
+        with conn.begin_nested():
+            conn.execute(text(ddl))
+        print(f"[MIGRATION] {description}: aplicado.", flush=True)
+        return True
     except Exception as e:
+        # El SAVEPOINT ya revirtió: la transacción exterior quedó utilizable.
         msg = str(e).lower()
         if "already exists" in msg or "duplicate column" in msg or "duplicate object" in msg:
-            print(f"[MIGRATION] {description}: ya existe. (OK)", flush=True)
-        elif "no such table" in msg or "undefined table" in msg or "does not exist" in msg:
-            print(f"[MIGRATION] {description}: tabla no existe aÃºn. (Saltando)", flush=True)
-        else:
-            print(f"[MIGRATION] {description}: advertencia â€“ {e}", flush=True)
+            print(f"[MIGRATION] {description}: ya existe. (OK, idempotente)", flush=True)
+            return True
+        if ("no such table" in msg or "undefined table" in msg
+                or ("relation" in msg and "does not exist" in msg)):
+            print(f"[MIGRATION] {description}: la tabla no existe aun. (Saltando)", flush=True)
+            return True
+        # Error REAL: hacerlo visible con traceback. NO es benigno.
+        print(f"[MIGRATION] {description}: ERROR REAL -> {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
+        logger.error("[MIGRATION] %s FALLO REAL: %s", description, e, exc_info=True)
+        return False
 
 
 def ensure_access_scope_column():
@@ -1504,18 +1529,22 @@ def ensure_dimensionamiento_entidad_columns():
     el finalize de ingesta / script de backfill (rebuild_client_entities).
     """
     print("[MIGRATION] Verificando columnas de identidad de clientes en Dimensionamiento...", flush=True)
+    # Cada _add_column_safe corre en su propio SAVEPOINT: un "already exists" (benigno) ya
+    # NO envenena la transacción ni arrastra a las siguientes con InFailedSqlTransaction.
+    # `ok` queda False solo ante un error REAL (no ante idempotencia).
+    ok = True
     with engine.begin() as conn:
-        _add_column_safe(
+        ok &= _add_column_safe(
             conn,
             "ALTER TABLE dimensionamiento_records ADD COLUMN cliente_entidad_id INTEGER",
             "dimensionamiento_records.cliente_entidad_id",
         )
-        _add_column_safe(
+        ok &= _add_column_safe(
             conn,
             "ALTER TABLE dimensionamiento_family_monthly_summary ADD COLUMN cliente_entidad_id INTEGER",
             "dimensionamiento_family_monthly_summary.cliente_entidad_id",
         )
-        _add_column_safe(
+        ok &= _add_column_safe(
             conn,
             "ALTER TABLE dimensionamiento_family_monthly_summary ADD COLUMN es_cliente_entidad BOOLEAN",
             "dimensionamiento_family_monthly_summary.es_cliente_entidad",
@@ -1531,8 +1560,12 @@ def ensure_dimensionamiento_entidad_columns():
             ("CREATE INDEX IF NOT EXISTS ix_dim_records_run_original ON dimensionamiento_records (import_run_id, cliente_nombre_original)", "ix_dim_records_run_original"),
             ("CREATE INDEX IF NOT EXISTS ix_dim_records_run_visible ON dimensionamiento_records (import_run_id, cliente_visible)", "ix_dim_records_run_visible"),
         ):
-            _add_column_safe(conn, ddl, desc)
-    print("[MIGRATION] SUCCESS: columnas de identidad de clientes verificadas/creadas.", flush=True)
+            ok &= _add_column_safe(conn, ddl, desc)
+    if ok:
+        print("[MIGRATION] SUCCESS: columnas/indices de identidad verificados/creados (todo OK o ya existente).", flush=True)
+    else:
+        print("[MIGRATION] ATENCION: alguna sentencia de identidad fallo con ERROR REAL (ver traceback arriba). "
+              "El esquema de identidad puede estar incompleto — NO asumir que quedo aplicado.", flush=True)
 
 
 def ensure_dimensionamiento_entidad_backfill():
