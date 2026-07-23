@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Match - Mercado Privado{% endblock %}
+{% block title %}Match - {{ 'Mercado Público' if market_context == 'public' else 'Mercado Privado' }}{% endblock %}
 
 {% block content %}
 <style>

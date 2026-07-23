@@ -48,7 +48,27 @@ router = APIRouter(prefix="/api/mercado-privado/match", tags=["match"])
 logger = logging.getLogger("wc.match.api")
 
 # Misma key de permiso que la pestaña del sidebar (gobierna acceso vía can_access).
-AllowedUser = Depends(require_perm("mercado_privado.match"))
+_perm_match = require_perm("mercado_privado.match")
+AllowedUser = Depends(_perm_match)
+
+# Gate de ESCRITURA: regla vigente del proyecto — en visualización Gerente se iguala a
+# Auditor, pero en escritura Gerente queda AFUERA (igual que auditor/visor, solo lectura).
+# Escriben decisiones: admin, analista y supervisor.
+_WRITE_ROLES = {"admin", "administrator", "administrador", "analista", "analyst", "supervisor"}
+
+
+def _require_match_write(request: Request):
+    user = _perm_match(request)
+    role = (getattr(user, "role", "") or "").strip().lower()
+    if role not in _WRITE_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo lectura: tu rol no puede registrar decisiones de Match.",
+        )
+    return user
+
+
+AllowedWriter = Depends(_require_match_write)
 
 
 def get_db(request: Request) -> Session:
@@ -243,7 +263,7 @@ def _run_id_vigente(db: Session) -> int | None:
 @router.post("/homologar")
 def match_homologar(
     request: Request,
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
     body: HomologarBody = Body(...),
 ):
@@ -279,7 +299,7 @@ def match_homologar(
 @router.post("/descartar")
 def match_descartar(
     request: Request,
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
     body: DescartarBody = Body(...),
 ):
@@ -316,7 +336,7 @@ class RevertirBody(BaseModel):
 
 @router.post("/revertir")
 def match_revertir(
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
     body: RevertirBody = Body(...),
 ):
@@ -400,7 +420,7 @@ def _marcar_eliminado(db: Session, producto: str, usuario: str) -> bool:
 
 @router.post("/papelera/eliminar")
 def match_papelera_eliminar(
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
     body: PapeleraEliminarBody = Body(...),
 ):
@@ -420,7 +440,7 @@ def match_papelera_eliminar(
 
 @router.post("/papelera/vaciar")
 def match_papelera_vaciar(
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
 ):
     """Vacía la papelera: 'papelera_eliminado' para todo lo que hoy figura en ella.
@@ -435,3 +455,200 @@ def match_papelera_vaciar(
     db.commit()
     logger.info("[MATCH][API] papelera/vaciar por=%s eliminados=%s", usuario, n)
     return {"ok": True, "eliminados": n}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Push de datos desde local (patrón push_identity / import por chunks de
+# Dimensionamiento): TODO se calcula/importa en la PC local y viaja como DATO
+# por lotes chicos; acá SOLO se aplica y commitea por lote. Protegido por el
+# MISMO token de import de Dimensionamiento (X-Import-Token). NO se gatea por
+# MATCH_ENABLED: el push debe poder correr ANTES de encender el módulo.
+# ──────────────────────────────────────────────────────────────────────────────
+
+from typing import Any  # noqa: E402
+
+from sqlalchemy import func, text  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # noqa: E402
+
+from web_comparativas.models import IS_SQLITE  # noqa: E402
+from web_comparativas.match.models import (  # noqa: E402
+    MATCH_RUN_APPROVED,
+    MATCH_RUN_PENDING,
+    MatchDemandaDesc,
+    MatchImportRun,
+    MatchNegocioMap,
+    MatchPropuesta,
+)
+from web_comparativas.routers.dimensiones_router import verify_import_token  # noqa: E402
+
+
+def _insert_ignore(model, constraint: str | None = None):
+    """INSERT idempotente portable: reintentos tras timeout no rompen con UniqueViolation."""
+    if IS_SQLITE:
+        return sqlite_insert(model).on_conflict_do_nothing()
+    if constraint:
+        return pg_insert(model).on_conflict_do_nothing(constraint=constraint)
+    return pg_insert(model).on_conflict_do_nothing()
+
+
+@router.get("/admin/estado")
+def match_admin_estado(
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Estado verificable por curl (runbook): corridas, conteos de propuestas de la
+    corrida vigente y tamaño de las tablas precalculadas."""
+    vigente = latest_approved_run(db)
+    pendientes = db.execute(
+        select(MatchImportRun.id, MatchImportRun.status, MatchImportRun.rows_inserted)
+        .where(MatchImportRun.status == MATCH_RUN_PENDING)
+        .order_by(MatchImportRun.id.desc()).limit(5)
+    ).all()
+    propuestas_vigente = 0
+    if vigente is not None:
+        propuestas_vigente = int(db.execute(
+            select(func.count(MatchPropuesta.id))
+            .where(MatchPropuesta.import_run_id == vigente.id)
+        ).scalar_one() or 0)
+    negocio_map = int(db.execute(select(func.count(MatchNegocioMap.codigo))).scalar_one() or 0)
+    demanda_desc = int(db.execute(select(func.count(MatchDemandaDesc.desc_norm))).scalar_one() or 0)
+    return {
+        "ok": True,
+        "match_enabled": MATCH_ENABLED(),
+        "run_vigente": vigente.id if vigente else None,
+        "run_vigente_filas": propuestas_vigente,
+        "runs_pendientes": [{"id": r.id, "status": r.status, "rows": r.rows_inserted} for r in pendientes],
+        "match_negocio_map": negocio_map,
+        "match_demanda_desc": demanda_desc,
+    }
+
+
+@router.post("/admin/apply-data-chunk")
+def match_admin_apply_data_chunk(
+    payload: dict[str, Any] = Body(...),
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Aplica UN LOTE de datos de Match calculados en local. Síncrono, commit por lote,
+    reanudable (inserts idempotentes por UNIQUE/PK). kind:
+      - 'start'        : crea corrida pending_approval -> {run_id}. Con payload.resume_run
+                         devuelve esa corrida sin crear una nueva (reanudación).
+      - 'propuestas'   : payload.run_id + payload.rows [dicts de match_propuestas].
+      - 'negocio-map'  : payload.rows [[codigo, negocio, subnegocio],...]. payload.reset
+                         (solo en el 1er lote) vacía la tabla antes (es chica).
+      - 'demanda-desc' : payload.rows [[desc_norm, renglones, clientes],...]. Ídem reset.
+      - 'finalize'     : payload.run_id + counts -> cierra la corrida y la APRUEBA
+                         (pasa a vigente). Devuelve el estado.
+    """
+    kind = payload.get("kind")
+    try:
+        if kind == "start":
+            resume = payload.get("resume_run")
+            if resume:
+                run = db.get(MatchImportRun, int(resume))
+                if run is None:
+                    raise HTTPException(status_code=404, detail=f"resume_run {resume} no existe.")
+                return {"ok": True, "kind": kind, "run_id": run.id, "resumed": True}
+            run = MatchImportRun(
+                source_path=str(payload.get("source_path") or "push:local"),
+                status=MATCH_RUN_PENDING,
+                started_at=dt.datetime.utcnow(),
+            )
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            logger.info("[MATCH][PUSH] start run_id=%s", run.id)
+            return {"ok": True, "kind": kind, "run_id": run.id, "resumed": False}
+
+        elif kind == "propuestas":
+            run_id = int(payload.get("run_id"))
+            rows = payload.get("rows") or []
+            now = dt.datetime.utcnow()
+            mappings = [{
+                "import_run_id": run_id,
+                "producto_plataforma": r.get("producto_plataforma"),
+                "nivel_confianza": r.get("nivel_confianza"),
+                "score_mejor": r.get("score_mejor"),
+                "candidato_codigo": r.get("candidato_codigo"),
+                "candidato_descripcion": r.get("candidato_descripcion"),
+                "score_tfidf": r.get("score_tfidf"),
+                "score_fuzzy": r.get("score_fuzzy"),
+                "score_pharma": r.get("score_pharma"),
+                "created_at": now,
+            } for r in rows if r.get("producto_plataforma")]
+            if mappings:
+                db.execute(_insert_ignore(MatchPropuesta, "uq_match_propuestas_run_prod_cand"), mappings)
+            db.commit()
+            total = int(db.execute(
+                select(func.count(MatchPropuesta.id))
+                .where(MatchPropuesta.import_run_id == run_id)
+            ).scalar_one() or 0)
+            return {"ok": True, "kind": kind, "run_id": run_id, "insertadas": len(mappings), "total_run": total}
+
+        elif kind == "negocio-map":
+            rows = payload.get("rows") or []
+            if payload.get("reset"):
+                borrados = db.execute(text("DELETE FROM match_negocio_map")).rowcount
+                logger.info("[MATCH][PUSH] negocio-map reset (borrados=%s)", borrados)
+            mappings = [{"codigo": str(c).strip(), "negocio": n, "subnegocio": s}
+                        for c, n, s in rows if c is not None and str(c).strip()]
+            if mappings:
+                db.execute(_insert_ignore(MatchNegocioMap), mappings)
+            db.commit()
+            total = int(db.execute(select(func.count(MatchNegocioMap.codigo))).scalar_one() or 0)
+            return {"ok": True, "kind": kind, "insertadas": len(mappings), "total": total}
+
+        elif kind == "demanda-desc":
+            rows = payload.get("rows") or []
+            if payload.get("reset"):
+                borrados = db.execute(text("DELETE FROM match_demanda_desc")).rowcount
+                logger.info("[MATCH][PUSH] demanda-desc reset (borrados=%s)", borrados)
+            mappings = [{"desc_norm": k, "renglones": int(r or 0), "clientes": int(c or 0)}
+                        for k, r, c in rows if k]
+            if mappings:
+                db.execute(_insert_ignore(MatchDemandaDesc), mappings)
+            db.commit()
+            total = int(db.execute(select(func.count(MatchDemandaDesc.desc_norm))).scalar_one() or 0)
+            return {"ok": True, "kind": kind, "insertadas": len(mappings), "total": total}
+
+        elif kind == "finalize":
+            run_id = int(payload.get("run_id"))
+            run = db.get(MatchImportRun, run_id)
+            if run is None:
+                raise HTTPException(status_code=404, detail=f"run {run_id} no existe.")
+            total = int(db.execute(
+                select(func.count(MatchPropuesta.id))
+                .where(MatchPropuesta.import_run_id == run_id)
+            ).scalar_one() or 0)
+            esperadas = payload.get("rows_esperadas")
+            if esperadas is not None and int(esperadas) != total:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Conteo no coincide: prod tiene {total} filas y local esperaba {esperadas}. "
+                           f"Reanudá el push (mismo comando con --resume-run {run_id}) antes de aprobar.",
+                )
+            run.rows_inserted = total
+            run.articulos_distintos = int(db.execute(
+                select(func.count(func.distinct(MatchPropuesta.candidato_codigo)))
+                .where(MatchPropuesta.import_run_id == run_id)
+            ).scalar_one() or 0)
+            if payload.get("counts_by_nivel"):
+                run.counts_by_nivel = payload["counts_by_nivel"]
+            run.finished_at = dt.datetime.utcnow()
+            run.status = MATCH_RUN_APPROVED
+            run.approved_at = dt.datetime.utcnow()
+            run.approved_by = "push:push_match_data"
+            db.commit()
+            logger.info("[MATCH][PUSH] finalize run=%s filas=%s (APPROVED)", run_id, total)
+            return {"ok": True, "kind": kind, "run_id": run_id, "filas": total,
+                    "articulos": run.articulos_distintos, "status": run.status}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"kind inválido: {kind!r}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[MATCH][PUSH] apply-data-chunk kind=%s FALLO", kind)
+        raise HTTPException(status_code=500, detail=f"Error en lote {kind}: {exc}")
