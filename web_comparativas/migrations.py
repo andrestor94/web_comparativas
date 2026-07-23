@@ -1741,22 +1741,52 @@ def ensure_dimensionamiento_composite_constraints():
         print(f"[MIGRATION] Error en records composite constraint: {e}", flush=True)
 
     # 2. dimensionamiento_family_monthly_summary
-    # La vieja constraint uq_dim_family_monthly_summary no incluia import_run_id.
-    # Vamos a recrearla siempre para asegurar que tenga las columnas correctas.
+    # ANTES este bloque dropeaba y recreaba la constraint EN CADA ARRANQUE ("recrearla
+    # siempre"). En prod el ADD CONSTRAINT construye el indice unico sobre toda la tabla
+    # y muere por statement_timeout; como DROP+ADD iban en la MISMA transaccion, el
+    # rollback restauraba la constraint vieja y el ciclo se repetia en cada arranque.
+    # Ahora: introspeccion primero. Si existe, NUNCA se recrea en el arranque (si su
+    # definicion difiere, eso es una operacion deliberada via el endpoint admin
+    # rebuild-summary-constraint). Solo se crea si NO existe (base nueva).
+    desired_cols = {
+        "month", "plataforma", "cliente_nombre_homologado", "cliente_visible",
+        "provincia", "familia", "unidad_negocio", "subunidad_negocio",
+        "resultado_participacion", "is_identified", "is_client", "import_run_id",
+    }
     try:
         with engine.begin() as conn:
-            conn.execute(text(
-                "ALTER TABLE dimensionamiento_family_monthly_summary DROP CONSTRAINT IF EXISTS uq_dim_family_monthly_summary"
-            ))
-            conn.execute(text(
-                "ALTER TABLE dimensionamiento_family_monthly_summary ADD CONSTRAINT uq_dim_family_monthly_summary UNIQUE ("
-                "month, plataforma, cliente_nombre_homologado, cliente_visible, provincia, familia, "
-                "unidad_negocio, subunidad_negocio, resultado_participacion, is_identified, is_client, import_run_id"
-                ")"
-            ))
-            print("[MIGRATION] Restriccion uq_dim_family_monthly_summary actualizada en summary.", flush=True)
+            existing_cols = conn.execute(text(
+                "SELECT a.attname FROM pg_constraint c "
+                "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+                "WHERE c.conname = 'uq_dim_family_monthly_summary' "
+                "AND c.conrelid = 'dimensionamiento_family_monthly_summary'::regclass "
+                "ORDER BY k.ord"
+            )).scalars().all()
+        if existing_cols:
+            if set(existing_cols) == desired_cols:
+                print("[MIGRATION] uq_dim_family_monthly_summary ya existe con las 12 columnas esperadas. (OK, skip)", flush=True)
+            else:
+                print(
+                    "[MIGRATION][WARN] uq_dim_family_monthly_summary existe con columnas "
+                    f"{list(existing_cols)} (distintas de las 12 esperadas). NO se recrea en el "
+                    "arranque (timeoutea). Si hace falta alinearla, usar el endpoint admin "
+                    "POST /admin/rebuild-summary-constraint (indice CONCURRENTLY + swap).",
+                    flush=True,
+                )
+        else:
+            with engine.begin() as conn:
+                _add_column_safe(
+                    conn,
+                    "ALTER TABLE dimensionamiento_family_monthly_summary ADD CONSTRAINT uq_dim_family_monthly_summary UNIQUE ("
+                    "month, plataforma, cliente_nombre_homologado, cliente_visible, provincia, familia, "
+                    "unidad_negocio, subunidad_negocio, resultado_participacion, is_identified, is_client, import_run_id"
+                    ")",
+                    "Constraint uq_dim_family_monthly_summary (creacion inicial)",
+                )
     except Exception as e:
-        print(f"[MIGRATION] Error al actualizar uq_dim_family_monthly_summary: {e}", flush=True)
+        print(f"[MIGRATION] Error al verificar uq_dim_family_monthly_summary: {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
 
     # 3. dimensionamiento_dashboard_snapshots
     # Diagnostico previo: loguear indices y constraints actuales para auditar.

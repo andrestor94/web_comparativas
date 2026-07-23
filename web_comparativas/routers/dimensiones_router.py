@@ -1425,6 +1425,23 @@ def admin_estado_identidad(
     except Exception:
         indices_summary = []
 
+    # Columnas REALES de la constraint uq_dim_family_monthly_summary (Postgres): permite
+    # verificar por curl si la definición de prod coincide con las 12 columnas del modelo,
+    # sin consola de base. En SQLite no aplica (autoindex de create_all, siempre alineado).
+    constraint_summary_cols: list[str] | None = None
+    if IS_POSTGRES:
+        try:
+            constraint_summary_cols = db.execute(text(
+                "SELECT a.attname FROM pg_constraint c "
+                "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+                "WHERE c.conname = 'uq_dim_family_monthly_summary' "
+                "AND c.conrelid = 'dimensionamiento_family_monthly_summary'::regclass "
+                "ORDER BY k.ord"
+            )).scalars().all() or None
+        except Exception:
+            constraint_summary_cols = None
+
     def _col_exists(table: str, col: str) -> bool:
         try:
             if IS_POSTGRES:
@@ -1449,7 +1466,8 @@ def admin_estado_identidad(
     if active_run is None:
         return {"ok": True, "run_activo": None, "registry_poblado": False,
                 "modo_card": "sin_datos", "entidades": 0, "indices_records": indices,
-                "indices_summary": indices_summary, "esquema_identidad": esquema_identidad}
+                "indices_summary": indices_summary, "esquema_identidad": esquema_identidad,
+                "constraint_summary_cols": constraint_summary_cols}
     reg = db.execute(
         text("SELECT COUNT(*), COALESCE(SUM(CASE WHEN es_cliente THEN 1 ELSE 0 END),0), "
              "MAX(created_at) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
@@ -1491,7 +1509,82 @@ def admin_estado_identidad(
         "indices_records": indices,
         "indices_summary": indices_summary,
         "esquema_identidad": esquema_identidad,
+        "constraint_summary_cols": constraint_summary_cols,
     }
+
+
+_SUMMARY_UQ_COLS = [
+    "month", "plataforma", "cliente_nombre_homologado", "cliente_visible",
+    "provincia", "familia", "unidad_negocio", "subunidad_negocio",
+    "resultado_participacion", "is_identified", "is_client", "import_run_id",
+]
+
+
+@router.post("/admin/rebuild-summary-constraint")
+def admin_rebuild_summary_constraint(
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Alinea uq_dim_family_monthly_summary con las 12 columnas del modelo — operación
+    ÚNICA y DELIBERADA (nunca en el arranque, donde timeoutea y no se puede supervisar).
+
+    Estrategia sin lock largo: CREATE UNIQUE INDEX CONCURRENTLY (no bloquea lecturas ni
+    escrituras) en sesión autocommit con statement_timeout=0, y después un swap atómico
+    corto: DROP CONSTRAINT vieja + ADD CONSTRAINT ... USING INDEX. Si la constraint ya
+    tiene las 12 columnas, no hace nada (idempotente).
+    """
+    if not IS_POSTGRES:
+        return {"ok": True, "skipped": "SQLite: la constraint la define create_all, no aplica."}
+
+    def _current_cols() -> list[str]:
+        return db.execute(text(
+            "SELECT a.attname FROM pg_constraint c "
+            "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conname = 'uq_dim_family_monthly_summary' "
+            "AND c.conrelid = 'dimensionamiento_family_monthly_summary'::regclass "
+            "ORDER BY k.ord"
+        )).scalars().all()
+
+    cols_before = _current_cols()
+    if set(cols_before) == set(_SUMMARY_UQ_COLS):
+        return {"ok": True, "rebuilt": False, "detail": "La constraint ya tiene las 12 columnas esperadas.",
+                "cols": cols_before}
+
+    from web_comparativas.models import engine
+    idx_tmp = "uq_dim_family_monthly_summary_rebuild"
+    col_list = ", ".join(_SUMMARY_UQ_COLS)
+    try:
+        # Fase 1: índice único nuevo, CONCURRENTLY (requiere autocommit, fuera de tx).
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as raw:
+            raw.execute(text("SET statement_timeout = 0"))
+            # Limpia un residuo inválido de un intento anterior interrumpido.
+            raw.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {idx_tmp}"))
+            logger.info("[DIM][CONSTRAINT] Creando índice único CONCURRENTLY (%s)...", idx_tmp)
+            raw.execute(text(
+                f"CREATE UNIQUE INDEX CONCURRENTLY {idx_tmp} "
+                f"ON dimensionamiento_family_monthly_summary ({col_list})"
+            ))
+        # Fase 2: swap atómico corto (lock breve, sin rebuild dentro del lock).
+        db.execute(text("SET LOCAL statement_timeout = 0"))
+        db.execute(text(
+            "ALTER TABLE dimensionamiento_family_monthly_summary "
+            "DROP CONSTRAINT IF EXISTS uq_dim_family_monthly_summary"
+        ))
+        db.execute(text(
+            "ALTER TABLE dimensionamiento_family_monthly_summary "
+            f"ADD CONSTRAINT uq_dim_family_monthly_summary UNIQUE USING INDEX {idx_tmp}"
+        ))
+        db.commit()
+        cols_after = _current_cols()
+        logger.info("[DIM][CONSTRAINT] uq_dim_family_monthly_summary reconstruida: %s -> %s",
+                    cols_before, cols_after)
+        return {"ok": True, "rebuilt": True, "cols_before": cols_before, "cols_after": cols_after}
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[DIM][CONSTRAINT] rebuild de uq_dim_family_monthly_summary FALLO")
+        raise HTTPException(status_code=500, detail=f"Rebuild falló (nada quedó a medias que bloquee: "
+                                                    f"un índice temporal inválido se limpia solo al reintentar): {exc}")
 
 
 @router.post("/admin/apply-identity-chunk")
