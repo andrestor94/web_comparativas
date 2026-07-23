@@ -712,6 +712,33 @@ except Exception as e:
 from web_comparativas.legacy_routes import router as legacy_router
 app.include_router(legacy_router)
 
+# ── Globals Jinja compartidos en TODAS las instancias de Jinja2Templates ──────
+# base.html usa match_enabled() en el sidebar, pero cada módulo con vistas crea SU
+# PROPIA instancia de Jinja2Templates (8 al momento de escribir esto): registrar el
+# global solo en main/legacy dejaba a las demás (pliegos, forecast, sic, ...) con
+# UndefinedError → 500 al renderizar cualquier página con ese sidebar. Acá se
+# registra sobre todas, después de que todos los routers quedaron importados.
+def _register_shared_template_globals() -> None:
+    import web_comparativas.api_comments as _m_comments
+    import web_comparativas.legacy_routes as _m_legacy
+    import web_comparativas.routers.forecast_router as _m_forecast
+    import web_comparativas.routers.notifications_router as _m_notif
+    import web_comparativas.routers.pliegos_router as _m_pliegos
+    import web_comparativas.routers.sic_router as _m_sic
+    mods = [_m_comments, _m_legacy, _m_forecast, _m_notif, _m_pliegos, _m_sic]
+    try:
+        import web_comparativas.routers.indicadores_router as _m_ind
+        mods.append(_m_ind)
+    except Exception:
+        pass  # módulo opcional (ver registro resiliente de indicadores_router)
+    for _mod in mods:
+        tpl = getattr(_mod, "templates", None)
+        if tpl is not None:
+            tpl.env.globals.setdefault("match_enabled", _match_enabled_tpl)
+
+
+_register_shared_template_globals()
+
 # === CLIENTES (LAZY LOADING FIX) ===
 _clientes_index_cache = None
 
