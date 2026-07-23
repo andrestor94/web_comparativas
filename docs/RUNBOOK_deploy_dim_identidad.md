@@ -1,5 +1,10 @@
 # Runbook — Deploy resolución de identidad de clientes (Dimensionamiento)
 
+> ⚠️ **DESACTUALIZADO (jul 2026):** el endpoint `resolve-entities` de este runbook devuelve
+> 410 y el backfill de arranque ya no existe (el server no calcula identidad; viaja como dato
+> con `scripts/push_identity.py`). Usar **`RUNBOOK_prod_dim_identidad_jul2026.md`**. Solo
+> sigue vigente la sección de ROLLBACK.
+
 Reemplazá `<PROD_HOST>` por el host de Render y `<IMPORT_TOKEN>` por el valor de
 `DIMENSIONAMIENTO_IMPORT_TOKEN` (el mismo token que usás para el push).
 El **run 67 se preserva como rollback** — no se borra en ningún paso.
