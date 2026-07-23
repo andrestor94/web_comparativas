@@ -254,19 +254,33 @@ def run_startup_migrations_once() -> None:
     except Exception as e:
         print(f"[MIGRATION] create_all warning: {e}", flush=True)
 
+    # Tablas precalculadas de Match: el CÓMPUTO (leer dimensionamiento_records, ~1M
+    # filas en prod) SOLO corre en local (SQLite). En Render (Postgres) NUNCA se
+    # calcula al boot — la data se calcula local y viaja por push
+    # (scripts/push_match_data.py → /api/mercado-privado/match/admin/apply-precalc-chunk);
+    # acá solo se loguea el conteo para verificar en el log de arranque.
     try:
-        from web_comparativas.match.service import ensure_negocio_map
-        _nm = ensure_negocio_map()
-        print(f"[STARTUP] match_negocio_map checked (total={_nm['total']}, filled={_nm['filled']}).", flush=True)
+        from web_comparativas.models import IS_SQLITE as _is_sqlite_startup
+        if _is_sqlite_startup:
+            from web_comparativas.match.service import ensure_negocio_map, ensure_match_demanda_desc
+            _nm = ensure_negocio_map()
+            print(f"[STARTUP] match_negocio_map checked (total={_nm['total']}, filled={_nm['filled']}).", flush=True)
+            _dd = ensure_match_demanda_desc()
+            print(f"[STARTUP] match_demanda_desc checked (total={_dd['total']}, filled={_dd['filled']}).", flush=True)
+        else:
+            from sqlalchemy import text as _sql_text
+            from web_comparativas.models import SessionLocal as _SL
+            _s = _SL()
+            try:
+                _nm_total = _s.execute(_sql_text("SELECT COUNT(*) FROM match_negocio_map")).scalar() or 0
+                _dd_total = _s.execute(_sql_text("SELECT COUNT(*) FROM match_demanda_desc")).scalar() or 0
+                print(f"[STARTUP] match precalc (solo lectura, sin computo server-side): "
+                      f"match_negocio_map={_nm_total}, match_demanda_desc={_dd_total}. "
+                      f"Si estan en 0, correr scripts/push_match_data.py desde local.", flush=True)
+            finally:
+                _s.close()
     except Exception as e:
-        print(f"[STARTUP] match_negocio_map warning: {e}", flush=True)
-
-    try:
-        from web_comparativas.match.service import ensure_match_demanda_desc
-        _dd = ensure_match_demanda_desc()
-        print(f"[STARTUP] match_demanda_desc checked (total={_dd['total']}, filled={_dd['filled']}).", flush=True)
-    except Exception as e:
-        print(f"[STARTUP] match_demanda_desc warning: {e}", flush=True)
+        print(f"[STARTUP] match precalc warning: {e}", flush=True)
 
     try:
         maybe_run_startup_ingestion()
