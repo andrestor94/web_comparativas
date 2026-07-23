@@ -137,6 +137,15 @@ MENU: list[dict] = [
      "parent": "mercado_publico.oportunidades", "market": "public",
      "roles": {"admin", "analista", "supervisor", "auditor"}},
 
+    # --- Match (hoja) — variante Mercado Público del módulo centralizado ---
+    # MISMA vista/API/data que "mercado_privado.match", pero permiso INDEPENDIENTE:
+    # esta clave gobierna solo la entrada/ruta de Mercado Público. Ver el comentario
+    # completo en la hoja de Mercado Privado.
+    {"key": "mercado_publico.match", "label": "Match",
+     "url": "/mercado-publico/match", "module": "mercado_publico",
+     "parent": "mercado_publico", "market": "public",
+     "roles": None, "icon": "bi-link-45deg", "pill": "Nuevo"},
+
     # --- Reporte perfiles (hoja) ---
     # roles=None a propósito: el acceso a "Reporte de perfiles" se gobierna SOLO por
     # el grant declarativo (module_access via require_perm). Sin techo de rol que
@@ -164,17 +173,17 @@ MENU: list[dict] = [
      "url": "/mercado-privado/dimensiones", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private", "roles": None, "icon": "bi-pie-chart"},
     # --- Match (homologación asistida) ---
-    # Módulo CENTRALIZADO/TRANSVERSAL: una sola clave de permiso ("mercado_privado.match"),
-    # una sola vista y una sola data (Dimensionamiento), navegable desde el sidebar de
-    # Mercado Privado Y de Mercado Público (ver "extra_markets"). Habilitarlo a un usuario
-    # lo habilita en ambos mercados. roles=None a propósito: mismo criterio que Reporte
-    # perfiles — el acceso lo gobierna SOLO el grant declarativo (module_access via
-    # require_perm). Visibilidad adicional gateada por el flag MATCH_ENABLED en el
-    # sidebar (global Jinja match_enabled()) y por MATCH_ENABLED() en la ruta/API.
+    # Módulo CENTRALIZADO (una sola vista/API/data) con PERMISO INDEPENDIENTE POR
+    # MERCADO: esta clave gobierna el acceso desde Mercado Privado y la hoja
+    # "mercado_publico.match" (más arriba) el acceso desde Mercado Público. Se puede
+    # habilitar solo privado, solo público, ambos o ninguno. roles=None a propósito:
+    # mismo criterio que Reporte perfiles — el acceso lo gobierna SOLO el grant
+    # declarativo (module_access via require_perm). Visibilidad adicional gateada por
+    # el flag MATCH_ENABLED en el sidebar (global Jinja match_enabled()) y por
+    # MATCH_ENABLED() en la ruta/API.
     {"key": "mercado_privado.match", "label": "Match",
      "url": "/mercado-privado/match", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private",
-     "extra_markets": ["public"],
      "roles": None, "icon": "bi-link-45deg", "pill": "Nuevo"},
     # roles=None: mismo criterio que la entrada de Mercado Público — acceso gobernado
     # solo por el grant declarativo (module_access via require_perm), sin techo de rol.

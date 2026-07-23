@@ -1764,7 +1764,7 @@ def mercado_privado_match(
     ),
     _mod: User = Depends(_require_module("mercado_privado.match")),
 ):
-    """Match desde Mercado Privado. Misma clave de permiso que la variante pública."""
+    """Match desde Mercado Privado. Permiso independiente del de la variante pública."""
     return _render_match(request, user, "private")
 
 
@@ -1774,11 +1774,11 @@ def mercado_publico_match(
     user: User = Depends(
         require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
     ),
-    _mod: User = Depends(_require_module("mercado_privado.match")),
+    _mod: User = Depends(_require_module("mercado_publico.match")),
 ):
-    """Match desde Mercado Público: MISMO módulo, misma clave de permiso
-    (mercado_privado.match), misma vista y datos; solo el sidebar/breadcrumb
-    marcan Mercado Público como contexto activo."""
+    """Match desde Mercado Público: MISMO módulo (misma vista y datos), pero con
+    permiso INDEPENDIENTE por mercado — esta ruta exige la clave
+    mercado_publico.match; la privada exige mercado_privado.match."""
     return _render_match(request, user, "public")
 
 

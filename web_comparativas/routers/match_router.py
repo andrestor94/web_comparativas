@@ -6,8 +6,9 @@ homologación en `match_homologaciones` (upsert last-wins) + bitácora
 `match_homologacion_eventos`.
 
 Seguridad:
-  - Acceso gobernado por `require_perm("mercado_privado.match")` (mismo sistema de
-    permisos declarativo que el resto de Mercado Privado).
+  - Acceso gobernado por el sistema de permisos declarativo (module_access): claves
+    INDEPENDIENTES por mercado (mercado_privado.match / mercado_publico.match); la API
+    compartida acepta a quien tenga AL MENOS UNA de las dos.
   - Kill-switch `MATCH_ENABLED`: si está OFF, la API responde 404.
   - El `usuario` de cada decisión se SELLA server-side desde la sesión; NUNCA del body.
 """
@@ -42,13 +43,24 @@ from web_comparativas.match.service import (
     match_papelera,
     match_resumen,
 )
-from web_comparativas.policy import require_perm
+from web_comparativas.policy import can_access
 
 router = APIRouter(prefix="/api/mercado-privado/match", tags=["match"])
 logger = logging.getLogger("wc.match.api")
 
-# Misma key de permiso que la pestaña del sidebar (gobierna acceso vía can_access).
-_perm_match = require_perm("mercado_privado.match")
+# Permiso INDEPENDIENTE por mercado (mercado_privado.match / mercado_publico.match),
+# pero la API es COMPARTIDA (misma vista y data desde ambos sidebars): alcanza con
+# tener AL MENOS UNA de las dos claves. Cada RUTA de página sí exige su clave propia
+# (ver legacy_routes).
+def _perm_match(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    if not (can_access(user, "mercado_privado.match") or can_access(user, "mercado_publico.match")):
+        raise HTTPException(status_code=403, detail="Sección no autorizada para este usuario.")
+    return user
+
+
 AllowedUser = Depends(_perm_match)
 
 # Gate de ESCRITURA: regla vigente del proyecto — en visualización Gerente se iguala a

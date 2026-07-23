@@ -725,7 +725,8 @@
         </a>
         {% endif %}
 
-        <!-- Match (homologación asistida) — módulo centralizado, misma clave en ambos mercados.
+        <!-- Match (homologación asistida) — módulo centralizado (misma vista/data) con
+             permiso INDEPENDIENTE por mercado: esta entrada usa mercado_privado.match.
              "match_enabled is defined" evita un 500 si la vista se renderiza desde una
              instancia de Jinja2Templates sin el global registrado (hay varias). -->
         {% if match_enabled is defined and match_enabled() and can_access(user, 'mercado_privado.match') %}
@@ -935,10 +936,10 @@
         {% endif %}
         <!-- ====== /Oportunidades ====== -->
 
-        <!-- Match (homologación asistida) — módulo centralizado: MISMA clave de permiso
-             que en Mercado Privado (mercado_privado.match); habilitarlo/quitarlo a un
-             usuario lo hace en ambos mercados a la vez. -->
-        {% if match_enabled is defined and match_enabled() and can_access(user, 'mercado_privado.match') %}
+        <!-- Match (homologación asistida) — módulo centralizado (misma vista/data) con
+             permiso INDEPENDIENTE por mercado: esta entrada se gobierna por la clave
+             mercado_publico.match; la del sidebar privado, por mercado_privado.match. -->
+        {% if match_enabled is defined and match_enabled() and can_access(user, 'mercado_publico.match') %}
         <a href="/mercado-publico/match"
           class="nav-link {% if request.url.path.startswith('/mercado-publico/match') %}active{% endif %}">
           <div><i class="bi bi-link-45deg"></i> Match <span class="sidebar-nav-pill sidebar-nav-pill--new">Nuevo</span></div>
