@@ -72,6 +72,7 @@ FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 from web_comparativas.migrations import (
     ensure_access_scope_column,
     ensure_module_access_column,
+    ensure_match_permiso_por_mercado,
     ensure_password_reset_columns,
     ensure_original_content_column,
     ensure_normalized_storage_columns,
@@ -159,6 +160,14 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: 'module_access' checked/added.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning module_access: {e}", flush=True)
+
+    # Match: de una clave única a permisos por mercado — los que tenían la clave
+    # vieja quedan con ambas (preserva comportamiento). Datos livianos, idempotente.
+    try:
+        ensure_match_permiso_por_mercado()
+        print("[MIGRATION] SUCCESS: match permisos por mercado checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning match permisos por mercado: {e}", flush=True)
 
     try:
         ensure_password_reset_columns()

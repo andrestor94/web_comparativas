@@ -91,6 +91,60 @@ def ensure_module_access_column():
     print("[MIGRATION] Columna 'users.module_access' verificada/creada.", flush=True)
 
 
+def ensure_match_permiso_por_mercado():
+    """Migración de DATOS (una vez, idempotente): Match pasó de UNA clave de permiso
+    ("mercado_privado.match" habilitaba ambos mercados) a claves INDEPENDIENTES por
+    mercado. Para no cambiarle el comportamiento a nadie, todo usuario que ya tenía
+    la clave vieja en su module_access recibe también "mercado_publico.match"
+    (después el admin destilda donde no corresponda desde S.I.C.).
+
+    Liviana a propósito: solo lee users con module_access NO-NULL (JSON chico por
+    usuario, pocos usuarios; los NULL-legacy no se tocan — ya ven todo por rol).
+    Cada UPDATE corre en su propio SAVEPOINT: un JSON corrupto de un usuario no
+    envenena la transacción ni frena a los demás. Reejecutarla no cambia nada.
+    """
+    import json as _json
+
+    print("[MIGRATION] Verificando permisos de Match por mercado (module_access)...", flush=True)
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text(
+                "SELECT id, module_access FROM users WHERE module_access IS NOT NULL"
+            )).fetchall()
+            actualizados = 0
+            fallidos = 0
+            for uid, raw in rows:
+                try:
+                    val = raw
+                    if isinstance(val, (bytes, bytearray)):
+                        val = val.decode("utf-8", "replace")
+                    if isinstance(val, str):
+                        val = _json.loads(val) if val.strip() else []
+                    if not isinstance(val, list):
+                        continue
+                    keys = [str(x).strip() for x in val]
+                    if "mercado_privado.match" in keys and "mercado_publico.match" not in keys:
+                        keys.append("mercado_publico.match")
+                        with conn.begin_nested():
+                            conn.execute(
+                                text("UPDATE users SET module_access = :ma WHERE id = :id"),
+                                {"ma": _json.dumps(keys), "id": uid},
+                            )
+                        actualizados += 1
+                except Exception as e:
+                    fallidos += 1
+                    print(f"[MIGRATION] ATENCION: module_access del user id={uid} no se pudo migrar: {e}", flush=True)
+            if fallidos:
+                print(f"[MIGRATION] Permisos Match por mercado: {actualizados} usuario(s) migrados, "
+                      f"{fallidos} con error (ver ATENCION arriba).", flush=True)
+            else:
+                print(f"[MIGRATION] Permisos Match por mercado: {actualizados} usuario(s) migrados "
+                      "(clave vieja -> ambas claves). (OK, idempotente)", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Error en migracion de permisos Match por mercado: {e}", flush=True)
+        print(traceback.format_exc(), flush=True)
+
+
 def ensure_password_reset_columns():
     """
     MigraciÃ³n para el flujo de restablecimiento de contraseÃ±a corporativo.
