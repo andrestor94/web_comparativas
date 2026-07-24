@@ -1,10 +1,48 @@
 # RUNBOOK — Producción: dataset actualizado de Dimensionamiento (jul 2026)
 
-**Fecha:** 24/07/2026 · **Ejecuta:** Andrés · Comandos de UNA línea para PowerShell (`curl.exe` explícito, nunca `curl` a secas).
+**Fecha:** 24/07/2026 (v2, post-incidente del finalize) · **Ejecuta:** Andrés · Comandos de UNA línea para PowerShell (`curl.exe` explícito, nunca `curl` a secas).
+
+> **INCIDENTE 24/07 (resuelto en código, pendiente de deploy):** el finalize del run 68 quedó bloqueado con 409 infinitos — un backend zombi de Postgres retuvo el lock tras un hipo de la instancia, y además el finalize viejo hacía >10 min de cómputo redundante en Render (resolvía identidad, reconstruía summary y regeneraba el snapshot que YA viajan desde tu PC). Ambas cosas están arregladas: el finalize ahora tarda segundos y reclama solo los locks huérfanos. **El run 68 quedó completo en staging (records 364.887 + summary 304.458): NO se re-sube nada, solo falta rematar el finalize tras el deploy.** El run 67 sigue activo e intacto.
+
+## Paso 0 — Push a main y deploy (AHORA SÍ es requisito)
+
+El fix del finalize tiene que estar desplegado antes de rematar el 68. Van TODOS los commits pendientes (los 4 del dataset + los 3 del incidente):
+
+```powershell
+git push origin main
+```
+
+**En el log de arranque de Render verificar:** `[MIGRATION] uq_dim_family_monthly_summary ya existe ... (OK, skip)`, sin `Traceback` ni `ERROR REAL`. (No hay migraciones nuevas en este deploy: el fix es de código.)
+
+**Diagnóstico opcional del zombi** (antes y/o después del deploy, para verlo con tus ojos):
+
+```powershell
+curl.exe -s "<URL>/api/mercado-privado/dimensiones/admin/import/finalize-estado?run_id=68" -H "X-Import-Token: <TOKEN>"
+```
+
+Esperado ANTES de rematar: `"run_status": "running"`, `counts.records: 364887`, `counts.summary: 304458`, y `lock_holder` con el pid zombi (probablemente `"holder_huerfano": true`) — o `lock_holder: null` si el reinicio del deploy ya lo mató.
+
+## Paso 1B — Rematar el finalize del run 68 (sin re-subir nada)
+
+El MISMO comando de siempre; el estado local (`scratch/upload_state.json`, verificado apuntando al 68 con todo subido) hace que saltee los 35 chunks y vaya directo al finalize, que ahora tarda segundos. Si el zombi sigue vivo, el server lo detecta como huérfano, lo termina y reclama el lock solo:
+
+```powershell
+python scripts/upload_dimensionamiento_chunks.py --url <URL> --token <TOKEN> upload
+```
+
+- **Duración esperada:** ~1 minuto total (warmup + finalize de segundos).
+- Salida esperada: "Registros ya subidos en su totalidad", ídem resúmenes, y el finalize OK con "IDENTIDAD DE CLIENTES: PENDIENTE (esperado)". Si en el log de Render aparece `marca HUÉRFANA detectada ... lock huérfano RECLAMADO`, es el fix haciendo su trabajo.
+- **Si diera 422 "summary no reconcilia"** (no debería — los conteos del 68 coinciden exactos): `python scripts/upload_dimensionamiento_chunks.py --url <URL> --token <TOKEN> upload --resubir-summary` re-sube SOLO el summary (16 chunks, ~5 min) y remata.
+
+**Verificación:** el mismo curl de arriba debe dar `"run_status": "success"`, y `estado-identidad` → `"run_activo": 68` (con `modo_card: "fallback"` hasta el Paso 2 — normal).
+
+Después seguí con los **Pasos 2, 3 y 4 de abajo** usando `<RUN_NUEVO>` = **68**.
+
+---
 
 **Qué se sube:** el run 10 local, validado completo (ingestado del `dataset_unificado_valorizado_2025_2026.csv` actualizado con el parser de fechas corregido). Diferencias reales vs el run 67 vigente en prod: 2.564 filas re-clasificadas de familia ('SIN DATO' → producto real; familias 2.451 → **2.522**), 1 CUIT corregido con cero inicial (1.337 filas del mismo cliente) y 13 filas con centavos de valorización. Mismas 364.887 filas, mismos 18 meses (ene25–jun26), mismas 256 entidades (158 · 98), misma valorización total (~$204.478 M; difiere $0,33 por redondeo). Además se refrescan las 2 tablas precalculadas de Match, que estaban desactualizadas desde junio: `match_negocio_map` 3.238 → **3.446** y `match_demanda_desc` 28.598 → **29.641**.
 
-**NO hace falta deploy de código**: el push es solo datos. (Hay 3 commits locales sin pushear — fix del parser de fechas, fix de Capa C y `--solo-precalc` — que conviene incluir en el PRÓXIMO push a main por higiene, pero este runbook no depende de ellos: el server de prod parsea las fechas de los chunks con su propio parser sano.)
+**Deploy requerido (ver Paso 0):** los fixes del incidente del finalize deben estar desplegados antes de rematar el 68. El push incluye además los commits de higiene del dataset (parser de fechas, Capa C, `--solo-precalc`).
 
 **Variables:** `<URL>` = URL base de prod (sin barra final) · `<TOKEN>` = `DIMENSIONAMIENTO_IMPORT_TOKEN` (Render → Environment, o tu `.env`).
 
@@ -13,6 +51,8 @@
 ---
 
 ## Paso 1 — Push del run nuevo por chunks (records + summary + finalize)
+
+> **Para el incidente actual NO corresponde este paso** (el 68 ya está subido — usar el Paso 1B de arriba). Queda documentado para futuros reemplazos de dataset, ya con el finalize rápido.
 
 Desde tu PC, venv activado, raíz del proyecto:
 
