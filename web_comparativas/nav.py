@@ -172,6 +172,16 @@ MENU: list[dict] = [
     {"key": "mercado_privado.dimensionamiento", "label": "Dimensionamiento",
      "url": "/mercado-privado/dimensiones", "module": "mercado_privado",
      "parent": "mercado_privado", "market": "private", "roles": None, "icon": "bi-pie-chart"},
+    # --- Oportunidades de Venta (hoja) ---
+    # SOLO Mercado Privado (no es transversal como Match): lee oportunidades_summary
+    # del run activo de Dimensionamiento. Techo de rol como en junio: analista/
+    # supervisor/auditor (admin y gerente son universales en policy → visualización
+    # Gerente = Auditor). Escritura (enviar a CRM) gateada aparte en el router.
+    # Kill-switch OPORTUNIDADES_ENABLED (global Jinja oportunidades_enabled()).
+    {"key": "mercado_privado.oportunidades", "label": "Oportunidades",
+     "url": "/mercado-privado/oportunidades", "module": "mercado_privado",
+     "parent": "mercado_privado", "market": "private",
+     "roles": {"admin", "analista", "supervisor", "auditor"}, "icon": "bi-lightbulb"},
     # --- Match (homologación asistida) ---
     # Módulo CENTRALIZADO (una sola vista/API/data) con PERMISO INDEPENDIENTE POR
     # MERCADO: esta clave gobierna el acceso desde Mercado Privado y la hoja

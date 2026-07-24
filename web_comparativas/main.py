@@ -760,6 +760,7 @@ def _register_shared_template_globals() -> None:
         tpl = getattr(_mod, "templates", None)
         if tpl is not None:
             tpl.env.globals.setdefault("match_enabled", _match_enabled_tpl)
+            tpl.env.globals.setdefault("oportunidades_enabled", _oportunidades_enabled_tpl)
 
 
 _register_shared_template_globals()

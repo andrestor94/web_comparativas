@@ -725,6 +725,15 @@
         </a>
         {% endif %}
 
+        <!-- Oportunidades de Venta — solo Mercado Privado. Guard "is defined": mismo
+             criterio que match_enabled (hay varias instancias de Jinja2Templates). -->
+        {% if oportunidades_enabled is defined and oportunidades_enabled() and can_access(user, 'mercado_privado.oportunidades') %}
+        <a href="/mercado-privado/oportunidades"
+          class="nav-link {% if request.url.path.startswith('/mercado-privado/oportunidades') %}active{% endif %}">
+          <div><i class="bi bi-lightbulb"></i> Oportunidades</div>
+        </a>
+        {% endif %}
+
         <!-- Match (homologación asistida) — módulo centralizado (misma vista/data) con
              permiso INDEPENDIENTE por mercado: esta entrada usa mercado_privado.match.
              "match_enabled is defined" evita un 500 si la vista se renderiza desde una

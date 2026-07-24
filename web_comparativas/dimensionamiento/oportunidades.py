@@ -42,7 +42,11 @@ logger = logging.getLogger("wc.dimensionamiento.oportunidades")
 
 # Kill-switch: si está off, rebuild_oportunidades_for_run no hace nada.
 def OPORTUNIDADES_ENABLED() -> bool:
-    raw = (os.getenv("OPORTUNIDADES_ENABLED") or "true").strip().lower()
+    # Default OFF (misma convención que MATCH_ENABLED): el módulo no aparece en
+    # ningún entorno hasta setear OPORTUNIDADES_ENABLED=1. Evita que un deploy
+    # futuro lo encienda en prod sin datos (oportunidades_summary viaja aparte).
+    # El default de junio era "true"; se cambió deliberadamente en el rescate.
+    raw = (os.getenv("OPORTUNIDADES_ENABLED") or "false").strip().lower()
     return raw not in {"0", "false", "no", "off", "n"}
 
 

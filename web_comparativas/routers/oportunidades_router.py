@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from web_comparativas.policy import require_perm, is_admin, is_manager
+from web_comparativas.policy import require_perm, is_admin
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     CrmEnvioEvento,
@@ -40,7 +40,28 @@ router = APIRouter(prefix="/api/mercado-privado/oportunidades", tags=["oportunid
 logger = logging.getLogger("wc.oportunidades.api")
 
 # Misma key de permiso que la pestaña: gobierna acceso vía can_access.
-AllowedUser = Depends(require_perm("mercado_privado.oportunidades"))
+_perm_oportunidades = require_perm("mercado_privado.oportunidades")
+AllowedUser = Depends(_perm_oportunidades)
+
+# Gate de ESCRITURA (regla vigente del proyecto, jul-2026): en visualización Gerente
+# se iguala a Auditor, pero en escritura queda AFUERA. Enviar a CRM es escritura →
+# admin/analista/supervisor. (El diseño de junio permitía override Admin/Gerente;
+# se adapta: override solo Admin.)
+_WRITE_ROLES = {"admin", "administrator", "administrador", "analista", "analyst", "supervisor"}
+
+
+def _require_oportunidades_write(request: Request):
+    user = _perm_oportunidades(request)
+    role = (getattr(user, "role", "") or "").strip().lower()
+    if role not in _WRITE_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo lectura: tu rol no puede enviar oportunidades al CRM.",
+        )
+    return user
+
+
+AllowedWriter = Depends(_require_oportunidades_write)
 
 _MESES_ES = [
     "ene", "feb", "mar", "abr", "may", "jun",
@@ -303,17 +324,17 @@ def _msg_ya_enviada(e: CrmEnvio) -> str:
 @router.post("/enviar/{summary_id}")
 def oportunidades_enviar(
     summary_id: int,
-    user=AllowedUser,
+    user=AllowedWriter,
     db: Session = Depends(get_db),
     override: bool = False,
 ):
     """Envía una oportunidad al CRM con sello del usuario y control de duplicados.
 
-    Flujo:
+    ESCRITURA (regla jul-2026): solo admin/analista/supervisor (AllowedWriter);
+    Gerente y Auditor ven el módulo pero no envían. Flujo:
       1. Resuelve la oportunidad del run activo (identidad estable = oportunidad_id).
       2. Si YA fue enviada y NO hay override → NO reenvía; devuelve mensaje claro.
-         - override solo lo pueden pedir Admin/Gerente (require_perm ya garantizó el
-           acceso a la sección; acá validamos el ROL para el reenvío).
+         - override (reenvío) solo Admin.
       3. Si no existe (o override autorizado) → sella el payload (enviado_por/at/id),
          intenta el envío real (hoy diferido) y SOLO ante ACK OK registra en
          `crm_envios` (+ bitácora `crm_envio_eventos`).
@@ -337,7 +358,15 @@ def oportunidades_enviar(
     ).scalars().first()
 
     # ── Control de duplicados ──
-    es_override = bool(override) and (is_admin(user) or is_manager(user))
+    # Override (reenvío) SOLO Admin: la regla vigente saca a Gerente de toda
+    # escritura, y el reenvío es la escritura más sensible (pisa el bloqueo).
+    es_override = bool(override) and is_admin(user)
+    if existente is not None and bool(override) and not es_override:
+        # Pidió override pero su rol no lo habilita (defensa explícita).
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Admin puede reenviar una oportunidad ya enviada.",
+        )
     if existente is not None and not es_override:
         # Bloqueo permanente: NO reenvía. Mensaje claro con quién y cuándo.
         return {
@@ -347,12 +376,6 @@ def oportunidades_enviar(
             "enviado_por": existente.enviado_por,
             "enviado_at": existente.enviado_at.isoformat() if existente.enviado_at else None,
         }
-    if existente is not None and bool(override) and not es_override:
-        # Pidió override pero su rol no lo habilita (defensa explícita).
-        raise HTTPException(
-            status_code=403,
-            detail="Solo Admin/Gerente pueden reenviar una oportunidad ya enviada.",
-        )
 
     # ── Feature 1: sello del usuario (server-side, NUNCA del cliente) ──
     enviado_por = getattr(user, "email", None)

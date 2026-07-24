@@ -1741,6 +1741,29 @@ def mercado_privado_dimensiones(
 
 
 
+@router.get("/mercado-privado/oportunidades", response_class=HTMLResponse)
+def mercado_privado_oportunidades(
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
+    ),
+    _mod: User = Depends(_require_module("mercado_privado.oportunidades")),
+):
+    """Oportunidades de Venta (Mercado Privado): vista que lee la tabla precalculada
+    oportunidades_summary del run activo vía /api/mercado-privado/oportunidades/list.
+    Gobernada por module_access (hoja mercado_privado.oportunidades) + kill-switch
+    OPORTUNIDADES_ENABLED. Solo Mercado Privado (no es transversal como Match)."""
+    from web_comparativas.dimensionamiento.oportunidades import OPORTUNIDADES_ENABLED
+    if not OPORTUNIDADES_ENABLED():
+        raise HTTPException(status_code=404, detail="Módulo Oportunidades deshabilitado.")
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+    }
+    return templates.TemplateResponse("mercado_privado_oportunidades.html", ctx)
+
+
 def _render_match(request: Request, user: User, market_context: str):
     """Vista ÚNICA de Match (módulo centralizado): misma data, misma lógica, mismo
     template desde ambos mercados. Solo cambia market_context (breadcrumb/sidebar
