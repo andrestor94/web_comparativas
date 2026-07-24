@@ -456,7 +456,23 @@ def ensure_entidad_columns_populated(session: Session, import_run_id: int, *, co
     Devuelve cuántas filas estaban NULL (0 = ya estaba consistente).
     """
     missing = _count_summary_entidad_null(session, import_run_id)
-    if missing == 0:
+    # Punto ciego detectado jul-2026: si el rebuild del summary corrió con el registry
+    # todavía vacío (p.ej. reingesta local donde el upsert preservó cliente_entidad_id
+    # en records pero el registry del run nuevo aún no existía), las filas quedan con
+    # cliente_entidad_id OK y es_cliente_entidad NULL — y el guard de arriba no dispara.
+    # El filtro Clientes/No clientes del dashboard usa es_cliente_entidad: hay que
+    # chequear AMBAS columnas para que la auto-reparación repare de verdad.
+    missing_es = int(
+        session.execute(
+            text(
+                "SELECT COUNT(*) FROM dimensionamiento_family_monthly_summary "
+                "WHERE import_run_id = :run AND cliente_entidad_id IS NOT NULL "
+                "AND es_cliente_entidad IS NULL"
+            ),
+            {"run": import_run_id},
+        ).scalar_one()
+    )
+    if missing == 0 and missing_es == 0:
         return 0
 
     # Sin límite de timeout: el UPDATE toca ~300k filas del summary y en Postgres puede
