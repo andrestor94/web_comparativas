@@ -75,6 +75,9 @@ def main() -> int:
     ap.add_argument("--local-run", type=int, default=None, help="corrida local de Match (default: última approved)")
     ap.add_argument("--resume-run", type=int, default=None, help="corrida REMOTA existente para reanudar un push cortado")
     ap.add_argument("--dry-run", action="store_true", help="mostrar conteos locales, sin enviar")
+    ap.add_argument("--solo-precalc", action="store_true",
+                    help="subir SOLO match_negocio_map y match_demanda_desc (sin propuestas ni corrida nueva); "
+                         "para cuando cambian los datos de Dimensionamiento pero no el Excel de propuestas")
     ap.add_argument("--batch", type=int, default=2000, help="filas por lote")
     ap.add_argument("--timeout", type=int, default=180, help="timeout por lote, en segundos")
     args = ap.parse_args()
@@ -155,17 +158,21 @@ def main() -> int:
         return _post_chunk(base, headers, payload, args.timeout)
 
     try:
-        # 2) start / resume
-        d = chunk(kind="start", resume_run=args.resume_run,
-                  source_path=f"push:local-run-{run.id}:{run.source_path}")
-        remote_run = d["run_id"]
-        print(f"\n[PUSH] corrida remota {remote_run} ({'reanudada' if d.get('resumed') else 'nueva, pending_approval'})", flush=True)
+        if not args.solo_precalc:
+            # 2) start / resume
+            d = chunk(kind="start", resume_run=args.resume_run,
+                      source_path=f"push:local-run-{run.id}:{run.source_path}")
+            remote_run = d["run_id"]
+            print(f"\n[PUSH] corrida remota {remote_run} ({'reanudada' if d.get('resumed') else 'nueva, pending_approval'})", flush=True)
 
-        # 3) propuestas por lotes (idempotente por UNIQUE del run remoto)
-        lotes = list(_batches(propuestas, nb))
-        for i, b in enumerate(lotes, 1):
-            d = chunk(kind="propuestas", run_id=remote_run, rows=b)
-            print(f"   propuestas lote {i}/{len(lotes)}: +{d.get('insertadas')} (total remoto: {d.get('total_run')})", flush=True)
+            # 3) propuestas por lotes (idempotente por UNIQUE del run remoto)
+            lotes = list(_batches(propuestas, nb))
+            for i, b in enumerate(lotes, 1):
+                d = chunk(kind="propuestas", run_id=remote_run, rows=b)
+                print(f"   propuestas lote {i}/{len(lotes)}: +{d.get('insertadas')} (total remoto: {d.get('total_run')})", flush=True)
+        else:
+            print("\n[PUSH] --solo-precalc: se actualizan SOLO las tablas precalculadas "
+                  "(la corrida vigente de propuestas en prod no se toca).", flush=True)
 
         # 4) tablas precalculadas (reset SOLO en el primer lote de un push nuevo)
         reset = args.resume_run is None
@@ -179,12 +186,18 @@ def main() -> int:
             print(f"   demanda-desc lote {i}/{len(dlotes)}: total remoto {d.get('total')}", flush=True)
 
         # 5) finalize: aprueba SOLO si el conteo remoto coincide con el local.
-        d = chunk(kind="finalize", run_id=remote_run,
-                  rows_esperadas=len(propuestas), counts_by_nivel=counts_by_nivel)
-        print("✅ ========================================================")
-        print(f"✅ PUSH COMPLETO: corrida remota {d.get('run_id')} APROBADA "
-              f"({d.get('filas')} filas, {d.get('articulos')} artículos).")
-        print("✅ ========================================================")
+        if not args.solo_precalc:
+            d = chunk(kind="finalize", run_id=remote_run,
+                      rows_esperadas=len(propuestas), counts_by_nivel=counts_by_nivel)
+            print("✅ ========================================================")
+            print(f"✅ PUSH COMPLETO: corrida remota {d.get('run_id')} APROBADA "
+                  f"({d.get('filas')} filas, {d.get('articulos')} artículos).")
+            print("✅ ========================================================")
+        else:
+            print("✅ ========================================================")
+            print(f"✅ PRECALC ACTUALIZADO: negocio_map={len(negocio_rows)} filas, "
+                  f"demanda_desc={len(demanda_rows)} filas (sin tocar propuestas).")
+            print("✅ ========================================================")
     except (requests.exceptions.RequestException, RuntimeError) as e:
         print(f"\n❌ Cortó un lote: {e}")
         print("   Nada se perdió: cada lote commitea solo y la corrida remota sigue pending_approval")
