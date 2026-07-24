@@ -176,6 +176,14 @@ def _parse_date(value: Any) -> dt.date | None:
     text = _clean_text(value)
     if not text:
         return None
+    # ISO (YYYY-MM-DD) PRIMERO y sin ambigüedad: pd.to_datetime(dayfirst=True) invierte
+    # día/mes en fechas ISO con día <= 12 ('2026-06-12' -> 2026-12-06). El dataset
+    # jul-2026 cambió su formato de fecha a ISO y esto corrompía 20k+ filas a meses
+    # futuros. dayfirst queda SOLO como fallback para el formato viejo (DD/MM/YYYY).
+    try:
+        return dt.date.fromisoformat(text[:10])
+    except ValueError:
+        pass
     parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
@@ -186,6 +194,11 @@ def _parse_datetime(value: Any) -> dt.datetime | None:
     text = _clean_text(value)
     if not text:
         return None
+    # Mismo criterio que _parse_date: ISO primero (con o sin hora), dayfirst de fallback.
+    try:
+        return dt.datetime.fromisoformat(text.replace("T", " ")[:19])
+    except ValueError:
+        pass
     parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
