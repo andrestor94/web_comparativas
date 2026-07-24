@@ -851,6 +851,10 @@ class FinalizePayload(BaseModel):
     # rechazar con 422 (el cliente re-sube el summary, cómputo local). Solo con
     # esta bandera el server reconstruye el summary desde los records (pesado).
     allow_rebuild: bool = False
+    # Agregados calculados por el CLIENTE en local (records_count,
+    # records_valorizacion, summary_rows): permiten validar sin el SUM pesado
+    # sobre el heap de records en Render (lección del run 68).
+    expected: dict[str, Any] | None = None
 
 
 class RollbackPayload(BaseModel):
@@ -1164,41 +1168,86 @@ def _ensure_entidad_summary_for_push_safe(db: Session, run_id: int) -> None:
         logger.exception("[DIM][IMPORT] identidad: capa C FALLÓ run=%s (no bloquea el finalize)", run_id)
 
 
-def _summary_reconciles_with_records(db: Session, run_id: int) -> bool:
-    """Opción A: el cliente ya subió el summary (dedup en SQLite). Si reconcilia
-    con los records de la corrida, evitamos el rebuild pesado (INSERT...SELECT de
-    cientos de miles de filas, cercano al timeout de 600s de Render).
+def _summary_reconciles_with_records(
+    db: Session, run_id: int, expected: dict[str, Any] | None = None
+) -> bool:
+    """Validación de integridad del finalize (Opción A: el cliente ya subió el summary).
 
-    Reconcilia si: hay summary subido, la suma de total_registros == cantidad de
-    records, y la valorización agregada coincide (tolerancia de redondeo). Si hubo
-    inflación por NULLS DISTINCT en reintentos de chunk, SUM(total_registros) queda
-    > COUNT(records) y NO reconcilia ⇒ se cae al rebuild como fallback seguro.
+    LECCIÓN DEL RUN 68 (24/07): la versión anterior hacía COUNT(*)+SUM(valorizacion)
+    sobre dimensionamiento_records — el SUM obliga a visitar el heap de ~365k filas de
+    una tabla ancha con 1M+ filas acumuladas y moría por statement_timeout (~55s) en
+    Render con caché fría; recién pasaba al 5º intento. Igual patrón que el constraint
+    del summary: instantáneo en local, escaneo pesado en prod.
+
+    Ahora, del lado de Render queda SOLO lo mínimo irreducible:
+      - COUNT(*) de records del run — se apoya en ix_dim_records_run_cuit (prefijo
+        import_run_id, casi index-only).
+      - Agregados del summary del run — se apoya en ix_dim_summary_entidad (prefijo
+        import_run_id; ~300k filas angostas).
+    El SUM pesado sobre records desaparece: la valorización se compara contra
+    `expected` (agregados calculados por el CLIENTE sobre su base local, la fuente
+    de la que salieron los chunks). Sin `expected` (cliente viejo), cae al chequeo
+    completo anterior. En ambos casos, `SET LOCAL statement_timeout='300s'` acotado
+    para que una caché fría no cancele la sentencia (bounded: no sostiene el
+    advisory lock indefinidamente).
+
+    Reconcilia si: hay summary, SUM(total_registros) == COUNT(records) (check fuerte
+    entero: cualquier inflación por NULLS DISTINCT en reintentos lo rompe), y la
+    valorización coincide con tolerancia relativa de coma flotante.
     """
-    rec = db.execute(
-        text(
-            "SELECT COUNT(*) AS c, COALESCE(SUM(valorizacion_estimada), 0) AS v "
-            "FROM dimensionamiento_records WHERE import_run_id = :r"
-        ),
+    if IS_POSTGRES:
+        db.execute(text("SET LOCAL statement_timeout = '300s'"))
+
+    rec_count = int(db.execute(
+        text("SELECT COUNT(*) FROM dimensionamiento_records WHERE import_run_id = :r"),
         {"r": run_id},
-    ).one()
+    ).scalar_one())
     summ = db.execute(
         text(
             "SELECT COALESCE(SUM(total_registros), 0) AS c, "
-            "COALESCE(SUM(total_valorizacion), 0) AS v "
+            "COALESCE(SUM(total_valorizacion), 0) AS v, COUNT(*) AS n "
             "FROM dimensionamiento_family_monthly_summary WHERE import_run_id = :r"
         ),
         {"r": run_id},
     ).one()
     if int(summ.c) == 0:
-        return False  # no se subió summary → hay que reconstruir
-    # Check fuerte: conteo entero EXACTO (SUM(total_registros) == COUNT(records)).
-    # Cualquier inflación por duplicación de filas rompe esta igualdad. La
-    # valorización es un chequeo secundario con tolerancia relativa para absorber
-    # el ruido de coma flotante al sumar cientos de miles de floats.
-    if int(summ.c) != int(rec.c):
+        return False  # no se subió summary → hay que reconstruir (o re-subir)
+    if int(summ.c) != rec_count:
+        logger.warning(
+            "[DIM][IMPORT] reconcile run=%s: SUM(total_registros)=%s != COUNT(records)=%s",
+            run_id, int(summ.c), rec_count,
+        )
         return False
-    tol = max(1.0, abs(float(rec.v)) * 1e-7)
-    return abs(float(summ.v) - float(rec.v)) <= tol
+
+    exp = expected or {}
+    if exp.get("records_count") is not None and int(exp["records_count"]) != rec_count:
+        logger.warning(
+            "[DIM][IMPORT] reconcile run=%s: COUNT(records)=%s != esperado del cliente=%s",
+            run_id, rec_count, exp["records_count"],
+        )
+        return False
+    if exp.get("summary_rows") is not None and int(exp["summary_rows"]) != int(summ.n):
+        logger.warning(
+            "[DIM][IMPORT] reconcile run=%s: filas de summary=%s != esperado del cliente=%s",
+            run_id, int(summ.n), exp["summary_rows"],
+        )
+        return False
+
+    exp_val = exp.get("records_valorizacion")
+    if exp_val is not None:
+        # Valorización del summary vs la calculada por el cliente en LOCAL (misma
+        # fuente de los chunks). Reemplaza el SUM pesado sobre el heap de records.
+        tol = max(1.0, abs(float(exp_val)) * 1e-7)
+        return abs(float(summ.v) - float(exp_val)) <= tol
+
+    # Fallback (cliente viejo, sin expected): comparación completa contra records.
+    rec_val = float(db.execute(
+        text("SELECT COALESCE(SUM(valorizacion_estimada), 0) "
+             "FROM dimensionamiento_records WHERE import_run_id = :r"),
+        {"r": run_id},
+    ).scalar_one())
+    tol = max(1.0, abs(rec_val) * 1e-7)
+    return abs(float(summ.v) - rec_val) <= tol
 
 
 # Umbrales de "marca huérfana" del finalize (incidente 24/07/2026): el advisory lock
@@ -1343,7 +1392,7 @@ def admin_import_finalize(
         # minutos de trabajo redundante en Render — la causa de fondo del incidente.
         # Ahora: validar conteos, aplicar snapshot recibido, swap atómico. Segundos.
         # La identidad llega DESPUÉS como dato (push_identity, Paso 2 del runbook).
-        if _summary_reconciles_with_records(db, run.id):
+        if _summary_reconciles_with_records(db, run.id, expected=payload.expected):
             summary_rows = _count_summary_rows(db, run.id)
             logger.info(
                 "[DIM][IMPORT] Run %d: summary subido reconcilia con records rows=%d",

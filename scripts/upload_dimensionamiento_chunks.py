@@ -434,11 +434,24 @@ def handle_upload(args):
             print("⚠️  Advertencia: No se encontró un snapshot de dashboard en local para esta corrida. Se finalizará sin snapshot precalculado.")
 
         print("\n🏁 Finalizando corrida de importación en el servidor remoto...")
+        # Agregados esperados, calculados en LOCAL (la fuente de los chunks): el
+        # server valida contra estos números y evita el SUM pesado sobre el heap
+        # de records en Render, que moría por statement_timeout (run 68, 24/07).
+        expected_val = float(session.query(
+            func.coalesce(func.sum(DimensionamientoRecord.valorizacion_estimada), 0.0)
+        ).filter(DimensionamientoRecord.import_run_id == local_run.id).scalar() or 0.0)
         finalize_payload = {
             "import_run_id": remote_run_id,
             "snapshot": snapshot_payload,
-            "summary_metadata": local_run.summary
+            "summary_metadata": local_run.summary,
+            "expected": {
+                "records_count": total_records,
+                "summary_rows": total_summaries,
+                "records_valorizacion": expected_val,
+            },
         }
+        print(f"   Validación esperada: records={total_records:,}, summary_rows={total_summaries:,}, "
+              f"valorización={expected_val:,.2f}")
         
         finalize_url = f"{args.url}/api/mercado-privado/dimensiones/admin/import/finalize"
         # Más reintentos que los chunks: si el server cae al rebuild (fallback) y
