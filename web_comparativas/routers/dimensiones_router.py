@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
@@ -846,6 +847,10 @@ class FinalizePayload(BaseModel):
     import_run_id: int
     snapshot: dict[str, Any] | None = None
     summary_metadata: dict[str, Any] | None = None
+    # Escape hatch EXPLÍCITO: si el summary subido no reconcilia, el default es
+    # rechazar con 422 (el cliente re-sube el summary, cómputo local). Solo con
+    # esta bandera el server reconstruye el summary desde los records (pesado).
+    allow_rebuild: bool = False
 
 
 class RollbackPayload(BaseModel):
@@ -1146,18 +1151,6 @@ def _count_summary_rows(db: Session, run_id: int) -> int:
     )
 
 
-def _resolve_entities_for_push_safe(db: Session, run_id: int) -> None:
-    """Resuelve records+registry en el finalize del push. Defensivo: un fallo NO rompe el
-    finalize (capa C en el próximo arranque repara). Ver dimensionamiento/identity.py."""
-    try:
-        from web_comparativas.dimensionamiento.identity import persist_records_and_registry
-        db.flush()
-        stats = persist_records_and_registry(db, run_id, commit=False)
-        logger.info("[DIM][IMPORT] identidad: records+registry resueltos run=%s stats=%s", run_id, stats)
-    except Exception:
-        logger.exception("[DIM][IMPORT] identidad: resolución FALLÓ run=%s (no bloquea el finalize)", run_id)
-
-
 def _ensure_entidad_summary_for_push_safe(db: Session, run_id: int) -> None:
     """Capa C en el finalize del push: propaga identidad al summary si quedó en NULL
     (crítico cuando se salteó el rebuild porque el summary subido reconcilió)."""
@@ -1169,19 +1162,6 @@ def _ensure_entidad_summary_for_push_safe(db: Session, run_id: int) -> None:
             logger.info("[DIM][IMPORT] identidad: capa C reparó %d filas de summary run=%s", repaired, run_id)
     except Exception:
         logger.exception("[DIM][IMPORT] identidad: capa C FALLÓ run=%s (no bloquea el finalize)", run_id)
-
-
-def _refresh_snapshot_for_push_safe(db: Session, run_id: int) -> None:
-    """Regenera el snapshot del dashboard server-side tras resolver la identidad. Debe
-    correr DESPUÉS de guardar el snapshot subido por el cliente (que trae el 'clientes'
-    sin resolución de identidad), para sobrescribirlo con el valor correcto."""
-    try:
-        from web_comparativas.dimensionamiento.query_service import refresh_default_dashboard_snapshot
-        db.flush()
-        refresh_default_dashboard_snapshot(db, import_run_id=run_id, commit=False)
-        logger.info("[DIM][IMPORT] identidad: snapshot del dashboard regenerado server-side run=%s", run_id)
-    except Exception:
-        logger.exception("[DIM][IMPORT] identidad: refresh snapshot FALLÓ run=%s (no bloquea el finalize)", run_id)
 
 
 def _summary_reconciles_with_records(db: Session, run_id: int) -> bool:
@@ -1221,6 +1201,75 @@ def _summary_reconciles_with_records(db: Session, run_id: int) -> bool:
     return abs(float(summ.v) - float(rec.v)) <= tol
 
 
+# Umbrales de "marca huérfana" del finalize (incidente 24/07/2026): el advisory lock
+# transaccional se libera al morir la conexión, pero un backend ZOMBI (instancia de
+# Render que se cuelga/reinicia sin cerrar el TCP) puede sostener la transacción — y el
+# lock — indefinidamente, bloqueando todo reintento con 409 sin trabajo real detrás.
+FINALIZE_STALE_IDLE_S = 120     # 'idle in transaction' sin señales de vida por 2 min
+FINALIZE_STALE_XACT_S = 900     # o transacción de más de 15 min, esté como esté
+
+
+def _advisory_lock_holder(db: Session, key: int) -> dict[str, Any] | None:
+    """Backend de Postgres que sostiene el advisory lock `key` (pg_try_advisory_xact_lock).
+    None si nadie lo tiene. Solo PG."""
+    row = db.execute(
+        text(
+            "SELECT a.pid, a.state, a.application_name, "
+            "EXTRACT(EPOCH FROM (now() - a.xact_start)) AS xact_age_s, "
+            "EXTRACT(EPOCH FROM (now() - a.state_change)) AS state_age_s "
+            "FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+            "WHERE l.locktype = 'advisory' AND l.granted "
+            "AND l.classid = :hi AND l.objid = :lo AND l.objsubid = 1 "
+            "AND l.pid <> pg_backend_pid()"
+        ),
+        {"hi": (int(key) >> 32) & 0xFFFFFFFF, "lo": int(key) & 0xFFFFFFFF},
+    ).first()
+    if row is None:
+        return None
+    return {
+        "pid": int(row.pid),
+        "state": row.state,
+        "application_name": row.application_name,
+        "xact_age_s": round(float(row.xact_age_s or 0), 1),
+        "state_age_s": round(float(row.state_age_s or 0), 1),
+    }
+
+
+def _holder_is_stale(holder: dict[str, Any]) -> bool:
+    """¿La marca está huérfana? 'idle in transaction' viejo (el trabajador no está
+    haciendo nada y hace rato) o una transacción más vieja que el TTL duro."""
+    if (holder.get("state") or "").startswith("idle in transaction") and holder["state_age_s"] > FINALIZE_STALE_IDLE_S:
+        return True
+    return holder["xact_age_s"] > FINALIZE_STALE_XACT_S
+
+
+@router.get("/admin/import/finalize-estado")
+def admin_import_finalize_estado(
+    run_id: int = Query(...),
+    _: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Inspección por curl del estado del finalize de un run: status de la corrida y,
+    en Postgres, quién sostiene el advisory lock (pid, estado, edad de la transacción)
+    y si califica como marca huérfana. Para diagnosticar un 409 sin entrar a la base."""
+    run = db.query(DimensionamientoImportRun).filter_by(id=run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Import run not found")
+    holder = _advisory_lock_holder(db, run_id) if IS_POSTGRES else None
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "run_status": run.status,
+        "lock_holder": holder,
+        "holder_huerfano": bool(holder and _holder_is_stale(holder)),
+        "counts": {
+            "records": int(db.execute(text(
+                "SELECT COUNT(*) FROM dimensionamiento_records WHERE import_run_id=:r"), {"r": run_id}).scalar_one()),
+            "summary": _count_summary_rows(db, run_id),
+        },
+    }
+
+
 @router.post("/admin/import/finalize")
 def admin_import_finalize(
     payload: FinalizePayload,
@@ -1240,15 +1289,40 @@ def admin_import_finalize(
     # otro finalize ya lo tiene tomado, respondemos 409 y liberamos la conexión de
     # inmediato. Un lock bloqueante mantendría una conexión ocupada hasta 600s y
     # Render tiene pocas conexiones ⇒ riesgo de agotar el pool. El lock es
-    # transaccional: se libera solo al commit/rollback de este request.
+    # transaccional: se libera al commit/rollback O al morir la conexión — pero un
+    # backend ZOMBI (incidente 24/07/2026: instancia que se colgó sin cerrar el TCP)
+    # puede sostenerlo indefinidamente. Por eso, ante lock tomado, se INSPECCIONA al
+    # holder: si está huérfano (idle-in-transaction viejo o transacción > TTL), se lo
+    # TERMINA (pg_terminate_backend → su transacción rollbackea, nada commiteado
+    # queda a medias) y se reclama el lock. 409 SOLO si hay un trabajador vivo.
     if IS_POSTGRES:
         got_lock = db.execute(
             text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": int(run.id)}
         ).scalar()
         if not got_lock:
-            raise HTTPException(
-                status_code=409, detail="Finalize already in progress for this run"
-            )
+            holder = _advisory_lock_holder(db, run.id)
+            if holder and _holder_is_stale(holder):
+                logger.warning(
+                    "[DIM][IMPORT] finalize run=%s: marca HUÉRFANA detectada "
+                    "(pid=%s state=%r xact_age=%.0fs state_age=%.0fs). Terminando backend y reclamando.",
+                    run.id, holder["pid"], holder["state"], holder["xact_age_s"], holder["state_age_s"],
+                )
+                db.execute(text("SELECT pg_terminate_backend(:p)"), {"p": holder["pid"]})
+                time.sleep(1.0)
+                got_lock = db.execute(
+                    text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": int(run.id)}
+                ).scalar()
+                if got_lock:
+                    logger.warning("[DIM][IMPORT] finalize run=%s: lock huérfano RECLAMADO, continuando.", run.id)
+            if not got_lock:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Finalize already in progress for this run",
+                        "holder": holder,
+                        "holder_huerfano": bool(holder and _holder_is_stale(holder)),
+                    },
+                )
         db.refresh(run)  # estado fresco tras adquirir el lock
 
     # Idempotencia (punto 3, lado server): si un intento previo ya la dejó en
@@ -1260,31 +1334,48 @@ def admin_import_finalize(
         raise HTTPException(status_code=400, detail=f"Import run is not running (status={run.status})")
 
     try:
-        # Opción A: el cliente ya subió el summary (dedup en SQLite). Si reconcilia
-        # con los records, salteamos el rebuild pesado (cercano al timeout de 600s
-        # y que empeora al crecer el dataset). Si NO reconcilia (inflación por
-        # NULLS DISTINCT en reintentos de chunk) o no se subió summary, se
-        # reconstruye desde los records como fallback seguro (fuente de verdad).
-        # Identidad de clientes: resolver records+registry ANTES de decidir el rebuild.
-        # Los chunks subidos por el cliente NO traen cliente_entidad_id/es_cliente_entidad,
-        # así que hay que resolver acá. Si luego se reconstruye (else), capa A copia la
-        # identidad; si se saltea (Opción A), el summary subido queda sin identidad y capa
-        # C la propaga. Cualquiera de las dos rutas termina con el summary poblado.
-        _resolve_entities_for_push_safe(db, run.id)
-
+        # ── FINALIZE LIVIANO (rediseño post-incidente 24/07/2026) ────────────────
+        # Regla del proyecto: Render solo APLICA; el cómputo pesado vive en la PC.
+        # El summary YA viaja completo por chunks y el snapshot YA viene precalculado
+        # (y con la identidad local resuelta). El finalize viejo además (1) resolvía
+        # la identidad server-side sobre 364k records, (2) reconstruía el summary y
+        # (3) REGENERABA el snapshot corriendo todas las queries del dashboard: >10
+        # minutos de trabajo redundante en Render — la causa de fondo del incidente.
+        # Ahora: validar conteos, aplicar snapshot recibido, swap atómico. Segundos.
+        # La identidad llega DESPUÉS como dato (push_identity, Paso 2 del runbook).
         if _summary_reconciles_with_records(db, run.id):
             summary_rows = _count_summary_rows(db, run.id)
             logger.info(
-                "[DIM][IMPORT] Run %d: summary subido reconcilia con records, se saltea rebuild rows=%d",
+                "[DIM][IMPORT] Run %d: summary subido reconcilia con records rows=%d",
+                run.id, summary_rows,
+            )
+        elif payload.allow_rebuild:
+            # Escape hatch explícito y deliberado (única vía pesada que queda).
+            summary_rows = _rebuild_summary_for_run(db, run.id)
+            logger.warning(
+                "[DIM][IMPORT] Run %d: allow_rebuild=True — summary reconstruido server-side rows=%d",
                 run.id, summary_rows,
             )
         else:
-            summary_rows = _rebuild_summary_for_run(db, run.id)
-            logger.info("[DIM][IMPORT] Run %d: summary reconstruido desde records rows=%d", run.id, summary_rows)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "El summary subido no reconcilia con los records (o no se subió). "
+                    "Re-subí el summary desde el cliente (el primer chunk hace reset "
+                    "run-scoped) y reintentá el finalize. Rebuild server-side solo con "
+                    "allow_rebuild=true (pesado, evitarlo)."
+                ),
+            )
 
-        # Capa C: garantizar que el summary del run quede con identidad, venga del rebuild
-        # (A) o del summary subido (skip). Idempotente/barata si ya está poblado.
-        _ensure_entidad_summary_for_push_safe(db, run.id)
+        # Capa C SOLO si el registry del run ya existe (re-finalize posterior al push
+        # de identidad). En el flujo normal el registry todavía no viajó: propagar acá
+        # sería un UPDATE de 300k filas para copiar NULLs — trabajo pesado inútil.
+        registry_rows = int(db.execute(
+            text("SELECT COUNT(*) FROM dimensionamiento_cliente_entidad WHERE import_run_id=:r"),
+            {"r": run.id},
+        ).scalar_one())
+        if registry_rows:
+            _ensure_entidad_summary_for_push_safe(db, run.id)
 
         if payload.snapshot:
             snap = db.query(DimensionamientoDashboardSnapshot).filter_by(
@@ -1308,9 +1399,9 @@ def admin_import_finalize(
             run_sum.update(payload.summary_metadata)
             run.summary = run_sum
 
-        # DESPUÉS de guardar el snapshot del cliente: regenerarlo server-side con la
-        # identidad resuelta, para que la card no sirva el 'clientes' sin resolución.
-        _refresh_snapshot_for_push_safe(db, run.id)
+        # El snapshot del cliente viene precalculado en local CON la identidad ya
+        # resuelta (run local resuelto antes del push) — no se regenera server-side.
+        # Tras el push de identidad (Paso 2), su finalize refresca el snapshot.
 
         run.status = "success"
         run.finished_at = dt.datetime.utcnow()
@@ -1331,9 +1422,11 @@ def admin_import_finalize(
         ).scalar_one())
         identidad_resuelta = ident_count > 0 and ident_null == 0
         if not identidad_resuelta:
-            logger.warning(
-                "[DIM][IMPORT] Run %d finalizado pero IDENTIDAD SIN RESOLVER "
-                "(entidades=%d, summary_null=%d). Correr backfill.", run.id, ident_count, ident_null,
+            logger.info(
+                "[DIM][IMPORT] Run %d finalizado con identidad PENDIENTE "
+                "(entidades=%d, summary_null=%d). Esperado en el flujo por chunks: "
+                "la identidad viaja como dato en el paso siguiente (push_identity).",
+                run.id, ident_count, ident_null,
             )
         logger.info("[DIM][IMPORT] Finalized run_id=%d successfully. identidad_resuelta=%s", run.id, identidad_resuelta)
         return {
@@ -1345,6 +1438,11 @@ def admin_import_finalize(
                 "summary_identidad_null": ident_null,
             },
         }
+    except HTTPException:
+        # 422 (no reconcilia) y similares: rollback y propagar tal cual — el except
+        # genérico de abajo los convertiría en un 500 engañoso.
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         logger.exception("[DIM][IMPORT] Error finalizing import run")
