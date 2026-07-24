@@ -78,9 +78,26 @@ def post_with_retry(url: str, headers: dict, json_data: dict, description: str, 
                 print(f"  ✅ {description}: la corrida ya estaba finalizada (idempotente).")
                 return {"ok": True, "idempotent": True, "message": str(err_detail)}
 
-            # Finalize en progreso en el server (try-lock no adquirido): reintentar.
+            # Finalize en progreso en el server (try-lock no adquirido): reintentar,
+            # reportando HONESTO quién tiene el lock (el server nuevo lo informa).
             if ok_if_already_final and response.status_code == 409:
-                print(f"  ⏳ {description}: finalize en progreso en el server (Intento {attempt}/{max_retries}).")
+                holder = err_detail.get("holder") if isinstance(err_detail, dict) else None
+                if holder:
+                    estado = holder.get("state")
+                    edad = holder.get("xact_age_s")
+                    huerfano = err_detail.get("holder_huerfano")
+                    if huerfano:
+                        print(f"  🛑 {description}: el lock lo tiene un backend HUÉRFANO "
+                              f"(pid={holder.get('pid')}, state={estado!r}, xact_age={edad}s) y el "
+                              f"reclamo automático no pudo tomarlo. Reintentando (Intento {attempt}/{max_retries})...")
+                    else:
+                        print(f"  ⏳ {description}: hay un finalize VIVO trabajando en el server "
+                              f"(pid={holder.get('pid')}, state={estado!r}, xact_age={edad}s). "
+                              f"Esperando (Intento {attempt}/{max_retries}).")
+                else:
+                    print(f"  ⏳ {description}: finalize en progreso en el server, sin detalle del "
+                          f"holder — probable server SIN el fix de lock huérfano desplegado "
+                          f"(Intento {attempt}/{max_retries}).")
             else:
                 print(f"  ⚠️  Falló {description} (Intento {attempt}/{max_retries}). HTTP Status: {response.status_code}")
                 print(f"      Detalle: {str(err_detail)[:200]}")
@@ -245,6 +262,14 @@ def handle_upload(args):
             print(f"   - Reanudando corrida remota ID: {remote_run_id}")
             print(f"   - Registros ya subidos: {records_offset:,} / {total_records:,}")
             print(f"   - Resúmenes ya subidos: {summaries_offset:,} / {total_summaries:,}")
+            if args.resubir_summary:
+                # Recuperación del 422 "summary no reconcilia": re-subir SOLO el summary
+                # (el primer chunk hace DELETE run-scoped en el server) sin re-subir
+                # los records ya cargados.
+                summaries_offset = 0
+                state["summaries_offset"] = 0
+                save_state(state)
+                print("   - --resubir-summary: el summary se re-sube desde cero (reset run-scoped); los records NO se re-suben.")
         else:
             print(f"\n🚀 Iniciando nueva corrida remota en {args.url}...")
             start_payload = {
@@ -428,11 +453,8 @@ def handle_upload(args):
 
         # Estado EXPLÍCITO de la resolución de identidad de clientes (el server lo devuelve
         # en el finalize). Un push NO es realmente exitoso si la identidad quedó sin resolver.
-        identidad = None
-        try:
-            identidad = (finalize_res.json() or {}).get("identidad")
-        except Exception:
-            identidad = None
+        # finalize_res ya es un dict (post_with_retry devuelve response.json()).
+        identidad = (finalize_res or {}).get("identidad") if isinstance(finalize_res, dict) else None
 
         print("\n🎉 ========================================================")
         print("🎉 ¡ACTUALIZACIÓN COMPLETADA CON ÉXITO!")
@@ -446,14 +468,12 @@ def handle_upload(args):
             print(f"✅ IDENTIDAD DE CLIENTES: RESUELTA — {identidad.get('entidades')} entidades. "
                   "La card cuenta por identidad.")
         else:
-            print("🛑 ========================================================")
-            print("🛑 IDENTIDAD DE CLIENTES: NO RESUELTA. La card está en FALLBACK")
-            print("🛑 (muestra el número anterior, provisorio). El push NO está completo.")
-            print(f"🛑   entidades={identidad.get('entidades')} summary_identidad_null={identidad.get('summary_identidad_null')}")
-            print("🛑   Correr el backfill:")
-            print(f"🛑   curl -s -X POST \"{args.url}/api/mercado-privado/dimensiones/admin/resolve-entities\" -H \"X-Import-Token: <TOKEN>\"")
-            print("🛑   Y confirmar con: GET .../admin/estado-identidad")
-            print("🛑 ========================================================")
+            print("ℹ️  ========================================================")
+            print("ℹ️  IDENTIDAD DE CLIENTES: PENDIENTE (esperado en este punto).")
+            print("ℹ️  La card queda en fallback hasta el paso siguiente, que la sube como dato:")
+            print(f"ℹ️    python -m scripts.push_identity --url {args.url} --token <TOKEN> --records --remote-run {remote_run_id} --timeout 300")
+            print("ℹ️  Y confirmar con: GET .../admin/estado-identidad (modo_card: identidad)")
+            print("ℹ️  ========================================================")
         print("")
         
     finally:
@@ -552,6 +572,13 @@ def main():
         action="store_true",
         help="Realiza validaciones locales sobre los datos sin iniciar la carga ni enviar nada al servidor."
     )
+    upload_parser.add_argument(
+        "--resubir-summary",
+        dest="resubir_summary",
+        action="store_true",
+        help="Al reanudar, re-sube SOLO el summary desde cero (reset run-scoped en el server) "
+             "sin re-subir los records. Recuperación del finalize 422 'summary no reconcilia'."
+    )
     
     # Subparser para rollback
     rollback_parser = subparsers.add_parser("rollback", help="Cancela una corrida remota poniéndola en 'failed'.")
@@ -583,6 +610,7 @@ def main():
         args.chunk_size = 20000
         args.fresh = False
         args.dry_run = False
+        args.resubir_summary = False
         
     print("======================================================================")
     print("     🚀  WEB COMPARATIVAS - CLIENTE DE CARGA DE DIMENSIONAMIENTO      ")
