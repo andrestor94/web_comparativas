@@ -380,6 +380,13 @@ def get_summary(
     cadneg: Optional[str] = None,
 ) -> dict:
     rows = get_rows(desde, hasta, laboratorio=laboratorio, familia=familia, cliente=cliente, search=search, cadneg=cadneg)
+    return summarize_rows(rows)
+
+
+def summarize_rows(rows: list) -> dict:
+    """Agregación del resumen a partir de filas YA consultadas (extraído de get_summary
+    sin cambios de lógica). Permite reusar UNA sola corrida de get_rows cuando hace
+    falta resumen + detalle juntos (export a Excel)."""
     by_month: dict = {}
     by_lab: dict = {}
     by_brand: dict = {}
@@ -428,6 +435,12 @@ def get_detail(
     cadneg: Optional[str] = None,
 ) -> list:
     rows = get_rows(desde, hasta, laboratorio=laboratorio, familia=familia, cliente=cliente, search=search, cadneg=cadneg)
+    return detail_from_rows(rows)
+
+
+def detail_from_rows(rows: list) -> list:
+    """Agregación del detalle a partir de filas YA consultadas (extraído de get_detail
+    sin cambios de lógica). Ver summarize_rows()."""
     total = sum(float(row["unidades"] or 0) for row in rows)
     grouped: dict = {}
 
@@ -463,6 +476,25 @@ def get_detail(
         })
 
     return sorted(result, key=lambda item: item["unidades"], reverse=True)
+
+
+def get_export_bundle(
+    desde: date,
+    hasta: date,
+    laboratorio: Optional[str] = None,
+    familia: Optional[str] = None,
+    cliente: Optional[str] = None,
+    search: Optional[str] = None,
+    cadneg: Optional[str] = None,
+) -> dict:
+    """Resumen + detalle con UNA sola corrida de get_rows (misma consulta que alimenta
+    la vista: tablas summary vía _corrida_activa(), o el vivo si no hay summary).
+    La pantalla pega a /resumen y /detalle por separado; el export los necesita juntos
+    y no tiene sentido consultar dos veces. Los valores son idénticos a los de esos
+    endpoints porque reusa summarize_rows()/detail_from_rows()."""
+    rows = get_rows(desde, hasta, laboratorio=laboratorio, familia=familia,
+                    cliente=cliente, search=search, cadneg=cadneg)
+    return {"resumen": summarize_rows(rows), "detalle": detail_from_rows(rows)}
 
 
 def get_metadata(

@@ -4,7 +4,7 @@
 
 {% block extra_head %}
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=4.1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/indicadores.css') }}?v=4.2">
 {% endblock %}
 
 {% block header_title %}Indicadores Comerciales{% endblock %}
@@ -22,6 +22,9 @@
   <div class="h-page-header__actions d-flex align-items-center gap-2 flex-wrap">
     <button id="lab-btn-print-report" class="ind-btn ind-btn--ghost btn-sm" onclick="LAB.printReport()" title="Imprimir informe completo">
       <i class="bi bi-printer me-1"></i>Imprimir
+    </button>
+    <button id="lab-btn-excel" class="ind-btn ind-btn--ghost btn-sm" onclick="LAB.exportExcel()" title="Descargar informe completo en Excel (respeta los filtros aplicados)">
+      <i class="bi bi-file-earmark-excel me-1"></i>Excel
     </button>
     <a href="/markets" class="btn btn-sm btn-outline-secondary">
       <i class="bi bi-grid me-1"></i>Suite SIEM
@@ -277,7 +280,7 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', path='js/indicadores_chart_theme.js') }}?v=1.1"></script>
-<script src="{{ url_for('static', path='js/indicadores_laboratorios.js') }}?v=3.1"></script>
+<script src="{{ url_for('static', path='js/indicadores_laboratorios.js') }}?v=3.3"></script>
 <script>
   LAB.init({
     desde: "{{ default_desde }}",
