@@ -521,6 +521,48 @@ const LAB = (() => {
     a.click();
   }
 
+  // ── Export Excel ─────────────────────────────────────────────────────────────
+  // Tercer botón de salida (además de Imprimir/PDF y CSV). El armado del .xlsx es
+  // server-side: se mandan los MISMOS filtros que usa la vista (_buildParams) y el
+  // endpoint reusa el servicio que alimenta la pantalla, exportando TODAS las filas
+  // del resultado filtrado (la grilla recorta a 1500 por scroll).
+  async function exportExcel() {
+    const btn = $('lab-btn-excel');
+    const original = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="ind-spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px"></span>Generando…';
+    }
+    try {
+      const r = await fetch(`${_cfg.apiBase}/export/xlsx?${_buildParams()}`,
+        { signal: AbortSignal.timeout(180000) });
+      // 404 acá no es un problema de datos: el proceso del servidor no tiene la ruta
+      // (arrancó antes de que existiera). Se avisa explícito para no perder tiempo.
+      if (r.status === 404) throw new Error('El servidor no tiene la ruta de exportación cargada. Reiniciá el servidor local y reintentá.');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const desde = ($('lab-desde')?.value || '').replace(/-/g, '');
+      const hasta = ($('lab-hasta')?.value || '').replace(/-/g, '');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Informes_Laboratorio_${desde}_${hasta}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (err) {
+      _showError(err.name === 'TimeoutError' || err.name === 'AbortError'
+        ? 'La generación del Excel tardó demasiado. Reducí el rango de fechas y volvé a intentar.'
+        : 'No se pudo generar el Excel. ' + (err.message || ''));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = original || '<i class="bi bi-file-earmark-excel me-1"></i>Excel';
+      }
+    }
+  }
+
   // ── UI helpers ───────────────────────────────────────────────────────────────
   function _setLoading(on) {
     const el = $('lab-loading');
@@ -626,5 +668,5 @@ const LAB = (() => {
     }, 600);
   }
 
-  return { init, applyFilters, clearFilters, exportCSV, printReport };
+  return { init, applyFilters, clearFilters, exportCSV, exportExcel, printReport };
 })();

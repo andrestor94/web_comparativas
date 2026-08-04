@@ -19,6 +19,7 @@ API Informes de Laboratorio:
   GET /indicadores-comerciales/api/laboratorios/metadata
   GET /indicadores-comerciales/api/laboratorios/resumen
   GET /indicadores-comerciales/api/laboratorios/detalle
+  GET /indicadores-comerciales/api/laboratorios/export/xlsx
 
 API Inflación PVP:
   GET /indicadores-comerciales/api/inflacion/resumen
@@ -38,7 +39,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from web_comparativas.models import User
@@ -525,6 +526,40 @@ def api_laboratorios_detalle(request: Request, _user: User = Depends(require_mod
         return JSONResponse(rows[:2000])
     except Exception as exc:
         logger.error("laboratorios detalle error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=_safe_error(exc))
+
+
+@router.get("/api/laboratorios/export/xlsx")
+def api_laboratorios_export_xlsx(request: Request, _user: User = Depends(require_module("indicadores_comerciales")),
+                                  desde: Optional[str] = Query(default=None),
+                                  hasta: Optional[str] = Query(default=None),
+                                  laboratorio: Optional[str] = Query(default=None),
+                                  familia: Optional[str] = Query(default=None),
+                                  cliente: Optional[str] = Query(default=None),
+                                  search: Optional[str] = Query(default=None),
+                                  cadneg: Optional[str] = Query(default=None)):
+    """Descarga el informe completo en .xlsx con los MISMOS filtros que la pantalla.
+    Tercera salida del módulo (no toca ni el PDF de Imprimir ni el CSV de la barra).
+    Los datos salen del mismo servicio que alimenta la vista; a diferencia de /detalle
+    (recortado a 2000) exporta todas las filas del resultado filtrado."""
+    try:
+        from web_comparativas.indicadores_laboratorios_export import build_laboratorios_workbook
+        content, filename = build_laboratorios_workbook(
+            desde=_parse_date(desde or _year_start_str()),
+            hasta=_parse_date(hasta or _today_str()),
+            laboratorio=laboratorio or None,
+            familia=familia or None,
+            cliente=cliente or None,
+            search=search or None,
+            cadneg=cadneg or None,
+        )
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        logger.error("laboratorios export xlsx error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=_safe_error(exc))
 
 
