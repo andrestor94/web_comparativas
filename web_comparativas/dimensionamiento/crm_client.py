@@ -647,11 +647,11 @@ def _texto_bitacora(
     origen = asignado.get("origen")
     if origen == "manual":
         cabecera = (
-            f"Enviada desde SIEM por {quien}, que la asignó manualmente a "
+            f"Enviado desde SIEM por {quien}, que la asignó manualmente a "
             f"{asignado.get('usuario') or asignado.get('id')}."
         )
     else:
-        cabecera = f"Enviada desde SIEM por {quien}."
+        cabecera = f"Enviado desde SIEM por {quien}."
     return f"{cabecera} {base}".strip()
 
 def enviar_oportunidad(

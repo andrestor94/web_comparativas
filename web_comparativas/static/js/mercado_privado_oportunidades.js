@@ -102,6 +102,28 @@
     $("kpiEfect").textContent = fmtPct(efProm);
   }
 
+  // Botón de CRM en la fila. El estado sale de `o.envio`, que el backend ya resuelve
+  // POR ENTORNO vigente (igual que el badge ENVIADA): una oportunidad enviada a TEST
+  // aparece como pendiente si se está operando contra PROD, que es lo correcto.
+  //   - sin enviar        -> abre el modal de payload (mismo flujo de siempre)
+  //   - enviada con id    -> lleva directo al registro del CRM, sin pasar por el modal
+  //   - enviada sin id    -> no hay a dónde ir (envío simulado): botón inerte
+  function accionCrmHtml(o) {
+    const env = o.envio || {};
+    if (env.enviado && env.crm_url) {
+      return `<button class="opp-detail-btn opp-crm-btn opp-crm-ok" type="button" ` +
+        `data-crm-url="${esc(env.crm_url)}" title="Ver esta oportunidad en el CRM" ` +
+        `aria-label="Ver en CRM"><i class="bi bi-box-arrow-up-right"></i></button>`;
+    }
+    if (env.enviado) {
+      return `<button class="opp-detail-btn opp-crm-btn opp-crm-ok" type="button" disabled ` +
+        `title="Enviada en modo simulado: no hay registro en el CRM" ` +
+        `aria-label="Enviada sin registro en el CRM"><i class="bi bi-check2-circle"></i></button>`;
+    }
+    return `<button class="opp-detail-btn opp-crm-btn" type="button" ` +
+      `title="Enviar a CRM" aria-label="Enviar a CRM"><i class="bi bi-send"></i></button>`;
+  }
+
   // ── Render lista de registros (CSS grid, no tabla de celdas) ──
   function render(rows) {
     const body = $("oppBody"), empty = $("oppEmpty");
@@ -139,7 +161,21 @@
           `<div class="opp-monto-v">${fmtMoney(o.monto_oportunidad)}</div>` +
           `<div class="opp-precio-sub">${fmtMoney(o.precio_unitario_estimado)} c/u</div>` +
         `</div>` +
-        `<div class="opp-c-action"><button class="opp-detail-btn" type="button" aria-label="Ver detalle de la oportunidad" title="Ver detalle"><i class="bi bi-eye"></i></button></div>`;
+        `<div class="opp-c-action">` +
+          accionCrmHtml(o) +
+          `<button class="opp-detail-btn" type="button" aria-label="Ver detalle de la oportunidad" title="Ver detalle"><i class="bi bi-eye"></i></button>` +
+        `</div>`;
+      // El click en la fila abre el detalle, pero el botón de CRM tiene lo suyo: se
+      // frena la propagación para que no dispare las dos cosas a la vez.
+      const btnCrm = row.querySelector(".opp-crm-btn");
+      if (btnCrm) {
+        btnCrm.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const url = btnCrm.dataset.crmUrl;
+          if (url) window.open(url, "_blank", "noopener");   // ya enviada -> directo al CRM
+          else showCrm(o);                                   // sin enviar -> modal de payload
+        });
+      }
       row.addEventListener("click", () => showDetail(o));
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDetail(o); }
@@ -261,7 +297,10 @@
   // el sistema no elige por el usuario, se lo pregunta. Devuelve true si quedó visible.
   function reflectAsignacion(o) {
     const box = $("crmAsignacionBox"), sel = $("crmAsignadoSel");
-    const requiere = !!((o.crm || {}).requiere_asignacion);
+    const crmInfo = o.crm || {};
+    // El Analista nunca elige: se asigna a sí mismo o no envía. El selector no se
+    // dibuja para él (y el backend igual rechaza cualquier otro assigned_user_id).
+    const requiere = !!crmInfo.requiere_asignacion && crmInfo.puede_elegir !== false;
     if (!box || !sel) return false;
     if (!requiere) { box.style.display = "none"; return false; }
 
@@ -339,7 +378,8 @@
       // Si hubo selección manual, viaja el id elegido. El backend igual lo valida
       // contra la lista real del CRM: acá solo se transmite la decisión.
       const sel = $("crmAsignadoSel");
-      const elegido = (o.crm && o.crm.requiere_asignacion && sel) ? sel.value : "";
+      const puedeElegir = o.crm && o.crm.requiere_asignacion && o.crm.puede_elegir !== false;
+      const elegido = (puedeElegir && sel) ? sel.value : "";
       const url = SEND_API(o.id) + (elegido ? `?assigned_user_id=${encodeURIComponent(elegido)}` : "");
       const resp = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
       const json = await resp.json().catch(() => ({}));

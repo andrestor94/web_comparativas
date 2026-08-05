@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Oportunidades enviadas al CRM - Mercado Privado{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=oportunidades-v9">
+<style>
+/* ====================================================================
+   Repositorio de oportunidades ENVIADAS al CRM.
+   A diferencia de la vista principal (lista de registros en grid), acá sí
+   corresponde una tabla: son datos homogéneos que se comparan y ordenan
+   columna por columna. Reutiliza los tokens SIEM de la vista hermana.
+   ==================================================================== */
+#oppEnviadasApp{
+  --opp-meta:#94a3b8;
+  --opp-hairline:rgba(6,72,111,.07);
+  --opp-row-hover:#f7fafc;
+  --opp-green:#15803d;
+}
+#oppEnviadasApp .opp-window-badge{display:inline-flex;align-items:center;gap:.45rem;font-size:.78rem;font-weight:600;color:var(--tech-blue-dark);background:rgba(30,92,138,.08);border:1px solid rgba(30,92,138,.18);border-radius:999px;padding:.35rem .8rem;line-height:1.2;}
+#oppEnviadasApp .btn{border-radius:999px;font-weight:600;font-size:.8rem;}
+#oppEnviadasApp #envReloadBtn{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--tech-blue-dark);background:var(--tech-blue-dark);color:#fff;padding:.34rem .9rem;}
+#oppEnviadasApp #envReloadBtn:hover{background:var(--tech-blue-mid);border-color:var(--tech-blue-mid);}
+#oppEnviadasApp .opp-search{height:34px;border-radius:999px;border:1px solid rgba(6,72,111,.15);background:#fff;font-size:.8rem;font-weight:600;color:var(--tech-blue-dark);padding:.25rem .9rem;min-width:260px;}
+#oppEnviadasApp .opp-search:focus{border-color:var(--tech-blue-bright);box-shadow:0 0 0 3px rgba(87,112,176,.18);outline:none;}
+#oppEnviadasApp .tech-select{height:34px;border-radius:999px;border:1px solid rgba(6,72,111,.15);background:#fff;font-size:.8rem;font-weight:600;color:var(--tech-blue-dark);padding:.25rem 1.9rem .25rem .9rem;}
+#oppEnviadasApp label{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--opp-meta);margin:0;}
+#oppEnviadasApp .filter-group{display:flex;flex-direction:column;gap:.22rem;}
+
+/* Tabla: scroll horizontal propio para no romper el layout en pantallas chicas */
+#oppEnviadasApp .env-scroll{overflow-x:auto;}
+#oppEnviadasApp table{width:100%;border-collapse:collapse;font-size:.82rem;min-width:1040px;}
+#oppEnviadasApp thead th{position:sticky;top:0;background:#fff;z-index:1;text-align:left;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tech-blue-mid);padding:.55rem .6rem;border-bottom:1px solid rgba(6,72,111,.14);white-space:nowrap;cursor:pointer;user-select:none;}
+#oppEnviadasApp thead th:hover{color:var(--tech-blue-dark);background:#f7fafc;}
+#oppEnviadasApp thead th .env-arrow{opacity:.35;font-size:.7rem;}
+#oppEnviadasApp thead th.env-sorted .env-arrow{opacity:1;}
+#oppEnviadasApp tbody td{padding:.5rem .6rem;border-bottom:1px solid var(--opp-hairline);vertical-align:middle;color:var(--tech-blue-dark);}
+#oppEnviadasApp tbody tr:hover{background:var(--opp-row-hover);}
+#oppEnviadasApp .env-cliente{font-weight:600;max-width:250px;}
+#oppEnviadasApp .env-prod{color:#475569;max-width:230px;}
+#oppEnviadasApp .env-monto{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--opp-green);white-space:nowrap;}
+#oppEnviadasApp .env-trunc{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#oppEnviadasApp .env-sub{display:block;font-size:.7rem;color:var(--opp-meta);}
+/* El entorno se lee de un vistazo: PROD tiene que saltar a la vista. */
+#oppEnviadasApp .env-modo{display:inline-block;font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-radius:999px;padding:.15rem .55rem;}
+#oppEnviadasApp .env-modo-prod{background:#fee2e2;color:#b91c1c;}
+#oppEnviadasApp .env-modo-test{background:#e0f2fe;color:#075985;}
+#oppEnviadasApp .env-modo-simulado{background:#f1f5f9;color:#64748b;}
+#oppEnviadasApp .env-manual{display:inline-block;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#92400e;background:#fef3c7;border-radius:999px;padding:.1rem .4rem;margin-left:.3rem;}
+#oppEnviadasApp .env-crm-link{display:inline-flex;align-items:center;gap:.3rem;font-weight:600;color:var(--tech-blue-mid);text-decoration:none;white-space:nowrap;}
+#oppEnviadasApp .env-crm-link:hover{color:var(--tech-blue-dark);text-decoration:underline;}
+#oppEnviadasApp .env-sin-link{color:var(--opp-meta);font-size:.75rem;}
+#oppEnviadasApp .opp-empty{padding:2rem;text-align:center;color:var(--opp-meta);}
+</style>
+
+<div class="tech-dashboard-grid animate-enter" id="oppEnviadasApp">
+    <div class="tech-header">
+        <div class="tech-title">
+            <h2>Oportunidades enviadas al CRM</h2>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="opp-window-badge"><i class="bi bi-send-check"></i><span id="envTotalLabel">Cargando…</span></span>
+            <a href="/mercado-privado/oportunidades" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i> Volver a Oportunidades
+            </a>
+            <button id="envReloadBtn" class="btn btn-sm"><i class="bi bi-arrow-repeat me-1"></i> Actualizar</button>
+        </div>
+    </div>
+
+    <div class="tech-toolbar">
+        <div class="d-flex flex-wrap gap-3 align-items-end w-100">
+            <div class="filter-group flex-grow-1">
+                <label>Buscar</label>
+                <input id="envSearch" class="opp-search" type="search"
+                       placeholder="Cliente, producto, quién envió, asignado, id del CRM…">
+            </div>
+            <div class="filter-group">
+                <label>Entorno</label>
+                <select id="envModo" class="tech-select">
+                    <option value="">Todos</option>
+                    <option value="prod">Producción</option>
+                    <option value="test">Test</option>
+                    <option value="simulado">Simulado</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Asignación</label>
+                <select id="envOrigen" class="tech-select">
+                    <option value="">Todas</option>
+                    <option value="match">Automática</option>
+                    <option value="manual">Manual</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="tech-card" style="grid-column:span 12;">
+        <div class="tech-card-title d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-archive me-1"></i>Repositorio de envíos</span>
+            <span class="text-muted small" id="envShownLabel"></span>
+        </div>
+        <div class="env-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-sort="cliente_visible">Cliente <span class="env-arrow">↕</span></th>
+                        <th data-sort="producto">Producto <span class="env-arrow">↕</span></th>
+                        <th data-sort="monto_oportunidad" style="text-align:right;">Monto/mes <span class="env-arrow">↕</span></th>
+                        <th data-sort="enviado_por">Enviada por <span class="env-arrow">↕</span></th>
+                        <th data-sort="asignado_a">Asignada a <span class="env-arrow">↕</span></th>
+                        <th data-sort="enviado_at">Fecha <span class="env-arrow">↕</span></th>
+                        <th data-sort="crm_modo">Entorno <span class="env-arrow">↕</span></th>
+                        <th>CRM</th>
+                    </tr>
+                </thead>
+                <tbody id="envBody"></tbody>
+            </table>
+        </div>
+        <div class="opp-empty" id="envEmpty" style="display:none;">Todavía no hay oportunidades enviadas al CRM.</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades_enviadas.js') }}?v=oportunidades-v9"></script>
+{% endblock %}

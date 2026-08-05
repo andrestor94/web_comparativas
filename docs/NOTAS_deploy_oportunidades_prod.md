@@ -53,6 +53,15 @@ Ojo con dos detalles del contrato: en `Cuentas_por_numero_fusion` el `data` es u
 2. **Sin match: NO se asigna a nadie automáticamente.** El modal muestra un **selector con todos los usuarios del CRM** para que quien envía elija explícitamente (arranca vacío a propósito: sin opción preseleccionada no hay envío distraído). Queda registrado como `crm_assigned_origen='manual'` junto con el usuario elegido, y `enviado_por` sigue guardando a quien disparó el envío.
 3. `CRM_USUARIO_FALLBACK_ID` **ya no se aplica solo**: solo puede pre-sugerir una opción en el selector. La asignación automática a un tercero se eliminó porque hacía aparecer oportunidades en el CRM a nombre de gente que no las generó.
 
+**Quién puede elegir el asignado (por rol, ago-2026):**
+
+| Rol | Selector | Puede asignar a |
+|---|---|---|
+| Analista | No lo ve | **Solo a sí mismo** (su match del CRM) |
+| Supervisor / Admin | Sí | Cualquier usuario del CRM |
+
+El chequeo es **server-side**: un Analista que llame al endpoint con otro `assigned_user_id` recibe 422 (la UI que no le muestra el selector es cosmética). Caso borde cubierto: **Analista cuyo usuario de SIEM no existe en el CRM** no tiene a quién asignar y tampoco puede elegir → el envío se bloquea con *"Tu usuario no está dado de alta en el CRM…"* en lugar de dejarlo con un botón muerto. A un Supervisor en la misma situación se le pide elegir, que sí puede.
+
 La consulta al CRM se hace una sola vez por request (no por fila) y trae el match + la lista completa. Si el CRM no responde, no hay lista que ofrecer y el envío queda **bloqueado** con el motivo a la vista.
 
 **La bitácora del CRM (paso 5) siempre nombra al usuario de SIEM** que disparó el envío, aunque la oportunidad quede asignada a otra persona: `"Enviada desde SIEM por <mail>[, que la asignó manualmente a <usuario>]."`. Sin eso, una oportunidad asignada a un tercero perdía todo rastro de su origen.
@@ -64,6 +73,14 @@ La consulta al CRM se hace una sola vez por request (no por fila) y trae el matc
 **Sin envíos degradados** (ago-2026): si no se resuelve el usuario asignado (ni por match ni por fallback) o falta la cuenta de fusión, la oportunidad NO se envía: el modal muestra el motivo y el botón queda deshabilitado, y el endpoint devuelve 422 aunque se lo llame a mano. `assigned_user` nunca lleva un texto de error: o es un nombre real, o es `null` y el envío está bloqueado.
 
 **Bloqueo de duplicados POR ENTORNO** (ago-2026): la clave única es `(oportunidad_id, crm_modo)`. Lo enviado a TEST no bloquea PROD, y lo simulado no bloquea nada real. El listado y el botón reflejan el entorno vigente (`CRM_MODO`), no un estado global. `crm_modo` es parte de la clave: si quedara NULL el bloqueo se apagaría en silencio (dos NULL son distintos entre sí en SQLite y en PG), por eso el código lo setea siempre y la migración rellena las filas viejas a `'simulado'`.
+
+## Repositorio de oportunidades enviadas
+
+Vista `/mercado-privado/oportunidades/enviadas` (API `GET /api/mercado-privado/oportunidades/enviadas`): lista TODO lo enviado con cliente, producto, monto, quién lo envió, a quién quedó asignado, fecha, entorno y link al CRM. Ordenable por cualquier columna y con búsqueda, ambas del lado del cliente.
+
+Dos decisiones deliberadas: **no filtra por `crm_modo`** (el entorno es una columna, no un filtro implícito — el sentido es ver todo y a dónde fue) y **no se limita al run activo** (lee `crm_envios`, que sobrevive a los recálculos; las que ya no califican se marcan "fuera de la corrida actual"). El monto sale del `payload_snapshot` —el que se mandó de verdad, no uno recalculado hoy— y el producto del summary con el código de artículo como respaldo.
+
+Comparte permiso y kill-switch con la vista principal a propósito: es de LECTURA para todos los que ven Oportunidades (Auditor y Gerente incluidos), así que no crea una hoja nueva que haya que tildar en S.I.C.
 
 ## Pasos que va a necesitar el runbook de prod (borrador de orden)
 

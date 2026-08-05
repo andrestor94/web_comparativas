@@ -61,6 +61,22 @@ AllowedUser = Depends(_perm_oportunidades)
 # se adapta: override solo Admin.)
 _WRITE_ROLES = {"admin", "administrator", "administrador", "analista", "analyst", "supervisor"}
 
+# Quién puede ELEGIR a quién se asigna la oportunidad en el CRM (ago-2026):
+#   Analista            -> solo a sí mismo. No ve el selector.
+#   Supervisor o superior -> elige entre los usuarios del CRM.
+# El analista trabaja su propia cartera: dejarlo asignar a un tercero le permitiría
+# mover trabajo (y comisión) sin control. El supervisor sí distribuye, es su función.
+_ROLES_ANALISTA = {"analista", "analyst"}
+
+
+def _rol(user) -> str:
+    return (getattr(user, "role", "") or "").strip().lower()
+
+
+def _puede_elegir_asignado(user) -> bool:
+    """True para supervisor o superior; False para analista."""
+    return _rol(user) not in _ROLES_ANALISTA
+
 
 def _require_oportunidades_write(request: Request):
     user = _perm_oportunidades(request)
@@ -152,6 +168,7 @@ def _build_crm_payload(
     *,
     usuarios_disponibles: bool = False,
     error_crm: str | None = None,
+    puede_elegir: bool = True,
 ) -> dict[str, Any]:
     """Arma el payload CRM. `cuenta_fusion` es el Nº de cuenta de FUSION del cliente
     (dataset: `cuenta_interna`), que es con lo que el CRM resuelve la cuenta. Si no se
@@ -237,11 +254,19 @@ def _build_crm_payload(
             "que es el dato con el que el CRM identifica al cliente."
         )
     # Distinto de un bloqueo: falta ELEGIR a quién asignar, y eso sí se resuelve en el
-    # modal con el selector. Solo es bloqueo cuando ni siquiera se pudo traer la lista
-    # de usuarios (CRM caído o sin configurar), porque ahí no hay nada que elegir.
+    # modal con el selector. Solo aplica a quien puede elegir (supervisor o superior).
     requiere_asignacion = False
     if payload["assigned_user"] is None:
-        if usuarios_disponibles:
+        if not puede_elegir:
+            # Analista sin match: no tiene a quién asignar y tampoco puede elegir. Se
+            # corta con el motivo REAL (su usuario no existe en el CRM) en vez de
+            # dejarlo con un botón muerto sin explicación.
+            bloqueos.append(
+                "Tu usuario no está dado de alta en el CRM, así que no podés enviar "
+                "esta oportunidad. Pedí el alta al equipo del CRM, o que la envíe un "
+                "supervisor."
+            )
+        elif usuarios_disponibles:
             requiere_asignacion = True
         else:
             bloqueos.append(
@@ -255,6 +280,8 @@ def _build_crm_payload(
         "faltantes_dataset": faltantes,
         "bloqueos": bloqueos,
         "requiere_asignacion": requiere_asignacion,
+        # La UI solo dibuja el selector si esto es True; el backend lo revalida igual.
+        "puede_elegir": puede_elegir,
     }
 
 
@@ -307,7 +334,7 @@ def _resolver_cuenta_fusion(db: Session, o: OportunidadSummary, run_id: int) -> 
     return _cuentas_fusion_desde_records(db, run_id, [o.cliente_visible]).get(o.cliente_visible)
 
 
-def _contexto_asignacion_seguro(email: str | None) -> dict[str, Any]:
+def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) -> dict[str, Any]:
     """Contexto de asignación para la VISTA PREVIA, sin poder romper la página.
 
     Devuelve {"match", "usuarios", "sugerido_id", "error"}. Se corre una sola vez por
@@ -317,16 +344,24 @@ def _contexto_asignacion_seguro(email: str | None) -> dict[str, Any]:
       - Cualquier CrmError se traga: que el CRM esté caído tiene que bloquear el envío
         con un motivo claro, no dejar sin listado a todo el módulo.
     """
-    vacio = {"match": None, "usuarios": [], "sugerido_id": None, "error": None}
+    vacio = {"match": None, "usuarios": [], "sugerido_id": None, "error": None,
+             "puede_elegir": puede_elegir}
     try:
         crm_client.crm_config()
     except CrmError as exc:
         return {**vacio, "error": exc.mensaje}
     try:
-        return {**crm_client.contexto_asignacion(email), "error": None}
+        ctx = {**crm_client.contexto_asignacion(email), "error": None,
+               "puede_elegir": puede_elegir}
     except CrmError as exc:
         logger.warning("[OPORTUNIDADES][API] no se pudo leer usuarios del CRM: %s", exc.mensaje)
         return {**vacio, "error": exc.mensaje}
+    if not puede_elegir:
+        # El analista no elige: no tiene sentido mandarle 82 usuarios al navegador,
+        # y no exponerlos evita que un cliente modificado los ofrezca igual.
+        ctx["usuarios"] = []
+        ctx["sugerido_id"] = None
+    return ctx
 
 
 def _row_to_dict(
@@ -339,6 +374,7 @@ def _row_to_dict(
         o, cuenta_fusion, ctx.get("match"),
         usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
+        puede_elegir=bool(ctx.get("puede_elegir", True)),
     )
     return {
         "id": o.id,
@@ -420,7 +456,9 @@ def oportunidades_list(
     # Contexto de asignación: UNA consulta al CRM por request (no por fila) — depende
     # del usuario logueado. Trae el match automático Y la lista completa de usuarios,
     # que es la que alimenta el selector cuando no hay match.
-    ctx = _contexto_asignacion_seguro(getattr(_user, "email", None))
+    ctx = _contexto_asignacion_seguro(
+        getattr(_user, "email", None), _puede_elegir_asignado(_user)
+    )
     data_rows = [
         _row_to_dict(
             o,
@@ -489,10 +527,75 @@ def oportunidades_list(
                 "usuarios": ctx.get("usuarios") or [],
                 "sugerido_id": ctx.get("sugerido_id"),
                 "error": ctx.get("error"),
+                "puede_elegir": bool(ctx.get("puede_elegir", True)),
             },
             "rows": data_rows,
         },
     }
+
+
+@router.get("/enviadas")
+def oportunidades_enviadas(
+    request: Request,
+    _user=AllowedUser,
+    db: Session = Depends(get_db),
+):
+    """Repositorio de oportunidades YA enviadas al CRM (todos los entornos).
+
+    A diferencia de /list, NO se filtra por `crm_modo`: el sentido de esta vista es
+    justamente ver todo lo enviado y a dónde fue, así que el entorno es una columna
+    más. Tampoco se limita al run activo: se lee de `crm_envios`, que sobrevive a los
+    recálculos mensuales (ahí está la gracia del `oportunidad_id` estable).
+
+    Monto y producto NO son columnas de `crm_envios`: el monto sale del
+    `payload_snapshot` (el que se mandó realmente, no uno recalculado hoy) y el
+    producto del summary del run activo, con el código de artículo como respaldo
+    cuando la oportunidad ya no califica.
+    """
+    _require_enabled()
+    envios = db.execute(
+        select(CrmEnvio).order_by(CrmEnvio.enviado_at.desc())
+    ).scalars().all()
+
+    # Producto legible: una sola query al run activo, no una por fila.
+    productos: dict[str, str] = {}
+    latest = _latest_success_import_run(db)
+    if latest is not None:
+        for o in db.execute(
+            select(OportunidadSummary).where(OportunidadSummary.import_run_id == latest.id)
+        ).scalars().all():
+            productos[opportunity_stable_id(o.cliente_visible, o.codigo_articulo)] = (
+                (o.producto_nombre or "").strip() or o.codigo_articulo or ""
+            )
+
+    filas = []
+    for e in envios:
+        monto = None
+        if e.payload_snapshot:
+            try:
+                monto = json.loads(e.payload_snapshot).get("amount")
+            except (ValueError, TypeError):
+                monto = None
+        filas.append({
+            "oportunidad_id": e.oportunidad_id,
+            "cliente_visible": e.cliente_visible,
+            "producto": productos.get(e.oportunidad_id) or e.codigo_articulo or "—",
+            "codigo_articulo": e.codigo_articulo,
+            "unidad_negocio": e.unidad_negocio,
+            "monto_oportunidad": monto,
+            "enviado_por": e.enviado_por,
+            "enviado_at": e.enviado_at.isoformat() if e.enviado_at else None,
+            "asignado_a": e.crm_assigned_usuario,
+            "asignado_origen": e.crm_assigned_origen,
+            "crm_modo": e.crm_modo,
+            "crm_status": e.crm_status,
+            "crm_id": e.crm_id,
+            "crm_url": crm_client.crm_detail_url(e.crm_id) if e.crm_id else None,
+            "en_run_activo": e.oportunidad_id in productos,
+        })
+
+    logger.info("[OPORTUNIDADES][API] enviadas total=%s", len(filas))
+    return {"ok": True, "data": {"total": len(filas), "rows": filas}}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -588,25 +691,40 @@ def _decidir_asignado(
     ctx: dict[str, Any],
     assigned_user_id: str | None,
 ) -> dict[str, str] | None:
-    """Decide el usuario del CRM asignado. El match automático MANDA.
+    """Decide el usuario del CRM asignado, respetando el rol de quien envía.
 
-    Prioridad deliberada:
-      1. Match automático (el mail de SIEM coincide con un `usuario` del CRM) → esa
-         persona, siempre. Que un envío pueda reasignarse a un tercero cuando la
-         asignación correcta es evidente abre la puerta a errores y a atribuirse
-         oportunidades ajenas; si algún día hace falta reasignar, se hace en el CRM.
-      2. Sin match: solo vale la selección MANUAL explícita, validada contra la lista
-         real del CRM (nunca se confía en el id que manda el cliente).
-      3. Sin match y sin selección: None → el endpoint corta con 422.
+    ANALISTA (`puede_elegir=False`): SOLO puede asignarse a sí mismo.
+      - Con match → esa persona.
+      - Pidiendo otro id → 422. Este chequeo es el que importa: la UI no le muestra el
+        selector, pero eso es cosmético; quien llame al endpoint a mano tiene que
+        rebotar igual.
+      - Sin match → None, y el endpoint corta con "no estás dado de alta en el CRM".
+
+    SUPERVISOR O SUPERIOR (`puede_elegir=True`): elige entre los usuarios del CRM.
+      - Con selección explícita → esa, validada contra la lista REAL (nunca se confía
+        en el id que manda el cliente).
+      - Sin selección → su propio match si lo tiene; si no, None → 422 pidiendo elegir.
     """
     match = ctx.get("match")
-    if match:
-        return match
     elegido = (assigned_user_id or "").strip()
+    puede_elegir = bool(ctx.get("puede_elegir", True))
+
+    if not puede_elegir:
+        if elegido and not (match and elegido == match["id"]):
+            raise HTTPException(
+                status_code=422,
+                detail=("Como Analista solo podés asignarte las oportunidades a vos "
+                        "mismo. Para asignarla a otra persona, pedíselo a un supervisor."),
+            )
+        return match
+
     if not elegido:
-        return None
+        return match
     for u in ctx.get("usuarios") or []:
         if u["id"] == elegido:
+            # Si eligió su propio usuario, no es una reasignación: se registra como match.
+            if match and u["id"] == match["id"]:
+                return match
             return {"id": u["id"], "usuario": u["usuario"], "origen": "manual"}
     raise HTTPException(
         status_code=422,
@@ -702,12 +820,13 @@ def oportunidades_enviar(
     # El usuario asignado se decide SIEMPRE antes de mandar nada, en los dos modos: es
     # un requisito del envío, no un adorno del modal. Si no se puede decidir, se corta
     # acá y no sale ningún request al CRM.
-    ctx = _contexto_asignacion_seguro(enviado_por)
+    ctx = _contexto_asignacion_seguro(enviado_por, _puede_elegir_asignado(user))
     asignado = _decidir_asignado(ctx, assigned_user_id)
     crm = _build_crm_payload(
         o, cuenta_fusion, asignado,
         usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
+        puede_elegir=bool(ctx.get("puede_elegir", True)),
     )
 
     # Chequeo server-side: la UI ya deshabilita el botón, pero el endpoint es la
