@@ -329,19 +329,33 @@
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content opp-crm-scope">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-box-arrow-up-right me-2"></i>Payload CRM <small class="text-muted">(armado — no enviado)</small></h5>
+        <h5 class="modal-title"><i class="bi bi-box-arrow-up-right me-2"></i>Payload CRM <small class="text-muted">(revisar antes de enviar)</small></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
         <div class="alert alert-info py-2 small mb-3">
           <i class="bi bi-info-circle me-1"></i>
-          Este payload se <strong>arma</strong> a partir de la oportunidad. El envío real al CRM
-          está <strong>diferido</strong> (fase futura): al confirmar se <strong>registra</strong> el
-          envío con tu usuario para trazabilidad y control de duplicados. Los campos marcados
-          <span class="crm-pendiente">PENDIENTE</span> se confirman con el equipo del CRM.
+          Este payload se <strong>arma</strong> a partir de la oportunidad. Al confirmar se
+          <strong>crea la oportunidad <span id="crmModoLabel">en el CRM</span></strong> y se
+          registra el envío con tu usuario para trazabilidad y control de duplicados.
+          El bloqueo de reenvío es <strong>por entorno</strong>: lo que mandes a TEST no
+          bloquea el envío a producción.
         </div>
         <!-- Mensaje de estado del envío (duplicado / éxito / error). -->
         <div id="crmStatusMsg" class="alert py-2 small mb-3" style="display:none;"></div>
+        <!-- Selector de asignación: aparece SOLO cuando el mail de SIEM no coincide con
+             ningún usuario del CRM. Nunca se asigna a nadie automáticamente en ese caso:
+             la elección es explícita y queda registrada como selección manual. -->
+        <div id="crmAsignacionBox" class="alert alert-warning py-2 small mb-3" style="display:none;">
+          <div class="mb-2">
+            <i class="bi bi-person-exclamation me-1"></i>
+            Tu usuario de SIEM no coincide con ningún usuario del CRM.
+            <strong>Elegí a quién asignar</strong> esta oportunidad.
+          </div>
+          <label class="form-label mb-1" for="crmAsignadoSel">Usuario del CRM</label>
+          <select id="crmAsignadoSel" class="form-select form-select-sm"></select>
+          <div class="mt-1 text-muted">Queda registrado que la asignaste vos.</div>
+        </div>
         <div id="crmFields"></div>
         <hr>
         <div class="crm-field">
@@ -351,6 +365,8 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary btn-sm" id="crmCopyBtn"><i class="bi bi-clipboard me-1"></i>Copiar JSON</button>
+        <!-- Aparece recién cuando el CRM devolvió el id del registro creado. -->
+        <a class="btn btn-success btn-sm" id="crmViewBtn" target="_blank" rel="noopener" style="display:none;"><i class="bi bi-box-arrow-up-right me-1"></i>Ver en CRM</a>
         <button type="button" class="btn btn-primary btn-sm" id="crmSendBtn"><i class="bi bi-send-check me-1"></i>Confirmar envío</button>
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
       </div>

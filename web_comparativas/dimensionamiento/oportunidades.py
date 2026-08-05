@@ -157,6 +157,21 @@ def opportunity_stable_id(cliente_visible: str | None, codigo_articulo: str | No
     return hashlib.sha1(f"{cli}|{cod}".encode("utf-8")).hexdigest()[:16]
 
 
+# Marcadores de "sin valor" que trae el dataset en texto plano (no son cuentas reales).
+_CUENTA_VACIA = {"", "SIN DATO", "SIN_DATO", "S/D", "NULL", "NONE", "0", "-"}
+
+
+def normalizar_cuenta_fusion(valor: str | None) -> str | None:
+    """Normaliza el Nº de cuenta de FUSION del dataset (`cuenta_interna`).
+
+    El dataset usa el literal 'SIN DATO' (entre otros) en vez de vacío: sin esto, el
+    CRM recibiría 'SIN DATO' como número de cuenta y respondería 404 con un mensaje
+    incomprensible. Devuelve None cuando no hay cuenta utilizable.
+    """
+    txt = (valor or "").strip()
+    return None if txt.upper() in _CUENTA_VACIA else txt
+
+
 def _month_floor(d: dt.date) -> dt.date:
     return dt.date(d.year, d.month, 1)
 
@@ -351,6 +366,7 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
                 "ultima_demanda": None,              # all-states (se setea en pase 2)
                 "_attr_fecha": None,                 # all-states
                 "cuit": None,
+                "cuenta_interna": None,              # Nº de cuenta de FUSION (clave del CRM)
                 "provincia": None,
                 "producto_nombre": None,
                 "familia": None,
@@ -374,6 +390,7 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
             R.fecha,
             R.cantidad_demandada,
             R.cuit,
+            R.cuenta_interna,
             R.provincia,
             R.producto_nombre_original,
             R.descripcion_articulo,
@@ -393,7 +410,8 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
     for row in session.execute(all_stmt):
         (
             cliente, codigo, fecha, cantidad,
-            cuit, provincia, prod_orig, desc_art, familia, unidad, plataforma, is_identified,
+            cuit, cuenta_interna, provincia, prod_orig, desc_art, familia, unidad,
+            plataforma, is_identified,
         ) = row
         key = (cliente, codigo)
         par = pares.get(key)
@@ -410,6 +428,7 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
         if par["_attr_fecha"] is None or fecha >= par["_attr_fecha"]:
             par["_attr_fecha"] = fecha
             par["cuit"] = cuit
+            par["cuenta_interna"] = normalizar_cuenta_fusion(cuenta_interna)
             par["provincia"] = provincia
             par["producto_nombre"] = prod_orig or desc_art
             par["familia"] = familia
@@ -501,6 +520,7 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
             "codigo_articulo": codigo,
             "cliente_visible": cliente,
             "cuit": par["cuit"],
+            "cuenta_interna": par["cuenta_interna"],
             "provincia": par["provincia"],
             "producto_nombre": par["producto_nombre"],
             "familia": par["familia"],

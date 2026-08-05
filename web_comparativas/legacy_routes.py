@@ -1752,7 +1752,18 @@ def mercado_privado_oportunidades(
     """Oportunidades de Venta (Mercado Privado): vista que lee la tabla precalculada
     oportunidades_summary del run activo vía /api/mercado-privado/oportunidades/list.
     Gobernada por module_access (hoja mercado_privado.oportunidades) + kill-switch
-    OPORTUNIDADES_ENABLED. Solo Mercado Privado (no es transversal como Match)."""
+    OPORTUNIDADES_ENABLED. Solo Mercado Privado (no es transversal como Match).
+
+    DEEP-LINK "Ver en SIEM" (contrato con el CRM — NO cambiar sin avisarles):
+        /mercado-privado/oportunidades?oportunidad_id=<id>
+    donde <id> es el mismo valor que SIEM manda al CRM en `id_sistema_origen_c`
+    (sha1(cliente_visible|codigo_articulo)[:16], ver opportunity_stable_id). El botón
+    "Ver en SIEM" del CRM arma esa URL por concatenación. El parámetro lo consume el
+    front (mercado_privado_oportunidades.js -> abrirDesdeDeepLink), que abre el detalle
+    de esa oportunidad; por eso esta ruta no lo declara ni lo valida. Si la oportunidad
+    no está en la corrida activa, el front lo dice en pantalla.
+    Ojo: si el usuario no tiene sesión, el login se lleva puesto el query param — vuelve
+    a la lista sin abrir el detalle. Es el comportamiento normal de la app."""
     from web_comparativas.dimensionamiento.oportunidades import OPORTUNIDADES_ENABLED
     if not OPORTUNIDADES_ENABLED():
         raise HTTPException(status_code=404, detail="Módulo Oportunidades deshabilitado.")

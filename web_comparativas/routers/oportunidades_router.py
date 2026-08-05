@@ -1,10 +1,18 @@
-"""API de Oportunidades de Venta (Mercado Privado) — Fase 1B.
+"""API de Oportunidades de Venta (Mercado Privado) — Fase 1B + envío real al CRM.
 
 Sirve las oportunidades del run activo leyendo la tabla PRECALCULADA
-`oportunidades_summary` (NO recalcula al vuelo). Arma el payload CRM por
-oportunidad (Capa B), pero NO lo envía a ningún sistema externo: la conexión
-real al CRM es una fase futura. Los campos que requieren confirmación del CRM
-quedan marcados como PENDIENTE_*.
+`oportunidades_summary` (NO recalcula al vuelo) y arma el payload CRM por
+oportunidad (Capa B).
+
+ENVÍO AL CRM (SuiteCRM V8): el circuito vive en `dimensionamiento/crm_client.py`;
+acá sólo se decide QUÉ se manda, se sella con el usuario y se persiste el
+resultado. Dos modos, gobernados por env:
+  - CRM_ENVIO_PLACEHOLDER=1 (default): simula, no toca el CRM (crm_status SIMULADO).
+  - CRM_ENVIO_PLACEHOLDER=0: envío real contra el CRM que indique CRM_MODO (test|prod).
+
+El cliente se identifica en el CRM por su Nº de cuenta de FUSION (dataset:
+`cuenta_interna`), NO por el cuit. Ante cualquier rechazo del CRM el envío NO se
+registra, de modo que la oportunidad queda libre para reintentar.
 
 Paridad SQLite/PG y patrón de run activo (_latest_success_import_run), igual que
 Dimensionamiento.
@@ -21,9 +29,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from web_comparativas.policy import require_perm, is_admin
+from web_comparativas.dimensionamiento import crm_client
+from web_comparativas.dimensionamiento.crm_client import CrmError
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     CrmEnvioEvento,
+    DimensionamientoRecord,
     OportunidadSummary,
 )
 from web_comparativas.dimensionamiento.oportunidades import (
@@ -32,6 +43,7 @@ from web_comparativas.dimensionamiento.oportunidades import (
     VENTANA_MESES,
     _detectar_ultimo_mes_completo,
     _subtract_months,
+    normalizar_cuenta_fusion,
     opportunity_stable_id,
 )
 from web_comparativas.dimensionamiento.query_service import _latest_success_import_run
@@ -68,11 +80,14 @@ _MESES_ES = [
     "jul", "ago", "sep", "oct", "nov", "dic",
 ]
 
-# Placeholders visibles hasta que se conecte el CRM.
-CRM_CURRENCY_PENDIENTE = "PENDIENTE_CRM"
-CRM_ASSIGNED_PENDIENTE = "PENDIENTE_MAPEO_CRM"
-CRM_LEAD_SOURCE = "SIEM"
-CRM_SALES_STAGE = "Prospecting"
+def _modo_envio_actual() -> str:
+    """Entorno al que iría un envío HECHO AHORA: 'simulado' | 'test' | 'prod'.
+
+    Es la segunda mitad de la clave de duplicados (oportunidad_id, crm_modo), así que
+    se calcula ANTES de consultar si ya se envió: el bloqueo se evalúa contra el mismo
+    entorno al que se está por mandar, no contra todos.
+    """
+    return "simulado" if CRM_ENVIO_PLACEHOLDER() else crm_client.CRM_MODO()
 
 
 def get_db(request: Request) -> Session:
@@ -111,8 +126,45 @@ def _fmt_num(value: float | None) -> str:
     return f"{v:,.0f}".replace(",", ".") if v == int(v) else f"{v:,.1f}".replace(",", ".")
 
 
-def _build_crm_payload(o: OportunidadSummary) -> dict[str, Any]:
-    """Arma el payload CRM (NO se envía). Campos PENDIENTE_* marcados aparte."""
+def _texto_asignado(asignado: dict[str, str] | None) -> str | None:
+    """Cómo se muestra el usuario asignado en el modal.
+
+    Match automático: "asignado a vos (<usuario>)" — quien envía es quien recibe.
+    Selección manual: se dice EXPLÍCITAMENTE que la eligió quien envía, porque significa
+    que la oportunidad NO queda en sus manos y eso hay que verlo antes de confirmar, no
+    descubrirlo después en el CRM.
+
+    Sin asignar devuelve None, NUNCA un texto de error: `assigned_user` es un campo del
+    payload, y meterle una frase tipo "no se pudo resolver" haría que un mensaje de error
+    viaje como si fuera un dato.
+    """
+    if not asignado or not asignado.get("usuario"):
+        return None
+    if asignado.get("origen") == "manual":
+        return f"asignado a {asignado['usuario']} (selección manual)"
+    return f"asignado a vos ({asignado['usuario']})"
+
+
+def _build_crm_payload(
+    o: OportunidadSummary,
+    cuenta_fusion: str | None = None,
+    asignado: dict[str, str] | None = None,
+    *,
+    usuarios_disponibles: bool = False,
+    error_crm: str | None = None,
+) -> dict[str, Any]:
+    """Arma el payload CRM. `cuenta_fusion` es el Nº de cuenta de FUSION del cliente
+    (dataset: `cuenta_interna`), que es con lo que el CRM resuelve la cuenta. Si no se
+    pasa, se toma de la propia fila del summary. `asignado` es el usuario decidido
+    ({id, usuario, origen}): el match automático con quien envía, o su selección manual.
+
+    `usuarios_disponibles` distingue los dos motivos por los que puede no haber asignado:
+    si hay lista de usuarios, falta ELEGIR (se resuelve en el modal); si no la hay, el
+    CRM no responde y el envío queda bloqueado.
+    """
+    cuenta_fusion = normalizar_cuenta_fusion(
+        cuenta_fusion if cuenta_fusion is not None else getattr(o, "cuenta_interna", None)
+    )
     producto = (o.producto_nombre or o.codigo_articulo or "").strip()
     cliente = (o.cliente_visible or "Sin cliente").strip()
     plataforma = o.plataforma or "el portal"
@@ -144,32 +196,150 @@ def _build_crm_payload(o: OportunidadSummary) -> dict[str, Any]:
 
     payload = {
         "name": f"SIEM [{o.tipo_oportunidad}] | {producto} | {cliente}",
-        "currency_id": CRM_CURRENCY_PENDIENTE,
+        "currency_id": crm_client.CRM_CURRENCY_ID,
         "amount": round(float(o.monto_oportunidad or 0), 2),
-        "n_cuenta": o.cuit,
+        # Nº de cuenta de FUSION: con esto el CRM resuelve el account_id (paso 3).
+        # OJO: NO es el cuit — el endpoint Cuentas_por_numero_fusion espera n_cuenta_c.
+        "n_cuenta": cuenta_fusion,
         "description": description,
-        "lead_source": CRM_LEAD_SOURCE,
-        "sales_stage": CRM_SALES_STAGE,
-        "assigned_user": CRM_ASSIGNED_PENDIENTE,
+        "tipooportunidad_c": crm_client.CRM_TIPO_OPORTUNIDAD,
+        "lead_source": crm_client.CRM_LEAD_SOURCE,
+        "sales_stage": crm_client.CRM_SALES_STAGE,
+        # Vínculo BIDIRECCIONAL con el CRM: `sistema_origen_c` marca de dónde vino la
+        # oportunidad y `id_sistema_origen_c` es la identidad estable de SIEM con la que
+        # el CRM arma su botón "Ver en SIEM". Se usa el id estable
+        # (sha1(cliente|codigo)) y NO el `id` de la fila del summary, que es run-scoped
+        # y cambia en cada recálculo mensual: un link armado con ese id se rompería solo.
+        "sistema_origen_c": crm_client.CRM_SISTEMA_ORIGEN,
+        "id_sistema_origen_c": opportunity_stable_id(o.cliente_visible, o.codigo_articulo),
+        "assigned_user": _texto_asignado(asignado),
         "update_text": update_text,
     }
 
-    # Campos PENDIENTE de confirmación con el equipo del CRM (marcados para la UI).
-    pendientes = ["currency_id", "assigned_user"]
+    # Sin pendientes: currency_id va en duro ("-99") y assigned_user llega resuelto.
+    pendientes: list[str] = []
     # Campos que dependen del dataset y quedaron vacíos (faltantes reales).
     faltantes: list[str] = []
-    if not o.cuit:
+    if not cuenta_fusion:
         faltantes.append("n_cuenta")
     if not (o.producto_nombre or "").strip():
         faltantes.append("producto_nombre")
     if not (o.cliente_visible or "").strip():
         faltantes.append("cliente_visible")
 
-    return {"payload": payload, "pendientes_crm": pendientes, "faltantes_dataset": faltantes}
+    # BLOQUEOS: datos sin los cuales el envío NO puede salir, y que el usuario NO puede
+    # resolver desde el modal. La UI deshabilita el botón y muestra el motivo; el backend
+    # vuelve a chequearlo (nunca se confía en el cliente).
+    bloqueos: list[str] = []
+    if not cuenta_fusion:
+        bloqueos.append(
+            "Esta oportunidad no tiene número de cuenta de fusión en el dataset, "
+            "que es el dato con el que el CRM identifica al cliente."
+        )
+    # Distinto de un bloqueo: falta ELEGIR a quién asignar, y eso sí se resuelve en el
+    # modal con el selector. Solo es bloqueo cuando ni siquiera se pudo traer la lista
+    # de usuarios (CRM caído o sin configurar), porque ahí no hay nada que elegir.
+    requiere_asignacion = False
+    if payload["assigned_user"] is None:
+        if usuarios_disponibles:
+            requiere_asignacion = True
+        else:
+            bloqueos.append(
+                "No se pudo obtener la lista de usuarios del CRM para asignar la "
+                "oportunidad" + (f": {error_crm}" if error_crm else ".")
+            )
+
+    return {
+        "payload": payload,
+        "pendientes_crm": pendientes,
+        "faltantes_dataset": faltantes,
+        "bloqueos": bloqueos,
+        "requiere_asignacion": requiere_asignacion,
+    }
 
 
-def _row_to_dict(o: OportunidadSummary) -> dict[str, Any]:
-    crm = _build_crm_payload(o)
+def _cuentas_fusion_desde_records(
+    db: Session,
+    run_id: int,
+    clientes: list[str],
+) -> dict[str, str]:
+    """Mapa cliente_visible -> Nº de cuenta de FUSION leído de dimensionamiento_records.
+
+    FALLBACK para summaries construidos ANTES de que `cuenta_interna` existiera en
+    `oportunidades_summary`: sin esto, habría que reconstruir el summary sí o sí para
+    poder enviar. Se resuelve en UNA query por request (no N+1) y solo para los clientes
+    que hagan falta. Si un cliente tuviera más de una cuenta en el run, se descarta por
+    ambiguo (mejor pedir el dato que mandar la cuenta equivocada al CRM).
+    """
+    if not clientes:
+        return {}
+    R = DimensionamientoRecord
+    filas = db.execute(
+        select(R.cliente_visible, R.cuenta_interna)
+        .where(R.import_run_id == run_id)
+        .where(R.cliente_visible.in_(clientes))
+        .where(R.cuenta_interna.is_not(None))
+        .distinct()
+    ).all()
+
+    candidatas: dict[str, set[str]] = {}
+    for cliente, cuenta in filas:
+        normalizada = normalizar_cuenta_fusion(cuenta)
+        if normalizada:
+            candidatas.setdefault(cliente, set()).add(normalizada)
+    salida: dict[str, str] = {}
+    for cliente, cuentas in candidatas.items():
+        if len(cuentas) == 1:
+            salida[cliente] = next(iter(cuentas))
+        else:
+            logger.warning(
+                "[OPORTUNIDADES] cliente '%s' con %s cuentas de fusión distintas: %s",
+                cliente, len(cuentas), sorted(cuentas),
+            )
+    return salida
+
+
+def _resolver_cuenta_fusion(db: Session, o: OportunidadSummary, run_id: int) -> str | None:
+    """Cuenta de fusión de UNA oportunidad: la del summary o, si falta, la de records."""
+    directa = normalizar_cuenta_fusion(getattr(o, "cuenta_interna", None))
+    if directa:
+        return directa
+    return _cuentas_fusion_desde_records(db, run_id, [o.cliente_visible]).get(o.cliente_visible)
+
+
+def _contexto_asignacion_seguro(email: str | None) -> dict[str, Any]:
+    """Contexto de asignación para la VISTA PREVIA, sin poder romper la página.
+
+    Devuelve {"match", "usuarios", "sugerido_id", "error"}. Se corre una sola vez por
+    request (depende del usuario logueado, no de la fila). Dos cuidados deliberados:
+      - Si falta configuración del CRM NO se sale a la red: sin esto, cada carga de la
+        página pagaría un timeout de conexión antes de fallar.
+      - Cualquier CrmError se traga: que el CRM esté caído tiene que bloquear el envío
+        con un motivo claro, no dejar sin listado a todo el módulo.
+    """
+    vacio = {"match": None, "usuarios": [], "sugerido_id": None, "error": None}
+    try:
+        crm_client.crm_config()
+    except CrmError as exc:
+        return {**vacio, "error": exc.mensaje}
+    try:
+        return {**crm_client.contexto_asignacion(email), "error": None}
+    except CrmError as exc:
+        logger.warning("[OPORTUNIDADES][API] no se pudo leer usuarios del CRM: %s", exc.mensaje)
+        return {**vacio, "error": exc.mensaje}
+
+
+def _row_to_dict(
+    o: OportunidadSummary,
+    cuenta_fusion: str | None = None,
+    ctx: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ctx = ctx or {}
+    crm = _build_crm_payload(
+        o, cuenta_fusion, ctx.get("match"),
+        usuarios_disponibles=bool(ctx.get("usuarios")),
+        error_crm=ctx.get("error"),
+    )
     return {
         "id": o.id,
         "oportunidad_id": opportunity_stable_id(o.cliente_visible, o.codigo_articulo),
@@ -178,6 +348,7 @@ def _row_to_dict(o: OportunidadSummary) -> dict[str, Any]:
         "cliente_visible": o.cliente_visible,
         "provincia": o.provincia,
         "cuit": o.cuit,
+        "cuenta_fusion": crm["payload"].get("n_cuenta"),
         "producto_nombre": o.producto_nombre,
         "codigo_articulo": o.codigo_articulo,
         "familia": o.familia,
@@ -238,15 +409,41 @@ def oportunidades_list(
         .order_by(OportunidadSummary.score.desc())
     ).scalars().all()
 
-    data_rows = [_row_to_dict(o) for o in rows]
+    # Cuenta de fusión: la del summary; para las filas viejas (summary anterior a la
+    # columna) se resuelve en UNA query contra records, no por fila.
+    sin_cuenta = [
+        o.cliente_visible
+        for o in rows
+        if not normalizar_cuenta_fusion(getattr(o, "cuenta_interna", None)) and o.cliente_visible
+    ]
+    respaldo = _cuentas_fusion_desde_records(db, latest.id, sorted(set(sin_cuenta)))
+    # Contexto de asignación: UNA consulta al CRM por request (no por fila) — depende
+    # del usuario logueado. Trae el match automático Y la lista completa de usuarios,
+    # que es la que alimenta el selector cuando no hay match.
+    ctx = _contexto_asignacion_seguro(getattr(_user, "email", None))
+    data_rows = [
+        _row_to_dict(
+            o,
+            normalizar_cuenta_fusion(getattr(o, "cuenta_interna", None))
+            or respaldo.get(o.cliente_visible),
+            ctx,
+        )
+        for o in rows
+    ]
 
     # Estado de envío al CRM: una sola query por todos los oportunidad_id del run.
     # Cada fila lleva `envio` para que la UI refleje quién/cuándo ya la envió.
+    # El estado "enviada" es POR ENTORNO: se mira solo el modo al que se enviaría ahora.
+    # Si no se filtrara, una oportunidad probada en TEST aparecería bloqueada al operar
+    # en PROD, que es justo lo que el bloqueo por entorno viene a evitar.
+    modo_actual = _modo_envio_actual()
     ids = [r["oportunidad_id"] for r in data_rows]
     enviados: dict[str, CrmEnvio] = {}
     if ids:
         for e in db.execute(
-            select(CrmEnvio).where(CrmEnvio.oportunidad_id.in_(ids))
+            select(CrmEnvio)
+            .where(CrmEnvio.oportunidad_id.in_(ids))
+            .where(CrmEnvio.crm_modo == modo_actual)
         ).scalars().all():
             enviados[e.oportunidad_id] = e
     for r in data_rows:
@@ -257,22 +454,26 @@ def oportunidades_list(
                 "enviado_por": e.enviado_por,
                 "enviado_at": e.enviado_at.isoformat() if e.enviado_at else None,
                 "crm_status": e.crm_status,
+                # Con crm_id la UI cambia "Enviar a CRM" por "Ver en CRM".
+                "crm_id": e.crm_id,
+                "crm_url": crm_client.crm_detail_url(e.crm_id) if e.crm_id else None,
+                "crm_modo": e.crm_modo,
             }
             if e
             else {"enviado": False}
         )
 
     # Resumen de completitud CRM (para detectar faltantes antes del go-live).
-    faltan_cuit = sum(1 for r in data_rows if not r["cuit"])
+    faltan_cuenta = sum(1 for r in data_rows if not r["cuenta_fusion"])
     completeness = {
         "total": len(data_rows),
-        "faltan_n_cuenta": faltan_cuit,
+        "faltan_n_cuenta": faltan_cuenta,
         "faltan_producto": sum(1 for r in data_rows if not (r["producto_nombre"] or "").strip()),
         "faltan_cliente": sum(1 for r in data_rows if not (r["cliente_visible"] or "").strip()),
     }
     logger.info(
-        "[OPORTUNIDADES][API] list run_id=%s total=%s faltan_cuit=%s",
-        latest.id, len(data_rows), faltan_cuit,
+        "[OPORTUNIDADES][API] list run_id=%s total=%s faltan_cuenta_fusion=%s",
+        latest.id, len(data_rows), faltan_cuenta,
     )
     return {
         "ok": True,
@@ -281,6 +482,14 @@ def oportunidades_list(
             "total": len(data_rows),
             "window": _window_meta(db, latest.id),
             "completeness": completeness,
+            "crm_modo": modo_actual,
+            # Insumos del selector de asignación (iguales para todas las filas).
+            "crm_asignacion": {
+                "match": ctx.get("match"),
+                "usuarios": ctx.get("usuarios") or [],
+                "sugerido_id": ctx.get("sugerido_id"),
+                "error": ctx.get("error"),
+            },
             "rows": data_rows,
         },
     }
@@ -290,25 +499,72 @@ def oportunidades_list(
 # Envío al CRM (Feature 1: sello del usuario · Feature 2: control de duplicados)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _enviar_real_a_crm(payload: dict[str, Any]) -> dict[str, Any]:
+# Traducción de la falla del CRM a un HTTP status propio. Ninguna cae en 500: el
+# usuario tiene que poder distinguir "el cliente no está en el CRM" (acción suya) de
+# "el CRM se cayó" (reintentar) y de "falta configurar el CRM" (acción de sistemas).
+_CRM_STATUS_HTTP = {
+    "cuenta_no_encontrada": 422,   # el cliente no existe en el CRM
+    "dato": 422,                   # el CRM rechazó un dato del payload
+    "auth": 502,                   # credenciales rechazadas
+    "config": 503,                 # falta configuración del lado de SIEM
+    "crm": 503,                    # 5xx del CRM -> reintentable
+    "red": 503,                    # timeout / conexión -> reintentable
+    "respuesta": 502,              # contrato roto
+}
+
+
+def _enviar_real_a_crm(payload: dict[str, Any], asignado: dict[str, str]) -> dict[str, Any]:
     """Punto único de envío al CRM. El registro en `crm_envios` se hace JUSTO DESPUÉS
     de que esta función confirme ok=True (ver `oportunidades_enviar`), de modo que el
     control de duplicados solo se active ante envíos efectivos.
 
-    Modo PRUEBA (CRM_ENVIO_PLACEHOLDER on, default mientras la API esté diferida):
-      NO llama a ningún sistema externo; devuelve ACK simulado con crm_status='SIMULADO'.
-      Las filas quedan marcadas SIMULADO → purgables con scripts/clear_crm_envios.py,
-      así se puede ejercitar el flujo de duplicados en la UI sin bloquear de forma
-      permanente.
+    Modo PRUEBA (CRM_ENVIO_PLACEHOLDER on, default): NO llama a ningún sistema externo;
+    devuelve ACK simulado con crm_status='SIMULADO'. Las filas quedan marcadas SIMULADO
+    → purgables con scripts/clear_crm_envios.py, así se puede ejercitar el flujo de
+    duplicados en la UI sin enviar nada al CRM. Se mantiene a propósito para poder
+    seguir simulando después del go-live.
 
-    TODO(CRM): cuando se conecte la API real, poner CRM_ENVIO_PLACEHOLDER=0 y reemplazar
-    el cuerpo del bloque `else` por la llamada real, propagando ok=False ante un rechazo
-    del CRM (en ese caso NO se registra el envío). El resto del flujo no cambia.
+    Modo REAL (CRM_ENVIO_PLACEHOLDER=0): corre el circuito completo de `crm_client`
+    (token → usuario → cuenta → oportunidad → bitácora) contra el CRM que indique
+    CRM_MODO (test | prod). Cualquier falla sale como CrmError y NO se registra el
+    envío, para que la oportunidad quede libre de reintentar.
     """
     if CRM_ENVIO_PLACEHOLDER():
-        return {"ok": True, "crm_status": "SIMULADO", "crm_id": None}
-    # Rama del envío real (diferida): hoy todavía no hay API conectada.
-    return {"ok": True, "crm_status": "PENDIENTE_ENVIO_REAL", "crm_id": None}
+        # Aun simulando se registra a quién se habría asignado y cómo se decidió: si no,
+        # el ensayo no ejercita la parte que más importa auditar.
+        return {
+            "ok": True, "crm_status": "SIMULADO", "crm_id": None, "crm_modo": "simulado",
+            "assigned_user_id": asignado.get("id"),
+            "assigned_user": asignado.get("usuario"),
+            "usuario_origen": asignado.get("origen"),
+        }
+
+    resultado = crm_client.enviar_oportunidad(
+        nombre=payload["name"],
+        email_usuario=payload.get("enviado_por"),
+        asignado=asignado,
+        n_cuenta_fusion=payload.get("n_cuenta"),
+        amount=payload.get("amount") or 0,
+        description=payload.get("description") or "",
+        bitacora_description=payload.get("update_text") or "",
+        id_sistema_origen=payload.get("id_sistema_origen_c") or "",
+        estado_siem=payload.get("estado_siem"),
+    )
+    modo = resultado["modo"]
+    return {
+        "ok": True,
+        "crm_status": f"ENVIADO_{modo.upper()}",
+        "crm_id": resultado["crm_id"],
+        "crm_account_id": resultado["crm_account_id"],
+        "crm_modo": modo,
+        "assigned_user_id": resultado["assigned_user_id"],
+        # Nombre del usuario que el CRM aceptó: es lo que se muestra y se guarda en el
+        # snapshot; sin reenviarlo acá, el payload quedaría con el texto de la preview.
+        "assigned_user": resultado.get("assigned_user"),
+        "usuario_origen": resultado["usuario_origen"],
+        "bitacora_id": resultado["bitacora_id"],
+        "bitacora_error": resultado["bitacora_error"],
+    }
 
 
 def _periodo_actual() -> str:
@@ -316,9 +572,58 @@ def _periodo_actual() -> str:
     return dt.datetime.utcnow().strftime("%Y%m")
 
 
+def _nota_evento(evento: str, ack: dict[str, Any]) -> str | None:
+    """Nota de la bitácora interna: override y/o fallo del paso 5 en el CRM."""
+    notas: list[str] = []
+    if evento == "REENVIO_OVERRIDE":
+        notas.append("override de reenvío")
+    if ack.get("bitacora_error"):
+        notas.append(f"bitácora del CRM no creada: {ack['bitacora_error']}")
+    if ack.get("usuario_origen") == "manual":
+        notas.append(f"asignado manualmente a {ack.get('assigned_user') or ack.get('assigned_user_id')}")
+    return " | ".join(notas) if notas else None
+
+
+def _decidir_asignado(
+    ctx: dict[str, Any],
+    assigned_user_id: str | None,
+) -> dict[str, str] | None:
+    """Decide el usuario del CRM asignado. El match automático MANDA.
+
+    Prioridad deliberada:
+      1. Match automático (el mail de SIEM coincide con un `usuario` del CRM) → esa
+         persona, siempre. Que un envío pueda reasignarse a un tercero cuando la
+         asignación correcta es evidente abre la puerta a errores y a atribuirse
+         oportunidades ajenas; si algún día hace falta reasignar, se hace en el CRM.
+      2. Sin match: solo vale la selección MANUAL explícita, validada contra la lista
+         real del CRM (nunca se confía en el id que manda el cliente).
+      3. Sin match y sin selección: None → el endpoint corta con 422.
+    """
+    match = ctx.get("match")
+    if match:
+        return match
+    elegido = (assigned_user_id or "").strip()
+    if not elegido:
+        return None
+    for u in ctx.get("usuarios") or []:
+        if u["id"] == elegido:
+            return {"id": u["id"], "usuario": u["usuario"], "origen": "manual"}
+    raise HTTPException(
+        status_code=422,
+        detail="El usuario del CRM elegido no existe en la lista de usuarios habilitados.",
+    )
+
+
 def _msg_ya_enviada(e: CrmEnvio) -> str:
     fecha = e.enviado_at.strftime("%d/%m/%Y") if e.enviado_at else "fecha desconocida"
-    return f"Esta oportunidad ya fue enviada al CRM por {e.enviado_por} el {fecha}."
+    # Se nombra el entorno: con bloqueo por (oportunidad_id, crm_modo), "ya fue enviada"
+    # sin decir a dónde se lee como un bloqueo global y confunde.
+    entorno = {
+        "simulado": "en modo simulado",
+        "test": "al CRM de TEST",
+        "prod": "al CRM de PRODUCCIÓN",
+    }.get(e.crm_modo or "", "al CRM")
+    return f"Esta oportunidad ya fue enviada {entorno} por {e.enviado_por} el {fecha}."
 
 
 @router.post("/enviar/{summary_id}")
@@ -327,6 +632,7 @@ def oportunidades_enviar(
     user=AllowedWriter,
     db: Session = Depends(get_db),
     override: bool = False,
+    assigned_user_id: str | None = None,
 ):
     """Envía una oportunidad al CRM con sello del usuario y control de duplicados.
 
@@ -336,8 +642,8 @@ def oportunidades_enviar(
       2. Si YA fue enviada y NO hay override → NO reenvía; devuelve mensaje claro.
          - override (reenvío) solo Admin.
       3. Si no existe (o override autorizado) → sella el payload (enviado_por/at/id),
-         intenta el envío real (hoy diferido) y SOLO ante ACK OK registra en
-         `crm_envios` (+ bitácora `crm_envio_eventos`).
+         corre el envío al CRM y SOLO ante ACK OK registra en `crm_envios`
+         (+ bitácora `crm_envio_eventos`), guardando el id que devolvió el CRM.
     """
     _require_enabled()
     latest = _latest_success_import_run(db)
@@ -353,8 +659,13 @@ def oportunidades_enviar(
         raise HTTPException(status_code=404, detail="Oportunidad no encontrada en la corrida activa.")
 
     oportunidad_id = opportunity_stable_id(o.cliente_visible, o.codigo_articulo)
+    # Duplicados POR ENTORNO: el bloqueo es (oportunidad_id, crm_modo). Lo enviado a
+    # TEST no bloquea PROD (ni al revés), y lo simulado no bloquea nada real.
+    modo_actual = _modo_envio_actual()
     existente = db.execute(
-        select(CrmEnvio).where(CrmEnvio.oportunidad_id == oportunidad_id)
+        select(CrmEnvio)
+        .where(CrmEnvio.oportunidad_id == oportunidad_id)
+        .where(CrmEnvio.crm_modo == modo_actual)
     ).scalars().first()
 
     # ── Control de duplicados ──
@@ -375,6 +686,9 @@ def oportunidades_enviar(
             "message": _msg_ya_enviada(existente),
             "enviado_por": existente.enviado_por,
             "enviado_at": existente.enviado_at.isoformat() if existente.enviado_at else None,
+            "crm_id": existente.crm_id,
+            "crm_url": crm_client.crm_detail_url(existente.crm_id) if existente.crm_id else None,
+            "crm_modo": existente.crm_modo,
         }
 
     # ── Feature 1: sello del usuario (server-side, NUNCA del cliente) ──
@@ -384,18 +698,69 @@ def oportunidades_enviar(
         raise HTTPException(status_code=401, detail="Usuario sin email en la sesión.")
     enviado_at = dt.datetime.utcnow()
 
-    crm = _build_crm_payload(o)
+    cuenta_fusion = _resolver_cuenta_fusion(db, o, latest.id)
+    # El usuario asignado se decide SIEMPRE antes de mandar nada, en los dos modos: es
+    # un requisito del envío, no un adorno del modal. Si no se puede decidir, se corta
+    # acá y no sale ningún request al CRM.
+    ctx = _contexto_asignacion_seguro(enviado_por)
+    asignado = _decidir_asignado(ctx, assigned_user_id)
+    crm = _build_crm_payload(
+        o, cuenta_fusion, asignado,
+        usuarios_disponibles=bool(ctx.get("usuarios")),
+        error_crm=ctx.get("error"),
+    )
+
+    # Chequeo server-side: la UI ya deshabilita el botón, pero el endpoint es la
+    # autoridad — un POST a mano no puede saltearse esto.
+    if crm["bloqueos"]:
+        logger.warning(
+            "[OPORTUNIDADES][API] envío bloqueado oportunidad_id=%s: %s",
+            oportunidad_id, " | ".join(crm["bloqueos"]),
+        )
+        raise HTTPException(status_code=422, detail=" ".join(crm["bloqueos"]))
+    if crm["requiere_asignacion"]:
+        # Sin match automático y sin selección: NO se elige por el usuario.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Tu usuario de SIEM no coincide con ningún usuario del CRM. "
+                "Elegí a qué usuario del CRM asignar esta oportunidad antes de enviarla."
+            ),
+        )
+
     payload = dict(crm["payload"])
     payload["enviado_por"] = enviado_por
     payload["enviado_por_id"] = enviado_por_id
     payload["enviado_at"] = enviado_at.isoformat()
+    # Estado de la oportunidad en SIEM -> `status` de la bitácora en el CRM (paso 5).
+    payload["estado_siem"] = o.estado_actividad
 
-    # ── Envío real (hoy DIFERIDO). El registro se hace SOLO si el ACK es OK. ──
-    ack = _enviar_real_a_crm(payload)
+    # ── Envío real. El registro se hace SOLO si el ACK es OK: ante cualquier falla la
+    # oportunidad queda SIN registrar, o sea libre de reintentar sin pedir override. ──
+    try:
+        ack = _enviar_real_a_crm(payload, asignado)
+    except CrmError as exc:
+        logger.warning(
+            "[OPORTUNIDADES][API] envío rechazado oportunidad_id=%s kind=%s paso=%s: %s",
+            oportunidad_id, exc.kind, exc.paso, exc.mensaje,
+        )
+        raise HTTPException(
+            status_code=_CRM_STATUS_HTTP.get(exc.kind, 502),
+            detail=exc.mensaje,
+        ) from exc
     if not ack.get("ok"):
         raise HTTPException(status_code=502, detail="El CRM rechazó el envío. Reintentá más tarde.")
 
     crm_status = ack.get("crm_status") or "PENDIENTE_ENVIO_REAL"
+    crm_id = ack.get("crm_id")
+    crm_url = crm_client.crm_detail_url(crm_id) if crm_id else None
+    # El usuario que el CRM aceptó de verdad manda sobre el de la vista previa: el
+    # snapshot tiene que reflejar a quién quedó asignada la oportunidad realmente.
+    if ack.get("assigned_user"):
+        payload["assigned_user"] = _texto_asignado({
+            "usuario": ack["assigned_user"], "origen": ack.get("usuario_origen", ""),
+        })
+        payload["assigned_user_id"] = ack.get("assigned_user_id")
     periodo = _periodo_actual()
     payload_snapshot = json.dumps(payload, ensure_ascii=False)
 
@@ -412,13 +777,33 @@ def oportunidades_enviar(
             enviado_por_id=enviado_por_id,
             enviado_at=enviado_at,
             crm_status=crm_status,
+            crm_id=crm_id,
+            crm_account_id=ack.get("crm_account_id"),
+            # NUNCA None: es parte de la clave única (oportunidad_id, crm_modo) y un
+            # NULL desactivaría el bloqueo de duplicados sin dar ninguna señal.
+            crm_modo=ack.get("crm_modo") or modo_actual,
+            # Asignación: a quién quedó y cómo se decidió (match | manual). `enviado_por`
+            # de arriba guarda a quien disparó el envío, que puede ser otra persona.
+            crm_assigned_user_id=ack.get("assigned_user_id"),
+            crm_assigned_usuario=ack.get("assigned_user"),
+            crm_assigned_origen=ack.get("usuario_origen"),
             payload_snapshot=payload_snapshot,
         ))
         evento = "ENVIO"
         status = "enviado"
     else:
-        # Override Admin/Gerente: NO se toca la fila canónica (preserva primer emisor);
-        # se anota un evento de reenvío en la bitácora (no rompe el UNIQUE).
+        # Override Admin DENTRO DEL MISMO ENTORNO (con el bloqueo por (oportunidad_id,
+        # crm_modo), un envío a otro entorno ya no cae acá: es una fila nueva).
+        # NO se toca el sello del primer emisor (enviado_por/at), que es lo que preserva
+        # la fila canónica. Excepción: si la fila no tenía id de CRM y este reenvío sí lo
+        # creó, se completa — si no, "Ver en CRM" nunca aparecería pese a existir la
+        # oportunidad del otro lado.
+        if crm_id and not existente.crm_id:
+            existente.crm_id = crm_id
+            existente.crm_account_id = ack.get("crm_account_id")
+            existente.crm_status = crm_status
+        else:
+            crm_url = crm_client.crm_detail_url(existente.crm_id) if existente.crm_id else crm_url
         evento = "REENVIO_OVERRIDE"
         status = "reenviado_override"
 
@@ -430,14 +815,16 @@ def oportunidades_enviar(
         enviado_por_id=enviado_por_id,
         enviado_at=enviado_at,
         crm_status=crm_status,
+        crm_id=crm_id,
         payload_snapshot=payload_snapshot,
-        nota=("override de reenvío" if evento == "REENVIO_OVERRIDE" else None),
+        nota=_nota_evento(evento, ack),
     ))
     db.commit()
 
     logger.info(
-        "[OPORTUNIDADES][API] enviar oportunidad_id=%s evento=%s por=%s run_id=%s",
-        oportunidad_id, evento, enviado_por, latest.id,
+        "[OPORTUNIDADES][API] enviar oportunidad_id=%s evento=%s por=%s run_id=%s "
+        "crm_status=%s crm_id=%s",
+        oportunidad_id, evento, enviado_por, latest.id, crm_status, crm_id,
     )
     return {
         "ok": True,
@@ -446,6 +833,14 @@ def oportunidades_enviar(
         "enviado_por": enviado_por,
         "enviado_at": enviado_at.isoformat(),
         "crm_status": crm_status,
+        "crm_id": crm_id,
+        "crm_url": crm_url,
+        "crm_modo": ack.get("crm_modo") or modo_actual,
+        "assigned_user": ack.get("assigned_user"),
+        "usuario_origen": ack.get("usuario_origen"),
+        # La oportunidad SÍ quedó creada; solo falló el paso 5 (bitácora). Se avisa en
+        # la UI sin marcar el envío como fallido.
+        "bitacora_error": ack.get("bitacora_error"),
         "payload": payload,
         "pendientes_crm": crm["pendientes_crm"],
         "faltantes_dataset": crm["faltantes_dataset"],
