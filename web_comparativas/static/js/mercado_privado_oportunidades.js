@@ -295,21 +295,38 @@
 
   // Selector de asignación. Solo se muestra cuando NO hubo match automático: en ese caso
   // el sistema no elige por el usuario, se lo pregunta. Devuelve true si quedó visible.
+  // El selector se dibuja AL ABRIR el modal, no después de un envío rechazado: quien
+  // envía tiene que ver de entrada a quién se va a asignar y poder cambiarlo. El 422 del
+  // backend queda solo como defensa; el usuario no debería llegar nunca a verlo.
   function reflectAsignacion(o) {
     const box = $("crmAsignacionBox"), sel = $("crmAsignadoSel");
     const crmInfo = o.crm || {};
-    // El Analista nunca elige: se asigna a sí mismo o no envía. El selector no se
-    // dibuja para él (y el backend igual rechaza cualquier otro assigned_user_id).
-    const requiere = !!crmInfo.requiere_asignacion && crmInfo.puede_elegir !== false;
-    if (!box || !sel) return false;
-    if (!requiere) { box.style.display = "none"; return false; }
-
     const usuarios = CRM_ASIGNACION.usuarios || [];
-    // Opción vacía primero: obliga a un acto deliberado. Sin esto, el primero de la
-    // lista quedaría preseleccionado y un envío distraído se lo asignaría a esa persona.
+    // Analista: no elige nunca (se asigna a sí mismo o queda bloqueado), así que no ve
+    // el selector. Sin usuarios tampoco hay nada que ofrecer: de eso se ocupa el bloqueo.
+    if (!box || !sel) return false;
+    if (crmInfo.puede_elegir === false || !usuarios.length) {
+      box.style.display = "none";
+      return false;
+    }
+
+    const match = CRM_ASIGNACION.match || null;
+    // Con match propio viene preseleccionado pero editable (supervisor o superior puede
+    // reasignar). Sin match arranca vacío a propósito: obliga a un acto deliberado en vez
+    // de dejar al primero de la lista listo para un envío distraído.
     sel.innerHTML = `<option value="">— Elegí un usuario —</option>` +
       usuarios.map((u) => `<option value="${esc(u.id)}">${esc(u.usuario)}</option>`).join("");
-    sel.value = "";
+    sel.value = match ? match.id : "";
+
+    box.className = `alert py-2 small mb-3 alert-${match ? "info" : "warning"}`;
+    $("crmAsignacionMsg").innerHTML = match
+      ? `<i class="bi bi-person-check me-1"></i>Se va a asignar a <strong>vos</strong> ` +
+        `(${esc(match.usuario)}). Podés cambiarlo si corresponde.`
+      : `<i class="bi bi-person-exclamation me-1"></i>Tu usuario de SIEM no coincide con ` +
+        `ningún usuario del CRM. <strong>Elegí a quién asignar</strong> esta oportunidad.`;
+    $("crmAsignacionNota").textContent = match
+      ? "Si elegís a otra persona, queda registrado que la asignaste vos."
+      : "Queda registrado que la asignaste vos.";
     box.style.display = "block";
 
     const btn = $("crmSendBtn");
@@ -319,11 +336,14 @@
       btn.innerHTML = ok
         ? `<i class="bi bi-send-check me-1"></i>Confirmar envío`
         : `<i class="bi bi-person-exclamation me-1"></i>Elegí un usuario`;
-      // El payload mostrado refleja la elección, para que lo que se ve sea lo que se manda.
+      // El payload mostrado refleja la elección: lo que se ve es lo que se manda.
       const elegido = usuarios.find((u) => u.id === sel.value);
-      const crm = o.crm || {}, payload = Object.assign({}, crm.payload || {});
-      payload.assigned_user = elegido ? `asignado a ${elegido.usuario} (selección manual)` : null;
-      renderCrmFields(payload, crm.pendientes_crm, crm.faltantes_dataset);
+      const payload = Object.assign({}, crmInfo.payload || {});
+      payload.assigned_user = !elegido ? null
+        : (match && elegido.id === match.id
+            ? `asignado a vos (${elegido.usuario})`
+            : `asignado a ${elegido.usuario} (selección manual)`);
+      renderCrmFields(payload, crmInfo.pendientes_crm, crmInfo.faltantes_dataset);
     };
     sel.onchange = sync;
     sync();
@@ -369,6 +389,21 @@
     reflectCrmLink(env.crm_url);
   }
 
+  // Traduce una respuesta de error a algo que le sirva a quien está mirando la pantalla.
+  // NUNCA se muestra un código HTTP: "HTTP 422" no le dice nada a un comercial y encima
+  // suena a que se rompió el sistema, cuando casi siempre falta un dato o el CRM no está.
+  // El `detail` del backend ya viene redactado para leerse; el mapa es solo la red por si
+  // alguna respuesta llega sin él.
+  function mensajeDeError(status, json) {
+    if (json && json.detail) return json.detail;
+    if (status === 401) return "Tu sesión expiró. Volvé a iniciar sesión e intentá de nuevo.";
+    if (status === 403) return "No tenés permiso para enviar esta oportunidad.";
+    if (status === 404) return "La oportunidad ya no está disponible. Actualizá la lista.";
+    if (status === 422) return "Faltan datos para poder enviar esta oportunidad.";
+    if (status >= 500) return "El CRM no está disponible en este momento. Probá de nuevo en unos minutos.";
+    return "No se pudo completar el envío. Probá de nuevo.";
+  }
+
   // POST /enviar/{id}: sella el envío server-side y maneja duplicado/éxito/error.
   async function sendCrm(o) {
     const btn = $("crmSendBtn");
@@ -377,8 +412,10 @@
     try {
       // Si hubo selección manual, viaja el id elegido. El backend igual lo valida
       // contra la lista real del CRM: acá solo se transmite la decisión.
+      // Se manda la elección siempre que el selector esté en juego (el supervisor lo ve
+      // aunque tenga match, porque puede reasignar). El backend la revalida igual.
       const sel = $("crmAsignadoSel");
-      const puedeElegir = o.crm && o.crm.requiere_asignacion && o.crm.puede_elegir !== false;
+      const puedeElegir = o.crm && o.crm.puede_elegir !== false;
       const elegido = (puedeElegir && sel) ? sel.value : "";
       const url = SEND_API(o.id) + (elegido ? `?assigned_user_id=${encodeURIComponent(elegido)}` : "");
       const resp = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
@@ -388,7 +425,7 @@
         btn.disabled = false; btn.innerHTML = `<i class="bi bi-send-check me-1"></i>Confirmar envío`;
         return;
       }
-      if (!resp.ok) throw new Error(json.detail || `HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(mensajeDeError(resp.status, json));
       // Bloqueo de duplicado: el backend devuelve ok:false + quién/cuándo.
       if (json.ok === false && json.status === "duplicado") {
         o.envio = {
@@ -467,7 +504,7 @@
     $("oppWindowLabel").textContent = "Cargando…";
     try {
       const resp = await fetch(API, { headers: { Accept: "application/json" } });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(mensajeDeError(resp.status, null));
       const json = await resp.json();
       const data = (json && json.data) || {};
       ALL = data.rows || [];
@@ -482,7 +519,7 @@
     } catch (e) {
       $("oppWindowLabel").textContent = "Error al cargar";
       $("oppBody").innerHTML =
-        `<div class="opp-empty">No se pudieron cargar las oportunidades (${esc(e.message)}).</div>`;
+        `<div class="opp-empty">No se pudieron cargar las oportunidades. ${esc(e.message)}</div>`;
     }
   }
 

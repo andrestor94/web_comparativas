@@ -98,7 +98,12 @@
     $("envTotalLabel").textContent = "Cargando…";
     try {
       const resp = await fetch(API, { headers: { Accept: "application/json" } });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      // Sin códigos HTTP crudos: no le dicen nada a quien mira la pantalla.
+      if (!resp.ok) {
+        throw new Error(resp.status >= 500
+          ? "El servidor no está respondiendo. Probá de nuevo en unos minutos."
+          : "No se pudo obtener el listado de envíos.");
+      }
       const json = await resp.json();
       ALL = ((json && json.data) || {}).rows || [];
       $("envTotalLabel").textContent = `${ALL.length} envío${ALL.length === 1 ? "" : "s"}`;
@@ -108,7 +113,7 @@
       $("envTotalLabel").textContent = "Error al cargar";
       $("envBody").innerHTML = "";
       $("envEmpty").style.display = "block";
-      $("envEmpty").textContent = `No se pudieron cargar los envíos (${e.message}).`;
+      $("envEmpty").textContent = `No se pudieron cargar los envíos. ${e.message}`;
     }
   }
 

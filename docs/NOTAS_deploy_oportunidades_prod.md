@@ -60,7 +60,13 @@ Ojo con dos detalles del contrato: en `Cuentas_por_numero_fusion` el `data` es u
 | Analista | No lo ve | **Solo a sí mismo** (su match del CRM) |
 | Supervisor / Admin | Sí | Cualquier usuario del CRM |
 
-El chequeo es **server-side**: un Analista que llame al endpoint con otro `assigned_user_id` recibe 422 (la UI que no le muestra el selector es cosmética). Caso borde cubierto: **Analista cuyo usuario de SIEM no existe en el CRM** no tiene a quién asignar y tampoco puede elegir → el envío se bloquea con *"Tu usuario no está dado de alta en el CRM…"* en lugar de dejarlo con un botón muerto. A un Supervisor en la misma situación se le pide elegir, que sí puede.
+El selector aparece **al abrir el modal**, no después de un envío rechazado: el Supervisor lo ve siempre (con su propio usuario preseleccionado si tiene match, editable), y el botón Confirmar arranca deshabilitado hasta que haya alguien elegido. El 422 del backend queda como defensa, no como camino normal — el usuario no debería llegar a verlo nunca.
+
+El chequeo es **server-side**: un Analista que llame al endpoint con otro `assigned_user_id` recibe 422 (la UI que no le muestra el selector es cosmética). Si un Supervisor se elige a sí mismo, se registra como `match`, no como `manual`: elegir lo que ya correspondía no es una reasignación.
+
+⚠️ **Cache-busting:** el `?v=` de los `<script>`/`<link>` de estos templates **hay que subirlo en cada cambio de JS/CSS** (hoy `oportunidades-v10-crm`). Si no, el navegador sigue sirviendo el archivo viejo y los cambios "no aparecen" sin ningún error a la vista — ya pasó con el selector de asignación.
+
+**Ningún mensaje de error visible muestra códigos HTTP.** El `detail` que devuelve el backend viene redactado para leerse; el front tiene además un mapa de respaldo por status por si alguna respuesta llega sin `detail`. Caso borde cubierto: **Analista cuyo usuario de SIEM no existe en el CRM** no tiene a quién asignar y tampoco puede elegir → el envío se bloquea con *"Tu usuario no está dado de alta en el CRM…"* en lugar de dejarlo con un botón muerto. A un Supervisor en la misma situación se le pide elegir, que sí puede.
 
 La consulta al CRM se hace una sola vez por request (no por fila) y trae el match + la lista completa. Si el CRM no responde, no hay lista que ofrecer y el envío queda **bloqueado** con el motivo a la vista.
 

@@ -2,7 +2,7 @@
 {% block title %}Oportunidades de Venta - Mercado Privado{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=oportunidades-v9">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=oportunidades-v10-crm">
 <style>
 /* ====================================================================
    Oportunidades de Venta — capa visual v5 "consola editorial".
@@ -66,8 +66,9 @@
 /* overflow-x:auto + min-width interno => en angosto scrollea, nunca aplasta */
 #oportunidadesApp .opp-list-wrap{width:100%;overflow-x:auto;overflow-y:auto;max-height:72vh;}
 #oportunidadesApp .opp-list{min-width:720px;}
+/* Última columna 66px = dos botones de 30px + separación (CRM + detalle).
+   La regla es compartida por el header y las filas: si cambia acá, quedan alineados. */
 #oportunidadesApp .opp-list-head,
-/* Última columna: 66px = dos botones de 30px + separación (CRM + detalle). */
 #oportunidadesApp .opp-row{display:grid;grid-template-columns:minmax(0,1fr) 54px 86px 138px 66px;align-items:center;column-gap:1rem;padding-left:.85rem;padding-right:.6rem;border-left:3px solid transparent;}
 
 /* Micro-headers (sin fondo navy pesado) */
@@ -359,15 +360,11 @@
         <!-- Selector de asignación: aparece SOLO cuando el mail de SIEM no coincide con
              ningún usuario del CRM. Nunca se asigna a nadie automáticamente en ese caso:
              la elección es explícita y queda registrada como selección manual. -->
-        <div id="crmAsignacionBox" class="alert alert-warning py-2 small mb-3" style="display:none;">
-          <div class="mb-2">
-            <i class="bi bi-person-exclamation me-1"></i>
-            Tu usuario de SIEM no coincide con ningún usuario del CRM.
-            <strong>Elegí a quién asignar</strong> esta oportunidad.
-          </div>
+        <div id="crmAsignacionBox" class="alert py-2 small mb-3" style="display:none;">
+          <div class="mb-2" id="crmAsignacionMsg"></div>
           <label class="form-label mb-1" for="crmAsignadoSel">Usuario del CRM</label>
           <select id="crmAsignadoSel" class="form-select form-select-sm"></select>
-          <div class="mt-1 text-muted">Queda registrado que la asignaste vos.</div>
+          <div class="mt-1 text-muted" id="crmAsignacionNota"></div>
         </div>
         <div id="crmFields"></div>
         <hr>
@@ -389,5 +386,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v9"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v10-crm"></script>
 {% endblock %}
