@@ -12,7 +12,8 @@
   let ALL = [];
   let WINDOW = {};
   let CRM_MODO = null;   // 'simulado' | 'test' | 'prod' — entorno al que se enviaría ahora
-  let CRM_ASIGNACION = { match: null, usuarios: [], sugerido_id: null, error: null };
+  let CRM_ASIGNACION = { match: null, usuarios: [], sugerido_id: null, error: null,
+                         bitacora_por_usuario: {} };
 
   // Cómo se nombra cada entorno en el modal. El bloqueo de duplicados es por entorno,
   // así que el usuario tiene que ver SIEMPRE contra cuál está operando.
@@ -337,12 +338,17 @@
         ? `<i class="bi bi-send-check me-1"></i>Confirmar envío`
         : `<i class="bi bi-person-exclamation me-1"></i>Elegí un usuario`;
       // El payload mostrado refleja la elección: lo que se ve es lo que se manda.
+      // `update_text` sale del mapa que arma el backend por usuario (mismo helper que
+      // usa el envío), no se recompone acá: si se rearmara del lado del cliente, el
+      // preview y lo que llega al CRM podrían decir cosas distintas.
       const elegido = usuarios.find((u) => u.id === sel.value);
       const payload = Object.assign({}, crmInfo.payload || {});
       payload.assigned_user = !elegido ? null
         : (match && elegido.id === match.id
             ? `asignado a vos (${elegido.usuario})`
             : `asignado a ${elegido.usuario} (selección manual)`);
+      const bitacoras = CRM_ASIGNACION.bitacora_por_usuario || {};
+      payload.update_text = elegido ? (bitacoras[elegido.id] || null) : null;
       renderCrmFields(payload, crmInfo.pendientes_crm, crmInfo.faltantes_dataset);
     };
     sel.onchange = sync;
@@ -510,7 +516,8 @@
       ALL = data.rows || [];
       WINDOW = data.window || {};
       CRM_MODO = data.crm_modo || null;
-      CRM_ASIGNACION = data.crm_asignacion || { match: null, usuarios: [], sugerido_id: null, error: null };
+      CRM_ASIGNACION = data.crm_asignacion ||
+        { match: null, usuarios: [], sugerido_id: null, error: null, bitacora_por_usuario: {} };
       $("oppWindowLabel").textContent = WINDOW.label ? `Demanda analizada: ${WINDOW.label}` : "Período no disponible";
       fillSelect("fFamilia", [...new Set(ALL.map((o) => o.familia).filter(Boolean))].sort());
       fillSelect("fUnidad", [...new Set(ALL.map((o) => o.unidad_negocio).filter(Boolean))].sort());

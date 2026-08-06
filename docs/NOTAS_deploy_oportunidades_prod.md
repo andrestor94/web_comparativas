@@ -70,7 +70,18 @@ El chequeo es **server-side**: un Analista que llame al endpoint con otro `assig
 
 La consulta al CRM se hace una sola vez por request (no por fila) y trae el match + la lista completa. Si el CRM no responde, no hay lista que ofrecer y el envío queda **bloqueado** con el motivo a la vista.
 
-**La bitácora del CRM (paso 5) siempre nombra al usuario de SIEM** que disparó el envío, aunque la oportunidad quede asignada a otra persona: `"Enviada desde SIEM por <mail>[, que la asignó manualmente a <usuario>]."`. Sin eso, una oportunidad asignada a un tercero perdía todo rastro de su origen.
+**La bitácora del CRM (paso 5)** es corta a propósito — todo el detalle de negocio ya viaja en `description` de la oportunidad y repetirlo solo ensucia el hilo:
+
+```
+Enviado desde SIEM por <mail SIEM>. Asignada a <usuario CRM>. dd/mm/aaaa HH:MM.
+Enviado desde SIEM por <mail SIEM>. Asignada manualmente a <usuario CRM>. dd/mm/aaaa HH:MM.
+```
+
+Lo único que aporta y no está en ningún otro lado: `assigned_user_id` dice quién la TRABAJA, no quién la generó — sin esta línea, una oportunidad asignada a un tercero perdería todo rastro de su origen. "Asignada manualmente" aparece solo cuando el asignado difiere de quien envía.
+
+La hora va en **hora argentina** (UTC-3 fijo; el país no tiene horario de verano desde 2009, así que no depende de tzdata, que en Windows no viene instalado). La app sigue guardando todo en UTC: la conversión es solo para esta línea, que la lee una persona dentro del CRM.
+
+El texto lo compone el ROUTER (`crm_client.texto_bitacora`) con la hora real del envío, y `enviar_oportunidad` lo manda tal cual. El modal muestra exactamente ese texto: `/list` devuelve `crm_asignacion.bitacora_por_usuario`, un mapa `{id_usuario: texto}` precalculado con el mismo helper, así que al cambiar el selector el preview se actualiza sin que el front recomponga nada. **Si el front lo armara por su cuenta, cualquier retoque del texto habría que hacerlo en dos lados y tarde o temprano divergirían.**
 
 > **CERTIFICADO (una línea):** al CRM le falta publicar el **certificado intermedio** de su cadena TLS (Sectigo); **lo arregla INFRA** en la config del servidor del CRM; si no se corrige antes de producción, SIEM no puede validar el certificado y **todos los envíos al CRM fallan** (503 "no se pudo conectar"), y la única alternativa sería mantener el bundle manual `CRM_CA_BUNDLE` —que hay que regenerar cada vez que el certificado rote— o apagar la verificación TLS, lo que expondría las credenciales.
 

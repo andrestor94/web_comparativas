@@ -631,28 +631,40 @@ def fecha_cierre_tentativa() -> str | None:
 # Circuito completo
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _texto_bitacora(
-    base: str,
-    email_siem: str | None,
-    asignado: dict[str, str],
-) -> str:
-    """Antepone la trazabilidad de QUIÉN disparó el envío al texto de la bitácora.
+# Argentina no aplica horario de verano desde 2009, así que un -3 fijo es exacto y evita
+# depender de tzdata (que en Windows no viene instalado por defecto). La app guarda todo
+# en UTC; acá se convierte porque esta línea la lee una persona dentro del CRM.
+_TZ_ARG = dt.timezone(dt.timedelta(hours=-3))
 
-    El `assigned_user_id` de la oportunidad dice quién la TRABAJA en el CRM; no dice
-    quién la generó. Cuando se asigna a otra persona (selección manual), sin esta línea
-    el rastro del origen se pierde: en el CRM la oportunidad aparecería como de esa
-    persona, sin nada que indique que la mandó alguien más desde SIEM.
+
+def formato_momento(momento: dt.datetime) -> str:
+    """UTC -> 'dd/mm/aaaa HH:MM' en hora argentina."""
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=dt.timezone.utc)
+    return momento.astimezone(_TZ_ARG).strftime("%d/%m/%Y %H:%M")
+
+
+def texto_bitacora(
+    email_siem: str | None,
+    asignado: dict[str, str] | None,
+    momento: dt.datetime,
+) -> str:
+    """Texto de la bitácora del CRM: quién envió, a quién quedó asignada y cuándo.
+
+    Deliberadamente CORTO. Todo el detalle de negocio (familia, consumo, efectividad,
+    monto, base de cálculo) ya viaja en `description` de la oportunidad; repetirlo acá
+    solo genera ruido en el hilo de la bitácora.
+
+    Lo que sí aporta y no está en ningún otro lado: el `assigned_user_id` dice quién la
+    TRABAJA, no quién la generó. Cuando se asigna a otra persona, sin esta línea el
+    rastro del origen se pierde — en el CRM aparecería como de esa persona y nada
+    indicaría que la mandó alguien más desde SIEM. Por eso "asignada manualmente"
+    aparece solo en ese caso: si coincide con quien envía, no hay nada que aclarar.
     """
     quien = (email_siem or "usuario desconocido").strip()
-    origen = asignado.get("origen")
-    if origen == "manual":
-        cabecera = (
-            f"Enviado desde SIEM por {quien}, que la asignó manualmente a "
-            f"{asignado.get('usuario') or asignado.get('id')}."
-        )
-    else:
-        cabecera = f"Enviado desde SIEM por {quien}."
-    return f"{cabecera} {base}".strip()
+    usuario = (asignado or {}).get("usuario") or (asignado or {}).get("id") or "sin asignar"
+    verbo = "Asignada manualmente a" if (asignado or {}).get("origen") == "manual" else "Asignada a"
+    return f"Enviado desde SIEM por {quien}. {verbo} {usuario}. {formato_momento(momento)}."
 
 def enviar_oportunidad(
     *,
@@ -724,7 +736,9 @@ def enviar_oportunidad(
             bitacora_id = crear_bitacora(
                 sesion, cfg, token,
                 parent_id=crm_id,
-                description=_texto_bitacora(bitacora_description, email_usuario, asignado),
+                # Ya viene compuesto por el router (con la hora real del envío) para que
+                # sea EXACTAMENTE el mismo texto que se muestra en el modal.
+                description=bitacora_description,
                 status=estado_siem,
             )
         except CrmError as exc:

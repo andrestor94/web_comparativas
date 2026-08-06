@@ -169,6 +169,8 @@ def _build_crm_payload(
     usuarios_disponibles: bool = False,
     error_crm: str | None = None,
     puede_elegir: bool = True,
+    email_siem: str | None = None,
+    momento: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Arma el payload CRM. `cuenta_fusion` es el Nº de cuenta de FUSION del cliente
     (dataset: `cuenta_interna`), que es con lo que el CRM resuelve la cuenta. Si no se
@@ -186,7 +188,6 @@ def _build_crm_payload(
     cliente = (o.cliente_visible or "Sin cliente").strip()
     plataforma = o.plataforma or "el portal"
     familia = o.familia or "Sin familia"
-    unidad = o.unidad_negocio or "Sin unidad"
     consumo = _fmt_num(o.consumo_tipico_mensual)
     rango = f"{_fmt_num(o.consumo_min_mensual)}–{_fmt_num(o.consumo_max_mensual)}"
     ultima = o.ultima_demanda.isoformat() if o.ultima_demanda else "s/d"
@@ -202,13 +203,13 @@ def _build_crm_payload(
         f"Monto mensual estimado recuperable: {_fmt_money(o.monto_oportunidad)}."
     )
 
+    # Bitácora: corta a propósito. Todo el detalle de negocio ya está en `description`;
+    # acá solo va lo que no está en ningún otro lado (quién envió, a quién, cuándo).
+    # Es EXACTAMENTE el texto que se manda: el mismo helper lo arma para el modal y para
+    # el envío, así que la vista previa no puede quedar diciendo otra cosa.
     update_text = (
-        f"[SIEM] Negocio: {unidad}. Familia: {familia}. "
-        f"Monto mensual estimado: {_fmt_money(o.monto_oportunidad)} "
-        f"({consumo} u/mes × {_fmt_money(o.precio_unitario_estimado)}/u). "
-        f"Base de cálculo: mediana de la demanda NO participada en la ventana de {o.ventana_meses} meses "
-        f"(anclada en el último mes completo). Tipo {o.tipo_oportunidad}, actividad {o.estado_actividad}, "
-        f"score {_fmt_money(o.score)}."
+        crm_client.texto_bitacora(email_siem, asignado, momento or dt.datetime.utcnow())
+        if asignado else None
     )
 
     payload = {
@@ -345,14 +346,14 @@ def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) ->
         con un motivo claro, no dejar sin listado a todo el módulo.
     """
     vacio = {"match": None, "usuarios": [], "sugerido_id": None, "error": None,
-             "puede_elegir": puede_elegir}
+             "puede_elegir": puede_elegir, "email": email}
     try:
         crm_client.crm_config()
     except CrmError as exc:
         return {**vacio, "error": exc.mensaje}
     try:
         ctx = {**crm_client.contexto_asignacion(email), "error": None,
-               "puede_elegir": puede_elegir}
+               "puede_elegir": puede_elegir, "email": email}
     except CrmError as exc:
         logger.warning("[OPORTUNIDADES][API] no se pudo leer usuarios del CRM: %s", exc.mensaje)
         return {**vacio, "error": exc.mensaje}
@@ -364,10 +365,30 @@ def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) ->
     return ctx
 
 
+def _bitacoras_por_usuario(ctx: dict[str, Any], momento: dt.datetime) -> dict[str, str]:
+    """Texto de bitácora ya armado para CADA usuario elegible del selector.
+
+    Se precalcula server-side (son strings cortos, y la lista completa son 82) para que
+    el modal muestre el texto EXACTO al cambiar la selección, sin que el front tenga que
+    reimplementar el formato: si el front lo compusiera por su cuenta, cualquier retoque
+    del texto habría que hacerlo en dos lados y tarde o temprano divergirían.
+    """
+    match = ctx.get("match") or {}
+    email = ctx.get("email")
+    salida: dict[str, str] = {}
+    for u in ctx.get("usuarios") or []:
+        origen = "match" if u["id"] == match.get("id") else "manual"
+        salida[u["id"]] = crm_client.texto_bitacora(
+            email, {**u, "origen": origen}, momento,
+        )
+    return salida
+
+
 def _row_to_dict(
     o: OportunidadSummary,
     cuenta_fusion: str | None = None,
     ctx: dict[str, Any] | None = None,
+    momento: dt.datetime | None = None,
 ) -> dict[str, Any]:
     ctx = ctx or {}
     crm = _build_crm_payload(
@@ -375,6 +396,8 @@ def _row_to_dict(
         usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
         puede_elegir=bool(ctx.get("puede_elegir", True)),
+        email_siem=ctx.get("email"),
+        momento=momento,
     )
     return {
         "id": o.id,
@@ -459,12 +482,16 @@ def oportunidades_list(
     ctx = _contexto_asignacion_seguro(
         getattr(_user, "email", None), _puede_elegir_asignado(_user)
     )
+    # Un único instante para toda la respuesta: si cada fila tomara su propia hora, dos
+    # filas de la misma pantalla podrían mostrar minutos distintos en la bitácora.
+    ahora = dt.datetime.utcnow()
     data_rows = [
         _row_to_dict(
             o,
             normalizar_cuenta_fusion(getattr(o, "cuenta_interna", None))
             or respaldo.get(o.cliente_visible),
             ctx,
+            ahora,
         )
         for o in rows
     ]
@@ -528,6 +555,9 @@ def oportunidades_list(
                 "sugerido_id": ctx.get("sugerido_id"),
                 "error": ctx.get("error"),
                 "puede_elegir": bool(ctx.get("puede_elegir", True)),
+                # Texto de bitácora ya armado por usuario: el modal lo muestra tal cual
+                # al cambiar la selección, sin recomponerlo del lado del cliente.
+                "bitacora_por_usuario": _bitacoras_por_usuario(ctx, ahora),
             },
             "rows": data_rows,
         },
@@ -827,6 +857,10 @@ def oportunidades_enviar(
         usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
         puede_elegir=bool(ctx.get("puede_elegir", True)),
+        email_siem=enviado_por,
+        # La hora del sello es la que va a la bitácora: el texto que se manda y el que
+        # queda en el snapshot son el mismo, sin recomponerse en ningún lado.
+        momento=enviado_at,
     )
 
     # Chequeo server-side: la UI ya deshabilita el botón, pero el endpoint es la
