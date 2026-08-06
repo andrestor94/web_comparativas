@@ -401,7 +401,13 @@
   // El `detail` del backend ya viene redactado para leerse; el mapa es solo la red por si
   // alguna respuesta llega sin él.
   function mensajeDeError(status, json) {
-    if (json && json.detail) return json.detail;
+    // OJO: en rutas /api/ la app tiene un handler global (main.py) que reempaqueta las
+    // HTTPException como {"error": <detail>, "status": <code>} — NO como {"detail": ...}.
+    // Leer solo `detail` hacía que TODOS los mensajes del backend se perdieran y siempre
+    // se mostrara el genérico de abajo, que además desorientaba ("faltan datos" cuando en
+    // realidad el CRM no había respondido). Se leen las dos formas.
+    const delBackend = json && (json.detail || json.error);
+    if (delBackend) return delBackend;
     if (status === 401) return "Tu sesión expiró. Volvé a iniciar sesión e intentá de nuevo.";
     if (status === 403) return "No tenés permiso para enviar esta oportunidad.";
     if (status === 404) return "La oportunidad ya no está disponible. Actualizá la lista.";
@@ -427,7 +433,8 @@
       const resp = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
       const json = await resp.json().catch(() => ({}));
       if (resp.status === 403) {
-        setCrmStatus("danger", `<i class="bi bi-shield-lock me-1"></i>${esc(json.detail || "No autorizado para reenviar.")}`);
+        setCrmStatus("danger",
+          `<i class="bi bi-shield-lock me-1"></i>${esc(mensajeDeError(403, json))}`);
         btn.disabled = false; btn.innerHTML = `<i class="bi bi-send-check me-1"></i>Confirmar envío`;
         return;
       }

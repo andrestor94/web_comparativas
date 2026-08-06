@@ -750,7 +750,19 @@ def _decidir_asignado(
 
     if not elegido:
         return match
-    for u in ctx.get("usuarios") or []:
+    usuarios = ctx.get("usuarios") or []
+    if not usuarios:
+        # La lista se vuelve a pedir al CRM en el momento del envío. Si esa consulta
+        # falla, la selección del usuario sigue siendo válida: lo que no se pudo es
+        # verificarla. Decir "no existe" mandaría a buscar un problema inexistente en
+        # una elección correcta, y encima como algo definitivo en vez de reintentable.
+        raise HTTPException(
+            status_code=503,
+            detail=("No se pudo verificar la lista de usuarios con el CRM"
+                    + (f": {ctx['error']}" if ctx.get("error") else ".")
+                    + " La oportunidad no se envió. Reintentá en unos minutos."),
+        )
+    for u in usuarios:
         if u["id"] == elegido:
             # Si eligió su propio usuario, no es una reasignación: se registra como match.
             if match and u["id"] == match["id"]:

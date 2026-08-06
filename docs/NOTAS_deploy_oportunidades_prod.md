@@ -66,7 +66,9 @@ El chequeo es **server-side**: un Analista que llame al endpoint con otro `assig
 
 ⚠️ **Cache-busting:** el `?v=` de los `<script>`/`<link>` de estos templates **hay que subirlo en cada cambio de JS/CSS** (hoy `oportunidades-v10-crm`). Si no, el navegador sigue sirviendo el archivo viejo y los cambios "no aparecen" sin ningún error a la vista — ya pasó con el selector de asignación.
 
-**Ningún mensaje de error visible muestra códigos HTTP.** El `detail` que devuelve el backend viene redactado para leerse; el front tiene además un mapa de respaldo por status por si alguna respuesta llega sin `detail`. Caso borde cubierto: **Analista cuyo usuario de SIEM no existe en el CRM** no tiene a quién asignar y tampoco puede elegir → el envío se bloquea con *"Tu usuario no está dado de alta en el CRM…"* en lugar de dejarlo con un botón muerto. A un Supervisor en la misma situación se le pide elegir, que sí puede.
+**Ningún mensaje de error visible muestra códigos HTTP.** El `detail` que devuelve el backend viene redactado para leerse; el front tiene además un mapa de respaldo por status por si alguna respuesta llega sin él.
+
+⚠️ **Forma del cuerpo de error en rutas `/api/`:** `main.py` tiene un `@app.exception_handler(HTTPException)` global que las reempaqueta como `{"error": <detail>, "status": <code>}` — **NO** como `{"detail": ...}`. Cualquier front que lea solo `detail` va a recibir `undefined` y mostrar un genérico, tapando el mensaje real (ya pasó: un 422 legítimo se veía como "faltan datos" y escondía que el CRM no había respondido). Leer siempre `detail || error`. Caso borde cubierto: **Analista cuyo usuario de SIEM no existe en el CRM** no tiene a quién asignar y tampoco puede elegir → el envío se bloquea con *"Tu usuario no está dado de alta en el CRM…"* en lugar de dejarlo con un botón muerto. A un Supervisor en la misma situación se le pide elegir, que sí puede.
 
 La consulta al CRM se hace una sola vez por request (no por fila) y trae el match + la lista completa. Si el CRM no responde, no hay lista que ofrecer y el envío queda **bloqueado** con el motivo a la vista.
 
