@@ -70,6 +70,124 @@ def ensure_access_scope_column():
             print(f"[MIGRATION] Error intentando agregar columna: {e}", flush=True)
 
 
+def ensure_users_reporta_a_column():
+    """
+    Agrega la columna 'reporta_a_id' a 'users' (jerarquía Oportunidades / Mercado
+    Privado: analista -> supervisor -> gerente). Self-FK: cada usuario reporta a lo
+    sumo a otro usuario; el `role` del hijo determina qué representa el vínculo
+    (mismo patrón que `Comment.parent_id`, sólo que acá el vínculo se carga a mano
+    desde el form de usuario de S.I.C., no lo arma el usuario mismo).
+    """
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "ALTER TABLE users ADD COLUMN reporta_a_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "users.reporta_a_id",
+        )
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            "CREATE INDEX IF NOT EXISTS ix_users_reporta_a_id ON users (reporta_a_id)",
+            "ix_users_reporta_a_id",
+        )
+    print("[MIGRATION] Columna 'users.reporta_a_id' verificada/creada.", flush=True)
+
+
+def ensure_vendedores_fusion_seed():
+    """
+    Crea (si falta) la tabla 'vendedores_fusion' y la precarga con los vendedores de
+    Operadores.xlsx (codigo_vendedor + nombre_fusion, user_id NULL — el vínculo a un
+    usuario se carga a mano desde S.I.C.; el cruce automático por legajo_c/nombre del
+    CRM no es confiable, ver docs/AUDITORIA_IDENTIDAD_CUENTAS_CRM.md).
+
+    Idempotente: no pisa vínculos ya cargados (solo inserta códigos de vendedor que
+    todavía no existen en la tabla) ni falla si Operadores.xlsx no está presente.
+    """
+    from web_comparativas.models import VendedorFusion
+    from web_comparativas.dimensionamiento.account_resolution import (
+        OPERADORES_PATH,
+        normalize_identifier,
+    )
+
+    try:
+        VendedorFusion.__table__.create(bind=engine, checkfirst=True)
+        print("[MIGRATION] Tabla 'vendedores_fusion' verificada/creada.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Tabla 'vendedores_fusion': advertencia — {e}", flush=True)
+
+    if not OPERADORES_PATH.exists():
+        print(f"[MIGRATION] vendedores_fusion seed: {OPERADORES_PATH} no existe. (Saltando)", flush=True)
+        return
+
+    from openpyxl import load_workbook
+
+    vendedores: dict[str, str] = {}
+    workbook = load_workbook(OPERADORES_PATH, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        rows = sheet.iter_rows(values_only=True)
+        headers = [str(value or "").strip() for value in next(rows)]
+        if not {"Vendedor", "Nombre"}.issubset(set(headers)):
+            print(
+                "[MIGRATION] vendedores_fusion seed: Operadores.xlsx sin columnas "
+                "Vendedor/Nombre. (Saltando)",
+                flush=True,
+            )
+            return
+        for values in rows:
+            raw = dict(zip(headers, values))
+            codigo = normalize_identifier(raw.get("Vendedor"))
+            if not codigo or codigo in vendedores:
+                continue
+            vendedores[codigo] = str(raw.get("Nombre") or "").strip()
+    finally:
+        workbook.close()
+
+    with engine.begin() as conn:
+        existentes = {
+            row[0]
+            for row in conn.execute(text("SELECT codigo_vendedor FROM vendedores_fusion")).fetchall()
+        }
+        nuevos = 0
+        for codigo, nombre in vendedores.items():
+            if codigo in existentes:
+                continue
+            with conn.begin_nested():
+                conn.execute(
+                    text(
+                        "INSERT INTO vendedores_fusion "
+                        "(codigo_vendedor, nombre_fusion, activo, updated_at) "
+                        "VALUES (:codigo, :nombre, :activo, :updated_at)"
+                    ),
+                    {
+                        "codigo": codigo,
+                        "nombre": nombre,
+                        "activo": True,
+                        "updated_at": dt.datetime.utcnow(),
+                    },
+                )
+            nuevos += 1
+    print(
+        f"[MIGRATION] vendedores_fusion seed: {nuevos} vendedor(es) nuevo(s) insertado(s) "
+        f"({len(vendedores)} en Operadores.xlsx).",
+        flush=True,
+    )
+
+
+def ensure_oportunidad_asignaciones_manuales_table():
+    """Crea (si falta) la tabla de asignación manual de oportunidades a analistas
+    (pieza 3 de cartera comercial / Oportunidades, Mercado Privado). Tabla 100% nueva
+    — `create_all` ya la crearía sola al boot, pero se deja explícita (mismo criterio
+    que `ensure_comparativa_rows_table`) para loguear el resultado."""
+    from web_comparativas.dimensionamiento.models import OportunidadAsignacionManual
+
+    try:
+        OportunidadAsignacionManual.__table__.create(bind=engine, checkfirst=True)
+        print("[MIGRATION] Tabla 'oportunidad_asignaciones_manuales' verificada/creada.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Tabla 'oportunidad_asignaciones_manuales': advertencia — {e}", flush=True)
+
+
 def ensure_module_access_column():
     """
     Agrega la columna 'module_access' a la tabla 'users' si falta.

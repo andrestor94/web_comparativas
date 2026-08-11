@@ -50,6 +50,15 @@ def OPORTUNIDADES_ENABLED() -> bool:
     return raw not in {"0", "false", "no", "off", "n"}
 
 
+# Kill-switch del filtrado por cartera comercial (visibilidad por fila en /list).
+# Default OFF: mientras esté apagado, oportunidades_router.py ni siquiera importa
+# el resultado de oportunidades_visibilidad — el listado sigue devolviendo TODAS las
+# filas del run activo a todo el mundo, exactamente como hoy (ago-2026).
+def OPORTUNIDADES_CARTERA_ENABLED() -> bool:
+    raw = (os.getenv("OPORTUNIDADES_CARTERA_ENABLED") or "false").strip().lower()
+    return raw not in {"0", "false", "no", "off", "n"}
+
+
 def CRM_ENVIO_PLACEHOLDER() -> bool:
     """Modo PRUEBA del envío a CRM (default ON mientras la API real esté diferida).
 

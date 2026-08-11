@@ -1803,6 +1803,28 @@ def mercado_privado_oportunidades_enviadas(
     return templates.TemplateResponse("mercado_privado_oportunidades_enviadas.html", ctx)
 
 
+@router.get("/mercado-privado/oportunidades/enviadas/{oportunidad_id}", response_class=HTMLResponse)
+def mercado_privado_oportunidad_enviada_detalle(
+    oportunidad_id: str,
+    request: Request,
+    user: User = Depends(
+        require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")
+    ),
+    _mod: User = Depends(_require_module("mercado_privado.oportunidades")),
+):
+    """Vista de lectura dedicada para un envio ya registrado en el CRM."""
+    from web_comparativas.dimensionamiento.oportunidades import OPORTUNIDADES_ENABLED
+    if not OPORTUNIDADES_ENABLED():
+        raise HTTPException(status_code=404, detail="M\u00f3dulo Oportunidades deshabilitado.")
+    ctx = {
+        "request": request,
+        "user": user,
+        "market_context": "private",
+        "oportunidad_id": oportunidad_id,
+    }
+    return templates.TemplateResponse("mercado_privado_oportunidad_enviada_detalle.html", ctx)
+
+
 def _render_match(request: Request, user: User, market_context: str):
     """Vista ÚNICA de Match (módulo centralizado): misma data, misma lógica, mismo
     template desde ambos mercados. Solo cambia market_context (breadcrumb/sidebar

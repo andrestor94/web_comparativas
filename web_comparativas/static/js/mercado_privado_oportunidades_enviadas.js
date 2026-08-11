@@ -7,8 +7,11 @@
   "use strict";
 
   const API = "/api/mercado-privado/oportunidades/enviadas";
+
   let ALL = [];
+
   let SORT = { campo: "enviado_at", desc: true };
+
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
@@ -23,6 +26,18 @@
     return `${p[2]}/${p[1]}/${p[0]}<span class="env-sub">${s.slice(11, 16)}</span>`;
   };
 
+  function deepLinkId() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.has('oportunidad_id') ? params.get('oportunidad_id') : null;
+    } catch (e) { return null; }
+  }
+
+  function detailPageUrl(row) {
+    const base = `/mercado-privado/oportunidades/enviadas/${encodeURIComponent(row.oportunidad_id)}`;
+    return row.crm_modo ? `${base}?crm_modo=${encodeURIComponent(row.crm_modo)}` : base;
+  }
+
   function filtradas() {
     const q = ($("envSearch").value || "").trim().toLowerCase();
     const modo = $("envModo").value;
@@ -32,7 +47,7 @@
       if (origen && (r.asignado_origen || "") !== origen) return false;
       if (q) {
         const hay = `${r.cliente_visible || ""} ${r.producto || ""} ${r.codigo_articulo || ""} ` +
-          `${r.enviado_por || ""} ${r.asignado_a || ""} ${r.crm_id || ""}`.toLowerCase();
+          `${r.enviado_por || ""} ${r.asignado_a || ""} ${r.crm_id || ""} ${r.cuenta_original || ""} ${r.cuenta_utilizada || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -71,7 +86,7 @@
         : `<span class="env-sin-link">${modo === "simulado" ? "simulado" : "sin id"}</span>`;
       const fueraDeRun = r.en_run_activo ? "" :
         `<span class="env-sub" title="Ya no califica en la corrida activa">fuera de la corrida actual</span>`;
-      return `<tr>` +
+      return `<tr data-oportunidad-id='${esc(r.oportunidad_id)}' data-crm-modo='${esc(r.crm_modo || "")}' tabindex='0' title='Abrir detalle'>` +
         `<td class="env-cliente"><span class="env-trunc" title="${esc(r.cliente_visible)}">${esc(r.cliente_visible || "—")}</span>${fueraDeRun}</td>` +
         `<td class="env-prod"><span class="env-trunc" title="${esc(r.producto)}">${esc(r.producto || "—")}</span>` +
           `<span class="env-sub">${esc(r.codigo_articulo || "")}</span></td>` +
@@ -95,6 +110,11 @@
   }
 
   async function load() {
+    const requestedId = deepLinkId();
+    if (requestedId !== null) {
+      window.location.replace(detailPageUrl({ oportunidad_id: requestedId }));
+      return;
+    }
     $("envTotalLabel").textContent = "Cargando…";
     try {
       const resp = await fetch(API, { headers: { Accept: "application/json" } });
@@ -118,6 +138,23 @@
   }
 
   function init() {
+    $('envBody').addEventListener('click', (event) => {
+      if (event.target.closest('a')) return;
+      const tr = event.target.closest('tr[data-oportunidad-id]');
+      if (!tr) return;
+      const row = ALL.find((item) => item.oportunidad_id === tr.dataset.oportunidadId &&
+        (item.crm_modo || '') === tr.dataset.crmModo);
+      if (row) window.location.href = detailPageUrl(row);
+    });
+    $('envBody').addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const tr = event.target.closest('tr[data-oportunidad-id]');
+      if (!tr) return;
+      event.preventDefault();
+      const row = ALL.find((item) => item.oportunidad_id === tr.dataset.oportunidadId &&
+        (item.crm_modo || '') === tr.dataset.crmModo);
+      if (row) window.location.href = detailPageUrl(row);
+    });
     $("envSearch").addEventListener("input", render);
     $("envModo").addEventListener("change", render);
     $("envOrigen").addEventListener("change", render);

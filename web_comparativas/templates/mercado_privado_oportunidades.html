@@ -347,34 +347,33 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <div class="alert alert-info py-2 small mb-3">
-          <i class="bi bi-info-circle me-1"></i>
-          Este payload se <strong>arma</strong> a partir de la oportunidad. Al confirmar se
-          <strong>crea la oportunidad <span id="crmModoLabel">en el CRM</span></strong> y se
-          registra el envío con tu usuario para trazabilidad y control de duplicados.
-          El bloqueo de reenvío es <strong>por entorno</strong>: lo que mandes a TEST no
-          bloquea el envío a producción.
-        </div>
+
         <!-- Mensaje de estado del envío (duplicado / éxito / error). -->
         <div id="crmStatusMsg" class="alert py-2 small mb-3" style="display:none;"></div>
-        <!-- Selector de asignación: aparece SOLO cuando el mail de SIEM no coincide con
-             ningún usuario del CRM. Nunca se asigna a nadie automáticamente en ese caso:
-             la elección es explícita y queda registrada como selección manual. -->
+        <!-- La cuenta se valida al abrir el modal. La UI muestra solo Cliente/CUIT/Cuenta/
+             Operador (ver reflectCuenta en el JS) antes de habilitar el envío. -->
+        <div id="crmCuentaBox" class="alert py-2 small mb-3 alert-secondary" style="display:none;">
+          <div class="fw-semibold mb-1"><i class="bi bi-building-check me-1"></i>Cuenta del CRM</div>
+          <div id="crmCuentaDetails"></div>
+          <div id="crmCuentaSelectorWrap" class="mt-2" style="display:none;">
+            <label class="form-label mb-1" for="crmCuentaSel">Cuenta relacionada con el mismo CUIT</label>
+            <select id="crmCuentaSel" class="form-select form-select-sm"></select>
+            <div class="mt-1 text-muted">La elección queda registrada en el payload y en la bitácora del envío.</div>
+          </div>
+        </div>
+        <!-- Selector de asignación (ver reflectAsignacion en el JS): si la cuenta tiene
+             operador de Fusión con usuario propio en el CRM, se bloquea a esa persona sin
+             opción de cambiarlo; si no, selector acotado a la estructura de quien envía
+             (Supervisor = su equipo, Gerente = su estructura, Admin/Auditor = todos);
+             Analista no lo ve nunca (se asigna a sí mismo). -->
         <div id="crmAsignacionBox" class="alert py-2 small mb-3" style="display:none;">
           <div class="mb-2" id="crmAsignacionMsg"></div>
           <label class="form-label mb-1" for="crmAsignadoSel">Usuario del CRM</label>
           <select id="crmAsignadoSel" class="form-select form-select-sm"></select>
           <div class="mt-1 text-muted" id="crmAsignacionNota"></div>
         </div>
-        <div id="crmFields"></div>
-        <hr>
-        <div class="crm-field">
-          <div class="crm-key">JSON</div>
-          <pre class="crm-json" id="crmJson"></pre>
-        </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="crmCopyBtn"><i class="bi bi-clipboard me-1"></i>Copiar JSON</button>
         <!-- Aparece recién cuando el CRM devolvió el id del registro creado. -->
         <a class="btn btn-success btn-sm" id="crmViewBtn" target="_blank" rel="noopener" style="display:none;"><i class="bi bi-box-arrow-up-right me-1"></i>Ver en CRM</a>
         <button type="button" class="btn btn-primary btn-sm" id="crmSendBtn"><i class="bi bi-send-check me-1"></i>Confirmar envío</button>
@@ -386,5 +385,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v12-fix422"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v18-crm-modal"></script>
 {% endblock %}

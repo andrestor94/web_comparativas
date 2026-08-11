@@ -22,29 +22,44 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
+import unicodedata
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from web_comparativas.policy import require_perm, is_admin
+from web_comparativas.models import User, VendedorFusion
+from web_comparativas.dimensionamiento.account_resolution import (
+    AccountSelectionError,
+    relationship_candidates,
+    select_account_resolution,
+)
 from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.crm_client import CrmError
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     CrmEnvioEvento,
     DimensionamientoRecord,
+    OportunidadAsignacionManual,
     OportunidadSummary,
 )
 from web_comparativas.dimensionamiento.oportunidades import (
     CRM_ENVIO_PLACEHOLDER,
+    OPORTUNIDADES_CARTERA_ENABLED,
     OPORTUNIDADES_ENABLED,
     VENTANA_MESES,
     _detectar_ultimo_mes_completo,
     _subtract_months,
     normalizar_cuenta_fusion,
     opportunity_stable_id,
+)
+from web_comparativas.dimensionamiento.oportunidades_visibilidad import (
+    analistas_a_cargo,
+    oportunidades_visibles_para,
+    supervisores_a_cargo,
 )
 from web_comparativas.dimensionamiento.query_service import _latest_success_import_run
 
@@ -67,6 +82,12 @@ _WRITE_ROLES = {"admin", "administrator", "administrador", "analista", "analyst"
 # El analista trabaja su propia cartera: dejarlo asignar a un tercero le permitiría
 # mover trabajo (y comisión) sin control. El supervisor sí distribuye, es su función.
 _ROLES_ANALISTA = {"analista", "analyst"}
+_ROLES_SUPERVISOR = {"supervisor"}
+_ROLES_GERENTE = {"gerente", "manager"}
+# Quién ve la lista COMPLETA de 82 usuarios del CRM en el selector de envío (ago-2026):
+# solo Admin/Auditor. Supervisor y Gerente ven acotado a su propia estructura (ver
+# _contexto_asignacion_seguro); Analista no ve selector en absoluto (_puede_elegir_asignado).
+_ROLES_CRM_LISTA_COMPLETA = {"admin", "administrator", "administrador", "auditor", "visor", "viewer"}
 
 
 def _rol(user) -> str:
@@ -90,6 +111,25 @@ def _require_oportunidades_write(request: Request):
 
 
 AllowedWriter = Depends(_require_oportunidades_write)
+
+# Quién puede ASIGNAR una oportunidad a mano a un analista (ago-2026): Supervisor
+# (solo a analistas de SU equipo) o Admin (a cualquier analista). Deliberadamente
+# más chico que _WRITE_ROLES: un Analista no asigna (solo se autoasigna al enviar al
+# CRM, que es otra acción) y Gerente/Auditor son de lectura.
+_ROLES_ASIGNADOR = {"admin", "administrator", "administrador", "supervisor"}
+
+
+def _require_oportunidades_asignar(request: Request):
+    user = _perm_oportunidades(request)
+    if _rol(user) not in _ROLES_ASIGNADOR:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Supervisor o Admin pueden asignar oportunidades a un analista.",
+        )
+    return user
+
+
+AllowedAssigner = Depends(_require_oportunidades_asignar)
 
 _MESES_ES = [
     "ene", "feb", "mar", "abr", "may", "jun",
@@ -335,7 +375,59 @@ def _resolver_cuenta_fusion(db: Session, o: OportunidadSummary, run_id: int) -> 
     return _cuentas_fusion_desde_records(db, run_id, [o.cliente_visible]).get(o.cliente_visible)
 
 
-def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) -> dict[str, Any]:
+def _operador_crm_matches(db: Session, operador_codigos: set[str]) -> dict[str, dict[str, str] | None]:
+    """{operador_codigo: {"id","usuario"}|None} — el usuario del CRM que corresponde a
+    la PERSONA de Fusión dueña de la cuenta (vía su identidad en SIEM: VendedorFusion),
+    no al de quien está enviando. Es la persona real de la cuenta en Fusión/CRM, así
+    que aplica sin importar la estructura de quien pide el envío.
+
+    UNA sola consulta a usuarios_rendidores para todos los códigos pedidos (evita N
+    llamadas al CRM si hay varias cuentas candidatas). Si el CRM no responde, no
+    revienta nada: se devuelve vacío y el selector cae al comportamiento normal
+    (acotado por estructura), que es exactamente lo que ya había antes de esto.
+    """
+    codigos = {c for c in operador_codigos if c}
+    if not codigos:
+        return {}
+    vendedores = (
+        db.query(VendedorFusion)
+        .filter(VendedorFusion.codigo_vendedor.in_(codigos), VendedorFusion.user_id.isnot(None))
+        .all()
+    )
+    if not vendedores:
+        return {}
+    try:
+        usuarios_crm = crm_client.contexto_asignacion(None).get("usuarios") or []
+    except CrmError:
+        return {}
+    salida: dict[str, dict[str, str] | None] = {}
+    for v in vendedores:
+        email = v.user.email if v.user else None
+        salida[v.codigo_vendedor] = crm_client.buscar_match_usuario(usuarios_crm, email)
+    return salida
+
+
+def _emails_bajo_mi_estructura(db: Session, user) -> set[str]:
+    """Emails de SIEM de las personas que quien pide esto puede elegir en el selector
+    del CRM: el propio + su estructura, según el rol. Reutiliza la MISMA jerarquía
+    (reporta_a_id) que ya usa oportunidades_visibilidad.py para la cartera comercial —
+    "poder ver la cartera de alguien" y "poder asignarle una oportunidad en el CRM" son
+    la misma noción de "está bajo mi estructura".
+    """
+    rol = _rol(user)
+    ids = {user.id}
+    if rol in _ROLES_SUPERVISOR:
+        ids |= set(analistas_a_cargo(db, user.id))
+    elif rol in _ROLES_GERENTE:
+        supervisores_ids = set(supervisores_a_cargo(db, user.id))
+        ids |= supervisores_ids
+        for sid in supervisores_ids:
+            ids |= set(analistas_a_cargo(db, sid))
+    filas = db.query(User.email).filter(User.id.in_(ids)).all()
+    return {e[0] for e in filas if e[0]}
+
+
+def _contexto_asignacion_seguro(user, db: Session) -> dict[str, Any]:
     """Contexto de asignación para la VISTA PREVIA, sin poder romper la página.
 
     Devuelve {"match", "usuarios", "sugerido_id", "error"}. Se corre una sola vez por
@@ -344,7 +436,18 @@ def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) ->
         página pagaría un timeout de conexión antes de fallar.
       - Cualquier CrmError se traga: que el CRM esté caído tiene que bloquear el envío
         con un motivo claro, no dejar sin listado a todo el módulo.
+
+    La lista de usuarios que se devuelve YA viene acotada por rol (ago-2026):
+      - Analista: vacía (no ve selector, `_puede_elegir_asignado` en False).
+      - Supervisor: el CRM de sí mismo + el de sus analistas a cargo.
+      - Gerente: el CRM de sus supervisores a cargo + transitivamente sus analistas.
+      - Admin/Auditor: los 82, sin acotar.
+    Como `_decidir_asignado` valida el `assigned_user_id` elegido CONTRA esta misma
+    lista (`ctx["usuarios"]`), acotarla acá alcanza para blindar server-side también
+    el envío — no hace falta un segundo chequeo en `/enviar`.
     """
+    email = getattr(user, "email", None)
+    puede_elegir = _puede_elegir_asignado(user)
     vacio = {"match": None, "usuarios": [], "sugerido_id": None, "error": None,
              "puede_elegir": puede_elegir, "email": email}
     try:
@@ -357,11 +460,28 @@ def _contexto_asignacion_seguro(email: str | None, puede_elegir: bool = True) ->
     except CrmError as exc:
         logger.warning("[OPORTUNIDADES][API] no se pudo leer usuarios del CRM: %s", exc.mensaje)
         return {**vacio, "error": exc.mensaje}
+
     if not puede_elegir:
         # El analista no elige: no tiene sentido mandarle 82 usuarios al navegador,
         # y no exponerlos evita que un cliente modificado los ofrezca igual.
         ctx["usuarios"] = []
         ctx["sugerido_id"] = None
+        return ctx
+
+    rol = _rol(user)
+    if rol not in _ROLES_CRM_LISTA_COMPLETA:
+        # Supervisor o Gerente: acotar a la estructura propia (match por email de SIEM
+        # sin dominio contra el campo `usuario` del CRM, mismo criterio que ya usa
+        # crm_client.buscar_match_usuario).
+        emails_permitidos = _emails_bajo_mi_estructura(db, user)
+        usuarios_permitidos = {
+            crm_client._usuario_desde_email(e) for e in emails_permitidos
+        }
+        ctx["usuarios"] = [
+            u for u in ctx["usuarios"] if u["usuario"].strip().lower() in usuarios_permitidos
+        ]
+        if ctx["sugerido_id"] and not any(u["id"] == ctx["sugerido_id"] for u in ctx["usuarios"]):
+            ctx["sugerido_id"] = None
     return ctx
 
 
@@ -450,7 +570,200 @@ def _window_meta(db: Session, run_id: int) -> dict[str, Any]:
     }
 
 
-@router.get("/list")
+def _oportunidades_pendientes(db: Session, run_id: int, crm_modo: str):
+    """Filas pendientes comparando la clave canonica exacta del envio.
+
+    ``oportunidades_summary`` no persiste ``oportunidad_id``. Por eso no se arma un
+    anti-join aproximado con columnas descriptivas: se calcula la identidad con
+    ``opportunity_stable_id``, la misma funcion usada por el payload y por
+    ``crm_envios.oportunidad_id``, y se excluye en backend antes de serializar/KPIs.
+    Son dos consultas acotadas y nunca una consulta por fila.
+    """
+    enviados = set(
+        db.execute(
+            select(CrmEnvio.oportunidad_id).where(CrmEnvio.crm_modo == crm_modo)
+        ).scalars()
+    )
+    rows = db.execute(
+        select(OportunidadSummary)
+        .where(OportunidadSummary.import_run_id == run_id)
+        .order_by(OportunidadSummary.score.desc())
+    ).scalars().all()
+    return [
+        row for row in rows
+        if opportunity_stable_id(row.cliente_visible, row.codigo_articulo) not in enviados
+    ]
+
+
+def _resolve_account_for_opportunity(
+    db: Session,
+    run_id: int,
+    opportunity: OportunidadSummary,
+    *,
+    requested_account: str | None = None,
+) -> dict[str, Any]:
+    """Reconstruye la relación y consulta el CRM en cada GET/POST; JavaScript no decide."""
+    relationship = relationship_candidates(db, run_id, opportunity)
+    crm_mode = _modo_envio_actual()
+    results: dict[str, dict[str, Any]] = {}
+    # Las relaciones ambiguas y los conjuntos >25 se bloquean ANTES de consultar. Para
+    # una oportunidad sin puente nominal todavía puede confirmarse su cuenta original.
+    can_query = not relationship.get("relacion_ambigua") and not relationship.get("exceso_candidatos")
+    codes = [row["cuenta"] for row in relationship.get("cuentas_candidatas") or []] if can_query else []
+    if crm_mode != "simulado" and codes:
+        try:
+            lookup = crm_client.consultar_cuentas(codes, detener_si_primera_existe=True)
+            results = lookup["results"]
+        except CrmError as exc:
+            results = {
+                code: {
+                    "exists": None, "error": exc.mensaje, "kind": exc.kind,
+                    "reintentable": exc.reintentable,
+                }
+                for code in codes
+            }
+    return select_account_resolution(
+        relationship, results, crm_mode=crm_mode, requested_account=requested_account,
+    )
+
+
+def _account_resolution_message(resolution: dict[str, Any]) -> str:
+    original = resolution.get("cuenta_original") or "sin dato"
+    cuit = resolution.get("cuit") or "sin CUIT válido"
+    evaluated = [row["cuenta"] for row in resolution.get("cuentas_candidatas") or []]
+    confidence = resolution.get("estado_confianza")
+    criterion = resolution.get("criterio_seleccion")
+    if confidence == "RELACION_AMBIGUA":
+        reasons = ", ".join(resolution.get("motivos_ambiguedad") or []) or "identidad no concluyente"
+        total = resolution.get("cantidad_candidatas_total", len(evaluated))
+        return (
+            f"La relación de cuentas es ambigua y no se enviará. Motivos: {reasons}. "
+            f"Candidatas detectadas: {total}; no se truncaron ni se seleccionó ninguna."
+        )
+    if confidence == "ERROR_CONSULTA_CRM":
+        return "No se pudieron verificar todas las cuentas con el CRM. No se envió; reintentá más tarde."
+    if criterion == "multiples_alternativas":
+        return (
+            "La cuenta original no existe y hay varias alternativas válidas. "
+            "Elegí explícitamente una cuenta; la decisión quedará registrada como manual."
+        )
+    return (
+        "Ninguna cuenta vinculada fue encontrada en el CRM del entorno actual. "
+        f"Cuenta original: {original}. CUIT: {cuit}. "
+        f"Cuentas evaluadas ({len(evaluated)}): {', '.join(evaluated) or 'ninguna'}."
+    )
+
+def _active_opportunity(db: Session, summary_id: int) -> tuple[Any, OportunidadSummary]:
+    latest = _latest_success_import_run(db)
+    if latest is None:
+        raise HTTPException(status_code=404, detail="No hay corrida activa de oportunidades.")
+    opportunity = db.execute(
+        select(OportunidadSummary)
+        .where(OportunidadSummary.id == summary_id)
+        .where(OportunidadSummary.import_run_id == latest.id)
+    ).scalars().first()
+    if opportunity is None:
+        raise HTTPException(status_code=404, detail="Oportunidad no encontrada en la corrida activa.")
+    return latest, opportunity
+
+
+def _payload_snapshot(e: CrmEnvio) -> dict[str, Any]:
+    if not e.payload_snapshot:
+        return {}
+    try:
+        value = json.loads(e.payload_snapshot)
+        return value if isinstance(value, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Nombre del cliente para pantalla (solo presentación)
+#
+# SIEM guarda la razón social; el CRM suele guardar el nombre de fantasía y le agrega
+# el sufijo de sucursal entre paréntesis ("SANATORIO ARGENTINO S.R.L. (L.H.)"). Cuando
+# son el mismo nombre escrito distinto, mostrar los dos es ruido; cuando de verdad
+# difieren ("DELTA S.A." vs "CLINICA SANTA MARIA (L.H)"), ocultar uno esconde algo que
+# el usuario necesita ver antes de enviar.
+#
+# Nada de esto participa de la resolución de cuentas ni del payload que viaja al CRM.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SUFIJO_SUCURSAL = re.compile(r"\([^)]*\)")
+
+
+def _display_key(name: str | None) -> str:
+    """Clave laxa, SOLO para decidir si dos nombres son el mismo cliente escrito distinto.
+
+    Descarta acentos, el sufijo de sucursal entre paréntesis y toda la puntuación, así
+    "SANATORIO ARGENTINO SRL" y "SANATORIO ARGENTINO S.R.L. (L.H.)" colapsan en la misma
+    clave. Deliberadamente NO se usa para relacionar cuentas: el puente del resolver
+    sigue siendo `canon` con igualdad exacta y no lo toca este cambio.
+    """
+    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = _SUFIJO_SUCURSAL.sub(" ", text)
+    return re.sub(r"[^A-Za-z0-9]+", "", text).upper()
+
+
+def _cliente_display(
+    dataset_name: str | None, crm_name: str | None, cuenta: Any,
+) -> dict[str, Any] | None:
+    dataset = (dataset_name or "").strip() or None
+    crm = (crm_name or "").strip() or None
+    if not dataset and not crm:
+        return None
+    sufijo = f" (cuenta {cuenta})" if cuenta else ""
+    if dataset and crm and _display_key(dataset) != _display_key(crm):
+        return {"texto": f"{dataset} — {crm}{sufijo}", "dos_nombres": True}
+    return {"texto": f"{dataset or crm}{sufijo}", "dos_nombres": False}
+
+
+def _envio_to_dict(e: CrmEnvio, producto: str | None = None) -> dict[str, Any]:
+    payload = _payload_snapshot(e)
+    return {
+        'oportunidad_id': e.oportunidad_id,
+        'cliente_visible': e.cliente_visible,
+        'cuit': e.cuit,
+        # Los registros viejos no tienen razón social del CRM: cae solo el nombre SIEM.
+        'cliente_display': _cliente_display(
+            e.cliente_visible,
+            payload.get('crm_razon_social_informada'),
+            payload.get('cuenta_utilizada') or payload.get('n_cuenta'),
+        ),
+        'producto': producto or payload.get('producto_nombre') or e.codigo_articulo or '-',
+        'codigo_articulo': e.codigo_articulo,
+        'unidad_negocio': e.unidad_negocio,
+        'monto_oportunidad': payload.get('amount'),
+        'descripcion': payload.get('description'),
+        'enviado_por': e.enviado_por,
+        'enviado_at': e.enviado_at.isoformat() if e.enviado_at else None,
+        'asignado_a': e.crm_assigned_usuario,
+        'asignado_origen': e.crm_assigned_origen,
+        'crm_modo': e.crm_modo,
+        'crm_status': e.crm_status,
+        'crm_id': e.crm_id,
+        # Trazabilidad retrocompatible: las filas anteriores exponen None sin migración.
+        'cuenta_original': payload.get('cuenta_original'),
+        'cuenta_utilizada': payload.get('cuenta_utilizada') or payload.get('n_cuenta'),
+        'cuenta_criterio': payload.get('cuenta_criterio') or payload.get('criterio_resolucion'),
+        'cuenta_estado_confianza': payload.get('cuenta_estado_confianza') or payload.get('nivel_confianza'),
+        'cuenta_confianza_label': payload.get('cuenta_confianza_label'),
+        'cuenta_confirmacion_fiscal': payload.get('cuenta_confirmacion_fiscal'),
+        'cuenta_seleccion_origen': payload.get('cuenta_seleccion_origen') or payload.get('seleccion_cuenta'),
+        'operador_codigo': payload.get('operador_codigo'),
+        'operador_nombre': payload.get('operador_nombre'),
+        'fuente_relacion_cuenta': payload.get('fuente_relacion_cuenta') or payload.get('fuente_relacion'),
+        'cantidad_candidatas': payload.get('cantidad_candidatas') or payload.get('cuentas_evaluadas'),
+        'cuentas_evaluadas': payload.get('cantidad_evaluadas', payload.get('cuentas_evaluadas')),
+        'crm_account_id': payload.get('crm_account_id') or e.crm_account_id,
+        'crm_cuit_informado': payload.get('crm_cuit_informado'),
+        'crm_razon_social_informada': payload.get('crm_razon_social_informada'),
+        'crm_url': crm_client.crm_detail_url(e.crm_id) if e.crm_id else None,
+    }
+
+
+@router.get('/list')
 def oportunidades_list(
     request: Request,
     _user=AllowedUser,
@@ -462,11 +775,14 @@ def oportunidades_list(
     if latest is None:
         return {"ok": True, "data": {"run_id": None, "total": 0, "window": {}, "rows": []}}
 
-    rows = db.execute(
-        select(OportunidadSummary)
-        .where(OportunidadSummary.import_run_id == latest.id)
-        .order_by(OportunidadSummary.score.desc())
-    ).scalars().all()
+    modo_actual = _modo_envio_actual()
+    rows = _oportunidades_pendientes(db, latest.id, modo_actual)
+
+    # Visibilidad por cartera comercial — kill-switch OPORTUNIDADES_CARTERA_ENABLED,
+    # default OFF: mientras esté apagado esta línea ni se ejecuta, `rows` sigue
+    # siendo exactamente lo que ya era (mismas filas para todo el mundo, como hoy).
+    if OPORTUNIDADES_CARTERA_ENABLED():
+        rows = oportunidades_visibles_para(db, _user, rows)
 
     # Cuenta de fusión: la del summary; para las filas viejas (summary anterior a la
     # columna) se resuelve en UNA query contra records, no por fila.
@@ -479,9 +795,7 @@ def oportunidades_list(
     # Contexto de asignación: UNA consulta al CRM por request (no por fila) — depende
     # del usuario logueado. Trae el match automático Y la lista completa de usuarios,
     # que es la que alimenta el selector cuando no hay match.
-    ctx = _contexto_asignacion_seguro(
-        getattr(_user, "email", None), _puede_elegir_asignado(_user)
-    )
+    ctx = _contexto_asignacion_seguro(_user, db)
     # Un único instante para toda la respuesta: si cada fila tomara su propia hora, dos
     # filas de la misma pantalla podrían mostrar minutos distintos en la bitácora.
     ahora = dt.datetime.utcnow()
@@ -496,37 +810,10 @@ def oportunidades_list(
         for o in rows
     ]
 
-    # Estado de envío al CRM: una sola query por todos los oportunidad_id del run.
-    # Cada fila lleva `envio` para que la UI refleje quién/cuándo ya la envió.
-    # El estado "enviada" es POR ENTORNO: se mira solo el modo al que se enviaría ahora.
-    # Si no se filtrara, una oportunidad probada en TEST aparecería bloqueada al operar
-    # en PROD, que es justo lo que el bloqueo por entorno viene a evitar.
-    modo_actual = _modo_envio_actual()
-    ids = [r["oportunidad_id"] for r in data_rows]
-    enviados: dict[str, CrmEnvio] = {}
-    if ids:
-        for e in db.execute(
-            select(CrmEnvio)
-            .where(CrmEnvio.oportunidad_id.in_(ids))
-            .where(CrmEnvio.crm_modo == modo_actual)
-        ).scalars().all():
-            enviados[e.oportunidad_id] = e
+    # La consulta base ya retiro los envios del entorno activo. Se conserva el contrato
+    # para que un cliente con JS anterior siga interpretando cada fila como pendiente.
     for r in data_rows:
-        e = enviados.get(r["oportunidad_id"])
-        r["envio"] = (
-            {
-                "enviado": True,
-                "enviado_por": e.enviado_por,
-                "enviado_at": e.enviado_at.isoformat() if e.enviado_at else None,
-                "crm_status": e.crm_status,
-                # Con crm_id la UI cambia "Enviar a CRM" por "Ver en CRM".
-                "crm_id": e.crm_id,
-                "crm_url": crm_client.crm_detail_url(e.crm_id) if e.crm_id else None,
-                "crm_modo": e.crm_modo,
-            }
-            if e
-            else {"enviado": False}
-        )
+        r['envio'] = {'enviado': False}
 
     # Resumen de completitud CRM (para detectar faltantes antes del go-live).
     faltan_cuenta = sum(1 for r in data_rows if not r["cuenta_fusion"])
@@ -562,6 +849,57 @@ def oportunidades_list(
             "rows": data_rows,
         },
     }
+
+
+@router.get("/cuentas/{summary_id}")
+def oportunidad_cuentas(
+    summary_id: int,
+    request: Request,
+    _user=AllowedUser,
+    db: Session = Depends(get_db),
+):
+    """Preview read-only de cuentas candidatas y existentes en el CRM activo."""
+    _require_enabled()
+    latest, opportunity = _active_opportunity(db, summary_id)
+    try:
+        resolution = _resolve_account_for_opportunity(db, latest.id, opportunity)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudo cargar el maestro de cuentas: {exc}") from exc
+    resolution["message"] = None if not resolution.get("bloqueado") else _account_resolution_message(resolution)
+    dataset_nombre = (
+        next(iter(resolution.get("nombres_homologados_originales") or []), None)
+        or opportunity.cliente_visible
+    )
+    # Cada cuenta hallada lleva su propio texto: si el usuario elige otra en el
+    # selector, el front la muestra sin recalcular nada ni volver a preguntarle al CRM.
+    for row in resolution.get("cuentas_encontradas_en_crm") or []:
+        row["cliente_display"] = _cliente_display(
+            dataset_nombre, row.get("crm_razon_social") or row.get("crm_nombre"), row.get("cuenta"),
+        )
+    seleccionada = resolution.get("cuenta_seleccionada") or {}
+    resolution["cliente_display"] = _cliente_display(
+        dataset_nombre,
+        seleccionada.get("crm_razon_social") or seleccionada.get("crm_nombre"),
+        seleccionada.get("cuenta"),
+    ) if seleccionada else None
+
+    # Operador de Fusión -> su usuario del CRM (si tiene identidad vinculada en SIEM).
+    # Solo tiene sentido calcularlo para quien ve selector (Analista nunca lo usa: se
+    # asigna siempre a sí mismo). Se anota en CADA candidata (no solo la seleccionada)
+    # para que cambiar de cuenta en el selector del modal no pierda el dato sin volver
+    # a pedirle nada al CRM.
+    if _puede_elegir_asignado(_user):
+        candidatas = resolution.get("cuentas_encontradas_en_crm") or []
+        codigos = {row.get("operador_codigo") for row in candidatas if row.get("operador_codigo")}
+        if seleccionada.get("operador_codigo"):
+            codigos.add(seleccionada["operador_codigo"])
+        operador_matches = _operador_crm_matches(db, codigos)
+        for row in candidatas:
+            row["operador_asignado_crm"] = operador_matches.get(row.get("operador_codigo"))
+        if seleccionada:
+            seleccionada["operador_asignado_crm"] = operador_matches.get(seleccionada.get("operador_codigo"))
+
+    return {"ok": True, "data": resolution}
 
 
 @router.get("/enviadas")
@@ -600,38 +938,55 @@ def oportunidades_enviadas(
 
     filas = []
     for e in envios:
-        monto = None
-        if e.payload_snapshot:
-            try:
-                monto = json.loads(e.payload_snapshot).get("amount")
-            except (ValueError, TypeError):
-                monto = None
-        filas.append({
-            "oportunidad_id": e.oportunidad_id,
-            "cliente_visible": e.cliente_visible,
-            "producto": productos.get(e.oportunidad_id) or e.codigo_articulo or "—",
-            "codigo_articulo": e.codigo_articulo,
-            "unidad_negocio": e.unidad_negocio,
-            "monto_oportunidad": monto,
-            "enviado_por": e.enviado_por,
-            "enviado_at": e.enviado_at.isoformat() if e.enviado_at else None,
-            "asignado_a": e.crm_assigned_usuario,
-            "asignado_origen": e.crm_assigned_origen,
-            "crm_modo": e.crm_modo,
-            "crm_status": e.crm_status,
-            "crm_id": e.crm_id,
-            "crm_url": crm_client.crm_detail_url(e.crm_id) if e.crm_id else None,
-            "en_run_activo": e.oportunidad_id in productos,
-        })
+        row = _envio_to_dict(e, productos.get(e.oportunidad_id))
+        row["en_run_activo"] = e.oportunidad_id in productos
+        filas.append(row)
 
     logger.info("[OPORTUNIDADES][API] enviadas total=%s", len(filas))
     return {"ok": True, "data": {"total": len(filas), "rows": filas}}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Envío al CRM (Feature 1: sello del usuario · Feature 2: control de duplicados)
+# Consulta puntual para el deep-link del repositorio de enviadas
 # ──────────────────────────────────────────────────────────────────────────────
 
+@router.get('/enviadas/detalle')
+def oportunidad_enviada_detalle(
+    request: Request,
+    oportunidad_id: str = Query(..., max_length=255),
+    _user=AllowedUser,
+    db: Session = Depends(get_db),
+):
+    '''Resuelve el id exacto enviado al CRM exclusivamente en el entorno activo.'''
+    _require_enabled()
+    modo_actual = _modo_envio_actual()
+    envio = db.execute(
+        select(CrmEnvio)
+        .where(CrmEnvio.oportunidad_id == oportunidad_id)
+        .where(CrmEnvio.crm_modo == modo_actual)
+    ).scalars().first()
+    if envio is None:
+        return {
+            'ok': True,
+            'data': {
+                'found': False,
+                'oportunidad_id': oportunidad_id,
+                'crm_modo': modo_actual,
+                'row': None,
+            },
+        }
+    return {
+        'ok': True,
+        'data': {
+            'found': True,
+            'oportunidad_id': oportunidad_id,
+            'crm_modo': modo_actual,
+            'row': _envio_to_dict(envio),
+        },
+    }
+
+
+# Envío al CRM (Feature 1: sello del usuario · Feature 2: control de duplicados)
 # Traducción de la falla del CRM a un HTTP status propio. Ninguna cae en 500: el
 # usuario tiene que poder distinguir "el cliente no está en el CRM" (acción suya) de
 # "el CRM se cayó" (reintentar) y de "falta configurar el CRM" (acción de sistemas).
@@ -646,7 +1001,9 @@ _CRM_STATUS_HTTP = {
 }
 
 
-def _enviar_real_a_crm(payload: dict[str, Any], asignado: dict[str, str]) -> dict[str, Any]:
+def _enviar_real_a_crm(
+    payload: dict[str, Any], asignado: dict[str, str], crm_account_id: str | None = None,
+) -> dict[str, Any]:
     """Punto único de envío al CRM. El registro en `crm_envios` se hace JUSTO DESPUÉS
     de que esta función confirme ok=True (ver `oportunidades_enviar`), de modo que el
     control de duplicados solo se active ante envíos efectivos.
@@ -682,6 +1039,7 @@ def _enviar_real_a_crm(payload: dict[str, Any], asignado: dict[str, str]) -> dic
         bitacora_description=payload.get("update_text") or "",
         id_sistema_origen=payload.get("id_sistema_origen_c") or "",
         estado_siem=payload.get("estado_siem"),
+        crm_account_id_validado=crm_account_id,
     )
     modo = resultado["modo"]
     return {
@@ -705,9 +1063,13 @@ def _periodo_actual() -> str:
     return dt.datetime.utcnow().strftime("%Y%m")
 
 
-def _nota_evento(evento: str, ack: dict[str, Any]) -> str | None:
+def _nota_evento(
+    evento: str, ack: dict[str, Any], account_trace: str | None = None,
+) -> str | None:
     """Nota de la bitácora interna: override y/o fallo del paso 5 en el CRM."""
     notas: list[str] = []
+    if account_trace:
+        notas.append(account_trace)
     if evento == "REENVIO_OVERRIDE":
         notas.append("override de reenvío")
     if ack.get("bitacora_error"):
@@ -793,6 +1155,8 @@ def oportunidades_enviar(
     db: Session = Depends(get_db),
     override: bool = False,
     assigned_user_id: str | None = None,
+    cuenta_seleccionada: str | None = None,
+    cuenta_seleccion_manual: bool = False,
 ):
     """Envía una oportunidad al CRM con sello del usuario y control de duplicados.
 
@@ -858,11 +1222,43 @@ def oportunidades_enviar(
         raise HTTPException(status_code=401, detail="Usuario sin email en la sesión.")
     enviado_at = dt.datetime.utcnow()
 
-    cuenta_fusion = _resolver_cuenta_fusion(db, o, latest.id)
+    try:
+        account_resolution = _resolve_account_for_opportunity(
+            db, latest.id, o, requested_account=cuenta_seleccionada,
+        )
+    except AccountSelectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=f"No se pudo cargar el maestro de cuentas: {exc}") from exc
+    selected_account = account_resolution.get("cuenta_seleccionada")
+    if not selected_account:
+        status_code = 503 if account_resolution.get("estado_confianza") == "ERROR_CONSULTA_CRM" else 422
+        raise HTTPException(status_code=status_code, detail=_account_resolution_message(account_resolution))
+    if (
+        account_resolution.get("criterio_seleccion") == "seleccion_manual_entre_alternativas"
+        and not cuenta_seleccion_manual
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "La relación de cuentas cambió desde que abriste el modal y ahora tiene "
+                "varias alternativas válidas. Actualizá el modal y elegí la cuenta explícitamente."
+            ),
+        )
+    cuenta_fusion = selected_account["cuenta"]
     # El usuario asignado se decide SIEMPRE antes de mandar nada, en los dos modos: es
     # un requisito del envío, no un adorno del modal. Si no se puede decidir, se corta
     # acá y no sale ningún request al CRM.
-    ctx = _contexto_asignacion_seguro(enviado_por, _puede_elegir_asignado(user))
+    ctx = _contexto_asignacion_seguro(user, db)
+    # Si la cuenta tiene un operador de Fusión con usuario propio en el CRM, esa
+    # persona es SIEMPRE una opción válida (es la dueña real de la cuenta), aunque
+    # quede fuera de la estructura de quien envía — por eso se suma acá, a la lista
+    # que `_decidir_asignado` valida, en vez de tocar esa función.
+    operador_codigo = (selected_account or {}).get("operador_codigo")
+    if operador_codigo and _puede_elegir_asignado(user):
+        operador_match = _operador_crm_matches(db, {operador_codigo}).get(operador_codigo)
+        if operador_match and not any(u["id"] == operador_match["id"] for u in ctx["usuarios"]):
+            ctx["usuarios"] = ctx["usuarios"] + [operador_match]
     asignado = _decidir_asignado(ctx, assigned_user_id)
     crm = _build_crm_payload(
         o, cuenta_fusion, asignado,
@@ -894,6 +1290,30 @@ def oportunidades_enviar(
         )
 
     payload = dict(crm["payload"])
+    payload["cuenta_original"] = account_resolution.get("cuenta_original")
+    payload["cuenta_utilizada"] = selected_account["cuenta"]
+    payload["cuenta_criterio"] = account_resolution.get("criterio_seleccion")
+    payload["criterio_resolucion"] = account_resolution.get("criterio_seleccion")
+    payload["cuenta_estado_confianza"] = account_resolution.get("estado_confianza")
+    payload["nivel_confianza"] = account_resolution.get("estado_confianza")
+    payload["cuenta_confianza_label"] = account_resolution.get("confianza_label")
+    payload["cuenta_confirmacion_fiscal"] = account_resolution.get("confirmacion_fiscal", False)
+    payload["cuenta_seleccion_origen"] = account_resolution.get("seleccion_origen")
+    payload["seleccion_cuenta"] = account_resolution.get("seleccion_origen")
+    payload["crm_cuit_informado"] = selected_account.get("crm_cuit")
+    payload["crm_razon_social_informada"] = selected_account.get("crm_razon_social")
+    payload["operador_codigo"] = selected_account.get("operador_codigo")
+    payload["operador_nombre"] = selected_account.get("operador_nombre")
+    payload["fuente_relacion_cuenta"] = account_resolution.get("fuente_relacion")
+    payload["fuente_relacion"] = account_resolution.get("fuente_relacion")
+    payload["cantidad_candidatas"] = account_resolution.get("cantidad_candidatas_total", len(account_resolution.get("cuentas_candidatas") or []))
+    payload["cantidad_evaluadas"] = account_resolution.get("cantidad_evaluadas_crm", 0)
+    payload["cuentas_evaluadas"] = payload["cantidad_evaluadas"]
+    if account_resolution.get("trazabilidad_texto"):
+        payload["update_text"] = (
+            f"{payload.get('update_text') or ''} {account_resolution['trazabilidad_texto']}"
+        ).strip()
+
     payload["enviado_por"] = enviado_por
     payload["enviado_por_id"] = enviado_por_id
     payload["enviado_at"] = enviado_at.isoformat()
@@ -903,7 +1323,7 @@ def oportunidades_enviar(
     # ── Envío real. El registro se hace SOLO si el ACK es OK: ante cualquier falla la
     # oportunidad queda SIN registrar, o sea libre de reintentar sin pedir override. ──
     try:
-        ack = _enviar_real_a_crm(payload, asignado)
+        ack = _enviar_real_a_crm(payload, asignado, selected_account.get("crm_account_id"))
     except CrmError as exc:
         logger.warning(
             "[OPORTUNIDADES][API] envío rechazado oportunidad_id=%s kind=%s paso=%s: %s",
@@ -916,6 +1336,7 @@ def oportunidades_enviar(
     if not ack.get("ok"):
         raise HTTPException(status_code=502, detail="El CRM rechazó el envío. Reintentá más tarde.")
 
+    payload["crm_account_id"] = ack.get("crm_account_id")
     crm_status = ack.get("crm_status") or "PENDIENTE_ENVIO_REAL"
     crm_id = ack.get("crm_id")
     crm_url = crm_client.crm_detail_url(crm_id) if crm_id else None
@@ -982,7 +1403,7 @@ def oportunidades_enviar(
         crm_status=crm_status,
         crm_id=crm_id,
         payload_snapshot=payload_snapshot,
-        nota=_nota_evento(evento, ack),
+        nota=_nota_evento(evento, ack, account_resolution.get("trazabilidad_texto")),
     ))
     db.commit()
 
@@ -1003,10 +1424,87 @@ def oportunidades_enviar(
         "crm_modo": ack.get("crm_modo") or modo_actual,
         "assigned_user": ack.get("assigned_user"),
         "usuario_origen": ack.get("usuario_origen"),
+        "cuenta_resolucion": account_resolution,
         # La oportunidad SÍ quedó creada; solo falló el paso 5 (bitácora). Se avisa en
         # la UI sin marcar el envío como fallido.
         "bitacora_error": ack.get("bitacora_error"),
         "payload": payload,
         "pendientes_crm": crm["pendientes_crm"],
         "faltantes_dataset": crm["faltantes_dataset"],
+    }
+
+
+@router.post("/asignar-analista/{summary_id}")
+def oportunidades_asignar_analista(
+    summary_id: int,
+    analista_id: int,
+    user=AllowedAssigner,
+    db: Session = Depends(get_db),
+):
+    """Asigna a mano una oportunidad puntual a un Analista (cartera comercial,
+    pieza 3, ago-2026). Pisa la cartera por vendedor: con OPORTUNIDADES_CARTERA_ENABLED
+    prendido, el analista la va a ver aunque la cuenta sea de otro vendedor de Fusión
+    (ver `oportunidades_visibilidad.py`). Esta acción es independiente del kill-switch
+    de filtrado — un Supervisor puede ir preparando asignaciones antes de que se
+    prenda, no tienen efecto visible hasta ese momento.
+
+    Server-side (nunca se confía en el cliente):
+      - Solo Supervisor (a analistas de SU equipo) o Admin (a cualquier analista).
+      - El destino tiene que existir, ser Analista, y —si quien pide es Supervisor—
+        reportarle a él (`reporta_a_id`).
+    """
+    _require_enabled()
+    latest = _latest_success_import_run(db)
+    if latest is None:
+        raise HTTPException(status_code=404, detail="No hay corrida activa de oportunidades.")
+
+    o = db.execute(
+        select(OportunidadSummary)
+        .where(OportunidadSummary.id == summary_id)
+        .where(OportunidadSummary.import_run_id == latest.id)
+    ).scalars().first()
+    if o is None:
+        raise HTTPException(status_code=404, detail="Oportunidad no encontrada en la corrida activa.")
+
+    analista = db.get(User, analista_id)
+    if not analista or not analista.has_role("analista", "analyst"):
+        raise HTTPException(status_code=422, detail="El usuario elegido no es un Analista.")
+    if not is_admin(user) and analista.reporta_a_id != getattr(user, "id", None):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo podés asignar oportunidades a analistas de tu propio equipo.",
+        )
+
+    oportunidad_id = opportunity_stable_id(o.cliente_visible, o.codigo_articulo)
+    existente = db.execute(
+        select(OportunidadAsignacionManual)
+        .where(OportunidadAsignacionManual.oportunidad_id == oportunidad_id)
+    ).scalars().first()
+    ahora = dt.datetime.utcnow()
+    if existente:
+        existente.analista_user_id = analista.id
+        existente.asignado_por_user_id = getattr(user, "id", None)
+        existente.asignado_en = ahora
+    else:
+        db.add(OportunidadAsignacionManual(
+            oportunidad_id=oportunidad_id,
+            analista_user_id=analista.id,
+            asignado_por_user_id=getattr(user, "id", None),
+            asignado_en=ahora,
+        ))
+    db.commit()
+
+    logger.info(
+        "[OPORTUNIDADES][API] asignar-analista oportunidad_id=%s analista_id=%s por=%s",
+        oportunidad_id, analista.id, getattr(user, "email", None),
+    )
+    return {
+        "ok": True,
+        "data": {
+            "oportunidad_id": oportunidad_id,
+            "analista_id": analista.id,
+            "analista_nombre": analista.display_name,
+            "asignado_por": getattr(user, "email", None),
+            "asignado_en": ahora.isoformat(),
+        },
     }

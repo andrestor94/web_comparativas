@@ -469,27 +469,20 @@ def contexto_asignacion(email_siem: str | None) -> dict[str, Any]:
 # Paso 3 — cuenta por número de FUSION
 # ──────────────────────────────────────────────────────────────────────────────
 
-def buscar_cuenta_id(
+def buscar_cuenta(
     sesion: requests.Session,
     cfg: dict[str, str],
     token: str,
     n_cuenta: str,
-) -> str:
-    """GET Cuentas_por_numero_fusion?n_cuenta_c=<nro> -> id de la cuenta en el CRM.
-
-    404 (o 200 con lista vacía) = la cuenta no existe en el CRM: se corta el envío con
-    `kind='cuenta_no_encontrada'` para que el usuario vea un mensaje concreto y no un
-    error genérico. Es el caso esperable cuando el cliente todavía no fue dado de alta.
-    """
+) -> dict[str, Any]:
+    """Consulta una cuenta FUSION y devuelve identidad y nombre del CRM."""
     paso = "cuenta en el CRM"
     url = f"{cfg['base_url']}/Api/V8/custom/reports/Cuentas_por_numero_fusion"
-    resp = _request(
-        sesion, "GET", url, paso=paso,
-        headers=_headers(token), params={"n_cuenta_c": n_cuenta},
-    )
+    resp = _request(sesion, "GET", url, paso=paso, headers=_headers(token), params={"n_cuenta_c": n_cuenta})
+
     def no_encontrada() -> CrmError:
         return CrmError(
-            f"El cliente no existe en el CRM (cuenta de fusión {n_cuenta}). "
+            f"El cliente no existe en el CRM (cuenta de fusion {n_cuenta}). "
             "Hay que darlo de alta en el CRM antes de enviar la oportunidad.",
             kind="cuenta_no_encontrada", http_status=404, paso=paso,
         )
@@ -497,23 +490,75 @@ def buscar_cuenta_id(
     if resp.status_code == 404:
         raise no_encontrada()
     _revisar(resp, paso=paso)
-
     data = _json(resp, paso=paso)
-    # Acá `status: false` significa "no la encontré", no "me caí": el circuito tiene que
-    # cortar con el mensaje de cuenta inexistente, no con un error reintentable.
     if isinstance(data, dict) and data.get("status") is False:
         raise no_encontrada()
-
-    for reg in _iter_registros(data):
-        cuenta_id = _valor(reg, ("id", "account_id", "cuenta_id"))
-        if cuenta_id:
-            return cuenta_id
+    for record in _iter_registros(data):
+        account_id = _valor(record, ("id", "account_id", "cuenta_id"))
+        if account_id:
+            name = _valor(record, ("name", "nombre", "account_name", "razon_social"))
+            return {
+                "id": account_id,
+                "name": name,
+                "n_cuenta_c": _valor(record, ("n_cuenta_c", "n_cuenta", "numero_fusion")) or n_cuenta,
+                # Solo se exponen campos fiscales explícitos del contrato si el report
+                # efectivamente los devuelve; nunca se infiere CUIT desde el nombre.
+                "cuit": _valor(record, (
+                    "cuit", "cuit_c", "tax_id", "tax_id_c", "identificacion_tributaria",
+                    "identificacion_tributaria_c", "numero_cuit", "numero_cuit_c",
+                )),
+                "razon_social": _valor(record, (
+                    "razon_social", "razon_social_c", "legal_name", "name", "nombre",
+                )) or name,
+                "documento": _valor(record, (
+                    "documento", "documento_c", "numero_documento", "numero_documento_c",
+                )),
+            }
     raise no_encontrada()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Pasos 4 y 5 — crear la oportunidad y su bitácora
-# ──────────────────────────────────────────────────────────────────────────────
+def buscar_cuenta_id(
+    sesion: requests.Session,
+    cfg: dict[str, str],
+    token: str,
+    n_cuenta: str,
+) -> str:
+    """Compatibilidad: devuelve solamente el id de la cuenta encontrada."""
+    return str(buscar_cuenta(sesion, cfg, token, n_cuenta)["id"])
+
+
+def consultar_cuentas(
+    numeros: list[str], *, detener_si_primera_existe: bool = False,
+) -> dict[str, Any]:
+    """Valida varias cuentas con una sola sesion/token, sin crear registros."""
+    cfg = crm_config()
+    unique = list(dict.fromkeys(str(value).strip() for value in numeros if str(value).strip()))
+    results: dict[str, dict[str, Any]] = {}
+    with _nueva_sesion(cfg) as session:
+        token = obtener_token(session, cfg)
+        for number in unique:
+            try:
+                account = buscar_cuenta(session, cfg, token, number)
+                results[number] = {
+                    "exists": True,
+                    "crm_account_id": account["id"],
+                    "crm_nombre": account.get("name"),
+                    "crm_numero_cuenta": account.get("n_cuenta_c"),
+                    "crm_cuit": account.get("cuit"),
+                    "crm_razon_social": account.get("razon_social"),
+                    "crm_documento": account.get("documento"),
+                }
+                if detener_si_primera_existe and number == unique[0]:
+                    break
+            except CrmError as exc:
+                if exc.kind == "cuenta_no_encontrada":
+                    results[number] = {"exists": False}
+                else:
+                    results[number] = {
+                        "exists": None, "error": exc.mensaje, "kind": exc.kind,
+                        "reintentable": exc.reintentable,
+                    }
+    return {"crm_modo": cfg["modo"], "results": results}
 
 def _crear_registro(
     sesion: requests.Session,
@@ -677,6 +722,7 @@ def enviar_oportunidad(
     bitacora_description: str,
     id_sistema_origen: str,
     estado_siem: str | None,
+    crm_account_id_validado: str | None = None,
 ) -> dict[str, Any]:
     """Corre el circuito completo (pasos 1..5) y devuelve el resultado del envío.
 
@@ -717,7 +763,7 @@ def enviar_oportunidad(
     assigned_user_id = asignado["id"]
     with _nueva_sesion(cfg) as sesion:
         token = obtener_token(sesion, cfg)
-        account_id = buscar_cuenta_id(sesion, cfg, token, n_cuenta)
+        account_id = crm_account_id_validado or buscar_cuenta_id(sesion, cfg, token, n_cuenta)
 
         crm_id = crear_oportunidad(
             sesion, cfg, token,

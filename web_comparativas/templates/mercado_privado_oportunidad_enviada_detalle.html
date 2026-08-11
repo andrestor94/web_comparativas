@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Detalle de oportunidad enviada - Mercado Privado{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=oportunidades-v12-fix422">
+<style>
+#envDetailPage{
+  --ed-navy:#06486f;
+  --ed-blue:#1e5c8a;
+  --ed-muted:#64748b;
+  --ed-line:rgba(6,72,111,.11);
+  --ed-soft:#f5f9fc;
+  --ed-green:#15803d;
+  max-width:1320px;
+  margin:0 auto;
+}
+#envDetailPage .ed-breadcrumb{display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;color:var(--ed-muted);font-size:.78rem;font-weight:600;}
+#envDetailPage .ed-breadcrumb a{color:var(--ed-blue);text-decoration:none;}
+#envDetailPage .ed-breadcrumb a:hover{text-decoration:underline;}
+#envDetailPage .ed-hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#fff 0%,#f7fbfe 100%);border:1px solid var(--ed-line);border-radius:18px;padding:1.65rem 1.8rem;box-shadow:0 12px 34px rgba(6,72,111,.07);}
+#envDetailPage .ed-hero::after{content:"";position:absolute;right:-70px;top:-95px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(36,123,170,.13),rgba(36,123,170,0) 70%);pointer-events:none;}
+#envDetailPage .ed-hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:1.5rem;position:relative;z-index:1;}
+#envDetailPage .ed-kicker{display:flex;align-items:center;gap:.55rem;color:var(--ed-blue);font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.65rem;}
+#envDetailPage .ed-title{color:var(--ed-navy);font-size:clamp(1.45rem,2.6vw,2.15rem);line-height:1.13;font-weight:750;margin:0 0 .45rem;max-width:850px;}
+#envDetailPage .ed-client{color:var(--ed-muted);font-size:.95rem;margin:0;}
+#envDetailPage .ed-hero-actions{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;justify-content:flex-end;position:relative;z-index:2;}
+#envDetailPage .ed-btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:999px;padding:.48rem .95rem;font-size:.8rem;font-weight:700;text-decoration:none;white-space:nowrap;}
+#envDetailPage .ed-btn-back{color:var(--ed-navy);background:#fff;border:1px solid var(--ed-line);}
+#envDetailPage .ed-btn-back:hover{background:var(--ed-soft);}
+#envDetailPage .ed-btn-crm{color:#fff;background:var(--ed-navy);border:1px solid var(--ed-navy);}
+#envDetailPage .ed-btn-crm:hover{color:#fff;background:var(--ed-blue);border-color:var(--ed-blue);}
+#envDetailPage .ed-summary{display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;margin-top:1.45rem;padding-top:1.15rem;border-top:1px solid var(--ed-line);position:relative;z-index:1;}
+#envDetailPage .ed-summary-item{min-width:150px;}
+#envDetailPage .ed-summary-label{display:block;color:var(--ed-muted);font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;margin-bottom:.25rem;}
+#envDetailPage .ed-summary-value{color:var(--ed-navy);font-size:.94rem;font-weight:700;}
+#envDetailPage .ed-amount{color:var(--ed-green);font-size:1.28rem;font-variant-numeric:tabular-nums;}
+#envDetailPage .ed-badge{display:inline-flex;align-items:center;border-radius:999px;padding:.25rem .7rem;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
+#envDetailPage .ed-badge-prod{background:#fee2e2;color:#b91c1c;}
+#envDetailPage .ed-badge-test{background:#e0f2fe;color:#075985;}
+#envDetailPage .ed-badge-simulado{background:#f1f5f9;color:#64748b;}
+#envDetailPage .ed-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1rem;margin-top:1rem;}
+#envDetailPage .ed-card{grid-column:span 6;background:#fff;border:1px solid var(--ed-line);border-radius:16px;padding:1.25rem 1.35rem;box-shadow:0 7px 22px rgba(6,72,111,.045);}
+#envDetailPage .ed-card-wide{grid-column:span 12;}
+#envDetailPage .ed-card-title{display:flex;align-items:center;gap:.55rem;color:var(--ed-navy);font-size:.84rem;font-weight:800;margin:0 0 1rem;padding-bottom:.75rem;border-bottom:1px solid var(--ed-line);}
+#envDetailPage .ed-card-title i{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:rgba(30,92,138,.09);color:var(--ed-blue);}
+#envDetailPage .ed-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem 1.35rem;margin:0;}
+#envDetailPage .ed-field{min-width:0;}
+#envDetailPage .ed-field-wide{grid-column:1/-1;}
+#envDetailPage dt{color:var(--ed-muted);font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.055em;margin:0 0 .25rem;}
+#envDetailPage dd{color:#163b52;font-size:.9rem;font-weight:650;margin:0;overflow-wrap:anywhere;}
+#envDetailPage .ed-description{color:#334155;font-size:.9rem;font-weight:500;line-height:1.65;background:var(--ed-soft);border-left:3px solid rgba(30,92,138,.35);border-radius:0 10px 10px 0;padding:1rem 1.1rem;white-space:pre-line;}
+#envDetailPage .ed-note{display:block;color:var(--ed-muted);font-size:.76rem;font-weight:500;margin-top:.3rem;}
+#envDetailPage .ed-state{margin-top:1rem;background:#fff;border:1px solid var(--ed-line);border-radius:16px;padding:2.5rem;text-align:center;color:var(--ed-muted);}
+#envDetailPage .ed-state i{font-size:1.35rem;color:var(--ed-blue);}
+@media(max-width:850px){
+  #envDetailPage .ed-hero{padding:1.25rem;}
+  #envDetailPage .ed-hero-top{flex-direction:column;}
+  #envDetailPage .ed-hero-actions{justify-content:flex-start;}
+  #envDetailPage .ed-card{grid-column:span 12;}
+}
+@media(max-width:520px){
+  #envDetailPage .ed-fields{grid-template-columns:1fr;}
+  #envDetailPage .ed-field-wide{grid-column:auto;}
+  #envDetailPage .ed-hero-actions,#envDetailPage .ed-btn{width:100%;}
+}
+</style>
+
+<main id="envDetailPage" class="animate-enter">
+  <nav class="ed-breadcrumb" aria-label="Navegaci&oacute;n">
+    <a href="/mercado-privado/oportunidades/enviadas">Oportunidades enviadas al CRM</a>
+    <i class="bi bi-chevron-right" aria-hidden="true"></i>
+    <span>Detalle</span>
+  </nav>
+
+  <div id="envDetailLoading" class="ed-state">
+    <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Cargando oportunidad enviada&hellip;
+  </div>
+  <div id="envDetailError" class="ed-state" style="display:none;">
+    <i class="bi bi-exclamation-circle d-block mb-2" aria-hidden="true"></i>
+    <div id="envDetailErrorText" class="mb-3"></div>
+    <a href="/mercado-privado/oportunidades/enviadas" class="ed-btn ed-btn-back">
+      <i class="bi bi-arrow-left"></i>Volver a Oportunidades enviadas
+    </a>
+  </div>
+
+  <div id="envDetailContent" style="display:none;">
+    <section class="ed-hero">
+      <div class="ed-hero-top">
+        <div>
+          <div class="ed-kicker"><i class="bi bi-send-check"></i>Oportunidad enviada al CRM</div>
+          <h1 class="ed-title" id="envDetailTitle"></h1>
+          <p class="ed-client" id="envDetailClient"></p>
+        </div>
+        <div class="ed-hero-actions">
+          <a href="/mercado-privado/oportunidades/enviadas" class="ed-btn ed-btn-back">
+            <i class="bi bi-arrow-left"></i>Volver a enviadas
+          </a>
+          <a id="envDetailCrmLink" class="ed-btn ed-btn-crm" target="_blank" rel="noopener" style="display:none;">
+            <i class="bi bi-box-arrow-up-right"></i>Ver en CRM
+          </a>
+        </div>
+      </div>
+      <div class="ed-summary">
+        <div class="ed-summary-item">
+          <span class="ed-summary-label">Monto recuperable / mes</span>
+          <span class="ed-summary-value ed-amount" id="envDetailAmount"></span>
+        </div>
+        <div class="ed-summary-item">
+          <span class="ed-summary-label">Enviado</span>
+          <span class="ed-summary-value" id="envDetailDate"></span>
+        </div>
+        <div class="ed-summary-item">
+          <span class="ed-summary-label">Entorno</span>
+          <span id="envDetailMode"></span>
+        </div>
+      </div>
+    </section>
+
+    <div class="ed-grid">
+      <section class="ed-card">
+        <h2 class="ed-card-title"><i class="bi bi-building"></i>Cliente y cuenta</h2>
+        <dl class="ed-fields">
+          <div class="ed-field ed-field-wide"><dt>Cliente</dt><dd id="envClientName"></dd></div>
+          <div class="ed-field"><dt>CUIT</dt><dd id="envClientCuit"></dd></div>
+          <div class="ed-field"><dt>Cuenta CRM</dt><dd id="envClientAccount"></dd></div>
+          <div class="ed-field ed-field-wide"><dt>Operador</dt><dd id="envClientOperator"></dd></div>
+        </dl>
+      </section>
+
+      <section class="ed-card">
+        <h2 class="ed-card-title"><i class="bi bi-box-seam"></i>Oportunidad y producto</h2>
+        <dl class="ed-fields">
+          <div class="ed-field ed-field-wide"><dt>Producto</dt><dd id="envProductName"></dd></div>
+          <div class="ed-field"><dt>C&oacute;digo de art&iacute;culo</dt><dd id="envProductCode"></dd></div>
+          <div class="ed-field"><dt>Unidad de negocio</dt><dd id="envBusinessUnit"></dd></div>
+        </dl>
+      </section>
+
+      <section class="ed-card ed-card-wide">
+        <h2 class="ed-card-title"><i class="bi bi-graph-up-arrow"></i>Informaci&oacute;n comercial</h2>
+        <dl class="ed-fields">
+          <div class="ed-field"><dt>Monto mensual estimado</dt><dd id="envCommercialAmount"></dd></div>
+          <div class="ed-field ed-field-wide"><dt>Resumen de la oportunidad</dt><dd class="ed-description" id="envCommercialDescription"></dd></div>
+        </dl>
+      </section>
+
+      <section class="ed-card">
+        <h2 class="ed-card-title"><i class="bi bi-person-check"></i>Asignaci&oacute;n CRM</h2>
+        <dl class="ed-fields">
+          <div class="ed-field ed-field-wide"><dt>Asignada a</dt><dd id="envAssignedTo"></dd></div>
+          <div class="ed-field ed-field-wide"><dt>Tipo de asignaci&oacute;n</dt><dd id="envAssignmentType"></dd></div>
+        </dl>
+      </section>
+
+      <section class="ed-card">
+        <h2 class="ed-card-title"><i class="bi bi-clock-history"></i>Datos del env&iacute;o</h2>
+        <dl class="ed-fields">
+          <div class="ed-field"><dt>Enviada por</dt><dd id="envSentBy"></dd></div>
+          <div class="ed-field"><dt>Fecha y hora</dt><dd id="envSentAt"></dd></div>
+          <div class="ed-field"><dt>Entorno</dt><dd id="envSentMode"></dd></div>
+          <div class="ed-field"><dt>Estado</dt><dd id="envSentStatus"></dd></div>
+        </dl>
+      </section>
+    </div>
+  </div>
+</main>
+{% endblock %}
+
+{% block extra_js %}
+<script>window.OPP_ENVIO_DETAIL = {{ {"oportunidadId": oportunidad_id}|tojson }};</script>
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidad_enviada_detalle.js') }}?v=oportunidades-v1-detail-page"></script>
+{% endblock %}

@@ -296,6 +296,14 @@ class User(Base):
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
 
+    # Jerarquía comercial (Oportunidades / Mercado Privado): a quién reporta este
+    # usuario. Un solo padre por persona (analista -> supervisor, supervisor ->
+    # gerente), por eso alcanza con una columna self-FK en vez de una tabla de
+    # relación tipo GroupMember (esa es para N:N; acá cada usuario tiene a lo sumo
+    # un "reporta_a"). El significado de la columna depende del `role` del usuario,
+    # no de la columna en sí: se carga a mano desde el form de usuario de S.I.C.
+    reporta_a_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Relaciones con métricas de uso (EVITAR eager load masivo)
     # Antes: lazy="selectin" -> traía TODO el historial al cargar el usuario.
     # Ahora: lazy="dynamic" -> devuelve un Query object, o lazy=True para carga bajo demanda si se accede.
@@ -303,6 +311,10 @@ class User(Base):
     # Como son logs, mejor no cargarlos por defecto.
     usage_events = relationship("UsageEvent", back_populates="user", lazy="select")
     usage_sessions = relationship("UsageSession", back_populates="user", lazy="select")
+
+    # A quién reporta (self-FK, ver reporta_a_id arriba). remote_side marca el lado
+    # "uno" de la relación muchos-a-uno (varios hijos -> un mismo padre).
+    manager = relationship("User", remote_side="User.id", foreign_keys=[reporta_a_id])
 
     # ---- Helpers de rol/unidad ----
     def _role_norm(self) -> str:
@@ -317,6 +329,12 @@ class User(Base):
 
     def is_supervisor(self) -> bool:
         return self.has_role("supervisor")
+
+    def is_analista(self) -> bool:
+        return self.has_role("analista", "analyst")
+
+    def is_gerente(self) -> bool:
+        return self.has_role("gerente", "manager")
 
     def can_manage_groups(self) -> bool:
         """Puede acceder a UI de Grupos."""
@@ -869,6 +887,36 @@ class GroupMember(Base):
 
     def __repr__(self) -> str:
         return f"<GroupMember g={self.group_id} u={self.user_id} role={self.role_in_group!r}>"
+
+
+# ---------- Vendedores de Fusión (cartera comercial, Oportunidades / Mercado Privado) ----------
+class VendedorFusion(Base):
+    """Puente vendedor de Fusión (Operadores.xlsx) <-> usuario del sistema.
+
+    Precargada con las 16 filas de Operadores.xlsx (codigo_vendedor + nombre_fusion,
+    user_id NULL) por ensure_vendedores_fusion_seed() en migrations.py. El vínculo a
+    un usuario se carga a mano desde el form de usuario de S.I.C. (el cruce automático
+    por legajo_c/nombre no es confiable, ver docs/AUDITORIA_IDENTIDAD_CUENTAS_CRM.md).
+    """
+    __tablename__ = "vendedores_fusion"
+
+    id = Column(Integer, primary_key=True)
+    # Mismo formato que account_resolution._load_master_index (normalize_identifier),
+    # para poder cruzar contra Operadores.xlsx sin desalineación de tipos.
+    codigo_vendedor = Column(String(16), nullable=False, unique=True, index=True)
+    nombre_fusion = Column(String(120), nullable=False)
+    # unique: un vendedor = un usuario, y un usuario = un vendedor (el form ofrece un
+    # <select>, no multi-selección, para el rol Analista).
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+    activo = Column(Boolean, nullable=False, default=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
+
+    def __repr__(self) -> str:
+        return f"<VendedorFusion codigo={self.codigo_vendedor!r} user_id={self.user_id}>"
 
 
 # ---------- Vistas guardadas por usuario ----------

@@ -7,7 +7,7 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember
+from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.policy import (
     require_perm, normalize_module_access, derive_access_scope,
@@ -1028,6 +1028,201 @@ def sic_api_usage_live_users(
     
     return JSONResponse({"ok": True, "users": live_data})
 
+# --- CARTERA COMERCIAL Y JERARQUÍA (Oportunidades / Mercado Privado) ---
+# Se carga a mano desde este mismo form de usuario: el cruce automático vendedor de
+# Fusión <-> usuario del CRM no es confiable (ver docs/AUDITORIA_IDENTIDAD_CUENTAS_CRM.md).
+# El filtrado por fila en Oportunidades queda detrás de OPORTUNIDADES_CARTERA_ENABLED
+# (no se toca acá); esto solo persiste los vínculos para cuando se prenda.
+_ROLES_ANALISTA = {"analista", "analyst"}
+_ROLES_SUPERVISOR = {"supervisor"}
+_ROLES_GERENTE = {"gerente", "manager"}
+# Roles con identidad propia en Fusión (Operadores.xlsx): los 16 vendedores son la
+# fuerza de venta real y hay tanto Analistas como Supervisores entre ellos, cada uno
+# con cartera propia. Gerente NO está acá todavía — a confirmar con negocio si algún
+# gerente también es vendedor de Fusión (hoy no hay dato del proyecto que lo indique).
+_ROLES_CON_IDENTIDAD_FUSION = _ROLES_ANALISTA | _ROLES_SUPERVISOR
+
+# Traduce ?err=<code> a un mensaje legible en el form (alta y edición comparten mapa).
+_USER_FORM_ERR_MAP = {
+    "password_vacio": "La contraseña inicial es obligatoria.",
+    "password_minimo_12": "La contraseña debe tener al menos 12 caracteres.",
+    "password_no_coincide": "Las contraseñas no coinciden.",
+    "email_vacio": "El email es obligatorio.",
+    "email_existe": "Ya existe un usuario con ese email.",
+    "error_interno": "Ocurrió un error al guardar el usuario. Intenta nuevamente.",
+    "permiso_denegado": "No tienes permisos para realizar esta acción.",
+    "not_found": "El usuario no existe.",
+    "vendedor_invalido": "El vendedor de Fusión seleccionado no es válido.",
+    "vendedor_ocupado": "Ese vendedor de Fusión ya está vinculado a otro usuario. Recargá la página para ver a quién.",
+    "analista_invalido": "Uno de los analistas seleccionados no es válido.",
+    "analista_ocupado": "Uno de los analistas seleccionados ya está a cargo de otro supervisor. Recargá la página para ver de quién.",
+    "supervisor_invalido": "Uno de los supervisores seleccionados no es válido.",
+    "supervisor_ocupado": "Uno de los supervisores seleccionados ya está a cargo de otro gerente. Recargá la página para ver de quién.",
+}
+
+
+class _CarteraConflictError(Exception):
+    """Alguien más ya tiene ese vendedor/analista/supervisor, o vino un id inválido.
+
+    Nunca se pisa en silencio (regla explícita del pedido): se corta la operación
+    completa y se redirige con un código que el form traduce a mensaje legible.
+    """
+    def __init__(self, err_code: str):
+        self.err_code = err_code
+        super().__init__(err_code)
+
+
+def _cartera_form_context(db, editing_user_id: int | None) -> dict:
+    """Arma el contexto de cartera/jerarquía para el form de usuario: los vendedores
+    de Fusión, los analistas y supervisores disponibles (con quién los tiene a cargo
+    hoy, si alguien), y cuántas relaciones se perderían si este usuario cambia de rol.
+    """
+    vendedores = (
+        db.query(VendedorFusion)
+        .filter(VendedorFusion.activo == True)  # noqa: E712 (comparación SQLAlchemy)
+        .order_by(VendedorFusion.codigo_vendedor)
+        .all()
+    )
+    analistas = (
+        db.query(User)
+        .filter(func.lower(User.role).in_(_ROLES_ANALISTA))
+        .order_by(User.name.asc(), User.email.asc())
+        .all()
+    )
+    supervisores = (
+        db.query(User)
+        .filter(func.lower(User.role).in_(_ROLES_SUPERVISOR))
+        .order_by(User.name.asc(), User.email.asc())
+        .all()
+    )
+    equipo_analistas_count = 0
+    equipo_supervisores_count = 0
+    tiene_vendedor_propio = False
+    if editing_user_id:
+        equipo_analistas_count = sum(1 for a in analistas if a.reporta_a_id == editing_user_id)
+        equipo_supervisores_count = sum(1 for s in supervisores if s.reporta_a_id == editing_user_id)
+        tiene_vendedor_propio = any(v.user_id == editing_user_id for v in vendedores)
+    return {
+        "vendedores_fusion": vendedores,
+        "analistas_disponibles": analistas,
+        "supervisores_disponibles": supervisores,
+        "equipo_analistas_count": equipo_analistas_count,
+        "equipo_supervisores_count": equipo_supervisores_count,
+        "tiene_vendedor_propio": tiene_vendedor_propio,
+    }
+
+
+def _sync_cartera_y_jerarquia(
+    db,
+    u: User,
+    role_ok: str,
+    vendedor_fusion_id: str,
+    analista_ids: list[str],
+    supervisor_ids: list[str],
+    actor: User,
+) -> None:
+    """Aplica identidad en Fusión (vínculo 1 a 1 con la persona real en el ERP, no una
+    asignación de recursos) y jerarquía (reporta_a_id) según el ROL final del usuario.
+    La identidad en Fusión aplica a Analista y Supervisor (ambos pueden tener cartera
+    propia: los 16 de Operadores.xlsx son la fuerza de venta real). El JS del form ya
+    deshabilita las opciones ocupadas, pero acá se revalida todo contra la base —
+    nunca se confía en lo que mandó el cliente (mismo criterio que ya usa
+    `_decidir_asignado` en oportunidades_router.py).
+
+    Libera en silencio los vínculos que el nuevo rol ya no sostiene (ej. pasó de
+    Supervisor a Analista -> sus analistas quedan sin supervisor, a reasignar por el
+    Admin); pero NUNCA pisa en silencio un vínculo de OTRA persona: si algo llega ya
+    tomado, corta con _CarteraConflictError y no guarda nada de esta función.
+
+    Requiere que `u.id` ya exista (flush antes de llamar, en alta).
+    """
+    ahora = dt.datetime.utcnow()
+
+    # --- Identidad en Fusión: Analista y Supervisor tienen cartera propia ---
+    actual_vendedor = db.query(VendedorFusion).filter(VendedorFusion.user_id == u.id).first()
+    if role_ok in _ROLES_CON_IDENTIDAD_FUSION:
+        elegido = (vendedor_fusion_id or "").strip()
+        vendedor = None
+        if elegido:
+            try:
+                vendedor = db.get(VendedorFusion, int(elegido))
+            except ValueError:
+                vendedor = None
+            if not vendedor:
+                raise _CarteraConflictError("vendedor_invalido")
+            if vendedor.user_id not in (None, u.id):
+                raise _CarteraConflictError("vendedor_ocupado")
+        # Libera primero (y flushea) para no chocar con el UNIQUE de user_id si el
+        # analista está cambiando de un vendedor a otro.
+        if actual_vendedor and actual_vendedor is not vendedor:
+            actual_vendedor.user_id = None
+            actual_vendedor.updated_by = actor.id
+            actual_vendedor.updated_at = ahora
+            db.flush()
+        if vendedor:
+            vendedor.user_id = u.id
+            vendedor.updated_by = actor.id
+            vendedor.updated_at = ahora
+    elif actual_vendedor:
+        actual_vendedor.user_id = None
+        actual_vendedor.updated_by = actor.id
+        actual_vendedor.updated_at = ahora
+
+    # --- Analistas a cargo: solo tiene sentido si el rol final es Supervisor ---
+    if role_ok in _ROLES_SUPERVISOR:
+        elegidos_ids = {int(x) for x in analista_ids if str(x).strip().isdigit()}
+        elegidos = db.query(User).filter(User.id.in_(elegidos_ids)).all() if elegidos_ids else []
+        if len(elegidos) != len(elegidos_ids):
+            raise _CarteraConflictError("analista_invalido")
+        for a in elegidos:
+            if not a.has_role(*_ROLES_ANALISTA):
+                raise _CarteraConflictError("analista_invalido")
+            if a.reporta_a_id not in (None, u.id):
+                raise _CarteraConflictError("analista_ocupado")
+        actuales = (
+            db.query(User)
+            .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_ANALISTA))
+            .all()
+        )
+        for a in actuales:
+            if a.id not in elegidos_ids:
+                a.reporta_a_id = None
+        for a in elegidos:
+            a.reporta_a_id = u.id
+    else:
+        for a in db.query(User).filter(
+            User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_ANALISTA)
+        ).all():
+            a.reporta_a_id = None
+
+    # --- Supervisores a cargo: solo tiene sentido si el rol final es Gerente ---
+    if role_ok in _ROLES_GERENTE:
+        elegidos_ids = {int(x) for x in supervisor_ids if str(x).strip().isdigit()}
+        elegidos = db.query(User).filter(User.id.in_(elegidos_ids)).all() if elegidos_ids else []
+        if len(elegidos) != len(elegidos_ids):
+            raise _CarteraConflictError("supervisor_invalido")
+        for s in elegidos:
+            if not s.has_role(*_ROLES_SUPERVISOR):
+                raise _CarteraConflictError("supervisor_invalido")
+            if s.reporta_a_id not in (None, u.id):
+                raise _CarteraConflictError("supervisor_ocupado")
+        actuales = (
+            db.query(User)
+            .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR))
+            .all()
+        )
+        for s in actuales:
+            if s.id not in elegidos_ids:
+                s.reporta_a_id = None
+        for s in elegidos:
+            s.reporta_a_id = u.id
+    else:
+        for s in db.query(User).filter(
+            User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR)
+        ).all():
+            s.reporta_a_id = None
+
+
 # --- USERS MANAGEMENT ---
 
 @router.get("/users", response_class=HTMLResponse)
@@ -1093,17 +1288,8 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
     )
     
     # Capture error from redirect and map to friendly message
-    _err_map = {
-        "password_vacio": "La contraseña inicial es obligatoria.",
-        "password_minimo_12": "La contraseña debe tener al menos 12 caracteres.",
-        "password_no_coincide": "Las contraseñas no coinciden.",
-        "email_vacio": "El email es obligatorio.",
-        "email_existe": "Ya existe un usuario con ese email.",
-        "error_interno": "Ocurrió un error al crear el usuario. Intenta nuevamente.",
-        "permiso_denegado": "No tienes permisos para realizar esta acción.",
-    }
     raw_err = request.query_params.get("err")
-    err = _err_map.get(raw_err, raw_err)
+    err = _USER_FORM_ERR_MAP.get(raw_err, raw_err)
 
     ctx = {
         "request": request,
@@ -1119,6 +1305,7 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         "nav_tree": form_nav_tree(),
         "role_ceilings": role_ceilings_map(),
         "form_roles": FORM_ROLES,
+        **_cartera_form_context(db_session, editing_user_id=None),
     }
     return templates.TemplateResponse("sic/users_form.html", ctx)
 
@@ -1132,6 +1319,9 @@ def sic_users_create(
     password_confirm: str = Form(""),
     unit_business: str = Form("Otros"),
     module_access: list[str] = Form(default=[]),
+    vendedor_fusion_id: str = Form(""),
+    analista_ids: list[str] = Form(default=[]),
+    supervisor_ids: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     # Enforce admin
@@ -1175,8 +1365,15 @@ def sic_users_create(
             module_access=modulos_ok,
         )
         db_session.add(u)
+        db_session.flush()  # necesita u.id para cartera/jerarquía
+        _sync_cartera_y_jerarquia(
+            db_session, u, role, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
+        )
         db_session.commit()
         return RedirectResponse("/sic/users?ok=created", status_code=303)
+    except _CarteraConflictError as e:
+        db_session.rollback()
+        return RedirectResponse(f"/sic/users/new?err={e.err_code}", status_code=303)
     except Exception as e:
         db_session.rollback()
         return RedirectResponse("/sic/users/new?err=error_interno", status_code=303)
@@ -1206,6 +1403,9 @@ def sic_users_edit(
         except:
             db_session.rollback()
 
+    raw_err = request.query_params.get("err")
+    err = _USER_FORM_ERR_MAP.get(raw_err, raw_err)
+
     ctx = {
         "request": request,
         "user": user,
@@ -1216,9 +1416,11 @@ def sic_users_edit(
         "business_units": business_units,
         "section": "users",
         "is_admin": is_admin,
+        "error": err,
         "nav_tree": form_nav_tree(),
         "role_ceilings": role_ceilings_map(),
         "form_roles": FORM_ROLES,
+        **_cartera_form_context(db_session, editing_user_id=u.id),
     }
     return templates.TemplateResponse("sic/users_form.html", ctx)
 
@@ -1230,6 +1432,9 @@ def sic_users_update(
     role: str = Form("analista"),
     unit_business: str = Form("Otros"),
     module_access: list[str] = Form(default=[]),
+    vendedor_fusion_id: str = Form(""),
+    analista_ids: list[str] = Form(default=[]),
+    supervisor_ids: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     if "admin" not in (user.role or "").lower():
@@ -1251,8 +1456,14 @@ def sic_users_update(
             u.unit_business = unit_ok
         u.access_scope = scope_ok
         u.module_access = modulos_ok
+        _sync_cartera_y_jerarquia(
+            db_session, u, role_ok, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
+        )
         db_session.commit()
         return RedirectResponse("/sic/users?ok=updated", status_code=303)
+    except _CarteraConflictError as e:
+        db_session.rollback()
+        return RedirectResponse(f"/sic/users/{user_id}/edit?err={e.err_code}", status_code=303)
     except Exception as e:
         db_session.rollback()
         return RedirectResponse(f"/sic/users/{user_id}/edit?err={str(e)}", status_code=303)

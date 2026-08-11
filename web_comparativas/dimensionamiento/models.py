@@ -364,6 +364,37 @@ class CrmEnvioEvento(Base):
     nota = Column(Text, nullable=True)
 
 
+class OportunidadAsignacionManual(Base):
+    """Asignación manual de una oportunidad a un Analista, hecha por su Supervisor.
+
+    Visibilidad por cartera (Oportunidades, Mercado Privado, ago-2026): la cartera
+    de un Analista sale de su identidad en Fusión (ver `VendedorFusion` en
+    `web_comparativas/models.py`), pero un Supervisor puede pisar ese default y
+    asignarle a mano una oportunidad puntual a uno de SUS analistas — el analista la
+    ve aunque la cuenta sea de otro vendedor. Esto es ADITIVO respecto de la cartera
+    (no le saca visibilidad a nadie más), ver `oportunidades_visibilidad.py`.
+
+    Identidad estable `oportunidad_id` = `oportunidades.opportunity_stable_id(...)`,
+    igual que `CrmEnvio` — NO por `import_run_id`, para que la asignación sobreviva a
+    que se recalcule el run. UNIQUE en `oportunidad_id`: una oportunidad tiene a lo
+    sumo UN analista asignado a mano a la vez (reasignar pisa la fila anterior, no
+    acumula historial — no se pidió auditoría de reasignaciones, solo quién/cuándo
+    de la asignación vigente).
+    """
+
+    __tablename__ = "oportunidad_asignaciones_manuales"
+
+    id = Column(Integer, primary_key=True)
+    oportunidad_id = Column(String(40), nullable=False, unique=True, index=True)
+
+    analista_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    asignado_por_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    asignado_en = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<OportunidadAsignacionManual oport={self.oportunidad_id!r} analista={self.analista_user_id}>"
+
+
 class DimensionamientoImportError(Base):
     __tablename__ = "dimensionamiento_import_errors"
 

@@ -9,6 +9,7 @@
 
   const API = "/api/mercado-privado/oportunidades/list";
   const SEND_API = (id) => `/api/mercado-privado/oportunidades/enviar/${id}`;
+  const ACCOUNT_API = (id) => `/api/mercado-privado/oportunidades/cuentas/${id}`;
   let ALL = [];
   let WINDOW = {};
   let CRM_MODO = null;   // 'simulado' | 'test' | 'prod' — entorno al que se enviaría ahora
@@ -250,27 +251,16 @@
   }
 
   // ── Modal payload CRM ──
-  // Render de los campos del payload (reutilizable: preview y payload sellado post-envío).
-  function renderCrmFields(payload, pendientesArr, faltantesArr) {
-    const pendientes = new Set(pendientesArr || []);
-    const faltantes = new Set(faltantesArr || []);
-    const fieldsHtml = Object.keys(payload).map((k) => {
-      let val = payload[k], badge = "";
-      if (pendientes.has(k)) badge += ` <span class="crm-pendiente">PENDIENTE CRM</span>`;
-      // El badge "FALTA EN DATASET" solo para lo que efectivamente falta en el dataset.
-      // Un campo vacío por otro motivo (p.ej. assigned_user que no se pudo resolver
-      // contra el CRM) se muestra "—" a secas: el banner de bloqueo explica el porqué,
-      // y etiquetarlo como problema del dataset mandaría a buscar donde no es.
-      if (faltantes.has(k)) badge += ` <span class="crm-faltante">FALTA EN DATASET</span>`;
-      if (val === null || val === "") val = "—";
-      if (typeof val === "number") val = k === "amount" ? `${fmtMoney(val)} (${val})` : val;
-      return `<div class="crm-field"><div class="crm-key">${esc(k)}${badge}</div>` +
-        `<div class="crm-val">${esc(val)}</div></div>`;
-    }).join("");
-    $("crmFields").innerHTML = fieldsHtml;
-    $("crmJson").textContent = JSON.stringify(payload, null, 2);
-    $("crmCopyBtn").onclick = () => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-  }
+  // El modal es solo presentación: los campos técnicos (NAME, CURRENCY_ID, AMOUNT,
+  // ASSIGNED_USER, CUENTA_*, CRM_*, OPERADOR_*, el JSON completo, etc.) ya NO se
+  // muestran — el usuario ve el bloque de cuenta (reflectCuenta) y el selector de
+  // asignación (reflectAsignacion), nada más. Nada de esto cambia lo que se guarda:
+  // `payload` sigue armándose igual y viajando igual al backend, que arma su PROPIO
+  // payload server-side (_build_crm_payload) y lo persiste en payload_snapshot /
+  // crm_envio_eventos sin depender de esta función en absoluto. Se deja como no-op
+  // (en vez de borrar las 3 llamadas que la invocan) para no tocar más superficie de
+  // la que hace falta.
+  function renderCrmFields() { return; }
 
   // Banner de estado del envío (warning=duplicado, success=ok, danger=error).
   function setCrmStatus(kind, html) {
@@ -294,19 +284,229 @@
     }
   }
 
-  // Selector de asignación. Solo se muestra cuando NO hubo match automático: en ese caso
-  // el sistema no elige por el usuario, se lo pregunta. Devuelve true si quedó visible.
-  // El selector se dibuja AL ABRIR el modal, no después de un envío rechazado: quien
-  // envía tiene que ver de entrada a quién se va a asignar y poder cambiarlo. El 422 del
-  // backend queda solo como defensa; el usuario no debería llegar nunca a verlo.
+  function selectedAccount(o) {
+    const resolution = o._cuentaResolucion || {};
+    return resolution.cuenta_seleccionada || null;
+  }
+
+  function renderResolvedPayload(o) {
+    const crmInfo = o.crm || {};
+    const payload = Object.assign({}, crmInfo.payload || {});
+    const resolution = o._cuentaResolucion || {};
+    const account = selectedAccount(o);
+    if (account) {
+      payload.n_cuenta = account.cuenta;
+      payload.cuenta_original = resolution.cuenta_original || null;
+      payload.cuenta_utilizada = account.cuenta;
+      payload.cuenta_criterio = resolution.criterio_seleccion || null;
+      payload.cuenta_estado_confianza = resolution.estado_confianza || null;
+      payload.cuenta_confianza_label = resolution.confianza_label || null;
+      payload.cuenta_confirmacion_fiscal = !!resolution.confirmacion_fiscal;
+      payload.cuenta_seleccion_origen = resolution.seleccion_origen || null;
+      payload.crm_cuit_informado = account.crm_cuit || null;
+      payload.crm_razon_social_informada = account.crm_razon_social || null;
+      payload.operador_codigo = account.operador_codigo || null;
+      payload.operador_nombre = account.operador_nombre || null;
+      payload.fuente_relacion_cuenta = resolution.fuente_relacion || null;
+      payload.cuentas_evaluadas = resolution.cantidad_candidatas_total ?? (resolution.cuentas_candidatas || []).length;
+      const trace = resolution.trazabilidad_texto || account.trazabilidad_seleccion;
+      if (trace) payload.update_text = `${payload.update_text || ""} ${trace}`.trim();
+    }
+    const users = CRM_ASIGNACION.usuarios || [];
+    const assignedSelect = $("crmAsignadoSel");
+    const assigned = assignedSelect ? users.find((u) => u.id === assignedSelect.value) : null;
+    const match = CRM_ASIGNACION.match || null;
+    if (assigned) {
+      payload.assigned_user = match && assigned.id === match.id
+        ? `asignado a vos (${assigned.usuario})`
+        : `asignado a ${assigned.usuario} (selección manual)`;
+    }
+    const logs = CRM_ASIGNACION.bitacora_por_usuario || {};
+    if (assigned && logs[assigned.id]) {
+      const trace = account && (resolution.trazabilidad_texto || account.trazabilidad_seleccion);
+      payload.update_text = `${logs[assigned.id]}${trace ? ` ${trace}` : ""}`;
+    }
+    renderCrmFields(payload, crmInfo.pendientes_crm, crmInfo.faltantes_dataset);
+  }
+
+  function syncCrmSendButton(o) {
+    const btn = $("crmSendBtn");
+    if (!btn || (o.envio && o.envio.enviado)) return;
+    const staticBlocks = ((o.crm || {}).bloqueos || []).length > 0;
+    const assignedBox = $("crmAsignacionBox"), assignedSelect = $("crmAsignadoSel");
+    const missingAssigned = assignedBox && assignedBox.style.display !== "none" && !assignedSelect.value;
+    const state = o._cuentaResolucionEstado;
+    const resolution = o._cuentaResolucion || {};
+    if (staticBlocks) {
+      btn.disabled = true;
+      btn.innerHTML = `<i class="bi bi-slash-circle me-1"></i>No se puede enviar`;
+    } else if (state === "loading") {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Validando cuenta...`;
+    } else if (state === "error" || !selectedAccount(o)) {
+      btn.disabled = true;
+      btn.innerHTML = resolution.requiere_seleccion
+        ? `<i class="bi bi-diagram-3 me-1"></i>Elegí una cuenta`
+        : `<i class="bi bi-slash-circle me-1"></i>Cuenta no disponible`;
+    } else if (missingAssigned) {
+      btn.disabled = true;
+      btn.innerHTML = `<i class="bi bi-person-exclamation me-1"></i>Elegí un usuario`;
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="bi bi-send-check me-1"></i>Confirmar envío`;
+    }
+  }
+
+  function reflectCuenta(o) {
+    const box = $("crmCuentaBox"), selectWrap = $("crmCuentaSelectorWrap");
+    const select = $("crmCuentaSel"), details = $("crmCuentaDetails");
+    if (!box || !select || !details) return;
+    if (o._cuentaResolucionEstado === "loading") {
+      box.className = "alert py-2 small mb-3 alert-secondary";
+      details.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Validando cuentas relacionadas en ${esc(MODO_TXT[CRM_MODO] || CRM_MODO || "CRM")}...`;
+      selectWrap.style.display = "none";
+      box.style.display = "block";
+      syncCrmSendButton(o);
+      return;
+    }
+    if (o._cuentaResolucionEstado === "error") {
+      box.className = "alert py-2 small mb-3 alert-danger";
+      details.innerHTML = `<strong>No se pudo validar la cuenta.</strong> ${esc(o._cuentaResolucionError || "Intentá nuevamente.")}`;
+      selectWrap.style.display = "none";
+      box.style.display = "block";
+      syncCrmSendButton(o);
+      return;
+    }
+    const resolution = o._cuentaResolucion || {};
+    const account = selectedAccount(o);
+    const found = resolution.cuentas_encontradas_en_crm || [];
+    const confidence = resolution.estado_confianza || "SIN_RELACION";
+    let kind = "success";
+    if (confidence === "ALTERNATIVA_CONFIRMADA_POR_CUIT") kind = "info";
+    if (confidence === "ALTERNATIVA_RELACIONADA_POR_NOMBRE_EXACTO_NO_AMBIGUO" || resolution.requiere_seleccion) kind = "warning";
+    if (["RELACION_AMBIGUA", "SIN_RELACION", "ERROR_CONSULTA_CRM"].includes(confidence)) kind = "danger";
+    box.className = `alert py-2 small mb-3 alert-${kind}`;
+    const operator = account
+      ? [account.operador_codigo, account.operador_nombre].filter(Boolean).join(" - ") || "sin operador"
+      : "pendiente de selección";
+    // Nombre del cliente: el del dataset y el que informó el CRM. La nota aclaratoria
+    // solo aparece cuando son distintos; si son el mismo nombre, explicar la diferencia
+    // confundiría en vez de ayudar. Lo arma el backend (`cliente_display`).
+    const display = resolution.cliente_display;
+    const clienteHtml = display
+      ? `<div><strong>Cliente:</strong> ${esc(display.texto)}</div>` +
+        (display.dos_nombres
+          ? `<div class="text-muted" style="font-size:.85em;">SIEM usa la razón social y el CRM el nombre de fantasía; es el mismo cliente.</div>`
+          : "")
+      : "";
+    // Solo presentación: 4 datos, en este orden. Todo lo demás (cuenta original,
+    // estado de confianza, criterio, cantidad evaluada, CUIT del CRM) se sigue
+    // calculando arriba para el color/lógica del bloque, pero no se dibuja acá.
+    details.innerHTML =
+      clienteHtml +
+      `<div><strong>CUIT:</strong> ${esc(resolution.cuit || "sin dato")}</div>` +
+      `<div><strong>Cuenta:</strong> ${esc(account ? account.cuenta : "pendiente")}</div>` +
+      `<div><strong>Operador:</strong> ${esc(operator)}</div>`;
+    if (resolution.requiere_seleccion) {
+      select.innerHTML = `<option value="">-- Elegí una cuenta --</option>` + found.map((row) => {
+        const op = [row.operador_codigo, row.operador_nombre].filter(Boolean).join(" - ");
+        return `<option value="${esc(row.cuenta)}">${esc(row.cuenta)} - ${esc(row.crm_nombre || row.nombre_cliente || "cuenta CRM")}${op ? ` - ${esc(op)}` : ""}</option>`;
+      }).join("");
+      select.value = account ? account.cuenta : "";
+      select.onchange = () => {
+        const chosen = found.find((row) => row.cuenta === select.value) || null;
+        resolution.cuenta_seleccionada = chosen;
+        resolution.criterio_seleccion = chosen ? "seleccion_manual_entre_alternativas" : "multiples_alternativas";
+        resolution.estado_confianza = chosen ? chosen.estado_confianza : "SIN_RELACION";
+        resolution.confianza_label = chosen ? chosen.confianza_label : "Seleccione una cuenta";
+        resolution.confirmacion_fiscal = !!(chosen && chosen.confirmacion_fiscal);
+        resolution.seleccion_origen = chosen ? "manual" : "ninguna";
+        resolution.trazabilidad_texto = chosen ? chosen.trazabilidad_seleccion : null;
+        resolution.bloqueado = !chosen;
+        // Cada candidata trae su texto ya armado por el backend.
+        resolution.cliente_display = chosen ? chosen.cliente_display : null;
+        renderResolvedPayload(o);
+        reflectCuenta(o);
+        // La cuenta elegida a mano puede traer OTRO operador (u ninguno): recalcula
+        // el selector de asignación para reflejar el bloqueo correcto.
+        if (!(o.envio && o.envio.enviado)) reflectAsignacion(o);
+      };
+      selectWrap.style.display = "block";
+    } else {
+      selectWrap.style.display = "none";
+    }
+    box.style.display = "block";
+    syncCrmSendButton(o);
+  }
+
+  async function loadAccountResolution(o) {
+    o._cuentaResolucionEstado = "loading";
+    o._cuentaResolucion = null;
+    reflectCuenta(o);
+    try {
+      const response = await fetch(ACCOUNT_API(o.id), { headers: { Accept: "application/json" } });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(mensajeDeError(response.status, json));
+      o._cuentaResolucion = (json && json.data) || {};
+      o._cuentaResolucionEstado = "ready";
+      renderResolvedPayload(o);
+      reflectCuenta(o);
+      // El operador (y su usuario del CRM, si tiene) recién se conoce acá: recalcula
+      // el selector de asignación para aplicar el bloqueo si corresponde.
+      if (!(o.envio && o.envio.enviado)) reflectAsignacion(o);
+    } catch (error) {
+      o._cuentaResolucionEstado = "error";
+      o._cuentaResolucionError = error.message;
+      reflectCuenta(o);
+    }
+  }
+  // Selector de asignación. Devuelve true si quedó visible. Se dibuja AL ABRIR el
+  // modal, no después de un envío rechazado: quien envía tiene que ver de entrada a
+  // quién se va a asignar y poder cambiarlo. El 422 del backend queda solo como
+  // defensa; el usuario no debería llegar nunca a verlo.
+  //
+  // Tres estados posibles (ago-2026):
+  //   1. La cuenta tiene un operador de Fusión con usuario propio en el CRM: se
+  //      asigna SIEMPRE a esa persona (es la dueña real de la cuenta), sin selector.
+  //      Se recalcula cuando termina de resolver la cuenta (`loadAccountResolution`
+  //      llama de nuevo a esta función), así que hasta que eso pase puede mostrarse
+  //      brevemente el estado 2 y corregirse solo.
+  //   2. Sin ese operador: selector acotado a la estructura de quien envía (Supervisor
+  //      = su equipo, Gerente = su estructura, Admin/Auditor = todos) — ya viene
+  //      acotado desde el backend en CRM_ASIGNACION.usuarios.
+  //   3. Analista: no elige nunca, no ve selector (sin cambios).
   function reflectAsignacion(o) {
     const box = $("crmAsignacionBox"), sel = $("crmAsignadoSel");
     const crmInfo = o.crm || {};
-    const usuarios = CRM_ASIGNACION.usuarios || [];
-    // Analista: no elige nunca (se asigna a sí mismo o queda bloqueado), así que no ve
-    // el selector. Sin usuarios tampoco hay nada que ofrecer: de eso se ocupa el bloqueo.
     if (!box || !sel) return false;
-    if (crmInfo.puede_elegir === false || !usuarios.length) {
+    if (crmInfo.puede_elegir === false) {
+      box.style.display = "none";
+      return false;
+    }
+
+    const account = selectedAccount(o);
+    const operadorMatch = account ? account.operador_asignado_crm : null;
+
+    if (operadorMatch) {
+      sel.innerHTML = `<option value="${esc(operadorMatch.id)}">${esc(operadorMatch.usuario)}</option>`;
+      sel.value = operadorMatch.id;
+      sel.disabled = true;
+      box.className = "alert py-2 small mb-3 alert-info";
+      $("crmAsignacionMsg").innerHTML =
+        `<i class="bi bi-person-check me-1"></i>Esta cuenta es de <strong>${esc(operadorMatch.usuario)}</strong>. ` +
+        `Se va a asignar a esa persona en el CRM.`;
+      $("crmAsignacionNota").textContent = "Vinculado por el operador de Fusión de la cuenta.";
+      box.style.display = "block";
+      const syncLocked = () => { renderResolvedPayload(o); syncCrmSendButton(o); };
+      sel.onchange = syncLocked;
+      syncLocked();
+      return true;
+    }
+
+    sel.disabled = false;
+    const usuarios = CRM_ASIGNACION.usuarios || [];
+    // Sin usuarios no hay nada que ofrecer: de eso se ocupa el bloqueo del botón.
+    if (!usuarios.length) {
       box.style.display = "none";
       return false;
     }
@@ -330,26 +530,9 @@
       : "Queda registrado que la asignaste vos.";
     box.style.display = "block";
 
-    const btn = $("crmSendBtn");
     const sync = () => {
-      const ok = !!sel.value;
-      btn.disabled = !ok;
-      btn.innerHTML = ok
-        ? `<i class="bi bi-send-check me-1"></i>Confirmar envío`
-        : `<i class="bi bi-person-exclamation me-1"></i>Elegí un usuario`;
-      // El payload mostrado refleja la elección: lo que se ve es lo que se manda.
-      // `update_text` sale del mapa que arma el backend por usuario (mismo helper que
-      // usa el envío), no se recompone acá: si se rearmara del lado del cliente, el
-      // preview y lo que llega al CRM podrían decir cosas distintas.
-      const elegido = usuarios.find((u) => u.id === sel.value);
-      const payload = Object.assign({}, crmInfo.payload || {});
-      payload.assigned_user = !elegido ? null
-        : (match && elegido.id === match.id
-            ? `asignado a vos (${elegido.usuario})`
-            : `asignado a ${elegido.usuario} (selección manual)`);
-      const bitacoras = CRM_ASIGNACION.bitacora_por_usuario || {};
-      payload.update_text = elegido ? (bitacoras[elegido.id] || null) : null;
-      renderCrmFields(payload, crmInfo.pendientes_crm, crmInfo.faltantes_dataset);
+      renderResolvedPayload(o);
+      syncCrmSendButton(o);
     };
     sel.onchange = sync;
     sync();
@@ -417,6 +600,10 @@
   }
 
   // POST /enviar/{id}: sella el envío server-side y maneja duplicado/éxito/error.
+  function removeFromPending(o) {
+    ALL = ALL.filter((row) => row.oportunidad_id !== o.oportunidad_id);
+  }
+
   async function sendCrm(o) {
     const btn = $("crmSendBtn");
     btn.disabled = true;
@@ -429,7 +616,14 @@
       const sel = $("crmAsignadoSel");
       const puedeElegir = o.crm && o.crm.puede_elegir !== false;
       const elegido = (puedeElegir && sel) ? sel.value : "";
-      const url = SEND_API(o.id) + (elegido ? `?assigned_user_id=${encodeURIComponent(elegido)}` : "");
+      const query = new URLSearchParams();
+      if (elegido) query.set("assigned_user_id", elegido);
+      const account = selectedAccount(o);
+      if (account) query.set("cuenta_seleccionada", account.cuenta);
+      if (account && (o._cuentaResolucion || {}).seleccion_origen === "manual") {
+        query.set("cuenta_seleccion_manual", "true");
+      }
+      const url = SEND_API(o.id) + (query.toString() ? `?${query}` : "");
       const resp = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
       const json = await resp.json().catch(() => ({}));
       if (resp.status === 403) {
@@ -446,6 +640,7 @@
           crm_id: json.crm_id, crm_url: json.crm_url,
         };
         reflectSent(o);
+        removeFromPending(o);
         applyFilters();
         return;
       }
@@ -482,6 +677,7 @@
         asignada + " " + cierre);
       btn.disabled = true; btn.innerHTML = `<i class="bi bi-check2-circle me-1"></i>Enviada`;
       reflectCrmLink(json.crm_url);
+      removeFromPending(o);
       applyFilters(); // refresca el badge "Enviada" en la lista
     } catch (e) {
       setCrmStatus("danger", `<i class="bi bi-x-circle me-1"></i>No se pudo enviar. ${esc(e.message)}`);
@@ -491,21 +687,21 @@
 
   function showCrm(o) {
     const crm = o.crm || {}, payload = crm.payload || {};
-    // Entorno destino en el encabezado: con bloqueo por entorno, confirmar sin saber
-    // contra cuál se está operando es justo lo que no queremos en la demo.
     const modoEl = $("crmModoLabel");
     if (modoEl) modoEl.textContent = CRM_MODO ? (MODO_TXT[CRM_MODO] || CRM_MODO) : "";
+    o._cuentaResolucionEstado = "loading";
+    o._cuentaResolucion = null;
     renderCrmFields(payload, crm.pendientes_crm, crm.faltantes_dataset);
-    // Orden: estado normal -> selector (si falta elegir) -> bloqueo (pisa a todo).
     reflectSent(o);
     if (!(o.envio && o.envio.enviado)) reflectAsignacion(o);
     else $("crmAsignacionBox").style.display = "none";
     reflectBloqueos(o);
+    reflectCuenta(o);
     $("crmSendBtn").onclick = () => sendCrm(o);
     if (!crmModal) crmModal = new bootstrap.Modal($("crmModal"));
     crmModal.show();
+    if (!(o.envio && o.envio.enviado)) loadAccountResolution(o);
   }
-
   function fillSelect(id, values) {
     const sel = $(id), cur = sel.value;
     sel.innerHTML = `<option value="">Todas</option>` +
