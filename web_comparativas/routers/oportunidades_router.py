@@ -27,7 +27,7 @@ import unicodedata
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from web_comparativas.policy import require_perm, is_admin
@@ -88,6 +88,56 @@ _ROLES_GERENTE = {"gerente", "manager"}
 # solo Admin/Auditor. Supervisor y Gerente ven acotado a su propia estructura (ver
 # _contexto_asignacion_seguro); Analista no ve selector en absoluto (_puede_elegir_asignado).
 _ROLES_CRM_LISTA_COMPLETA = {"admin", "administrator", "administrador", "auditor", "visor", "viewer"}
+
+
+def _ids_y_emails_visibles_en_envios(db: Session, user) -> tuple[set[int], set[str]] | None:
+    """Identidades cuyos envios puede auditar ``user``.
+
+    ``None`` significa acceso total (Admin/Auditor). El resto usa la jerarquia
+    comercial explicita de ``reporta_a_id``. Los emails complementan al FK porque
+    los envios historicos pueden no tener ``enviado_por_id``.
+    """
+    rol = _rol(user)
+    if rol in _ROLES_CRM_LISTA_COMPLETA:
+        return None
+
+    ids: set[int] = set()
+    user_id = getattr(user, "id", None)
+    if user_id is not None:
+        ids.add(int(user_id))
+        if rol in _ROLES_SUPERVISOR:
+            ids.update(analistas_a_cargo(db, int(user_id)))
+        elif rol in _ROLES_GERENTE:
+            supervisores_ids = set(supervisores_a_cargo(db, int(user_id)))
+            ids.update(supervisores_ids)
+            for supervisor_id in supervisores_ids:
+                ids.update(analistas_a_cargo(db, supervisor_id))
+
+    emails = {
+        str(email).strip().lower()
+        for (email,) in (db.query(User.email).filter(User.id.in_(ids)).all() if ids else [])
+        if email
+    }
+    email_actor = str(getattr(user, "email", "") or "").strip().lower()
+    if email_actor:
+        emails.add(email_actor)
+    return ids, emails
+
+
+def _envios_visibles_stmt(db: Session, user):
+    """SELECT server-side de envios autorizado para el actor actual."""
+    stmt = select(CrmEnvio)
+    scope = _ids_y_emails_visibles_en_envios(db, user)
+    if scope is None:
+        return stmt
+    ids, emails = scope
+    condiciones = []
+    if ids:
+        condiciones.append(CrmEnvio.enviado_por_id.in_(ids))
+    if emails:
+        condiciones.append(func.lower(func.trim(CrmEnvio.enviado_por)).in_(emails))
+    # Un usuario sin identidad utilizable no debe heredar acceso por accidente.
+    return stmt.where(or_(*condiciones)) if condiciones else stmt.where(False)
 
 
 def _rol(user) -> str:
@@ -719,7 +769,25 @@ def _cliente_display(
     return {"texto": f"{dataset or crm}{sufijo}", "dos_nombres": False}
 
 
-def _envio_to_dict(e: CrmEnvio, producto: str | None = None) -> dict[str, Any]:
+def _active_summaries_by_opportunity_id(db: Session) -> dict[str, OportunidadSummary]:
+    """Snapshot comercial disponible en la corrida activa, indexado por identidad estable."""
+    latest = _latest_success_import_run(db)
+    if latest is None:
+        return {}
+    rows = db.execute(
+        select(OportunidadSummary).where(OportunidadSummary.import_run_id == latest.id)
+    ).scalars().all()
+    return {
+        opportunity_stable_id(row.cliente_visible, row.codigo_articulo): row
+        for row in rows
+    }
+
+
+def _envio_to_dict(
+    e: CrmEnvio,
+    producto: str | None = None,
+    oportunidad: OportunidadSummary | None = None,
+) -> dict[str, Any]:
     payload = _payload_snapshot(e)
     return {
         'oportunidad_id': e.oportunidad_id,
@@ -731,9 +799,33 @@ def _envio_to_dict(e: CrmEnvio, producto: str | None = None) -> dict[str, Any]:
             payload.get('crm_razon_social_informada'),
             payload.get('cuenta_utilizada') or payload.get('n_cuenta'),
         ),
-        'producto': producto or payload.get('producto_nombre') or e.codigo_articulo or '-',
+        'producto': (
+            producto
+            or (oportunidad.producto_nombre if oportunidad is not None else None)
+            or payload.get('producto_nombre')
+            or e.codigo_articulo
+            or '-'
+        ),
         'codigo_articulo': e.codigo_articulo,
         'unidad_negocio': e.unidad_negocio,
+        'datos_oportunidad_disponibles': oportunidad is not None,
+        'tipo_oportunidad': oportunidad.tipo_oportunidad if oportunidad is not None else None,
+        'estado_actividad': oportunidad.estado_actividad if oportunidad is not None else None,
+        'provincia': oportunidad.provincia if oportunidad is not None else None,
+        'familia': oportunidad.familia if oportunidad is not None else None,
+        'plataforma': oportunidad.plataforma if oportunidad is not None else None,
+        'consumo_tipico_mensual': oportunidad.consumo_tipico_mensual if oportunidad is not None else None,
+        'consumo_min_mensual': oportunidad.consumo_min_mensual if oportunidad is not None else None,
+        'consumo_max_mensual': oportunidad.consumo_max_mensual if oportunidad is not None else None,
+        'meses_demanda_cliente_12m': oportunidad.meses_demanda_cliente_12m if oportunidad is not None else None,
+        'meses_no_participo_12m': oportunidad.meses_no_participo_12m if oportunidad is not None else None,
+        'ventana_meses': oportunidad.ventana_meses if oportunidad is not None else None,
+        'ultima_demanda': oportunidad.ultima_demanda.isoformat() if oportunidad is not None and oportunidad.ultima_demanda else None,
+        'meses_desde_ultima_demanda': oportunidad.meses_desde_ultima_demanda if oportunidad is not None else None,
+        'efectividad': oportunidad.efectividad if oportunidad is not None else None,
+        'ganados': oportunidad.ganados if oportunidad is not None else None,
+        'clientes_distintos': oportunidad.clientes_distintos if oportunidad is not None else None,
+        'precio_unitario_estimado': oportunidad.precio_unitario_estimado if oportunidad is not None else None,
         'monto_oportunidad': payload.get('amount'),
         'descripcion': payload.get('description'),
         'enviado_por': e.enviado_por,
@@ -908,7 +1000,7 @@ def oportunidades_enviadas(
     _user=AllowedUser,
     db: Session = Depends(get_db),
 ):
-    """Repositorio de oportunidades YA enviadas al CRM (todos los entornos).
+    """Repositorio de oportunidades YA enviadas al CRM (todos los entornos visibles).
 
     A diferencia de /list, NO se filtra por `crm_modo`: el sentido de esta vista es
     justamente ver todo lo enviado y a dónde fue, así que el entorno es una columna
@@ -922,24 +1014,18 @@ def oportunidades_enviadas(
     """
     _require_enabled()
     envios = db.execute(
-        select(CrmEnvio).order_by(CrmEnvio.enviado_at.desc())
+        _envios_visibles_stmt(db, _user).order_by(CrmEnvio.enviado_at.desc())
     ).scalars().all()
 
-    # Producto legible: una sola query al run activo, no una por fila.
-    productos: dict[str, str] = {}
-    latest = _latest_success_import_run(db)
-    if latest is not None:
-        for o in db.execute(
-            select(OportunidadSummary).where(OportunidadSummary.import_run_id == latest.id)
-        ).scalars().all():
-            productos[opportunity_stable_id(o.cliente_visible, o.codigo_articulo)] = (
-                (o.producto_nombre or "").strip() or o.codigo_articulo or ""
-            )
+    # Una sola query al run activo para completar el detalle comercial de las filas
+    # que todavia califican. Los historicos conservan el resumen textual sellado.
+    oportunidades = _active_summaries_by_opportunity_id(db)
 
     filas = []
     for e in envios:
-        row = _envio_to_dict(e, productos.get(e.oportunidad_id))
-        row["en_run_activo"] = e.oportunidad_id in productos
+        oportunidad = oportunidades.get(e.oportunidad_id)
+        row = _envio_to_dict(e, oportunidad=oportunidad)
+        row["en_run_activo"] = oportunidad is not None
         filas.append(row)
 
     logger.info("[OPORTUNIDADES][API] enviadas total=%s", len(filas))
@@ -961,7 +1047,7 @@ def oportunidad_enviada_detalle(
     _require_enabled()
     modo_actual = _modo_envio_actual()
     envio = db.execute(
-        select(CrmEnvio)
+        _envios_visibles_stmt(db, _user)
         .where(CrmEnvio.oportunidad_id == oportunidad_id)
         .where(CrmEnvio.crm_modo == modo_actual)
     ).scalars().first()
@@ -981,7 +1067,10 @@ def oportunidad_enviada_detalle(
             'found': True,
             'oportunidad_id': oportunidad_id,
             'crm_modo': modo_actual,
-            'row': _envio_to_dict(envio),
+            'row': _envio_to_dict(
+                envio,
+                oportunidad=_active_summaries_by_opportunity_id(db).get(envio.oportunidad_id),
+            ),
         },
     }
 

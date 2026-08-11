@@ -176,19 +176,20 @@ def test_deep_link_is_exact_environment_scoped_and_re_resolves(db, monkeypatch):
     monkeypatch.setattr(router, 'OPORTUNIDADES_ENABLED', lambda: True)
 
     monkeypatch.setattr(router, '_modo_envio_actual', lambda: 'test')
-    found = router.oportunidad_enviada_detalle(object(), oid, object(), db)
+    actor = SimpleNamespace(id=900, email='admin@example.com', role='admin')
+    found = router.oportunidad_enviada_detalle(object(), oid, actor, db)
     assert found['data']['found'] is True
     assert found['data']['row']['oportunidad_id'] == oid
     assert found['data']['row']['crm_modo'] == 'test'
     assert found['data']['row']['crm_url'].endswith(f'record=crm-test-{opportunity.id}')
 
-    different_case = router.oportunidad_enviada_detalle(object(), oid.upper(), object(), db)
+    different_case = router.oportunidad_enviada_detalle(object(), oid.upper(), actor, db)
     assert different_case['data']['found'] is False
-    hostile = router.oportunidad_enviada_detalle(object(), chr(39) + ' OR 1=1 --', object(), db)
+    hostile = router.oportunidad_enviada_detalle(object(), chr(39) + ' OR 1=1 --', actor, db)
     assert hostile['data']['found'] is False
 
     monkeypatch.setattr(router, '_modo_envio_actual', lambda: 'prod')
-    other_environment = router.oportunidad_enviada_detalle(object(), oid, object(), db)
+    other_environment = router.oportunidad_enviada_detalle(object(), oid, actor, db)
     assert other_environment['data']['found'] is False
     assert other_environment['data']['crm_modo'] == 'prod'
 
@@ -217,8 +218,8 @@ def test_repository_frontend_navigates_to_dedicated_detail_page():
     with open(detail_template, encoding='utf-8') as template_file:
         template = template_file.read()
     for heading in (
-        'Cliente y cuenta', 'Oportunidad y producto', 'Informaci&oacute;n comercial',
-        'Asignaci&oacute;n CRM', 'Datos del env&iacute;o',
+        'Cliente', 'Producto', 'Demanda', 'Desempe&ntilde;o comercial',
+        'Valorizaci&oacute;n', 'Env&iacute;o y CRM',
     ):
         assert heading in template
     for internal_label in (
