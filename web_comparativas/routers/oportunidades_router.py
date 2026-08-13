@@ -26,7 +26,7 @@ import re
 import unicodedata
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,7 @@ from web_comparativas.dimensionamiento.crm_client import CrmError
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     CrmEnvioEvento,
+    DimensionamientoImportRun,
     DimensionamientoRecord,
     OportunidadAsignacionManual,
     OportunidadSummary,
@@ -1597,3 +1598,110 @@ def oportunidades_asignar_analista(
             "asignado_en": ahora.isoformat(),
         },
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Push de datos desde local (patrón push_match_data / Dimensionamiento):
+# `oportunidades_summary` se calcula LOCAL (scripts/rebuild_oportunidades.py) y
+# viaja como DATO por lotes chicos; acá SOLO se aplica y commitea por lote.
+# Protegido por el MISMO token de import de Dimensionamiento (X-Import-Token).
+# NO se gatea por OPORTUNIDADES_ENABLED a propósito: el push tiene que poder
+# correr ANTES de encender el módulo (kill-switch OFF = riesgo cero mientras se
+# cargan los datos).
+# ──────────────────────────────────────────────────────────────────────────────
+
+from web_comparativas.routers.dimensiones_router import verify_import_token  # noqa: E402
+
+
+@router.get("/admin/estado")
+def oportunidades_admin_estado(
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Estado verificable por curl (runbook de prod): run activo de Dimensionamiento,
+    filas de `oportunidades_summary` de ESE run, y los kill-switches."""
+    latest = _latest_success_import_run(db)
+    filas = 0
+    if latest is not None:
+        filas = int(db.execute(
+            select(func.count(OportunidadSummary.id))
+            .where(OportunidadSummary.import_run_id == latest.id)
+        ).scalar_one() or 0)
+    return {
+        "ok": True,
+        "oportunidades_enabled": OPORTUNIDADES_ENABLED(),
+        "oportunidades_cartera_enabled": OPORTUNIDADES_CARTERA_ENABLED(),
+        "crm_envio_placeholder": CRM_ENVIO_PLACEHOLDER(),
+        "crm_modo": crm_client.CRM_MODO(),
+        "run_activo": latest.id if latest else None,
+        "oportunidades_summary_filas": filas,
+    }
+
+
+@router.post("/admin/apply-data-chunk")
+def oportunidades_admin_apply_data_chunk(
+    payload: dict[str, Any] = Body(...),
+    _token: str = Depends(verify_import_token),
+    db: Session = Depends(get_db),
+):
+    """Aplica UN LOTE de `oportunidades_summary` calculado en local. Síncrono, commit
+    por lote. kind:
+      - 'oportunidades-summary': payload.run_id (el run de Dimensionamiento YA
+        vigente en prod — este endpoint NO crea uno nuevo, solo cuelga filas de la
+        tabla precalculada de ese run) + payload.rows [dicts de OportunidadSummary,
+        sin id/import_run_id/created_at] + payload.reset (True SOLO en el primer
+        lote de un push: borra las filas previas de ESE run_id antes de insertar,
+        para que reintentar el push no duplique).
+    """
+    kind = payload.get("kind")
+    try:
+        if kind == "oportunidades-summary":
+            run_id = int(payload.get("run_id"))
+            run = db.get(DimensionamientoImportRun, run_id)
+            if run is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"run {run_id} no existe en prod (pusheá primero el dataset de Dimensionamiento).",
+                )
+
+            if payload.get("reset"):
+                borradas = (
+                    db.query(OportunidadSummary)
+                    .filter(OportunidadSummary.import_run_id == run_id)
+                    .delete(synchronize_session=False)
+                )
+                db.commit()
+                logger.info("[OPORTUNIDADES][PUSH] reset run_id=%s (borradas=%s)", run_id, borradas)
+
+            rows = payload.get("rows") or []
+            now = dt.datetime.utcnow()
+            columnas = {c.name for c in OportunidadSummary.__table__.columns}
+            mappings = []
+            for r in rows:
+                if not r.get("codigo_articulo"):
+                    continue
+                m = {k: v for k, v in r.items() if k in columnas}
+                m["import_run_id"] = run_id
+                m["created_at"] = now
+                mappings.append(m)
+            if mappings:
+                db.execute(OportunidadSummary.__table__.insert(), mappings)
+            db.commit()
+
+            total = int(db.execute(
+                select(func.count(OportunidadSummary.id))
+                .where(OportunidadSummary.import_run_id == run_id)
+            ).scalar_one() or 0)
+            logger.info(
+                "[OPORTUNIDADES][PUSH] run_id=%s +%s filas (total run=%s)",
+                run_id, len(mappings), total,
+            )
+            return {"ok": True, "kind": kind, "run_id": run_id, "insertadas": len(mappings), "total": total}
+
+        raise HTTPException(status_code=400, detail=f"kind inválido: {kind!r}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("[OPORTUNIDADES][PUSH] apply-data-chunk kind=%s FALLO", kind)
+        raise HTTPException(status_code=500, detail=f"Error en lote {kind}: {exc}")

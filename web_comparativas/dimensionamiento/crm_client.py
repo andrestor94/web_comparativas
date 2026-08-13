@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import os
+import tempfile
 from typing import Any
 
 import requests
@@ -133,14 +134,55 @@ def crm_config() -> dict[str, str]:
     }
 
 
+_CRM_CA_PEM_TEMP_PATH: str | None = None
+
+
+def _bundle_desde_ca_pem(contenido: str) -> str:
+    """Escribe CRM_CA_PEM (el intermedio, en texto) a un archivo temporal y devuelve su
+    ruta, lista para usar como `verify`. Pensado para Render: ahí no hay filesystem
+    persistente entre deploys para un CRM_CA_BUNDLE local como en desarrollo, pero las
+    env vars sí viajan.
+
+    El archivo temporal = CAs de certifi (las de siempre) + el intermedio de CRM_CA_PEM
+    agregado al final — MISMO formato que arma `scripts/crm_ca_bundle.py` para el bundle
+    local. Se escribe una sola vez por proceso (cacheado en `_CRM_CA_PEM_TEMP_PATH`).
+    """
+    global _CRM_CA_PEM_TEMP_PATH
+    if _CRM_CA_PEM_TEMP_PATH and os.path.isfile(_CRM_CA_PEM_TEMP_PATH):
+        return _CRM_CA_PEM_TEMP_PATH
+
+    import certifi
+
+    # Si CRM_CA_PEM se pegó como un valor de una sola línea con "\n" literales
+    # (común al cargar env vars desde algunos paneles), se normaliza a saltos reales.
+    texto = contenido.strip()
+    if "\n" not in texto and "\\n" in texto:
+        texto = texto.replace("\\n", "\n")
+
+    fd, path = tempfile.mkstemp(prefix="crm_ca_pem_", suffix=".pem")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        with open(certifi.where(), "r", encoding="utf-8") as certifi_bundle:
+            f.write(certifi_bundle.read())
+        f.write("\n" + texto + "\n")
+
+    _CRM_CA_PEM_TEMP_PATH = path
+    logger.info("[CRM] CRM_CA_PEM detectada: bundle temporal escrito en %s", path)
+    return path
+
+
 def _verificacion_tls() -> Any:
     """Qué usar como `verify` de requests: True | ruta a un CA bundle | False.
 
     POR QUÉ EXISTE: el CRM presenta un certificado válido de Sectigo, pero **no envía
     la cadena intermedia**. Los navegadores la resuelven solos (AIA fetching); Python
     no, y falla con "unable to get local issuer certificate". La solución correcta es
-    apuntar CRM_CA_BUNDLE a un bundle que incluya ese intermedio (o que el equipo de
-    infra arregle la cadena en el servidor).
+    apuntar CRM_CA_BUNDLE (archivo local) o CRM_CA_PEM (contenido vía env, para Render)
+    a un bundle que incluya ese intermedio (o que el equipo de infra arregle la cadena
+    en el servidor).
+
+    Orden de resolución: CRM_SSL_VERIFY=0 (apaga todo, puerta de emergencia) >
+    CRM_CA_BUNDLE (ruta a archivo, uso local) > CRM_CA_PEM (contenido en texto, uso en
+    Render) > True (certifi normal, sin el intermedio agregado).
 
     CRM_SSL_VERIFY=0 apaga la verificación por completo. Es una puerta de emergencia
     EXPLÍCITA: hay que setearla a mano, avisa por WARNING en cada envío y deja el
@@ -151,7 +193,7 @@ def _verificacion_tls() -> Any:
         logger.warning(
             "[CRM] CRM_SSL_VERIFY=%s -> verificación TLS DESACTIVADA. El tráfico con el "
             "CRM (incluidas las credenciales) queda expuesto a interceptación. "
-            "Usar solo como último recurso; lo correcto es CRM_CA_BUNDLE.", raw,
+            "Usar solo como último recurso; lo correcto es CRM_CA_BUNDLE/CRM_CA_PEM.", raw,
         )
         return False
     bundle = (os.getenv("CRM_CA_BUNDLE") or "").strip()
@@ -162,6 +204,9 @@ def _verificacion_tls() -> Any:
                 kind="config",
             )
         return bundle
+    ca_pem = (os.getenv("CRM_CA_PEM") or "").strip()
+    if ca_pem:
+        return _bundle_desde_ca_pem(ca_pem)
     return True
 
 
