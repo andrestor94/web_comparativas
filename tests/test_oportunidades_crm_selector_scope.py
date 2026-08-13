@@ -126,6 +126,30 @@ def test_supervisor_puede_asignar_a_alguien_de_su_propio_equipo(db, escenario):
     assert resultado == {"id": "crm-2", "usuario": "ayelen.piluso", "origen": "manual"}
 
 
+def test_supervisor_no_ve_opcion_usuario_siem(db, escenario, monkeypatch):
+    """CRM_USUARIO_SIEM_ID está restringida a Admin puro (ago-2026): un Supervisor
+    (que sí puede elegir asignado) no tiene que ver la opción "Usuario SIEM (sistema)"
+    en su lista, aunque la variable esté seteada."""
+    monkeypatch.setattr(router, "CRM_USUARIO_SIEM_ID", lambda: "crm-siem-1")
+    ctx_supervisor = router._contexto_asignacion_seguro(escenario["supervisor"], db)
+    assert "crm-siem-1" not in _usuarios_ids(ctx_supervisor)
+
+    # Control positivo en el mismo test: con la variable seteada, Admin SÍ la ve.
+    ctx_admin = router._contexto_asignacion_seguro(escenario["admin"], db)
+    assert "crm-siem-1" in _usuarios_ids(ctx_admin)
+
+
+def test_supervisor_no_puede_forzar_usuario_siem(db, escenario, monkeypatch):
+    """La validación server-side (no solo el <select>): un Supervisor que mande el id
+    del usuario de sistema a mano en el request tiene que ser rechazado igual, aunque
+    no lo vea en su propia lista."""
+    monkeypatch.setattr(router, "CRM_USUARIO_SIEM_ID", lambda: "crm-siem-1")
+    ctx_supervisor = router._contexto_asignacion_seguro(escenario["supervisor"], db)
+    with pytest.raises(HTTPException) as exc_info:
+        router._decidir_asignado(ctx_supervisor, "crm-siem-1")
+    assert exc_info.value.status_code == 422
+
+
 def test_sugerido_id_se_limpia_si_queda_fuera_del_scope(db, escenario, monkeypatch):
     monkeypatch.setattr(
         crm_client, "contexto_asignacion",

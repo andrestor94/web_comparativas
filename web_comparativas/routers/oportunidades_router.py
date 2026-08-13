@@ -539,12 +539,15 @@ def _contexto_asignacion_seguro(user, db: Session) -> dict[str, Any]:
 
     # Opción fija "usuario de sistema" (CRM_USUARIO_SIEM_ID, ago-2026): para cuando
     # quien envía no tiene usuario propio en el CRM (p. ej. el primer envío real,
-    # hecho por Admin). Se agrega DESPUÉS del acotado por estructura a propósito: es
-    # una opción de sistema, no de la cartera de nadie, y tiene que sobrevivir al
-    # filtro de Supervisor/Gerente. `_decidir_asignado` valida contra esta misma
-    # lista, así que agregarla acá alcanza para habilitarla también server-side.
+    # hecho por Admin). Restringida a Admin PURO (is_admin), no a "quien puede elegir
+    # asignado": Supervisor y Gerente también pasan ese último gate, pero esta opción
+    # no es para ellos. Se agrega DESPUÉS del acotado por estructura a propósito: es
+    # una opción de sistema, no de la cartera de nadie. `_decidir_asignado` valida el
+    # assigned_user_id elegido CONTRA esta misma lista (ctx["usuarios"]), así que un
+    # Supervisor/Gerente que la pida a mano no la encuentra acá y es rechazado — el
+    # gate es server-side, no cosmético del dropdown.
     siem_id = CRM_USUARIO_SIEM_ID()
-    if siem_id and not any(u["id"] == siem_id for u in ctx["usuarios"]):
+    if siem_id and is_admin(user) and not any(u["id"] == siem_id for u in ctx["usuarios"]):
         ctx["usuarios"] = ctx["usuarios"] + [
             {"id": siem_id, "usuario": "Usuario SIEM (sistema)", "es_sistema": True}
         ]
