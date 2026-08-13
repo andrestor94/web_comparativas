@@ -49,6 +49,7 @@ from web_comparativas.dimensionamiento.models import (
 )
 from web_comparativas.dimensionamiento.oportunidades import (
     CRM_ENVIO_PLACEHOLDER,
+    CRM_USUARIO_SIEM_ID,
     OPORTUNIDADES_CARTERA_ENABLED,
     OPORTUNIDADES_ENABLED,
     VENTANA_MESES,
@@ -247,6 +248,8 @@ def _texto_asignado(asignado: dict[str, str] | None) -> str | None:
     """
     if not asignado or not asignado.get("usuario"):
         return None
+    if asignado.get("origen") == "sistema":
+        return f"asignado a {asignado['usuario']} (usuario de sistema)"
     if asignado.get("origen") == "manual":
         return f"asignado a {asignado['usuario']} (selección manual)"
     return f"asignado a vos ({asignado['usuario']})"
@@ -533,6 +536,18 @@ def _contexto_asignacion_seguro(user, db: Session) -> dict[str, Any]:
         ]
         if ctx["sugerido_id"] and not any(u["id"] == ctx["sugerido_id"] for u in ctx["usuarios"]):
             ctx["sugerido_id"] = None
+
+    # Opción fija "usuario de sistema" (CRM_USUARIO_SIEM_ID, ago-2026): para cuando
+    # quien envía no tiene usuario propio en el CRM (p. ej. el primer envío real,
+    # hecho por Admin). Se agrega DESPUÉS del acotado por estructura a propósito: es
+    # una opción de sistema, no de la cartera de nadie, y tiene que sobrevivir al
+    # filtro de Supervisor/Gerente. `_decidir_asignado` valida contra esta misma
+    # lista, así que agregarla acá alcanza para habilitarla también server-side.
+    siem_id = CRM_USUARIO_SIEM_ID()
+    if siem_id and not any(u["id"] == siem_id for u in ctx["usuarios"]):
+        ctx["usuarios"] = ctx["usuarios"] + [
+            {"id": siem_id, "usuario": "Usuario SIEM (sistema)", "es_sistema": True}
+        ]
     return ctx
 
 
@@ -1219,7 +1234,11 @@ def _decidir_asignado(
             # Si eligió su propio usuario, no es una reasignación: se registra como match.
             if match and u["id"] == match["id"]:
                 return match
-            return {"id": u["id"], "usuario": u["usuario"], "origen": "manual"}
+            # La opción fija "usuario de sistema" (CRM_USUARIO_SIEM_ID) se distingue de
+            # una reasignación real: queda con su propio origen en crm_assigned_origen,
+            # para poder identificar después los envíos hechos sin usuario propio.
+            origen = "sistema" if u.get("es_sistema") else "manual"
+            return {"id": u["id"], "usuario": u["usuario"], "origen": origen}
     raise HTTPException(
         status_code=422,
         detail="El usuario del CRM elegido no existe en la lista de usuarios habilitados.",

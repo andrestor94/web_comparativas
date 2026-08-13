@@ -319,7 +319,9 @@
     if (assigned) {
       payload.assigned_user = match && assigned.id === match.id
         ? `asignado a vos (${assigned.usuario})`
-        : `asignado a ${assigned.usuario} (selección manual)`;
+        : assigned.es_sistema
+          ? `asignado a ${assigned.usuario} (usuario de sistema)`
+          : `asignado a ${assigned.usuario} (selección manual)`;
     }
     const logs = CRM_ASIGNACION.bitacora_por_usuario || {};
     if (assigned && logs[assigned.id]) {

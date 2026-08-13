@@ -59,6 +59,21 @@ def OPORTUNIDADES_CARTERA_ENABLED() -> bool:
     return raw not in {"0", "false", "no", "off", "n"}
 
 
+def CRM_USUARIO_SIEM_ID() -> str | None:
+    """Id (en el CRM) del usuario "SIEM (sistema)": una opción FIJA que se agrega al
+    selector de asignación para cuando quien envía no tiene usuario propio en el CRM
+    (p. ej. el primer envío en un entorno nuevo, hecho por Admin). Vacía por defecto:
+    sin setearla, el selector se comporta exactamente igual que hoy.
+
+    Deliberadamente separada de `CRM_USUARIO_FALLBACK_ID` (que solo pre-sugiere una
+    opción existente en `usuarios_rendidores`, nunca se aplica sola): esta variable
+    agrega una opción NUEVA y siempre visible para quien puede elegir asignado, no
+    una sugerencia. Se valida server-side igual que cualquier otra (ver
+    `_contexto_asignacion_seguro`/`_decidir_asignado` en oportunidades_router.py).
+    """
+    return (os.getenv("CRM_USUARIO_SIEM_ID") or "").strip() or None
+
+
 def CRM_ENVIO_PLACEHOLDER() -> bool:
     """Modo PRUEBA del envío a CRM (default ON mientras la API real esté diferida).
 
