@@ -105,6 +105,9 @@ from web_comparativas.migrations import (
     ensure_dimensionamiento_entidad_columns,
     ensure_dimensionamiento_composite_constraints,
     ensure_indicadores_schema_v2,
+    ensure_users_reporta_a_column,
+    ensure_vendedores_fusion_seed,
+    ensure_oportunidad_asignaciones_manuales_table,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -351,6 +354,27 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: crm_envios table/indexes checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning crm_envios table: {e}", flush=True)
+
+    # Cartera comercial y jerarquía de usuarios (Oportunidades / Mercado Privado).
+    # Solo carga datos base (vendedores + columna de jerarquía); el filtrado por fila
+    # sigue detrás del kill-switch OPORTUNIDADES_CARTERA_ENABLED, no se toca acá.
+    try:
+        ensure_users_reporta_a_column()
+        print("[MIGRATION] SUCCESS: users.reporta_a_id column checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning users.reporta_a_id column: {e}", flush=True)
+
+    try:
+        ensure_vendedores_fusion_seed()
+        print("[MIGRATION] SUCCESS: vendedores_fusion table/seed checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning vendedores_fusion seed: {e}", flush=True)
+
+    try:
+        ensure_oportunidad_asignaciones_manuales_table()
+        print("[MIGRATION] SUCCESS: oportunidad_asignaciones_manuales table checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning oportunidad_asignaciones_manuales table: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup

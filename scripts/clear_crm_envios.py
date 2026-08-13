@@ -43,6 +43,17 @@ def _counts(session) -> tuple[int, int, int]:
     return int(total), int(simulados), int(eventos)
 
 
+def _detalle_por_modo(session) -> str:
+    """Desglose por entorno: con bloqueo por (oportunidad_id, crm_modo), saber cuántas
+    filas hay de cada modo es lo que permite confirmar que no se toca lo productivo."""
+    filas = session.execute(
+        select(CrmEnvio.crm_modo, func.count(CrmEnvio.id)).group_by(CrmEnvio.crm_modo)
+    ).all()
+    if not filas:
+        return "  (sin envíos registrados)"
+    return "\n".join(f"  crm_modo={m or 'NULL'}: {n}" for m, n in sorted(filas, key=lambda r: str(r[0])))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Limpia crm_envios / crm_envio_eventos.")
     ap.add_argument("--all", action="store_true",
@@ -56,6 +67,7 @@ def main() -> int:
     try:
         total, simulados, eventos = _counts(session)
         print(f"Estado actual: crm_envios={total} (SIMULADO={simulados}), crm_envio_eventos={eventos}")
+        print(_detalle_por_modo(session))
 
         if args.dry_run:
             objetivo = total if args.all else simulados
@@ -72,19 +84,18 @@ def main() -> int:
             ev = session.execute(delete(CrmEnvioEvento))
             en = session.execute(delete(CrmEnvio))
         else:
-            # Solo SIMULADO: borra esos envíos y los eventos del mismo oportunidad_id.
-            ids = [r[0] for r in session.execute(
-                select(CrmEnvio.oportunidad_id).where(CrmEnvio.crm_status == SIMULADO)
-            ).all()]
-            if ids:
-                ev = session.execute(
-                    delete(CrmEnvioEvento).where(CrmEnvioEvento.oportunidad_id.in_(ids))
-                )
-                en = session.execute(
-                    delete(CrmEnvio).where(CrmEnvio.crm_status == SIMULADO)
-                )
-            else:
-                ev = en = None
+            # Solo SIMULADO. Los eventos se filtran por crm_status, NO por
+            # oportunidad_id: desde que el bloqueo es por entorno
+            # (oportunidad_id, crm_modo), una misma oportunidad puede tener a la vez
+            # una fila simulada y una real. Borrar los eventos "de esos oportunidad_id"
+            # se llevaría puesta la bitácora de los envíos REALES, que es justo lo que
+            # este modo promete no tocar.
+            ev = session.execute(
+                delete(CrmEnvioEvento).where(CrmEnvioEvento.crm_status == SIMULADO)
+            )
+            en = session.execute(
+                delete(CrmEnvio).where(CrmEnvio.crm_status == SIMULADO)
+            )
 
         session.commit()
         borrados_en = en.rowcount if en is not None else 0

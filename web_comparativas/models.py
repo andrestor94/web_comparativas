@@ -296,6 +296,14 @@ class User(Base):
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
 
+    # Jerarquía comercial (Oportunidades / Mercado Privado): a quién reporta este
+    # usuario. Un solo padre por persona (analista -> supervisor, supervisor ->
+    # gerente), por eso alcanza con una columna self-FK en vez de una tabla de
+    # relación tipo GroupMember (esa es para N:N; acá cada usuario tiene a lo sumo
+    # un "reporta_a"). El significado de la columna depende del `role` del usuario,
+    # no de la columna en sí: se carga a mano desde el form de usuario de S.I.C.
+    reporta_a_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Relaciones con métricas de uso (EVITAR eager load masivo)
     # Antes: lazy="selectin" -> traía TODO el historial al cargar el usuario.
     # Ahora: lazy="dynamic" -> devuelve un Query object, o lazy=True para carga bajo demanda si se accede.
@@ -303,6 +311,10 @@ class User(Base):
     # Como son logs, mejor no cargarlos por defecto.
     usage_events = relationship("UsageEvent", back_populates="user", lazy="select")
     usage_sessions = relationship("UsageSession", back_populates="user", lazy="select")
+
+    # A quién reporta (self-FK, ver reporta_a_id arriba). remote_side marca el lado
+    # "uno" de la relación muchos-a-uno (varios hijos -> un mismo padre).
+    manager = relationship("User", remote_side="User.id", foreign_keys=[reporta_a_id])
 
     # ---- Helpers de rol/unidad ----
     def _role_norm(self) -> str:
@@ -317,6 +329,12 @@ class User(Base):
 
     def is_supervisor(self) -> bool:
         return self.has_role("supervisor")
+
+    def is_analista(self) -> bool:
+        return self.has_role("analista", "analyst")
+
+    def is_gerente(self) -> bool:
+        return self.has_role("gerente", "manager")
 
     def can_manage_groups(self) -> bool:
         """Puede acceder a UI de Grupos."""
@@ -871,6 +889,36 @@ class GroupMember(Base):
         return f"<GroupMember g={self.group_id} u={self.user_id} role={self.role_in_group!r}>"
 
 
+# ---------- Vendedores de Fusión (cartera comercial, Oportunidades / Mercado Privado) ----------
+class VendedorFusion(Base):
+    """Puente vendedor de Fusión (Operadores.xlsx) <-> usuario del sistema.
+
+    Precargada con las 16 filas de Operadores.xlsx (codigo_vendedor + nombre_fusion,
+    user_id NULL) por ensure_vendedores_fusion_seed() en migrations.py. El vínculo a
+    un usuario se carga a mano desde el form de usuario de S.I.C. (el cruce automático
+    por legajo_c/nombre no es confiable, ver docs/AUDITORIA_IDENTIDAD_CUENTAS_CRM.md).
+    """
+    __tablename__ = "vendedores_fusion"
+
+    id = Column(Integer, primary_key=True)
+    # Mismo formato que account_resolution._load_master_index (normalize_identifier),
+    # para poder cruzar contra Operadores.xlsx sin desalineación de tipos.
+    codigo_vendedor = Column(String(16), nullable=False, unique=True, index=True)
+    nombre_fusion = Column(String(120), nullable=False)
+    # unique: un vendedor = un usuario, y un usuario = un vendedor (el form ofrece un
+    # <select>, no multi-selección, para el rol Analista).
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
+    activo = Column(Boolean, nullable=False, default=True)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+
+    user = relationship("User", foreign_keys=[user_id])
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
+
+    def __repr__(self) -> str:
+        return f"<VendedorFusion codigo={self.codigo_vendedor!r} user_id={self.user_id}>"
+
+
 # ---------- Vistas guardadas por usuario ----------
 class SavedView(Base):
     """
@@ -1373,25 +1421,118 @@ def _ensure_crm_envios_table():
     """
     Alinea la tabla `crm_envios` (envíos de oportunidades al CRM) en DBs ya existentes.
 
-    `create_all` ya crea la tabla y el UNIQUE en bases nuevas; esto garantiza de forma
-    idempotente el índice ÚNICO sobre `oportunidad_id` (bloqueo PERMANENTE de reenvío)
-    en bases donde la tabla pudo crearse sin el constraint. Compatible SQLite/Postgres
-    (CREATE UNIQUE INDEX IF NOT EXISTS funciona en ambos). NO destructivo.
+    `create_all` ya crea la tabla y el UNIQUE en bases nuevas; esto lo alinea de forma
+    idempotente en bases ya existentes. Compatible SQLite/Postgres. NO destructivo.
 
-    Modo alternativo "por período": ver docstring de CrmEnvio. Para activarlo, reemplazar
-    el índice de abajo por uno compuesto sobre (oportunidad_id, periodo_yyyymm).
+    BLOQUEO POR ENTORNO (ago-2026): el UNIQUE pasó de `oportunidad_id` a
+    (oportunidad_id, crm_modo), para que un envío a TEST no bloquee el envío a PROD.
+    Esto obliga a DAR DE BAJA los índices únicos viejos sobre `oportunidad_id` solo:
+    mientras sigan existiendo, el bloqueo viejo (cross-entorno) sigue vigente y el
+    nuevo índice compuesto no cambia nada. Los nombres que hay que bajar son
+    `ix_crm_envios_oportunidad_id` (el que genera create_all por unique=True) y
+    `uq_crm_envios_oport` (el que creaba esta misma función).
+
+    Las columnas se agregan ANTES que los índices: el índice compuesto usa `crm_modo`.
+
+    Modo alternativo "por período": ver docstring de CrmEnvio.
     """
+    _log = logging.getLogger("wc.models.migrate")
+    # Primero las columnas (el índice compuesto depende de crm_modo) + backfill.
+    _ensure_crm_envio_real_columns()
     try:
         idx_sql = [
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_envios_oport ON crm_envios(oportunidad_id)",
+            # Fuera los únicos viejos por oportunidad_id solo (bloqueo cross-entorno).
+            "DROP INDEX IF EXISTS ix_crm_envios_oportunidad_id",
+            "DROP INDEX IF EXISTS uq_crm_envios_oport",
+            # Nuevo bloqueo: una oportunidad puede estar enviada una vez POR ENTORNO.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_envios_oport_modo "
+            "ON crm_envios(oportunidad_id, crm_modo)",
+            # Lookup por oportunidad (ya no lo cubre un índice único propio).
+            "CREATE INDEX IF NOT EXISTS idx_crm_envios_oport ON crm_envios(oportunidad_id)",
             "CREATE INDEX IF NOT EXISTS idx_crm_envios_periodo ON crm_envios(periodo_yyyymm)",
             "CREATE INDEX IF NOT EXISTS idx_crm_evt_oport ON crm_envio_eventos(oportunidad_id)",
         ]
-        with engine.begin() as conn:
-            for sql in idx_sql:
-                conn.execute(text(sql))
+        for sql in idx_sql:
+            # UNA TRANSACCIÓN POR SENTENCIA a propósito: en Postgres, un error deja la
+            # transacción abortada (InFailedSqlTransaction) y TODAS las siguientes
+            # fallarían aunque fueran correctas. Aislarlas hace que un DROP que no
+            # aplica no se lleve puesta la creación del índice nuevo.
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(sql))
+            except Exception:
+                _log.warning("crm_envios: no se pudo aplicar '%s'", sql[:60])
     except Exception:
         # No bloquear el arranque si algún backend no soporta IF NOT EXISTS.
+        pass
+
+
+def _ensure_crm_envio_real_columns():
+    """Columnas del ENVÍO REAL al CRM (SuiteCRM V8) en bases ya existentes.
+
+    `create_all` las crea en bases nuevas; esto las agrega de forma idempotente donde
+    las tablas ya existían (mismo patrón no destructivo que el resto de _ensure_*):
+      - crm_envios.crm_id          -> id del Opportunities creado (habilita "Ver en CRM")
+      - crm_envios.crm_account_id  -> cuenta resuelta por número de fusión (auditoría)
+      - crm_envios.crm_modo        -> entorno del CRM ('test'/'prod'/'simulado')
+      - crm_envio_eventos.crm_id   -> mismo id en la bitácora append-only
+      - oportunidades_summary.cuenta_interna -> Nº de cuenta de FUSION del cliente
+
+    Además RELLENA `crm_modo` en las filas viejas (ver comentario en el backfill): es
+    parte de la clave única y un NULL apagaría el bloqueo de duplicados sin avisar.
+
+    El resto de las filas viejas queda con NULL a propósito: los envíos SIMULADOS
+    previos no tienen id de CRM (correcto), y `cuenta_interna` se completa al
+    reconstruir oportunidades_summary. El envío tiene fallback a
+    dimensionamiento_records, así que no exige rebuild inmediato.
+    """
+    _log = logging.getLogger("wc.models.migrate")
+    try:
+        insp = inspect(engine)
+        existentes = set(insp.get_table_names())
+        faltantes: dict[str, list[tuple[str, str]]] = {
+            "crm_envios": [
+                ("crm_id", "VARCHAR(64)"),
+                ("crm_account_id", "VARCHAR(64)"),
+                ("crm_modo", "VARCHAR(16)"),
+                ("crm_assigned_user_id", "VARCHAR(64)"),
+                ("crm_assigned_usuario", "VARCHAR(255)"),
+                ("crm_assigned_origen", "VARCHAR(16)"),
+            ],
+            "crm_envio_eventos": [("crm_id", "VARCHAR(64)")],
+            "oportunidades_summary": [("cuenta_interna", "VARCHAR(120)")],
+        }
+        ddls: list[str] = []
+        for tabla, columnas in faltantes.items():
+            if tabla not in existentes:
+                continue  # create_all la creará completa
+            cols = {c["name"] for c in insp.get_columns(tabla)}
+            for nombre, tipo in columnas:
+                if nombre not in cols:
+                    ddls.append(f"ALTER TABLE {tabla} ADD COLUMN {nombre} {tipo}")
+        if "crm_envios" in existentes:
+            ddls.append("CREATE INDEX IF NOT EXISTS idx_crm_envios_crm_id ON crm_envios(crm_id)")
+            # BACKFILL OBLIGATORIO: `crm_modo` es parte de la clave única
+            # (oportunidad_id, crm_modo). Si quedara NULL en las filas viejas, el UNIQUE
+            # no las agruparía (dos NULL son distintos entre sí tanto en SQLite como en
+            # Postgres) y esas oportunidades se podrían reenviar sin bloqueo, en
+            # silencio. Los envíos previos a este cambio son todos del modo simulado
+            # (crm_status='SIMULADO') o quedaron sin enviar de verdad
+            # ('PENDIENTE_ENVIO_REAL'): en ninguno de los dos casos tocaron un CRM real.
+            ddls.append(
+                "UPDATE crm_envios SET crm_modo = 'simulado' WHERE crm_modo IS NULL"
+            )
+        for ddl in ddls:
+            # Una transacción por sentencia: mismo motivo que en _ensure_crm_envios_table
+            # (en Postgres un error aborta la transacción entera).
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+            except Exception:
+                _log.warning("crm_envios: no se pudo aplicar '%s'", ddl[:60])
+    except Exception:
+        # No bloquear el arranque: sin estas columnas el envío real queda inoperante,
+        # pero el resto de la app (y el modo placeholder) sigue funcionando.
         pass
 
 

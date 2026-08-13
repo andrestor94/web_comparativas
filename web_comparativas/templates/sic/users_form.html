@@ -30,6 +30,15 @@
   .acc-row.on .sw::after{left:18px}
   .acc-pill{font-size:11px;color:#aab2f2;border:1px solid rgba(108,122,224,.55);
     border-radius:999px;padding:1px 7px;margin:0 8px}
+
+  /* ====== Cartera comercial / jerarquía (Analista·Supervisor·Gerente) ====== */
+  .cartera-list{max-height:280px;overflow-y:auto}
+  .cartera-check-row{display:flex;align-items:center;gap:8px;padding:7px 6px;
+    color:#e7edf6;font-size:13px;cursor:pointer;border-radius:6px}
+  .cartera-check-row:hover{background:rgba(255,255,255,.04)}
+  .cartera-check-row.disabled{opacity:.45;cursor:not-allowed}
+  .cartera-check-row input[type=checkbox]{flex:0 0 auto}
+  .cartera-check-row .taken{color:#9aa6b8;font-size:12px}
 </style>
 {% endblock %}
 
@@ -124,6 +133,91 @@
                     • <strong>Analista:</strong> puede cargar y ver solo sus procesos.<br>
                     • <strong>Auditor:</strong> solo lectura de todos los procesos.
                 </div>
+            </div>
+
+            {# ====== Aviso: relaciones que se pierden si se cambia el rol (JS) ====== #}
+            <div class="span-12">
+                <div id="role-change-warning" class="alert alert-warning mb-0" style="display:none"></div>
+            </div>
+
+            {# ====== Cartera comercial / jerarquía (Oportunidades, Mercado Privado) ======
+               Un solo bloque visible por vez, según el rol elegido (JS al final del template).
+               Todo pre-renderizado: el server nunca confía en lo que decidió el JS, revalida
+               todo al guardar (_sync_cartera_y_jerarquia en sic_router.py). #}
+
+            {# --- Analista y Supervisor: identidad en Fusión (ERP) ---
+               NO es una asignación de recursos: los 16 vendedores de Operadores.xlsx
+               son la fuerza de venta real (hay Analistas y Supervisores entre ellos,
+               cada uno con cartera propia). Este selector vincula el usuario de SIEM
+               con la persona que ya existe en Fusión — identidad uno a uno. #}
+            <div class="span-12" data-role-blocks="analista supervisor" style="display:none">
+                <label class="form-label text-white-50 small" for="vendedor_fusion_id">Identidad en Fusión (ERP)</label>
+                <select class="form-select form-select-sic" id="vendedor_fusion_id" name="vendedor_fusion_id">
+                    <option value="">— Sin vincular —</option>
+                    {% for v in vendedores_fusion %}
+                    {% set ocupado_por_otro = v.user_id and v.user_id != form.id %}
+                    <option value="{{ v.id }}"
+                        {% if v.user_id and v.user_id == form.id %}selected{% endif %}
+                        {% if ocupado_por_otro %}disabled{% endif %}>
+                        {{ v.codigo_vendedor }} — {{ v.nombre_fusion }}{% if ocupado_por_otro %} (ya vinculada a: {{ v.user.display_name if v.user else 'otro usuario' }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">
+                    Vinculá este usuario con su persona en Fusión. De ahí salen las cuentas de su
+                    cartera. Cada persona de Fusión se vincula a un solo usuario — las que ya están
+                    vinculadas a otro aparecen deshabilitadas.
+                </div>
+            </div>
+
+            {# --- Supervisor: además de su propia identidad (arriba), qué analistas tiene a cargo --- #}
+            <div class="span-12" data-role-blocks="supervisor" style="display:none">
+                <label class="form-label text-white-50 small">Analistas a cargo</label>
+                <div class="cartera-list p-3 rounded-3"
+                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
+                    {% for a in analistas_disponibles %}
+                    {% set tomado_por_otro = a.reporta_a_id and a.reporta_a_id != form.id %}
+                    <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}">
+                        <input type="checkbox" name="analista_ids" value="{{ a.id }}"
+                            {% if a.reporta_a_id and a.reporta_a_id == form.id %}checked{% endif %}
+                            {% if tomado_por_otro %}disabled{% endif %}>
+                        <span>{{ a.display_name }} ({{ a.email }})</span>
+                        {% if tomado_por_otro %}
+                        <span class="taken">— ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}</span>
+                        {% endif %}
+                    </label>
+                    {% else %}
+                    <div class="text-white-50 small">No hay usuarios con rol Analista todavía.</div>
+                    {% endfor %}
+                </div>
+                <div class="text-white-50 small mt-1">Los analistas marcados en gris ya están a cargo de otro supervisor.</div>
+            </div>
+
+            {# --- Gerente: qué supervisores tiene a cargo ---
+               Sin selector de identidad en Fusión por ahora: a confirmar con negocio
+               si algún gerente tiene cartera propia (hoy no hay dato del proyecto que
+               lo indique). Si se confirma, sumar "gerente" a data-role-blocks del
+               bloque de arriba. #}
+            <div class="span-12" data-role-blocks="gerente" style="display:none">
+                <label class="form-label text-white-50 small">Supervisores a cargo</label>
+                <div class="cartera-list p-3 rounded-3"
+                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
+                    {% for s in supervisores_disponibles %}
+                    {% set tomado_por_otro = s.reporta_a_id and s.reporta_a_id != form.id %}
+                    <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}">
+                        <input type="checkbox" name="supervisor_ids" value="{{ s.id }}"
+                            {% if s.reporta_a_id and s.reporta_a_id == form.id %}checked{% endif %}
+                            {% if tomado_por_otro %}disabled{% endif %}>
+                        <span>{{ s.display_name }} ({{ s.email }})</span>
+                        {% if tomado_por_otro %}
+                        <span class="taken">— ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}</span>
+                        {% endif %}
+                    </label>
+                    {% else %}
+                    <div class="text-white-50 small">No hay usuarios con rol Supervisor todavía.</div>
+                    {% endfor %}
+                </div>
+                <div class="text-white-50 small mt-1">Los supervisores marcados en gris ya están a cargo de otro gerente. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
             </div>
 
             {# ====== Unidad de Negocio ====== #}
@@ -346,6 +440,72 @@
 
     roleSelect.addEventListener('change', function () { applyCeiling(true); });
     applyCeiling(false);
+})();
+
+// ── Cartera comercial y jerarquía (Analista·Supervisor·Gerente): bloques por rol ──
+(function () {
+    var roleSelect = document.getElementById('role');
+    var blocks = Array.prototype.slice.call(document.querySelectorAll('[data-role-blocks]'));
+    if (!roleSelect || !blocks.length) return;
+
+    // Rol con el que se cargó la página (antes de que el Admin toque el <select>),
+    // normalizado igual que el `r` que ya usa el template para marcar `selected`.
+    var initialRole = "{{ (form.role or '')|lower }}";
+    if (initialRole === 'visor') initialRole = 'auditor';
+    if (initialRole === 'manager') initialRole = 'gerente';
+
+    // Roles que hoy tienen identidad en Fusión propia (ver bloque de arriba):
+    // Analista y Supervisor. Gerente todavía no — a confirmar con negocio.
+    var ROLES_CON_IDENTIDAD_FUSION = ['analista', 'supervisor'];
+
+    var equipoAnalistas = {{ equipo_analistas_count | default(0) }};
+    var equipoSupervisores = {{ equipo_supervisores_count | default(0) }};
+    var tieneVendedor = {{ 'true' if tiene_vendedor_propio else 'false' }};
+    var warnBox = document.getElementById('role-change-warning');
+
+    function showBlocks(role) {
+        blocks.forEach(function (b) {
+            var roles = b.getAttribute('data-role-blocks').split(' ');
+            b.style.display = (roles.indexOf(role) !== -1) ? '' : 'none';
+        });
+    }
+
+    // Solo avisa la PRIMERA vez que se abandona el rol original: si ya cambió de
+    // rol y vuelve a tocar el select entre otras dos opciones, no hay nada que
+    // perder que no se haya avisado ya (los vínculos del rol original son los
+    // únicos que corren riesgo real al guardar). Un mismo cambio de rol puede
+    // perder más de una cosa a la vez (ej. Supervisor con cartera propia Y equipo
+    // que pasa a Auditor pierde las dos) — se listan todas juntas.
+    function warningFor(role) {
+        if (role === initialRole) return null;
+        var perdidas = [];
+        var identidadAntes = ROLES_CON_IDENTIDAD_FUSION.indexOf(initialRole) !== -1;
+        var identidadDespues = ROLES_CON_IDENTIDAD_FUSION.indexOf(role) !== -1;
+        if (tieneVendedor && identidadAntes && !identidadDespues) {
+            perdidas.push('su identidad en Fusión (la cartera vinculada) queda liberada');
+        }
+        if (initialRole === 'supervisor' && role !== 'supervisor' && equipoAnalistas > 0) {
+            perdidas.push(equipoAnalistas + ' analista(s) a cargo van a quedar sin supervisor asignado');
+        }
+        if (initialRole === 'gerente' && role !== 'gerente' && equipoSupervisores > 0) {
+            perdidas.push(equipoSupervisores + ' supervisor(es) a cargo van a quedar sin gerente asignado');
+        }
+        if (!perdidas.length) return null;
+        return 'Si guardás este cambio de rol: ' + perdidas.join('; ') + '.';
+    }
+
+    function refresh() {
+        var role = roleSelect.value;
+        showBlocks(role);
+        var msg = warnBox ? warningFor(role) : null;
+        if (warnBox) {
+            if (msg) { warnBox.textContent = '⚠ ' + msg; warnBox.style.display = ''; }
+            else { warnBox.style.display = 'none'; }
+        }
+    }
+
+    roleSelect.addEventListener('change', refresh);
+    refresh();
 })();
 </script>
 {% endblock %}

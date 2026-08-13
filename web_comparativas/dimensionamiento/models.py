@@ -205,6 +205,11 @@ class OportunidadSummary(Base):
     codigo_articulo = Column(String(120), nullable=False, index=True)
     cliente_visible = Column(Text, nullable=True, index=True)
     cuit = Column(String(32), nullable=True)
+    # Nº de cuenta de FUSION del cliente (dataset: columna `cuenta_interna`). Es la clave
+    # con la que el CRM resuelve la cuenta (`Cuentas_por_numero_fusion?n_cuenta_c=`), NO
+    # el cuit. Se arrastra desde el renglón más reciente del par, igual que cuit/provincia.
+    # Puede venir 'SIN DATO' en el dataset → se normaliza a NULL en el motor.
+    cuenta_interna = Column(String(120), nullable=True)
     provincia = Column(String(120), nullable=True)
     producto_nombre = Column(Text, nullable=True)
     familia = Column(Text, nullable=True)
@@ -260,29 +265,36 @@ class CrmEnvio(Base):
     depende de montos/efectividad/atributos del último renglón (cuit, unidad), de
     modo que sobrevive a los recálculos mensuales.
 
-    UNIQUE(oportunidad_id) ⇒ bloqueo PERMANENTE de reenvío (default del proyecto).
-    Esta fila guarda al PRIMER emisor (quién/cuándo) y NO se sobrescribe; los
-    reenvíos por override de Admin/Gerente se anotan en `crm_envio_eventos`.
+    UNIQUE(oportunidad_id, crm_modo) ⇒ bloqueo de reenvío POR ENTORNO (ago-2026).
+    Antes el UNIQUE era solo `oportunidad_id`, lo que hacía que una oportunidad
+    probada contra el CRM de TEST quedara bloqueada para PROD. Al incluir `crm_modo`
+    ('simulado' | 'test' | 'prod'), cada entorno lleva su propio bloqueo: se puede
+    ensayar en TEST toda la semana sin comprometer el envío productivo, y sigue siendo
+    imposible mandar dos veces la misma oportunidad al MISMO entorno.
+
+    Cada fila guarda al PRIMER emisor (quién/cuándo) de SU entorno y NO se sobrescribe;
+    los reenvíos por override de Admin se anotan en `crm_envio_eventos`.
+
+    ⚠️ `crm_modo` es parte de la clave: si quedara NULL, el UNIQUE no agruparía (en
+    SQLite y en Postgres dos NULL se consideran distintos) y el bloqueo se apagaría EN
+    SILENCIO. Por eso el código lo setea siempre y la migración rellena las filas viejas.
 
     Compatible SQLite/Postgres: solo TEXT/INTEGER/TIMESTAMP. El UNIQUE lo crea
     `create_all` en tablas nuevas y `_ensure_crm_envios_table` lo alinea de forma
     idempotente en bases ya existentes (mismo patrón que el resto de _ensure_*).
 
     ── Modo alternativo "por período" (NO activo por defecto) ──────────────────
-    Para permitir reenviar en un mes nuevo, el bloqueo debería ser por
-    (oportunidad_id, periodo_yyyymm) en vez de solo oportunidad_id:
-      1. Quitar unique=True de `oportunidad_id`.
-      2. Agregar UniqueConstraint("oportunidad_id", "periodo_yyyymm",
-         name="uq_crm_envio_oport_periodo") a __table_args__.
-      3. En _ensure_crm_envios_table, crear el índice único compuesto.
-    El campo `periodo_yyyymm` ya se persiste para tener todo listo ese día.
+    Para permitir además reenviar en un mes nuevo, agregar `periodo_yyyymm` a la
+    UniqueConstraint de abajo y al índice que crea `_ensure_crm_envios_table`. El campo
+    ya se persiste para tener todo listo ese día.
     """
 
     __tablename__ = "crm_envios"
 
     id = Column(Integer, primary_key=True)
-    # Identidad estable de la oportunidad (hash corto, 16 hex). UNIQUE = bloqueo permanente.
-    oportunidad_id = Column(String(40), nullable=False, unique=True, index=True)
+    # Identidad estable de la oportunidad (hash corto, 16 hex). El bloqueo NO es por este
+    # campo solo: es por (oportunidad_id, crm_modo) — ver __table_args__.
+    oportunidad_id = Column(String(40), nullable=False, index=True)
     # Período YYYYMM del envío. Hoy informativo; clave del modo "por período".
     periodo_yyyymm = Column(String(6), nullable=True, index=True)
 
@@ -300,15 +312,40 @@ class CrmEnvio(Base):
     crm_status = Column(String(40), nullable=False, default="PENDIENTE_ENVIO_REAL")
     payload_snapshot = Column(Text, nullable=True)  # JSON serializado del payload sellado
 
+    # ── Resultado del envío REAL al CRM (SuiteCRM V8) ──
+    # crm_id: id del registro Opportunities creado en el CRM. Es lo que convierte el
+    # botón "Enviar a CRM" en "Ver en CRM" (se arma el DetailView con este id).
+    crm_id = Column(String(64), nullable=True, index=True)
+    # Cuenta del CRM resuelta por número de fusión (paso 3) — se guarda para auditoría.
+    crm_account_id = Column(String(64), nullable=True)
+    # A quién quedó asignada la oportunidad DEL LADO DEL CRM, y cómo se decidió:
+    #   'match'  -> coincidió automáticamente con quien envía (mail sin dominio).
+    #   'manual' -> quien envía la eligió a mano en el selector del modal.
+    # NO se guarda ningún origen 'fallback': la asignación automática a un tercero se
+    # eliminó a propósito. `enviado_por` sigue siendo quien disparó el envío, que puede
+    # ser distinto del asignado; son dos preguntas distintas y se auditan por separado.
+    crm_assigned_user_id = Column(String(64), nullable=True)
+    crm_assigned_usuario = Column(String(255), nullable=True)
+    crm_assigned_origen = Column(String(16), nullable=True)
+    # Entorno del CRM al que se envió realmente ('simulado' | 'test' | 'prod').
+    # FORMA PARTE DE LA CLAVE ÚNICA junto con oportunidad_id: es lo que separa el
+    # bloqueo de TEST del de PROD. Nullable solo por compatibilidad con el ALTER TABLE
+    # de bases ya existentes; el código lo setea SIEMPRE.
+    crm_modo = Column(String(16), nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("oportunidad_id", "crm_modo", name="uq_crm_envios_oport_modo"),
+    )
 
 
 class CrmEnvioEvento(Base):
     """Bitácora (append-only) de TODOS los eventos de envío al CRM.
 
-    A diferencia de `crm_envios` (1 fila canónica por oportunidad, con UNIQUE),
-    esta tabla NO tiene unique: registra el primer ENVIO y cada REENVIO_OVERRIDE
-    de Admin/Gerente, sin romper el bloqueo permanente. Permite auditar quién
+    A diferencia de `crm_envios` (1 fila canónica por oportunidad y entorno, con
+    UNIQUE), esta tabla NO tiene unique: registra el primer ENVIO y cada
+    REENVIO_OVERRIDE de Admin, sin romper el bloqueo. Permite auditar quién
     reenvió y cuándo aunque el bloqueo siga vigente.
     """
 
@@ -322,8 +359,40 @@ class CrmEnvioEvento(Base):
     enviado_por_id = Column(Integer, nullable=True)
     enviado_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
     crm_status = Column(String(40), nullable=True)
+    crm_id = Column(String(64), nullable=True)  # id del registro creado en el CRM (si hubo)
     payload_snapshot = Column(Text, nullable=True)
     nota = Column(Text, nullable=True)
+
+
+class OportunidadAsignacionManual(Base):
+    """Asignación manual de una oportunidad a un Analista, hecha por su Supervisor.
+
+    Visibilidad por cartera (Oportunidades, Mercado Privado, ago-2026): la cartera
+    de un Analista sale de su identidad en Fusión (ver `VendedorFusion` en
+    `web_comparativas/models.py`), pero un Supervisor puede pisar ese default y
+    asignarle a mano una oportunidad puntual a uno de SUS analistas — el analista la
+    ve aunque la cuenta sea de otro vendedor. Esto es ADITIVO respecto de la cartera
+    (no le saca visibilidad a nadie más), ver `oportunidades_visibilidad.py`.
+
+    Identidad estable `oportunidad_id` = `oportunidades.opportunity_stable_id(...)`,
+    igual que `CrmEnvio` — NO por `import_run_id`, para que la asignación sobreviva a
+    que se recalcule el run. UNIQUE en `oportunidad_id`: una oportunidad tiene a lo
+    sumo UN analista asignado a mano a la vez (reasignar pisa la fila anterior, no
+    acumula historial — no se pidió auditoría de reasignaciones, solo quién/cuándo
+    de la asignación vigente).
+    """
+
+    __tablename__ = "oportunidad_asignaciones_manuales"
+
+    id = Column(Integer, primary_key=True)
+    oportunidad_id = Column(String(40), nullable=False, unique=True, index=True)
+
+    analista_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    asignado_por_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    asignado_en = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<OportunidadAsignacionManual oport={self.oportunidad_id!r} analista={self.analista_user_id}>"
 
 
 class DimensionamientoImportError(Base):

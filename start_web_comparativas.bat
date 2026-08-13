@@ -16,7 +16,13 @@ set "SMTP_PORT=587"
 set "SMTP_USER=tu_usuario_smtp"
 set "SMTP_PASS=tu_password_smtp"
 set "SMTP_TLS=1"
-call "venv_webcomparativas\Scripts\activate.bat"
+
+:: === Cartera comercial (Oportunidades, Mercado Privado) ===
+:: Kill-switch del filtrado por fila en Oportunidades. Default del codigo = OFF.
+:: Para APAGARLO despues de la presentacion: cambiar el 1 de abajo por 0 (o borrar la linea).
+set "OPORTUNIDADES_CARTERA_ENABLED=1"
+
+call "C:\venvs\web_comparativas\Scripts\activate.bat"
 echo.
 echo  Abriendo en: http://127.0.0.1:8000
 echo.
