@@ -9,7 +9,12 @@ import logging
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(override=False)
+    # Ruta explícita (no auto-discovery por stack frame): bajo uvicorn --reload el
+    # worker se relanza vía multiprocessing y la detección automática de find_dotenv()
+    # puede resolver un frame distinto al de este archivo, sin encontrar nunca el .env
+    # real — dejando APP_SECRET/MATCH_ENABLED/OPORTUNIDADES_ENABLED silenciosamente en
+    # sus defaults (visto en vivo: "[SECURITY] APP_SECRET no definida" solo con --reload).
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 except ImportError:
     pass
 
