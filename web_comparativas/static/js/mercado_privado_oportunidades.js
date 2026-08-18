@@ -467,12 +467,14 @@
   // quién se va a asignar y poder cambiarlo. El 422 del backend queda solo como
   // defensa; el usuario no debería llegar nunca a verlo.
   //
-  // Tres estados posibles (ago-2026):
-  //   1. La cuenta tiene un operador de Fusión con usuario propio en el CRM: se
-  //      asigna SIEMPRE a esa persona (es la dueña real de la cuenta), sin selector.
-  //      Se recalcula cuando termina de resolver la cuenta (`loadAccountResolution`
-  //      llama de nuevo a esta función), así que hasta que eso pase puede mostrarse
-  //      brevemente el estado 2 y corregirse solo.
+  // Tres estados posibles (ago-2026, revisado para permitir reasignar aun con
+  // operador de Fusión):
+  //   1. La cuenta tiene un operador de Fusión con usuario propio en el CRM: viene
+  //      PRESELECCIONADO (es la dueña real de la cuenta), pero el selector queda
+  //      habilitado para elegir a otra persona de la lista (p. ej. quien envía, si la
+  //      cuenta en la práctica la maneja otro). Se recalcula cuando termina de resolver
+  //      la cuenta (`loadAccountResolution` llama de nuevo a esta función), así que
+  //      hasta que eso pase puede mostrarse brevemente el estado 2 y corregirse solo.
   //   2. Sin ese operador: selector acotado a la estructura de quien envía (Supervisor
   //      = su equipo, Gerente = su estructura, Admin/Auditor = todos) — ya viene
   //      acotado desde el backend en CRM_ASIGNACION.usuarios.
@@ -489,32 +491,24 @@
     const account = selectedAccount(o);
     const operadorMatch = account ? account.operador_asignado_crm : null;
 
-    if (operadorMatch) {
-      sel.innerHTML = `<option value="${esc(operadorMatch.id)}">${esc(operadorMatch.usuario)}</option>`;
-      sel.value = operadorMatch.id;
-      sel.disabled = true;
-      box.className = "alert py-2 small mb-3 alert-info";
-      $("crmAsignacionMsg").innerHTML =
-        `<i class="bi bi-person-check me-1"></i>Esta cuenta es de <strong>${esc(operadorMatch.usuario)}</strong>. ` +
-        `Se va a asignar a esa persona en el CRM.`;
-      $("crmAsignacionNota").textContent = "Vinculado por el operador de Fusión de la cuenta.";
-      box.style.display = "block";
-      const syncLocked = () => { renderResolvedPayload(o); syncCrmSendButton(o); };
-      sel.onchange = syncLocked;
-      syncLocked();
-      return true;
-    }
-
     sel.disabled = false;
-    const usuarios = CRM_ASIGNACION.usuarios || [];
+    const usuariosBase = CRM_ASIGNACION.usuarios || [];
+    // El dueño real de la cuenta (operador de Fusión) es SIEMPRE una opción válida y
+    // viene preseleccionado, pero NO exclusiva: quien envía tiene que poder elegirse a
+    // sí mismo o a su equipo si esa cuenta, en la práctica, la maneja otra persona. El
+    // backend ya acepta cualquiera de las dos (se suma a la lista que valida en
+    // `/enviar`); acá solo se refleja lo mismo en el selector.
+    const usuarios = operadorMatch && !usuariosBase.some((u) => u.id === operadorMatch.id)
+      ? [operadorMatch, ...usuariosBase]
+      : usuariosBase;
     // Sin usuarios no hay nada que ofrecer: de eso se ocupa el bloqueo del botón.
     if (!usuarios.length) {
       box.style.display = "none";
       return false;
     }
 
-    const match = CRM_ASIGNACION.match || null;
-    // Con match propio viene preseleccionado pero editable (supervisor o superior puede
+    const match = operadorMatch || CRM_ASIGNACION.match || null;
+    // Con match viene preseleccionado pero editable (supervisor o superior puede
     // reasignar). Sin match arranca vacío a propósito: obliga a un acto deliberado en vez
     // de dejar al primero de la lista listo para un envío distraído.
     sel.innerHTML = `<option value="">— Elegí un usuario —</option>` +
@@ -522,12 +516,17 @@
     sel.value = match ? match.id : "";
 
     box.className = `alert py-2 small mb-3 alert-${match ? "info" : "warning"}`;
-    $("crmAsignacionMsg").innerHTML = match
+    $("crmAsignacionMsg").innerHTML = operadorMatch
+      ? `<i class="bi bi-person-check me-1"></i>Esta cuenta es de <strong>${esc(operadorMatch.usuario)}</strong>. ` +
+        `Se va a asignar a esa persona en el CRM. Podés cambiarlo si corresponde.`
+      : match
       ? `<i class="bi bi-person-check me-1"></i>Se va a asignar a <strong>vos</strong> ` +
         `(${esc(match.usuario)}). Podés cambiarlo si corresponde.`
       : `<i class="bi bi-person-exclamation me-1"></i>Tu usuario de SIEM no coincide con ` +
         `ningún usuario del CRM. <strong>Elegí a quién asignar</strong> esta oportunidad.`;
-    $("crmAsignacionNota").textContent = match
+    $("crmAsignacionNota").textContent = operadorMatch
+      ? "Vinculado por el operador de Fusión de la cuenta. Podés reasignarlo si corresponde."
+      : match
       ? "Si elegís a otra persona, queda registrado que la asignaste vos."
       : "Queda registrado que la asignaste vos.";
     box.style.display = "block";
