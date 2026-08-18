@@ -260,7 +260,6 @@ def _build_crm_payload(
     cuenta_fusion: str | None = None,
     asignado: dict[str, str] | None = None,
     *,
-    usuarios_disponibles: bool = False,
     error_crm: str | None = None,
     puede_elegir: bool = True,
     email_siem: str | None = None,
@@ -271,9 +270,9 @@ def _build_crm_payload(
     pasa, se toma de la propia fila del summary. `asignado` es el usuario decidido
     ({id, usuario, origen}): el match automático con quien envía, o su selección manual.
 
-    `usuarios_disponibles` distingue los dos motivos por los que puede no haber asignado:
-    si hay lista de usuarios, falta ELEGIR (se resuelve en el modal); si no la hay, el
-    CRM no responde y el envío queda bloqueado.
+    `error_crm` distingue los dos motivos por los que puede no haber asignado: si el
+    CRM respondió pero falta ELEGIR, se resuelve en el modal (`requiere_asignacion`);
+    si el CRM no respondió, el envío queda bloqueado con el motivo real.
     """
     cuenta_fusion = normalizar_cuenta_fusion(
         cuenta_fusion if cuenta_fusion is not None else getattr(o, "cuenta_interna", None)
@@ -361,13 +360,19 @@ def _build_crm_payload(
                 "esta oportunidad. Pedí el alta al equipo del CRM, o que la envíe un "
                 "supervisor."
             )
-        elif usuarios_disponibles:
-            requiere_asignacion = True
-        else:
+        elif error_crm:
             bloqueos.append(
                 "No se pudo obtener la lista de usuarios del CRM para asignar la "
-                "oportunidad" + (f": {error_crm}" if error_crm else ".")
+                f"oportunidad: {error_crm}"
             )
+        else:
+            # Sin match propio y sin lista acotada con nadie de su estructura: NO se
+            # bloquea acá. La cuenta puede tener un operador de Fusión con usuario
+            # propio en el CRM (dueño real, aunque quede fuera de la estructura de
+            # quien envía) que solo se conoce al resolver la cuenta en el modal — eso
+            # se resuelve ahí (o, si tampoco hay operador, rebota en `/enviar` con el
+            # motivo real, "elegí a quién asignar").
+            requiere_asignacion = True
 
     return {
         "payload": payload,
@@ -582,7 +587,6 @@ def _row_to_dict(
     ctx = ctx or {}
     crm = _build_crm_payload(
         o, cuenta_fusion, ctx.get("match"),
-        usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
         puede_elegir=bool(ctx.get("puede_elegir", True)),
         email_siem=ctx.get("email"),
@@ -1374,7 +1378,6 @@ def oportunidades_enviar(
     asignado = _decidir_asignado(ctx, assigned_user_id)
     crm = _build_crm_payload(
         o, cuenta_fusion, asignado,
-        usuarios_disponibles=bool(ctx.get("usuarios")),
         error_crm=ctx.get("error"),
         puede_elegir=bool(ctx.get("puede_elegir", True)),
         email_siem=enviado_por,
