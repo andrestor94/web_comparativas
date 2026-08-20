@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from web_comparativas import forecast_service as svc
 from web_comparativas.migrations import ensure_forecast_override_storage
-from web_comparativas.models import ForecastUserOverride, SessionLocal, User
+from web_comparativas.models import ForecastChangeRequest, ForecastUserOverride, SessionLocal, User
 from web_comparativas.routers import forecast_router
 from web_comparativas.routers.forecast_router import _can_view_global_forecast_adjustments
 
@@ -30,6 +30,9 @@ def _create_user() -> int:
 
 def _delete_user(user_id: int) -> None:
     with SessionLocal() as session:
+        session.query(ForecastChangeRequest).filter(
+            ForecastChangeRequest.created_by_user_id == int(user_id)
+        ).delete(synchronize_session=False)
         session.query(ForecastUserOverride).filter(
             ForecastUserOverride.user_id == int(user_id)
         ).delete(synchronize_session=False)
@@ -50,8 +53,48 @@ def _active_overrides(user_id: int) -> list[ForecastUserOverride]:
         )
 
 
+def _approve_pending(user_id: int) -> None:
+    """La suite histórica valida cálculo/persistencia del estado ya aprobado."""
+    with SessionLocal() as session:
+        pending = (
+            session.query(ForecastChangeRequest)
+            .filter(ForecastChangeRequest.created_by_user_id == int(user_id))
+            .filter(ForecastChangeRequest.status == "pendiente")
+            .order_by(ForecastChangeRequest.id)
+            .all()
+        )
+        for cr in pending:
+            svc.materialize_approved_change_request(
+                session, cr, reviewer_email="regression@example.com"
+            )
+            cr.status = "aprobado"
+        session.commit()
+
+
 @pytest.fixture(autouse=True)
-def clear_response_cache_between_tests():
+def approved_state_for_legacy_calculation_tests(monkeypatch):
+    real_save = svc.save_client_overrides
+    real_group = svc.save_group_expectations
+    real_clear = svc.clear_client_overrides
+
+    def save_and_approve(*args, **kwargs):
+        result = real_save(*args, **kwargs)
+        _approve_pending(int(kwargs["user_id"]))
+        return result
+
+    def group_and_approve(*args, **kwargs):
+        result = real_group(*args, **kwargs)
+        _approve_pending(int(kwargs["user_id"]))
+        return result
+
+    def clear_and_approve(*args, **kwargs):
+        result = real_clear(*args, **kwargs)
+        _approve_pending(int(kwargs["user_id"]))
+        return result
+
+    monkeypatch.setattr(svc, "save_client_overrides", save_and_approve)
+    monkeypatch.setattr(svc, "save_group_expectations", group_and_approve)
+    monkeypatch.setattr(svc, "clear_client_overrides", clear_and_approve)
     svc.clear_response_cache()
     yield
     svc.clear_response_cache()
@@ -719,7 +762,7 @@ def test_chart_data_uses_global_override_scope_for_admin_and_auditor(monkeypatch
     monkeypatch.setattr(forecast_router.svc, "get_lab_product_codes", lambda _lab: [])
 
     admin = User(id=1, email="admin@test.local", role="admin")
-    auditor = User(id=2, email="auditor@test.local", role="Auditor SIEM")
+    auditor = User(id=2, email="auditor@test.local", role="auditor")
     analyst = User(id=3, email="analyst@test.local", role="analista")
 
     admin_response = forecast_router.api_chart_data(request=None, _user=admin)

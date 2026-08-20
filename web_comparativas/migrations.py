@@ -188,6 +188,59 @@ def ensure_oportunidad_asignaciones_manuales_table():
         print(f"[MIGRATION] Tabla 'oportunidad_asignaciones_manuales': advertencia — {e}", flush=True)
 
 
+def ensure_cartera_tables():
+    """Crea (si faltan) `cartera_import_runs`, `cartera_operadores` y
+    `cartera_vendedores` (visibilidad por cartera de cuentas, ago-2026). Solo crea
+    esquema — la carga de datos corre aparte vía `push_cartera_data.py` (mismo
+    patrón de push directo a DATABASE_URL que `migrate_forecast_csv_to_postgres.py`)."""
+    from web_comparativas.models import CarteraImportRun, CarteraOperador, CarteraVendedor
+
+    for model, label in (
+        (CarteraImportRun, "cartera_import_runs"),
+        (CarteraOperador, "cartera_operadores"),
+        (CarteraVendedor, "cartera_vendedores"),
+    ):
+        try:
+            model.__table__.create(bind=engine, checkfirst=True)
+            print(f"[MIGRATION] Tabla '{label}' verificada/creada.", flush=True)
+        except Exception as e:
+            print(f"[MIGRATION] Tabla '{label}': advertencia — {e}", flush=True)
+
+
+def ensure_users_cartera_columns():
+    """Agrega a 'users' las tres columnas de cartera de cuentas (ago-2026):
+    cartera_operador_codigos, cartera_vendedor_codigos, cartera_unineg_scope.
+
+    IMPORTANTE (a diferencia de module_access): NULL/[] en estas columnas significa
+    "sin cartera asignada" -> el resolver de `cartera_visibilidad.py` devuelve CERO
+    clientes (fail-closed). No es "acceso total" como en module_access.
+    """
+    with engine.begin() as conn:
+        for col in ("cartera_operador_codigos", "cartera_vendedor_codigos", "cartera_unineg_scope"):
+            _add_column_safe(
+                conn,
+                f"ALTER TABLE users ADD COLUMN {col} TEXT",
+                f"users.{col}",
+            )
+    print("[MIGRATION] Columnas de cartera en 'users' verificadas/creadas.", flush=True)
+
+
+def ensure_users_cartera_fusion_columns():
+    '''Agrega el modo dinámico de vinculación por nombre contra Fusión.'''
+    with engine.begin() as conn:
+        _add_column_safe(
+            conn,
+            'ALTER TABLE users ADD COLUMN cartera_fusion_enabled BOOLEAN NOT NULL DEFAULT FALSE',
+            'users.cartera_fusion_enabled',
+        )
+        _add_column_safe(
+            conn,
+            'ALTER TABLE users ADD COLUMN cartera_fusion_identidad VARCHAR(255)',
+            'users.cartera_fusion_identidad',
+        )
+    print('[MIGRATION] Columnas de vínculo dinámico con Fusión verificadas/creadas.', flush=True)
+
+
 def ensure_module_access_column():
     """
     Agrega la columna 'module_access' a la tabla 'users' si falta.

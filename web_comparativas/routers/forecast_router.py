@@ -17,6 +17,8 @@ import json as _json
 import logging
 import re
 import time
+import hashlib
+from dataclasses import dataclass
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -25,7 +27,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from web_comparativas.models import User, Ticket, TicketMessage
+from web_comparativas.models import User, Ticket, TicketMessage, SessionLocal
 from web_comparativas import forecast_service as svc
 from web_comparativas.policy import (
     require_module,
@@ -34,6 +36,7 @@ from web_comparativas.policy import (
     puede_ver_aprobaciones_forecast,
     puede_editar_aprobaciones_forecast,
 )
+from web_comparativas.cartera_visibilidad import clientes_visibles_para, FORECAST_CARTERA_ENABLED
 
 logger = logging.getLogger("wc.forecast.router")
 logger.setLevel(logging.INFO)
@@ -44,6 +47,129 @@ templates.env.globals["can_access"] = _can_access_tpl
 templates.env.globals["can_switch_market"] = _can_switch_market_tpl
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
+
+
+@dataclass(frozen=True)
+class _ForecastAccess:
+    branches: svc.ForecastCarteraBranches | None
+    member_user_ids: tuple[int, ...] | None
+    branch_member_user_ids: tuple[tuple[int, ...], ...] | None
+    unrestricted: bool
+    cache_key: str
+
+
+def _central_forecast_access(user: User) -> _ForecastAccess:
+    """Adapta el scope central sin depender del feature flag del dashboard."""
+    with SessionLocal() as db:
+        scope = clientes_visibles_para(db, user)
+    if scope.unrestricted:
+        return _ForecastAccess(None, None, None, True, "global")
+    raw = tuple((b.codigos_cliente, b.unidades_negocio) for b in scope.branches)
+    branches = svc.normalize_forecast_cartera_branches(raw)
+    member_ids = tuple(sorted({uid for b in scope.branches for uid in b.member_user_ids}))
+    branch_member_ids = tuple(tuple(sorted(b.member_user_ids)) for b in scope.branches)
+    signature = hashlib.sha256(
+        repr((branches, branch_member_ids)).encode("utf-8")
+    ).hexdigest()[:16]
+    return _ForecastAccess(branches, member_ids, branch_member_ids, False, signature)
+
+
+def _forecast_access(user: User) -> _ForecastAccess:
+    """Scope del dashboard: el flag apagado conserva el comportamiento anterior."""
+    if not FORECAST_CARTERA_ENABLED():
+        return _ForecastAccess(None, None, None, True, "disabled")
+    return _central_forecast_access(user)
+
+
+def _forecast_preview_requested(user: User, scenario: str | None) -> bool:
+    # Al invocar la función directamente (tests/herramientas internas), FastAPI
+    # no reemplaza el objeto Query por su default.
+    value = str(scenario if isinstance(scenario, str) else "official").strip().lower()
+    if value not in {"official", "pending"}:
+        raise HTTPException(400, "Escenario Forecast inválido")
+    if value == "pending" and _forecast_role_key(user) == "auditor":
+        raise HTTPException(403, "Auditor solo puede consultar el Forecast oficial")
+    return value == "pending"
+
+
+def _forecast_override_owner_scope(user: User, access: _ForecastAccess):
+    if access.unrestricted:
+        return "all"
+    ids = set(access.member_user_ids or ())
+    if getattr(user, "id", None) is not None:
+        ids.add(int(user.id))
+    return tuple(sorted(ids))
+
+
+def _forecast_override_context(user: User, access: _ForecastAccess, *, preview_pending: bool):
+    return svc.forecast_override_context(
+        owner_user_ids=_forecast_override_owner_scope(user, access),
+        preview_user_id=int(user.id) if preview_pending else None,
+    )
+
+
+def _require_visible_client(
+    user: User, selector: str, access: _ForecastAccess | None = None, visible_selectors: tuple = (),
+) -> None:
+    """`visible_selectors`: precómputo opcional de `_approval_visible_selectors_for`
+    (una pasada de `df_valorizado` por rama). Pasalo siempre que se llame esto en
+    un loop de varios clientes (save-group, save-group-batch) — sin él, cada
+    cliente repite el escaneo completo (~700ms medidos) igual que hacía
+    Aprobaciones Forecast antes de este mismo fix."""
+    access = access or _forecast_access(user)
+    if access.branches is None:
+        return
+    sel = str(selector or "").strip()
+    if visible_selectors:
+        ok = any(
+            (sel in vs) if vs is not None else svc.forecast_client_visible(sel, (branch,))
+            for branch, vs in zip(access.branches, visible_selectors)
+        )
+    else:
+        ok = svc.forecast_client_visible(sel, access.branches)
+    if not ok:
+        raise HTTPException(status_code=403, detail="Cliente fuera de la cartera autorizada")
+
+
+def _require_forecast_proposal_write(user: User) -> None:
+    if _forecast_role_key(user) not in {"admin", "gerente", "supervisor", "analista"}:
+        raise HTTPException(403, "No tiene permiso para proponer cambios de Forecast")
+
+
+def _require_proposal_scope(
+    user: User,
+    access: _ForecastAccess,
+    client_selector: str,
+    subnegs: list[str | None],
+) -> None:
+    """Autoriza un guardado: cuenta visible + (si no es dueño-miembro) dueño
+    dentro de la rama. `subnegs` ya NO se usa para filtrar — la UN dejó de
+    restringir filas dentro de una cuenta heredada (ver
+    `normalize_forecast_cartera_branches`, corrección 2026-08-20: la UN decide
+    QUÉ CUENTAS se heredan, no qué "negocio" de esa cuenta se puede tocar). Por
+    eso esto ya no itera por subneg — antes repetía el chequeo de rama una vez
+    por cada `subneg` recibido (hasta uno por cada celda del payload, sin
+    deduplicar) pagando un escaneo completo del dataset en cada vuelta; ahora
+    es UN solo chequeo, con el precómputo de `_approval_visible_selectors_for`
+    para no escanear nada (ver docstring de `forecast_branch_visible_selectors`).
+    Se mantiene el parámetro `subnegs` en la firma sin usar para no tocar el
+    call site en `api_save_client`."""
+    _require_forecast_proposal_write(user)
+    visible_selectors = _approval_visible_selectors_for(access)
+    _require_visible_client(user, client_selector, access, visible_selectors)
+    if access.unrestricted:
+        return
+    role = _forecast_role_key(user)
+    indexes = _approval_branch_indexes(
+        access,
+        owner_user_id=getattr(user, "id", None),
+        client_selector=client_selector,
+        neg=None,
+        require_owner_member=role != "gerente",
+        visible_selectors=visible_selectors,
+    )
+    if not indexes:
+        raise HTTPException(403, "Cambio fuera de la rama autorizada")
 
 
 def _approx_json_bytes(payload) -> int:
@@ -133,6 +259,8 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/", response_class=HTMLResponse)
 def forecast_home(request: Request, user: User = Depends(require_module("forecast"))):
+    access = _forecast_access(user)
+    approvals_visible = puede_ver_aprobaciones_forecast(user)
     return templates.TemplateResponse(
         "forecast/index.html",
         {
@@ -141,8 +269,9 @@ def forecast_home(request: Request, user: User = Depends(require_module("forecas
             "market_context": "forecast",
             # Aprobaciones Forecast: visibilidad/edición por rol (autoridad = policy).
             # El template SOLO refleja; el backend reenforza igual en cada endpoint.
-            "can_view_approvals": puede_ver_aprobaciones_forecast(user),
-            "can_edit_approvals": puede_editar_aprobaciones_forecast(user),
+            "can_view_approvals": approvals_visible,
+            "can_edit_approvals": approvals_visible and puede_editar_aprobaciones_forecast(user),
+            "forecast_scope_cache_key": access.cache_key,
         },
     )
 
@@ -155,7 +284,7 @@ def forecast_home(request: Request, user: User = Depends(require_module("forecas
 def api_filter_options(request: Request, _user: User = Depends(require_module("forecast"))):
     started = time.perf_counter()
     try:
-        result = svc.get_filter_options()
+        result = svc.get_filter_options(cartera_branches=_forecast_access(_user).branches)
         _log_api_perf("filter-options", started, result)
         if isinstance(result, bytes):
             return Response(content=result, media_type="application/json")
@@ -174,7 +303,10 @@ def api_product_list(
 ):
     started = time.perf_counter()
     try:
-        result = svc.get_product_list(profiles=profiles, neg=neg)
+        result = svc.get_product_list(
+            profiles=profiles, neg=neg,
+            cartera_branches=_forecast_access(_user).branches,
+        )
         _log_api_perf("product-list", started, result)
         if isinstance(result, bytes):
             return Response(content=result, media_type="application/json")
@@ -196,6 +328,7 @@ def api_chart_data(
     lab_name: Optional[str] = Query(default=None),
     view_money: bool = Query(default=True),
     growth_pct: float = Query(default=0.0),
+    scenario: str = Query(default="official"),
     _user: User = Depends(require_module("forecast")),
 ):
     import traceback as _tb
@@ -207,7 +340,9 @@ def api_chart_data(
     )
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
-        can_view_global = _can_view_global_forecast_adjustments(_user)
+        access = _forecast_access(_user)
+        preview_pending = _forecast_preview_requested(_user, scenario)
+        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
         logger.info(
             "[FORECAST API] chart-data user_id=%s role=%r role_key=%s global_overrides=%s",
             getattr(_user, "id", None),
@@ -215,18 +350,21 @@ def api_chart_data(
             _forecast_role_key(_user),
             can_view_global,
         )
-        result = svc.get_chart_data(
-            user_id=_user.id,
-            start_date=start_date,
-            end_date=end_date,
-            profiles=profiles,
-            neg=neg,
-            subneg=subneg,
-            products=resolved_products,
-            view_money=view_money,
-            growth_pct=growth_pct,
-            is_admin=can_view_global,
-        )
+        with _forecast_override_context(_user, access, preview_pending=preview_pending):
+            result = svc.get_chart_data(
+                user_id=_user.id,
+                start_date=start_date,
+                end_date=end_date,
+                profiles=profiles,
+                neg=neg,
+                subneg=subneg,
+                products=resolved_products,
+                view_money=view_money,
+                growth_pct=growth_pct,
+                is_admin=can_view_global,
+                cartera_branches=access.branches,
+                preview_pending=preview_pending,
+            )
         # Cache HIT returns pre-serialized bytes — bypass FastAPI encoding entirely.
         if isinstance(result, bytes):
             _log_api_perf("chart-data", started, result)
@@ -269,6 +407,8 @@ def api_chart_data(
             logger.debug("chart-data sanitized — retrying JSON")
         _log_api_perf("chart-data", started, result)
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("chart-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -287,6 +427,7 @@ def api_client_table(
     growth_pct: float = Query(default=0.0),
     lab_products: Optional[List[str]] = Query(default=None, alias="lab_products[]"),
     lab_name: Optional[str] = Query(default=None),
+    scenario: str = Query(default="official"),
     _user: User = Depends(require_module("forecast")),
 ):
     import traceback as _tb
@@ -294,24 +435,31 @@ def api_client_table(
     logger.debug("client-table start=%s end=%s profiles=%s neg=%s", start_date, end_date, profiles, neg)
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
-        can_view_global = _can_view_global_forecast_adjustments(_user)
-        result = svc.get_client_table(
-            user_id=_user.id,
-            start_date=start_date,
-            end_date=end_date,
-            profiles=profiles,
-            neg=neg,
-            subneg=subneg,
-            products=resolved_products,
-            view_money=view_money,
-            growth_pct=growth_pct,
-            lab_products=lab_products,
-            is_admin=can_view_global,
-        )
+        access = _forecast_access(_user)
+        preview_pending = _forecast_preview_requested(_user, scenario)
+        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        with _forecast_override_context(_user, access, preview_pending=preview_pending):
+            result = svc.get_client_table(
+                user_id=_user.id,
+                start_date=start_date,
+                end_date=end_date,
+                profiles=profiles,
+                neg=neg,
+                subneg=subneg,
+                products=resolved_products,
+                view_money=view_money,
+                growth_pct=growth_pct,
+                lab_products=lab_products,
+                is_admin=can_view_global,
+                cartera_branches=access.branches,
+                preview_pending=preview_pending,
+            )
         _log_api_perf("client-table", started, result)
         if isinstance(result, bytes):
             return Response(content=result, media_type="application/json")
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("client-table error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -329,29 +477,37 @@ def api_treemap_data(
     view_money: bool = Query(default=True),
     period_date: Optional[str] = Query(default=None),
     lab_name: Optional[str] = Query(default=None),
+    scenario: str = Query(default="official"),
     _user: User = Depends(require_module("forecast")),
 ):
     started = time.perf_counter()
     logger.debug("treemap-data start=%s end=%s profiles=%s neg=%s period=%s", start_date, end_date, profiles, neg, period_date)
     try:
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
-        can_view_global = _can_view_global_forecast_adjustments(_user)
-        result = svc.get_treemap_data(
-            user_id=_user.id,
-            start_date=start_date,
-            end_date=end_date,
-            profiles=profiles,
-            neg=neg,
-            subneg=subneg,
-            products=resolved_products,
-            view_money=view_money,
-            period_date=period_date,
-            is_admin=can_view_global,
-        )
+        access = _forecast_access(_user)
+        preview_pending = _forecast_preview_requested(_user, scenario)
+        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        with _forecast_override_context(_user, access, preview_pending=preview_pending):
+            result = svc.get_treemap_data(
+                user_id=_user.id,
+                start_date=start_date,
+                end_date=end_date,
+                profiles=profiles,
+                neg=neg,
+                subneg=subneg,
+                products=resolved_products,
+                view_money=view_money,
+                period_date=period_date,
+                is_admin=can_view_global,
+                cartera_branches=access.branches,
+                preview_pending=preview_pending,
+            )
         _log_api_perf("treemap-data", started, result)
         if isinstance(result, bytes):
             return Response(content=result, media_type="application/json")
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("treemap-data error: %s", exc, exc_info=True)
         raise HTTPException(500, str(exc))
@@ -368,27 +524,35 @@ def api_client_detail(
     subneg: Optional[List[str]] = Query(default=None, alias="subneg[]"),
     products: Optional[List[str]] = Query(default=None, alias="products[]"),
     growth_pct: float = Query(default=0.0),
+    scenario: str = Query(default="official"),
     _user: User = Depends(require_module("forecast")),
 ):
     started = time.perf_counter()
     try:
-        can_view_global = _can_view_global_forecast_adjustments(_user)
-        result = svc.get_client_detail(
-            user_id=_user.id,
-            client_id=client_id,
-            start_date=start_date,
-            end_date=end_date,
-            profiles=profiles,
-            neg=neg,
-            subneg=subneg,
-            products=products,
-            growth_pct=growth_pct,
-            is_admin=can_view_global,
-        )
+        access = _forecast_access(_user)
+        preview_pending = _forecast_preview_requested(_user, scenario)
+        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        with _forecast_override_context(_user, access, preview_pending=preview_pending):
+            result = svc.get_client_detail(
+                user_id=_user.id,
+                client_id=client_id,
+                start_date=start_date,
+                end_date=end_date,
+                profiles=profiles,
+                neg=neg,
+                subneg=subneg,
+                products=products,
+                growth_pct=growth_pct,
+                is_admin=can_view_global,
+                cartera_branches=access.branches,
+                preview_pending=preview_pending,
+            )
         _log_api_perf("client-detail", started, result)
         if isinstance(result, bytes):
             return Response(content=result, media_type="application/json")
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         import traceback as _tb
         logger.error(
@@ -402,6 +566,8 @@ def api_client_detail(
 def api_debug_schema(request: Request, _user: User = Depends(require_module("forecast"))):
     """Return actual column names for all forecast tables from information_schema.
     Use this to verify the real PostgreSQL schema matches what the code expects."""
+    if _forecast_role_key(_user) != "admin":
+        raise HTTPException(403, "Solo administradores")
     try:
         return svc.get_forecast_schema_info()
     except Exception as exc:
@@ -412,6 +578,8 @@ def api_debug_schema(request: Request, _user: User = Depends(require_module("for
 @router.get("/api/debug-overrides")
 def api_debug_overrides(request: Request, _user: User = Depends(require_module("forecast"))):
     """Inspect ForecastUserOverride records for the current user — for debugging only."""
+    if _forecast_role_key(_user) != "admin":
+        raise HTTPException(403, "Solo administradores")
     from web_comparativas.models import SessionLocal, ForecastUserOverride
     from web_comparativas import forecast_service as _svc
     if SessionLocal is None or ForecastUserOverride is None:
@@ -469,6 +637,8 @@ def api_reload(request: Request, _user: User = Depends(require_module("forecast"
 def api_diag(_user: User = Depends(require_module("forecast"))):
     """Diagnostic endpoint: reports which CSV file is loaded, row counts, totals and timestamps.
     Available to all authenticated users for debugging purposes."""
+    if _forecast_role_key(_user) != "admin":
+        raise HTTPException(403, "Solo administradores")
     import pandas as pd
     import datetime as _dt
     import sqlite3
@@ -546,6 +716,13 @@ def api_save_client(
     _user: User = Depends(require_module("forecast")),
 ):
     """Persist per-product overrides for a client and reflect changes in the whole dashboard."""
+    access = _forecast_access(_user)
+    _require_proposal_scope(
+        _user,
+        access,
+        payload.client_id,
+        [o.subneg for o in payload.subneg_overrides] + [o.subneg for o in payload.overrides],
+    )
     try:
         svc.save_client_overrides(
             user_id=_user.id,
@@ -591,6 +768,11 @@ def api_save_group(
     _user: User = Depends(require_module("forecast")),
 ):
     """Save a uniform growth expectation for all clients in a group."""
+    _require_forecast_proposal_write(_user)
+    access = _forecast_access(_user)
+    visible_selectors = _approval_visible_selectors_for(access)
+    for client_id in payload.client_ids:
+        _require_visible_client(_user, client_id, access, visible_selectors)
     try:
         result = svc.save_group_expectations(
             user_id=_user.id,
@@ -599,6 +781,7 @@ def api_save_group(
             growth_pct=payload.growth_pct,
             base_growth_pct=payload.base_growth_pct,
             user_email=_user.email,
+            cartera_branches=access.branches,
         )
         saved_ok = result.get("saved_clients", 0) > 0 and result.get("saved_overrides", 0) > 0
         return {"ok": saved_ok, "group_name": payload.group_name, **result}
@@ -620,6 +803,12 @@ def api_save_group_batch(
     _user: User = Depends(require_module("forecast")),
 ):
     """Save a uniform growth expectation across multiple groups at once."""
+    _require_forecast_proposal_write(_user)
+    access = _forecast_access(_user)
+    visible_selectors = _approval_visible_selectors_for(access)
+    for group in payload.groups:
+        for client_id in list(group.get("client_ids", [])):
+            _require_visible_client(_user, client_id, access, visible_selectors)
     try:
         total_saved = 0
         total_overrides = 0
@@ -635,6 +824,7 @@ def api_save_group_batch(
                 growth_pct=payload.growth_pct,
                 base_growth_pct=payload.base_growth_pct,
                 user_email=_user.email,
+                cartera_branches=access.branches,
             )
             total_saved   += result.get("saved_clients", 0)
             total_overrides += result.get("saved_overrides", 0)
@@ -664,8 +854,16 @@ def api_clear_client(
     _user: User = Depends(require_module("forecast")),
 ):
     """Remove all saved overrides for a client, restoring the CSV baseline."""
+    _require_forecast_proposal_write(_user)
+    _require_visible_client(_user, client_id)
     try:
-        svc.clear_client_overrides(user_id=_user.id, client_id=client_id, user_email=_user.email)
+        access = _forecast_access(_user)
+        svc.clear_client_overrides(
+            user_id=_user.id,
+            client_id=client_id,
+            user_email=_user.email,
+            cartera_branches=access.branches,
+        )
         return {"ok": True, "client_id": client_id}
     except Exception as exc:
         logger.error("clear-client error: %s", exc, exc_info=True)
@@ -735,6 +933,8 @@ def api_create_manual_client(
 ):
     """Create a new manual forecast client with article-month entries."""
     started = time.perf_counter()
+    if _forecast_access(_user).branches is not None:
+        raise HTTPException(403, "Los clientes manuales no poseen identidad Fusión autorizable")
     try:
         nombre = (payload.nombre_cliente or "").strip()
         if not nombre:
@@ -837,6 +1037,8 @@ def api_add_articles_to_manual_client(
 ):
     """Append new article-month entries to an existing manual client."""
     started = time.perf_counter()
+    if _forecast_access(_user).branches is not None:
+        raise HTTPException(403, "Los clientes manuales no poseen identidad Fusión autorizable")
     try:
         if not payload.entries:
             raise HTTPException(400, "Debe agregar al menos un artículo")
@@ -873,6 +1075,7 @@ def api_add_articles_by_client_name(
     Existing records are reused, so no duplication occurs.
     """
     started = time.perf_counter()
+    _require_visible_client(_user, payload.client_name)
     try:
         name = (payload.client_name or "").strip()
         if not name:
@@ -1044,11 +1247,7 @@ def _require_audit_access(user: User) -> None:
 
 
 def _require_aprobaciones_view(user: User) -> None:
-    """Aprobaciones Forecast — LECTURA: Admin, Gerente y Auditor. Resto → 403.
-
-    Autoridad server-side de los endpoints GET de la sección. La fuente de verdad
-    de la matriz es policy.puede_ver_aprobaciones_forecast.
-    """
+    """Lectura habilitada a roles canónicos; cada fila se filtra luego por scope."""
     if not puede_ver_aprobaciones_forecast(user):
         raise HTTPException(
             status_code=403,
@@ -1057,11 +1256,7 @@ def _require_aprobaciones_view(user: User) -> None:
 
 
 def _require_aprobaciones_edit(user: User) -> None:
-    """Aprobaciones Forecast — EDICIÓN (aprobar/rechazar): SOLO Admin y Gerente.
-
-    Auditor, Analista y Supervisor → 403, aunque le peguen directo al endpoint.
-    La fuente de verdad de la matriz es policy.puede_editar_aprobaciones_forecast.
-    """
+    """Permite intentar una decisión; la fila exige además nivel y rama válidos."""
     if not puede_editar_aprobaciones_forecast(user):
         raise HTTPException(
             status_code=403,
@@ -1069,7 +1264,241 @@ def _require_aprobaciones_edit(user: User) -> None:
         )
 
 
+def _approval_branch_indexes(
+    access: _ForecastAccess,
+    *,
+    owner_user_id,
+    client_selector,
+    neg,
+    require_owner_member: bool = True,
+    visible_selectors: tuple = (),
+) -> set[int]:
+    """Ramas que autorizan simultáneamente dueño, cliente y UN del registro.
+
+    `visible_selectors`: precómputo opcional de `svc.forecast_branch_visible_selectors`
+    — un frozenset de selectores visibles POR RAMA (o `None` en esa posición si
+    no aplica, ej. PostgreSQL). Cuando está presente evita volver a escanear
+    `df_valorizado` completo en esta llamada (ver docstring de esa función);
+    sin él, cae al camino viejo (`forecast_client_visible` fila por fila) —
+    mismo resultado, más lento. Pasarlo SIEMPRE que se evalúe esto en un loop
+    sobre muchas filas (Aprobaciones Forecast)."""
+    try:
+        owner_id = int(owner_user_id)
+    except (TypeError, ValueError):
+        return set()
+    selector = str(client_selector or "").strip()
+    neg_key = str(neg or "").strip().casefold()
+    if not selector or access.branches is None or access.branch_member_user_ids is None:
+        return set()
+    if len(access.branches) != len(access.branch_member_user_ids):
+        return set()
+
+    authorized: set[int] = set()
+    for idx, (branch, members) in enumerate(zip(access.branches, access.branch_member_user_ids)):
+        if require_owner_member and owner_id not in set(members):
+            continue
+        _accounts, units = branch
+        if units is not None:
+            unit_keys = {str(value).strip().casefold() for value in units if str(value).strip()}
+            # Gerente/Supervisor requieren UN explícita. Un CR legacy sin neg no se
+            # puede ubicar de forma inequívoca y queda cerrado.
+            if not neg_key or neg_key not in unit_keys:
+                continue
+        precomputed = visible_selectors[idx] if idx < len(visible_selectors) else None
+        if precomputed is not None:
+            if selector in precomputed:
+                authorized.add(idx)
+            continue
+        try:
+            if svc.forecast_client_visible(selector, (branch,)):
+                authorized.add(idx)
+        except Exception:
+            continue
+    return authorized
+
+
 # ── Textos de limitación incluidos en cada fila del export ──────────────────
+def _approval_request_branch_indexes(
+    access: _ForecastAccess, cr, *, require_owner_member: bool = True, visible_selectors: tuple = (),
+) -> set[int]:
+    return _approval_branch_indexes(
+        access,
+        owner_user_id=getattr(cr, "created_by_user_id", None),
+        client_selector=getattr(cr, "client_selector", None),
+        neg=getattr(cr, "neg", None),
+        require_owner_member=require_owner_member,
+        visible_selectors=visible_selectors,
+    )
+
+
+def _approval_owner(session, cr):
+    try:
+        owner_id = int(getattr(cr, "created_by_user_id", None))
+    except (TypeError, ValueError):
+        return None
+    return session.get(User, owner_id)
+
+
+def _can_view_approval_request(
+    session, user: User, cr, access: _ForecastAccess | None = None, visible_selectors: tuple = (),
+) -> bool:
+    """Espejo a nivel de fila de `puede_ver_aprobaciones_forecast`. Detrás de
+    FORECAST_CARTERA_ENABLED, igual criterio que el resto del módulo (agregado
+    2026-08-20 para que subir este código no cambie nada visible en producción
+    hasta que se prenda el flag — ver el bloque de comentario en policy.py).
+
+    Flag prendido: Analista y Supervisor ya quedan afuera antes de llegar acá
+    (`_require_aprobaciones_view` los corta en la puerta del endpoint) — se
+    acota igual el rol acá para que esta función no le mienta a un futuro
+    caller que la reuse fuera de ese endpoint. Ve por rama (cartera +
+    reporta_a_id vía `_central_forecast_access`).
+
+    Flag apagado: matriz previa a la corrección — Admin/Gerente/Supervisor/
+    Auditor ven todo; Analista solo lo propio. SIN cartera, SIN reporta_a_id
+    (`access`/`visible_selectors` no se usan en esta rama — ni siquiera hace
+    falta que el caller los calcule).
+
+    `visible_selectors`: ver `_approval_branch_indexes` — pasalo siempre que
+    evalúes esto para muchas filas del mismo `access` (evita re-escanear
+    df_valorizado por cada llamada)."""
+    role = _forecast_role_key(user)
+    if not FORECAST_CARTERA_ENABLED():
+        if role not in {"admin", "gerente", "supervisor", "analista", "auditor"}:
+            return False
+        if role != "analista":
+            return True
+        owner = _approval_owner(session, cr)
+        return owner is not None and int(getattr(owner, "id", 0) or 0) == int(getattr(user, "id", 0) or 0)
+    if role not in {"admin", "gerente", "auditor"}:
+        return False
+    if role in {"admin", "auditor"}:
+        return True
+    owner = _approval_owner(session, cr)
+    if owner is None or _forecast_role_key(owner) not in {"admin", "gerente", "supervisor", "analista"}:
+        return False
+    owner_id = int(owner.id)
+    actor_id = int(getattr(user, "id", 0) or 0)
+    access = access or _central_forecast_access(user)
+    if access.unrestricted or not access.branches:
+        return False
+    return bool(_approval_request_branch_indexes(
+        access,
+        cr,
+        require_owner_member=owner_id != actor_id,
+        visible_selectors=visible_selectors,
+    ))
+
+
+def _can_review_approval_request(
+    session, user: User, cr, access: _ForecastAccess | None = None, visible_selectors: tuple = (),
+) -> bool:
+    """Detrás de FORECAST_CARTERA_ENABLED (ver docstring de `_can_view_approval_request`).
+
+    Flag prendido: único rol que decide (aprueba/rechaza) es Gerente, sin
+    importar si la propuesta la creó un Analista o un Supervisor de su rama —
+    más Admin, sin restricción. Supervisor NUNCA decide (política corregida
+    2026-08-20; antes dejaba a un Supervisor revisar a sus analistas — ver
+    policy.py). Ve por rama (cartera + reporta_a_id).
+
+    Flag apagado: Admin/Gerente/Supervisor deciden sobre CUALQUIER propuesta
+    pendiente, SIN cartera, SIN reporta_a_id (matriz previa a la corrección).
+
+    En ambos casos la autoprobación queda prohibida (`owner_id == actor_id`
+    corta antes de mirar rol o flag) — no es parte de "scoping de cartera",
+    es un piso de sanidad que no depende de ninguno de los dos.
+
+    `visible_selectors`: ver `_approval_branch_indexes`."""
+    role = _forecast_role_key(user)
+    owner = _approval_owner(session, cr)
+    if owner is None:
+        return False
+    actor_id = int(getattr(user, "id", 0) or 0)
+    owner_id = int(getattr(owner, "id", 0) or 0)
+    if not actor_id or owner_id == actor_id:
+        return False
+    if not FORECAST_CARTERA_ENABLED():
+        return role in {"admin", "gerente", "supervisor"}
+    owner_role = _forecast_role_key(owner)
+    if role == "admin":
+        return owner_role in {"admin", "gerente", "supervisor", "analista"}
+    if role != "gerente" or owner_role not in {"analista", "supervisor"}:
+        return False
+    access = access or _central_forecast_access(user)
+    return bool(
+        not access.unrestricted
+        and access.branches
+        and _approval_request_branch_indexes(access, cr, require_owner_member=True, visible_selectors=visible_selectors)
+    )
+
+
+def _approval_visible_selectors_for(access: _ForecastAccess | None) -> tuple:
+    """Precómputo de `svc.forecast_branch_visible_selectors` para un `access` ya
+    resuelto — UNA pasada del dataset por rama, para reusar en todo el loop de
+    filas que sigue (ver `_approval_branch_indexes`). `access=None` (admin/auditor,
+    sin ramas) devuelve `()`, consistente con el default de esas funciones."""
+    if access is None or access.unrestricted or not access.branches:
+        return ()
+    return svc.forecast_branch_visible_selectors(access.branches)
+
+
+def _approval_access_for(user: User, role: str) -> _ForecastAccess | None:
+    """`_central_forecast_access(user)` — SOLO si FORECAST_CARTERA_ENABLED está
+    prendido. Con el flag apagado, `_can_view/_can_review_approval_request` no
+    usan `access` para nada (matriz previa a la corrección, sin cartera): pedirlo
+    igual sería una consulta + un escaneo de rama tirados a la basura en cada
+    request de Aprobaciones mientras el flag esté apagado."""
+    if role in {"admin", "auditor"} or not FORECAST_CARTERA_ENABLED():
+        return None
+    return _central_forecast_access(user)
+
+
+def _filter_visible_approval_requests(session, user: User, rows: list) -> list:
+    role = _forecast_role_key(user)
+    if role in {"admin", "auditor"}:
+        return list(rows)
+    access = _approval_access_for(user, role)
+    visible_selectors = _approval_visible_selectors_for(access)
+    return [
+        row for row in rows
+        if _can_view_approval_request(session, user, row, access, visible_selectors)
+    ]
+
+
+def _visible_approval_records(session, user: User, rows: list, group_map: dict | None = None) -> list[dict]:
+    role = _forecast_role_key(user)
+    access = _approval_access_for(user, role)
+    visible_selectors = _approval_visible_selectors_for(access)
+    visible = [
+        row for row in rows
+        if role in {"admin", "auditor"} or _can_view_approval_request(session, user, row, access, visible_selectors)
+    ]
+    return [
+        _cr_to_dict(
+            row,
+            group_map,
+            can_review=_can_review_approval_request(session, user, row, access, visible_selectors),
+        )
+        for row in visible
+    ]
+
+
+def _require_approval_request_access(
+    session, user: User, cr, access: _ForecastAccess | None = None, visible_selectors: tuple = (),
+) -> None:
+    _require_aprobaciones_edit(user)
+    try:
+        if getattr(cr, "status", "pendiente") != "pendiente":
+            raise ValueError("solicitud no pendiente")
+        if not _can_review_approval_request(session, user, cr, access, visible_selectors):
+            raise ValueError("fuera de jerarquía o rama")
+    except Exception as exc:
+        logger.warning(
+            "forecast approval denied user_id=%s request_id=%s reason=%s",
+            getattr(user, "id", None), getattr(cr, "id", None), exc,
+        )
+        raise HTTPException(403, "Aprobación fuera del alcance autorizado")
+
+
 _LIM_VALORES_ABSOLUTOS = (
     "Valor absoluto no disponible: forecast_user_overrides almacena solo "
     "porcentajes de ajuste. Para impacto monetario cruzar con fact_forecast_valorizado."
@@ -1632,7 +2061,7 @@ def _lookup_grupo(client_name, client_selector, group_map: dict | None) -> str:
     return ""
 
 
-def _cr_to_dict(cr, group_map: dict | None = None) -> dict:
+def _cr_to_dict(cr, group_map: dict | None = None, *, can_review: bool = False) -> dict:
     return {
         "_created_sort": cr.created_at or dt.datetime.min,
         "id": cr.id,
@@ -1664,6 +2093,7 @@ def _cr_to_dict(cr, group_map: dict | None = None) -> dict:
         "revisado_por": cr.reviewed_by_username or "—",
         "revisado_el": cr.reviewed_at.strftime("%Y-%m-%d %H:%M:%S") if cr.reviewed_at else "—",
         "motivo": cr.review_comment or "",
+        "can_review": bool(can_review),
     }
 
 
@@ -2037,7 +2467,7 @@ def api_approvals(
     try:
         with SessionLocal() as session:
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
-            records = [_cr_to_dict(r) for r in rows]
+            records = _visible_approval_records(session, user, rows)
 
         # Matriz/impactos desde los propios change requests (delta real, por status).
         # Ya NO usa la curva +25% (ver _compute_approval_kpis).
@@ -2097,6 +2527,11 @@ def api_approvals_filter_options(
 
         # Usuario (cotizador) y Período: propios de las modificaciones.
         with SessionLocal() as session:
+            visible_rows = _filter_visible_approval_requests(
+                session,
+                user,
+                session.query(CR).order_by(CR.created_at.desc()).limit(_MAX_CR_POOL).all(),
+            )
             comerciales = sorted({
                 r.created_by_username
                 for r in session.query(CR.created_by_username).distinct()
@@ -2113,6 +2548,12 @@ def api_approvals_filter_options(
                 negocios = sorted({r.neg for r in session.query(CR.neg).distinct() if r.neg})
             if not subnegs:
                 subnegs = sorted({r.subneg for r in session.query(CR.subneg).distinct() if r.subneg})
+
+            comerciales = sorted({r.created_by_username for r in visible_rows if r.created_by_username})
+            periodos = sorted({r.period for r in visible_rows if r.period})
+            perfiles = sorted({r.perfil for r in visible_rows if r.perfil})
+            negocios = sorted({r.neg for r in visible_rows if r.neg})
+            subnegs = sorted({r.subneg for r in visible_rows if r.subneg})
 
         return JSONResponse({
             "ok": True,
@@ -2131,20 +2572,27 @@ class _ReviewPayload(BaseModel):
     motivo: Optional[str] = Field(default=None, max_length=2000)
 
 
-def _apply_review(session, cr, *, status: str, user: User, motivo: Optional[str]) -> Optional[int]:
-    """Aplica la revisión a un change_request. Devuelve el user_id DUEÑO del override
-    revertido (para invalidar su caché tras el commit), o None.
+def _apply_review(
+    session, cr, *, status: str, user: User, motivo: Optional[str],
+    access: _ForecastAccess | None = None, visible_selectors: tuple = (),
+) -> Optional[int]:
+    """Aplica la revisión a un change_request. Devuelve el user_id DUEÑO de la
+    propuesta (para invalidar su caché tras el commit), o None.
 
-    APROBAR  → solo cambia status (el override ya está aplicado, ahora avalado).
-    RECHAZAR → además:
-      (a) desactiva el override vigente vinculado (cr.override_id) → el alcance vuelve
-          a la BASE del modelo. Al grano del override (un subneg revierte sus celdas;
-          un override de celda más fino, separado, sobrevive).
-      (b) marca TODAS las CR pendientes HERMANAS del mismo override como rechazadas
-          con el mismo motivo (sin pendientes fantasma).
-    Idempotente: si el override ya está inactivo, o las hermanas ya no están
-    pendientes, no rompe ni re-procesa (los loops grupo/by-ids saltan las ya
-    decididas por su guard `status != 'pendiente'`)."""
+    Modelo vigente (corregido 2026-08-20 — el comentario anterior describía un
+    flujo previo que ya no existe en el código): la solicitud PENDIENTE es la
+    propuesta completa; el ForecastUserOverride no existe todavía (ver
+    `_upsert_override_record` en forecast_service.py).
+      APROBAR  → `materialize_approved_change_request` crea/actualiza el
+                 override recién ahí (atómico) y linkea `cr.override_id`.
+      RECHAZAR → solo cambia status/motivo (`_stamp`). No hay override que
+                 revertir porque nunca se creó — el Forecast oficial queda
+                 intacto tal cual estaba, que es exactamente el resultado
+                 buscado.
+    Ninguna cascada a CR "hermanas" acá: eso ya lo resuelve
+    `_record_change_request` al CREAR una propuesta nueva (rechaza en el acto
+    cualquier pendiente previa del mismo autor+identity — ver ese docstring)."""
+    _require_approval_request_access(session, user, cr, access, visible_selectors)
     reviewer_id = getattr(user, "id", None)
     reviewer_email = getattr(user, "email", None) or getattr(user, "display_name", None)
     now = dt.datetime.utcnow()
@@ -2158,26 +2606,26 @@ def _apply_review(session, cr, *, status: str, user: User, motivo: Optional[str]
         if motivo is not None:
             c.review_comment = comment
 
-    if status != "rechazado":
+    # Nuevo flujo: la solicitud pendiente es la propuesta. Aprobar la
+    # materializa de forma atómica; rechazar conserva intacto el Forecast oficial.
+    if status == "aprobado":
+        try:
+            owner_uid = svc.materialize_approved_change_request(
+                session, cr, reviewer_email=reviewer_email
+            )
+        except ValueError as exc:
+            logger.warning("forecast stale proposal request_id=%s: %s", getattr(cr, "id", None), exc)
+            raise HTTPException(409, "La propuesta ya no coincide con el estado oficial")
         _stamp(cr)
-        return None
+        return owner_uid
+    if status == "rechazado":
+        _stamp(cr)
+        try:
+            return int(getattr(cr, "created_by_user_id", None))
+        except (TypeError, ValueError):
+            return None
 
-    # RECHAZAR → revertir override vigente + cascada a hermanas pendientes.
-    owner_uid = svc.deactivate_override_by_id(
-        session, getattr(cr, "override_id", None), reviewer_email=reviewer_email
-    )
-    if getattr(cr, "override_id", None) is not None:
-        from web_comparativas.models import ForecastChangeRequest as _CR
-        siblings = (
-            session.query(_CR)
-            .filter(_CR.override_id == cr.override_id)
-            .filter(_CR.status == "pendiente")
-            .all()
-        )
-        for sib in siblings:
-            _stamp(sib)
-    _stamp(cr)  # asegura el cr actual (cubre override_id NULL y cualquier borde)
-    return owner_uid
+    raise ValueError("estado de revisión inválido")
 
 
 @router.post("/api/approvals/{request_id:int}/approve", response_class=JSONResponse)
@@ -2193,12 +2641,15 @@ def api_approvals_approve(
     if SessionLocal is None:
         raise HTTPException(503, "Almacenamiento no disponible")
     try:
+        owner_uid = None
         with SessionLocal() as session:
             cr = session.get(CR, request_id)
             if cr is None:
                 raise HTTPException(404, "Modificación no encontrada")
-            _apply_review(session, cr, status="aprobado", user=user, motivo=payload.motivo)
+            owner_uid = _apply_review(session, cr, status="aprobado", user=user, motivo=payload.motivo)
             session.commit()
+        if owner_uid is not None:
+            svc.clear_response_cache()
         return JSONResponse({"ok": True, "id": request_id, "status": "aprobado"})
     except HTTPException:
         raise
@@ -2233,7 +2684,7 @@ def api_approvals_reject(
             session.commit()
         # Caché del DUEÑO del override (cotizador), no del admin que rechaza.
         if owner_uid is not None:
-            svc._clear_cache_for_override_save(owner_uid)
+            svc.clear_response_cache()
         return JSONResponse({"ok": True, "id": request_id, "status": "rechazado"})
     except HTTPException:
         raise
@@ -2278,6 +2729,11 @@ def _build_group_unit(grupo: str, recs: list[dict]) -> dict:
         "estados": estados,
         "estado_consolidado": consolidado,
         "pendientes": estados["pendiente"],
+        "reviewable_pending": sum(
+            1 for r in recs
+            if (r.get("status") or "pendiente") == "pendiente"
+            and r.get("can_review")
+        ),
         "periodo_desde": periodos[0] if periodos else None,
         "periodo_hasta": periodos[-1] if periodos else None,
         "records": recs,
@@ -2390,7 +2846,8 @@ def _build_account_unit(cuenta: str, recs: list[dict]) -> dict:
     # IDs concretos de los CR PENDIENTES (crudos) de esta cuenta en ESTE camino.
     # Base de la aprobación/rechazo por nodo (selección por IDs, no por valor).
     pending_ids = [r.get("id") for r in recs
-                   if (r.get("status") or "pendiente") == "pendiente" and r.get("id") is not None]
+                   if (r.get("status") or "pendiente") == "pendiente"
+                   and r.get("can_review") and r.get("id") is not None]
 
     return {
         "type": "account",
@@ -2576,7 +3033,7 @@ def api_approvals_grouped(
         group_map = svc.get_client_group_map() if dim == "grupo" else None
         with SessionLocal() as session:
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
-            records = [_cr_to_dict(r, group_map) for r in rows]
+            records = _visible_approval_records(session, user, rows, group_map)
 
         # KPIs/matriz desde los propios change requests (delta real, por status).
         kpis = _compute_approval_kpis(records)
@@ -2717,10 +3174,12 @@ def _impacts_by_status(records_all: list[dict], impacts: dict) -> dict:
     return out
 
 
-def _compute_meta_gauge(session) -> dict:
+def _compute_meta_gauge(session, user: User) -> dict:
     """Números del medidor de meta (global). best-effort: ante cualquier falla
     devuelve {"disponible": False} sin romper el árbol."""
     try:
+        if not _central_forecast_access(user).unrestricted:
+            return {"disponible": False, "efecto_detectado": False}
         # Meta global = misma definición que el KPI "Meta Anual" del resto de la UI
         # (Total_Adj = base × 1.25). Reusa get_chart_data sin filtros; puede volver
         # bytes en cache-hit → json.loads (igual que api_approvals_filter_options).
@@ -2818,10 +3277,10 @@ def api_approvals_tree(
         group_map = svc.get_client_group_map()
         with SessionLocal() as session:
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
-            records = [_cr_to_dict(r, group_map) for r in rows]
+            records = _visible_approval_records(session, user, rows, group_map)
 
             # Medidor de meta: GLOBAL (sobre TODOS los CRs, no `records` filtrado).
-            gauge = _compute_meta_gauge(session)
+            gauge = _compute_meta_gauge(session, user)
 
         # KPIs/matriz desde los propios change requests (delta real, por status).
         kpis = _compute_approval_kpis(records)
@@ -2921,6 +3380,13 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
     reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
+        rows = _filter_visible_approval_requests(session, user, rows)
+        access = _approval_access_for(user, _forecast_role_key(user))
+        visible_selectors = _approval_visible_selectors_for(access)
+        rows = [
+            cr for cr in rows
+            if _can_review_approval_request(session, user, cr, access, visible_selectors)
+        ]
         for cr in rows:
             if cr.status != "pendiente":
                 continue
@@ -2937,13 +3403,16 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
                 colval = str(getattr(cr, col, None) or "").strip().lower()
                 if colval != vkey:  # vkey "" matchea NULL/vacío (Sin X)
                     continue
-            owner = _apply_review(session, cr, status=status, user=user, motivo=motivo)
+            owner = _apply_review(
+                session, cr, status=status, user=user, motivo=motivo,
+                access=access, visible_selectors=visible_selectors,
+            )
             if owner is not None:
                 reverted_owner_ids.add(owner)
             n += 1
         session.commit()
-    for uid in reverted_owner_ids:
-        svc._clear_cache_for_override_save(uid)
+    if reverted_owner_ids:
+        svc.clear_response_cache()
     return n
 
 
@@ -3034,15 +3503,33 @@ def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -
     reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
-        for cr in rows:
-            if cr.id in requested and cr.status == "pendiente":
-                owner = _apply_review(session, cr, status=status, user=user, motivo=motivo)
-                if owner is not None:
-                    reverted_owner_ids.add(owner)
-                n += 1
+        rows = _filter_visible_approval_requests(session, user, rows)
+        access = _approval_access_for(user, _forecast_role_key(user))
+        visible_selectors = _approval_visible_selectors_for(access)
+        rows = [
+            cr for cr in rows
+            if _can_review_approval_request(session, user, cr, access, visible_selectors)
+        ]
+        eligible = {
+            int(cr.id): cr for cr in rows
+            if cr.id in requested and cr.status == "pendiente"
+        }
+        # Un ID inexistente, fuera de los filtros o ya no pendiente no se ignora:
+        # para un payload manipulado la respuesta debe ser fail-closed.
+        if requested != set(eligible):
+            raise HTTPException(403, "Una o más aprobaciones están fuera del alcance autorizado")
+        for request_id in sorted(requested):
+            cr = eligible[request_id]
+            owner = _apply_review(
+                session, cr, status=status, user=user, motivo=motivo,
+                access=access, visible_selectors=visible_selectors,
+            )
+            if owner is not None:
+                reverted_owner_ids.add(owner)
+            n += 1
         session.commit()
-    for uid in reverted_owner_ids:
-        svc._clear_cache_for_override_save(uid)
+    if reverted_owner_ids:
+        svc.clear_response_cache()
     return n
 
 
@@ -3148,7 +3635,7 @@ def api_approvals_export(
         group_map = svc.get_client_group_map()
         with SessionLocal() as session:
             rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
-            records = [_cr_to_dict(r, group_map) for r in rows]
+            records = _visible_approval_records(session, user, rows, group_map)
             for r in records:
                 r["grupo"] = r.get("grupo") or "Sin grupo"
     except Exception as exc:

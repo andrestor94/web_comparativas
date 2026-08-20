@@ -664,6 +664,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (!status.has_data) {
+                // Cartera de cuentas (ago-2026): distingue "sin cartera asignada" del
+                // genérico "no hay datos cargados" — nunca pantalla en blanco sin
+                // explicación (ver informe de auditoría 2026-08-19).
+                const emptyTitle = elements.emptyState.querySelector('h3');
+                const emptyBody = elements.emptyState.querySelector('p');
+                if (status.cartera_blocked) {
+                    if (emptyTitle) emptyTitle.textContent = 'No tenés cuentas asignadas';
+                    if (emptyBody) emptyBody.textContent =
+                        'No tenés cuentas asignadas. Contactá al administrador.';
+                } else if (emptyTitle && emptyBody) {
+                    emptyTitle.textContent = 'No hay datos cargados';
+                    emptyBody.textContent =
+                        'Los datos de Dimensionamiento aún no han sido cargados en la base de datos. ' +
+                        'El sistema los cargará automáticamente en el próximo inicio si el dataset está configurado.';
+                }
                 elements.emptyState.style.display = 'block';
                 elements.dashboardContent.style.display = 'none';
                 return;
@@ -1263,15 +1278,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.kpiValorizacionCard) {
             elements.kpiValorizacionCard.style.display = state.activeMetric === 'valorizacion' ? '' : 'none';
         }
-        try {
-            localStorage.setItem('mp_dimensiones_kpis', JSON.stringify({
-                clients: kpis.clientes || 0,
-                processes: kpis.renglones || 0,
-                families: kpis.familias || 0,
-                provinces: kpis.provincias || 0,
-                lastUpdated: new Date().toISOString(),
-            }));
-        } catch {}
     }
 
     function renderAreaChart(series) {

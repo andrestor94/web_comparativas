@@ -2272,6 +2272,23 @@
       </div>
     </div>
 
+    <div id="fcScenarioBar" style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 18px;background:#fff;border-bottom:1px solid var(--border-color);">
+      <div>
+        <strong id="fcScenarioTitle" style="font-size:.84rem;color:var(--text-primary);">Forecast oficial</strong>
+        <div id="fcScenarioHelp" style="font-size:.72rem;color:var(--text-muted);margin-top:2px;">Solo contiene cambios aprobados.</div>
+      </div>
+      <div class="appr-seg" role="group" aria-label="Escenario de Forecast">
+        <button type="button" id="fcScenarioOfficial" class="active" onclick="setForecastScenario('official')">
+          <i class="bi bi-shield-check"></i> Oficial
+        </button>
+        {% if (user.role or '')|lower != 'auditor' %}
+        <button type="button" id="fcScenarioPending" onclick="setForecastScenario('pending')">
+          <i class="bi bi-eye"></i> Mis cambios pendientes
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
     <!-- Filter bar -->
     <div class="fc-filter-bar" id="filterBar">
 
@@ -2589,7 +2606,7 @@
       </div><!-- /panel-detalle -->
 
       <!-- ════════════════════════════════════════════════════════════ -->
-      <!-- PANEL 3 — APROBACIONES FORECAST (Admin/Gerente: edición · Auditor: solo lectura) -->
+      <!-- PANEL 3 — APROBACIONES FORECAST (acciones según nivel jerárquico) -->
       <!-- ════════════════════════════════════════════════════════════ -->
       {% if can_view_approvals %}
       <div class="fc-tab-panel" id="panel-aprobaciones" data-can-edit="{{ 'true' if can_edit_approvals else 'false' }}">
@@ -3106,7 +3123,7 @@
           </div>
         </div>
 
-        <!-- ── Modal: rechazar con motivo (enriquecido con aviso de reversión) ── -->
+        <!-- ── Modal: rechazar una propuesta pendiente con motivo ── -->
         <style>
           .appr-reject-impact{
             background: var(--g-red-light, #fdecea);
@@ -3145,7 +3162,7 @@
             </div>
             <div class="appr-modal-body">
               <p id="appr-reject-sub" style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;"></p>
-              <!-- Aviso de reversión: rechazar revierte ajustes reales. Se rellena en _apprFillRejectImpact(). -->
+              <!-- Resumen de las propuestas pendientes que quedarán rechazadas. -->
               <div id="appr-reject-impact" class="appr-reject-impact" style="display:none;">
                 <div class="appr-reject-impact-head">
                   <i class="bi bi-exclamation-triangle"></i>
@@ -3153,13 +3170,13 @@
                 </div>
                 <div class="appr-reject-impact-figures">
                   <div class="appr-reject-impact-count">
-                    <b id="appr-reject-impact-count-n">0</b> <span>modificación(es) se revertirán</span>
+                    <b id="appr-reject-impact-count-n">0</b> <span>propuesta(s) quedarán rechazadas</span>
                   </div>
                   <div id="appr-reject-impact-money" class="appr-reject-impact-money"></div>
                 </div>
                 <p class="appr-reject-impact-note">
-                  Los ajustes vuelven a su valor original (la base del modelo). Si los cotizadores
-                  querían mantenerlos, deberán volver a cargarlos.
+                  Estas propuestas todavía no afectan el Forecast oficial. El rechazo conserva la
+                  trazabilidad y descarta únicamente su vista previa pendiente.
                 </p>
               </div>
               <label style="font-size:0.82rem;font-weight:600;display:block;margin-bottom:6px;">Motivo del rechazo</label>
@@ -3170,7 +3187,7 @@
             <div class="appr-modal-foot">
               <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseReject()">Cancelar</button>
               <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprConfirmReject()">
-                <i class="bi bi-exclamation-triangle me-2"></i>Rechazar y revertir
+                <i class="bi bi-x-circle me-2"></i>Rechazar propuesta
               </button>
             </div>
           </div>
@@ -3375,6 +3392,7 @@ const STATE = {
   startDate: null,
   endDate: null,
   maxHistDate: null,
+  scenario: 'official',
   activeTab: 'analisis',
   modalClientData: null,       // current client detail data
   modalSubnegGrowths: {},      // subneg overrides per modal session
@@ -3396,12 +3414,14 @@ const STATE = {
    Versioned prefix (_FC_V) forces a clean slate after each deploy.
    =================================================================== */
 const _FC_V          = '{{ request.app.version | default("1") }}';  // bust on redeploy
-const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}';
+// Incluye la firma del scope central. Si cambia la cartera/jerarquía/UN del mismo
+// usuario, ninguna respuesta guardada bajo el alcance anterior puede reutilizarse.
+const _FC_USER_KEY   = '{{ user.id }}_{{ (user.role or "")|lower|replace(" ", "_") }}_{{ forecast_scope_cache_key|default("disabled") }}';
 const _FC_IS_ADMIN   = {{ 'true' if user.is_admin() else 'false' }};
-// Aprobaciones Forecast: ¿este usuario puede aprobar/rechazar? (Admin/Gerente sí; Auditor no).
+// Aprobaciones Forecast: acción visible solo para un nivel autorizador.
 // Solo UX — el backend reenforza igual (403) aunque se invoque el endpoint a mano.
 const _FC_APPR_CAN_EDIT = {{ 'true' if can_edit_approvals else 'false' }};
-const _FC_CV         = 'c4';  // content version — increment when payload contract changes
+const _FC_CV         = 'c5';  // c5: KPIs históricos distinguen no-disponible de cero
 const _FC_PFX        = 'fc_' + _FC_CV + '_' + _FC_V + '_' + _FC_USER_KEY + '_';
 const _FC_TTL_DATA   = 10 * 60 * 1000;   // 10 min — chart, table, treemap, products
 const _FC_TTL_STATIC = 30 * 60 * 1000;   // 30 min — filter-options
@@ -3481,6 +3501,7 @@ function _captureForecastView() {
     selectedLab: STATE.selectedLab,
     startDate: STATE.startDate,
     endDate: STATE.endDate,
+    scenario: STATE.scenario,
     activeTab: STATE.activeTab,
     treemapPeriod: document.getElementById('treemapPeriod')?.value || '__all__',
     clientSearch: document.getElementById('clientSearchInput')?.value || '',
@@ -3523,6 +3544,7 @@ function _restoreForecastView() {
     STATE.selectedLab = typeof data.selectedLab === 'string' ? data.selectedLab : '';
     STATE.startDate = typeof data.startDate === 'string' ? data.startDate : null;
     STATE.endDate = typeof data.endDate === 'string' ? data.endDate : null;
+    STATE.scenario = data.scenario === 'pending' ? 'pending' : 'official';
     STATE.activeTab = data.activeTab === 'detalle' ? 'detalle' : 'analisis';
 
     Object.keys(_groupExpanded).forEach(k => delete _groupExpanded[k]);
@@ -3536,6 +3558,33 @@ function _restoreForecastView() {
     return true;
   } catch {
     return false;
+  }
+}
+
+function _syncForecastScenarioUI() {
+  const pending = STATE.scenario === 'pending';
+  document.getElementById('fcScenarioOfficial')?.classList.toggle('active', !pending);
+  document.getElementById('fcScenarioPending')?.classList.toggle('active', pending);
+  const title = document.getElementById('fcScenarioTitle');
+  const help = document.getElementById('fcScenarioHelp');
+  if (title) title.textContent = pending ? 'Escenario pendiente personal' : 'Forecast oficial';
+  if (help) help.textContent = pending
+    ? 'Vista previa: incluye únicamente tus propuestas pendientes; todavía no afectan el Forecast oficial.'
+    : 'Solo contiene cambios aprobados.';
+  document.getElementById('fcScenarioBar')?.classList.toggle('is-pending', pending);
+}
+
+async function setForecastScenario(value) {
+  const next = value === 'pending' ? 'pending' : 'official';
+  if (next === 'pending' && !document.getElementById('fcScenarioPending')) return;
+  if (STATE.scenario === next) return;
+  STATE.scenario = next;
+  _syncForecastScenarioUI();
+  _persistForecastView();
+  await _refreshAfterSave();
+  if (STATE.activeTab === 'detalle') {
+    _tableIsStale = false;
+    await loadTable();
   }
 }
 
@@ -3557,6 +3606,7 @@ function _syncForecastControls() {
   if (treemapPeriod && window.__fcRestoredView?.treemapPeriod) {
     treemapPeriod.value = window.__fcRestoredView.treemapPeriod;
   }
+  _syncForecastScenarioUI();
 }
 
 function _fcNormalize(raw, url) {
@@ -3663,6 +3713,7 @@ function buildQS(extra = {}) {
   }
   p.append('view_money', STATE.viewMoney ? 'true' : 'false');
   p.append('growth_pct', STATE.growthPct);
+  p.append('scenario', STATE.scenario === 'pending' ? 'pending' : 'official');
   Object.entries(extra).forEach(([k, v]) => p.append(k, v));
   return p.toString();
 }
@@ -3996,11 +4047,18 @@ function renderKPIs(kpis, growthPct) {
   sub1.textContent = 'Var. Nominal ($): ' + (growthPct >= 0 ? '+' : '') + growthPct.toFixed(0) + '%';
 
   // ── KPI 2: Variación Nominal sobre 2025 ──────────────────────────
-  const varNom = kpis.var_nominal_2025 != null ? kpis.var_nominal_2025 : 0;
-  document.getElementById('kpi-varnominal-val').textContent = (varNom >= 0 ? '+' : '') + varNom.toFixed(1) + '%';
+  const historical2025Available = kpis.historical_2025_available !== false
+    && kpis.var_nominal_2025 != null && kpis.var_real_2025 != null;
+  const historical2025Reason = kpis.historical_2025_unavailable_reason
+    || 'El histórico 2025 no está disponible para la selección actual.';
+  const varNom = historical2025Available ? Number(kpis.var_nominal_2025) : null;
+  document.getElementById('kpi-varnominal-val').textContent = historical2025Available
+    ? (varNom >= 0 ? '+' : '') + varNom.toFixed(1) + '%'
+    : 'No disponible';
   const sub2 = document.getElementById('kpi-varnominal-sub');
-  sub2.className = 'kpi-trend ' + (varNom > 0 ? 'trend-up' : varNom < 0 ? 'trend-down' : 'trend-neutral');
-  sub2.textContent = 'Var. Nominal Anual (%)';
+  sub2.className = 'kpi-trend ' + (historical2025Available && varNom > 0 ? 'trend-up' : historical2025Available && varNom < 0 ? 'trend-down' : 'trend-neutral');
+  sub2.textContent = historical2025Available ? 'Var. Nominal Anual (%)' : historical2025Reason;
+  document.getElementById('kpi-varnominal').title = historical2025Available ? '' : historical2025Reason;
 
   // ── KPI 3: Inflación Esperada ─────────────────────────────────────
   const infPct = kpis.inflation_pct != null ? kpis.inflation_pct : 40.5;
@@ -4012,11 +4070,14 @@ function renderKPIs(kpis, growthPct) {
   if (inflChip) inflChip.textContent = infMo.toFixed(1) + '%';
 
   // ── KPI 4: Variación Real sobre 2025 ─────────────────────────────
-  const varReal = kpis.var_real_2025 != null ? kpis.var_real_2025 : 0;
-  document.getElementById('kpi-varreal-val').textContent = (varReal >= 0 ? '+' : '') + varReal.toFixed(1) + '%';
+  const varReal = historical2025Available ? Number(kpis.var_real_2025) : null;
+  document.getElementById('kpi-varreal-val').textContent = historical2025Available
+    ? (varReal >= 0 ? '+' : '') + varReal.toFixed(1) + '%'
+    : 'No disponible';
   const sub4 = document.getElementById('kpi-varreal-sub');
-  sub4.className = 'kpi-trend ' + (varReal > 0 ? 'trend-up' : varReal < 0 ? 'trend-down' : 'trend-neutral');
-  sub4.textContent = 'Var. Real Anual (%)';
+  sub4.className = 'kpi-trend ' + (historical2025Available && varReal > 0 ? 'trend-up' : historical2025Available && varReal < 0 ? 'trend-down' : 'trend-neutral');
+  sub4.textContent = historical2025Available ? 'Var. Real Anual (%)' : historical2025Reason;
+  document.getElementById('kpi-varreal').title = historical2025Available ? '' : historical2025Reason;
 
   // ── KPI 5: Coincidencia Acumulada del Modelo ─────────────────────
   const acc = kpis.accuracy_val != null ? kpis.accuracy_val : 0;
@@ -4114,13 +4175,15 @@ function renderChart(data) {
   }
 
   // ── Facturación 2025 (Historia) — dark blue #06486F ──────────────────
-  traces.push({
-    x: hist.map(d=>d.fecha), y: hist.map(d=>d.Total_Venta||0),
-    customdata: getHoverTexts(hist.map(d=>d.fecha), hist.map(d=>d.Total_Venta||0), 'Facturación 2025'),
-    name:'Facturación 2025', mode:'lines',
-    line:{color:'#06486F', width:2.8, shape:'spline', smoothing:1.3},
-    hovertemplate:`Facturación 2025: <b>%{customdata}</b><extra></extra>`,
-  });
+  if (hist.length > 0) {
+    traces.push({
+      x: hist.map(d=>d.fecha), y: hist.map(d=>d.Total_Venta||0),
+      customdata: getHoverTexts(hist.map(d=>d.fecha), hist.map(d=>d.Total_Venta||0), 'Facturación 2025'),
+      name:'Facturación 2025', mode:'lines',
+      line:{color:'#06486F', width:2.8, shape:'spline', smoothing:1.3},
+      hovertemplate:`Facturación 2025: <b>%{customdata}</b><extra></extra>`,
+    });
+  }
 
   // ── Facturación 2026 (real billing Jan-Feb) — orange #F97316 ─────────
   if (val2026.length > 0) {
@@ -4982,6 +5045,9 @@ async function saveGroupExpectation() {
     }
 
     closeGroupModal();
+    STATE.scenario = 'pending';
+    _syncForecastScenarioUI();
+    _persistForecastView();
     _fcClear();
     await _refreshAfterSave();
     // Force table reload if already on detalle tab (stale flag alone won't trigger it)
@@ -5328,6 +5394,9 @@ async function saveModalChanges() {
     }
     _setModalDirty(false);
     closeModal();
+    STATE.scenario = 'pending';
+    _syncForecastScenarioUI();
+    _persistForecastView();
     _fcClear();   // Overrides altered the dataset — force fresh data on next render
     await _refreshAfterSave();  // sequential — avoids parallel 502 on Render
     // Force table reload if already on detalle tab (stale flag alone won't trigger it)
@@ -7233,7 +7302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pend = r.status === 'pendiente';
     // Auditor (solo lectura): nunca se muestran Aprobar/Rechazar, solo Ver detalle.
     const detailBtn = `<button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`;
-    const actions = (pend && _FC_APPR_CAN_EDIT)
+    const actions = (pend && r.can_review && _FC_APPR_CAN_EDIT)
       ? `<button class="appr-act appr-act--ok" title="Aprobar" onclick="_apprApprove(${r.id})"><i class="bi bi-check-lg"></i></button>
          <button class="appr-act appr-act--no" title="Rechazar" onclick="_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i></button>
          ${detailBtn}`
@@ -7274,7 +7343,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const caret = expanded ? 'bi-chevron-down' : 'bi-chevron-right';
     const est = u.estados || {};
     const cons = statusBadge(u.estado_consolidado);
-    const hasPend = (u.pendientes || 0) > 0;
+    const hasPend = (u.reviewable_pending || 0) > 0;
     const isGrupoDim = _apprDimension === 'grupo';
     const dimMeta = _APPR_DIM_META[_apprDimension] || _APPR_DIM_META.grupo;
     const tagLabel = isGrupoDim ? 'Grupo' : (dimMeta.noun.charAt(0).toUpperCase() + dimMeta.noun.slice(1));
@@ -7769,10 +7838,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body || {}),
     });
-    if (r.status === 403) throw new Error('Solo usuarios Admin pueden realizar esta acción.');
+    if (r.status === 403) throw new Error('La solicitud no pertenece a tu nivel jerárquico o rama autorizada.');
     let d = {};
     try { d = await r.json(); } catch (_) {}
     if (!r.ok || !d.ok) throw new Error(d.detail || `Error (${r.status})`);
+    _fcClear();
     return d;
   }
 
@@ -7791,7 +7861,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Acciones individuales ──────────────────────────────────────
   window._apprApprove = async function(id) {
-    if (!confirm('¿Aprobar esta modificación? Quedará registrada como aprobada por Dirección.')) return;
+    if (!confirm('¿Aprobar esta propuesta? Recién entonces pasará al Forecast oficial.')) return;
     _apprSetStatus('Aprobando…', 'var(--g-blue)');
     try { await _apprPost(`/forecast/api/approvals/${id}/approve`, {}); _apprFetch(); }
     catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
@@ -7823,7 +7893,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // ── Rechazo (individual o grupo) ───────────────────────────────
-  // Aviso de reversión: rechazar revierte ajustes reales (vuelven a la base).
+  // Resumen de propuestas pendientes: el oficial no se modifica al rechazar.
   // detail = {scope, count, baja, suba} (todo ya en el front; sin llamada nueva).
   // baja viene negativa (↓), suba positiva (↑); si ambas 0 → impacto no estimable.
   function _apprFillRejectImpact(detail) {
@@ -7931,7 +8001,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const foot = document.getElementById('appr-detail-foot');
     if (foot) {
       // Auditor (solo lectura): el detalle no ofrece Aprobar/Rechazar, solo Cerrar.
-      foot.innerHTML = (r.status === 'pendiente' && _FC_APPR_CAN_EDIT)
+      foot.innerHTML = (r.status === 'pendiente' && r.can_review && _FC_APPR_CAN_EDIT)
         ? `<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" onclick="_apprCloseDetail();_apprApprove(${r.id})"><i class="bi bi-check-lg"></i> Aprobar</button>
            <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprCloseDetail();_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i> Rechazar</button>
            <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`
@@ -8003,7 +8073,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         <th>Usuario</th><th>Fecha</th><th>Tipo</th><th>Ant. (%)</th><th>Nuevo (%)</th>
         <th>Impacto estimado</th><th>Cuenta/Cliente</th><th>Artículo</th><th>Período</th><th>Estado</th><th>Observación</th>
       </tr></thead><tbody>${rows || `<tr><td colspan="11" style="text-align:center;padding:18px;">Sin modificaciones para los filtros aplicados.</td></tr>`}</tbody></table>
-      <div class="firma"><div>Revisado por (Admin)</div><div>Aprobado por Dirección</div></div>
+      <div class="firma"><div>Revisado por nivel autorizador</div><div>Decisión registrada en SIEM</div></div>
       <p class="noprint" style="margin-top:18px;"><button onclick="window.print()">Imprimir</button></p>
       <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
       </body></html>`;

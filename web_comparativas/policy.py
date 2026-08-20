@@ -191,40 +191,71 @@ def puede_editar_ficha_pliego(user) -> bool:
 # Sección: Aprobaciones Forecast (pestaña dentro del módulo Forecast) — VER / EDITAR
 # ──────────────────────────────────────────────────────────────────────────────
 #
-# Matriz por rol (ÚNICA fuente de verdad de esta sección):
-#   Admin      → ver + editar
-#   Gerente    → ver + editar
-#   Auditor    → ver (solo lectura, NO edita)
-#   Analista   → sin acceso
-#   Supervisor → sin acceso
+# Detrás de FORECAST_CARTERA_ENABLED (cartera_visibilidad.py) — MISMO criterio que
+# el resto del módulo Forecast, agregado 2026-08-20 para que subir este código no
+# cambie nada visible en producción hasta que se prenda el flag (recién ahí tiene
+# sentido: antes de eso nadie tiene reporta_a_id/cartera cargada en S.I.C., así que
+# la matriz nueva dejaría a todo Gerente/Supervisor viendo la sección vacía).
+#
+# Matriz con el flag PRENDIDO (política corregida 2026-08-20 — reemplaza la matriz
+# anterior que dejaba decidir a Supervisor):
+#   Admin      → ve todo, decide todo (incluso cambios propios de otro Admin).
+#   Gerente    → ve y decide TODAS las propuestas de su rama — de Analista o de
+#                Supervisor por igual, sin importar quién la creó — salvo las
+#                propias (nunca se autoaprueba; esas las decide Admin).
+#   Auditor    → ve la sección completa, sin ningún botón de decisión.
+#   Supervisor → NO ve la pestaña. Ni siquiera en modo solo lectura.
+#   Analista   → NO ve la pestaña.
+#
+# Matriz con el flag APAGADO (la que ya estaba antes de esta corrección — se
+# preserva tal cual para que bajar el flag revierta sin redeploy):
+#   Admin/Gerente/Supervisor pueden ver y editar; Analista/Auditor solo ven.
+#
+# En ambos casos, Analista y Supervisor conservan "Mis cambios pendientes"
+# (scope='pending' del propio dashboard) para ver SUS propias propuestas — esa
+# vista es otra, no pasa por estos dos predicados.
 #
 # IMPORTANTE: NO se reutiliza has_write_access para "editar" — ese predicado
-# (role ∉ AUDITOR_ROLES) habilitaría también a Supervisor y Analista, que aquí NO
-# deben editar. La regla de Aprobaciones es más restrictiva, por eso son predicados
-# dedicados, en el mismo patrón sección-específico que puede_editar_ficha_pliego.
-# Se construyen sobre los role-sets canónicos (sin inventar vocabulario nuevo).
+# (role ∉ AUDITOR_ROLES) habilitaría también a Supervisor y Analista, que con el
+# flag prendido NO deben editar (ni siquiera ver). La regla de Aprobaciones es más
+# restrictiva, por eso son predicados dedicados, en el mismo patrón sección-
+# específico que puede_editar_ficha_pliego. Se construyen sobre los role-sets
+# canónicos.
 
 def puede_ver_aprobaciones_forecast(user) -> bool:
     """
     ¿Puede `user` VER la pestaña/lectura de "Aprobaciones Forecast"?
-    Admin, Gerente y Auditor: SÍ. Analista y Supervisor: NO.
-    Gobierna el render del tab/panel y los endpoints GET de la sección.
+    Con FORECAST_CARTERA_ENABLED prendido: solo Admin, Gerente y Auditor —
+    Supervisor y Analista quedan afuera por completo (ni modo solo lectura),
+    usan "Mis cambios pendientes" para lo suyo. Apagado: los cinco roles
+    canónicos ven (comportamiento previo a la corrección de política).
     """
     if not user:
         return False
-    return _role_of(user) in (ADMIN_ROLES | MANAGER_ROLES | AUDITOR_ROLES)
+    from web_comparativas.cartera_visibilidad import FORECAST_CARTERA_ENABLED
+    role = _role_of(user)
+    if FORECAST_CARTERA_ENABLED():
+        return role in {"admin", "gerente", "auditor"}
+    return role in {"admin", "gerente", "supervisor", "analista", "auditor"}
 
 
 def puede_editar_aprobaciones_forecast(user) -> bool:
     """
     ¿Puede `user` EJECUTAR acciones que cambian estado (aprobar/rechazar, individual
     o por grupo) en "Aprobaciones Forecast"?
-    SOLO Admin y Gerente. Auditor (solo lectura), Analista y Supervisor: NO.
+    Con FORECAST_CARTERA_ENABLED prendido: solo Admin y Gerente — Auditor es
+    solo lectura; Supervisor y Analista ni siquiera llegan acá
+    (puede_ver_aprobaciones_forecast ya los excluye antes). Apagado: Admin,
+    Gerente y Supervisor (comportamiento previo a la corrección de política).
     Gobierna los endpoints POST de mutación y la visibilidad de los controles de edición.
     """
     if not user:
         return False
-    return _role_of(user) in (ADMIN_ROLES | MANAGER_ROLES)
+    from web_comparativas.cartera_visibilidad import FORECAST_CARTERA_ENABLED
+    role = _role_of(user)
+    if FORECAST_CARTERA_ENABLED():
+        return role in {"admin", "gerente"}
+    return role in {"admin", "gerente", "supervisor"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────

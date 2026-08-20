@@ -298,6 +298,37 @@ class User(Base):
     # como NULL = acceso total). El tipo físico sigue siendo TEXT → sin migración.
     module_access = Column(JSONEncodedList, nullable=True, default=None)
 
+    # ---- Cartera de cuentas (Forecast / Dimensionamiento / Oportunidades, ago-2026) ----
+    # Códigos de identidad comercial de ESTE usuario en los dos padrones de RRHH
+    # comercial (operadores_comerciales.csv / Cliente_vendedor.csv). Son DOS espacios
+    # de código disjuntos (intersección medida = 0): una misma persona puede tener un
+    # código de operador (Mercado Público, ~22 códigos) y, aparte, uno o más códigos
+    # de vendedor (Cliente_vendedor.csv, ~248 códigos) — por eso van en columnas
+    # separadas y ambas son listas, nunca un único valor.
+    #
+    # ⚠️ SEMÁNTICA INVERSA a `module_access`: acá NULL y [] significan LO MISMO —
+    # "sin cartera asignada" = el resolver (`cartera_visibilidad.py`) devuelve CERO
+    # clientes (fail-closed, decisión de negocio 2026-08-19). Para `module_access`
+    # NULL significa acceso TOTAL; para estos tres campos NUNCA es así. No copiar esa
+    # convención acá.
+    cartera_operador_codigos = Column(JSONEncodedList, nullable=True, default=None)
+    cartera_vendedor_codigos = Column(JSONEncodedList, nullable=True, default=None)
+
+    # Vinculación dinámica por nombre contra los padrones de Fusión. Cuando está
+    # activa, los códigos se resuelven en runtime desde las tablas de cartera para
+    # que una recarga refleje cambios sin editar nuevamente al usuario. La identidad
+    # solo se guarda si el Admin debió elegir entre candidatos ambiguos.
+    cartera_fusion_enabled = Column(Boolean, nullable=False, default=False)
+    cartera_fusion_identidad = Column(String(255), nullable=True, default=None)
+
+    # Unidades de negocio (valores de `CarteraVendedor.unineg`) a las que este usuario
+    # está acotado. Hoy solo tiene efecto para el rol Supervisor (acota la cartera
+    # heredada de sus analistas a estas BU) — asignación EXPLÍCITA en el alta, nunca
+    # inferida. "0" ("Sin unidad asignada") es un valor válido y se otorga a
+    # propósito, no es un default. operadores_comerciales.csv no tiene equivalente:
+    # este scope nunca filtra la parte "operador" de la cartera, solo la "vendedor".
+    cartera_unineg_scope = Column(JSONEncodedList, nullable=True, default=None)
+
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
 
@@ -518,16 +549,7 @@ class ForecastManualEntry(Base):
 
 # ---------- Aprobaciones Forecast: solicitudes de cambio ----------
 class ForecastChangeRequest(Base):
-    """
-    Registro de control de modificaciones del Forecast realizadas por los
-    cotizadores (módulo "Aprobaciones Forecast").
-
-    Semántica = REGISTRO DE CONTROL: el override del cotizador se aplica al
-    instante (lógica existente intacta). Esta tabla NO bloquea ni revierte el
-    cambio; solo deja constancia para que Dirección/Admin lo revise, apruebe o
-    rechace con un motivo. Tabla puramente aditiva: nunca sobrescribe ni
-    modifica forecast_user_overrides.
-    """
+    """Propuesta trazable: solo una aprobación modifica el Forecast oficial."""
     __tablename__ = "forecast_change_requests"
 
     id = Column(Integer, primary_key=True)
@@ -922,6 +944,89 @@ class VendedorFusion(Base):
 
     def __repr__(self) -> str:
         return f"<VendedorFusion codigo={self.codigo_vendedor!r} user_id={self.user_id}>"
+
+
+# ---------- Cartera de cuentas por operador/vendedor (ago-2026) ----------
+# Réplica local de los dos padrones de RRHH comercial. NO se leen los CSV en runtime
+# (Render no tiene la carpeta) — se cargan por `push_cartera_data.py` (mismo patrón
+# de push directo a DATABASE_URL que `migrate_forecast_csv_to_postgres.py`) y se
+# refrescan reemplazando el contenido completo (las carteras cambian). Distinta
+# tabla de `vendedores_fusion`: esa modela la identidad Fusión/Mercado Privado (16
+# personas, UNIQUE 1 a 1 con user_id); estas dos son los padrones completos
+# (22 operadores / 248 vendedores) contra los que se resuelven los códigos que el
+# usuario tiene asignados en `User.cartera_operador_codigos/cartera_vendedor_codigos`.
+class CarteraOperador(Base):
+    """1 fila por (cliente, operador) — réplica de operadores_comerciales.csv.
+    Mercado Público: 1 cliente = 1 operador en este padrón (no trae unidad de negocio)."""
+    __tablename__ = "cartera_operadores"
+
+    id = Column(Integer, primary_key=True)
+    codigo_cliente = Column(String(32), nullable=False, index=True)
+    fantasia_cliente = Column(String(255), nullable=True)
+    operador_codigo = Column(String(16), nullable=False, index=True)
+    operador_nombre = Column(String(120), nullable=True)
+    import_run_id = Column(
+        Integer, ForeignKey("cartera_import_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    loaded_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("codigo_cliente", "operador_codigo", name="uq_cartera_operadores_cliente_operador"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CarteraOperador cliente={self.codigo_cliente!r} operador={self.operador_codigo!r}>"
+
+
+class CarteraVendedor(Base):
+    """1 fila por (cliente, vendedor, unidad de negocio) — réplica de Cliente_vendedor.csv.
+    Un cliente puede tener hasta 7 vendedores en distintas unidades de negocio;
+    `unineg='0'` ("Sin unidad asignada") es el bucket más grande (~52% de las filas)."""
+    __tablename__ = "cartera_vendedores"
+
+    id = Column(Integer, primary_key=True)
+    codigo_cliente = Column(String(32), nullable=False, index=True)  # CSV: cliente
+    fantasia_cliente = Column(String(255), nullable=True)
+    vendedor_codigo = Column(String(16), nullable=False, index=True)  # CSV: vendedor
+    vendedor_nombre = Column(String(120), nullable=True)
+    unineg = Column(String(16), nullable=False, default="0", index=True)
+    descneg = Column(String(120), nullable=True)
+    import_run_id = Column(
+        Integer, ForeignKey("cartera_import_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    loaded_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "codigo_cliente", "vendedor_codigo", "unineg",
+            name="uq_cartera_vendedores_cliente_vendedor_unineg",
+        ),
+        Index("ix_cartera_vendedores_vendedor_unineg", "vendedor_codigo", "unineg"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CarteraVendedor cliente={self.codigo_cliente!r} vendedor={self.vendedor_codigo!r} "
+            f"unineg={self.unineg!r}>"
+        )
+
+
+class CarteraImportRun(Base):
+    """Bitácora de cada refresco de `cartera_operadores`/`cartera_vendedores`
+    (1 fila por dataset por corrida — las carteras cambian y se re-cargan periódicamente)."""
+    __tablename__ = "cartera_import_runs"
+
+    id = Column(Integer, primary_key=True)
+    dataset = Column(String(20), nullable=False, index=True)  # "operadores" | "vendedores"
+    source_path = Column(String(500), nullable=True)
+    status = Column(String(20), nullable=False, default="running", index=True)  # running/success/failed
+    rows_loaded = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CarteraImportRun dataset={self.dataset!r} status={self.status!r} rows={self.rows_loaded}>"
 
 
 # ---------- Vistas guardadas por usuario ----------

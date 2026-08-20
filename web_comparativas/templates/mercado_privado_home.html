@@ -51,7 +51,7 @@
 
 
 <script>
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
         const clientEl = document.getElementById('kpiClientsHome');
         const familyEl = document.getElementById('kpiFamiliesHome');
         const processEl = document.getElementById('kpiProcessesHome');
@@ -60,20 +60,23 @@
         const fmt = new Intl.NumberFormat('es-AR');
 
         try {
-            const raw = localStorage.getItem('mp_dimensiones_kpis');
-            if (raw) {
-                const data = JSON.parse(raw);
-                if (data) {
-                    clientEl.textContent = fmt.format(data.clients || 0);
-                    familyEl.textContent = fmt.format(data.families || 0);
-                    processEl.textContent = fmt.format(data.processes || 0);
-                }
-            } else {
+            // Usar la sesion actual; localStorage puede pertenecer a otro usuario.
+            const response = await fetch('/api/mercado-privado/dimensiones/kpis', {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const payload = await response.json();
+            if (!payload.ok || !payload.data) throw new Error('Respuesta sin datos');
+            clientEl.textContent = fmt.format(payload.data.clientes || 0);
+            familyEl.textContent = fmt.format(payload.data.familias || 0);
+            processEl.textContent = fmt.format(payload.data.renglones || 0);
+            /* Legacy local fallback intentionally disabled.
                 // Default 0 if no data
                 clientEl.textContent = "0";
                 familyEl.textContent = "0";
                 processEl.textContent = "0";
-            }
+            */
         } catch (e) {
             console.warn("Error loading KPIs from localStorage", e);
             clientEl.textContent = "0";

@@ -35,6 +35,7 @@ from web_comparativas.dimensionamiento.query_service import (
     DEFAULT_DASHBOARD_SNAPSHOT_KEY,
 )
 from web_comparativas.models import User, IS_SQLITE, IS_POSTGRES
+from web_comparativas.cartera_visibilidad import clientes_visibles_para, DIMENSIONAMIENTO_CARTERA_ENABLED
 from web_comparativas.dimensionamiento.models import (
     DimensionamientoImportRun,
     DimensionamientoRecord,
@@ -159,6 +160,48 @@ AllowedUser = Annotated[
     User,
     Depends(require_roles("admin", "analista", "supervisor", "auditor", "gerente", "manager")),
 ]
+
+AdminUser = Annotated[
+    User,
+    Depends(require_roles("admin")),
+]
+
+
+def _dimensionamiento_allowed_cliente_ids(db: Session, user: User) -> "frozenset[str] | None":
+    """Cartera de cuentas (ago-2026): None = sin restricción (feature apagado, o rol
+    admin/auditor). frozenset (posiblemente vacío) = restringido a esos códigos de
+    cliente — vacío es fail-closed (sin cartera asignada), nunca "todos". Detrás de
+    DIMENSIONAMIENTO_CARTERA_ENABLED (default OFF) — ver cartera_visibilidad.py."""
+    if not DIMENSIONAMIENTO_CARTERA_ENABLED():
+        return None
+    scope = clientes_visibles_para(db, user)
+    if scope.unrestricted:
+        return None
+    return frozenset(scope.codigos_cliente)
+
+
+def _dimensionamiento_cartera_branches(
+    db: Session, user: User
+) -> "tuple[tuple[frozenset[str], frozenset[str] | None], ...] | None":
+    '''Ramas (cuentas, UN) listas para Dimensionamiento; None = acceso global.
+
+    Corrección 2026-08-20 (misma regla que Forecast, ver
+    forecast_service.normalize_forecast_cartera_branches): la UN del padrón
+    describe la relación cliente-vendedor y ya decidió, en
+    cartera_visibilidad._cartera_propia, QUÉ CUENTAS entran a
+    scope.codigos_cliente. No es la misma dimensión que "Unidad de Negocio" en
+    DimensionamientoRecord (esta traducía el código de UN a su etiqueta de
+    Negocios.csv y esa etiqueta se usaba en query_service._apply_common_filters
+    / get_status para filtrar FILAS dentro de una cuenta ya heredada — el mismo
+    bug que en Forecast: un Supervisor/Gerente veía menos filas que su propio
+    Analista sobre la MISMA cuenta). Ahora siempre `units=None`: si una cuenta
+    está en la rama, se ve completa — la UN ya hizo su trabajo más arriba.'''
+    if not DIMENSIONAMIENTO_CARTERA_ENABLED():
+        return None
+    scope = clientes_visibles_para(db, user)
+    if scope.unrestricted:
+        return None
+    return tuple((branch.codigos_cliente, None) for branch in scope.branches)
 
 
 def get_db(request: Request) -> Session:
@@ -323,18 +366,45 @@ def _filters_from_payload(payload: dict[str, Any] | None):
     )
 
 
+def _scoped_filters_for_request(request: Request, query_filters, payload, db: Session, user: User):
+    filters = _filters_for_request(request, query_filters, payload)
+    filters.cartera_branches = _dimensionamiento_cartera_branches(db, user)
+    if filters.cartera_branches is not None:
+        filters.cartera_unrestricted = False
+    return filters
+
+
+def _scoped_dashboard_bootstrap(db, user, filters, include_status, bypass_snapshot):
+    allowed_clientes = _dimensionamiento_allowed_cliente_ids(db, user)
+    allowed_branches = _dimensionamiento_cartera_branches(db, user)
+    result = get_dashboard_bootstrap(
+        db, filters, include_status=False, bypass_snapshot=bypass_snapshot,
+        allowed_cliente_ids=allowed_clientes,
+    )
+    if include_status:
+        result['status'] = get_status(
+            db, allowed_cliente_ids=allowed_clientes,
+            allowed_cartera_branches=allowed_branches,
+        )
+    return result
+
+
 def _filters_for_request(request: Request, query_filters, payload: dict[str, Any] | None):
     return _filters_from_payload(payload) if request.method.upper() == "POST" else query_filters
 
 
 @router.get("/status")
 def dimensionamiento_status(
-    _: AllowedUser,
+    user: AllowedUser,
     db: Session = Depends(get_db),
 ):
     logger.info("[DIM][API] GET /status start")
     try:
-        data = get_status(db)
+        data = get_status(
+            db,
+            allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user),
+            allowed_cartera_branches=_dimensionamiento_cartera_branches(db, user),
+        )
         logger.info(
             "[DIM][API] GET /status success has_data=%s total_rows=%s",
             data.get("has_data"),
@@ -349,24 +419,25 @@ def dimensionamiento_status(
 @router.api_route("/bootstrap", methods=["GET", "POST"])
 def dimensionamiento_bootstrap(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     include_status: bool = Query(default=True),
     bypass_snapshot: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
-    active_filters = _filters_for_request(request, filters, payload)
+    active_filters = _scoped_filters_for_request(request, filters, payload, db, user)
     active_include_status = _payload_bool(payload, "include_status", include_status)
     active_bypass_snapshot = _payload_bool(payload, "bypass_snapshot", bypass_snapshot)
     return _safe_dashboard_response(
         request,
         "bootstrap",
-        lambda: get_dashboard_bootstrap(
+        lambda: _scoped_dashboard_bootstrap(
             db,
+            user,
             active_filters,
-            include_status=active_include_status,
-            bypass_snapshot=active_bypass_snapshot,
+            active_include_status,
+            active_bypass_snapshot,
         ),
         {
             "status": {"has_data": False, "total_rows": 0, "platforms": [], "last_import": None},
@@ -408,9 +479,13 @@ def dimensionamiento_bootstrap(
 @router.get("/debug-snapshot")
 def dimensionamiento_debug_snapshot(
     request: Request,
-    _: AllowedUser,
+    _: AdminUser,
     db: Session = Depends(get_db),
 ):
+    # Admin-only (ago-2026): panel de debug con conteos/valores company-wide que
+    # bypasean _apply_common_filters por completo (no toma DimensionamientoFilters) —
+    # no hay forma barata de aplicarle cartera, así que se restringe el acceso en vez
+    # de restringir los datos. Antes era AllowedUser (cualquier rol logueado).
     payload = _request_debug_payload(request)
     logger.info("[DIM][API] debug_snapshot start payload=%s", payload)
     try:
@@ -443,15 +518,15 @@ def dimensionamiento_negocio_labels(_: AllowedUser):
 @router.api_route("/filters", methods=["GET", "POST"])
 def dimensionamiento_filters(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     logger.info("[DIM][API] GET /filters start filters=%s", filters)
     try:
-        data = get_filter_options(db, filters)
+        data = get_filter_options(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user))
         logger.info(
             "[DIM][API] GET /filters success clientes=%s provincias=%s familias=%s plataformas=%s",
             len(data.get("clientes", [])),
@@ -486,16 +561,16 @@ def dimensionamiento_filters(
 @router.api_route("/kpis", methods=["GET", "POST"])
 def dimensionamiento_kpis(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "kpis",
-        lambda: get_kpis(db, filters),
+        lambda: get_kpis(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)),
         {
             "total_rows": 0,
             "clientes": 0,
@@ -512,16 +587,16 @@ def dimensionamiento_kpis(
 @router.api_route("/series", methods=["GET", "POST"])
 def dimensionamiento_series(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "series",
-        lambda: get_series(db, filters),
+        lambda: get_series(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)),
         {"months": [], "datasets": []},
     )
 
@@ -529,16 +604,16 @@ def dimensionamiento_series(
 @router.api_route("/results", methods=["GET", "POST"])
 def dimensionamiento_results(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "results",
-        lambda: get_results_breakdown(db, filters),
+        lambda: get_results_breakdown(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)),
         [],
     )
 
@@ -546,16 +621,16 @@ def dimensionamiento_results(
 @router.api_route("/top-families", methods=["GET", "POST"])
 def dimensionamiento_top_families(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "top_families",
-        lambda: get_top_families(db, filters),
+        lambda: get_top_families(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)),
         [],
     )
 
@@ -563,16 +638,16 @@ def dimensionamiento_top_families(
 @router.api_route("/geo", methods=["GET", "POST"])
 def dimensionamiento_geo(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "geo",
-        lambda: get_geography_distribution(db, filters),
+        lambda: get_geography_distribution(db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)),
         [],
     )
 
@@ -580,18 +655,20 @@ def dimensionamiento_geo(
 @router.api_route("/clients-by-result", methods=["GET", "POST"])
 def dimensionamiento_clients_by_result(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
     limit: int = Query(default=10, ge=1, le=30),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     limit = max(1, min(30, _payload_int(payload, "limit", limit)))
     return _safe_dashboard_response(
         request,
         "clients_by_result",
-        lambda: get_clients_by_result(db, filters, limit=limit),
+        lambda: get_clients_by_result(
+            db, filters, limit=limit, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)
+        ),
         [],
     )
 
@@ -599,16 +676,18 @@ def dimensionamiento_clients_by_result(
 @router.api_route("/family-consumption", methods=["GET", "POST"])
 def dimensionamiento_family_consumption(
     request: Request,
-    _: AllowedUser,
+    user: AllowedUser,
     payload: dict[str, Any] | None = Body(default=None),
     filters=Depends(_filters_from_query),
     db: Session = Depends(get_db),
 ):
-    filters = _filters_for_request(request, filters, payload)
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
     return _safe_dashboard_response(
         request,
         "family_consumption",
-        lambda: get_family_consumption_table(db, filters),
+        lambda: get_family_consumption_table(
+            db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)
+        ),
         {"months": [], "rows": [], "total": 0},
     )
 
@@ -622,12 +701,6 @@ def deprecated_manual_process(_: AllowedUser):
             "para refrescar el módulo Dimensionamiento."
         ),
     )
-
-
-AdminUser = Annotated[
-    User,
-    Depends(require_roles("admin")),
-]
 
 
 def _run_ingestion_background(tmp_path: str) -> None:

@@ -7,7 +7,7 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion
+from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion, CarteraOperador, CarteraVendedor
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.policy import (
     require_perm, normalize_module_access, derive_access_scope,
@@ -16,6 +16,10 @@ from web_comparativas.policy import (
 )
 from web_comparativas.usage_service import get_usage_summary, log_usage_event
 from web_comparativas.notifications_service import create_notification
+from web_comparativas.fusion_name_matching import (
+    fusion_account_codes,
+    resolve_fusion_identity,
+)
 
 # Setup templates
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -1042,6 +1046,18 @@ _ROLES_GERENTE = {"gerente", "manager"}
 # gerente también es vendedor de Fusión (hoy no hay dato del proyecto que lo indique).
 _ROLES_CON_IDENTIDAD_FUSION = _ROLES_ANALISTA | _ROLES_SUPERVISOR
 
+
+def _normalize_codigos(values: list[str]) -> list[str]:
+    """Limpia una lista de códigos venida de un <select multiple>: trim, descarta
+    vacíos, sin duplicados, orden estable. Lista vacía != None, pero el resolver de
+    cartera_visibilidad.py las trata igual (ambas = "sin cartera", fail-closed)."""
+    seen: list[str] = []
+    for v in values or []:
+        v = str(v).strip()
+        if v and v not in seen:
+            seen.append(v)
+    return seen
+
 # Traduce ?err=<code> a un mensaje legible en el form (alta y edición comparten mapa).
 _USER_FORM_ERR_MAP = {
     "password_vacio": "La contraseña inicial es obligatoria.",
@@ -1058,7 +1074,16 @@ _USER_FORM_ERR_MAP = {
     "analista_ocupado": "Uno de los analistas seleccionados ya está a cargo de otro supervisor. Recargá la página para ver de quién.",
     "supervisor_invalido": "Uno de los supervisores seleccionados no es válido.",
     "supervisor_ocupado": "Uno de los supervisores seleccionados ya está a cargo de otro gerente. Recargá la página para ver de quién.",
+    "jerarquia_ciclo": "La asignación formaría un ciclo en la jerarquía y no fue guardada.",
+    "reporta_a_invalido": "El superior elegido en \"Reporta a\" no existe o no tiene el rol esperado para este usuario.",
 }
+
+
+_USER_FORM_ERR_MAP.update({
+    'fusion_ambiguo': 'Fusión encontró varios candidatos probables. Elegí uno antes de guardar.',
+    'fusion_identidad_invalida': 'La persona de Fusión elegida ya no existe en los padrones actuales.',
+    'fusion_confirmacion_requerida': 'Debés confirmar explícitamente que las variantes corresponden a la misma persona.',
+})
 
 
 class _CarteraConflictError(Exception):
@@ -1070,6 +1095,33 @@ class _CarteraConflictError(Exception):
     def __init__(self, err_code: str):
         self.err_code = err_code
         super().__init__(err_code)
+
+
+def _assert_hierarchy_link_safe(db, parent: User, child: User) -> None:
+    '''Valida que child -> parent no cierre un ciclo, incluso ante datos legados.'''
+    if parent.id == child.id:
+        raise _CarteraConflictError('jerarquia_ciclo')
+    seen: set[int] = set()
+    cursor = parent
+    while cursor is not None:
+        if cursor.id == child.id or cursor.id in seen:
+            raise _CarteraConflictError('jerarquia_ciclo')
+        seen.add(cursor.id)
+        cursor = db.get(User, cursor.reporta_a_id) if cursor.reporta_a_id else None
+
+
+def _clear_incompatible_parent(db, user: User, final_role: str) -> None:
+    '''Un cambio de rol nunca conserva un padre de un nivel incompatible.'''
+    if not user.reporta_a_id:
+        return
+    parent = db.get(User, user.reporta_a_id)
+    parent_role = (parent.role or '').strip().lower() if parent else ''
+    compatible = (
+        (final_role in _ROLES_ANALISTA and parent_role in _ROLES_SUPERVISOR)
+        or (final_role in _ROLES_SUPERVISOR and parent_role in _ROLES_GERENTE)
+    )
+    if not compatible:
+        user.reporta_a_id = None
 
 
 def _cartera_form_context(db, editing_user_id: int | None) -> dict:
@@ -1095,6 +1147,12 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
         .order_by(User.name.asc(), User.email.asc())
         .all()
     )
+    gerentes = (
+        db.query(User)
+        .filter(func.lower(User.role).in_(_ROLES_GERENTE))
+        .order_by(User.name.asc(), User.email.asc())
+        .all()
+    )
     equipo_analistas_count = 0
     equipo_supervisores_count = 0
     tiene_vendedor_propio = False
@@ -1102,14 +1160,93 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
         equipo_analistas_count = sum(1 for a in analistas if a.reporta_a_id == editing_user_id)
         equipo_supervisores_count = sum(1 for s in supervisores if s.reporta_a_id == editing_user_id)
         tiene_vendedor_propio = any(v.user_id == editing_user_id for v in vendedores)
+
+    # --- Cartera de cuentas (padrones operadores_comerciales.csv / Cliente_vendedor.csv,
+    # ago-2026): opciones para los multi-select del form. Distinto de vendedores_fusion
+    # (16 personas de Fusión) — acá son los padrones completos (22 / 248 códigos). ---
+    operadores_cartera_opciones = (
+        db.query(CarteraOperador.operador_codigo, CarteraOperador.operador_nombre)
+        .distinct()
+        .order_by(CarteraOperador.operador_nombre.asc())
+        .all()
+    )
+    vendedores_cartera_opciones = (
+        db.query(CarteraVendedor.vendedor_codigo, CarteraVendedor.vendedor_nombre)
+        .distinct()
+        .order_by(CarteraVendedor.vendedor_nombre.asc())
+        .all()
+    )
+    unineg_pares = (
+        db.query(CarteraVendedor.unineg, CarteraVendedor.descneg)
+        .distinct()
+        .all()
+    )
+    # unineg='0' viene con descneg='' en el CSV (52% de las filas) — es un bucket
+    # propio y nombrado a propósito (decisión 2026-08-19), nunca un default silencioso.
+    _unineg_seen: dict[str, str] = {}
+    for codigo, desc in unineg_pares:
+        etiqueta = (desc or "").strip() or "Sin unidad asignada"
+        if codigo not in _unineg_seen or _unineg_seen[codigo] == "Sin unidad asignada":
+            _unineg_seen[codigo] = etiqueta
+    unineg_opciones = sorted(_unineg_seen.items(), key=lambda kv: (kv[0] != "0", kv[1]))
+
     return {
         "vendedores_fusion": vendedores,
         "analistas_disponibles": analistas,
         "supervisores_disponibles": supervisores,
+        "gerentes_disponibles": gerentes,
         "equipo_analistas_count": equipo_analistas_count,
         "equipo_supervisores_count": equipo_supervisores_count,
         "tiene_vendedor_propio": tiene_vendedor_propio,
+        "operadores_cartera_opciones": operadores_cartera_opciones,
+        "vendedores_cartera_opciones": vendedores_cartera_opciones,
+        "unineg_opciones": unineg_opciones,
     }
+
+
+def _resolve_reporta_a(
+    db,
+    u: User,
+    role_ok: str,
+    reporta_a_supervisor_id: str,
+    reporta_a_gerente_id: str,
+) -> None:
+    """Fija `u.reporta_a_id` desde el campo "Reporta a" del propio form —
+    dirección hijo→padre, complementaria (no sustituta) de las listas "a cargo"
+    que arma `_sync_cartera_y_jerarquia` desde el padre. Dos inputs separados,
+    uno por rol hijo (`reporta_a_supervisor_id` para Analista, `reporta_a_gerente_id`
+    para Supervisor) para que cada combo solo pueda ofrecer padres del rol
+    correcto; acá se revalida igual, nunca se confía en cuál mandó el cliente.
+    Cualquier otro rol final (Gerente/Admin/Auditor) no tiene padre en este
+    esquema — se ignoran ambos campos y se limpia el vínculo, mismo criterio que
+    `_clear_incompatible_parent`. Debe llamarse ANTES de `_sync_cartera_y_jerarquia`
+    (esa función solo toca los HIJOS de `u`, nunca pisa esto)."""
+    if role_ok in _ROLES_ANALISTA:
+        raw = reporta_a_supervisor_id
+        parent_roles = _ROLES_SUPERVISOR
+    elif role_ok in _ROLES_SUPERVISOR:
+        raw = reporta_a_gerente_id
+        parent_roles = _ROLES_GERENTE
+    else:
+        u.reporta_a_id = None
+        return
+
+    raw = (raw or "").strip()
+    if not raw:
+        u.reporta_a_id = None
+        return
+
+    try:
+        parent_id = int(raw)
+    except ValueError:
+        raise _CarteraConflictError("reporta_a_invalido")
+
+    parent = db.get(User, parent_id)
+    if parent is None or not parent.has_role(*parent_roles):
+        raise _CarteraConflictError("reporta_a_invalido")
+
+    _assert_hierarchy_link_safe(db, parent, u)
+    u.reporta_a_id = parent.id
 
 
 def _sync_cartera_y_jerarquia(
@@ -1137,6 +1274,7 @@ def _sync_cartera_y_jerarquia(
     Requiere que `u.id` ya exista (flush antes de llamar, en alta).
     """
     ahora = dt.datetime.utcnow()
+    _clear_incompatible_parent(db, u, role_ok)
 
     # --- Identidad en Fusión: Analista y Supervisor tienen cartera propia ---
     actual_vendedor = db.query(VendedorFusion).filter(VendedorFusion.user_id == u.id).first()
@@ -1179,6 +1317,7 @@ def _sync_cartera_y_jerarquia(
                 raise _CarteraConflictError("analista_invalido")
             if a.reporta_a_id not in (None, u.id):
                 raise _CarteraConflictError("analista_ocupado")
+            _assert_hierarchy_link_safe(db, u, a)
         actuales = (
             db.query(User)
             .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_ANALISTA))
@@ -1206,6 +1345,7 @@ def _sync_cartera_y_jerarquia(
                 raise _CarteraConflictError("supervisor_invalido")
             if s.reporta_a_id not in (None, u.id):
                 raise _CarteraConflictError("supervisor_ocupado")
+            _assert_hierarchy_link_safe(db, u, s)
         actuales = (
             db.query(User)
             .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR))
@@ -1221,6 +1361,68 @@ def _sync_cartera_y_jerarquia(
             User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR)
         ).all():
             s.reporta_a_id = None
+
+
+def _validated_fusion_link(db, name: str, enabled: bool, selected_identity: str) -> tuple[bool, str | None]:
+    if not enabled:
+        return False, None
+    selected = (selected_identity or '').strip()
+    initial = resolve_fusion_identity(db, name)
+    if initial.get('status') == 'merge_confirmation_required':
+        if not selected:
+            raise _CarteraConflictError('fusion_confirmacion_requerida')
+        if selected != initial.get('merge_key'):
+            raise _CarteraConflictError('fusion_identidad_invalida')
+    result = resolve_fusion_identity(db, name, selected or None)
+    if selected and result.get('status') not in {'selected', 'merge_confirmed'}:
+        raise _CarteraConflictError('fusion_identidad_invalida')
+    if not selected and result.get('status') == 'ambiguous':
+        raise _CarteraConflictError('fusion_ambiguo')
+    # Exacto/confiable se recalcula por nombre tras cada recarga. Solo se fija la
+    # firma cuando el Admin eligió explícitamente un candidato.
+    return True, selected or None
+
+
+@router.get('/users/cartera-fusion-preview')
+def sic_users_cartera_fusion_preview(
+    name: str = Query(''),
+    role: str = Query('analista'),
+    identity: str = Query(''),
+    unineg: list[str] = Query(default=[]),
+    user: User = Depends(sic_access_required),
+):
+    if 'admin' not in (user.role or '').lower():
+        raise HTTPException(status_code=403, detail='Solo Admin puede vincular carteras.')
+    result = resolve_fusion_identity(db_session, name, identity or None)
+    match = result.get('match')
+    allowed_units = set(unineg) if (role or '').strip().lower() == 'supervisor' else None
+    payload = {
+        'status': result.get('status'),
+        'automatic': bool(result.get('automatic')),
+        'message': {
+            'exact': 'Coincidencia exacta e inequívoca.',
+            'confident': 'Coincidencia confiable por similitud.',
+            'selected': 'Persona de Fusión elegida por el Admin.',
+            'merge_confirmed': 'Combinación confirmada por el Admin.',
+            'merge_confirmation_required': 'Hay dos variantes entre padrones. Confirmá que corresponden a la misma persona.',
+            'ambiguous': 'Hay varios candidatos probables. Elegí uno para continuar.',
+            'not_found': 'No se pudo identificar con seguridad.',
+        }.get(result.get('status'), 'No se encontró cartera en Fusión.'),
+        'match': None,
+        'candidates': result.get('candidates', []),
+        'merge_key': result.get('merge_key'),
+    }
+    for candidate in payload['candidates']:
+        candidate_result = resolve_fusion_identity(db_session, name, candidate.get('key'))
+        candidate_match = candidate_result.get('match')
+        candidate['account_count'] = (
+            len(fusion_account_codes(db_session, candidate_match, allowed_units))
+            if candidate_match is not None else 0
+        )
+    if match is not None:
+        payload['match'] = match.as_dict()
+        payload['match']['account_count'] = len(fusion_account_codes(db_session, match, allowed_units))
+    return JSONResponse(payload)
 
 
 # --- USERS MANAGEMENT ---
@@ -1283,8 +1485,14 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         full_name="",
         role="analista",
         unit_business="Otros",
+        reporta_a_id=None,
         access_scope="todos", # Default
         module_access=None,  # None → en alta el template marca todo el techo del rol
+        cartera_operador_codigos=[],
+        cartera_vendedor_codigos=[],
+        cartera_unineg_scope=[],
+        cartera_fusion_enabled=False,
+        cartera_fusion_identidad=None,
     )
     
     # Capture error from redirect and map to friendly message
@@ -1322,6 +1530,13 @@ def sic_users_create(
     vendedor_fusion_id: str = Form(""),
     analista_ids: list[str] = Form(default=[]),
     supervisor_ids: list[str] = Form(default=[]),
+    reporta_a_supervisor_id: str = Form(""),
+    reporta_a_gerente_id: str = Form(""),
+    cartera_fusion_enabled: str | None = Form(default=None),
+    cartera_fusion_identidad: str = Form(''),
+    cartera_operador_codigos: list[str] = Form(default=[]),
+    cartera_vendedor_codigos: list[str] = Form(default=[]),
+    cartera_unineg_scope: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     # Enforce admin
@@ -1353,6 +1568,12 @@ def sic_users_create(
 
         modulos_ok = normalize_module_access(module_access, role)
         scope_ok = derive_access_scope(modulos_ok)
+        fusion_enabled, fusion_identity = _validated_fusion_link(
+            db_session,
+            (name or '').strip() or email.split('@')[0],
+            bool(cartera_fusion_enabled) and role in _ROLES_CON_IDENTIDAD_FUSION,
+            cartera_fusion_identidad,
+        )
 
         u = User(
             email=email,
@@ -1363,9 +1584,15 @@ def sic_users_create(
             unit_business=unit_ok,
             access_scope=scope_ok,
             module_access=modulos_ok,
+            cartera_operador_codigos=_normalize_codigos(cartera_operador_codigos),
+            cartera_vendedor_codigos=_normalize_codigos(cartera_vendedor_codigos),
+            cartera_unineg_scope=_normalize_codigos(cartera_unineg_scope),
+            cartera_fusion_enabled=fusion_enabled,
+            cartera_fusion_identidad=fusion_identity,
         )
         db_session.add(u)
         db_session.flush()  # necesita u.id para cartera/jerarquía
+        _resolve_reporta_a(db_session, u, role, reporta_a_supervisor_id, reporta_a_gerente_id)
         _sync_cartera_y_jerarquia(
             db_session, u, role, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )
@@ -1435,6 +1662,13 @@ def sic_users_update(
     vendedor_fusion_id: str = Form(""),
     analista_ids: list[str] = Form(default=[]),
     supervisor_ids: list[str] = Form(default=[]),
+    reporta_a_supervisor_id: str = Form(""),
+    reporta_a_gerente_id: str = Form(""),
+    cartera_fusion_enabled: str | None = Form(default=None),
+    cartera_fusion_identidad: str = Form(''),
+    cartera_operador_codigos: list[str] = Form(default=[]),
+    cartera_vendedor_codigos: list[str] = Form(default=[]),
+    cartera_unineg_scope: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     if "admin" not in (user.role or "").lower():
@@ -1448,14 +1682,27 @@ def sic_users_update(
     role_ok = (role or "").strip().lower()
     modulos_ok = normalize_module_access(module_access, role_ok)
     scope_ok = derive_access_scope(modulos_ok)
+    fusion_enabled, fusion_identity = False, None
 
     try:
+        fusion_enabled, fusion_identity = _validated_fusion_link(
+            db_session,
+            (name or '').strip(),
+            bool(cartera_fusion_enabled) and role_ok in _ROLES_CON_IDENTIDAD_FUSION,
+            cartera_fusion_identidad,
+        )
         u.name = (name or "").strip()
         u.role = role_ok
         if hasattr(u, "unit_business"):
             u.unit_business = unit_ok
         u.access_scope = scope_ok
         u.module_access = modulos_ok
+        u.cartera_operador_codigos = _normalize_codigos(cartera_operador_codigos)
+        u.cartera_vendedor_codigos = _normalize_codigos(cartera_vendedor_codigos)
+        u.cartera_unineg_scope = _normalize_codigos(cartera_unineg_scope)
+        u.cartera_fusion_enabled = fusion_enabled
+        u.cartera_fusion_identidad = fusion_identity
+        _resolve_reporta_a(db_session, u, role_ok, reporta_a_supervisor_id, reporta_a_gerente_id)
         _sync_cartera_y_jerarquia(
             db_session, u, role_ok, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )

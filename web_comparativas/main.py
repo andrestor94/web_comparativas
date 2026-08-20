@@ -108,6 +108,9 @@ from web_comparativas.migrations import (
     ensure_users_reporta_a_column,
     ensure_vendedores_fusion_seed,
     ensure_oportunidad_asignaciones_manuales_table,
+    ensure_cartera_tables,
+    ensure_users_cartera_columns,
+    ensure_users_cartera_fusion_columns,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -375,6 +378,21 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: oportunidad_asignaciones_manuales table checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning oportunidad_asignaciones_manuales table: {e}", flush=True)
+
+    # Cartera de cuentas por operador/vendedor (Forecast + Dimensionamiento, ago-2026).
+    # Solo esquema acá; los datos se cargan aparte con push_cartera_data.py.
+    try:
+        ensure_cartera_tables()
+        print("[MIGRATION] SUCCESS: cartera_operadores/cartera_vendedores tables checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning cartera tables: {e}", flush=True)
+
+    try:
+        ensure_users_cartera_columns()
+        ensure_users_cartera_fusion_columns()
+        print("[MIGRATION] SUCCESS: users cartera columns checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning users cartera columns: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup

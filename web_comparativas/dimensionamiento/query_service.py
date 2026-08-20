@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from sqlalchemy import Date, Text, case, cast, distinct, func, inspect as sa_db_inspect, literal, or_, select, text
+from sqlalchemy import Date, Text, and_, case, cast, distinct, func, inspect as sa_db_inspect, literal, or_, select, text
 from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
@@ -76,12 +76,21 @@ _SUMMARY_HEALTH_CACHE: dict[int | None, dict] = {}
 
 # Micro-cache para get_status: los conteos globales raramente cambian; 30s evita
 # 3 queries extras en cada carga inicial y cada reload sin invalidar datos útiles.
-_STATUS_CACHE: dict[int | None, dict] = {}
+# Key = (import_run_id, cartera_key) — la cartera forma parte de la clave (ver get_status).
+_STATUS_CACHE: dict[tuple, dict] = {}
 _TTL_STATUS = 30.0
 
 # Registro de entidades-cliente resueltas por corrida (identity.py), con etiquetas ya
 # desambiguadas. Cache pequeño; se invalida en invalidate_query_cache().
 _ENTITY_REGISTRY_CACHE: dict[int | None, dict[str, Any]] = {}
+
+# cuenta_interna -> {cliente_entidad_id, ...} por corrida (cartera de cuentas, ago-2026).
+# DimensionamientoRecord.cuenta_interna no tiene índice de DB (full scan al construirlo:
+# ~330ms medido localmente sobre 365k filas) — por eso se cachea 1 vez por run_id, igual
+# que _ENTITY_REGISTRY_CACHE, y NO como account_resolution.py._identity_cache (esa cache
+# nunca se invalida en ningún lado del código — no copiar ese patrón). Se invalida en
+# invalidate_query_cache(), igual que el resto.
+_CUENTA_ENTIDAD_CACHE: dict[int | None, dict[str, set[int]]] = {}
 
 
 def _make_cache_key(fn_name: str, filters: "DimensionamientoFilters", **extra: Any) -> str:
@@ -127,6 +136,7 @@ def invalidate_query_cache() -> None:
     _SUMMARY_HEALTH_CACHE.clear()
     _STATUS_CACHE.clear()
     _ENTITY_REGISTRY_CACHE.clear()
+    _CUENTA_ENTIDAD_CACHE.clear()
     logger.info("[DIM][CACHE] Caché invalidado. %d entradas eliminadas.", count)
 
 
@@ -171,6 +181,21 @@ class DimensionamientoFilters:
     # Protección PERMANENTE contra "card en 0", no un parche de deploy.
     entities_resolved: bool = True
 
+    # ── Cartera de cuentas (ago-2026, ver cartera_visibilidad.py) ──────────────
+    # DISTINTO de `cliente_entidad_ids` arriba (esa es la selección del usuario en el
+    # desplegable "Cliente"; se limpia a propósito en `_client_dropdown`/`_client_
+    # dropdown_fallback` para poder listar TODAS las opciones). Estos dos campos son
+    # la identidad de QUIÉN pregunta, no QUÉ filtró — nunca se limpian en _clone_filters,
+    # y _apply_common_filters los aplica siempre, además de (no en lugar de) la
+    # selección del usuario. `cartera_unrestricted=True` (default) = sin restricción
+    # (rol admin/auditor, o flag DIMENSIONAMIENTO_CARTERA_ENABLED apagado).
+    cartera_unrestricted: bool = True
+    cartera_entidad_ids: frozenset[int] = field(default_factory=frozenset)
+    # Ramas crudas (cuentas + UN) y su forma resuelta a entidades. None conserva
+    # compatibilidad con el alcance plano anterior; tupla vacia es fail-closed.
+    cartera_branches: tuple[tuple[frozenset[str], frozenset[str] | None], ...] | None = None
+    cartera_entidad_branches: tuple[tuple[frozenset[int], frozenset[str] | None], ...] = field(default_factory=tuple)
+
 
 def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
     return {
@@ -188,6 +213,14 @@ def _filters_debug_dict(filters: DimensionamientoFilters) -> dict[str, Any]:
         "is_client": filters.is_client,
         "import_run_id": filters.import_run_id,
         "entities_resolved": filters.entities_resolved,
+        # En la cache key para que cartera distinta = key distinta (nunca comparten
+        # resultado cacheado entre usuarios con cartera distinta).
+        "cartera_unrestricted": filters.cartera_unrestricted,
+        "cartera_entidad_ids": sorted(filters.cartera_entidad_ids),
+        "cartera_entidad_branches": [
+            [sorted(entity_ids), None if units is None else sorted(units)]
+            for entity_ids, units in filters.cartera_entidad_branches
+        ],
     }
 
 
@@ -220,12 +253,21 @@ def _clone_filters(filters: DimensionamientoFilters) -> DimensionamientoFilters:
         is_client=filters.is_client,
         import_run_id=filters.import_run_id,
         entities_resolved=filters.entities_resolved,
+        cartera_unrestricted=filters.cartera_unrestricted,
+        cartera_entidad_ids=filters.cartera_entidad_ids,
+        cartera_branches=filters.cartera_branches,
+        cartera_entidad_branches=filters.cartera_entidad_branches,
     )
 
 
 def _has_active_filters(filters: DimensionamientoFilters) -> bool:
     return any(
         [
+            # Un usuario con cartera restringida NUNCA cuenta como "sin filtros
+            # activos" — si no, get_dashboard_bootstrap serviría el snapshot
+            # compartido (calculado sin filtros, whole-company) a un usuario
+            # restringido. Ver _get_dashboard_snapshot / get_dashboard_bootstrap.
+            not filters.cartera_unrestricted,
             filters.clientes,
             filters.cliente_entidad_ids,
             filters.provincias,
@@ -449,11 +491,43 @@ def _default_platform_values(session: Session, import_run_id: int | None = None)
 def _normalize_dashboard_filters(
     session: Session,
     filters: DimensionamientoFilters,
+    *,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> DimensionamientoFilters:
+    """`allowed_cliente_ids`: códigos de cuenta (cartera_visibilidad.CarteraScope.
+    codigos_cliente) del usuario que pide los datos. None = sin restricción (rol
+    admin/auditor, o DIMENSIONAMIENTO_CARTERA_ENABLED apagado) — comportamiento
+    IDÉNTICO a hoy. Cualquier otro valor (incluso frozenset() vacío) activa el
+    filtrado fail-closed vía cartera_unrestricted/cartera_entidad_ids."""
     normalized = _clone_filters(filters)
     if normalized.import_run_id is None:
         latest = _latest_success_import_run(session)
         normalized.import_run_id = latest.id if latest else None
+
+    if normalized.cartera_branches is not None:
+        normalized.cartera_unrestricted = False
+        normalized.cartera_entidad_branches = tuple(
+            (
+                cuenta_to_entidad_ids(session, normalized.import_run_id, cuentas),
+                unidades,
+            )
+            for cuentas, unidades in normalized.cartera_branches
+        )
+        normalized.cartera_entidad_ids = frozenset(
+            entity_id
+            for entity_ids, _units in normalized.cartera_entidad_branches
+            for entity_id in entity_ids
+        )
+    elif allowed_cliente_ids is None:
+        normalized.cartera_unrestricted = True
+        normalized.cartera_entidad_ids = frozenset()
+        normalized.cartera_entidad_branches = ()
+    else:
+        normalized.cartera_unrestricted = False
+        normalized.cartera_entidad_ids = cuenta_to_entidad_ids(
+            session, normalized.import_run_id, allowed_cliente_ids
+        )
+        normalized.cartera_entidad_branches = ()
 
     default_platforms = _default_platform_values(session, normalized.import_run_id)
     if normalized.plataformas and default_platforms:
@@ -777,6 +851,38 @@ def build_filters(
 
 
 def _apply_common_filters(stmt, model, filters: DimensionamientoFilters, applied_conditions: list[str] | None = None):
+    # Cartera de cuentas: SIEMPRE se aplica primero, independiente de y ADEMÁS de
+    # cualquier selección propia del usuario (cliente_entidad_ids/clientes más abajo)
+    # — las dos condiciones se ANDan. Si el usuario elige a mano una entidad fuera de
+    # su cartera, el AND de ambos IN(...) da 0 filas solo: no hace falta intersectar
+    # a mano. cartera_entidad_ids vacío (sin cartera asignada) -> 1=0, fail-closed,
+    # sin excepción, para AMBOS modelos (summary y detalle).
+    if filters.cartera_branches is not None:
+        branch_conditions = []
+        for entity_ids, units in filters.cartera_entidad_branches:
+            if not entity_ids or (units is not None and not units):
+                continue
+            condition = model.cliente_entidad_id.in_(entity_ids)
+            if units is not None:
+                condition = and_(condition, model.unidad_negocio.in_(units))
+            branch_conditions.append(condition)
+        if not branch_conditions:
+            stmt = stmt.where(literal(False))
+            if applied_conditions is not None:
+                applied_conditions.append("cartera_branches EMPTY -> 1=0 (fail-closed)")
+        else:
+            stmt = stmt.where(or_(*branch_conditions))
+            if applied_conditions is not None:
+                applied_conditions.append(f"cartera estructurada: {len(branch_conditions)} ramas")
+    elif not filters.cartera_unrestricted:
+        if not filters.cartera_entidad_ids:
+            stmt = stmt.where(literal(False))
+            if applied_conditions is not None:
+                applied_conditions.append("cartera_entidad_ids EMPTY -> 1=0 (fail-closed, sin cartera asignada)")
+        else:
+            stmt = stmt.where(model.cliente_entidad_id.in_(filters.cartera_entidad_ids))
+            if applied_conditions is not None:
+                applied_conditions.append(f"cartera: cliente_entidad_id IN ({len(filters.cartera_entidad_ids)} entidades)")
     if filters.import_run_id is not None:
         stmt = stmt.where(model.import_run_id == filters.import_run_id)
         if applied_conditions is not None:
@@ -1233,19 +1339,41 @@ def ensure_default_dashboard_snapshot(session: Session) -> dict[str, Any] | None
     return refresh_default_dashboard_snapshot(session, import_run_id=latest.id, commit=True)
 
 
-def get_status(session: Session, import_run_id: int | None = None) -> dict[str, Any]:
+def get_status(
+    session: Session,
+    import_run_id: int | None = None,
+    *,
+    allowed_unidades_negocio: frozenset[str] | None = None,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
+    allowed_cartera_branches: "tuple[tuple[frozenset[str], frozenset[str] | None], ...] | None" = None,
+) -> dict[str, Any]:
+    """`total_rows`/`platforms` reflejan SOLO la cartera del usuario cuando
+    `allowed_cliente_ids` no es None (cartera de cuentas, ago-2026) — `last_import`
+    (metadata del archivo importado: rows_processed, hash, fecha) NO se restringe:
+    describe el CSV fuente completo, no "filas que este usuario puede ver"."""
     if import_run_id is None:
         latest = _latest_success_import_run(session)
         import_run_id = latest.id if latest else None
 
     now = time.perf_counter()
-    cached = _STATUS_CACHE.get(import_run_id)
+    # Cache key incluye la cartera: sin esto, la respuesta restringida de un usuario
+    # quedaría cacheada y se serviría (o serviría la SIN restringir) a otro usuario.
+    if allowed_cartera_branches is not None:
+        cartera_key = tuple(
+            (tuple(sorted(cuentas)), None if units is None else tuple(sorted(units)))
+            for cuentas, units in allowed_cartera_branches
+        )
+    else:
+        cartera_key = "ALL" if allowed_cliente_ids is None else "R:" + ",".join(sorted(allowed_cliente_ids))
+    unidad_key = None if allowed_unidades_negocio is None else tuple(sorted(allowed_unidades_negocio))
+    cache_key = (import_run_id, cartera_key, unidad_key)
+    cached = _STATUS_CACHE.get(cache_key)
     if cached is not None and now - cached["ts"] < _TTL_STATUS:
         logger.debug("[DIM][CACHE] get_status hit")
         return cached["val"]
 
     started_at = now
-    logger.info("[DIM][QUERY] get_status start run_id=%s", import_run_id)
+    logger.info("[DIM][QUERY] get_status start run_id=%s restricted=%s", import_run_id, allowed_cliente_ids is not None)
     _apply_local_statement_timeout(session, 50000)
 
     if import_run_id is not None:
@@ -1256,27 +1384,78 @@ def get_status(session: Session, import_run_id: int | None = None) -> dict[str, 
     if run_obj is None:
         run_obj = _latest_success_import_run(session)
 
-    if run_obj is not None:
-        total_rows = session.execute(
-            select(func.count(DimensionamientoRecord.id))
-            .where(DimensionamientoRecord.import_run_id == run_obj.id)
-        ).scalar_one()
-
-        platform_rows = session.execute(
-            select(
-                DimensionamientoRecord.plataforma,
-                func.count(DimensionamientoRecord.id),
+    cartera_entidad_ids: "frozenset[int] | None" = None
+    cartera_entidad_branches = None
+    if allowed_cartera_branches is not None:
+        cartera_entidad_branches = tuple(
+            (
+                cuenta_to_entidad_ids(session, run_obj.id if run_obj else None, cuentas),
+                units,
             )
+            for cuentas, units in allowed_cartera_branches
+        )
+        cartera_entidad_ids = frozenset(
+            entity_id
+            for entity_ids, _units in cartera_entidad_branches
+            for entity_id in entity_ids
+        )
+    elif allowed_cliente_ids is not None:
+        cartera_entidad_ids = cuenta_to_entidad_ids(session, run_obj.id if run_obj else None, allowed_cliente_ids)
+
+    if (
+        run_obj is not None
+        and (
+            cartera_entidad_branches is None
+            or any(ids and (units is None or units) for ids, units in cartera_entidad_branches)
+        )
+        and (cartera_entidad_branches is not None or cartera_entidad_ids is None or cartera_entidad_ids)
+        and (allowed_unidades_negocio is None or allowed_unidades_negocio)
+    ):
+        total_stmt = select(func.count(DimensionamientoRecord.id)).where(
+            DimensionamientoRecord.import_run_id == run_obj.id
+        )
+        platform_stmt = (
+            select(DimensionamientoRecord.plataforma, func.count(DimensionamientoRecord.id))
             .where(DimensionamientoRecord.import_run_id == run_obj.id)
             .group_by(DimensionamientoRecord.plataforma)
             .order_by(DimensionamientoRecord.plataforma)
-        ).all()
+        )
+        if cartera_entidad_branches is not None:
+            branch_conditions = []
+            for entity_ids, units in cartera_entidad_branches:
+                if not entity_ids or (units is not None and not units):
+                    continue
+                condition = DimensionamientoRecord.cliente_entidad_id.in_(entity_ids)
+                if units is not None:
+                    condition = and_(condition, DimensionamientoRecord.unidad_negocio.in_(units))
+                branch_conditions.append(condition)
+            total_stmt = total_stmt.where(or_(*branch_conditions))
+            platform_stmt = platform_stmt.where(or_(*branch_conditions))
+        elif cartera_entidad_ids is not None:
+            total_stmt = total_stmt.where(DimensionamientoRecord.cliente_entidad_id.in_(cartera_entidad_ids))
+            platform_stmt = platform_stmt.where(DimensionamientoRecord.cliente_entidad_id.in_(cartera_entidad_ids))
+        if allowed_unidades_negocio is not None:
+            total_stmt = total_stmt.where(DimensionamientoRecord.unidad_negocio.in_(allowed_unidades_negocio))
+            platform_stmt = platform_stmt.where(DimensionamientoRecord.unidad_negocio.in_(allowed_unidades_negocio))
+        total_rows = session.execute(total_stmt).scalar_one()
+        platform_rows = session.execute(platform_stmt).all()
     else:
+        # run_obj is None, OR restringido sin ninguna entidad en cartera -> fail-closed.
         total_rows = 0
         platform_rows = []
 
     payload = {
         "has_data": total_rows > 0,
+        # True cuando el usuario está restringido por cartera Y no tiene ninguna cuenta
+        # visible en esta corrida (sin cartera asignada, o su cartera no matchea nada
+        # acá) — el frontend usa esto para mostrar "No tenés cuentas asignadas..." en
+        # vez del genérico "No hay datos cargados" (decisión 2026-08-19).
+        "cartera_blocked": bool(
+            (cartera_entidad_branches is not None and not any(
+                ids and (units is None or units) for ids, units in cartera_entidad_branches
+            ))
+            or (cartera_entidad_branches is None and cartera_entidad_ids is not None and not cartera_entidad_ids)
+        ),
         "total_rows": total_rows,
         "platforms": [{"name": name, "rows": rows} for name, rows in platform_rows],
         "last_import": {
@@ -1293,7 +1472,9 @@ def get_status(session: Session, import_run_id: int | None = None) -> dict[str, 
         else None,
     }
     _log_query_success("get_status", started_at, total_rows=total_rows, platforms=len(platform_rows))
-    _STATUS_CACHE[import_run_id] = {
+    if allowed_unidades_negocio is not None and not allowed_unidades_negocio:
+        payload['cartera_blocked'] = True
+    _STATUS_CACHE[cache_key] = {
         "ts": time.perf_counter(),
         "val": payload
     }
@@ -1394,8 +1575,11 @@ def get_debug_snapshot(session: Session, import_run_id: int | None = None) -> di
     return payload
 
 
-def get_filter_options(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_filter_options(
+    session: Session, filters: DimensionamientoFilters,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     # ── Caché: hit frecuente al limpiar/reutilizar un mismo set de filtros ──
     _ttl = _TTL_FILTER_OPTIONS_DFLT if not _has_active_filters(filters) else _TTL_FILTER_OPTIONS_FILT
     _ck = _make_cache_key("get_filter_options", filters)
@@ -1580,6 +1764,43 @@ def _entity_registry(session: Session, import_run_id: int | None) -> dict[str, A
     return result
 
 
+def _cuenta_to_entidad_map(session: Session, import_run_id: int | None) -> dict[str, set[int]]:
+    """{cuenta_interna: {cliente_entidad_id, ...}} de TODA la corrida — sin filtrar por
+    cartera (sería circular). Cacheado por run_id, igual que _entity_registry: sin esto,
+    cada resolución de cartera sería un full scan de dimensionamiento_records (no hay
+    índice sobre cuenta_interna — medido: ~330ms sobre 365k filas locales)."""
+    cached = _CUENTA_ENTIDAD_CACHE.get(import_run_id)
+    if cached is not None:
+        return cached
+    mapping: dict[str, set[int]] = {}
+    if import_run_id is not None:
+        rows = session.execute(
+            select(distinct(DimensionamientoRecord.cuenta_interna), DimensionamientoRecord.cliente_entidad_id)
+            .where(DimensionamientoRecord.import_run_id == import_run_id)
+            .where(DimensionamientoRecord.cuenta_interna.isnot(None))
+            .where(DimensionamientoRecord.cuenta_interna != "")
+            .where(DimensionamientoRecord.cliente_entidad_id.isnot(None))
+        ).all()
+        for cuenta, entidad_id in rows:
+            mapping.setdefault(str(cuenta).strip(), set()).add(entidad_id)
+    _CUENTA_ENTIDAD_CACHE[import_run_id] = mapping
+    return mapping
+
+
+def cuenta_to_entidad_ids(
+    session: Session, import_run_id: int | None, cuentas: "Iterable[str]"
+) -> frozenset[int]:
+    """Resuelve un set de códigos de cuenta (cartera de un usuario, ver
+    cartera_visibilidad.py) a los cliente_entidad_id correspondientes en esta corrida.
+    Cuentas que no matchean ningún registro de la corrida se ignoran en silencio (no
+    hay nada que resolver — quedan simplemente fuera del resultado)."""
+    mapping = _cuenta_to_entidad_map(session, import_run_id)
+    result: set[int] = set()
+    for c in cuentas:
+        result |= mapping.get(str(c).strip(), set())
+    return frozenset(result)
+
+
 def _present_entity_ids(session: Session, filters: DimensionamientoFilters) -> set[int]:
     """Ids de entidad presentes bajo los filtros activos, IGNORANDO ¿Cliente?.
 
@@ -1682,8 +1903,11 @@ def _client_dropdown(session: Session, filters: DimensionamientoFilters) -> list
     return items
 
 
-def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, Any]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_kpis(
+    session: Session, filters: DimensionamientoFilters,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_kpis", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1764,8 +1988,11 @@ def get_kpis(session: Session, filters: DimensionamientoFilters) -> dict[str, An
         raise
 
 
-def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 5) -> dict[str, Any]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_series(
+    session: Session, filters: DimensionamientoFilters, limit: int = 5,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> dict[str, Any]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_series", filters, limit=limit)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1845,8 +2072,11 @@ def get_series(session: Session, filters: DimensionamientoFilters, limit: int = 
         raise
 
 
-def get_results_breakdown(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_results_breakdown(
+    session: Session, filters: DimensionamientoFilters,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_results_breakdown", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1891,8 +2121,11 @@ def get_results_breakdown(session: Session, filters: DimensionamientoFilters) ->
         raise
 
 
-def get_top_families(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_top_families(
+    session: Session, filters: DimensionamientoFilters,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_top_families", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1944,8 +2177,11 @@ def get_top_families(session: Session, filters: DimensionamientoFilters) -> list
         raise
 
 
-def get_geography_distribution(session: Session, filters: DimensionamientoFilters) -> list[dict[str, Any]]:
-    filters = _normalize_dashboard_filters(session, filters)
+def get_geography_distribution(
+    session: Session, filters: DimensionamientoFilters,
+    *, allowed_cliente_ids: "frozenset[str] | None" = None,
+) -> list[dict[str, Any]]:
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_geography_distribution", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -1994,8 +2230,10 @@ def get_clients_by_result(
     session: Session,
     filters: DimensionamientoFilters,
     limit: int = 10,
+    *,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> list[dict[str, Any]]:
-    filters = _normalize_dashboard_filters(session, filters)
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_clients_by_result", filters, limit=limit)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -2103,8 +2341,10 @@ def get_clients_by_result(
 def get_family_consumption_table(
     session: Session,
     filters: DimensionamientoFilters,
+    *,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> dict[str, Any]:
-    filters = _normalize_dashboard_filters(session, filters)
+    filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
     _ck = _make_cache_key("get_family_consumption_table", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -2554,6 +2794,7 @@ def _get_aggregated_dashboard_bootstrap(
     filters: DimensionamientoFilters,
     *,
     include_status: bool,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> dict[str, Any]:
     cache_key = _make_cache_key("get_dashboard_bootstrap.aggregated", filters, include_status=include_status)
     cached = _cache_get(cache_key, _TTL_QUERY_RESULT)
@@ -2593,7 +2834,7 @@ def _get_aggregated_dashboard_bootstrap(
     payload["filters"]["clientes"] = _client_dropdown(session, filters)
 
     if include_status:
-        payload["status"] = get_status(session, filters.import_run_id)
+        payload["status"] = get_status(session, filters.import_run_id, allowed_cliente_ids=allowed_cliente_ids)
     payload["meta"] = {
         "source": "live",
         "stale": False,
@@ -2612,8 +2853,11 @@ def get_dashboard_bootstrap(
     *,
     include_status: bool = True,
     bypass_snapshot: bool = False,
+    allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> dict[str, Any]:
-    filters = _normalize_dashboard_filters(session, filters or build_filters())
+    filters = _normalize_dashboard_filters(
+        session, filters or build_filters(), allowed_cliente_ids=allowed_cliente_ids
+    )
     started_at = _log_query_start(
         "get_dashboard_bootstrap",
         filters,
@@ -2674,6 +2918,7 @@ def get_dashboard_bootstrap(
                 session,
                 filters,
                 include_status=include_status,
+                allowed_cliente_ids=allowed_cliente_ids,
             )
         else:
             # El gráfico de series siempre recibe datos SIN la exclusión de negocios,
@@ -2681,14 +2926,14 @@ def get_dashboard_bootstrap(
             filters_for_series = _clone_filters(filters)
             filters_for_series.unidades_negocio_excluir = []
             payload = {
-                "filters": get_filter_options(session, filters),
-                "kpis": get_kpis(session, filters),
-                "series": get_series(session, filters_for_series),
-                "results": get_results_breakdown(session, filters),
-                "top_families": get_top_families(session, filters),
-                "geo": get_geography_distribution(session, filters),
-                "clients_by_result": get_clients_by_result(session, filters, limit=10),
-                "family_consumption": get_family_consumption_table(session, filters),
+                "filters": get_filter_options(session, filters, allowed_cliente_ids=allowed_cliente_ids),
+                "kpis": get_kpis(session, filters, allowed_cliente_ids=allowed_cliente_ids),
+                "series": get_series(session, filters_for_series, allowed_cliente_ids=allowed_cliente_ids),
+                "results": get_results_breakdown(session, filters, allowed_cliente_ids=allowed_cliente_ids),
+                "top_families": get_top_families(session, filters, allowed_cliente_ids=allowed_cliente_ids),
+                "geo": get_geography_distribution(session, filters, allowed_cliente_ids=allowed_cliente_ids),
+                "clients_by_result": get_clients_by_result(session, filters, limit=10, allowed_cliente_ids=allowed_cliente_ids),
+                "family_consumption": get_family_consumption_table(session, filters, allowed_cliente_ids=allowed_cliente_ids),
                 "meta": {
                     "source": "live",
                     "stale": False,
@@ -2698,7 +2943,7 @@ def get_dashboard_bootstrap(
                 },
             }
             if include_status:
-                payload["status"] = get_status(session)
+                payload["status"] = get_status(session, filters.import_run_id, allowed_cliente_ids=allowed_cliente_ids)
         _log_query_success(
             "get_dashboard_bootstrap",
             started_at,

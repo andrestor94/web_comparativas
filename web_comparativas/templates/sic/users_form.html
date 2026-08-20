@@ -140,6 +140,47 @@
                 <div id="role-change-warning" class="alert alert-warning mb-0" style="display:none"></div>
             </div>
 
+            {# ====== Reporta a (jerarquía, dirección hijo→padre) ======
+               Complementa —no reemplaza— las listas "a cargo" de más abajo (esas
+               asignan desde el padre). Este campo asigna desde el propio usuario:
+               sin él, vincular un Analista con su Supervisor requiere entrar a
+               editar al Supervisor y encontrarlo en su lista. Dos <select>, uno
+               por rol hijo posible, para que las opciones respeten la jerarquía
+               real (Analista → Supervisor, Supervisor → Gerente) sin mezclarlas
+               en un mismo combo. El server revalida todo igual que el resto de
+               este form: rol del padre compatible + sin ciclos
+               (_resolve_reporta_a en sic_router.py, misma dureza que
+               _sync_cartera_y_jerarquia). Dejarlo vacío es válido — desvincula. #}
+            <div class="span-12" data-role-blocks="analista" style="display:none">
+                <label class="form-label text-white-50 small" for="reporta_a_supervisor_id">Reporta a (Supervisor)</label>
+                <select class="form-select form-select-sic" id="reporta_a_supervisor_id" name="reporta_a_supervisor_id">
+                    <option value="">— Sin asignar —</option>
+                    {% for s in supervisores_disponibles %}
+                    <option value="{{ s.id }}" {% if form.reporta_a_id and form.reporta_a_id == s.id %}selected{% endif %}>
+                        {{ s.display_name }} ({{ s.email }})
+                    </option>
+                    {% else %}
+                    <option disabled>No hay usuarios con rol Supervisor todavía.</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">De quién depende este Analista. Sin este vínculo, su cartera nunca sube a un Supervisor ni a un Gerente.</div>
+            </div>
+
+            <div class="span-12" data-role-blocks="supervisor" style="display:none">
+                <label class="form-label text-white-50 small" for="reporta_a_gerente_id">Reporta a (Gerente)</label>
+                <select class="form-select form-select-sic" id="reporta_a_gerente_id" name="reporta_a_gerente_id">
+                    <option value="">— Sin asignar —</option>
+                    {% for g in gerentes_disponibles %}
+                    <option value="{{ g.id }}" {% if form.reporta_a_id and form.reporta_a_id == g.id %}selected{% endif %}>
+                        {{ g.display_name }} ({{ g.email }})
+                    </option>
+                    {% else %}
+                    <option disabled>No hay usuarios con rol Gerente todavía.</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">De quién depende este Supervisor.</div>
+            </div>
+
             {# ====== Cartera comercial / jerarquía (Oportunidades, Mercado Privado) ======
                Un solo bloque visible por vez, según el rol elegido (JS al final del template).
                Todo pre-renderizado: el server nunca confía en lo que decidió el JS, revalida
@@ -167,6 +208,107 @@
                     Vinculá este usuario con su persona en Fusión. De ahí salen las cuentas de su
                     cartera. Cada persona de Fusión se vincula a un solo usuario — las que ya están
                     vinculadas a otro aparecen deshabilitadas.
+                </div>
+            </div>
+
+            {# ====== Cartera de cuentas (Forecast / Dimensionamiento / Oportunidades, ago-2026) ======
+               Padrones operadores_comerciales.csv / Cliente_vendedor.csv — DISTINTO de la
+               identidad en Fusión de arriba (esa es un vínculo 1 a 1 con las 16 personas de
+               Mercado Privado; esto son los códigos completos, 22 operadores / 248 vendedores,
+               Mercado Público + Privado). Son DOS espacios de código disjuntos: un usuario
+               puede tener un código de operador Y uno o más de vendedor, a la vez.
+               FAIL-CLOSED: sin ningún código acá, el usuario no ve ninguna cuenta (nunca "todas"). #}
+            <div class='span-12' data-role-blocks='analista supervisor' style='display:none'>
+                <div class='p-3 rounded-3' style='background:rgba(13,110,253,.08);border:1px solid rgba(110,168,254,.35)'>
+                    <div class='form-check form-switch'>
+                        <input class='form-check-input' type='checkbox' role='switch'
+                            id='cartera_fusion_enabled' name='cartera_fusion_enabled' value='1'
+                            {% if form.cartera_fusion_enabled %}checked{% endif %}>
+                        <label class='form-check-label text-white fw-semibold' for='cartera_fusion_enabled'>Vincular con Fusión</label>
+                    </div>
+                    <input type='hidden' id='cartera_fusion_identidad' name='cartera_fusion_identidad'
+                        value='{{ form.cartera_fusion_identidad or '' }}'>
+                    <div class='text-white-50 small mt-1'>
+                        Busca por nombre y apellido en ambos padrones. Los códigos y las cuentas se resuelven
+                        desde Fusión en cada consulta; no se copian cuentas al usuario.
+                    </div>
+                    <div id='fusion-link-preview' class='mt-3 small' style='display:none'></div>
+                    <div id='fusion-candidate-wrap' class='mt-2' style='display:none'>
+                        <label class='form-label text-warning small' for='fusion-candidate-select'>Elegí la persona correcta</label>
+                        <select class='form-select form-select-sm form-select-sic' id='fusion-candidate-select'>
+                            <option value=''>— Seleccionar candidato —</option>
+                        </select>
+                    </div>
+                    <div id='fusion-merge-wrap' class='mt-3 p-2 rounded-2' style='display:none;border:1px solid rgba(255,193,7,.55)'>
+                        <div id='fusion-merge-list' class='mb-2'></div>
+                        <button type='button' class='btn btn-sm btn-warning' id='fusion-merge-confirm'>
+                            Confirmar que corresponden a la misma persona
+                        </button>
+                        <div class='text-white-50 small mt-2'>
+                            Sin esta confirmación no se vincula ninguna de las dos carteras.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class='span-12 text-white-50 small' data-role-blocks='analista supervisor' style='display:none'>
+                Asignación manual (excepción): los códigos elegidos abajo se suman explícitamente
+                a la cartera encontrada en Fusión. Si no se elige ninguno, no se copian cuentas.
+            </div>
+            {% set op_sel = (form.cartera_operador_codigos or []) %}
+            {% set vd_sel = (form.cartera_vendedor_codigos or []) %}
+            <div class="span-12" data-role-blocks="analista supervisor" style="display:none">
+                <label class="form-label text-white-50 small" for="cartera_operador_codigos">Cartera — códigos de Operador (Mercado Público)</label>
+                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
+                    data-filter-target="cartera_operador_codigos" placeholder="Filtrar por nombre o código…">
+                <select class="form-select form-select-sic" id="cartera_operador_codigos"
+                    name="cartera_operador_codigos" multiple size="6">
+                    {% for codigo, nombre in operadores_cartera_opciones %}
+                    <option value="{{ codigo }}" {% if codigo in op_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
+                    {% else %}
+                    <option disabled>No hay padrón de operadores cargado (ver push_cartera_data.py)</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">Ctrl/Cmd + click para elegir varios. Sin nada seleccionado, este usuario no ve ninguna cuenta por este lado.</div>
+            </div>
+
+            <div class="span-12" data-role-blocks="analista supervisor" style="display:none">
+                <label class="form-label text-white-50 small" for="cartera_vendedor_codigos">Cartera — códigos de Vendedor (Cliente_vendedor)</label>
+                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
+                    data-filter-target="cartera_vendedor_codigos" placeholder="Filtrar por nombre o código…">
+                <select class="form-select form-select-sic" id="cartera_vendedor_codigos"
+                    name="cartera_vendedor_codigos" multiple size="8">
+                    {% for codigo, nombre in vendedores_cartera_opciones %}
+                    <option value="{{ codigo }}" {% if codigo in vd_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
+                    {% else %}
+                    <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">Una persona puede tener más de un código de vendedor (hasta 7 unidades de negocio distintas por cliente).</div>
+            </div>
+
+            {# --- Supervisor: unidad(es) de negocio a la(s) que queda acotado ---
+               Asignación EXPLÍCITA, nunca inferida (decisión 2026-08-19). Solo acota el
+               lado "vendedor" de su cartera y la de sus analistas a cargo — operadores_comerciales.csv
+               no trae unidad de negocio, así que ese lado nunca se filtra por esto. #}
+            {% set un_sel = (form.cartera_unineg_scope or []) %}
+            <div class="span-12" data-role-blocks="supervisor" style="display:none">
+                <label class="form-label text-white-50 small" for="cartera_unineg_scope">Unidad(es) de negocio (acota la cartera heredada)</label>
+                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
+                    data-filter-target="cartera_unineg_scope" placeholder="Filtrar por código o descripción…">
+                <select class="form-select form-select-sic" id="cartera_unineg_scope"
+                    name="cartera_unineg_scope" multiple size="8">
+                    {% for codigo, etiqueta in unineg_opciones %}
+                    <option value="{{ codigo }}" {% if codigo in un_sel %}selected{% endif %}>{{ etiqueta }}{% if codigo == '0' %} (unineg=0){% endif %}</option>
+                    {% else %}
+                    <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
+                    {% endfor %}
+                </select>
+                <div class="text-white-50 small mt-1">
+                    Sin ninguna marcada, este Supervisor no hereda cuentas del lado vendedor de sus
+                    analistas (fail-closed) aunque ellos sí tengan cartera propia. "Sin unidad
+                    asignada" es un bucket real (~52% de las filas del padrón) — hay que otorgarlo
+                    a propósito si corresponde, no queda tildado por default.
                 </div>
             </div>
 
@@ -330,6 +472,124 @@
 
 {% block extra_js %}
 <script>
+(function () {
+    var enabled = document.getElementById('cartera_fusion_enabled');
+    var identity = document.getElementById('cartera_fusion_identidad');
+    var candidate = document.getElementById('fusion-candidate-select');
+    var candidateWrap = document.getElementById('fusion-candidate-wrap');
+    var mergeWrap = document.getElementById('fusion-merge-wrap');
+    var mergeList = document.getElementById('fusion-merge-list');
+    var mergeConfirm = document.getElementById('fusion-merge-confirm');
+    var preview = document.getElementById('fusion-link-preview');
+    var nameInput = document.getElementById('name');
+    var roleInput = document.getElementById('role');
+    var unitInput = document.getElementById('cartera_unineg_scope');
+    if (!enabled || !identity || !preview || !nameInput) return;
+    if (identity.value === 'None') identity.value = '';
+    var timer = null;
+
+    function optionText(item) {
+        var ops = (item.operator_codes || []).join(', ') || '—';
+        var sellers = (item.seller_codes || []).join(', ') || '—';
+        var score = item.score ? ' · ' + Math.round(item.score * 100) + '%' : '';
+        var accounts = typeof item.account_count === 'number' ? ' · ' + item.account_count + ' cuentas' : '';
+        return item.name + score + ' · Op: ' + ops + ' · Vend: ' + sellers + accounts;
+    }
+    function showMessage(text, color) {
+        preview.style.display = '';
+        preview.textContent = text;
+        preview.style.color = color;
+    }
+    function render(data) {
+        candidateWrap.style.display = 'none';
+        mergeWrap.style.display = 'none';
+        mergeList.textContent = '';
+        candidate.innerHTML = '';
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '— Seleccionar candidato —';
+        candidate.appendChild(empty);
+        if (data.match) {
+            var match = data.match;
+            var ops = (match.operator_codes || []).join(', ') || 'ninguno';
+            var sellers = (match.seller_codes || []).join(', ') || 'ninguno';
+            var people = (match.aliases || []).join(' + ') || match.name;
+            showMessage(data.message + ' ' + people + ' · Operador: ' + ops +
+                ' · Vendedor: ' + sellers + ' · ' + match.account_count + ' cuentas vinculadas.', '#8ee6b0');
+            return;
+        }
+        if (data.status === 'merge_confirmation_required') {
+            (data.candidates || []).forEach(function (item) {
+                var row = document.createElement('div');
+                row.className = 'mb-1';
+                row.textContent = optionText(item);
+                mergeList.appendChild(row);
+            });
+            mergeConfirm.setAttribute('data-merge-key', data.merge_key || '');
+            mergeWrap.style.display = '';
+            showMessage(data.message, '#ffd166');
+            return;
+        }
+        if (data.status === 'ambiguous') {
+            (data.candidates || []).forEach(function (item) {
+                var option = document.createElement('option');
+                option.value = item.key;
+                option.textContent = optionText(item);
+                candidate.appendChild(option);
+            });
+            candidateWrap.style.display = '';
+            showMessage(data.message, '#ffd166');
+            return;
+        }
+        showMessage('No se encontró cartera en Fusión. El usuario queda sin acceso automático.', '#ff9c9c');
+    }
+    function refresh() {
+        if (!enabled.checked) {
+            preview.style.display = 'none';
+            candidateWrap.style.display = 'none';
+            mergeWrap.style.display = 'none';
+            return;
+        }
+        var params = new URLSearchParams();
+        params.set('name', nameInput.value || '');
+        params.set('role', roleInput ? roleInput.value : 'analista');
+        if (identity.value) params.set('identity', identity.value);
+        if (unitInput) Array.prototype.forEach.call(unitInput.selectedOptions, function (item) {
+            params.append('unineg', item.value);
+        });
+        showMessage('Buscando en Fusión…', '#b8c2d8');
+        fetch('/sic/users/cartera-fusion-preview?' + params.toString(), {credentials: 'same-origin'})
+            .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+            .then(render)
+            .catch(function () { showMessage('No se pudo consultar Fusión. El vínculo no otorgará acceso.', '#ff9c9c'); });
+    }
+    function schedule(clearIdentity) {
+        if (clearIdentity) identity.value = '';
+        clearTimeout(timer);
+        timer = setTimeout(refresh, 250);
+    }
+    enabled.addEventListener('change', function () { if (!enabled.checked) identity.value = ''; refresh(); });
+    nameInput.addEventListener('input', function () { schedule(true); });
+    if (roleInput) roleInput.addEventListener('change', function () { schedule(false); });
+    if (unitInput) unitInput.addEventListener('change', function () { schedule(false); });
+    candidate.addEventListener('change', function () { identity.value = candidate.value; refresh(); });
+    mergeConfirm.addEventListener('click', function () {
+        identity.value = mergeConfirm.getAttribute('data-merge-key') || '';
+        refresh();
+    });
+    var form = enabled.closest('form');
+    if (form) form.addEventListener('submit', function (event) {
+        if (enabled.checked &&
+            (candidateWrap.style.display !== 'none' || mergeWrap.style.display !== 'none') &&
+            !identity.value) {
+            event.preventDefault();
+            if (mergeWrap.style.display !== 'none') mergeConfirm.focus(); else candidate.focus();
+            showMessage('Elegí o confirmá la identidad antes de guardar.', '#ff9c9c');
+        }
+    });
+    if (enabled.checked) refresh();
+})();
+
 (function () {
     var pw = document.getElementById('password');
     var pc = document.getElementById('password_confirm');
@@ -506,6 +766,22 @@
 
     roleSelect.addEventListener('change', refresh);
     refresh();
+})();
+
+// ── Cartera de cuentas: filtro en vivo sobre los <select multiple> grandes (248 vendedores) ──
+(function () {
+    var filters = Array.prototype.slice.call(document.querySelectorAll('.cartera-filter'));
+    filters.forEach(function (input) {
+        var select = document.getElementById(input.getAttribute('data-filter-target'));
+        if (!select) return;
+        var options = Array.prototype.slice.call(select.options);
+        input.addEventListener('input', function () {
+            var q = input.value.trim().toLowerCase();
+            options.forEach(function (opt) {
+                opt.hidden = q.length > 0 && opt.text.toLowerCase().indexOf(q) === -1;
+            });
+        });
+    });
 })();
 </script>
 {% endblock %}

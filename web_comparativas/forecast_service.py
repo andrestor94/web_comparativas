@@ -14,8 +14,11 @@ import threading
 import time
 import datetime as dt
 from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -38,6 +41,34 @@ except ImportError:
 
 logger = logging.getLogger("wc.forecast")
 logger.setLevel(logging.INFO)
+
+
+# Alcance de overrides para una petición Forecast. El scope de datos continúa
+# llegando explícitamente como ramas cuenta+UN; este contexto limita únicamente
+# qué overrides APROBADOS pueden participar y, opcionalmente, agrega las
+# propuestas pendientes del usuario actual para su vista previa.
+_OVERRIDE_OWNER_SCOPE: ContextVar[tuple[int, ...] | str | None] = ContextVar(
+    "forecast_override_owner_scope", default=None
+)
+_PENDING_PREVIEW_USER: ContextVar[int | None] = ContextVar(
+    "forecast_pending_preview_user", default=None
+)
+
+
+@contextmanager
+def forecast_override_context(
+    *,
+    owner_user_ids: tuple[int, ...] | str | None,
+    preview_user_id: int | None = None,
+):
+    """Aísla por request el scope de overrides y la vista previa pendiente."""
+    owner_token = _OVERRIDE_OWNER_SCOPE.set(owner_user_ids)
+    preview_token = _PENDING_PREVIEW_USER.set(preview_user_id)
+    try:
+        yield
+    finally:
+        _PENDING_PREVIEW_USER.reset(preview_token)
+        _OVERRIDE_OWNER_SCOPE.reset(owner_token)
 
 
 def _forecast_diag(message: str, *args) -> None:
@@ -135,6 +166,11 @@ _RESP_CACHE_MAX_ITEMS = 128
 _RESP_CACHE_MAX_ENTRY_BYTES = 5_000_000   # 5 MB — allows client-table (~1.7 MB) and treemap to cache
 _RESP_CACHE_MAX_TOTAL_BYTES = 64_000_000  # 64 MB total
 _OVERRIDE_PCT_TOL = 5e-4
+
+# Alcance de cartera ya resuelto por el motor central. Cada elemento conserva la
+# relación (cuentas, unidades de negocio) de una rama jerárquica. ``None`` en el
+# argumento completo significa acceso global; una tupla vacía significa cero datos.
+ForecastCarteraBranches = tuple[tuple[tuple[str, ...], tuple[str, ...] | None], ...]
 
 
 def _is_all_marker(value: Any) -> bool:
@@ -650,7 +686,8 @@ def _fetch_override_records(
 ) -> list[Any]:
     if SessionLocal is None or ForecastUserOverride is None:
         return []
-    if not all_users and not user_id:
+    owner_scope = _OVERRIDE_OWNER_SCOPE.get()
+    if owner_scope is None and not all_users and not user_id:
         return []
     with SessionLocal() as session:
         q = (
@@ -658,7 +695,13 @@ def _fetch_override_records(
             .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
             .filter(ForecastUserOverride.is_active.is_(True))
         )
-        if not all_users:
+        if owner_scope == "all":
+            pass
+        elif isinstance(owner_scope, tuple):
+            if not owner_scope:
+                return []
+            q = q.filter(ForecastUserOverride.user_id.in_(owner_scope))
+        elif not all_users:
             q = q.filter(ForecastUserOverride.user_id == int(user_id))
         if client_selector is not None:
             q = q.filter(ForecastUserOverride.client_selector == _clean_override_text(client_selector))
@@ -671,7 +714,130 @@ def _fetch_override_records(
         # When querying all users, sort by updated_at ascending so later saves win on conflict
         if all_users:
             q = q.order_by(ForecastUserOverride.updated_at.asc())
-        return list(q.all())
+        records = list(q.all())
+
+        # Compatibilidad no destructiva con el workflow anterior, que aplicaba
+        # el override antes de decidir la solicitud. Si una fila tiene historial
+        # de aprobación, el estado oficial se reconstruye desde la última
+        # solicitud aprobada; una fila con solicitudes solo pendientes/rechazadas
+        # no forma parte del oficial. Las filas históricas sin workflow se
+        # conservan tal como estaban.
+        if records and ForecastChangeRequest is not None:
+            record_ids = [int(rec.id) for rec in records if getattr(rec, "id", None)]
+            linked = (
+                session.query(ForecastChangeRequest)
+                .filter(ForecastChangeRequest.override_id.in_(record_ids))
+                .order_by(
+                    ForecastChangeRequest.created_at.asc(),
+                    ForecastChangeRequest.id.asc(),
+                )
+                .all()
+            ) if record_ids else []
+            requests_by_override: dict[int, list[Any]] = {}
+            for change_request in linked:
+                requests_by_override.setdefault(
+                    int(change_request.override_id), []
+                ).append(change_request)
+            official_records: list[Any] = []
+            for rec in records:
+                history = requests_by_override.get(int(rec.id), [])
+                if not history:
+                    official_records.append(rec)
+                    continue
+                approved = [
+                    change_request
+                    for change_request in history
+                    if change_request.status == "aprobado"
+                ]
+                if not approved:
+                    continue
+                decision = approved[-1]
+                if decision.new_value is None:
+                    continue
+                annual = float(decision.new_value)
+                values = {
+                    column.name: getattr(rec, column.name)
+                    for column in ForecastUserOverride.__table__.columns
+                }
+                values["override_growth_pct"] = annual
+                values["effective_monthly_pct"] = (
+                    round(_monthly_pct_from_annual_growth(annual), 4)
+                    if _normalize_scope(decision.scope_type) == FORECAST_SCOPE_CELL
+                    else _monthly_pct_from_annual_growth(annual)
+                )
+                values["is_active"] = True
+                official_records.append(SimpleNamespace(**values))
+            records = official_records
+
+        # La vista previa agrega únicamente las propuestas pendientes del usuario
+        # actual. La tabla de overrides sigue conteniendo solo estado oficial.
+        preview_user_id = _PENDING_PREVIEW_USER.get()
+        if not preview_user_id or ForecastChangeRequest is None:
+            return records
+        pending_q = (
+            session.query(ForecastChangeRequest)
+            .filter(ForecastChangeRequest.created_by_user_id == int(preview_user_id))
+            .filter(ForecastChangeRequest.status == "pendiente")
+        )
+        if client_selector is not None:
+            pending_q = pending_q.filter(
+                ForecastChangeRequest.client_selector == _clean_override_text(client_selector)
+            )
+        elif client_selectors:
+            pending_q = pending_q.filter(
+                ForecastChangeRequest.client_selector.in_(
+                    [_clean_override_text(v) for v in client_selectors if _clean_override_text(v)]
+                )
+            )
+        pending = list(pending_q.order_by(ForecastChangeRequest.created_at.asc()).all())
+        if not pending:
+            return records
+
+        def _record_identity(value) -> tuple[str, str, str, str, str, int]:
+            return (
+                _clean_override_text(getattr(value, "client_selector", "")),
+                _normalize_scope(getattr(value, "override_scope", None) or getattr(value, "scope_type", None)),
+                _clean_override_text(getattr(value, "subneg", "")),
+                _clean_override_text(getattr(value, "codigo_serie", "")),
+                _normalize_month_key(getattr(value, "forecast_month", "") or getattr(value, "period", "")),
+                int(getattr(value, "user_id", None) or getattr(value, "created_by_user_id", 0) or 0),
+            )
+
+        # Un nuevo pendiente reemplaza solo el estado oficial del mismo autor y
+        # alcance. Al agregarse al final también gana en la consolidación global.
+        by_identity = {_record_identity(rec): rec for rec in records}
+        for cr in pending:
+            key = _record_identity(cr)
+            if cr.new_value is None:
+                by_identity.pop(key, None)  # propuesta de volver a la base
+                continue
+            created_date = (cr.created_at or dt.datetime.utcnow()).date()
+            annual = float(cr.new_value)
+            by_identity[key] = SimpleNamespace(
+                id=None,
+                user_id=int(cr.created_by_user_id),
+                source_module=FORECAST_OVERRIDE_SOURCE,
+                context_key=FORECAST_OVERRIDE_CONTEXT,
+                client_selector=_clean_override_text(cr.client_selector),
+                client_display=_clean_override_text(cr.client_name or cr.client_selector),
+                perfil=cr.perfil,
+                neg=cr.neg,
+                subneg=_clean_override_text(cr.subneg),
+                codigo_serie=_clean_override_text(cr.codigo_serie),
+                forecast_month=_normalize_month_key(cr.period),
+                override_scope=_normalize_scope(cr.scope_type),
+                base_growth_pct=cr.old_value,
+                override_growth_pct=annual,
+                effective_monthly_pct=_monthly_pct_from_annual_growth(annual),
+                effective_from_month=get_forecast_effective_month(created_date),
+                is_active=True,
+                created_at=cr.created_at,
+                updated_at=cr.created_at,
+                created_by=cr.created_by_username,
+                updated_by=cr.created_by_username,
+                _pending_preview=True,
+            )
+        return list(by_identity.values())
 
 
 def _override_record_user_ids(records: list[Any], limit: int = 20) -> list[int]:
@@ -1485,17 +1651,18 @@ def build_subneg_neg_map() -> dict[str, str]:
             df = get_data().get("df_valorizado", pd.DataFrame())
             if df is None or df.empty or "subneg" not in df.columns or "neg" not in df.columns:
                 return out
+            # Vectorizado — antes iteraba fila a fila con .iterrows() sobre las
+            # ~700K filas de df_valorizado (~17s medidos). str.strip/lower +
+            # groupby corren en C, no en el loop de Python: mismo resultado,
+            # milisegundos en vez de segundos (medido: ver PROJECT_ACTIVE.md).
             sub = df[["subneg", "neg"]].dropna()
-            grp: dict[str, set] = {}
-            for _, r in sub.iterrows():
-                s = str(r.get("subneg") or "").strip().lower()
-                neg = str(r.get("neg") or "").strip()
-                if not s or not neg:
-                    continue
-                grp.setdefault(s, set()).add(neg)
-            for s, negs in grp.items():
+            s_norm = sub["subneg"].astype(str).str.strip().str.lower()
+            neg_norm = sub["neg"].astype(str).str.strip()
+            mask = (s_norm != "") & (neg_norm != "")
+            grouped = pd.DataFrame({"s": s_norm[mask], "neg": neg_norm[mask]}).groupby("s")["neg"].unique()
+            for s, negs in grouped.items():
                 if len(negs) == 1:  # solo 1:1, ambiguos omitidos
-                    out[s] = next(iter(negs))
+                    out[s] = negs[0]
     except Exception as exc:
         logger.warning("build_subneg_neg_map error: %s", exc)
         return {}
@@ -1538,20 +1705,82 @@ def _record_change_request(
     source: str,
     user_id: int,
     user_email: str | None,
-) -> None:
+) -> Any | None:
     """Registra una solicitud de cambio PENDIENTE (módulo Aprobaciones Forecast).
 
     Registro de control: NO bloquea ni revierte el override. Best-effort —
     nunca propaga excepción para no romper el guardado del cotizador.
+
+    Auto-supersede: si ya existe una solicitud PENDIENTE del mismo autor para
+    el mismo cliente+identity (mismo scope/subneg/codigo_serie/mes), la marca
+    "rechazado" con motivo "Reemplazada o cancelada por su autor antes de
+    revisión" antes de crear esta — evita pendientes duplicados fantasma
+    cuando el usuario reguarda el mismo cambio más de una vez. Intencional,
+    no es un rechazo real de un revisor.
     """
     if ForecastChangeRequest is None:
         return
     try:
         old_v = None if old_pct is None else float(old_pct)
         new_v = None if new_pct is None else float(new_pct)
-        # No registrar no-ops (re-guardar el mismo valor).
+        identity = _override_identity(
+            getattr(rec, "override_scope", None),
+            subneg=getattr(rec, "subneg", ""),
+            codigo_serie=getattr(rec, "codigo_serie", ""),
+            forecast_month=getattr(rec, "forecast_month", ""),
+        )
+        prior = (
+            session.query(ForecastChangeRequest)
+            .filter(ForecastChangeRequest.created_by_user_id == int(user_id))
+            .filter(ForecastChangeRequest.client_selector == rec.client_selector)
+            .filter(ForecastChangeRequest.status == "pendiente")
+            .all()
+        )
+        now = dt.datetime.utcnow()
+        for previous in prior:
+            previous_identity = _override_identity(
+                previous.scope_type,
+                subneg=previous.subneg or "",
+                codigo_serie=previous.codigo_serie or "",
+                forecast_month=previous.period or "",
+            )
+            if previous_identity != identity:
+                continue
+            previous.status = "rechazado"
+            previous.reviewed_by_user_id = int(user_id)
+            previous.reviewed_by_username = user_email
+            previous.reviewed_at = now
+            previous.review_comment = "Reemplazada o cancelada por su autor antes de revisión."
+
+        # Una fila física legacy puede contener el último valor propuesto aunque
+        # nunca haya sido aprobado. Para calcular la nueva propuesta, el valor
+        # anterior siempre es el último oficial aprobado, no el contenido crudo
+        # de esa fila.
+        override_id = getattr(rec, "id", None)
+        if override_id is not None:
+            linked_history = (
+                session.query(ForecastChangeRequest)
+                .filter(ForecastChangeRequest.override_id == int(override_id))
+                .order_by(
+                    ForecastChangeRequest.created_at.asc(),
+                    ForecastChangeRequest.id.asc(),
+                )
+                .all()
+            )
+            if linked_history:
+                approved_history = [
+                    item for item in linked_history if item.status == "aprobado"
+                ]
+                old_v = (
+                    float(approved_history[-1].new_value)
+                    if approved_history and approved_history[-1].new_value is not None
+                    else None
+                )
+
+        if old_v is None and new_v is None:
+            return None
         if old_v is not None and new_v is not None and abs(new_v - old_v) < 1e-9:
-            return
+            return None
 
         abs_delta = None
         pct_delta = None
@@ -1559,6 +1788,9 @@ def _record_change_request(
             base = old_v if old_v is not None else 0.0
             abs_delta = round(new_v - base, 4)
             pct_delta = abs_delta  # los valores ya son puntos porcentuales
+        elif old_v is not None:
+            abs_delta = round(-old_v, 4)
+            pct_delta = abs_delta
 
         amount_base = estimate_scope_amount(
             perfil=rec.perfil,
@@ -1613,8 +1845,10 @@ def _record_change_request(
             status="pendiente",
         )
         session.add(cr)
+        return cr
     except Exception as exc:
-        logger.warning("change-request record skipped: %s", exc)
+        logger.error("change-request proposal failed: %s", exc, exc_info=True)
+        raise
 
 
 def _upsert_override_record(
@@ -1636,47 +1870,38 @@ def _upsert_override_record(
     effective_from_month: str | None = None,
     source: str = "save-client",
 ) -> None:
+    """Registra la PROPUESTA (ForecastChangeRequest) para este identity — nunca
+    crea el ForecastUserOverride acá. El override real recién nace en
+    `materialize_approved_change_request`, al aprobar (ver docstring de
+    `_apply_review` en forecast_router.py: "la solicitud pendiente ES la
+    propuesta; aprobar la materializa"). `proposal` es un SimpleNamespace en
+    memoria — nunca se persiste — solo transporta los valores hacia
+    `_record_change_request`, que sí escribe el ForecastChangeRequest real."""
     identity = _override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month)
-    rec = existing_map.get(identity)
-    # Capturar el valor anterior ANTES de mutar (None = alta de override).
-    _old_override_pct = None if rec is None else getattr(rec, "override_growth_pct", None)
-    if rec is None:
-        rec = ForecastUserOverride(
-            user_id=int(user_id),
-            source_module=FORECAST_OVERRIDE_SOURCE,
-            context_key=FORECAST_OVERRIDE_CONTEXT,
-            client_selector=_clean_override_text(client_id),
-            client_display=_clean_override_text(client_id),
-            override_scope=identity[0],
-            subneg=identity[1],
-            codigo_serie=identity[2],
-            forecast_month=identity[3],
-            created_by=user_email,
-        )
-        session.add(rec)
-        existing_map[identity] = rec
-    rec.perfil = perfil
-    rec.neg = neg
-    rec.base_growth_pct = float(base_growth_pct or 0.0)
-    rec.override_growth_pct = float(override_growth_pct or 0.0)
-    rec.effective_monthly_pct = float(effective_monthly_pct or 0.0)
-    rec.client_display = _clean_override_text(client_id)
-    rec.is_active = True
-    rec.updated_by = user_email
-    rec.updated_at = dt.datetime.utcnow()
-    # Store the effective_from_month so the rule can be enforced on load
-    try:
-        rec.effective_from_month = effective_from_month
-    except AttributeError:
-        pass  # Column not yet migrated — safe to skip
-
-    # Aprobaciones Forecast: registrar la modificación como solicitud pendiente.
-    # Registro de control aditivo; nunca rompe el guardado (best-effort interno).
+    official = existing_map.get(identity)
+    if official is not None and not getattr(official, "is_active", False):
+        official = None
+    proposal = SimpleNamespace(
+        id=getattr(official, "id", None),
+        user_id=int(user_id),
+        client_selector=_clean_override_text(client_id),
+        client_display=_clean_override_text(client_id),
+        override_scope=identity[0],
+        subneg=identity[1],
+        codigo_serie=identity[2],
+        forecast_month=identity[3],
+        perfil=perfil,
+        neg=neg,
+        base_growth_pct=float(base_growth_pct or 0.0),
+        override_growth_pct=float(override_growth_pct or 0.0),
+        effective_monthly_pct=float(effective_monthly_pct or 0.0),
+        effective_from_month=effective_from_month,
+    )
     _record_change_request(
         session,
-        rec,
-        old_pct=_old_override_pct,
-        new_pct=rec.override_growth_pct,
+        proposal,
+        old_pct=getattr(official, "override_growth_pct", None),
+        new_pct=proposal.override_growth_pct,
         source=source,
         user_id=user_id,
         user_email=user_email,
@@ -1684,15 +1909,45 @@ def _upsert_override_record(
 
 
 def _deactivate_override(
+    session,
     existing_map: dict[tuple[str, str, str, str], Any],
     *,
+    user_id: int,
+    client_id: str,
     scope: str,
     user_email: str | None,
     subneg: str = "",
     codigo_serie: str = "",
     forecast_month: str = "",
 ) -> None:
-    rec = existing_map.get(_override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month))
+    identity = _override_identity(scope, subneg=subneg, codigo_serie=codigo_serie, forecast_month=forecast_month)
+    rec = existing_map.get(identity)
+    if rec is not None and not getattr(rec, "is_active", False):
+        rec = None
+    proposal = SimpleNamespace(
+        id=getattr(rec, "id", None),
+        user_id=int(user_id),
+        client_selector=_clean_override_text(client_id),
+        client_display=_clean_override_text(client_id),
+        override_scope=identity[0],
+        subneg=identity[1],
+        codigo_serie=identity[2],
+        forecast_month=identity[3],
+        perfil=getattr(rec, "perfil", None),
+        neg=getattr(rec, "neg", None),
+    )
+    _record_change_request(
+        session,
+        proposal,
+        old_pct=getattr(rec, "override_growth_pct", None),
+        new_pct=None,
+        source="clear-client",
+        user_id=user_id,
+        user_email=user_email,
+    )
+    return
+
+    rec = existing_map.get(identity)
     if rec is None:
         return
     rec.is_active = False
@@ -1730,6 +1985,115 @@ def deactivate_override_by_id(
     rec.updated_by = reviewer_email
     rec.updated_at = dt.datetime.utcnow()
     return int(rec.user_id) if getattr(rec, "user_id", None) is not None else None
+
+
+def materialize_approved_change_request(session, cr, *, reviewer_email: str | None = None) -> int:
+    """Convierte una propuesta aprobada en el único override oficial de su autor.
+
+    Verifica optimisticamente que el valor oficial no haya cambiado desde que se
+    creó la propuesta. Una discordancia cierra la operación para impedir que una
+    aprobación vieja sobrescriba una decisión posterior.
+    """
+    if ForecastUserOverride is None:
+        raise RuntimeError("Forecast override storage is not available")
+    owner_id = int(getattr(cr, "created_by_user_id", 0) or 0)
+    selector = _clean_override_text(getattr(cr, "client_selector", ""))
+    identity = _override_identity(
+        getattr(cr, "scope_type", None),
+        subneg=getattr(cr, "subneg", "") or "",
+        codigo_serie=getattr(cr, "codigo_serie", "") or "",
+        forecast_month=getattr(cr, "period", "") or "",
+    )
+    if not owner_id or not selector or identity[0] not in {
+        FORECAST_SCOPE_SUBNEG, FORECAST_SCOPE_PRODUCT, FORECAST_SCOPE_CELL
+    }:
+        raise ValueError("propuesta incompleta")
+
+    rec = (
+        session.query(ForecastUserOverride)
+        .filter(ForecastUserOverride.user_id == owner_id)
+        .filter(ForecastUserOverride.source_module == FORECAST_OVERRIDE_SOURCE)
+        .filter(ForecastUserOverride.context_key == FORECAST_OVERRIDE_CONTEXT)
+        .filter(ForecastUserOverride.client_selector == selector)
+        .filter(ForecastUserOverride.override_scope == identity[0])
+        .filter(ForecastUserOverride.subneg == identity[1])
+        .filter(ForecastUserOverride.codigo_serie == identity[2])
+        .filter(ForecastUserOverride.forecast_month == identity[3])
+        .one_or_none()
+    )
+    active = rec if rec is not None and getattr(rec, "is_active", False) else None
+    expected_old = getattr(cr, "old_value", None)
+    current_old = getattr(active, "override_growth_pct", None)
+    # Para filas creadas por el workflow legacy, la fila física podía contener
+    # el valor pendiente. El estado oficial comparable es la última aprobación.
+    if rec is not None and getattr(rec, "id", None):
+        history = (
+            session.query(ForecastChangeRequest)
+            .filter(ForecastChangeRequest.override_id == rec.id)
+            .filter(ForecastChangeRequest.id != getattr(cr, "id", None))
+            .order_by(
+                ForecastChangeRequest.created_at.asc(),
+                ForecastChangeRequest.id.asc(),
+            )
+            .all()
+        )
+        if history or getattr(cr, "override_id", None) == rec.id:
+            approved = [item for item in history if item.status == "aprobado"]
+            if approved and approved[-1].new_value is not None:
+                current_old = float(approved[-1].new_value)
+                active = rec
+            else:
+                current_old = None
+                active = None
+    if expected_old is None:
+        if active is not None:
+            raise ValueError("el estado oficial cambió desde la propuesta")
+    elif active is None or current_old is None or abs(float(current_old) - float(expected_old)) > 1e-6:
+        raise ValueError("el estado oficial cambió desde la propuesta")
+
+    new_value = getattr(cr, "new_value", None)
+    if new_value is None:
+        if active is not None:
+            active.is_active = False
+            active.updated_by = reviewer_email
+            active.updated_at = dt.datetime.utcnow()
+            cr.override_id = active.id
+        return owner_id
+
+    annual = float(new_value)
+    monthly = _monthly_pct_from_annual_growth(annual)
+    if identity[0] == FORECAST_SCOPE_CELL:
+        # Las celdas se editan y persistían con precisión de 4 decimales.
+        monthly = round(monthly, 4)
+    if not np.isfinite(annual) or not np.isfinite(monthly):
+        raise ValueError("valor propuesto inválido")
+    if rec is None:
+        rec = ForecastUserOverride(
+            user_id=owner_id,
+            source_module=FORECAST_OVERRIDE_SOURCE,
+            context_key=FORECAST_OVERRIDE_CONTEXT,
+            client_selector=selector,
+            override_scope=identity[0],
+            subneg=identity[1],
+            codigo_serie=identity[2],
+            forecast_month=identity[3],
+            created_by=getattr(cr, "created_by_username", None),
+        )
+        session.add(rec)
+        session.flush()
+    rec.client_display = _clean_override_text(getattr(cr, "client_name", None) or selector)
+    rec.perfil = getattr(cr, "perfil", None)
+    rec.neg = getattr(cr, "neg", None)
+    rec.base_growth_pct = float(expected_old or 0.0)
+    rec.override_growth_pct = annual
+    rec.effective_monthly_pct = monthly
+    created = getattr(cr, "created_at", None) or dt.datetime.utcnow()
+    rec.effective_from_month = get_forecast_effective_month(created.date())
+    rec.is_active = True
+    rec.updated_by = reviewer_email
+    rec.updated_at = dt.datetime.utcnow()
+    cr.override_id = rec.id
+    return owner_id
 
 
 def save_client_overrides(
@@ -1849,7 +2213,10 @@ def save_client_overrides(
                 subneg_monthly_lookup[subneg] = monthly_growth
             else:
                 _deactivate_override(
+                    session,
                     existing_map,
+                    user_id=user_id,
+                    client_id=client_key,
                     scope=FORECAST_SCOPE_SUBNEG,
                     subneg=subneg,
                     user_email=user_email,
@@ -1892,7 +2259,10 @@ def save_client_overrides(
             reference_monthly = float(subneg_monthly_lookup.get(subneg, resolved.get("monthly_pct", 0.0)))
             if abs(monthly_pct - reference_monthly) <= _OVERRIDE_PCT_TOL:
                 _deactivate_override(
+                    session,
                     existing_map,
+                    user_id=user_id,
+                    client_id=client_key,
                     scope=FORECAST_SCOPE_CELL,
                     subneg=subneg,
                     codigo_serie=codigo,
@@ -1934,6 +2304,7 @@ def save_group_expectations(
     growth_pct: float,
     base_growth_pct: float = 0.0,
     user_email: str | None = None,
+    cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Save a uniform growth expectation override for all clients in a group.
 
@@ -2032,9 +2403,25 @@ def save_group_expectations(
     for client_id in client_ids:
         clean_id = _clean_override_text(client_id)
         subnegs = client_subnegs.get(client_id) or client_subnegs.get(clean_id) or []
+        if cartera_branches is not None:
+            neg_map = get_subneg_neg_map()
+            subnegs = [
+                sub for sub in subnegs
+                if forecast_client_unit_visible(
+                    clean_id, neg_map.get(str(sub).strip().lower()), cartera_branches
+                )
+            ]
+            if not subnegs and not forecast_client_unit_visible(clean_id, None, cartera_branches):
+                skipped.append(clean_id)
+                continue
 
         # Always clear existing overrides so group save fully replaces individual ones
-        clear_client_overrides(user_id=user_id, client_id=client_id, user_email=user_email)
+        clear_client_overrides(
+            user_id=user_id,
+            client_id=client_id,
+            user_email=user_email,
+            cartera_branches=cartera_branches,
+        )
 
         if subnegs:
             # Same mechanism as individual modal save:
@@ -2119,7 +2506,13 @@ def save_group_expectations(
     }
 
 
-def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | None = None) -> None:
+def clear_client_overrides(
+    *,
+    user_id: int,
+    client_id: str,
+    user_email: str | None = None,
+    cartera_branches: ForecastCarteraBranches | None = None,
+) -> None:
     if SessionLocal is None or ForecastUserOverride is None:
         return
     client_key = _clean_override_text(client_id)
@@ -2132,10 +2525,55 @@ def clear_client_overrides(*, user_id: int, client_id: str, user_email: str | No
             .filter(ForecastUserOverride.is_active.is_(True))
             .all()
         )
-        for rec in rows:
-            rec.is_active = False
-            rec.updated_by = user_email
-            rec.updated_at = dt.datetime.utcnow()
+        if cartera_branches is not None:
+            rows = [
+                rec for rec in rows
+                if forecast_client_unit_visible(client_key, getattr(rec, "neg", None), cartera_branches)
+            ]
+        existing_map = {
+            _override_identity(
+                rec.override_scope,
+                subneg=rec.subneg,
+                codigo_serie=rec.codigo_serie,
+                forecast_month=rec.forecast_month,
+            ): rec
+            for rec in rows
+        }
+        identities = set(existing_map)
+        if ForecastChangeRequest is not None:
+            pending = (
+                session.query(ForecastChangeRequest)
+                .filter(ForecastChangeRequest.created_by_user_id == int(user_id))
+                .filter(ForecastChangeRequest.client_selector == client_key)
+                .filter(ForecastChangeRequest.status == "pendiente")
+                .all()
+            )
+            if cartera_branches is not None:
+                pending = [
+                    cr for cr in pending
+                    if forecast_client_unit_visible(client_key, getattr(cr, "neg", None), cartera_branches)
+                ]
+            identities.update(
+                _override_identity(
+                    cr.scope_type,
+                    subneg=cr.subneg or "",
+                    codigo_serie=cr.codigo_serie or "",
+                    forecast_month=cr.period or "",
+                )
+                for cr in pending
+            )
+        for scope, subneg, codigo, month in identities:
+            _deactivate_override(
+                session,
+                existing_map,
+                user_id=user_id,
+                client_id=client_key,
+                scope=scope,
+                subneg=subneg,
+                codigo_serie=codigo,
+                forecast_month=month,
+                user_email=user_email,
+            )
         session.commit()
     # Invalidate saving user's cache + admin views (admin sees all users' overrides).
     _clear_cache_for_override_save(user_id)
@@ -2987,6 +3425,198 @@ def _safe_in(col: str, vals: list) -> str:
         return f"{col} = ANY(ARRAY[{','.join(clean_vals)}])"
     return f"{col} IN ({','.join(clean_vals)})"
 
+
+def normalize_forecast_cartera_branches(branches) -> ForecastCarteraBranches:
+    """Normaliza ramas centrales para Forecast: cuentas únicas y ordenadas por
+    rama, SIN restricción de unidad de negocio a nivel de fila.
+
+    Corrección 2026-08-20 — regla real del negocio: la UN del padrón
+    (`cartera_vendedores.unineg`) describe la relación cliente-vendedor; es la
+    llave que `cartera_visibilidad._cartera_propia` usa para decidir QUÉ
+    CUENTAS hereda un Supervisor/Gerente. No es la misma dimensión que
+    "Negocio" en el dataset de Forecast (columna `neg`: "CARDINAL HEALTH",
+    "ACCESORIOS E INSUM MED-HOSPITALARIOS", etc. — vocabulario propio, sin
+    correspondencia 1 a 1 real con los códigos de UN del padrón).
+
+    Antes esta función traducía el código de UN a su descripción raíz en
+    Negocios.csv y ese valor se usaba para filtrar FILAS dentro de una cuenta
+    ya heredada (`_cartera_mask` / `_cartera_sql`, `unit_col="neg"`). Efecto
+    real, visto en vivo: sobre las MISMAS 8 cuentas heredadas del Analista,
+    Daniela (Supervisor) veía 18 productos / $39,0 M mientras el Analista veía
+    465 productos / $643,5 M — la UN cortaba de cada cuenta heredada todo lo
+    que no fuera "CARDINAL HEALTH", perdiendo negocios como "ACCESORIOS E
+    INSUM MED-HOSPITALARIOS" de esa misma cuenta.
+
+    Regla correcta: si una cuenta está en la rama, se ve COMPLETA — la UN ya
+    hizo su trabajo más arriba, decidiendo si esa cuenta entraba o no a
+    `codigos_cliente`. Por eso acá SIEMPRE se devuelve `unit_key=None` (sin
+    restricción); `_cartera_mask`/`_cartera_sql` siguen soportando el filtro
+    por unidad como capacidad genérica (con branches armadas a mano, ej.
+    tests) — simplemente ya no reciben ninguna UN real desde este pipeline."""
+    normalized = []
+    for accounts, _units in branches or ():
+        account_key = tuple(sorted({str(v).strip() for v in accounts or () if str(v).strip()}))
+        normalized.append((account_key, None))
+    return tuple(normalized)
+
+
+def _cartera_sql(
+    branches: ForecastCarteraBranches | None,
+    *,
+    client_col: str = "cliente_id",
+    unit_col: str = "neg",
+    fact_by_series: bool = False,
+) -> str | None:
+    """SQL de autorización por ramas. Tupla vacía/configuración incompleta => 1=0."""
+    if branches is None:
+        return None
+    conditions: list[str] = []
+    for accounts, units in branches:
+        account_sql = _safe_in(client_col, list(accounts))
+        if not account_sql:
+            continue
+        if units is None:
+            conditions.append(f"({account_sql})")
+            continue
+        unit_sql = _safe_in("neg", list(units))
+        if not unit_sql:
+            continue
+        if fact_by_series:
+            conditions.append(
+                f"({account_sql} AND codigo_serie IN "
+                f"(SELECT DISTINCT codigo_serie FROM forecast_main WHERE {unit_sql}))"
+            )
+        else:
+            conditions.append(f"({account_sql} AND {_safe_in(unit_col, list(units))})")
+    return "(" + " OR ".join(conditions) + ")" if conditions else "1=0"
+
+
+def _cartera_mask(
+    df: pd.DataFrame,
+    branches: ForecastCarteraBranches | None,
+    *,
+    client_col: str = "cliente_id",
+    unit_col: str = "neg",
+    series_units: pd.DataFrame | None = None,
+) -> pd.Series:
+    """Máscara pandas equivalente a `_cartera_sql`, siempre fail-closed."""
+    if branches is None:
+        return pd.Series(True, index=df.index)
+    mask = pd.Series(False, index=df.index)
+    if df.empty or client_col not in df.columns:
+        return mask
+    clients = df[client_col].astype(str).str.strip()
+    for accounts, units in branches:
+        if not accounts:
+            continue
+        branch_mask = clients.isin(set(accounts))
+        if units is not None:
+            if not units:
+                continue
+            if unit_col in df.columns:
+                branch_mask &= df[unit_col].astype(str).str.strip().isin(set(units))
+            elif series_units is not None and "codigo_serie" in df.columns:
+                if series_units.empty or not {"codigo_serie", unit_col}.issubset(series_units.columns):
+                    continue
+                allowed_series = set(
+                    series_units.loc[
+                        series_units[unit_col].astype(str).str.strip().isin(set(units)),
+                        "codigo_serie",
+                    ].astype(str)
+                )
+                branch_mask &= df["codigo_serie"].astype(str).isin(allowed_series)
+            else:
+                continue
+        mask |= branch_mask
+    return mask
+
+
+def forecast_client_visible(client_selector: str, branches: ForecastCarteraBranches | None) -> bool:
+    """Autoriza lectura/escritura de un cliente base bajo el mismo scope del dashboard."""
+    if branches is None:
+        return True
+    selector = str(client_selector or "").strip()
+    if not selector:
+        return False
+    if engine is not None and "postgresql" in str(engine.url):
+        scope_sql = _cartera_sql(branches) or "1=1"
+        selector_sql = _safe_in("cliente_id", [selector])
+        fantasia_sql = _safe_in("fantasia", [selector])
+        df = _query_agg(
+            f"SELECT 1 FROM forecast_valorizado WHERE {scope_sql} "
+            f"AND ({selector_sql} OR {fantasia_sql}) LIMIT 1"
+        )
+        return not df.empty
+    df = get_data().get("df_valorizado", pd.DataFrame())
+    if df.empty:
+        return False
+    scope_mask = _cartera_mask(df, branches)
+    selector_mask = pd.Series(False, index=df.index)
+    for col in ("cliente_id", "fantasia"):
+        if col in df.columns:
+            selector_mask |= df[col].astype(str).str.strip().eq(selector)
+    return bool((scope_mask & selector_mask).any())
+
+
+def forecast_branch_visible_selectors(
+    branches: ForecastCarteraBranches | None,
+) -> tuple[frozenset[str] | None, ...]:
+    """Selectores de cliente (cliente_id + fantasia) visibles bajo CADA rama,
+    una sola pasada de `df_valorizado` por rama.
+
+    Pensada para listas que evalúan `forecast_client_visible` fila por fila
+    (Aprobaciones Forecast: cientos/miles de change_requests por request) — sin
+    esto, cada fila repetía el escaneo completo del dataset (~700ms medidos por
+    llamada sobre ~700K filas; con miles de filas eso son minutos por request).
+    Calculás esto UNA vez al principio del request y cada fila hace
+    `selector in visible_selectors[idx]` — O(1) en vez de otra pasada completa.
+
+    PostgreSQL: ese camino ya resuelve `forecast_client_visible` con SQL
+    indexado (no escanea nada en memoria), así que no hay nada que precomputar
+    — se devuelve `None` por rama como señal explícita de "no aplica, el
+    caller debe caer de vuelta a forecast_client_visible fila por fila".
+    """
+    if not branches:
+        return ()
+    if engine is not None and "postgresql" in str(engine.url):
+        return tuple(None for _ in branches)
+    df = get_data().get("df_valorizado", pd.DataFrame())
+    if df.empty:
+        return tuple(frozenset() for _ in branches)
+    out: list[frozenset[str]] = []
+    for branch in branches:
+        mask = _cartera_mask(df, (branch,))
+        selectors: set[str] = set()
+        for col in ("cliente_id", "fantasia"):
+            if col in df.columns:
+                vals = df.loc[mask, col].astype(str).str.strip()
+                selectors.update(v for v in vals.unique().tolist() if v)
+        out.append(frozenset(selectors))
+    return tuple(out)
+
+
+def forecast_client_unit_visible(
+    client_selector: str,
+    neg: str | None,
+    branches: ForecastCarteraBranches | None,
+) -> bool:
+    """Autoriza el par cliente+UN dentro de una misma rama estructurada."""
+    if branches is None:
+        return True
+    selector = str(client_selector or "").strip()
+    neg_key = str(neg or "").strip().casefold()
+    if not selector:
+        return False
+    for branch in branches:
+        accounts, units = branch
+        if units is not None:
+            allowed_units = {str(v).strip().casefold() for v in units if str(v).strip()}
+            if not neg_key or neg_key not in allowed_units:
+                continue
+        if forecast_client_visible(selector, (branch,)):
+            return True
+    return False
+
 def _query_db(table: str, start_date=None, end_date=None, profiles=None, neg=None, subneg=None, products=None, extra_where=None) -> "pd.DataFrame":
     import pandas as pd
     try:
@@ -3702,7 +4332,11 @@ def _val_prod_filter(prod_codes: "list | None") -> "list | None":
 # PostgreSQL-optimized implementations (use SQL GROUP BY, no full-table loads)
 # ---------------------------------------------------------------------------
 
-def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
+def _pg_get_product_list(
+    profiles: list | None,
+    neg: list | None,
+    cartera_branches: ForecastCarteraBranches | None = None,
+) -> list:
     """Return product list with volume ranking.
     Two-query strategy:
       1. forecast_main  → neg/codigo_serie mapping (TEXT ops only — no numeric aggregation)
@@ -3715,7 +4349,31 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
     _pl_volume_ms = 0.0
     _pl_labs_ms = 0.0
     _pl_build_ms = 0.0
-    neg_where = _build_filter_sql(profiles=profiles, neg=neg)
+    neg_where = _build_filter_sql(
+        profiles=profiles, neg=neg,
+        extra=_cartera_sql(cartera_branches),
+    )
+    # Las tablas summary y forecast_main no conservan cliente+rama. Bajo cartera
+    # se usa exclusivamente forecast_valorizado, que sí posee ambas dimensiones.
+    if cartera_branches is not None:
+        df = _query_agg(
+            f"SELECT COALESCE(neg, 'Varios') AS neg, codigo_serie, "
+            f"SUM(COALESCE(monto_yhat, 0)) AS vol_venta "
+            f"FROM forecast_valorizado WHERE {neg_where} "
+            f"GROUP BY COALESCE(neg, 'Varios'), codigo_serie"
+        )
+        if df.empty:
+            return []
+        labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
+        lab_map = {}
+        for _, row in labs_df.iterrows():
+            try:
+                lab_map[str(row["codigo_serie"])] = json.loads(row["laboratorios"])
+            except Exception:
+                pass
+        df["descripcion"] = df["codigo_serie"]
+        df["labs"] = df["codigo_serie"].apply(lambda x: lab_map.get(str(x), []))
+        return df.sort_values(["neg", "vol_venta"], ascending=[True, False]).to_dict(orient="records")
     # Rama summary (PR-3): la tabla 2 ya trae (neg, codigo_serie, vol_venta), así que UNA
     # lectura reemplaza el mapping UNION+DISTINCT (query 1) y la de volumen (query 2).
     # Gate con NOMBRE EXPLÍCITO: product-list usa forecast_product_summary, no el default.
@@ -3805,7 +4463,7 @@ def _pg_get_product_list(profiles: list | None, neg: list | None) -> list:
 
 def _pg_get_chart_data(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Memory-safe PostgreSQL chart data: all heavy aggregation runs in SQL."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
@@ -3813,7 +4471,7 @@ def _pg_get_chart_data(
     try:
         return _pg_get_chart_data_inner(
             user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
     except Exception as exc:
         import traceback
@@ -3824,7 +4482,7 @@ def _pg_get_chart_data(
 
 def _pg_get_chart_data_inner(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Inner implementation — called by _pg_get_chart_data which catches all exceptions."""
     _EMPTY = {"history": [], "forecast": [], "val_2026": [], "kpis": {}}
@@ -3864,6 +4522,7 @@ def _pg_get_chart_data_inner(
     prod_codes = _pg_resolve_prod_codes(products)
     # val_prod: None when forecast_valorizado lacks the column (graceful degradation)
     val_prod   = _val_prod_filter(prod_codes)
+    _cartera_extra = _cartera_sql(cartera_branches)
 
     logger.debug("[FORECAST INNER] prod_codes_count=%s", len(prod_codes) if prod_codes is not None else "None")
     # WHERE for forecast_main (has neg/subneg, no descripcion — uses codigo_serie only)
@@ -3881,6 +4540,7 @@ def _pg_get_chart_data_inner(
             profiles=profiles, neg=neg, subneg=subneg,
             products_as_codes=val_prod,
             products=None if val_prod is not None else products,
+            extra=_cartera_extra,
         )
         _ch_t0 = time.perf_counter()
         df_meta = _query_agg(
@@ -3888,13 +4548,15 @@ def _pg_get_chart_data_inner(
             f"FROM forecast_valorizado WHERE {val_where_meta}"
         )
         _ch_meta_ms = (time.perf_counter() - _ch_t0) * 1000
-    else:
+    elif cartera_branches is None:
         _ch_t0 = time.perf_counter()
         df_meta = _query_agg(
             f"SELECT COUNT(DISTINCT codigo_serie) AS n_products "
             f"FROM forecast_main WHERE {main_where}"
         )
         _ch_meta_ms = (time.perf_counter() - _ch_t0) * 1000
+    else:
+        df_meta = pd.DataFrame({"n_products": [0]})
     if df_meta.empty:
         logger.debug("[FORECAST INNER] df_meta empty — returning _EMPTY")
         return _EMPTY
@@ -3934,12 +4596,17 @@ def _pg_get_chart_data_inner(
             f" AND codigo_serie IN "
             f"(SELECT DISTINCT codigo_serie FROM forecast_main WHERE {_neg_series_where})"
         )
+    # Cartera de cuentas (Forecast, ago-2026, cartera_visibilidad.py): None = sin
+    # restricción; lista (posiblemente vacía) = restringido. Solo forecast_valorizado
+    # y forecast_fact_2026 tienen cliente_id — forecast_imp_hist NO (ver más abajo,
+    # se suprime la línea "Historia" entera para usuarios restringidos).
     # WHERE for forecast_valorizado: use val_prod (None when column absent → no crash)
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
         products_as_codes=val_prod,
         products=None if val_prod is not None else products,
+        extra=_cartera_extra,
     )
     # fact_2026 uses two independent filters so each dimension resolves correctly:
     # 1. Profile → tipocli column directly from forecast_fact_2026 (enriched at load time
@@ -3959,7 +4626,16 @@ def _pg_get_chart_data_inner(
     # NOTE: PostgreSQL returns column aliases in lowercase regardless of AS casing.
     # All queries use lowercase aliases; rename to Title-Case after each query so the
     # rest of the function keeps its existing column references unchanged.
-    if view_money:
+    #
+    # Cartera de cuentas (ago-2026): forecast_imp_hist (importe_historico.csv) tiene
+    # SOLO periodo/codigo_serie/perfil/imp_hist — NUNCA tuvo columna de cliente, en
+    # ningún punto del pipeline (confirmado contra el CSV fuente). No es filtrable.
+    # Para un usuario restringido, la única forma de cumplir "ningún panel muestra
+    # plata fuera de la cartera" es NO mostrar esta línea/KPI en vez de mostrarla sin
+    # filtrar — se fuerza vacía, sin consultar la tabla.
+    if cartera_branches is not None:
+        df_hist = pd.DataFrame(columns=["fecha", "Total_Venta"])
+    elif view_money:
         # CANONICAL SERIES FILTER: restrict imp_hist to the 3039 series that exist in
         # forecast_valorizado (same inner-join the original app.py applied at load time).
         # Without this filter forecast_imp_hist returns 44 861 rows / $109.1B (all series).
@@ -4174,7 +4850,10 @@ def _pg_get_chart_data_inner(
             _ch_override_ms = (time.perf_counter() - _t_ovr) * 1000
 
     # ── Inject manual client entries into PG forecast totals ─────────────
-    _manual_df_pg_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+    _manual_df_pg_chart = (
+        _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+        if cartera_branches is None else pd.DataFrame()
+    )
     if not _manual_df_pg_chart.empty and not df_fcst.empty:
         _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
         _manual_monthly_pg = (
@@ -4255,6 +4934,8 @@ def _pg_get_chart_data_inner(
             f"  SELECT DISTINCT fm.codigo_serie FROM forecast_main fm WHERE {fact_series_only_where}"
             f")"
         )
+    if cartera_branches is not None:
+        _fact_parts.append(_cartera_sql(cartera_branches, fact_by_series=True) or "1=0")
     _ch_t0 = time.perf_counter()
     df_fact_raw = _query_agg(
         f"SELECT fecha, SUM(COALESCE(imp_hist, 0)) AS total_venta "
@@ -4302,8 +4983,14 @@ def _pg_get_chart_data_inner(
 
     INFLATION_MO_PCT = 2.9
     inflation_pct = ((1 + INFLATION_MO_PCT / 100) ** 12 - 1) * 100
-    var_nominal = ((total_adj / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
-    var_real    = ((total_adj / (1 + inflation_pct / 100) / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
+    historical_2025_available = total_real_2025 > 0
+    historical_2025_reason = None if historical_2025_available else (
+        "El histórico 2025 no está desagregado por cliente y se suprime bajo cartera."
+        if cartera_branches is not None
+        else "No hay histórico 2025 disponible para la selección actual."
+    )
+    var_nominal = ((total_adj / total_real_2025) - 1) * 100 if historical_2025_available else None
+    var_real    = ((total_adj / (1 + inflation_pct / 100) / total_real_2025) - 1) * 100 if historical_2025_available else None
     meta_completeness = (fact_2026_sum / total_adj * 100) if total_adj > 0 else 0.0
 
     accuracy_val = 0.0
@@ -4362,18 +5049,20 @@ def _pg_get_chart_data_inner(
         "max_hist_date": max_hist.strftime("%Y-%m-%d") if pd.notna(max_hist) else None,
         "kpis": {
             "total_proyeccion_2026":    round(total_adj, 0),
-            "var_nominal_2025":         round(var_nominal, 2),
+            "var_nominal_2025":         round(var_nominal, 2) if var_nominal is not None else None,
             "inflation_pct":            round(inflation_pct, 1),
             "inflation_mo_pct":         INFLATION_MO_PCT,
-            "var_real_2025":            round(var_real, 2),
+            "var_real_2025":            round(var_real, 2) if var_real is not None else None,
             "accuracy_val":             round(accuracy_val, 1),
             "expectation_accuracy_val": 0.0,
             "fact_2026":                round(fact_2026_sum, 0),
             "meta_completeness":        round(meta_completeness, 1),
-            "total_historia":           round(total_hist, 0),
+            "total_historia":           round(total_hist, 0) if historical_2025_available else None,
             "total_proyeccion":         round(total_fcst, 0),
             "total_proyeccion_adj":     round(total_adj, 0),
-            "total_real_2025":          round(total_real_2025, 0),
+            "total_real_2025":          round(total_real_2025, 0) if historical_2025_available else None,
+            "historical_2025_available": historical_2025_available,
+            "historical_2025_unavailable_reason": historical_2025_reason,
             "n_products":               n_products,
         },
     }
@@ -4400,15 +5089,17 @@ def _pg_get_chart_data_inner(
 
 def _pg_get_client_table(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"months": [], "rows": [], "totals": {}, "min_val": 0, "max_val": 0, "total_projected": 0}
     try:
         result = _pg_get_client_table_inner(
             user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
+        if cartera_branches is not None:
+            return result
         return _inject_manual_client_rows_into_table(
             result, user_id=user_id,
             start_date=start_date, end_date=end_date,
@@ -4427,7 +5118,7 @@ def _pg_get_client_table(
 
 def _pg_get_client_table_inner(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, lab_products,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Memory-safe PostgreSQL client table: GROUP BY (fantasia, nombre_grupo, fecha).
 
@@ -4450,11 +5141,15 @@ def _pg_get_client_table_inner(
 
     prod_codes = _pg_resolve_prod_codes(products)
     val_prod   = _val_prod_filter(prod_codes)
+    # Cartera de cuentas (Forecast, ago-2026, ver cartera_visibilidad.py): None = sin
+    # restricción (admin/auditor o feature apagado); set() vacío = fail-closed, "1=0".
+    _cartera_extra = _cartera_sql(cartera_branches)
     val_where = _build_filter_sql(
         start_date=start_date, end_date=end_date,
         profiles=profiles, neg=neg, subneg=subneg,
         products_as_codes=val_prod,
         products=None if val_prod is not None else products,
+        extra=_cartera_extra,
     )
 
     _ct_base_t0 = time.perf_counter()
@@ -4462,7 +5157,7 @@ def _pg_get_client_table_inner(
     # agregado pre-calculado con work_mem alto (el ORDER BY fecha derramaba a disco).
     # Si el summary da vacío o (en plata) monto all-zero, df_agg=None y cae al bloque
     # crudo de abajo, que conserva el fallback yhat×precio IDÉNTICO a hoy.
-    _use_summary = (prod_codes is None and _forecast_summary_available())
+    _use_summary = (cartera_branches is None and prod_codes is None and _forecast_summary_available())
     df_agg = None
     if _use_summary:
         _ct_col = "monto_yhat" if view_money else "yhat_cliente"
@@ -4812,14 +5507,14 @@ def _pg_get_client_table_inner(
 
 def _pg_get_treemap_data(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
     try:
         return _pg_get_treemap_data_inner(
             user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
     except Exception as exc:
         import traceback as _tb
@@ -4832,13 +5527,13 @@ def _pg_get_treemap_data(
 
 def _pg_get_treemap_data_inner(
     user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
 
     # All available periods (unfiltered) — cached to avoid repeated full-scan
-    periods = _get_forecast_periods_cached()
+    periods = _get_forecast_periods_cached() if cartera_branches is None else []
     _tm_total_t0 = time.perf_counter()
     _tm_base_ms = 0.0
     _tm_fetch_ovr_ms = 0.0
@@ -4853,10 +5548,13 @@ def _pg_get_treemap_data_inner(
     val_prod   = _val_prod_filter(prod_codes)
     val_col    = "monto_yhat" if view_money else "yhat_cliente"
 
-    extra = None
+    extra_parts = []
     if period_date:
         target = pd.to_datetime(period_date).replace(day=1).strftime("%Y-%m-%d")
-        extra = f"fecha = '{target}'"
+        extra_parts.append(f"fecha = '{target}'")
+    if cartera_branches is not None:
+        extra_parts.append(_cartera_sql(cartera_branches) or "1=0")
+    extra = " AND ".join(extra_parts) if extra_parts else None
 
     val_where = _build_filter_sql(
         start_date=start_date if not period_date else None,
@@ -4866,11 +5564,18 @@ def _pg_get_treemap_data_inner(
         products=None if val_prod is not None else products,
         extra=extra,
     )
+    if cartera_branches is not None:
+        period_df = _query_agg(
+            "SELECT DISTINCT fecha FROM forecast_valorizado "
+            f"WHERE {_cartera_sql(cartera_branches) or '1=0'} ORDER BY fecha"
+        )
+        if not period_df.empty:
+            periods = [str(v)[:10] for v in period_df["fecha"].dropna().tolist()]
     _tm_base_t0 = time.perf_counter()
     # Rama summary: sin filtro de producto y con la tabla 1 disponible -> lee el
     # agregado pre-calculado (gate default = forecast_valorizado_summary). Treemap
     # no ORDER BY -> HashAggregate en RAM, no necesita work_mem.
-    if prod_codes is None and _forecast_summary_available():
+    if cartera_branches is None and prod_codes is None and _forecast_summary_available():
         df_tree = _query_agg(
             f"SELECT perfil, nombre_grupo, fantasia, cliente_id, "
             f"SUM(COALESCE({val_col}, 0)) AS monto "
@@ -5060,7 +5765,10 @@ def _pg_get_treemap_data_inner(
         return {**_EMPTY, "periods": periods}
 
     # ── Inject manual client entries into PG treemap ───────────────────────
-    _manual_df_pg_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+    _manual_df_pg_tm = (
+        _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+        if cartera_branches is None else pd.DataFrame()
+    )
     if not _manual_df_pg_tm.empty:
         _val_col_tm = "monto_yhat" if view_money else "yhat_cliente"
         if period_date:
@@ -5186,7 +5894,7 @@ def _pg_get_treemap_data_inner(
 
 def _pg_get_client_detail(
     user_id, client_id, start_date, end_date, profiles, neg, subneg, products, growth_pct,
-    is_admin=False,
+    is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Memory-safe PostgreSQL client detail: loads only single client's rows."""
     _EMPTY = {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
@@ -5194,6 +5902,11 @@ def _pg_get_client_detail(
     # Filter strictly by this client (fantasia or cliente_id)
     safe_cid  = str(client_id).replace("'", "''")
     cli_extra = f"(fantasia = '{safe_cid}' OR cliente_id = '{safe_cid}')"
+    if cartera_branches is not None:
+        # Cartera de cuentas (ago-2026): AND-eado con el match de arriba — si el
+        # cliente pedido no está en la cartera, esto da 0 filas -> mismo resultado
+        # vacío que "cliente inexistente" (no distingue "no existe" de "no autorizado").
+        cli_extra = f"({cli_extra} AND {_cartera_sql(cartera_branches) or '1=0'})"
     prod_codes = _pg_resolve_prod_codes(products)
     val_prod   = _val_prod_filter(prod_codes)
     val_where  = _build_filter_sql(
@@ -5376,16 +6089,26 @@ def get_data() -> dict[str, Any]:
 
 
 def preload_valorizado_parquet() -> None:
-    """Pre-warm _data_cache in a background thread at server startup.
+    """Pre-warm _data_cache + los mapas TTL derivados, en un thread de background
+    al arrancar el server.
 
-    Calls get_data() which loads the full valorizado parquet + CSV files into
-    _data_cache so the first user request finds data already in memory.
+    Calienta, en orden (cada uno depende del anterior estando ya en memoria):
+      1. get_data()            — parquet + CSVs -> _data_cache (~10-20s en frío).
+      2. get_client_dim_map()  — cliente->{grupo,perfil}, TTL 600s.
+      3. get_subneg_neg_map()  — subneg->neg, TTL 600s.
+    Antes solo se precalentaba (1); (2) y (3) quedaban fríos hasta el primer
+    request real que los tocara — que en Aprobaciones Forecast es CUALQUIER
+    guardado (`_require_proposal_scope` los usa para autorizar). Medido en vivo:
+    (1) ~14-20s, (2) ~5-8s, (3) ~17s con el .iterrows() viejo — ver
+    build_subneg_neg_map, ya vectorizado — stackeados, explican los minutos de
+    espera en el primer guardado tras un arranque/reload.
 
-    - On SQLite/local: loads ~10-30s in background; subsequent requests use in-memory data.
-    - On PostgreSQL/Render: get_data() returns {} immediately — this is a no-op.
-    - Thread-safe: get_data() already uses _cache_lock; only one load runs at a time.
-    - Non-blocking: runs as a daemon thread; the server stays responsive.
-    - Failure-safe: any exception is logged and the app continues working normally.
+    - On SQLite/local: corre en background; requests posteriores usan cache tibia.
+    - On PostgreSQL/Render: get_data() devuelve {} enseguida — todo el resto es no-op.
+    - Thread-safe: cada get_*() ya tiene su propio lock; un solo load corre a la vez.
+    - Non-blocking: thread daemon: el server queda responsive mientras carga.
+    - Failure-safe: cualquier excepción se loguea y la app sigue funcionando
+      normal (peor caso: vuelve al comportamiento de antes, frío en el primer hit).
     """
     def _load() -> None:
         if engine is not None and "postgresql" in str(engine.url):
@@ -5397,9 +6120,32 @@ def preload_valorizado_parquet() -> None:
             data = get_data()
             elapsed_ms = (time.monotonic() - t0) * 1000
             n_rows = len(data.get("df_valorizado", pd.DataFrame())) if data else 0
-            logger.info("[FORECAST PRELOAD] loaded in %.0f ms — df_valorizado %d rows", elapsed_ms, n_rows)
+            logger.info("[FORECAST PRELOAD] get_data() loaded in %.0f ms — df_valorizado %d rows", elapsed_ms, n_rows)
         except Exception as exc:
-            logger.error("[FORECAST PRELOAD] failed: %s", exc, exc_info=True)
+            logger.error("[FORECAST PRELOAD] get_data() failed: %s", exc, exc_info=True)
+            return  # sin datos base, los mapas de abajo tampoco van a servir de nada
+
+        t1 = time.monotonic()
+        try:
+            dim = get_client_dim_map(force=True)
+            logger.info(
+                "[FORECAST PRELOAD] get_client_dim_map() loaded in %.0f ms — %d clientes",
+                (time.monotonic() - t1) * 1000, len(dim),
+            )
+        except Exception as exc:
+            logger.error("[FORECAST PRELOAD] get_client_dim_map() failed: %s", exc, exc_info=True)
+
+        t2 = time.monotonic()
+        try:
+            neg_map = get_subneg_neg_map(force=True)
+            logger.info(
+                "[FORECAST PRELOAD] get_subneg_neg_map() loaded in %.0f ms — %d subnegocios",
+                (time.monotonic() - t2) * 1000, len(neg_map),
+            )
+        except Exception as exc:
+            logger.error("[FORECAST PRELOAD] get_subneg_neg_map() failed: %s", exc, exc_info=True)
+
+        logger.info("[FORECAST PRELOAD] done in %.0f ms total", (time.monotonic() - t0) * 1000)
 
     threading.Thread(target=_load, name="forecast-preload", daemon=True).start()
 
@@ -5462,7 +6208,7 @@ def get_forecast_schema_info() -> dict:
 
 
 @_with_resp_cache(ttl=_RESP_TTL_STATIC)
-def get_filter_options() -> dict:
+def get_filter_options(cartera_branches: ForecastCarteraBranches | None = None) -> dict:
     import json  # needed in both branches
     _fo_total_t0 = time.perf_counter()
     _fo_profiles_ms = 0.0
@@ -5471,6 +6217,43 @@ def get_filter_options() -> dict:
     _fo_dates_ms = 0.0
     _fo_labs_ms = 0.0
     _fo_build_ms = 0.0
+    if cartera_branches is not None:
+        scope_sql = _cartera_sql(cartera_branches) or "1=0"
+        if engine is not None and "postgresql" in str(engine.url):
+            visible = _query_agg(
+                "SELECT perfil, neg, subneg, fecha, codigo_serie "
+                f"FROM forecast_valorizado WHERE {scope_sql}"
+            )
+            labs_df = _query_agg("SELECT codigo_serie, laboratorios FROM forecast_product_labs")
+            lab_map = {}
+            for _, row in labs_df.iterrows():
+                try:
+                    lab_map[str(row["codigo_serie"])] = json.loads(row["laboratorios"])
+                except Exception:
+                    pass
+        else:
+            data = get_data()
+            source = data.get("df_valorizado", pd.DataFrame())
+            visible = source[_cartera_mask(source, cartera_branches)].copy() if not source.empty else pd.DataFrame()
+            lab_map = data.get("product_lab_map", {})
+        if visible.empty:
+            return {"profiles": [], "neg": [], "subneg": [], "labs": [], "min_date": None, "max_date": None}
+        def _visible_values(col):
+            if col not in visible.columns:
+                return []
+            return sorted({str(v).strip() for v in visible[col].dropna() if str(v).strip().lower() not in {"", "nan", "none"}})
+        dates = pd.to_datetime(visible.get("fecha"), errors="coerce").dropna()
+        codes = set(visible.get("codigo_serie", pd.Series(dtype=str)).dropna().astype(str))
+        labs = sorted({lab for code in codes for lab in (lab_map.get(code, []) or [])})
+        return {
+            "profiles": _visible_values("perfil"),
+            "neg": _visible_values("neg"),
+            "subneg": _visible_values("subneg"),
+            "labs": labs,
+            "min_date": dates.min().strftime("%Y-%m-%d") if not dates.empty else None,
+            "max_date": dates.max().strftime("%Y-%m-%d") if not dates.empty else None,
+        }
+
     if engine is not None and "postgresql" in str(engine.url):
         # ── Core filters: profiles, neg, subneg, dates ────────────────────
         # Isolated in their own try/except so a labs table absence does NOT
@@ -5685,12 +6468,16 @@ def get_filter_options() -> dict:
 
 
 @_with_resp_cache(ttl=_RESP_TTL_DATA)
-def get_product_list(profiles: list | None = None, neg: list | None = None) -> list[dict]:
+def get_product_list(
+    profiles: list | None = None,
+    neg: list | None = None,
+    cartera_branches: ForecastCarteraBranches | None = None,
+) -> list[dict]:
     import pandas as pd
     if engine is not None and "postgresql" in str(engine.url):
-        return _pg_get_product_list(profiles=profiles, neg=neg)
+        return _pg_get_product_list(profiles=profiles, neg=neg, cartera_branches=cartera_branches)
     else:
-        if not _data_cache:
+        if not _data_cache and cartera_branches is None:
             light = _local_get_product_list_light(profiles=profiles, neg=neg)
             if light:
                 return light
@@ -5700,6 +6487,9 @@ def get_product_list(profiles: list | None = None, neg: list | None = None) -> l
         lab_map = data.get("product_lab_map", {})
 
     p_list = []
+    if cartera_branches is not None and df_val is not None and not df_val.empty:
+        df_val = df_val[_cartera_mask(df_val, cartera_branches)].copy()
+        df_main = pd.DataFrame()
     if df_main is not None and not df_main.empty:
         cols = [c for c in ["neg", "codigo_serie", "perfil", "descripcion"] if c in df_main.columns]
         p_list.append(df_main[cols])
@@ -5795,6 +6585,8 @@ def get_chart_data(
     view_money: bool = True,
     growth_pct: float = 0.0,
     is_admin: bool = False,
+    cartera_branches: ForecastCarteraBranches | None = None,
+    preview_pending: bool = False,
 ) -> dict:
     import pandas as pd
     global_overrides = bool(is_admin)
@@ -5806,7 +6598,7 @@ def get_chart_data(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, growth_pct=growth_pct,
-            is_admin=global_overrides,
+            is_admin=global_overrides, cartera_branches=cartera_branches,
         )
 
     _loc_ovr_records_for_debug = _fetch_override_records(user_id, all_users=global_overrides)
@@ -5820,7 +6612,9 @@ def get_chart_data(
         _loc_ovr_user_ids,
     )
     _has_manual = bool(_query_manual_clients(user_id, is_admin=is_admin))
-    if not _data_cache and not _ovr_active and not _has_manual:
+    # El light path no conserva la relación cuenta+UN; un usuario restringido
+    # siempre cae al camino completo.
+    if not _data_cache and not _ovr_active and not _has_manual and cartera_branches is None:
         light = _local_get_chart_data_light(
             user_id=user_id,
             start_date=start_date,
@@ -5908,8 +6702,17 @@ def get_chart_data(
         _neg_allowed_codes = set(df.loc[_neg_mask, "codigo_serie"].dropna().astype(str).unique())
         print(f"[FORECAST HIST NEG FILTER] neg={neg} subneg={subneg} | neg_allowed_codes_count={len(_neg_allowed_codes)}", flush=True)
 
-    df_hist = pd.DataFrame()
-    if view_money and not df_imp_hist.empty and "imp_hist" in df_imp_hist.columns and "fecha" in df_imp_hist.columns:
+    # Columns pre-declared: cuando queda vacío (sin match, o cartera restringida
+    # suprime la línea abajo), el código de más adelante hace df_hist.sort_values
+    # ("fecha") y df_hist["fecha"] incondicionalmente — un DataFrame() a secas no
+    # tiene esa columna y revienta con KeyError.
+    df_hist = pd.DataFrame(columns=["fecha", "Total_Venta"])
+    # Cartera de cuentas (ago-2026): forecast_imp_hist (importe_historico.csv) tiene
+    # SOLO periodo/codigo_serie/perfil/imp_hist — nunca tuvo columna de cliente en
+    # ningún punto del pipeline. No es filtrable. Para un usuario restringido, la
+    # única forma de cumplir "ningún panel muestra plata fuera de la cartera" es NO
+    # mostrar esta línea/KPI (queda vacía) en vez de mostrarla sin filtrar.
+    if cartera_branches is None and view_money and not df_imp_hist.empty and "imp_hist" in df_imp_hist.columns and "fecha" in df_imp_hist.columns:
         mask_ih = pd.Series(True, index=df_imp_hist.index)
         start_ts = pd.to_datetime(start_date) if start_date else None
         end_ts = pd.to_datetime(end_date) if end_date else None
@@ -5939,8 +6742,9 @@ def get_chart_data(
         )
         print(f"[FORECAST HIST] rows_matched={_hist_rows_before} months={len(df_hist)} total_venta={df_hist['Total_Venta'].sum():.0f}", flush=True)
 
-    if df_hist.empty:
-        # Fallback: price×units from forecast_base_consolidado tipo='hist'
+    if df_hist.empty and cartera_branches is None:
+        # Fallback: price×units from forecast_base_consolidado tipo='hist'. df_main
+        # tampoco tiene cliente_id — solo entra acá cuando NO hay restricción de cartera.
         df_hist = df_filt[df_filt.get("Etiqueta_Upper", pd.Series()) == "Historia"].groupby("fecha").agg(
             Total_Venta=("y", "sum")
         ).reset_index()
@@ -5964,6 +6768,8 @@ def get_chart_data(
                 mask_v &= df_val["codigo_serie"].astype(str).isin(_neg_allowed_codes)
         if products and "descripcion" in df_val.columns:
             mask_v &= df_val["descripcion"].isin(products)
+        if cartera_branches is not None:
+            mask_v &= _cartera_mask(df_val, cartera_branches)
 
         df_val_f = df_val[mask_v]
         col_y = "monto_yhat" if view_money else "yhat_cliente"
@@ -6027,7 +6833,10 @@ def get_chart_data(
         df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
 
     # ── Inject manual client entries into forecast totals ─────────────────
-    _manual_df_chart = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+    _manual_df_chart = (
+        _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+        if cartera_branches is None else pd.DataFrame()
+    )
     if not _manual_df_chart.empty:
         _val_col_m = "monto_yhat" if view_money else "yhat_cliente"
         _manual_monthly = (
@@ -6140,11 +6949,17 @@ def get_chart_data(
         total_real_2025 = 0.0
 
     # Variación nominal 2026 vs 2025
-    var_nominal_2025 = ((total_proyectado_2026_annual / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
+    historical_2025_available = total_real_2025 > 0
+    historical_2025_reason = None if historical_2025_available else (
+        "El histórico 2025 no está desagregado por cliente y se suprime bajo cartera."
+        if cartera_branches is not None
+        else "No hay histórico 2025 disponible para la selección actual."
+    )
+    var_nominal_2025 = ((total_proyectado_2026_annual / total_real_2025) - 1) * 100 if historical_2025_available else None
 
     # Variación real (deflactada)
     total_proyectado_2026_deflated = total_proyectado_2026_annual / (1 + inflation_pct / 100)
-    var_real_2025 = ((total_proyectado_2026_deflated / total_real_2025) - 1) * 100 if total_real_2025 > 0 else 0.0
+    var_real_2025 = ((total_proyectado_2026_deflated / total_real_2025) - 1) * 100 if historical_2025_available else None
 
     # ── Facturación 2026 (real billing — analytical layer: Jan+Feb+Mar) ────
     # Original app uses fact_history.csv val rows which include ALL available months.
@@ -6181,6 +6996,8 @@ def get_chart_data(
         # Products filter: direct codigo_serie lookup.
         if products and "codigo_serie" in df_fact_2026.columns:
             mask_f2 &= df_fact_2026["codigo_serie"].astype(str).isin(_prod_codes_lookup)
+        if cartera_branches is not None:
+            mask_f2 &= _cartera_mask(df_fact_2026, cartera_branches, series_units=df)
         df_f2 = df_fact_2026[mask_f2].copy()
 
         # All months aggregated (analytical layer: Jan+Feb+Mar)
@@ -6247,12 +7064,12 @@ def get_chart_data(
             # KPI 1 - Monto Total Proyectado Anual 2026
             "total_proyeccion_2026": round(total_proyectado_2026_annual, 0),
             # KPI 2 - Variación Nominal sobre 2025
-            "var_nominal_2025": round(var_nominal_2025, 2),
+            "var_nominal_2025": round(var_nominal_2025, 2) if var_nominal_2025 is not None else None,
             # KPI 3 - Inflación Esperada (fija)
             "inflation_pct": round(inflation_pct, 1),
             "inflation_mo_pct": INFLATION_MO_PCT,
             # KPI 4 - Variación Real sobre 2025
-            "var_real_2025": round(var_real_2025, 2),
+            "var_real_2025": round(var_real_2025, 2) if var_real_2025 is not None else None,
             # KPI 5 - Coincidencia modelo
             "accuracy_val": round(accuracy_val, 1),
             # KPI 6 - Coincidencia expectativa
@@ -6261,11 +7078,19 @@ def get_chart_data(
             "fact_2026": round(fact_2026_sum, 0),
             "meta_completeness": round(meta_completeness, 1),
             # --- Legacy / extra ---
-            "total_historia": round(total_hist, 0),
+            "total_historia": round(total_hist, 0) if historical_2025_available else None,
             "total_proyeccion": round(total_fcst, 0),
             "total_proyeccion_adj": round(total_adj, 0),
-            "total_real_2025": round(total_real_2025, 0),
-            "n_products": int(df_val_f["descripcion"].nunique()) if (not df_val_f.empty and "descripcion" in df_val_f.columns) else (int(df_filt["descripcion"].nunique()) if "descripcion" in df_filt.columns else 0),
+            "total_real_2025": round(total_real_2025, 0) if historical_2025_available else None,
+            "historical_2025_available": historical_2025_available,
+            "historical_2025_unavailable_reason": historical_2025_reason,
+            "n_products": (
+                int(df_val_f["descripcion"].nunique())
+                if (not df_val_f.empty and "descripcion" in df_val_f.columns)
+                else (0 if cartera_branches is not None else (
+                    int(df_filt["descripcion"].nunique()) if "descripcion" in df_filt.columns else 0
+                ))
+            ),
         },
     }
 
@@ -6283,6 +7108,8 @@ def get_client_table(
     growth_pct: float = 0.0,
     lab_products: list | None = None,
     is_admin: bool = False,
+    cartera_branches: ForecastCarteraBranches | None = None,
+    preview_pending: bool = False,
 ) -> dict:
     import pandas as pd
     _db_path = "postgresql" if (engine is not None and "postgresql" in str(engine.url)) else "sqlite"
@@ -6294,7 +7121,7 @@ def get_client_table(
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money,
             growth_pct=growth_pct, lab_products=lab_products,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
 
     data = get_data()
@@ -6328,6 +7155,8 @@ def get_client_table(
             "max_val": 0,
             "total_projected": 0,
         }
+        if cartera_branches is not None:
+            return base
         return _inject_manual_client_rows_into_table(
             base, user_id=user_id,
             start_date=start_date, end_date=end_date,
@@ -6353,6 +7182,8 @@ def get_client_table(
         mask &= df_val["subneg"].isin(subneg)
     if products and "descripcion" in df_val.columns:
         mask &= df_val["descripcion"].isin(products)
+    if cartera_branches is not None:
+        mask &= _cartera_mask(df_val, cartera_branches)
 
     df_c = df_val[mask].copy()
     if df_c.empty:
@@ -6497,7 +7328,10 @@ def get_client_table(
         "total_projected": total_projected,
     }
 
-    # Inject manually-added clients
+    if cartera_branches is not None:
+        return base_result
+    # Inject manually-added clients sólo cuando el acceso es global. Los clientes
+    # manuales no poseen identidad Fusión y no pueden autorizarse con seguridad.
     return _inject_manual_client_rows_into_table(
         base_result, user_id=user_id,
         start_date=start_date, end_date=end_date,
@@ -6551,6 +7385,8 @@ def get_treemap_data(
     view_money: bool = True,
     period_date: str | None = None,
     is_admin: bool = False,
+    cartera_branches: ForecastCarteraBranches | None = None,
+    preview_pending: bool = False,
 ) -> dict:
     """Return Plotly treemap: Canal (perfil) → Grupo → Cliente hierarchy.
 
@@ -6570,14 +7406,16 @@ def get_treemap_data(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, view_money=view_money, period_date=period_date,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
 
     _ovr_active = _has_overrides(user_id, is_admin=is_admin)
     _has_manual_tm = bool(_query_manual_clients(user_id, is_admin=is_admin))
     # Use light path when no overrides/manual clients — _local_get_treemap_data_light
     # now uses _data_cache["df_valorizado"] when available (avoids parquet re-read).
-    if not _ovr_active and not _has_manual_tm:
+    # El light path no conserva la relación cuenta+UN; un usuario restringido
+    # siempre cae al camino completo.
+    if not _ovr_active and not _has_manual_tm and cartera_branches is None:
         light = _local_get_treemap_data_light(
             user_id=user_id,
             start_date=start_date,
@@ -6593,6 +7431,8 @@ def get_treemap_data(
             return light
 
     df_val = _get_patched_df_val(user_id=user_id, is_admin=is_admin)
+    if cartera_branches is not None and not df_val.empty:
+        df_val = df_val[_cartera_mask(df_val, cartera_branches)].copy()
     if df_val.empty:
         return _EMPTY
 
@@ -6619,11 +7459,13 @@ def get_treemap_data(
         mask &= df_val["neg"].isin(neg)
     if subneg and "subneg" in df_val.columns:
         mask &= df_val["subneg"].isin(subneg)
-
     df_f = df_val[mask].copy()
 
     # ── Inject manual client entries ───────────────────────────────────────
-    _manual_df_tm = _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+    _manual_df_tm = (
+        _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
+        if cartera_branches is None else pd.DataFrame()
+    )
     if not _manual_df_tm.empty:
         # Filter manual entries by period_date if set
         if period_date:
@@ -6801,6 +7643,8 @@ def get_client_detail(
     products: list | None = None,
     growth_pct: float = 0.0,
     is_admin: bool = False,
+    cartera_branches: ForecastCarteraBranches | None = None,
+    preview_pending: bool = False,
 ) -> dict:
     """Return per-product detail for a client, pivoted by month, grouped by neg/subneg.
     Used by the modal edit dialog.
@@ -6810,7 +7654,7 @@ def get_client_detail(
     import pandas as pd
 
     # Check if this is a manually-added client first (both SQLite and PG paths)
-    _manual = _manual_client_by_name(client_id, user_id)
+    _manual = _manual_client_by_name(client_id, user_id) if cartera_branches is None else None
     _manual_to_merge = None  # Set when a base client has manual additions to merge
 
     if _manual is not None:
@@ -6844,7 +7688,7 @@ def get_client_detail(
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
             products=products, growth_pct=growth_pct,
-            is_admin=is_admin,
+            is_admin=is_admin, cartera_branches=cartera_branches,
         )
 
     data = get_data()
@@ -6886,6 +7730,9 @@ def get_client_detail(
                 neg_filter=neg, subneg_filter=subneg, growth_pct=growth_pct, is_admin=is_admin,
             )
         return {"client_id": client_id, "perfil": "", "negocios": [], "dates": []}
+
+    if cartera_branches is not None:
+        mask_cli &= _cartera_mask(df_val, cartera_branches)
 
     df_c = df_val[mask_cli].copy()
 
