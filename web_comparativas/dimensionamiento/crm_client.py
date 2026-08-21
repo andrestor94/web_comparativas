@@ -218,11 +218,12 @@ def _nueva_sesion(cfg: dict[str, Any]) -> requests.Session:
 
 
 def crm_detail_url(crm_id: str) -> str | None:
-    """URL del DetailView de la oportunidad en el CRM (botón 'Ver en CRM')."""
+    """Deep-link de la oportunidad en el CRM (botón 'Ver en CRM')."""
     base_url = (os.getenv("CRM_BASE_URL") or "").strip().rstrip("/")
+    crm_id = (crm_id or "").strip()
     if not base_url or not crm_id:
         return None
-    return f"{base_url}/index.php?action=DetailView&module=Opportunities&record={crm_id}"
+    return f"{base_url}/index.php?module=Opportunities&action=sp&ov_id={crm_id}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

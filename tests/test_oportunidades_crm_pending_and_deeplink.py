@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from web_comparativas.models import Base
+from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     DimensionamientoImportRun,
@@ -58,7 +59,10 @@ def add_opportunity(db, row_id: int, client: str, code: str) -> OportunidadSumma
     return row
 
 
-def add_sent(db, opportunity: OportunidadSummary, mode: str, *, raw_client=None, raw_code=None):
+def add_sent(
+    db, opportunity: OportunidadSummary, mode: str, *,
+    raw_client=None, raw_code=None, crm_id=None,
+):
     oid = opportunity_stable_id(opportunity.cliente_visible, opportunity.codigo_articulo)
     db.add(CrmEnvio(
         oportunidad_id=oid,
@@ -66,7 +70,7 @@ def add_sent(db, opportunity: OportunidadSummary, mode: str, *, raw_client=None,
         codigo_articulo=raw_code if raw_code is not None else opportunity.codigo_articulo,
         unidad_negocio=opportunity.unidad_negocio, enviado_por='sender@example.com',
         enviado_at=dt.datetime(2026, 8, 1, 12, 0), crm_status='CREADA',
-        crm_id=f'crm-{mode}-{opportunity.id}', crm_modo=mode,
+        crm_id=crm_id or f'crm-{mode}-{opportunity.id}', crm_modo=mode,
         crm_assigned_usuario='Asignado', crm_assigned_origen='match',
         payload_snapshot=json.dumps({'amount': opportunity.monto_oportunidad}),
     ))
@@ -82,6 +86,35 @@ def configure_list(monkeypatch, mode: str):
         'match': None, 'usuarios': [], 'sugerido_id': None, 'error': None,
         'puede_elegir': True, 'email': 'viewer@example.com',
     })
+
+
+@pytest.mark.parametrize('base_url', [
+    'https://crm.example.test',
+    'https://crm.example.test/',
+])
+def test_crm_detail_url_uses_dynamic_crm_id_and_normalizes_base_url(monkeypatch, base_url):
+    crm_id = '1825769e-b417-bf6a-4a48-681cfe4e779c'
+    monkeypatch.setenv('CRM_BASE_URL', base_url)
+
+    assert crm_client.crm_detail_url(crm_id) == (
+        'https://crm.example.test/index.php?module=Opportunities'
+        f'&action=sp&ov_id={crm_id}'
+    )
+
+
+@pytest.mark.parametrize('crm_id', ['', '   ', None])
+def test_crm_detail_url_without_crm_id_returns_none(monkeypatch, crm_id):
+    monkeypatch.setenv('CRM_BASE_URL', 'https://crm.example.test')
+    assert crm_client.crm_detail_url(crm_id) is None
+
+
+def test_crm_detail_url_uses_each_opportunity_crm_id(monkeypatch):
+    monkeypatch.setenv('CRM_BASE_URL', 'https://crm.example.test')
+    first_id = '1825769e-b417-bf6a-4a48-681cfe4e779c'
+    second_id = 'crm-opportunity-2'
+
+    assert crm_client.crm_detail_url(first_id).endswith(f'ov_id={first_id}')
+    assert crm_client.crm_detail_url(second_id).endswith(f'ov_id={second_id}')
 
 
 def test_main_list_excludes_only_current_environment_and_kpis_use_pending(db, monkeypatch):
@@ -169,19 +202,28 @@ def test_main_list_frontend_filters_cannot_reintroduce_sent_rows(db, monkeypatch
 
 
 def test_deep_link_is_exact_environment_scoped_and_re_resolves(db, monkeypatch):
-    monkeypatch.setenv('CRM_BASE_URL', 'https://crm.example.test')
+    monkeypatch.setenv('CRM_BASE_URL', 'https://crm.example.test/')
+    crm_id = '1825769e-b417-bf6a-4a48-681cfe4e779c'
+    expected_url = (
+        'https://crm.example.test/index.php?module=Opportunities'
+        f'&action=sp&ov_id={crm_id}'
+    )
     opportunity = add_opportunity(db, 1, 'Cliente', 'ART-1')
-    oid = add_sent(db, opportunity, 'test')
+    oid = add_sent(db, opportunity, 'test', crm_id=crm_id)
     db.commit()
     monkeypatch.setattr(router, 'OPORTUNIDADES_ENABLED', lambda: True)
+    monkeypatch.setattr(router, '_latest_success_import_run', lambda _db: None)
 
     monkeypatch.setattr(router, '_modo_envio_actual', lambda: 'test')
     actor = SimpleNamespace(id=900, email='admin@example.com', role='admin')
+    sent_rows = router.oportunidades_enviadas(object(), actor, db)
+    assert sent_rows['data']['rows'][0]['crm_url'] == expected_url
+
     found = router.oportunidad_enviada_detalle(object(), oid, actor, db)
     assert found['data']['found'] is True
     assert found['data']['row']['oportunidad_id'] == oid
     assert found['data']['row']['crm_modo'] == 'test'
-    assert found['data']['row']['crm_url'].endswith(f'record=crm-test-{opportunity.id}')
+    assert found['data']['row']['crm_url'] == expected_url
 
     different_case = router.oportunidad_enviada_detalle(object(), oid.upper(), actor, db)
     assert different_case['data']['found'] is False
@@ -210,6 +252,17 @@ def test_repository_frontend_navigates_to_dedicated_detail_page():
     assert 'window.location.replace(detailPageUrl({ oportunidad_id: requestedId }))' in source
     assert 'bootstrap.Modal' not in source
     assert 'envDetailModal' not in source
+    assert 'href="${esc(r.crm_url)}"' in source
+
+    detail_script = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), 'web_comparativas', 'static', 'js',
+        'mercado_privado_oportunidad_enviada_detalle.js',
+    )
+    with open(detail_script, encoding='utf-8') as detail_script_file:
+        detail_source = detail_script_file.read()
+    assert 'if (row.crm_url)' in detail_source
+    assert 'crmLink.href = row.crm_url' in detail_source
+    assert 'crmLink.removeAttribute("href")' in detail_source
 
     detail_template = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), 'web_comparativas', 'templates',
