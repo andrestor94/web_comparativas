@@ -234,6 +234,11 @@ def _fmt_num(value: float | None) -> str:
     return f"{v:,.0f}".replace(",", ".") if v == int(v) else f"{v:,.1f}".replace(",", ".")
 
 
+def _unir_bloques_texto(*bloques: str | None) -> str:
+    """Une bloques de texto plano preservando párrafos y descartando vacíos."""
+    return "\n\n".join(bloque.strip() for bloque in bloques if bloque and bloque.strip())
+
+
 def _texto_asignado(asignado: dict[str, str] | None) -> str | None:
     """Cómo se muestra el usuario asignado en el modal.
 
@@ -278,35 +283,40 @@ def _build_crm_payload(
         cuenta_fusion if cuenta_fusion is not None else getattr(o, "cuenta_interna", None)
     )
     producto = (o.producto_nombre or o.codigo_articulo or "").strip()
-    cliente = (o.cliente_visible or "Sin cliente").strip()
     plataforma = o.plataforma or "el portal"
     familia = o.familia or "Sin familia"
     consumo = _fmt_num(o.consumo_tipico_mensual)
-    rango = f"{_fmt_num(o.consumo_min_mensual)}–{_fmt_num(o.consumo_max_mensual)}"
-    ultima = o.ultima_demanda.isoformat() if o.ultima_demanda else "s/d"
+    ultima = o.ultima_demanda.strftime("%d/%m/%Y") if o.ultima_demanda else "Sin dato"
 
     description = (
-        f"Oportunidad de venta detectada por SIEM sobre el espacio NO PARTICIPADO en {plataforma}. "
-        f"El cliente {cliente} ({o.provincia or 's/provincia'}) demanda «{producto}» "
-        f"(cód. {o.codigo_articulo}, familia {familia}) con un consumo típico de {consumo} u/mes "
-        f"(rango mensual {rango}), apareciendo en {o.meses_demanda_cliente_12m} de {o.ventana_meses} meses analizados. "
-        f"Última demanda: {ultima} ({o.meses_desde_ultima_demanda} meses atrás; estado {o.estado_actividad}). "
-        f"Efectividad histórica del producto: {_fmt_pct(o.efectividad)} "
-        f"({o.ganados} adjudicaciones ganadas, {o.clientes_distintos} clientes distintos). "
-        f"Monto mensual estimado recuperable: {_fmt_money(o.monto_oportunidad)}."
+        "OPORTUNIDAD DETECTADA POR SIEM\n\n"
+        f"- Origen: Espacio no participado en {plataforma}\n"
+        f"- Producto: {producto}\n"
+        f"- Demanda típica: {consumo} unidades/mes\n"
+        f"- Frecuencia observada: {o.meses_demanda_cliente_12m} de {o.ventana_meses} meses analizados\n"
+        f"- Última demanda: {ultima}\n"
+        f"- Estado de actividad: {o.estado_actividad or 's/d'}"
     )
 
-    # Bitácora: corta a propósito. Todo el detalle de negocio ya está en `description`;
-    # acá solo va lo que no está en ningún otro lado (quién envió, a quién, cuándo).
-    # Es EXACTAMENTE el texto que se manda: el mismo helper lo arma para el modal y para
-    # el envío, así que la vista previa no puede quedar diciendo otra cosa.
-    update_text = (
+    datos_complementarios = (
+        "DATOS COMPLEMENTARIOS SIEM\n\n"
+        f"- Código de artículo: {o.codigo_articulo or 's/d'}\n"
+        f"- Familia: {familia}\n"
+        f"- Rango mensual observado: {_fmt_num(o.consumo_min_mensual)} a "
+        f"{_fmt_num(o.consumo_max_mensual)} unidades\n"
+        f"- Efectividad histórica: {_fmt_pct(o.efectividad)}\n"
+        f"- Adjudicaciones ganadas: {o.ganados or 0}\n"
+        f"- Clientes distintos observados: {o.clientes_distintos or 0}"
+    )
+    trazabilidad = (
         crm_client.texto_bitacora(email_siem, asignado, momento or dt.datetime.utcnow())
         if asignado else None
     )
+    # La vista previa y el envío comparten este mismo payload de texto plano.
+    update_text = _unir_bloques_texto(datos_complementarios, trazabilidad)
 
     payload = {
-        "name": f"SIEM [{o.tipo_oportunidad}] | {producto} | {cliente}",
+        "name": f"SIEM [{o.tipo_oportunidad}] | {producto} | {(o.cliente_visible or 'Sin cliente').strip()}",
         "currency_id": crm_client.CRM_CURRENCY_ID,
         "amount": round(float(o.monto_oportunidad or 0), 2),
         # Nº de cuenta de FUSION: con esto el CRM resuelve el account_id (paso 3).
@@ -380,6 +390,8 @@ def _build_crm_payload(
         "faltantes_dataset": faltantes,
         "bloqueos": bloqueos,
         "requiere_asignacion": requiere_asignacion,
+        # La UI lo usa para recomponer la vista previa si cambia el asignado.
+        "bitacora_datos_siem": datos_complementarios,
         # La UI solo dibuja el selector si esto es True; el backend lo revalida igual.
         "puede_elegir": puede_elegir,
     }
@@ -1425,9 +1437,10 @@ def oportunidades_enviar(
     payload["cantidad_evaluadas"] = account_resolution.get("cantidad_evaluadas_crm", 0)
     payload["cuentas_evaluadas"] = payload["cantidad_evaluadas"]
     if account_resolution.get("trazabilidad_texto"):
-        payload["update_text"] = (
-            f"{payload.get('update_text') or ''} {account_resolution['trazabilidad_texto']}"
-        ).strip()
+        payload["update_text"] = _unir_bloques_texto(
+            payload.get("update_text"),
+            account_resolution["trazabilidad_texto"],
+        )
 
     payload["enviado_por"] = enviado_por
     payload["enviado_por_id"] = enviado_por_id

@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from web_comparativas.models import Base, User, VendedorFusion
+from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.account_resolution import AccountSelectionError
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio, CrmEnvioEvento, DimensionamientoImportRun, OportunidadSummary,
@@ -45,7 +46,8 @@ def db():
             tipo_oportunidad="INTERMITENTE", estado_actividad="ACTIVA",
             meses_demanda_cliente_12m=3, meses_no_participo_12m=3, ventana_meses=12,
             consumo_tipico_mensual=100, consumo_min_mensual=100, consumo_max_mensual=100,
-            meses_desde_ultima_demanda=4, precio_unitario_estimado=100,
+            ultima_demanda=dt.date(2026, 4, 15), meses_desde_ultima_demanda=4,
+            precio_unitario_estimado=100,
             monto_oportunidad=10000, efectividad=0.37, ganados=46, comprado_otra=1,
             en_espera=0, clientes_distintos=25, tipo_multiplicador=1,
             multiplicador_actividad=1, score=10000,
@@ -204,7 +206,167 @@ def test_valid_post_uses_server_resolution_and_repository_exposes_trace(db, monk
     assert repository_row["cuenta_seleccion_origen"] == "automatica_unica_alternativa"
     assert repository_row["operador_nombre"] == "AYELEN PILUSO"
     assert repository_row["cuit"] == "30595201027"
-    assert "Oportunidad de venta detectada por SIEM" in repository_row["descripcion"]
+    assert "OPORTUNIDAD DETECTADA POR SIEM" in repository_row["descripcion"]
+    assert "DATOS COMPLEMENTARIOS SIEM" in payload["update_text"]
+    assert "- Enviado por: admin@suizo.com" in payload["update_text"]
+    assert "- Asignación: Automática → admin" in payload["update_text"]
+    assert "Alternativa relacionada" in payload["update_text"]
+
+def test_crm_payload_reorganizes_description_and_bitacora_without_losing_data(db):
+    oportunidad = db.get(OportunidadSummary, 371)
+    asignado = {"id": "crm-user-1", "usuario": "vendedor.crm", "origen": "manual"}
+    momento = dt.datetime(2026, 8, 21, 15, 30)
+
+    crm = router._build_crm_payload(
+        oportunidad,
+        asignado=asignado,
+        email_siem="supervisor@suizo.com",
+        momento=momento,
+    )
+
+    expected_description = (
+        "OPORTUNIDAD DETECTADA POR SIEM\n\n"
+        "- Origen: Espacio no participado en BIONEXO\n"
+        "- Producto: CEFTAZIDIMA\n"
+        "- Demanda típica: 100 unidades/mes\n"
+        "- Frecuencia observada: 3 de 12 meses analizados\n"
+        "- Última demanda: 15/04/2026\n"
+        "- Estado de actividad: ACTIVA"
+    )
+    complementary = (
+        "DATOS COMPLEMENTARIOS SIEM\n\n"
+        "- Código de artículo: 8111612\n"
+        "- Familia: FAMILIA\n"
+        "- Rango mensual observado: 100 a 100 unidades\n"
+        "- Efectividad histórica: 37%\n"
+        "- Adjudicaciones ganadas: 46\n"
+        "- Clientes distintos observados: 25"
+    )
+    trace = (
+        "TRAZABILIDAD\n\n"
+        "- Enviado por: supervisor@suizo.com\n"
+        "- Asignación: Manual → vendedor.crm\n"
+        "- Fecha de envío: 21/08/2026 12:30"
+    )
+
+    assert crm["payload"]["description"] == expected_description
+    assert crm["payload"]["update_text"] == f"{complementary}\n\n{trace}"
+    assert crm["bitacora_datos_siem"] == complementary
+    assert "SANATORIO JUAN XXIII" not in crm["payload"]["description"]
+    assert "10.000" not in crm["payload"]["description"]
+    assert crm["payload"]["amount"] == 10000
+    assert "SANATORIO JUAN XXIII" in crm["payload"]["name"]
+    assert "<br" not in crm["payload"]["description"].lower()
+    assert "<br" not in crm["payload"]["update_text"].lower()
+
+    preview = router._row_to_dict(
+        oportunidad,
+        oportunidad.cuenta_interna,
+        {"match": asignado, "email": "supervisor@suizo.com"},
+        momento=momento,
+    )
+    assert preview["crm"]["payload"] == crm["payload"]
+
+
+def test_final_send_uses_exact_preview_description_and_bitacora(db, monkeypatch):
+    oportunidad = db.get(OportunidadSummary, 371)
+    asignado = {"id": "crm-user-1", "usuario": "vendedor.crm", "origen": "manual"}
+    payload = router._build_crm_payload(
+        oportunidad,
+        asignado=asignado,
+        email_siem="supervisor@suizo.com",
+        momento=dt.datetime(2026, 8, 21, 15, 30),
+    )["payload"]
+    captured = {}
+
+    monkeypatch.setattr(router, "CRM_ENVIO_PLACEHOLDER", lambda: False)
+    monkeypatch.setattr(
+        crm_client,
+        "enviar_oportunidad",
+        lambda **kwargs: captured.update(kwargs) or {
+            "crm_id": "crm-opportunity-1", "crm_account_id": "crm-account-1",
+            "modo": "prod", "bitacora_id": "bitacora-1",
+            "assigned_user_id": asignado["id"], "assigned_user": asignado["usuario"],
+            "usuario_origen": asignado["origen"], "bitacora_error": None,
+        },
+    )
+
+    router._enviar_real_a_crm(payload, asignado, "crm-account-1")
+
+    assert captured["description"] == payload["description"]
+    assert captured["bitacora_description"] == payload["update_text"]
+
+
+def test_description_date_fallback_and_automatic_trace_are_clear(db):
+    oportunidad = db.get(OportunidadSummary, 371)
+    oportunidad.ultima_demanda = None
+    crm = router._build_crm_payload(
+        oportunidad,
+        asignado={"id": "crm-user-2", "usuario": "vendedor.auto", "origen": "match"},
+        email_siem="vendedor@suizo.com",
+        momento=dt.datetime(2026, 8, 21, 15, 30),
+    )
+
+    assert "- Última demanda: Sin dato" in crm["payload"]["description"]
+    assert (
+        "TRAZABILIDAD\n\n"
+        "- Enviado por: vendedor@suizo.com\n"
+        "- Asignación: Automática → vendedor.auto\n"
+        "- Fecha de envío: 21/08/2026 12:30"
+    ) in crm["payload"]["update_text"]
+
+
+def test_crm_client_forwards_plain_text_newlines_unchanged(monkeypatch):
+    calls = []
+
+    def fake_create(_session, _cfg, _token, *, tipo, atributos, paso):
+        calls.append((tipo, atributos, paso))
+        return "record-id"
+
+    monkeypatch.setattr(crm_client, "_crear_registro", fake_create)
+    description = "Línea uno\n\n- Línea dos"
+    bitacora = "Datos\n\nTrazabilidad"
+
+    crm_client.crear_oportunidad(
+        object(), {}, "token", nombre="Nombre", assigned_user_id="user-id",
+        account_id="account-id", amount=10, description=description,
+        id_sistema_origen="siem-id",
+    )
+    crm_client.crear_bitacora(
+        object(), {}, "token", parent_id="opportunity-id",
+        description=bitacora, status="ACTIVA",
+    )
+
+    assert calls[0][1]["description"] == description
+    assert calls[1][1]["description"] == bitacora
+    assert all("<br" not in call[1]["description"].lower() for call in calls)
+
+
+def test_manual_assignment_preview_preserves_complementary_bitacora():
+    root = os.path.dirname(os.path.dirname(__file__))
+    source = os.path.join(
+        root,
+        "web_comparativas", "static", "js", "mercado_privado_oportunidades.js",
+    )
+    with open(source, encoding="utf-8") as handle:
+        javascript = handle.read()
+
+    assert 'const bitacoraDatosSiem = crmInfo.bitacora_datos_siem || "";' in javascript
+    assert "[bitacoraDatosSiem, logs[assigned.id], trace]" in javascript
+    assert '.join("\\n\\n")' in javascript
+    assert "description.textContent = (payload && payload.description)" in javascript
+    assert "bitacora.textContent = (payload && payload.update_text)" in javascript
+    assert ".innerHTML = payload" not in javascript
+
+    template_path = os.path.join(
+        root, "web_comparativas", "templates", "mercado_privado_oportunidades.html",
+    )
+    with open(template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    assert "white-space:pre-line" in template
+    assert 'id="crmDescriptionPreview"' in template
+    assert 'id="crmBitacoraPreview"' in template
+
 
 def test_accounts_get_requires_authentication(monkeypatch):
     app = FastAPI()

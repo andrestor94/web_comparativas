@@ -260,7 +260,16 @@
   // crm_envio_eventos sin depender de esta función en absoluto. Se deja como no-op
   // (en vez de borrar las 3 llamadas que la invocan) para no tocar más superficie de
   // la que hace falta.
-  function renderCrmFields() { return; }
+  // Se muestran solo los dos bloques comerciales; textContent evita interpretar HTML.
+  function renderCrmFields(payload) {
+    const box = $("crmTextPreview");
+    const description = $("crmDescriptionPreview");
+    const bitacora = $("crmBitacoraPreview");
+    if (!box || !description || !bitacora) return;
+    description.textContent = (payload && payload.description) || "";
+    bitacora.textContent = (payload && payload.update_text) || "";
+    box.style.display = description.textContent || bitacora.textContent ? "" : "none";
+  }
 
   // Banner de estado del envío (warning=duplicado, success=ok, danger=error).
   function setCrmStatus(kind, html) {
@@ -292,6 +301,7 @@
   function renderResolvedPayload(o) {
     const crmInfo = o.crm || {};
     const payload = Object.assign({}, crmInfo.payload || {});
+    const bitacoraDatosSiem = crmInfo.bitacora_datos_siem || "";
     const resolution = o._cuentaResolucion || {};
     const account = selectedAccount(o);
     if (account) {
@@ -310,7 +320,7 @@
       payload.fuente_relacion_cuenta = resolution.fuente_relacion || null;
       payload.cuentas_evaluadas = resolution.cantidad_candidatas_total ?? (resolution.cuentas_candidatas || []).length;
       const trace = resolution.trazabilidad_texto || account.trazabilidad_seleccion;
-      if (trace) payload.update_text = `${payload.update_text || ""} ${trace}`.trim();
+      if (trace) payload.update_text = [payload.update_text, trace].filter(Boolean).join("\n\n");
     }
     const users = CRM_ASIGNACION.usuarios || [];
     const assignedSelect = $("crmAsignadoSel");
@@ -326,7 +336,9 @@
     const logs = CRM_ASIGNACION.bitacora_por_usuario || {};
     if (assigned && logs[assigned.id]) {
       const trace = account && (resolution.trazabilidad_texto || account.trazabilidad_seleccion);
-      payload.update_text = `${logs[assigned.id]}${trace ? ` ${trace}` : ""}`;
+      payload.update_text = [bitacoraDatosSiem, logs[assigned.id], trace]
+        .filter(Boolean)
+        .join("\n\n");
     }
     renderCrmFields(payload, crmInfo.pendientes_crm, crmInfo.faltantes_dataset);
   }

@@ -740,22 +740,16 @@ def texto_bitacora(
     asignado: dict[str, str] | None,
     momento: dt.datetime,
 ) -> str:
-    """Texto de la bitácora del CRM: quién envió, a quién quedó asignada y cuándo.
-
-    Deliberadamente CORTO. Todo el detalle de negocio (familia, consumo, efectividad,
-    monto, base de cálculo) ya viaja en `description` de la oportunidad; repetirlo acá
-    solo genera ruido en el hilo de la bitácora.
-
-    Lo que sí aporta y no está en ningún otro lado: el `assigned_user_id` dice quién la
-    TRABAJA, no quién la generó. Cuando se asigna a otra persona, sin esta línea el
-    rastro del origen se pierde — en el CRM aparecería como de esa persona y nada
-    indicaría que la mandó alguien más desde SIEM. Por eso "asignada manualmente"
-    aparece solo en ese caso: si coincide con quien envía, no hay nada que aclarar.
-    """
+    """Trazabilidad estructurada del envío, desacoplada del modelo de oportunidad."""
     quien = (email_siem or "usuario desconocido").strip()
     usuario = (asignado or {}).get("usuario") or (asignado or {}).get("id") or "sin asignar"
-    verbo = "Asignada manualmente a" if (asignado or {}).get("origen") == "manual" else "Asignada a"
-    return f"Enviado desde SIEM por {quien}. {verbo} {usuario}. {formato_momento(momento)}."
+    tipo_asignacion = "Manual" if (asignado or {}).get("origen") == "manual" else "Automática"
+    return (
+        "TRAZABILIDAD\n\n"
+        f"- Enviado por: {quien}\n"
+        f"- Asignación: {tipo_asignacion} → {usuario}\n"
+        f"- Fecha de envío: {formato_momento(momento)}"
+    )
 
 def enviar_oportunidad(
     *,

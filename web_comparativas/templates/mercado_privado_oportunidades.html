@@ -179,6 +179,7 @@
 .opp-crm-scope .modal-header .modal-title{font-weight:700;}
 .opp-crm-scope .modal-header .modal-title small{color:rgba(255,255,255,.7)!important;}
 .opp-crm-scope .modal-header .btn-close{filter:invert(1) grayscale(1)brightness(1.6);opacity:.85;}
+.opp-crm-scope .crm-text-preview{white-space:pre-line;overflow-wrap:anywhere;font-size:.82rem;line-height:1.45;color:#334155;}
 .opp-detail-scope .modal-footer,.opp-crm-scope .modal-footer{position:sticky;bottom:0;background:#fff;border-top:1px solid rgba(6,72,111,.08);}
 .opp-crm-scope .modal-footer .btn{border-radius:var(--radius-sm);font-weight:600;}
 
@@ -371,6 +372,16 @@
           <label class="form-label mb-1" for="crmAsignadoSel">Usuario del CRM</label>
           <select id="crmAsignadoSel" class="form-select form-select-sm"></select>
           <div class="mt-1 text-muted" id="crmAsignacionNota"></div>
+        </div>
+        <div id="crmTextPreview" class="row g-3" style="display:none;">
+          <div class="col-12">
+            <div class="fw-semibold mb-1">Descripción</div>
+            <div id="crmDescriptionPreview" class="crm-text-preview border rounded p-3 bg-light"></div>
+          </div>
+          <div class="col-12">
+            <div class="fw-semibold mb-1">Bitácora</div>
+            <div id="crmBitacoraPreview" class="crm-text-preview border rounded p-3 bg-light"></div>
+          </div>
         </div>
       </div>
       <div class="modal-footer">
