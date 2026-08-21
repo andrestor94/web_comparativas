@@ -138,6 +138,18 @@
   .chipsel-footer button:hover{color:#8ea0e6;text-decoration:underline}
   .chipsel-footer button[disabled]{opacity:.4;cursor:not-allowed;text-decoration:none}
   .chipsel-footer .chipsel-only.is-on{color:var(--sic-done)}
+
+  /* ====== "Equipo a cargo": mismo widget de fichas, sobre checkboxes reales ====== */
+  {# La lista cruda de <label class="cartera-check-row"> se oculta recién cuando
+     el widget se arma con éxito — igual criterio que .chipsel-enhanced arriba,
+     así el fallback "No hay usuarios con rol X todavía" sigue visible si no hay
+     nada que armar. #}
+  .chipcheck-raw.chipcheck-enhanced{display:none}
+  .chipsel-row.is-disabled{opacity:.5;cursor:not-allowed}
+  .chipsel-row.is-disabled:hover{background:none}
+  .chipsel-row.is-disabled input[type=checkbox]{cursor:not-allowed;border-color:rgba(148,163,184,.4)}
+  .chipsel-taken{color:var(--sic-text-muted);font-size:11.5px;margin-left:8px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 {% endblock %}
 
@@ -430,55 +442,75 @@
                 </div>
             </details>
 
-            {# --- Supervisor: además de su propia identidad (arriba), qué analistas tiene a cargo --- #}
-            <div class="span-12" data-role-blocks="supervisor" style="display:none">
-                <label class="form-label text-white-50 small">Analistas a cargo</label>
-                <div class="cartera-list p-3 rounded-3"
-                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
-                    {% for a in analistas_disponibles %}
-                    {% set tomado_por_otro = a.reporta_a_id and a.reporta_a_id != form.id %}
-                    <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}">
-                        <input type="checkbox" name="analista_ids" value="{{ a.id }}"
-                            {% if a.reporta_a_id and a.reporta_a_id == form.id %}checked{% endif %}
-                            {% if tomado_por_otro %}disabled{% endif %}>
-                        <span>{{ a.display_name }} ({{ a.email }})</span>
-                        {% if tomado_por_otro %}
-                        <span class="taken">— ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}</span>
-                        {% endif %}
-                    </label>
-                    {% else %}
-                    <div class="text-white-50 small">No hay usuarios con rol Analista todavía.</div>
-                    {% endfor %}
+            {# --- Supervisor: además de su propia identidad (arriba), qué analistas tiene a cargo ---
+               data-chip-checklist: mismo widget de fichas que los <select> de arriba, pero
+               sobre checkboxes reales (name="analista_ids" sin tocar). Cada <label> conserva
+               data-name/data-taken para que el JS arme la fila sin parsear texto; el .taken
+               original queda igual (server-side) por si el JS no corre. #}
+            <details class="sic-collapse span-12" data-role-blocks="supervisor" style="display:none">
+                <summary class="sic-collapse-summary">
+                    <span class="sic-collapse-title">Equipo a cargo</span>
+                    <span class="sic-collapse-badge" id="summary-equipo-analistas">—</span>
+                </summary>
+                <div class="sic-collapse-body">
+                    <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
+                        <div class="chipcheck-raw">
+                            {% for a in analistas_disponibles %}
+                            {% set tomado_por_otro = a.reporta_a_id and a.reporta_a_id != form.id %}
+                            <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}"
+                                data-name="{{ a.display_name }} ({{ a.email }})"
+                                {% if tomado_por_otro %}data-taken="ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}"{% endif %}>
+                                <input type="checkbox" name="analista_ids" value="{{ a.id }}"
+                                    {% if a.reporta_a_id and a.reporta_a_id == form.id %}checked{% endif %}
+                                    {% if tomado_por_otro %}disabled{% endif %}>
+                                <span>{{ a.display_name }} ({{ a.email }})</span>
+                                {% if tomado_por_otro %}
+                                <span class="taken">— ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}</span>
+                                {% endif %}
+                            </label>
+                            {% else %}
+                            <div class="text-white-50 small">No hay usuarios con rol Analista todavía.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="text-white-50 small mt-1">Los analistas marcados en gris ya están a cargo de otro supervisor.</div>
                 </div>
-                <div class="text-white-50 small mt-1">Los analistas marcados en gris ya están a cargo de otro supervisor.</div>
-            </div>
+            </details>
 
             {# --- Gerente: qué supervisores tiene a cargo ---
                Sin selector de identidad en Fusión por ahora: a confirmar con negocio
                si algún gerente tiene cartera propia (hoy no hay dato del proyecto que
                lo indique). Si se confirma, sumar "gerente" a data-role-blocks del
                bloque de arriba. #}
-            <div class="span-12" data-role-blocks="gerente" style="display:none">
-                <label class="form-label text-white-50 small">Supervisores a cargo</label>
-                <div class="cartera-list p-3 rounded-3"
-                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
-                    {% for s in supervisores_disponibles %}
-                    {% set tomado_por_otro = s.reporta_a_id and s.reporta_a_id != form.id %}
-                    <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}">
-                        <input type="checkbox" name="supervisor_ids" value="{{ s.id }}"
-                            {% if s.reporta_a_id and s.reporta_a_id == form.id %}checked{% endif %}
-                            {% if tomado_por_otro %}disabled{% endif %}>
-                        <span>{{ s.display_name }} ({{ s.email }})</span>
-                        {% if tomado_por_otro %}
-                        <span class="taken">— ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}</span>
-                        {% endif %}
-                    </label>
-                    {% else %}
-                    <div class="text-white-50 small">No hay usuarios con rol Supervisor todavía.</div>
-                    {% endfor %}
+            <details class="sic-collapse span-12" data-role-blocks="gerente" style="display:none">
+                <summary class="sic-collapse-summary">
+                    <span class="sic-collapse-title">Equipo a cargo</span>
+                    <span class="sic-collapse-badge" id="summary-equipo-supervisores">—</span>
+                </summary>
+                <div class="sic-collapse-body">
+                    <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
+                        <div class="chipcheck-raw">
+                            {% for s in supervisores_disponibles %}
+                            {% set tomado_por_otro = s.reporta_a_id and s.reporta_a_id != form.id %}
+                            <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}"
+                                data-name="{{ s.display_name }} ({{ s.email }})"
+                                {% if tomado_por_otro %}data-taken="ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}"{% endif %}>
+                                <input type="checkbox" name="supervisor_ids" value="{{ s.id }}"
+                                    {% if s.reporta_a_id and s.reporta_a_id == form.id %}checked{% endif %}
+                                    {% if tomado_por_otro %}disabled{% endif %}>
+                                <span>{{ s.display_name }} ({{ s.email }})</span>
+                                {% if tomado_por_otro %}
+                                <span class="taken">— ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}</span>
+                                {% endif %}
+                            </label>
+                            {% else %}
+                            <div class="text-white-50 small">No hay usuarios con rol Supervisor todavía.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="text-white-50 small mt-1">Los supervisores marcados en gris ya están a cargo de otro gerente. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
                 </div>
-                <div class="text-white-50 small mt-1">Los supervisores marcados en gris ya están a cargo de otro gerente. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
-            </div>
+            </details>
 
             {# ====== Sección plegable: Clasificación ======
                Unidad de Negocio (business_unit) + Perfil comercial + Negocio.
@@ -1179,7 +1211,219 @@
         renderAll();
     }
 
+    // ── Mismo widget, sobre checkboxes reales ("Equipo a cargo") en vez de un
+    // <select>. Reusa escapeHtml/highlight/CHIP_CAP de arriba; los name= de los
+    // checkboxes (analista_ids / supervisor_ids) no se tocan. ──
+    function enhanceCheckList(container) {
+        var raw = container.querySelector('.chipcheck-raw');
+        if (!raw) return;
+        var labels = Array.prototype.slice.call(raw.querySelectorAll('.cartera-check-row'));
+        if (!labels.length) return; // nada que armar: queda "No hay usuarios..." visible
+
+        var rows = labels.map(function (label) {
+            var input = label.querySelector('input[type=checkbox]');
+            return {
+                input: input,
+                code: input.value,
+                name: (label.getAttribute('data-name') || '').trim(),
+                taken: label.getAttribute('data-taken') || '',
+                disabled: input.disabled,
+            };
+        });
+        // Disponibles primero (alfabético); los ya tomados por otro supervisor/
+        // gerente quedan al final, igual criterio que "sin nombre" arriba: lo
+        // útil primero.
+        rows.sort(function (a, b) {
+            if (a.disabled !== b.disabled) return a.disabled ? 1 : -1;
+            return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+        });
+
+        var tray = document.createElement('div');
+        tray.className = 'chipsel-tray';
+        var searchWrap = document.createElement('div');
+        searchWrap.className = 'chipsel-search';
+        var search = document.createElement('input');
+        search.type = 'text';
+        var placeholder = container.getAttribute('data-placeholder') || 'Filtrar…';
+        search.placeholder = placeholder;
+        search.setAttribute('aria-label', placeholder);
+        search.setAttribute('autocomplete', 'off');
+        searchWrap.appendChild(search);
+        var list = document.createElement('div');
+        list.className = 'chipsel-list';
+        var footer = document.createElement('div');
+        footer.className = 'chipsel-footer';
+        var leftFoot = document.createElement('div');
+        leftFoot.style.cssText = 'display:flex;gap:10px;align-items:center';
+        var countEl = document.createElement('span');
+        countEl.className = 'chipsel-count';
+        var onlyBtn = document.createElement('button');
+        onlyBtn.type = 'button';
+        onlyBtn.className = 'chipsel-only';
+        leftFoot.appendChild(countEl);
+        leftFoot.appendChild(onlyBtn);
+        var clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.textContent = 'Vaciar selección';
+        footer.appendChild(leftFoot);
+        footer.appendChild(clearBtn);
+
+        container.insertBefore(tray, raw);
+        container.insertBefore(searchWrap, raw);
+        container.insertBefore(list, raw);
+        container.insertBefore(footer, raw);
+        raw.classList.add('chipcheck-enhanced');
+
+        var state = { q: '', onlySelected: false, expanded: false, active: 0 };
+        var visible = rows.slice();
+
+        function selectedRows() { return rows.filter(function (r) { return r.input.checked; }); }
+        function fireChange(input) { input.dispatchEvent(new Event('change', { bubbles: true })); }
+        function toggle(row) {
+            if (row.disabled) return;
+            row.input.checked = !row.input.checked;
+            fireChange(row.input);
+            renderAll();
+        }
+        function matches(row, q) {
+            if (!q) return true;
+            return row.name.toLowerCase().indexOf(q) !== -1;
+        }
+        function recomputeVisible() {
+            var q = state.q.trim().toLowerCase();
+            visible = rows.filter(function (r) {
+                if (state.onlySelected && !r.input.checked) return false;
+                return matches(r, q);
+            });
+            if (state.active >= visible.length) state.active = Math.max(0, visible.length - 1);
+        }
+
+        function renderTray() {
+            var sel = selectedRows();
+            if (!sel.length) {
+                tray.innerHTML = '<span class="chipsel-empty">ninguno seleccionado</span>';
+                return;
+            }
+            var shown = state.expanded ? sel : sel.slice(0, CHIP_CAP);
+            var html = shown.map(function (r) {
+                return '<span class="chipsel-chip"><span>' + escapeHtml(r.name) + '</span>' +
+                    '<button type="button" data-code="' + escapeHtml(r.code) + '" aria-label="Quitar ' + escapeHtml(r.name) + '">✕</button></span>';
+            }).join('');
+            if (sel.length > CHIP_CAP) {
+                html += state.expanded
+                    ? '<button type="button" class="chipsel-more" data-collapse="1">− Mostrar menos</button>'
+                    : '<button type="button" class="chipsel-more" data-expand="1">+' + (sel.length - CHIP_CAP) + ' más</button>';
+            }
+            tray.innerHTML = html;
+        }
+
+        function renderList() {
+            if (!visible.length) {
+                list.innerHTML = '<div class="chipsel-empty-row">' +
+                    (state.onlySelected ? 'Todavía no seleccionaste nada.' : ('Sin resultados para "' + escapeHtml(search.value) + '"')) +
+                    '</div>';
+                return;
+            }
+            var q = state.q.trim();
+            list.innerHTML = visible.map(function (r, i) {
+                var checked = r.input.checked;
+                var cls = 'chipsel-row' + (checked ? ' is-checked' : '') + (r.disabled ? ' is-disabled' : '') +
+                    (i === state.active ? ' is-active' : '');
+                var tag = r.taken ? '<span class="chipsel-taken">— ' + escapeHtml(r.taken) + '</span>' : '';
+                return '<label class="' + cls + '" data-idx="' + i + '">' +
+                    '<input type="checkbox" tabindex="-1"' + (checked ? ' checked' : '') + (r.disabled ? ' disabled' : '') + '>' +
+                    '<span class="chipsel-main">' + highlight(r.name, q) + '</span>' + tag + '</label>';
+            }).join('');
+        }
+
+        function renderFooter() {
+            var n = selectedRows().length;
+            countEl.innerHTML = '<b>' + n + '</b> de ' + rows.length;
+            onlyBtn.textContent = state.onlySelected ? 'Ver todos' : 'Ver solo seleccionados';
+            onlyBtn.classList.toggle('is-on', state.onlySelected);
+            clearBtn.disabled = n === 0;
+        }
+
+        function renderAll() {
+            recomputeVisible();
+            renderTray();
+            renderList();
+            renderFooter();
+        }
+
+        function scrollActiveIntoView() {
+            var row = list.querySelector('.chipsel-row.is-active');
+            if (row) row.scrollIntoView({ block: 'nearest' });
+        }
+
+        list.addEventListener('click', function (e) {
+            var row = e.target.closest('.chipsel-row');
+            if (!row) return;
+            var idx = parseInt(row.getAttribute('data-idx'), 10);
+            state.active = idx;
+            toggle(visible[idx]);
+        });
+        tray.addEventListener('click', function (e) {
+            var rm = e.target.closest('[data-code]');
+            if (rm) {
+                var row = rows.filter(function (r) { return r.code === rm.getAttribute('data-code'); })[0];
+                if (row) toggle(row);
+                return;
+            }
+            if (e.target.closest('[data-expand]')) { state.expanded = true; renderTray(); }
+            if (e.target.closest('[data-collapse]')) { state.expanded = false; renderTray(); }
+        });
+        onlyBtn.addEventListener('click', function () {
+            state.onlySelected = !state.onlySelected;
+            state.active = 0;
+            renderAll();
+        });
+        clearBtn.addEventListener('click', function () {
+            if (clearBtn.disabled) return;
+            selectedRows().forEach(function (r) { r.input.checked = false; fireChange(r.input); });
+            renderAll();
+        });
+        search.addEventListener('input', function () {
+            state.q = search.value;
+            state.active = 0;
+            recomputeVisible();
+            renderList();
+        });
+        search.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!visible.length) return;
+                state.active = Math.min(state.active + 1, visible.length - 1);
+                renderList();
+                scrollActiveIntoView();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!visible.length) return;
+                state.active = Math.max(state.active - 1, 0);
+                renderList();
+                scrollActiveIntoView();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                var target = visible[state.active];
+                search.value = '';
+                state.q = '';
+                state.active = 0;
+                if (target && !target.disabled) toggle(target); else renderAll();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                search.value = '';
+                state.q = '';
+                state.active = 0;
+                recomputeVisible();
+                renderList();
+            }
+        });
+
+        renderAll();
+    }
+
     Array.prototype.slice.call(document.querySelectorAll('select[data-chip-select]')).forEach(enhance);
+    Array.prototype.slice.call(document.querySelectorAll('[data-chip-checklist]')).forEach(enhanceCheckList);
 })();
 
 // ── Resúmenes en el encabezado de cada sección plegable — solo texto mostrado,
@@ -1244,6 +1488,17 @@
         else badge.textContent = on + ' de ' + activas.length + ' secciones';
     }
 
+    function updateEquipo(name, badgeId) {
+        var badge = document.getElementById(badgeId);
+        if (!badge) return;
+        var boxes = Array.prototype.slice.call(document.querySelectorAll('input[name="' + name + '"]'));
+        if (!boxes.length) { badge.textContent = 'sin candidatos disponibles'; return; }
+        var on = boxes.filter(function (b) { return b.checked; }).length;
+        badge.textContent = on ? (on + ' de ' + boxes.length) : 'sin configurar';
+    }
+    function updateEquipoAnalistas() { updateEquipo('analista_ids', 'summary-equipo-analistas'); }
+    function updateEquipoSupervisores() { updateEquipo('supervisor_ids', 'summary-equipo-supervisores'); }
+
     ['cartera_operador_codigos', 'cartera_vendedor_codigos', 'cartera_unineg_scope'].forEach(function (id) {
         onChange(id, updateAsignacion);
     });
@@ -1258,9 +1513,19 @@
     var roleSelect = document.getElementById('role');
     if (roleSelect) roleSelect.addEventListener('change', updateModulos);
 
+    // Delegado en document: los checkboxes de "Equipo a cargo" los crea/toca el
+    // widget de fichas dinámicamente, así que no hay un id fijo al que engancharse.
+    document.addEventListener('change', function (e) {
+        if (!e.target || !e.target.name) return;
+        if (e.target.name === 'analista_ids') updateEquipoAnalistas();
+        if (e.target.name === 'supervisor_ids') updateEquipoSupervisores();
+    });
+
     updateAsignacion();
     updateClasificacion();
     updateModulos();
+    updateEquipoAnalistas();
+    updateEquipoSupervisores();
 })();
 </script>
 {% endblock %}
