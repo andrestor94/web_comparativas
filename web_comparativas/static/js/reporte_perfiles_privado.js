@@ -283,6 +283,26 @@ function pvClearAll() {
 
 // Dropdowns
 
+function pvNormalizeDropdownOption(option) {
+  if (option && typeof option === "object" && !Array.isArray(option)) {
+    const value = option.id ?? option.value;
+    const label = cleanMojibakeText(option.label || "").trim();
+    if (value === undefined || value === null || value === "" || !label) return null;
+    return { value, label };
+  }
+  const label = cleanMojibakeText(option).trim();
+  return label ? { value: label, label } : null;
+}
+
+function pvSameDropdownValue(left, right) {
+  return String(left ?? "") === String(right ?? "");
+}
+
+function pvDropdownSelectedLabel(state) {
+  if (!state || state.selected === "" || state.selected === null || state.selected === undefined) return "";
+  return state.options.find(option => pvSameDropdownValue(option.value, state.selected))?.label || "";
+}
+
 function pvBuildDropdown(mountId, label, options, currentVal, onChangeFn, required = false) {
   const mount = document.getElementById(mountId);
   if (!mount) return;
@@ -290,19 +310,21 @@ function pvBuildDropdown(mountId, label, options, currentVal, onChangeFn, requir
   const allLabel = required ? `Selecciona ${label}` : `Sin filtro de ${label.toLowerCase()}`;
   const allMeta = required ? "Filtro principal para habilitar el reporte" : "Filtro complementario opcional";
   const searchPlaceholder = `Buscar ${label.toLowerCase()}...`;
-  const safeOptions = Array.isArray(options) ? options.map(cleanMojibakeText).filter(Boolean) : [];
+  const safeOptions = Array.isArray(options) ? options.map(pvNormalizeDropdownOption).filter(Boolean) : [];
+  const selectedValue = currentVal ?? "";
 
   PV.dropdowns[mountId] = {
     label,
     options: safeOptions,
-    selected: currentVal || "",
-    draft: currentVal || "",
+    selected: selectedValue,
+    draft: selectedValue,
     query: "",
     onChange: onChangeFn,
     required,
     allLabel,
     allMeta,
   };
+  const selectedLabel = pvDropdownSelectedLabel(PV.dropdowns[mountId]);
 
   mount.innerHTML = `
     <div class="pf-multi pf-multi--single" data-pv-filter-id="${mountId}">
@@ -311,8 +333,8 @@ function pvBuildDropdown(mountId, label, options, currentVal, onChangeFn, requir
       </label>
       <button type="button" class="pf-multi__trigger" id="${mountId}Trigger" onclick="pvToggleFilterPanel('${mountId}')">
         <span class="pf-multi__summary">
-          <span class="pf-multi__value${currentVal ? '' : ' is-placeholder'}" id="${mountId}Value">${pvEsc(currentVal || allLabel)}</span>
-          <span class="pf-multi__meta" id="${mountId}Meta">${pvEsc(currentVal ? 'Seleccionado' : allMeta)}</span>
+          <span class="pf-multi__value${selectedLabel ? '' : ' is-placeholder'}" id="${mountId}Value">${pvEsc(selectedLabel || allLabel)}</span>
+          <span class="pf-multi__meta" id="${mountId}Meta">${pvEsc(selectedLabel ? 'Seleccionado' : allMeta)}</span>
         </span>
         <i class="bi bi-chevron-down"></i>
       </button>
@@ -370,7 +392,7 @@ function pvToggleFilterPanel(mountId) {
   trigger.classList.toggle('is-open', willOpen);
   if (willOpen) {
     const state = PV.dropdowns[mountId];
-    if (state) state.draft = state.selected || '';
+    if (state) state.draft = state.selected ?? '';
     pvRenderDropdownOptions(mountId);
     setTimeout(() => document.getElementById(`${mountId}Search`)?.focus(), 0);
   }
@@ -388,7 +410,10 @@ function pvRenderDropdownOptions(mountId) {
   const list = document.getElementById(`${mountId}Options`);
   if (!state || !list) return;
   const q = state.query.trim().toLowerCase();
-  const visible = state.options.filter(opt => !q || opt.toLowerCase().includes(q)).slice(0, 250);
+  const matches = state.options.filter(opt => !q || opt.label.toLowerCase().includes(q));
+  // La lista de clientes tiene 256 entidades: se muestran todas. Para catálogos
+  // mucho mayores (familias), la búsqueda sigue recorriendo el conjunto completo.
+  const visible = matches.slice(0, state.options.length <= 500 ? state.options.length : 250);
   if (!visible.length) {
     list.innerHTML = '<div class="pf-multi__empty">No hay opciones disponibles para esta busqueda.</div>';
     return;
@@ -400,8 +425,8 @@ function pvRenderDropdownOptions(mountId) {
     </label>`;
   list.innerHTML = emptyOption + visible.map((opt, idx) => `
     <label class="pf-multi__option">
-      <input type="radio" name="${mountId}Option" ${state.draft === opt ? 'checked' : ''} onchange="pvSetDropdownDraftByVisibleIndex('${mountId}', ${idx})">
-      <span class="pf-multi__option-text" title="${pvEscAttr(opt)}">${pvEsc(opt)}</span>
+      <input type="radio" name="${mountId}Option" ${pvSameDropdownValue(state.draft, opt.value) ? 'checked' : ''} onchange="pvSetDropdownDraftByVisibleIndex('${mountId}', ${idx})">
+      <span class="pf-multi__option-text" title="${pvEscAttr(opt.label)}">${pvEsc(opt.label)}</span>
     </label>`).join('');
   state.visible = visible;
 }
@@ -414,7 +439,7 @@ function pvSetDropdownDraft(mountId, value) {
 function pvSetDropdownDraftByVisibleIndex(mountId, index) {
   const state = PV.dropdowns[mountId];
   if (!state) return;
-  state.draft = state.visible?.[index] || '';
+  state.draft = state.visible?.[index]?.value ?? '';
 }
 
 function pvClearDropdownDraft(mountId) {
@@ -432,7 +457,7 @@ function pvApplyDropdownSelection(mountId) {
 function pvCommitDropdownSelection(mountId) {
   const state = PV.dropdowns[mountId];
   if (!state) return false;
-  state.selected = state.draft || '';
+  state.selected = state.draft ?? '';
   if (typeof state.onChange === 'function') state.onChange(state.selected);
   return true;
 }
@@ -461,8 +486,9 @@ function pvUpdateDropdownTrigger(mountId) {
   const value = document.getElementById(`${mountId}Value`);
   const meta = document.getElementById(`${mountId}Meta`);
   if (!state || !value || !meta) return;
-  const hasValue = Boolean(state.selected);
-  value.textContent = hasValue ? state.selected : state.allLabel;
+  const selectedLabel = pvDropdownSelectedLabel(state);
+  const hasValue = Boolean(selectedLabel);
+  value.textContent = hasValue ? selectedLabel : state.allLabel;
   value.classList.toggle('is-placeholder', !hasValue);
   meta.textContent = hasValue ? 'Seleccionado' : state.allMeta;
 }
@@ -881,7 +907,7 @@ async function pvLoadArticulo() {
 
   const payload = pvCurrentPayload({
     familias: [PV.artFamilia],
-    ...(PV.artCliente ? { clientes: [PV.artCliente] } : {}),
+    ...(PV.artCliente ? { cliente_entidad_ids: [PV.artCliente] } : {}),
   });
 
   // Lanzar todas las queries en paralelo
@@ -981,7 +1007,7 @@ async function pvLoadCliente() {
   pvRenderKpiSkeletons("cliKpiRow", 4);
 
   const payload = pvCurrentPayload({
-    clientes: [PV.cliCliente],
+    cliente_entidad_ids: [PV.cliCliente],
     ...(PV.cliFamilia ? { familias: [PV.cliFamilia] } : {}),
   });
 

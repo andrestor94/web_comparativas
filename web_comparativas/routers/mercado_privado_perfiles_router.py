@@ -93,6 +93,24 @@ def _str_val(payload: dict | None, key: str) -> str | None:
     return str(val).strip() if val else None
 
 
+def _int_list(payload: dict | None, key: str) -> list[int] | None:
+    if not payload:
+        return None
+    val = payload.get(key)
+    if val is None or val == "":
+        return None
+    values = val if isinstance(val, list) else [val]
+    result: list[int] = []
+    for item in values:
+        if isinstance(item, bool) or item is None or item == "":
+            continue
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return result or None
+
+
 def _date_val(payload: dict | None, key: str) -> dt.date | None:
     raw = _str_val(payload, key)
     if not raw:
@@ -106,11 +124,30 @@ def _date_val(payload: dict | None, key: str) -> dt.date | None:
 def _build_filters_from_payload(payload: dict | None) -> DimensionamientoFilters:
     return build_filters(
         clientes=_str_list(payload, "clientes"),
+        cliente_entidad_ids=_int_list(payload, "cliente_entidad_ids"),
         familias=_str_list(payload, "familias"),
         plataformas=_str_list(payload, "plataformas"),
         fecha_desde=_date_val(payload, "fecha_desde"),
         fecha_hasta=_date_val(payload, "fecha_hasta"),
     )
+
+
+def _private_client_options(options: Any) -> list[dict[str, Any]]:
+    """Adapta el contrato compartido {value,label} al contrato privado {id,label}."""
+    result: list[dict[str, Any]] = []
+    for option in options if isinstance(options, list) else []:
+        if not isinstance(option, dict):
+            continue
+        raw_id = option.get("id", option.get("value"))
+        label = str(option.get("label") or "").strip()
+        if isinstance(raw_id, bool) or not label:
+            continue
+        try:
+            entity_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        result.append({"id": entity_id, "label": label})
+    return result
 
 
 def _month_bucket(model):
@@ -166,7 +203,7 @@ def privado_perfiles_filters(
         data = get_filter_options(db, filters)
         result = {
             "familias": data.get("familias", []),
-            "clientes": data.get("clientes", []),
+            "clientes": _private_client_options(data.get("clientes", [])),
             "plataformas": data.get("plataformas", []),
             "date_range": data.get("date_range", {"min": None, "max": None}),
         }
