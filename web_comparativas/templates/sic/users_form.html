@@ -287,13 +287,15 @@
                 <div class="text-white-50 small mt-1">Una persona puede tener más de un código de vendedor (hasta 7 unidades de negocio distintas por cliente).</div>
             </div>
 
-            {# --- Supervisor: unidad(es) de negocio a la(s) que queda acotado ---
+            {# --- Supervisor: unidad(es) de negocio a la(s) que queda acotada su CARTERA PROPIA ---
                Asignación EXPLÍCITA, nunca inferida (decisión 2026-08-19). Solo acota el
-               lado "vendedor" de su cartera y la de sus analistas a cargo — operadores_comerciales.csv
-               no trae unidad de negocio, así que ese lado nunca se filtra por esto. #}
+               lado "vendedor" de la cartera propia de este Supervisor — operadores_comerciales.csv
+               no trae unidad de negocio, así que ese lado nunca se filtra por esto. Regla
+               corregida 2026-08-20: la jerarquía manda, esto NUNCA filtra lo heredado de sus
+               analistas a cargo (ver comentario en cartera_visibilidad.py::clientes_visibles_para). #}
             {% set un_sel = (form.cartera_unineg_scope or []) %}
             <div class="span-12" data-role-blocks="supervisor" style="display:none">
-                <label class="form-label text-white-50 small" for="cartera_unineg_scope">Unidad(es) de negocio (acota la cartera heredada)</label>
+                <label class="form-label text-white-50 small" for="cartera_unineg_scope">Unidad(es) de negocio (acota solo la cartera propia de este Supervisor)</label>
                 <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
                     data-filter-target="cartera_unineg_scope" placeholder="Filtrar por código o descripción…">
                 <select class="form-select form-select-sic" id="cartera_unineg_scope"
@@ -305,10 +307,12 @@
                     {% endfor %}
                 </select>
                 <div class="text-white-50 small mt-1">
-                    Sin ninguna marcada, este Supervisor no hereda cuentas del lado vendedor de sus
-                    analistas (fail-closed) aunque ellos sí tengan cartera propia. "Sin unidad
-                    asignada" es un bucket real (~52% de las filas del padrón) — hay que otorgarlo
-                    a propósito si corresponde, no queda tildado por default.
+                    Acota únicamente la cartera propia de este Supervisor (sus propios códigos de
+                    vendedor): sin ninguna marcada, no ve cuentas propias del lado vendedor
+                    (fail-closed). No afecta lo que hereda de sus analistas a cargo — esa cartera
+                    entra completa, sin filtrar por esta UN. "Sin unidad asignada" es un bucket
+                    real (~52% de las filas del padrón) — hay que otorgarlo a propósito si
+                    corresponde, no queda tildado por default.
                 </div>
             </div>
 
