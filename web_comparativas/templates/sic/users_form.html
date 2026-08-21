@@ -39,6 +39,105 @@
   .cartera-check-row.disabled{opacity:.45;cursor:not-allowed}
   .cartera-check-row input[type=checkbox]{flex:0 0 auto}
   .cartera-check-row .taken{color:#9aa6b8;font-size:12px}
+
+  /* ====== Secciones plegables (presentación pura, no toca el envío) ====== */
+  .sic-collapse{border:1px solid var(--sic-border);border-radius:12px;
+    background:rgba(0,0,0,.15);overflow:hidden}
+  .sic-collapse-summary{list-style:none;cursor:pointer;display:flex;align-items:center;
+    gap:10px;padding:12px 14px;color:#e7edf6;font-weight:600;font-size:14px}
+  .sic-collapse-summary::marker,.sic-collapse-summary::-webkit-details-marker{
+    content:"";display:none}
+  .sic-collapse-summary::before{content:"\25B8";display:inline-block;color:#6b7689;
+    transition:transform .15s;flex:0 0 auto}
+  .sic-collapse[open]>.sic-collapse-summary::before{transform:rotate(90deg)}
+  .sic-collapse-summary .sic-collapse-title{flex:0 0 auto}
+  .sic-collapse-badge{font-size:12px;font-weight:400;color:#aab2f2;
+    background:rgba(108,122,224,.14);border:1px solid rgba(108,122,224,.35);
+    border-radius:999px;padding:2px 10px;white-space:nowrap;margin-left:auto}
+  .sic-collapse-body{padding:0 14px 14px 14px;display:grid;gap:1rem}
+
+  /* ====== Selector de fichas (reemplaza <select multiple> nativo) ======
+     Presentación pura: el <select> original sigue en el DOM (oculto) y es lo
+     único que se envía en el POST — este widget solo lo refleja/edita. ====== */
+  .chipsel{display:block}
+  {# El <select> se oculta desde JS (no acá por CSS): si el padrón viene vacío
+     no hay widget que armar y el <select> con su <option disabled> informativo
+     ("No hay padrón cargado…") debe seguir siendo lo que se ve. Ocultarlo por
+     CSS incondicionalmente lo taparía incluso en ese caso. #}
+  .chipsel select[data-chip-select].chipsel-enhanced{display:none}
+  .chipsel-tray{
+    display:flex;flex-wrap:wrap;align-items:center;gap:6px;
+    min-height:32px;padding:2px 2px 10px;margin-bottom:8px;
+    border-bottom:1px solid var(--sic-border)}
+  .chipsel-tray .chipsel-empty{color:var(--sic-text-muted);font-size:13px;font-style:italic}
+  .chipsel-chip{
+    display:inline-flex;align-items:center;gap:6px;
+    background:rgba(87,112,176,.22);border:1px solid rgba(87,112,176,.55);
+    color:#fff;font-size:12.5px;font-weight:500;line-height:1.3;
+    padding:4px 6px 4px 10px;border-radius:999px;max-width:260px}
+  .chipsel-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chipsel-chip button{
+    all:unset;display:flex;align-items:center;justify-content:center;
+    width:16px;height:16px;border-radius:50%;color:#c7cef0;cursor:pointer;
+    font-size:12px;line-height:1;flex:0 0 auto}
+  .chipsel-chip button:hover{background:rgba(255,255,255,.16);color:#fff}
+  .chipsel-chip button:focus-visible{outline:2px solid var(--sic-highlight);outline-offset:1px}
+  .chipsel-more{
+    all:unset;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--sic-highlight);
+    padding:4px 10px;border-radius:999px;border:1px dashed rgba(87,112,176,.55)}
+  .chipsel-more:hover{color:#8ea0e6;border-color:#8ea0e6}
+  .chipsel-search{position:relative;margin-bottom:8px}
+  .chipsel-search input{
+    width:100%;background:rgba(15,23,42,.6);border:1px solid var(--sic-border);
+    color:#fff;border-radius:8px;padding:8px 12px;font:inherit;font-size:13.5px}
+  .chipsel-search input::placeholder{color:var(--sic-text-muted)}
+  .chipsel-search input:focus{
+    outline:none;background:rgba(4,14,28,.85);border-color:var(--sic-highlight);
+    box-shadow:0 0 0 3px rgba(87,112,176,.22)}
+  .chipsel-list{
+    max-height:210px;overflow-y:auto;border:1px solid var(--sic-border);
+    border-radius:8px;background:rgba(4,10,20,.4);
+    scrollbar-width:thin;scrollbar-color:var(--sic-highlight) transparent}
+  .chipsel-list::-webkit-scrollbar{width:8px}
+  .chipsel-list::-webkit-scrollbar-track{background:transparent}
+  .chipsel-list::-webkit-scrollbar-thumb{
+    background-color:rgba(87,112,176,.45);border-radius:99px;
+    border:2px solid transparent;background-clip:content-box}
+  .chipsel-list::-webkit-scrollbar-thumb:hover{background-color:var(--sic-highlight)}
+  .chipsel-row{
+    display:flex;align-items:center;gap:10px;padding:7px 12px;cursor:pointer;
+    border-bottom:1px solid rgba(87,112,176,.09)}
+  .chipsel-row:last-child{border-bottom:none}
+  .chipsel-row:hover{background:rgba(255,255,255,.035)}
+  .chipsel-row.is-checked{background:rgba(87,112,176,.13)}
+  .chipsel-row.is-active{box-shadow:inset 0 0 0 1px var(--sic-highlight)}
+  .chipsel-row input[type=checkbox]{
+    appearance:none;-webkit-appearance:none;width:16px;height:16px;flex:0 0 auto;
+    border:1.5px solid var(--sic-text-muted);border-radius:4px;
+    display:grid;place-content:center;cursor:pointer;margin:0}
+  .chipsel-row input[type=checkbox]::before{
+    content:"";width:9px;height:9px;transform:scale(0);transition:transform .08s ease-in;
+    box-shadow:inset 1em 1em var(--sic-done);
+    clip-path:polygon(14% 44%,0 65%,50% 100%,100% 16%,80% 0%,43% 62%)}
+  .chipsel-row input[type=checkbox]:checked{border-color:var(--sic-done)}
+  .chipsel-row input[type=checkbox]:checked::before{transform:scale(1)}
+  .chipsel-row .chipsel-main{flex:1;min-width:0;font-size:13.5px;color:#e7edf6;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chipsel-row.no-name .chipsel-main{color:var(--sic-text-muted)}
+  .chipsel-row .chipsel-tag{
+    font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#8a93a8;
+    background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);
+    border-radius:999px;padding:1px 7px;margin-left:8px;white-space:nowrap;flex:0 0 auto}
+  .chipsel-row mark{background:rgba(0,164,135,.35);color:#fff;border-radius:2px;padding:0 1px}
+  .chipsel-empty-row{padding:16px 12px;text-align:center;color:var(--sic-text-muted);font-size:13px}
+  .chipsel-footer{display:flex;justify-content:space-between;align-items:center;
+    margin-top:8px;font-size:12px;color:var(--sic-text-muted);gap:10px;flex-wrap:wrap}
+  .chipsel-footer .chipsel-count{font-variant-numeric:tabular-nums}
+  .chipsel-footer .chipsel-count b{font-weight:600;color:#e7edf6}
+  .chipsel-footer button{all:unset;cursor:pointer;font-size:12px;font-weight:500;color:var(--sic-highlight)}
+  .chipsel-footer button:hover{color:#8ea0e6;text-decoration:underline}
+  .chipsel-footer button[disabled]{opacity:.4;cursor:not-allowed;text-decoration:none}
+  .chipsel-footer .chipsel-only.is-on{color:var(--sic-done)}
 </style>
 {% endblock %}
 
@@ -251,70 +350,85 @@
                 </div>
             </div>
 
-            <div class='span-12 text-white-50 small' data-role-blocks='analista supervisor' style='display:none'>
-                Asignación manual (excepción): los códigos elegidos abajo se suman explícitamente
-                a la cartera encontrada en Fusión. Si no se elige ninguno, no se copian cuentas.
-            </div>
+            {# ====== Sección plegable: Asignación manual (excepción) ======
+               Presentación pura — cada campo de adentro conserva exactamente su
+               data-role-blocks original, así que la visibilidad por rol sigue
+               calculada por el mismo JS de siempre (showBlocks). El wrapper usa
+               la UNIÓN de esos roles (analista+supervisor) solo para no mostrar
+               un acordeón vacío en los roles que no tienen nada adentro. #}
             {% set op_sel = (form.cartera_operador_codigos or []) %}
             {% set vd_sel = (form.cartera_vendedor_codigos or []) %}
-            <div class="span-12" data-role-blocks="analista supervisor" style="display:none">
-                <label class="form-label text-white-50 small" for="cartera_operador_codigos">Cartera — códigos de Operador (Mercado Público)</label>
-                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
-                    data-filter-target="cartera_operador_codigos" placeholder="Filtrar por nombre o código…">
-                <select class="form-select form-select-sic" id="cartera_operador_codigos"
-                    name="cartera_operador_codigos" multiple size="6">
-                    {% for codigo, nombre in operadores_cartera_opciones %}
-                    <option value="{{ codigo }}" {% if codigo in op_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
-                    {% else %}
-                    <option disabled>No hay padrón de operadores cargado (ver push_cartera_data.py)</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">Ctrl/Cmd + click para elegir varios. Sin nada seleccionado, este usuario no ve ninguna cuenta por este lado.</div>
-            </div>
-
-            <div class="span-12" data-role-blocks="analista supervisor" style="display:none">
-                <label class="form-label text-white-50 small" for="cartera_vendedor_codigos">Cartera — códigos de Vendedor (Cliente_vendedor)</label>
-                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
-                    data-filter-target="cartera_vendedor_codigos" placeholder="Filtrar por nombre o código…">
-                <select class="form-select form-select-sic" id="cartera_vendedor_codigos"
-                    name="cartera_vendedor_codigos" multiple size="8">
-                    {% for codigo, nombre in vendedores_cartera_opciones %}
-                    <option value="{{ codigo }}" {% if codigo in vd_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
-                    {% else %}
-                    <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">Una persona puede tener más de un código de vendedor (hasta 7 unidades de negocio distintas por cliente).</div>
-            </div>
-
-            {# --- Supervisor: unidad(es) de negocio a la(s) que queda acotada su CARTERA PROPIA ---
-               Asignación EXPLÍCITA, nunca inferida (decisión 2026-08-19). Solo acota el
-               lado "vendedor" de la cartera propia de este Supervisor — operadores_comerciales.csv
-               no trae unidad de negocio, así que ese lado nunca se filtra por esto. Regla
-               corregida 2026-08-20: la jerarquía manda, esto NUNCA filtra lo heredado de sus
-               analistas a cargo (ver comentario en cartera_visibilidad.py::clientes_visibles_para). #}
             {% set un_sel = (form.cartera_unineg_scope or []) %}
-            <div class="span-12" data-role-blocks="supervisor" style="display:none">
-                <label class="form-label text-white-50 small" for="cartera_unineg_scope">Unidad(es) de negocio (acota solo la cartera propia de este Supervisor)</label>
-                <input type="text" class="form-control form-control-sic form-control-sm mb-1 cartera-filter"
-                    data-filter-target="cartera_unineg_scope" placeholder="Filtrar por código o descripción…">
-                <select class="form-select form-select-sic" id="cartera_unineg_scope"
-                    name="cartera_unineg_scope" multiple size="8">
-                    {% for codigo, etiqueta in unineg_opciones %}
-                    <option value="{{ codigo }}" {% if codigo in un_sel %}selected{% endif %}>{{ etiqueta }}{% if codigo == '0' %} (unineg=0){% endif %}</option>
-                    {% else %}
-                    <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">
-                    Acota únicamente la cartera propia de este Supervisor (sus propios códigos de
-                    vendedor): sin ninguna marcada, no ve cuentas propias del lado vendedor
-                    (fail-closed). No afecta lo que hereda de sus analistas a cargo — esa cartera
-                    entra completa, sin filtrar por esta UN. "Sin unidad asignada" es un bucket
-                    real (~52% de las filas del padrón) — hay que otorgarlo a propósito si
-                    corresponde, no queda tildado por default.
+            {% set _asignacion_con_datos = (op_sel or vd_sel or un_sel) %}
+            <details class="sic-collapse span-12" data-role-blocks="analista supervisor" style="display:none" {% if _asignacion_con_datos %}open{% endif %}>
+                <summary class="sic-collapse-summary">
+                    <span class="sic-collapse-title">Asignación manual (excepción)</span>
+                    <span class="sic-collapse-badge" id="summary-asignacion">—</span>
+                </summary>
+                <div class="sic-collapse-body">
+                    <div class='text-white-50 small' data-role-blocks='analista supervisor' style='display:none'>
+                        Asignación manual (excepción): los códigos elegidos abajo se suman explícitamente
+                        a la cartera encontrada en Fusión. Si no se elige ninguno, no se copian cuentas.
+                    </div>
+                    <div data-role-blocks="analista supervisor" style="display:none">
+                        <label class="form-label text-white-50 small" for="cartera_operador_codigos">Cartera — códigos de Operador (Mercado Público)</label>
+                        <div class="chipsel">
+                            <select id="cartera_operador_codigos" name="cartera_operador_codigos" multiple
+                                data-chip-select data-named="1" data-placeholder="Filtrar por nombre o código…">
+                                {% for codigo, nombre in operadores_cartera_opciones %}
+                                <option value="{{ codigo }}" data-name="{{ nombre or '' }}" {% if codigo in op_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
+                                {% else %}
+                                <option disabled>No hay padrón de operadores cargado (ver push_cartera_data.py)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="text-white-50 small mt-1">Sin nada seleccionado, este usuario no ve ninguna cuenta por este lado.</div>
+                    </div>
+
+                    <div data-role-blocks="analista supervisor" style="display:none">
+                        <label class="form-label text-white-50 small" for="cartera_vendedor_codigos">Cartera — códigos de Vendedor (Cliente_vendedor)</label>
+                        <div class="chipsel">
+                            <select id="cartera_vendedor_codigos" name="cartera_vendedor_codigos" multiple
+                                data-chip-select data-named="1" data-placeholder="Filtrar por nombre o código…">
+                                {% for codigo, nombre in vendedores_cartera_opciones %}
+                                <option value="{{ codigo }}" data-name="{{ nombre or '' }}" {% if codigo in vd_sel %}selected{% endif %}>{{ codigo }} — {{ nombre }}</option>
+                                {% else %}
+                                <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="text-white-50 small mt-1">Una persona puede tener más de un código de vendedor (hasta 7 unidades de negocio distintas por cliente).</div>
+                    </div>
+
+                    {# --- Supervisor: unidad(es) de negocio a la(s) que queda acotada su CARTERA PROPIA ---
+                       Asignación EXPLÍCITA, nunca inferida (decisión 2026-08-19). Solo acota el
+                       lado "vendedor" de la cartera propia de este Supervisor — operadores_comerciales.csv
+                       no trae unidad de negocio, así que ese lado nunca se filtra por esto. Regla
+                       corregida 2026-08-20: la jerarquía manda, esto NUNCA filtra lo heredado de sus
+                       analistas a cargo (ver comentario en cartera_visibilidad.py::clientes_visibles_para). #}
+                    <div data-role-blocks="supervisor" style="display:none">
+                        <label class="form-label text-white-50 small" for="cartera_unineg_scope">Unidad(es) de negocio (acota solo la cartera propia de este Supervisor)</label>
+                        <div class="chipsel">
+                            <select id="cartera_unineg_scope" name="cartera_unineg_scope" multiple
+                                data-chip-select data-named="1" data-placeholder="Filtrar por código o descripción…">
+                                {% for codigo, etiqueta in unineg_opciones %}
+                                <option value="{{ codigo }}" data-name="{{ etiqueta }}{% if codigo == '0' %} (unineg=0){% endif %}" {% if codigo in un_sel %}selected{% endif %}>{{ etiqueta }}{% if codigo == '0' %} (unineg=0){% endif %}</option>
+                                {% else %}
+                                <option disabled>No hay padrón de vendedores cargado (ver push_cartera_data.py)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="text-white-50 small mt-1">
+                            Acota únicamente la cartera propia de este Supervisor (sus propios códigos de
+                            vendedor): sin ninguna marcada, no ve cuentas propias del lado vendedor
+                            (fail-closed). No afecta lo que hereda de sus analistas a cargo — esa cartera
+                            entra completa, sin filtrar por esta UN. "Sin unidad asignada" es un bucket
+                            real (~52% de las filas del padrón) — hay que otorgarlo a propósito si
+                            corresponde, no queda tildado por default.
+                        </div>
+                    </div>
                 </div>
-            </div>
+            </details>
 
             {# --- Supervisor: además de su propia identidad (arriba), qué analistas tiene a cargo --- #}
             <div class="span-12" data-role-blocks="supervisor" style="display:none">
@@ -366,7 +480,12 @@
                 <div class="text-white-50 small mt-1">Los supervisores marcados en gris ya están a cargo de otro gerente. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
             </div>
 
-            {# ====== Unidad de Negocio ====== #}
+            {# ====== Sección plegable: Clasificación ======
+               Unidad de Negocio (business_unit) + Perfil comercial + Negocio.
+               Puramente descriptivos — NO filtran qué datos ve el usuario (eso lo
+               define la cartera, ver cartera_visibilidad.py). Opciones de Perfil/
+               Negocio desde los mismos maestros que usa Forecast: clientes.csv
+               (tipocli) y Negocios.csv (unidad), nunca una lista escrita a mano. #}
             {% set bu_opts = (business_units if business_units is defined else [
             'Productos Hospitalarios',
             'Estética Médica y Reconstructiva',
@@ -374,18 +493,58 @@
             'Otros'
             ]) %}
             {% set bu_val = (form.unit_business or 'Otros') %}
-            <div class="span-12">
-                <label class="form-label text-white-50 small" for="unit_business">Unidad de Negocio</label>
-                <select class="form-select form-select-sic" id="unit_business" name="unit_business" required>
-                    {% for opt in bu_opts %}
-                    <option value="{{ opt }}" {% if opt==bu_val %}selected{% endif %}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">Clasifica al usuario según la unidad de negocio a la que
-                    pertenece.</div>
-            </div>
+            {% set perfil_sel = (form.perfil_comercial_codigos or []) %}
+            {% set negocio_sel = (form.negocio_codigos or []) %}
+            <details class="sic-collapse span-12">
+                <summary class="sic-collapse-summary">
+                    <span class="sic-collapse-title">Clasificación</span>
+                    <span class="sic-collapse-badge" id="summary-clasificacion">—</span>
+                </summary>
+                <div class="sic-collapse-body">
+                    <div>
+                        <label class="form-label text-white-50 small" for="unit_business">Unidad de Negocio</label>
+                        <select class="form-select form-select-sic" id="unit_business" name="unit_business" required>
+                            {% for opt in bu_opts %}
+                            <option value="{{ opt }}" {% if opt==bu_val %}selected{% endif %}>{{ opt }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="text-white-50 small mt-1">Clasifica al usuario según la unidad de negocio a la que
+                            pertenece.</div>
+                    </div>
 
-            {# ====== Acceso a módulos / sub-secciones (árbol jerárquico) ====== #}
+                    <div>
+                        <label class="form-label text-white-50 small" for="perfil_comercial_codigos">Perfil comercial</label>
+                        <div class="chipsel">
+                            <select id="perfil_comercial_codigos" name="perfil_comercial_codigos" multiple
+                                data-chip-select data-placeholder="Filtrar por código…">
+                                {% for codigo in perfil_comercial_opciones %}
+                                <option value="{{ codigo }}" {% if codigo in perfil_sel %}selected{% endif %}>{{ codigo }}</option>
+                                {% else %}
+                                <option disabled>No hay maestro de clientes cargado (clientes.csv)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="text-white-50 small mt-1">Clasifica al usuario, no afecta qué cuentas ve.</div>
+                    </div>
+
+                    <div>
+                        <label class="form-label text-white-50 small" for="negocio_codigos">Negocio</label>
+                        <div class="chipsel">
+                            <select id="negocio_codigos" name="negocio_codigos" multiple
+                                data-chip-select data-named="1" data-placeholder="Filtrar por nombre…">
+                                {% for codigo, etiqueta in negocio_opciones %}
+                                <option value="{{ codigo }}" data-name="{{ etiqueta }}" {% if codigo in negocio_sel %}selected{% endif %}>{{ etiqueta }}</option>
+                                {% else %}
+                                <option disabled>No hay maestro de negocios cargado (Negocios.csv)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="text-white-50 small mt-1">Clasifica al usuario, no afecta qué cuentas ve.</div>
+                    </div>
+                </div>
+            </details>
+
+            {# ====== Sección plegable: Acceso a módulos / sub-secciones (árbol jerárquico) ====== #}
             {# Semántica de marcado inicial (hojas):
                  - form.module_access es None  -> sin configurar -> marcar TODO el techo del rol.
                  - form.module_access es lista -> marcar solo las hojas de la lista.
@@ -426,20 +585,27 @@
                 </div>
               {% endif %}
             {% endmacro %}
-            <div class="span-12">
-                <label class="form-label text-white-50 small">Acceso a módulos</label>
-                <div id="module-access-tree" class="acc-tree p-3 rounded-3"
-                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
-                    {% for node in nav_tree %}
-                    {{ render_node(node, ma, 0) }}
-                    {% endfor %}
+            <details class="sic-collapse span-12">
+                <summary class="sic-collapse-summary">
+                    <span class="sic-collapse-title">Acceso a módulos</span>
+                    <span class="sic-collapse-badge" id="summary-modulos">—</span>
+                </summary>
+                <div class="sic-collapse-body">
+                    <div>
+                        <div id="module-access-tree" class="acc-tree p-3 rounded-3"
+                            style="background: rgba(0,0,0,0.2); border: 1px solid var(--sic-border);">
+                            {% for node in nav_tree %}
+                            {{ render_node(node, ma, 0) }}
+                            {% endfor %}
+                        </div>
+                        <div class="text-white-50 small mt-1">
+                            Controla a qué secciones puede entrar el usuario. El rol define el máximo disponible;
+                            las secciones fuera del alcance del rol se deshabilitan automáticamente. El
+                            "Apartado (Alcance)" / página de inicio se deriva solo de los mercados concedidos.
+                        </div>
+                    </div>
                 </div>
-                <div class="text-white-50 small mt-1">
-                    Controla a qué secciones puede entrar el usuario. El rol define el máximo disponible;
-                    las secciones fuera del alcance del rol se deshabilitan automáticamente. El
-                    "Apartado (Alcance)" / página de inicio se deriva solo de los mercados concedidos.
-                </div>
-            </div>
+            </details>
 
             <div class="span-12 d-flex gap-2">
                 <a class="btn btn-sic-ghost" href="/sic/users">Volver</a>
@@ -772,20 +938,329 @@
     refresh();
 })();
 
-// ── Cartera de cuentas: filtro en vivo sobre los <select multiple> grandes (248 vendedores) ──
+// ── Selector de fichas: reemplaza el <select multiple> nativo en los 5
+// listados de cartera/clasificación (operador, vendedor, unidades de negocio,
+// perfil comercial, negocio). El <select> original queda oculto en el DOM con
+// sus <option selected> siempre en sync — es lo único que viaja en el POST.
+// Cada cambio dispara un 'change' real sobre el <select>, así que cualquier
+// otro script que ya escuche ese evento (el preview de Fusión, el resumen de
+// secciones de arriba) sigue funcionando sin que se le haya tocado una línea. ──
 (function () {
-    var filters = Array.prototype.slice.call(document.querySelectorAll('.cartera-filter'));
-    filters.forEach(function (input) {
-        var select = document.getElementById(input.getAttribute('data-filter-target'));
-        if (!select) return;
-        var options = Array.prototype.slice.call(select.options);
-        input.addEventListener('input', function () {
-            var q = input.value.trim().toLowerCase();
-            options.forEach(function (opt) {
-                opt.hidden = q.length > 0 && opt.text.toLowerCase().indexOf(q) === -1;
-            });
+    var CHIP_CAP = 6;
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
+    }
+    function highlight(text, q) {
+        var safe = escapeHtml(text);
+        if (!q) return safe;
+        var idx = text.toLowerCase().indexOf(q.toLowerCase());
+        if (idx === -1) return safe;
+        return escapeHtml(text.slice(0, idx)) + '<mark>' + escapeHtml(text.slice(idx, idx + q.length)) +
+            '</mark>' + escapeHtml(text.slice(idx + q.length));
+    }
+    function labelFor(row) {
+        return row.hasName ? (row.name + ' · ' + row.code) : row.code;
+    }
+
+    function buildRows(select) {
+        var named = select.dataset.named === '1';
+        var rows = Array.prototype.map.call(select.options, function (opt) {
+            if (opt.disabled) return null;
+            var name = (opt.dataset.name || '').trim();
+            return { opt: opt, code: opt.value, name: name, hasName: named && !!name };
+        }).filter(Boolean);
+        // Alfabético por nombre; los que no tienen nombre en el padrón van al
+        // final, ordenados por código — dejan de ser lo primero que se ve.
+        rows.sort(function (a, b) {
+            if (a.hasName !== b.hasName) return a.hasName ? -1 : 1;
+            var la = a.hasName ? a.name : a.code;
+            var lb = b.hasName ? b.name : b.code;
+            return la.localeCompare(lb, 'es', { numeric: true, sensitivity: 'base' });
+        });
+        return rows;
+    }
+
+    function enhance(select) {
+        var rows = buildRows(select);
+        if (!rows.length) return; // padrón vacío: solo el <option disabled> informativo
+
+        var wrap = select.closest('.chipsel');
+        if (!wrap) return;
+
+        var tray = document.createElement('div');
+        tray.className = 'chipsel-tray';
+        var searchWrap = document.createElement('div');
+        searchWrap.className = 'chipsel-search';
+        var search = document.createElement('input');
+        search.type = 'text';
+        var placeholder = select.getAttribute('data-placeholder') || 'Filtrar…';
+        search.placeholder = placeholder;
+        search.setAttribute('aria-label', placeholder);
+        search.setAttribute('autocomplete', 'off');
+        searchWrap.appendChild(search);
+        var list = document.createElement('div');
+        list.className = 'chipsel-list';
+        var footer = document.createElement('div');
+        footer.className = 'chipsel-footer';
+        var leftFoot = document.createElement('div');
+        leftFoot.style.cssText = 'display:flex;gap:10px;align-items:center';
+        var countEl = document.createElement('span');
+        countEl.className = 'chipsel-count';
+        var onlyBtn = document.createElement('button');
+        onlyBtn.type = 'button';
+        onlyBtn.className = 'chipsel-only';
+        leftFoot.appendChild(countEl);
+        leftFoot.appendChild(onlyBtn);
+        var clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.textContent = 'Vaciar selección';
+        footer.appendChild(leftFoot);
+        footer.appendChild(clearBtn);
+
+        wrap.insertBefore(tray, select);
+        wrap.insertBefore(searchWrap, select);
+        wrap.insertBefore(list, select);
+        wrap.insertBefore(footer, select);
+        select.classList.add('chipsel-enhanced'); // recién ahora se oculta por CSS
+
+        var state = { q: '', onlySelected: false, expanded: false, active: 0 };
+        var visible = rows.slice();
+
+        function selectedRows() { return rows.filter(function (r) { return r.opt.selected; }); }
+
+        function commit() {
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            renderAll();
+        }
+        function toggle(row) {
+            row.opt.selected = !row.opt.selected;
+            commit();
+        }
+        function matches(row, q) {
+            if (!q) return true;
+            var hay = (row.hasName ? row.name + ' ' + row.code : row.code).toLowerCase();
+            return hay.indexOf(q) !== -1;
+        }
+        function recomputeVisible() {
+            var q = state.q.trim().toLowerCase();
+            visible = rows.filter(function (r) {
+                if (state.onlySelected && !r.opt.selected) return false;
+                return matches(r, q);
+            });
+            if (state.active >= visible.length) state.active = Math.max(0, visible.length - 1);
+        }
+
+        function renderTray() {
+            var sel = selectedRows();
+            if (!sel.length) {
+                tray.innerHTML = '<span class="chipsel-empty">ninguno seleccionado</span>';
+                return;
+            }
+            var shown = state.expanded ? sel : sel.slice(0, CHIP_CAP);
+            var html = shown.map(function (r) {
+                var title = r.hasName ? '' : ' title="Sin nombre en el padrón"';
+                return '<span class="chipsel-chip"' + title + '><span>' + escapeHtml(labelFor(r)) + '</span>' +
+                    '<button type="button" data-code="' + escapeHtml(r.code) + '" aria-label="Quitar ' + escapeHtml(labelFor(r)) + '">✕</button></span>';
+            }).join('');
+            if (sel.length > CHIP_CAP) {
+                html += state.expanded
+                    ? '<button type="button" class="chipsel-more" data-collapse="1">− Mostrar menos</button>'
+                    : '<button type="button" class="chipsel-more" data-expand="1">+' + (sel.length - CHIP_CAP) + ' más</button>';
+            }
+            tray.innerHTML = html;
+        }
+
+        function renderList() {
+            if (!visible.length) {
+                list.innerHTML = '<div class="chipsel-empty-row">' +
+                    (state.onlySelected ? 'Todavía no seleccionaste nada.' : ('Sin resultados para "' + escapeHtml(search.value) + '"')) +
+                    '</div>';
+                return;
+            }
+            var q = state.q.trim();
+            list.innerHTML = visible.map(function (r, i) {
+                var checked = r.opt.selected;
+                var cls = 'chipsel-row' + (checked ? ' is-checked' : '') + (!r.hasName ? ' no-name' : '') +
+                    (i === state.active ? ' is-active' : '');
+                var mainText = r.hasName ? highlight(r.name + ' · ' + r.code, q) : highlight(r.code, q);
+                var tag = r.hasName ? '' : '<span class="chipsel-tag">Sin nombre en el padrón</span>';
+                return '<label class="' + cls + '" data-idx="' + i + '">' +
+                    '<input type="checkbox" tabindex="-1"' + (checked ? ' checked' : '') + '>' +
+                    '<span class="chipsel-main">' + mainText + '</span>' + tag + '</label>';
+            }).join('');
+        }
+
+        function renderFooter() {
+            var n = selectedRows().length;
+            countEl.innerHTML = '<b>' + n + '</b> de ' + rows.length;
+            onlyBtn.textContent = state.onlySelected ? 'Ver todos' : 'Ver solo seleccionados';
+            onlyBtn.classList.toggle('is-on', state.onlySelected);
+            clearBtn.disabled = n === 0;
+        }
+
+        function renderAll() {
+            recomputeVisible();
+            renderTray();
+            renderList();
+            renderFooter();
+        }
+
+        function scrollActiveIntoView() {
+            var row = list.querySelector('.chipsel-row.is-active');
+            if (row) row.scrollIntoView({ block: 'nearest' });
+        }
+
+        list.addEventListener('click', function (e) {
+            var row = e.target.closest('.chipsel-row');
+            if (!row) return;
+            var idx = parseInt(row.getAttribute('data-idx'), 10);
+            state.active = idx;
+            toggle(visible[idx]);
+        });
+        tray.addEventListener('click', function (e) {
+            var rm = e.target.closest('[data-code]');
+            if (rm) {
+                var row = rows.filter(function (r) { return r.code === rm.getAttribute('data-code'); })[0];
+                if (row) toggle(row);
+                return;
+            }
+            if (e.target.closest('[data-expand]')) { state.expanded = true; renderTray(); }
+            if (e.target.closest('[data-collapse]')) { state.expanded = false; renderTray(); }
+        });
+        onlyBtn.addEventListener('click', function () {
+            state.onlySelected = !state.onlySelected;
+            state.active = 0;
+            renderAll();
+        });
+        clearBtn.addEventListener('click', function () {
+            if (clearBtn.disabled) return;
+            selectedRows().forEach(function (r) { r.opt.selected = false; });
+            commit();
+        });
+        search.addEventListener('input', function () {
+            state.q = search.value;
+            state.active = 0;
+            recomputeVisible();
+            renderList();
+        });
+        search.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (!visible.length) return;
+                state.active = Math.min(state.active + 1, visible.length - 1);
+                renderList();
+                scrollActiveIntoView();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (!visible.length) return;
+                state.active = Math.max(state.active - 1, 0);
+                renderList();
+                scrollActiveIntoView();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                var target = visible[state.active];
+                search.value = '';
+                state.q = '';
+                state.active = 0;
+                if (target) toggle(target); else renderAll();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                search.value = '';
+                state.q = '';
+                state.active = 0;
+                recomputeVisible();
+                renderList();
+            }
+        });
+
+        renderAll();
+    }
+
+    Array.prototype.slice.call(document.querySelectorAll('select[data-chip-select]')).forEach(enhance);
+})();
+
+// ── Resúmenes en el encabezado de cada sección plegable — solo texto mostrado,
+// no toca nada de lo que se envía. Se recalcula ante cualquier cambio relevante
+// para no quedar desactualizado si el Admin abre, edita y vuelve a cerrar. ──
+(function () {
+    function plural(n, singular, pluralWord) {
+        return n + ' ' + (n === 1 ? singular : (pluralWord || singular + 's'));
+    }
+    function countSelected(id) {
+        var el = document.getElementById(id);
+        if (!el) return 0;
+        return Array.prototype.filter.call(el.options, function (o) { return o.selected; }).length;
+    }
+    function selectedLabel(id) {
+        var el = document.getElementById(id);
+        if (!el || el.selectedIndex < 0) return '';
+        var opt = el.options[el.selectedIndex];
+        return opt ? opt.textContent : '';
+    }
+    function onChange(id, handler) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', handler);
+    }
+
+    function updateAsignacion() {
+        var badge = document.getElementById('summary-asignacion');
+        if (!badge) return;
+        var partes = [];
+        var op = countSelected('cartera_operador_codigos');
+        var vd = countSelected('cartera_vendedor_codigos');
+        var un = countSelected('cartera_unineg_scope');
+        if (op) partes.push(plural(op, 'operador'));
+        if (vd) partes.push(plural(vd, 'vendedor'));
+        if (un) partes.push(plural(un, 'unidad', 'unidades'));
+        badge.textContent = partes.length ? partes.join(', ') : 'sin configurar';
+    }
+
+    function updateClasificacion() {
+        var badge = document.getElementById('summary-clasificacion');
+        if (!badge) return;
+        var partes = [];
+        var bu = selectedLabel('unit_business');
+        if (bu) partes.push(bu);
+        var pf = countSelected('perfil_comercial_codigos');
+        var ng = countSelected('negocio_codigos');
+        if (pf) partes.push(plural(pf, 'perfil'));
+        if (ng) partes.push(plural(ng, 'negocio'));
+        badge.textContent = partes.length ? partes.join(', ') : 'sin configurar';
+    }
+
+    function updateModulos() {
+        var badge = document.getElementById('summary-modulos');
+        var tree = document.getElementById('module-access-tree');
+        if (!badge || !tree) return;
+        var leaves = Array.prototype.slice.call(tree.querySelectorAll('.ma-leaf'));
+        var activas = leaves.filter(function (l) { return !l.disabled; });
+        var on = activas.filter(function (l) { return l.checked; }).length;
+        if (!activas.length) badge.textContent = 'sin secciones disponibles';
+        else if (on === 0) badge.textContent = 'sin acceso';
+        else if (on === activas.length) badge.textContent = 'acceso completo (' + on + ')';
+        else badge.textContent = on + ' de ' + activas.length + ' secciones';
+    }
+
+    ['cartera_operador_codigos', 'cartera_vendedor_codigos', 'cartera_unineg_scope'].forEach(function (id) {
+        onChange(id, updateAsignacion);
     });
+    ['unit_business', 'perfil_comercial_codigos', 'negocio_codigos'].forEach(function (id) {
+        onChange(id, updateClasificacion);
+    });
+    // Registrado después que el script de "Acceso a módulos" de arriba: para el
+    // mismo evento (click en el árbol, change en Rol) los listeners corren en
+    // orden de registro, así que acá ya se ve el estado post-recálculo.
+    var tree = document.getElementById('module-access-tree');
+    if (tree) tree.addEventListener('click', updateModulos);
+    var roleSelect = document.getElementById('role');
+    if (roleSelect) roleSelect.addEventListener('change', updateModulos);
+
+    updateAsignacion();
+    updateClasificacion();
+    updateModulos();
 })();
 </script>
 {% endblock %}

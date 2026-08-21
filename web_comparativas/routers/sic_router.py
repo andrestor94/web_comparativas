@@ -9,6 +9,10 @@ from sqlalchemy import func, or_
 
 from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion, CarteraOperador, CarteraVendedor
 from web_comparativas.auth import user_display, hash_password, verify_password
+from web_comparativas.forecast_service import (
+    get_perfil_comercial_master_options,
+    get_negocio_master_options,
+)
 from web_comparativas.policy import (
     require_perm, normalize_module_access, derive_access_scope,
     role_ceilings_map, form_nav_tree, FORM_ROLES, can_access as _can_access_tpl,
@@ -1190,6 +1194,13 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
             _unineg_seen[codigo] = etiqueta
     unineg_opciones = sorted(_unineg_seen.items(), key=lambda kv: (kv[0] != "0", kv[1]))
 
+    # Clasificación de usuario (Perfil comercial / Negocio, ago-2026): no es
+    # cartera — se arma acá solo porque este helper ya alimenta ambos GET del
+    # form. Opciones desde los mismos maestros que usa Forecast (clientes.csv /
+    # Negocios.csv), no de una lista escrita a mano.
+    perfil_comercial_opciones = get_perfil_comercial_master_options()
+    negocio_opciones = get_negocio_master_options()
+
     return {
         "vendedores_fusion": vendedores,
         "analistas_disponibles": analistas,
@@ -1201,6 +1212,8 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
         "operadores_cartera_opciones": operadores_cartera_opciones,
         "vendedores_cartera_opciones": vendedores_cartera_opciones,
         "unineg_opciones": unineg_opciones,
+        "perfil_comercial_opciones": perfil_comercial_opciones,
+        "negocio_opciones": negocio_opciones,
     }
 
 
@@ -1493,6 +1506,8 @@ def sic_users_new(request: Request, user: User = Depends(sic_access_required)):
         cartera_unineg_scope=[],
         cartera_fusion_enabled=False,
         cartera_fusion_identidad=None,
+        perfil_comercial_codigos=[],
+        negocio_codigos=[],
     )
     
     # Capture error from redirect and map to friendly message
@@ -1537,6 +1552,8 @@ def sic_users_create(
     cartera_operador_codigos: list[str] = Form(default=[]),
     cartera_vendedor_codigos: list[str] = Form(default=[]),
     cartera_unineg_scope: list[str] = Form(default=[]),
+    perfil_comercial_codigos: list[str] = Form(default=[]),
+    negocio_codigos: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     # Enforce admin
@@ -1589,6 +1606,8 @@ def sic_users_create(
             cartera_unineg_scope=_normalize_codigos(cartera_unineg_scope),
             cartera_fusion_enabled=fusion_enabled,
             cartera_fusion_identidad=fusion_identity,
+            perfil_comercial_codigos=_normalize_codigos(perfil_comercial_codigos),
+            negocio_codigos=_normalize_codigos(negocio_codigos),
         )
         db_session.add(u)
         db_session.flush()  # necesita u.id para cartera/jerarquía
@@ -1669,6 +1688,8 @@ def sic_users_update(
     cartera_operador_codigos: list[str] = Form(default=[]),
     cartera_vendedor_codigos: list[str] = Form(default=[]),
     cartera_unineg_scope: list[str] = Form(default=[]),
+    perfil_comercial_codigos: list[str] = Form(default=[]),
+    negocio_codigos: list[str] = Form(default=[]),
     user: User = Depends(sic_access_required),
 ):
     if "admin" not in (user.role or "").lower():
@@ -1702,6 +1723,8 @@ def sic_users_update(
         u.cartera_unineg_scope = _normalize_codigos(cartera_unineg_scope)
         u.cartera_fusion_enabled = fusion_enabled
         u.cartera_fusion_identidad = fusion_identity
+        u.perfil_comercial_codigos = _normalize_codigos(perfil_comercial_codigos)
+        u.negocio_codigos = _normalize_codigos(negocio_codigos)
         _resolve_reporta_a(db_session, u, role_ok, reporta_a_supervisor_id, reporta_a_gerente_id)
         _sync_cartera_y_jerarquia(
             db_session, u, role_ok, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user

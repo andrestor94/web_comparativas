@@ -2997,6 +2997,51 @@ def _apply_neg_names(df: pd.DataFrame, negocios_path: Path) -> pd.DataFrame:
     return df
 
 
+def get_perfil_comercial_master_options() -> list[str]:
+    """Códigos de Perfil comercial (columna `tipocli`) desde clientes.csv — el
+    mismo maestro que usa Forecast para enriquecer forecast_fact_2026.perfil (ver
+    _load_data, "Enrich with tipocli"). Usado por S.I.C. para clasificar al
+    usuario (web_comparativas/routers/sic_router.py) — no filtra ningún dato,
+    solo alimenta el <select multiple>. Lectura directa, sin cache: archivo chico
+    (~40K filas, ~17 códigos distintos), ya viaja al deploy junto con el resto de
+    web_comparativas/data/forecast_data/."""
+    if not CLIENTES_FILE.exists():
+        return []
+    try:
+        df = pd.read_csv(str(CLIENTES_FILE), encoding="latin-1", low_memory=False, usecols=["tipocli"])
+        vals = {str(v).strip() for v in df["tipocli"].dropna() if str(v).strip()}
+        return sorted(vals)
+    except Exception as exc:
+        logger.warning("get_perfil_comercial_master_options: %s", exc)
+        return []
+
+
+def get_negocio_master_options() -> list[tuple[str, str]]:
+    """Unidades de Negocio de primer nivel (subunidad=0) desde Negocios.csv — el
+    mismo maestro que usa Forecast en _apply_neg_names para traducir el código
+    `neg` a nombre. Usado por S.I.C. para clasificar al usuario — no filtra
+    ningún dato. Devuelve (codigo, etiqueta) ordenado por código numérico."""
+    if not NEGOCIOS_FILE.exists():
+        return []
+    try:
+        df = pd.read_csv(str(NEGOCIOS_FILE))
+        df.columns = [c.strip().lower() for c in df.columns]
+        df["unidad"] = pd.to_numeric(df["unidad"], errors="coerce")
+        df["subunidad"] = pd.to_numeric(df["subunidad"], errors="coerce").fillna(0).astype(int)
+        top = (
+            df[(df["subunidad"] == 0) & df["unidad"].notna()][["unidad", "descrip"]]
+            .drop_duplicates("unidad")
+        )
+        opciones = [
+            (str(int(row.unidad)), str(row.descrip or "").strip())
+            for row in top.itertuples(index=False)
+        ]
+        return sorted(opciones, key=lambda t: int(t[0]))
+    except Exception as exc:
+        logger.warning("get_negocio_master_options: %s", exc)
+        return []
+
+
 def _process_dataframe(df_input: pd.DataFrame, df_meta: pd.DataFrame) -> pd.DataFrame:
     if df_input.empty:
         return df_input

@@ -111,6 +111,7 @@ from web_comparativas.migrations import (
     ensure_cartera_tables,
     ensure_users_cartera_columns,
     ensure_users_cartera_fusion_columns,
+    ensure_users_perfil_negocio_columns,
 )
 from web_comparativas.dimensionamiento.ingestion import maybe_run_startup_ingestion
 from web_comparativas.dimensionamiento.query_service import ensure_default_dashboard_snapshot
@@ -393,6 +394,16 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: users cartera columns checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning users cartera columns: {e}", flush=True)
+
+    # Clasificación de usuario: Perfil comercial / Negocio (ago-2026). Reemplazan
+    # en S.I.C. al select "Unidad de Negocio" como forma de clasificar al usuario,
+    # pero no lo sustituyen a nivel de esquema: business_unit sigue existiendo
+    # porque Grupos/visibility_service.py todavía dependen de él.
+    try:
+        ensure_users_perfil_negocio_columns()
+        print("[MIGRATION] SUCCESS: users perfil/negocio columns checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning users perfil/negocio columns: {e}", flush=True)
 
     print("[STARTUP] STAGE 25 - MIGRATIONS RESTORED", flush=True)
     # Backfill runs in background to avoid OOM during startup

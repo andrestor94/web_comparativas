@@ -329,6 +329,20 @@ class User(Base):
     # este scope nunca filtra la parte "operador" de la cartera, solo la "vendedor".
     cartera_unineg_scope = Column(JSONEncodedList, nullable=True, default=None)
 
+    # ---- Clasificación de usuario: Perfil comercial / Negocio (ago-2026) ----
+    # Puramente descriptivo — NO filtra qué datos ve el usuario (eso lo define la
+    # cartera, ver cartera_visibilidad.py). Reemplaza en S.I.C. al viejo select
+    # "Unidad de Negocio" como forma de clasificar al usuario, pero `unit_business`
+    # sigue existiendo aparte porque Grupos y visibility_service.py todavía
+    # dependen de él para permisos/visibilidad de cargas (no tocar esa lógica acá).
+    # Opciones servidas en runtime desde los mismos maestros que usa Forecast:
+    # clientes.csv (columna tipocli) y Negocios.csv (columna unidad) — ver
+    # forecast_service.get_perfil_comercial_master_options() /
+    # get_negocio_master_options(). NULL/[] = sin clasificar (no es fail-closed,
+    # a diferencia de los campos de cartera de arriba).
+    perfil_comercial_codigos = Column(JSONEncodedList, nullable=True, default=None)
+    negocio_codigos = Column(JSONEncodedList, nullable=True, default=None)
+
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
 

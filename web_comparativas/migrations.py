@@ -225,6 +225,21 @@ def ensure_users_cartera_columns():
     print("[MIGRATION] Columnas de cartera en 'users' verificadas/creadas.", flush=True)
 
 
+def ensure_users_perfil_negocio_columns():
+    """Agrega a 'users' las columnas de clasificación 'perfil_comercial_codigos' y
+    'negocio_codigos' (ago-2026). Puramente descriptivas — NULL/[] simplemente
+    significa "sin clasificar", nada las consume para filtrar datos (a diferencia
+    de las columnas de cartera arriba)."""
+    with engine.begin() as conn:
+        for col in ("perfil_comercial_codigos", "negocio_codigos"):
+            _add_column_safe(
+                conn,
+                f"ALTER TABLE users ADD COLUMN {col} TEXT",
+                f"users.{col}",
+            )
+    print("[MIGRATION] Columnas de Perfil comercial / Negocio en 'users' verificadas/creadas.", flush=True)
+
+
 def ensure_users_cartera_fusion_columns():
     '''Agrega el modo dinámico de vinculación por nombre contra Fusión.'''
     with engine.begin() as conn:
