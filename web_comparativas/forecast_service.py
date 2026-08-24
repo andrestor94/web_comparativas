@@ -911,7 +911,16 @@ def _build_override_maps(records: list[Any]) -> dict[str, Any]:
         annual = float(annual or 0.0)
         # effective_from_month is carried in the payload so _resolve_override_for_row
         # can check temporal validity before applying the override.
-        payload: dict[str, Any] = {"monthly_pct": monthly, "annual_pct": annual, "effective_from_month": efm}
+        payload: dict[str, Any] = {
+            "monthly_pct": monthly,
+            "annual_pct": annual,
+            "effective_from_month": efm,
+            # Metadatos inertes para auditoria/preview. La resolucion numerica no
+            # depende de ellos, pero permiten atribuir cada fila al request que
+            # realmente gano despues de precedencia y superposiciones.
+            "_source_request_id": getattr(rec, "_pending_request_id", None),
+            "_source_override_id": getattr(rec, "id", None),
+        }
 
         if scope == FORECAST_SCOPE_SUBNEG:
             subneg_map[(selector, subneg)] = payload
@@ -1076,6 +1085,9 @@ def _apply_override_effects_to_dataframe(
         out["_override_scope"] = "base"
         out["_monthly_pct"] = _monthly_pct_from_annual_growth(base_growth_pct)
         out["_annual_eff"] = 1.0 + float(base_growth_pct or 0.0) / 100.0
+        if max_hist_date is not None and "fecha" in out.columns:
+            historical = pd.to_datetime(out["fecha"], errors="coerce") <= max_hist_date
+            out.loc[historical, "_annual_eff"] = 1.0
         out["_has_override"] = False
         return out, maps
 
@@ -1158,7 +1170,15 @@ def _apply_override_effects_to_dataframe(
     # Initialize all rows as base (vectorized — no Python loop).
     scopes: list[str] = ["base"] * _n
     monthlies: list[float] = [_base_monthly] * _n
-    annual_effects: list[float] = [1.0] * _n
+    # Toda fila no alcanzada por un override conserva la curva base solicitada
+    # por el caller (+25% en Forecast Gerencia). El valor 1.0 anterior quitaba
+    # silenciosamente la meta a filas hermanas del mismo selector.
+    _base_annual_eff = 1.0 + float(base_growth_pct or 0.0) / 100.0
+    annual_effects: list[float] = [_base_annual_eff] * _n
+    if max_hist_date is not None and "fecha" in out.columns:
+        _hist_mask = pd.to_datetime(out["fecha"], errors="coerce") <= max_hist_date
+        for _hist_pos in _np.where(_hist_mask.values)[0]:
+            annual_effects[int(_hist_pos)] = 1.0
     flags: list[bool] = [False] * _n
 
     # Resolve overrides for affected rows only.
@@ -1505,6 +1525,248 @@ def compute_approval_curve_impacts(growth_pct: float = 25.0, *, is_admin: bool =
     for v in out.values():
         v["impact"] = round(v["impact"], 2)
     return out
+
+
+def compute_pending_approval_preview(
+    pending_requests: list[Any],
+    growth_pct: float = 25.0,
+    *,
+    official_records: list[Any] | None = None,
+    value_frame: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Replay read-only de pendientes con el mismo resolver de Total_User_Adj."""
+    pending = sorted(
+        [r for r in (pending_requests or []) if getattr(r, "status", None) == "pendiente"],
+        key=lambda r: (
+            getattr(r, "created_at", None) or dt.datetime.min,
+            int(getattr(r, "id", 0) or 0),
+        ),
+    )
+    categories = {
+        "efectiva": 0, "sin_efecto": 0, "supersedida": 0,
+        "redundante": 0, "conflicto": 0, "incompleta": 0,
+    }
+    if official_records is None:
+        official_records = [
+            r for r in _fetch_override_records(None, all_users=True)
+            if getattr(r, "is_active", False)
+        ]
+    official_records = list(official_records or [])
+
+    def _identity(value: Any) -> tuple:
+        return (
+            int(getattr(value, "user_id", None)
+                or getattr(value, "created_by_user_id", 0) or 0),
+            _clean_override_text(getattr(value, "client_selector", "")),
+            *_override_identity(
+                getattr(value, "override_scope", None)
+                or getattr(value, "scope_type", None),
+                subneg=getattr(value, "subneg", "") or "",
+                codigo_serie=getattr(value, "codigo_serie", "") or "",
+                forecast_month=(getattr(value, "forecast_month", "")
+                                or getattr(value, "period", "") or ""),
+            ),
+        )
+
+    def _same(left: Any, right: Any) -> bool:
+        if left is None or right is None:
+            return left is None and right is None
+        try:
+            return abs(float(left) - float(right)) <= 1e-6
+        except (TypeError, ValueError):
+            return False
+
+    state = {_identity(rec): rec for rec in official_records}
+    applied_order: dict[tuple, tuple[int, Any]] = {}
+    by_request: dict[int, dict[str, Any]] = {}
+
+    for sequence, cr in enumerate(pending, start=1):
+        request_id = int(getattr(cr, "id", 0) or 0)
+        key = _identity(cr)
+        owner_id, selector, scope, subneg, codigo, month = key
+        active = state.get(key)
+        current = (
+            float(getattr(active, "override_growth_pct"))
+            if active is not None and getattr(active, "is_active", False)
+            and getattr(active, "override_growth_pct", None) is not None
+            else None
+        )
+        old_value = getattr(cr, "old_value", None)
+        new_value = getattr(cr, "new_value", None)
+        complete = bool(
+            owner_id and selector
+            and scope in {FORECAST_SCOPE_SUBNEG, FORECAST_SCOPE_PRODUCT,
+                          FORECAST_SCOPE_CELL}
+            and (scope != FORECAST_SCOPE_CELL or month)
+        )
+        if new_value is not None:
+            try:
+                complete = complete and bool(np.isfinite(float(new_value)))
+            except (TypeError, ValueError):
+                complete = False
+        info = {
+            "request_id": request_id, "category": None,
+            "effective_delta": 0.0, "official_before": current,
+            "official_after": current,
+        }
+        by_request[request_id] = info
+        if not complete:
+            info["category"] = "incompleta"
+            continue
+        if not _same(old_value, current):
+            info["category"] = "conflicto"
+            continue
+        if _same(new_value, current):
+            info["category"] = "redundante"
+            continue
+        info["category"] = "candidata"
+        info["official_after"] = float(new_value) if new_value is not None else None
+        if new_value is None:
+            state.pop(key, None)
+            applied_order.pop(key, None)
+            continue
+        annual = float(new_value)
+        values = (
+            {column.name: getattr(active, column.name, None)
+             for column in ForecastUserOverride.__table__.columns}
+            if active is not None and ForecastUserOverride is not None else {}
+        )
+        values.update(
+            id=getattr(active, "id", None), user_id=owner_id,
+            source_module=FORECAST_OVERRIDE_SOURCE,
+            context_key=FORECAST_OVERRIDE_CONTEXT,
+            client_selector=selector,
+            client_display=_clean_override_text(
+                getattr(cr, "client_name", None) or selector),
+            perfil=getattr(cr, "perfil", None), neg=getattr(cr, "neg", None),
+            subneg=subneg, codigo_serie=codigo, forecast_month=month,
+            override_scope=scope, base_growth_pct=float(old_value or 0.0),
+            override_growth_pct=annual,
+            effective_monthly_pct=(
+                round(_monthly_pct_from_annual_growth(annual), 4)
+                if scope == FORECAST_SCOPE_CELL
+                else _monthly_pct_from_annual_growth(annual)),
+            effective_from_month=get_forecast_effective_month(
+                (getattr(cr, "created_at", None) or dt.datetime.utcnow()).date()),
+            is_active=True,
+            created_at=getattr(active, "created_at", None)
+            or getattr(cr, "created_at", None),
+            updated_at=getattr(cr, "created_at", None),
+            created_by=getattr(active, "created_by", None)
+            or getattr(cr, "created_by_username", None),
+            updated_by=getattr(cr, "created_by_username", None),
+            _pending_request_id=request_id, _pending_sequence=sequence,
+        )
+        preview_record = SimpleNamespace(**values)
+        state[key] = preview_record
+        applied_order[key] = (sequence, preview_record)
+
+    official_effective = _consolidate_override_records(
+        official_records, "approval-preview-official")
+    pending_keys = set(applied_order)
+    preview_records = [rec for key, rec in state.items()
+                       if key not in pending_keys]
+    preview_records += [item[1] for item in sorted(
+        applied_order.values(), key=lambda item: item[0])]
+    preview_effective = _consolidate_override_records(
+        preview_records, "approval-preview")
+    survivor_ids = {
+        int(getattr(rec, "_pending_request_id"))
+        for rec in preview_effective
+        if getattr(rec, "_pending_request_id", None) is not None
+    }
+    selectors = sorted({
+        _clean_override_text(getattr(cr, "client_selector", ""))
+        for cr in pending
+        if _clean_override_text(getattr(cr, "client_selector", ""))
+    })
+    ov = value_frame.copy() if value_frame is not None else None
+    if ov is None:
+        is_pg = engine is not None and "postgresql" in str(engine.url)
+        if is_pg and selectors:
+            sel_f = _safe_in("fantasia", selectors)
+            ov = _query_agg(
+                "SELECT fecha, fantasia, cliente_id, subneg, codigo_serie, "
+                "SUM(COALESCE(monto_yhat,0)) AS base_val "
+                f"FROM forecast_valorizado WHERE ({sel_f}) "
+                "GROUP BY fecha, fantasia, cliente_id, subneg, codigo_serie")
+        else:
+            df = get_data().get("df_valorizado", pd.DataFrame())
+            if df is not None and not df.empty and selectors:
+                wanted = {_clean_override_text(value) for value in selectors}
+                mask = df["fantasia"].astype(str).map(
+                    _clean_override_text).isin(wanted)
+                sub_df = df.loc[mask].copy()
+                sub_df["base_val"] = sub_df["monto_yhat"]
+                ov = sub_df.groupby(
+                    ["fecha", "fantasia", "cliente_id", "subneg", "codigo_serie"],
+                    dropna=False)["base_val"].sum().reset_index()
+            else:
+                ov = pd.DataFrame()
+
+    effective_by_request: dict[int, float] = {}
+    unattributed = 0.0
+    if ov is not None and not ov.empty:
+        ov["fecha"] = pd.to_datetime(ov["fecha"], errors="coerce")
+        official_df, _ = _apply_override_effects_to_dataframe(
+            ov, user_id=None, base_growth_pct=float(growth_pct),
+            max_hist_date=None, _records=official_effective, is_admin=True)
+        preview_df, preview_maps = _apply_override_effects_to_dataframe(
+            ov, user_id=None, base_growth_pct=float(growth_pct),
+            max_hist_date=None, _records=preview_effective, is_admin=True)
+        row_delta = ov["base_val"].astype(float) * (
+            preview_df["_annual_eff"].astype(float)
+            - official_df["_annual_eff"].astype(float))
+        for idx in row_delta.index[row_delta.abs() > 0.005]:
+            row = ov.loc[idx]
+            selector_candidates = []
+            for column in ("fantasia", "cliente_id", "_cliente", "Cliente"):
+                if column in ov.columns:
+                    value = _clean_override_text(row.get(column, ""))
+                    if value and value not in selector_candidates:
+                        selector_candidates.append(value)
+            resolved = _resolve_override_for_row(
+                selector_candidates=selector_candidates,
+                subneg=_clean_override_text(row.get("subneg", "")),
+                codigo_serie=_clean_override_text(row.get("codigo_serie", "")),
+                forecast_month=_normalize_month_key(str(row.get("fecha"))[:7]),
+                maps=preview_maps, base_growth_pct=float(growth_pct))
+            request_id = resolved.get("_source_request_id")
+            amount = float(row_delta.loc[idx])
+            if request_id is None:
+                unattributed += amount
+            else:
+                request_id = int(request_id)
+                effective_by_request[request_id] = (
+                    effective_by_request.get(request_id, 0.0) + amount)
+
+    for request_id, info in by_request.items():
+        if info["category"] != "candidata":
+            categories[info["category"]] += 1
+            continue
+        amount = float(effective_by_request.get(request_id, 0.0))
+        if abs(amount) > 0.5:
+            info["category"] = "efectiva"
+            info["effective_delta"] = round(amount, 2)
+        elif request_id not in survivor_ids:
+            info["category"] = "supersedida"
+        else:
+            info["category"] = "sin_efecto"
+        categories[info["category"]] += 1
+    total_delta = round(
+        sum(float(info["effective_delta"]) for info in by_request.values())
+        + unattributed, 2)
+    return {
+        "selected": len(pending), "effective_delta": total_delta,
+        "effective_down": round(sum(
+            float(info["effective_delta"]) for info in by_request.values()
+            if float(info["effective_delta"]) < 0), 2),
+        "effective_up": round(sum(
+            float(info["effective_delta"]) for info in by_request.values()
+            if float(info["effective_delta"]) > 0), 2),
+        "unattributed_delta": round(unattributed, 2),
+        "counts": categories, "by_request": by_request,
+    }
 
 
 def estimate_scope_amount(
@@ -5551,14 +5813,14 @@ def _pg_get_client_table_inner(
 
 
 def _pg_get_treemap_data(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, period_date,
     is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Shell: catches all exceptions so the router never sees a 500 from this path."""
     _EMPTY = {"ids": [], "labels": [], "parents": [], "values": [], "colors": [], "periods": [], "canals": []}
     try:
         return _pg_get_treemap_data_inner(
-            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+            user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, period_date,
             is_admin=is_admin, cartera_branches=cartera_branches,
         )
     except Exception as exc:
@@ -5571,7 +5833,7 @@ def _pg_get_treemap_data(
 
 
 def _pg_get_treemap_data_inner(
-    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, period_date,
+    user_id, start_date, end_date, profiles, neg, subneg, products, view_money, growth_pct, period_date,
     is_admin=False, cartera_branches: ForecastCarteraBranches | None = None,
 ) -> dict:
     """Memory-safe PostgreSQL treemap: GROUP BY (perfil, nombre_grupo, fantasia, cliente_id)."""
@@ -5694,7 +5956,7 @@ def _pg_get_treemap_data_inner(
                     df_rows, _override_maps = _apply_override_effects_to_dataframe(
                         df_rows,
                         user_id=user_id,
-                        base_growth_pct=0.0,
+                        base_growth_pct=growth_pct,
                         max_hist_date=max_hist_date,
                         _records=_ovr_records_tm,
                         is_admin=is_admin,
@@ -5716,14 +5978,22 @@ def _pg_get_treemap_data_inner(
                     df_base_no_ovr = df_tree[
                         ~df_tree["fantasia"].fillna("").astype(str).str.strip().isin(_ovr_fantasias)
                     ].copy()
+                    if growth_pct != 0:
+                        df_base_no_ovr["monto"] = (
+                            df_base_no_ovr["monto"] * (1.0 + growth_pct / 100.0)
+                        )
                     df_tree = pd.concat([df_base_no_ovr, df_ovr_tree], ignore_index=True)
                     _tm_apply_ms = (time.perf_counter() - _tm_apply_t0) * 1000
                     _tm_used_delta = True
                 else:
                     _forecast_diag("[TREEMAP] delta_rows empty -- keeping base aggregate")
+                    if growth_pct != 0:
+                        df_tree["monto"] = df_tree["monto"] * (1.0 + growth_pct / 100.0)
                     _tm_used_delta = True
             else:
                 _forecast_diag("[TREEMAP] no valid selectors -- keeping base aggregate")
+                if growth_pct != 0:
+                    df_tree["monto"] = df_tree["monto"] * (1.0 + growth_pct / 100.0)
                 _tm_delta_query_ms = (time.perf_counter() - _tm_delta_t0) * 1000
                 _tm_used_delta = True
         except Exception as _delta_exc_tm:
@@ -5770,7 +6040,7 @@ def _pg_get_treemap_data_inner(
             df_rows, _override_maps = _apply_override_effects_to_dataframe(
                 df_rows,
                 user_id=user_id,
-                base_growth_pct=0.0,
+                base_growth_pct=growth_pct,
                 max_hist_date=max_hist_date,
                 _records=_ovr_records_tm,
                 is_admin=is_admin,
@@ -5788,6 +6058,10 @@ def _pg_get_treemap_data_inner(
                 .sum()
                 .reset_index()
             )
+    elif growth_pct != 0:
+        # Sin overrides, composicion representa la misma linea gerencial que
+        # Total_User_Adj. Las altas manuales se agregan despues y no se escalan.
+        df_tree["monto"] = df_tree["monto"] * (1.0 + growth_pct / 100.0)
 
     # Normalise column name — PostgreSQL always returns lowercase aliases
     if bool(_ovr_records_tm) and not _tm_used_delta and _tm_delta_rows > 0:
@@ -7428,6 +7702,7 @@ def get_treemap_data(
     subneg: list | None = None,
     products: list | None = None,
     view_money: bool = True,
+    growth_pct: float = 25.0,
     period_date: str | None = None,
     is_admin: bool = False,
     cartera_branches: ForecastCarteraBranches | None = None,
@@ -7450,7 +7725,8 @@ def get_treemap_data(
             user_id=user_id,
             start_date=start_date, end_date=end_date,
             profiles=profiles, neg=neg, subneg=subneg,
-            products=products, view_money=view_money, period_date=period_date,
+            products=products, view_money=view_money, growth_pct=growth_pct,
+            period_date=period_date,
             is_admin=is_admin, cartera_branches=cartera_branches,
         )
 
@@ -7460,7 +7736,7 @@ def get_treemap_data(
     # now uses _data_cache["df_valorizado"] when available (avoids parquet re-read).
     # El light path no conserva la relación cuenta+UN; un usuario restringido
     # siempre cae al camino completo.
-    if not _ovr_active and not _has_manual_tm and cartera_branches is None:
+    if not _ovr_active and not _has_manual_tm and cartera_branches is None and growth_pct == 0:
         light = _local_get_treemap_data_light(
             user_id=user_id,
             start_date=start_date,
@@ -7505,6 +7781,26 @@ def get_treemap_data(
     if subneg and "subneg" in df_val.columns:
         mask &= df_val["subneg"].isin(subneg)
     df_f = df_val[mask].copy()
+
+    # Igual que Detalle Operativo: _get_patched_df_val ya materializo el
+    # factor propio de las filas con override. Las restantes conservan la
+    # curva gerencial fija; las altas manuales se concatenan despues.
+    if growth_pct != 0 and not df_f.empty:
+        data = get_data()
+        df_main = data.get("df_main", pd.DataFrame())
+        if not df_main.empty and "tipo" in df_main.columns and "fecha" in df_main.columns:
+            max_hist = df_main[df_main["tipo"] == "hist"]["fecha"].max()
+            future = df_f["fecha"] > max_hist if pd.notna(max_hist) else pd.Series(True, index=df_f.index)
+        else:
+            future = pd.Series(True, index=df_f.index)
+        if "_has_override" in df_f.columns:
+            future &= ~df_f["_has_override"].fillna(False)
+        val_col_base = "monto_yhat" if (view_money and "monto_yhat" in df_f.columns) else "yhat_cliente"
+        if val_col_base in df_f.columns:
+            df_f.loc[future, val_col_base] = (
+                df_f.loc[future, val_col_base].astype(float)
+                * (1.0 + growth_pct / 100.0)
+            )
 
     # ── Inject manual client entries ───────────────────────────────────────
     _manual_df_tm = (

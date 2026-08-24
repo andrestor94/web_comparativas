@@ -475,6 +475,7 @@ def api_treemap_data(
     subneg: Optional[List[str]] = Query(default=None, alias="subneg[]"),
     products: Optional[List[str]] = Query(default=None, alias="products[]"),
     view_money: bool = Query(default=True),
+    growth_pct: float = Query(default=25.0),
     period_date: Optional[str] = Query(default=None),
     lab_name: Optional[str] = Query(default=None),
     scenario: str = Query(default="official"),
@@ -497,6 +498,7 @@ def api_treemap_data(
                 subneg=subneg,
                 products=resolved_products,
                 view_money=view_money,
+                growth_pct=growth_pct,
                 period_date=period_date,
                 is_admin=can_view_global,
                 cartera_branches=access.branches,
@@ -2368,7 +2370,12 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
         #     Rechazado al revisar (el status sale del propio change request).
         # N/D honesto: si no hay base valorizada (impacto None) se cuenta como
         # sin_estimar de la celda y NO se inventa monto.
-        neto = _dedupe_and_resolve_overlap(records)
+        preview_pending = [
+            r for r in records
+            if r.get("status") == "pendiente" and r.get("preview_category")
+        ]
+        legacy_records = [r for r in records if r not in preview_pending]
+        neto = _dedupe_and_resolve_overlap(legacy_records)
 
         def _impact_value(r):
             v = r.get("impacto_estimado")
@@ -2401,6 +2408,21 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
             cta = _vig_norm(r.get("client_selector")) or _vig_norm(r.get("client_name"))
             por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(v)
             sel_display.setdefault(cta, r.get("client_name") or "—")
+        # Pending amounts are already netted and attributed by forecast rows.
+        for r in preview_pending:
+            if r.get("preview_category") != "efectiva":
+                continue
+            v = _impact_value(r)
+            if v is None or abs(v) <= 0.005:
+                continue
+            direction = "baja" if v < 0 else "suba"
+            matrix["pendiente"][direction]["monto"] += v
+            matrix["pendiente"][direction]["n"] += 1
+            imp_status["pendiente"] += v
+            cta = _vig_norm(r.get("client_selector")) or _vig_norm(r.get("client_name"))
+            por_cuenta[cta] = por_cuenta.get(cta, 0.0) + abs(v)
+            sel_display.setdefault(cta, r.get("client_name") or "-")
+
         for st in matrix:
             for d in ("baja", "suba"):
                 matrix[st][d]["monto"] = round(matrix[st][d]["monto"], 2)
@@ -2429,6 +2451,15 @@ def _compute_approval_kpis(records: list[dict], override_impacts: dict | None = 
         "altas_manuales": altas,
         "matrix": matrix,
         "sin_estimar_total": sin_estimar_total,
+        "pending_preview_counts": {
+            category: sum(
+                1 for r in pendientes if r.get("preview_category") == category
+            )
+            for category in (
+                "efectiva", "sin_efecto", "supersedida",
+                "redundante", "conflicto", "incompleta",
+            )
+        },
         "total": len(records),
     }
 
@@ -2628,6 +2659,76 @@ def _apply_review(
     raise ValueError("estado de revisión inválido")
 
 
+def _pending_preview_by_request(session) -> dict[int, dict]:
+    """Clasificacion autoritativa y read-only de todas las pendientes."""
+    from web_comparativas.models import ForecastChangeRequest as CR
+
+    pending = list(
+        session.query(CR)
+        .filter(CR.status == "pendiente")
+        .order_by(CR.created_at.asc(), CR.id.asc())
+        .all()
+    )
+    preview = svc.compute_pending_approval_preview(pending, growth_pct=25.0)
+    return {
+        int(request_id): dict(info or {})
+        for request_id, info in (preview.get("by_request") or {}).items()
+    }
+
+
+def _apply_bulk_reviews(
+    session,
+    candidates: list,
+    *,
+    status: str,
+    user: User,
+    motivo: Optional[str],
+    access=None,
+    visible_selectors: tuple = (),
+    preview_by_request: dict[int, dict] | None = None,
+) -> dict:
+    """Revisa un lote sin dejar que un conflicto aborte filas independientes."""
+    preview_by_request = preview_by_request or {}
+    affected = 0
+    omitted_conflicts: list[int] = []
+    owner_ids: set[int] = set()
+    ordered = sorted(
+        candidates,
+        key=lambda cr: (
+            getattr(cr, "created_at", None) or dt.datetime.min,
+            int(getattr(cr, "id", 0) or 0),
+        ),
+    )
+    for cr in ordered:
+        request_id = int(getattr(cr, "id", 0) or 0)
+        if (
+            status == "aprobado"
+            and (preview_by_request.get(request_id) or {}).get("category") == "conflicto"
+        ):
+            omitted_conflicts.append(request_id)
+            continue
+        try:
+            with session.begin_nested():
+                owner = _apply_review(
+                    session, cr, status=status, user=user, motivo=motivo,
+                    access=access, visible_selectors=visible_selectors,
+                )
+        except HTTPException as exc:
+            if status == "aprobado" and exc.status_code == 409:
+                omitted_conflicts.append(request_id)
+                continue
+            raise
+        if owner is not None:
+            owner_ids.add(int(owner))
+        affected += 1
+    return {
+        "afectados": affected,
+        "omitidos_conflicto": len(omitted_conflicts),
+        "conflict_ids": omitted_conflicts,
+        "owner_ids": owner_ids,
+    }
+
+
 @router.post("/api/approvals/{request_id:int}/approve", response_class=JSONResponse)
 def api_approvals_approve(
     request_id: int,
@@ -2797,8 +2898,24 @@ def _build_dimension_units(records: list[dict], dimension: str) -> list[dict]:
 # conservan en cada cuenta (records) para el detalle de nivel 4.
 
 def _agg_amounts(recs: list[dict]) -> tuple[float, float, float]:
-    baja = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "baja_pct"), 2)
-    suba = round(sum(_amt_of(r) for r in recs if r.get("change_type") == "suba_pct"), 2)
+    def _is_down(record):
+        if record.get("preview_category"):
+            return (
+                record.get("preview_category") == "efectiva"
+                and _amt_of(record) < 0
+            )
+        return record.get("change_type") == "baja_pct"
+
+    def _is_up(record):
+        if record.get("preview_category"):
+            return (
+                record.get("preview_category") == "efectiva"
+                and _amt_of(record) > 0
+            )
+        return record.get("change_type") == "suba_pct"
+
+    baja = round(sum(_amt_of(r) for r in recs if _is_down(r)), 2)
+    suba = round(sum(_amt_of(r) for r in recs if _is_up(r)), 2)
     neto = round(sum(_amt_of(r) for r in recs), 2)
     return baja, suba, neto
 
@@ -2820,7 +2937,9 @@ def _build_account_unit(cuenta: str, recs: list[dict]) -> dict:
     los eventos crudos para el detalle de nivel 4 (no se pierde nada).
     """
     # IMPORTANTE: deduplicar ANTES de tocar _created_sort (lo usa el dedupe).
-    survivors = _dedupe_and_resolve_overlap(recs)
+    preview_rows = [r for r in recs if r.get("preview_category")]
+    legacy_rows = [r for r in recs if r not in preview_rows]
+    survivors = _dedupe_and_resolve_overlap(legacy_rows) + preview_rows
     baja, suba, neto = _agg_amounts(survivors)
     estados = {"pendiente": 0, "aprobado": 0, "rechazado": 0}
     for r in survivors:
@@ -2848,6 +2967,12 @@ def _build_account_unit(cuenta: str, recs: list[dict]) -> dict:
     pending_ids = [r.get("id") for r in recs
                    if (r.get("status") or "pendiente") == "pendiente"
                    and r.get("can_review") and r.get("id") is not None]
+    conflict_ids = [r.get("id") for r in recs
+                    if r.get("id") in pending_ids
+                    and r.get("preview_category") == "conflicto"]
+    conflict_set = set(conflict_ids)
+    approvable_ids = [request_id for request_id in pending_ids
+                      if request_id not in conflict_set]
 
     return {
         "type": "account",
@@ -2864,6 +2989,10 @@ def _build_account_unit(cuenta: str, recs: list[dict]) -> dict:
         "pendientes": estados["pendiente"],
         "pending_ids": pending_ids,
         "pending_count": len(pending_ids),
+        "conflict_ids": conflict_ids,
+        "conflict_count": len(conflict_ids),
+        "approvable_ids": approvable_ids,
+        "approvable_count": len(approvable_ids),
         "periodo_desde": periodos[0] if periodos else None,
         "periodo_hasta": periodos[-1] if periodos else None,
         "records": eventos,
@@ -2910,8 +3039,12 @@ def _build_node(level: str, label: str, value: str, is_sin: bool, children: list
     # los de sus hijos (hojas o sub-nodos). Selección por IDs concretos → aprobar
     # este nodo no toca CR de otro camino (otro perfil/grupo bajo otra rama).
     pending_ids: list = []
+    conflict_ids: list = []
+    approvable_ids: list = []
     for c in children:
         pending_ids.extend(c.get("pending_ids") or [])
+        conflict_ids.extend(c.get("conflict_ids") or [])
+        approvable_ids.extend(c.get("approvable_ids") or [])
     return {
         "type": "node",
         "level": level,         # grupo|perfil|neg|subneg → tag del front
@@ -2928,6 +3061,10 @@ def _build_node(level: str, label: str, value: str, is_sin: bool, children: list
         "pendientes": estados["pendiente"],
         "pending_ids": pending_ids,
         "pending_count": len(pending_ids),
+        "conflict_ids": conflict_ids,
+        "conflict_count": len(conflict_ids),
+        "approvable_ids": approvable_ids,
+        "approvable_count": len(approvable_ids),
         "children": children,
     }
 
@@ -3203,14 +3340,35 @@ def _compute_meta_gauge(session, user: User) -> dict:
         except Exception:
             forecast_year = None
 
-        impacts = svc.compute_approval_curve_impacts(growth_pct=25.0, is_admin=True)
-        rows_all = _query_change_requests(session, {}, cap=_MAX_CR_POOL)   # TODOS los CRs
-        records_all = [_cr_to_dict(r) for r in rows_all]
-        by = _impacts_by_status(records_all, impacts)
+        # Aprobado ES la serie oficial visible, no meta + impactos reclasificados
+        # por status. Esa formula anterior quitaba del oficial un override cuando
+        # su request mas reciente seguia pendiente.
+        official_rows = [
+            row for row in ((cd or {}).get("forecast") or [])
+            if str(row.get("fecha") or "")[:4] == str(forecast_year)
+        ]
+        proy_aprobados = sum(
+            float(row.get("Total_User_Adj") or 0.0) for row in official_rows
+        )
+        if proy_aprobados <= 0:
+            return {"disponible": False, "efecto_detectado": False}
 
-        proy_aprobados = meta + by["aprobado"]
-        proy_aprob_pend = meta + by["aprobado"] + by["pendiente"]
-        efecto = (abs(by["aprobado"]) + abs(by["pendiente"]) + abs(by["rechazado"])) > 0.5
+        from web_comparativas.models import ForecastChangeRequest as CR
+        pending_rows = list(
+            session.query(CR)
+            .filter(CR.status == "pendiente")
+            .order_by(CR.created_at.asc(), CR.id.asc())
+            .all()
+        )
+        preview = svc.compute_pending_approval_preview(
+            pending_rows, growth_pct=25.0
+        )
+        proy_aprob_pend = proy_aprobados + float(
+            preview.get("effective_delta") or 0.0
+        )
+        efecto = abs(proy_aprobados - meta) > 0.5 or abs(
+            preview.get("effective_delta") or 0.0
+        ) > 0.5
         return {
             "disponible": True,
             "efecto_detectado": bool(efecto),
@@ -3219,12 +3377,49 @@ def _compute_meta_gauge(session, user: User) -> dict:
             "meta": round(meta, 0),
             "proy_aprobados": round(proy_aprobados, 0),
             "proy_aprob_pend": round(proy_aprob_pend, 0),
-            "pct_aprobados": round(proy_aprobados / meta * 100, 1),
-            "pct_si_pendientes": round(proy_aprob_pend / meta * 100, 1),
+            "pct_aprobados": round(proy_aprobados / meta * 100, 4),
+            "pct_si_pendientes": round(proy_aprob_pend / meta * 100, 4),
+            "pending_preview": {
+                key: preview.get(key)
+                for key in (
+                    "selected", "effective_delta", "effective_down",
+                    "effective_up", "counts", "unattributed_delta",
+                )
+            },
+            "_preview_by_request": preview.get("by_request") or {},
         }
     except Exception as exc:
         logger.warning("meta gauge failed: %s", exc)
         return {"disponible": False, "efecto_detectado": False}
+
+
+def _annotate_pending_preview(
+    records: list[dict], preview_by_request: dict
+) -> None:
+    """Reemplaza solo el impacto visual pendiente por el delta efectivo."""
+    for record in records:
+        if record.get("status") != "pendiente":
+            continue
+        info = (preview_by_request or {}).get(int(record.get("id") or 0))
+        record["impacto_estimado_original"] = record.get("impacto_estimado")
+        if info is None:
+            record["preview_category"] = "incompleta"
+            record["impacto_estimado"] = None
+            continue
+        record["preview_category"] = info.get("category")
+        record["preview_official_before"] = info.get("official_before")
+        record["preview_official_after"] = info.get("official_after")
+        is_conflict = info.get("category") == "conflicto"
+        record["approval_blocked"] = is_conflict
+        record["preview_explanation"] = (
+            "El valor inicial de la solicitud ya no coincide con el Forecast oficial vigente."
+            if is_conflict else None
+        )
+        record["impacto_estimado"] = (
+            float(info.get("effective_delta") or 0.0)
+            if info.get("category") == "efectiva"
+            else None
+        )
 
 
 @router.get("/api/approvals/tree", response_class=JSONResponse)
@@ -3282,7 +3477,10 @@ def api_approvals_tree(
             # Medidor de meta: GLOBAL (sobre TODOS los CRs, no `records` filtrado).
             gauge = _compute_meta_gauge(session, user)
 
-        # KPIs/matriz desde los propios change requests (delta real, por status).
+        preview_by_request = gauge.pop("_preview_by_request", {})
+        _annotate_pending_preview(records, preview_by_request)
+
+        # Pendientes y gauge salen del mismo replay efectivo.
         kpis = _compute_approval_kpis(records)
 
         # _build_tree consume _created_sort (vía dedupe) y luego lo descarta;
@@ -3344,7 +3542,7 @@ def _group_filters(payload: "_GroupReviewPayload") -> dict:
     )
 
 
-def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) -> int:
+def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) -> dict:
     """Aplica revisión (aprobado/rechazado) a las modificaciones PENDIENTES de la
     UNIDAD elegida (grupo de clientes o bucket de perfil/negocio/subnegocio),
     dentro del contexto/filtros actuales. Re-deriva el conjunto en el servidor
@@ -3376,8 +3574,6 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
         vkey = (payload.value or "").strip().lower()  # "" → bucket "Sin X" (NULL/vacío)
         col = _DIM_MODEL_COL[dim]
 
-    n = 0
-    reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
         rows = _filter_visible_approval_requests(session, user, rows)
@@ -3387,6 +3583,7 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
             cr for cr in rows
             if _can_review_approval_request(session, user, cr, access, visible_selectors)
         ]
+        candidates = []
         for cr in rows:
             if cr.status != "pendiente":
                 continue
@@ -3403,17 +3600,18 @@ def _review_group(payload: "_GroupReviewPayload", *, status: str, user: User) ->
                 colval = str(getattr(cr, col, None) or "").strip().lower()
                 if colval != vkey:  # vkey "" matchea NULL/vacío (Sin X)
                     continue
-            owner = _apply_review(
-                session, cr, status=status, user=user, motivo=motivo,
-                access=access, visible_selectors=visible_selectors,
-            )
-            if owner is not None:
-                reverted_owner_ids.add(owner)
-            n += 1
+            candidates.append(cr)
+        preview = _pending_preview_by_request(session) if status == "aprobado" else {}
+        result = _apply_bulk_reviews(
+            session, candidates, status=status, user=user, motivo=motivo,
+            access=access, visible_selectors=visible_selectors,
+            preview_by_request=preview,
+        )
         session.commit()
-    if reverted_owner_ids:
+    if result["owner_ids"]:
         svc.clear_response_cache()
-    return n
+    result.pop("owner_ids", None)
+    return result
 
 
 @router.post("/api/approvals/group/approve", response_class=JSONResponse)
@@ -3425,8 +3623,9 @@ def api_approvals_group_approve(
     """Aprueba todas las modificaciones pendientes del grupo (contexto actual). Solo Admin/Gerente."""
     _require_aprobaciones_edit(user)
     try:
-        n = _review_group(payload, status="aprobado", user=user)
-        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value, "status": "aprobado", "afectados": n})
+        result = _review_group(payload, status="aprobado", user=user)
+        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value,
+                             "status": "aprobado", **result})
     except HTTPException:
         raise
     except Exception as exc:
@@ -3445,8 +3644,9 @@ def api_approvals_group_reject(
     if not (payload.motivo or "").strip():
         raise HTTPException(400, "Debe indicar un motivo para rechazar el grupo.")
     try:
-        n = _review_group(payload, status="rechazado", user=user)
-        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value, "status": "rechazado", "afectados": n})
+        result = _review_group(payload, status="rechazado", user=user)
+        return JSONResponse({"ok": True, "grupo": payload.grupo or payload.value,
+                             "status": "rechazado", **result})
     except HTTPException:
         raise
     except Exception as exc:
@@ -3486,7 +3686,7 @@ def _ids_filters(payload: "_ByIdsReviewPayload") -> dict:
     )
 
 
-def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -> int:
+def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -> dict:
     """Aplica revisión (aprobado/rechazado) SOLO a los CR cuyo id viene en
     payload.ids Y que, re-derivados server-side desde los filtros vigentes, sigan
     PENDIENTES. Re-validación: no se confía en los ids del cliente — se intersecan
@@ -3496,11 +3696,10 @@ def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -
         raise HTTPException(503, "Almacenamiento no disponible")
     requested = {int(i) for i in (payload.ids or [])}
     if not requested:
-        return 0
+        return {"afectados": 0, "omitidos_conflicto": 0,
+                "conflict_ids": [], "owner_ids": []}
     motivo = (payload.motivo or "").strip() or None
     filters = _ids_filters(payload)
-    n = 0
-    reverted_owner_ids: set[int] = set()
     with SessionLocal() as session:
         rows = _query_change_requests(session, filters, cap=_MAX_CR_POOL)
         rows = _filter_visible_approval_requests(session, user, rows)
@@ -3518,19 +3717,17 @@ def _review_by_ids(payload: "_ByIdsReviewPayload", *, status: str, user: User) -
         # para un payload manipulado la respuesta debe ser fail-closed.
         if requested != set(eligible):
             raise HTTPException(403, "Una o más aprobaciones están fuera del alcance autorizado")
-        for request_id in sorted(requested):
-            cr = eligible[request_id]
-            owner = _apply_review(
-                session, cr, status=status, user=user, motivo=motivo,
-                access=access, visible_selectors=visible_selectors,
-            )
-            if owner is not None:
-                reverted_owner_ids.add(owner)
-            n += 1
+        preview = _pending_preview_by_request(session) if status == "aprobado" else {}
+        result = _apply_bulk_reviews(
+            session, list(eligible.values()), status=status, user=user,
+            motivo=motivo, access=access, visible_selectors=visible_selectors,
+            preview_by_request=preview,
+        )
         session.commit()
-    if reverted_owner_ids:
+    if result["owner_ids"]:
         svc.clear_response_cache()
-    return n
+    result.pop("owner_ids", None)
+    return result
 
 
 @router.post("/api/approvals/by-ids/approve", response_class=JSONResponse)
@@ -3542,8 +3739,8 @@ def api_approvals_by_ids_approve(
     """Aprueba los CR pendientes indicados por id (un nodo del árbol). Solo Admin/Gerente."""
     _require_aprobaciones_edit(user)
     try:
-        n = _review_by_ids(payload, status="aprobado", user=user)
-        return JSONResponse({"ok": True, "status": "aprobado", "afectados": n})
+        result = _review_by_ids(payload, status="aprobado", user=user)
+        return JSONResponse({"ok": True, "status": "aprobado", **result})
     except HTTPException:
         raise
     except Exception as exc:
@@ -3562,8 +3759,8 @@ def api_approvals_by_ids_reject(
     if not (payload.motivo or "").strip():
         raise HTTPException(400, "Debe indicar un motivo para rechazar.")
     try:
-        n = _review_by_ids(payload, status="rechazado", user=user)
-        return JSONResponse({"ok": True, "status": "rechazado", "afectados": n})
+        result = _review_by_ids(payload, status="rechazado", user=user)
+        return JSONResponse({"ok": True, "status": "rechazado", **result})
     except HTTPException:
         raise
     except Exception as exc:
