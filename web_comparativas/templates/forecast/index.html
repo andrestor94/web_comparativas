@@ -2075,6 +2075,8 @@
   .appr-badge--ok { background: var(--g-green-light); color: var(--g-green); }
   .appr-badge--no { background: var(--g-red-light); color: var(--g-red); }
   .appr-badge--mix { background: #ede7f6; color: #6c3fe0; }
+  .appr-badge--conflict { background:#fce8e6; color:#b3261e; border:1px solid #f4b7b2; }
+  .appr-act:disabled, .appr-gbtn:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
 
   /* ── Banda de grupo (fila padre) — sección full-width, clara y premium ── */
   table.appr-table tbody tr.appr-group-row { cursor: pointer; }
@@ -2835,7 +2837,7 @@
           // SOLO presentación: no cambia el cálculo del gauge ni el cableado externo.
           (function(){
             const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-            const fmtN = v => v.toFixed(1).replace('.', ',');        // número es-AR (sin %)
+            const fmtN = v => v.toFixed(2).replace('.', ',');
             const fmt1 = v => fmtN(v) + '%';
             const REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
             let _mgFirst = true;                                     // el draw/count-up corre UNA sola vez
@@ -7273,10 +7275,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const noteEl = document.getElementById('appr-matrix-note');
     if (noteEl) {
       const sinTot = k.sin_estimar_total || 0;
-      noteEl.textContent = sinTot
-        ? `Valores estimados (ARS) · ${sinTot.toLocaleString('es-AR')} sin base (N/D)`
-        : 'Valores estimados (ARS)';
-      noteEl.style.color = sinTot ? '#b06000' : '';
+      const pc = k.pending_preview_counts || {};
+      const effective = pc.efectiva || 0;
+      const noEffect = pc.sin_efecto || 0;
+      const conflicts = pc.conflicto || 0;
+      const excluded = noEffect + (pc.supersedida || 0)
+        + (pc.redundante || 0) + (pc.conflicto || 0) + (pc.incompleta || 0);
+      noteEl.textContent = `Preview pendiente: ${effective} efectivas`
+        + ` / ${noEffect} sin efecto / ${conflicts} conflictos`
+        + (excluded > noEffect + conflicts ? ` / ${excluded-noEffect-conflicts} otras no efectivas` : '')
+        + (sinTot ? ` / ${sinTot} sin base` : '');
+      noteEl.style.color = (excluded || sinTot) ? '#b06000' : '';
     }
   }
 
@@ -7300,15 +7309,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Fila individual (cliente/modificación) — sirve para sueltos y para hijos de grupo
   function _apprRowHtml(r, isChild) {
     const pend = r.status === 'pendiente';
+    const conflict = r.preview_category === 'conflicto' || r.approval_blocked === true;
     // Auditor (solo lectura): nunca se muestran Aprobar/Rechazar, solo Ver detalle.
     const detailBtn = `<button class="appr-act" title="Ver detalle" onclick="_apprDetail(${r.id})"><i class="bi bi-eye"></i></button>`;
     const actions = (pend && r.can_review && _FC_APPR_CAN_EDIT)
-      ? `<button class="appr-act appr-act--ok" title="Aprobar" onclick="_apprApprove(${r.id})"><i class="bi bi-check-lg"></i></button>
+      ? `<button class="appr-act appr-act--ok" title="${conflict ? 'No se puede aprobar: el valor inicial ya no coincide con el oficial' : 'Aprobar'}" ${conflict ? 'disabled aria-disabled="true"' : `onclick="_apprApprove(${r.id})"`}><i class="bi bi-check-lg"></i></button>
          <button class="appr-act appr-act--no" title="Rechazar" onclick="_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i></button>
          ${detailBtn}`
       : detailBtn;
+    const conflictBadge = conflict
+      ? `<div style="margin-top:4px;"><span class="appr-badge appr-badge--conflict" title="El valor inicial de la solicitud ya no coincide con el Forecast oficial vigente.">Conflicto</span><div class="appr-cell-sub">El valor inicial ya no coincide con el oficial.</div></div>` : '';
     const estadoCell = pend
-      ? statusBadge(r.status)
+      ? statusBadge(r.status) + conflictBadge
       : `${statusBadge(r.status)}<div class="appr-cell-sub" style="margin-top:4px;">${esc(r.revisado_por)} · ${esc(r.revisado_el)}</div>`;
     const art = (r.codigo_serie && r.codigo_serie !== '—')
       ? `<div class="appr-cell-sub"><span class="appr-code">${esc(r.codigo_serie)}</span></div>` : '';
@@ -7476,11 +7488,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // variable), para togglear/aprobar sin pasar strings frágiles por onclick.
   function _apprAssignUids(tree) {
     _apprNodeByUid = {};
+    _apprById = {};
+    _apprRecords = [];
     let uid = 0;
     (function walk(items) {
       (items || []).forEach(it => {
         it.__uid = uid++; _apprNodeByUid[it.__uid] = it;
-        if (it.type === 'account') return;       // hoja: no desciende
+        if (it.type === 'account') {
+          (it.records || []).forEach(r => {
+            _apprById[r.id] = r;
+            _apprRecords.push(r);
+          });
+          return;
+        }
         walk(it.children || []);
       });
     })(tree || []);
@@ -7518,8 +7538,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // _FC_APPR_CAN_EDIT y por pending_count>0 (solo-lectura → sin botones).
   function _apprNodeActions(node, nounSingular) {
     const pend = node.pending_count || 0;
+    const conflicts = node.conflict_count || 0;
+    const approvable = node.approvable_count == null ? Math.max(0, pend - conflicts) : node.approvable_count;
     if (pend > 0 && _FC_APPR_CAN_EDIT) {
-      return `<button class="appr-gbtn appr-gbtn--ok" title="Aprobar ${nounSingular}" onclick="event.stopPropagation();_apprApproveNode(${node.__uid})"><i class="bi bi-check2-all"></i> Aprobar</button>
+      const disabled = approvable <= 0 ? ' disabled aria-disabled="true"' : '';
+      const approveTitle = approvable > 0
+        ? `Aprobar ${approvable} solicitud(es); ${conflicts} conflicto(s) se omitiran`
+        : `No hay solicitudes aprobables; ${conflicts} conflicto(s) estan bloqueados`;
+      return `<button class="appr-gbtn appr-gbtn--ok" title="${approveTitle}"${disabled} onclick="event.stopPropagation();_apprApproveNode(${node.__uid})"><i class="bi bi-check2-all"></i> Aprobar (${approvable})</button>
          <button class="appr-gbtn appr-gbtn--no" title="Rechazar ${nounSingular}" onclick="event.stopPropagation();_apprOpenRejectNode(${node.__uid})"><i class="bi bi-x-octagon"></i> Rechazar</button>`;
     }
     return pend > 0
@@ -7559,6 +7585,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // toggle; ya no despliega eventos). Muestra resumen + botones por cuenta.
   function _apprAccountRowHtml(a, depth) {
     const meta = `${a.celdas_vigentes} celda${a.celdas_vigentes!==1?'s':''} vigente${a.celdas_vigentes!==1?'s':''}`;
+    const conflictRecords = (a.records || []).filter(r =>
+      r.status === 'pendiente' && (r.preview_category === 'conflicto' || r.approval_blocked === true));
+    const conflictBadges = conflictRecords.map(r =>
+      `<button type="button" class="appr-badge appr-badge--conflict" title="Solicitud #${r.id}: el valor inicial ya no coincide con el oficial" onclick="event.stopPropagation();_apprDetail(${r.id})">Conflicto</button>`
+    ).join(' ');
+    const conflictInfo = conflictRecords.length
+      ? `<div class="appr-group-meta">${conflictBadges}<span style="margin-left:6px;">El valor inicial ya no coincide con el oficial.</span></div>` : '';
     return `<tr class="appr-group-row appr-tree-cuenta appr-tree-leaf">
       <td colspan="${_NC}">
         <div class="appr-group-bar" style="padding-left:${depth*22}px;">
@@ -7567,6 +7600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="appr-group-id">
             <div class="appr-group-name" title="${esc(a.cuenta)}">${esc(a.cuenta)}</div>
             <div class="appr-group-meta">${meta}</div>
+            ${conflictInfo}
           </div>
           <div class="appr-group-cluster">
             ${_apprStatusCluster(a)}
@@ -7626,12 +7660,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       _apprPages = d.pages;
       _apprTree = d.tree || [];
       _apprAssignUids(_apprTree);
-      _apprTreeExpanded = {};   // colapsado por defecto tras cada carga
-      // RETIRADO (Cambio 1: cuenta = hoja, sin eventos individuales): el indexado
-      // de eventos (_apprById/_apprRecords) para "Ver detalle"/impresión por evento
-      // ya no se usa. Se deja inicializado vacío y rotulado para limpieza posterior.
-      _apprById = {};
-      _apprRecords = [];
+      _apprTreeExpanded = {};
       _apprTotal = d.total_records || 0;
       _apprThreshold = d.high_impact_threshold || _apprThreshold;
       _apprRenderKpis(d.kpis || {});
@@ -7670,12 +7699,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const node = _apprNodeByUid[uid];
     if (!node) return;
     const n = node.pending_count || 0;
-    if (n <= 0) return;
-    if (!confirm(`¿Aprobar las ${n} modificación(es) pendiente(s) de ${_apprNodeLabel(node)}?\nQuedarán registradas como aprobadas por Dirección.`)) return;
+    const conflicts = node.conflict_count || 0;
+    const approvable = node.approvable_count == null ? Math.max(0, n - conflicts) : node.approvable_count;
+    if (n <= 0 || approvable <= 0) return;
+    if (!confirm(`Aprobar ${approvable} de las ${n} solicitudes pendientes de ${_apprNodeLabel(node)}?\nSe omitiran explicitamente ${conflicts} conflicto(s).`)) return;
     _apprSetStatus('Aprobando…', 'var(--g-blue)');
     try {
       const d = await _apprPost('/forecast/api/approvals/by-ids/approve', _apprByIdsBody(node));
-      _apprSetStatus(`Aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
+      _apprSetStatus(`Aprobadas: ${d.afectados}. Conflictos omitidos: ${d.omitidos_conflicto || 0}.`, 'var(--g-green)');
       _apprFetch();
     } catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
   };
@@ -7861,7 +7892,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Acciones individuales ──────────────────────────────────────
   window._apprApprove = async function(id) {
-    if (!confirm('¿Aprobar esta propuesta? Recién entonces pasará al Forecast oficial.')) return;
+    const record = _apprById[id];
+    if (record && (record.preview_category === 'conflicto' || record.approval_blocked === true)) {
+      const msg = 'No se puede aprobar: el valor inicial de la solicitud ya no coincide con el Forecast oficial vigente.';
+      _apprSetStatus(msg, '#d93025');
+      alert(msg);
+      return;
+    }
+    if (!confirm('Aprobar esta propuesta? Recien entonces pasara al Forecast oficial.')) return;
     _apprSetStatus('Aprobando…', 'var(--g-blue)');
     try { await _apprPost(`/forecast/api/approvals/${id}/approve`, {}); _apprFetch(); }
     catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
@@ -7877,7 +7915,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _apprSetStatus('Aprobando…', 'var(--g-blue)');
     try {
       const d = await _apprPost('/forecast/api/approvals/group/approve', _apprGroupBody(_apprUnitValue(u)));
-      _apprSetStatus(`Aprobado: ${d.afectados} modificación(es).`, 'var(--g-green)');
+      _apprSetStatus(`Aprobadas: ${d.afectados}. Conflictos omitidos: ${d.omitidos_conflicto || 0}.`, 'var(--g-green)');
       _apprFetch();
     } catch (err) { _apprSetStatus('Error: ' + (err.message || err), '#d93025'); alert(err.message || err); }
   };
@@ -7975,6 +8013,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window._apprDetail = function(id) {
     const r = _apprById[id];
     if (!r) return;
+    const conflict = r.preview_category === 'conflicto' || r.approval_blocked === true;
     const row = (label, val) => `<div class="appr-dt-row"><span class="appr-dt-k">${label}</span><span class="appr-dt-v">${val}</span></div>`;
     const body = document.getElementById('appr-detail-body');
     if (body) body.innerHTML = [
@@ -7995,6 +8034,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       row('Período', esc(r.periodo)),
       row('Alcance', esc(r.scope_type)),
       row('Estado', statusBadge(r.status)),
+      (conflict ? row('Validacion', '<span class="appr-badge appr-badge--conflict">Conflicto</span><div class="appr-cell-sub">El valor inicial ya no coincide con el oficial.</div>') : ''),
       (r.status !== 'pendiente' ? row('Revisado por', esc(r.revisado_por) + ' — ' + esc(r.revisado_el)) : ''),
       (r.motivo ? row('Observación / Motivo', esc(r.motivo)) : ''),
     ].join('');
@@ -8002,7 +8042,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (foot) {
       // Auditor (solo lectura): el detalle no ofrece Aprobar/Rechazar, solo Cerrar.
       foot.innerHTML = (r.status === 'pendiente' && r.can_review && _FC_APPR_CAN_EDIT)
-        ? `<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" onclick="_apprCloseDetail();_apprApprove(${r.id})"><i class="bi bi-check-lg"></i> Aprobar</button>
+        ? `${conflict
+             ? '<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" disabled aria-disabled="true" title="El valor inicial ya no coincide con el oficial"><i class="bi bi-check-lg"></i> Aprobar</button>'
+             : `<button class="btn btn-sm" style="background:#0f9d58;color:#fff;" onclick="_apprCloseDetail();_apprApprove(${r.id})"><i class="bi bi-check-lg"></i> Aprobar</button>`}
            <button class="btn btn-sm" style="background:#d93025;color:#fff;" onclick="_apprCloseDetail();_apprOpenReject(${r.id})"><i class="bi bi-x-lg"></i> Rechazar</button>
            <button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`
         : `<button class="btn btn-sm btn-outline-secondary" onclick="_apprCloseDetail()">Cerrar</button>`;
