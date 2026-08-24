@@ -431,12 +431,14 @@
                             </select>
                         </div>
                         <div class="text-white-50 small mt-1">
-                            Acota únicamente la cartera propia de este Supervisor (sus propios códigos de
-                            vendedor): sin ninguna marcada, no ve cuentas propias del lado vendedor
-                            (fail-closed). No afecta lo que hereda de sus analistas a cargo — esa cartera
-                            entra completa, sin filtrar por esta UN. "Sin unidad asignada" es un bucket
-                            real (~52% de las filas del padrón) — hay que otorgarlo a propósito si
-                            corresponde, no queda tildado por default.
+                            Acota únicamente el lado VENDEDOR de la cartera propia de este Supervisor: sin
+                            ninguna marcada, no ve cuentas propias del lado vendedor (fail-closed). El lado
+                            OPERADOR (Mercado Público) entra siempre completo — el padrón de operadores no
+                            trae unidad de negocio, así que esta UN nunca lo filtra, esté vacía o no. No
+                            afecta lo que hereda de sus analistas a cargo — esa cartera entra completa, sin
+                            filtrar por esta UN. "Sin unidad asignada" es un bucket real (~52% de las filas
+                            del padrón) — hay que otorgarlo a propósito si corresponde, no queda tildado
+                            por default.
                         </div>
                     </div>
                 </div>

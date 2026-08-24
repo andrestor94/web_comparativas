@@ -9,6 +9,12 @@ Contrato — FAIL-CLOSED (decisión de negocio, no accidente):
     — no reutilizar esa convención acá. Ver comentario en `models.py` sobre
     `cartera_operador_codigos` / `cartera_vendedor_codigos` / `cartera_unineg_scope`.
 
+Contrato — `cartera_unineg_scope` acota SOLO el lado vendedor:
+    `operadores_comerciales.csv` no trae unidad de negocio, así que el lado
+    operador de la cartera propia de un Supervisor entra siempre completo — con
+    UN asignada, sin asignar, o con el scope vacío (fail-closed solo aplica al
+    lado vendedor, nunca al operador). Ver `_cartera_propia()`.
+
 Reusa la jerarquía (`analistas_a_cargo` / `supervisores_a_cargo`, vía `reporta_a_id`)
 del motor ya construido para Oportunidades en `oportunidades_visibilidad.py` — un
 solo lugar donde vive la lógica de "quién reporta a quién" para cartera comercial.
@@ -143,8 +149,15 @@ def _clientes_por_vendedor(
 
 def _cartera_propia(db: Session, u: User, unineg_scope: set[str] | None = None) -> set[str]:
     """Cuentas propias de un usuario: unión de lo que le toca por su código de
-    operador y por su(s) código(s) de vendedor. `unineg_scope` solo se aplica al lado
-    vendedor (operadores_comerciales.csv no trae unidad de negocio).
+    operador y por su(s) código(s) de vendedor. `unineg_scope` se aplica
+    EXCLUSIVAMENTE al lado vendedor: `operadores_comerciales.csv` no trae unidad
+    de negocio, así que el lado operador entra siempre completo, sin importar el
+    valor de `unineg_scope` (incluido vacío) — no hay columna `unineg` contra la
+    que filtrarlo. Bug real que esto corrige (2026-08-24, caso Yanina Sassone):
+    una intersección posterior contra `CarteraVendedor` se aplicaba sobre la unión
+    completa (operador + vendedor), así que un cliente que solo existe en
+    `cartera_operadores` (Mercado Público, sin fila en `cartera_vendedores`)
+    quedaba excluido siempre, sin importar qué UN se le asignara al Supervisor.
 
     `unineg_scope` es EXCLUSIVAMENTE el scope del propio `u` — nunca el de un
     superior ni el de un subordinado (regla corregida 2026-08-20: la jerarquía
@@ -155,23 +168,15 @@ def _cartera_propia(db: Session, u: User, unineg_scope: set[str] | None = None) 
     fusion_operadores, fusion_vendedores, _match = fusion_codes_for_user(db, u)
     operadores = _codes(u.cartera_operador_codigos) | fusion_operadores
     vendedores = _codes(u.cartera_vendedor_codigos) | fusion_vendedores
-    codigos = _clientes_por_operador(db, operadores) | _clientes_por_vendedor(
-        db, vendedores, unineg_scope
-    )
-    if unineg_scope is not None:
-        # Supervisor = cartera encontrada ∩ unidades autorizadas. Se aplica sobre
-        # el resultado completo, incluido el lado operador.
-        if not unineg_scope:
-            return set()
-        permitidos = {
-            row[0]
-            for row in db.query(CarteraVendedor.codigo_cliente)
-            .filter(CarteraVendedor.unineg.in_(unineg_scope))
-            .distinct()
-            .all()
-        }
-        codigos &= permitidos
-    return codigos
+
+    codigos_operador = _clientes_por_operador(db, operadores)
+    if unineg_scope is not None and not unineg_scope:
+        # Supervisor sin BU asignada explícita: fail-closed, pero solo del lado
+        # vendedor — el operador no tiene UN de la que "cerrarse".
+        codigos_vendedor: set[str] = set()
+    else:
+        codigos_vendedor = _clientes_por_vendedor(db, vendedores, unineg_scope)
+    return codigos_operador | codigos_vendedor
 
 
 def clientes_visibles_para(db: Session, user: User) -> CarteraScope:
