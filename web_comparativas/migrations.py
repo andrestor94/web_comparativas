@@ -1823,6 +1823,27 @@ def ensure_dimensionamiento_entidad_columns():
               "El esquema de identidad puede estar incompleto — NO asumir que quedo aplicado.", flush=True)
 
 
+def ensure_dimensionamiento_import_runs_oportunidades_ref_month_column():
+    """`dimensionamiento_import_runs.oportunidades_ref_month` (ago-2026, optimización de
+    /list Oportunidades — medido: `_window_meta` recalculando esto en cada carga se
+    llevaba ~20s, 82% del tiempo total del endpoint). Ver comentario en
+    `models.DimensionamientoImportRun`. Columna nueva, nullable: no rompe runs
+    existentes — quedan NULL, `_window_meta` cae al cálculo on-the-fly para esos
+    (sin backfill forzado, ver comentario en oportunidades_router.py::_window_meta).
+    Se puebla sola en runs NUEVOS, desde `rebuild_oportunidades_for_run`.
+    """
+    with engine.begin() as conn:
+        ok = _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_import_runs ADD COLUMN oportunidades_ref_month DATE",
+            "dimensionamiento_import_runs.oportunidades_ref_month",
+        )
+    if ok:
+        print("[MIGRATION] SUCCESS: dimensionamiento_import_runs.oportunidades_ref_month verificada/creada.", flush=True)
+    else:
+        print("[MIGRATION] ATENCION: no se pudo verificar/crear oportunidades_ref_month (ver traceback arriba).", flush=True)
+
+
 def ensure_dimensionamiento_entidad_backfill():
     """Backfill AUTOMÁTICO de identidad si el registry está VACÍO para el run activo
     (arranque en frío post-deploy: las columnas existen pero nadie resolvió todavía).

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from web_comparativas.models import IS_POSTGRES
 
 from .models import (
+    DimensionamientoImportRun,
     DimensionamientoRecord,
     OportunidadSummary,
 )
@@ -632,6 +633,18 @@ def rebuild_oportunidades_for_run(
     )
     if rows:
         session.execute(OportunidadSummary.__table__.insert(), rows)
+
+    # Persiste el ancla (ref_month) en la MISMA transacción que reescribe
+    # oportunidades_summary — ver oportunidades_router.py::_window_meta, que lo lee
+    # de acá en vez de recalcularlo agregando sobre todo dimensionamiento_records en
+    # cada carga de /list. Run y ancla quedan sincronizados: o avanzan juntos, o
+    # ninguno (si `stats` no trae ref_month —run sin datos—, no hay nada que guardar).
+    ref_month_iso = stats.get("ref_month")
+    if ref_month_iso:
+        run_obj = session.get(DimensionamientoImportRun, target_run_id)
+        if run_obj is not None:
+            run_obj.oportunidades_ref_month = dt.date.fromisoformat(ref_month_iso)
+
     if commit:
         session.commit()
 

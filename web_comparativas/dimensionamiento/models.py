@@ -44,6 +44,16 @@ class DimensionamientoImportRun(Base):
     summary = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
 
+    # Ancla de Oportunidades (ago-2026, optimización de /list): "último mes completo"
+    # del run, calculado UNA VEZ por `computar_oportunidades` (oportunidades.py) y
+    # persistido acá en la misma transacción que reescribe `oportunidades_summary`
+    # (`rebuild_oportunidades_for_run`). `_window_meta` (oportunidades_router.py) lo
+    # lee de acá en vez de recalcularlo agregando sobre TODO `dimensionamiento_records`
+    # del run en cada carga de /list (medido: ~20s, 82% del tiempo total del endpoint).
+    # NULL para runs de antes de este cambio — `_window_meta` cae al cálculo on-the-fly
+    # para esos (sin backfill forzado, ver comentario ahí).
+    oportunidades_ref_month = Column(Date, nullable=True)
+
     records = relationship("DimensionamientoRecord", back_populates="import_run")
     summaries = relationship("DimensionamientoFamilyMonthlySummary", back_populates="import_run")
     snapshots = relationship("DimensionamientoDashboardSnapshot", back_populates="import_run")

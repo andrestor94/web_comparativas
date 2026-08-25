@@ -640,12 +640,27 @@ def _row_to_dict(
     }
 
 
-def _window_meta(db: Session, run_id: int) -> dict[str, Any]:
-    """Etiqueta de la ventana de demanda vigente (desde el ancla del motor)."""
-    anchor = _detectar_ultimo_mes_completo(db, run_id)
-    if not anchor:
-        return {"label": None, "ref_month": None, "window_start": None, "window_end": None}
-    ref_month = anchor["ref_month"]
+def _window_meta(db: Session, run: DimensionamientoImportRun) -> dict[str, Any]:
+    """Etiqueta de la ventana de demanda vigente (desde el ancla del motor).
+
+    `ref_month` sale de `run.oportunidades_ref_month` — calculado UNA VEZ por
+    `computar_oportunidades` (oportunidades.py) al correr el pipeline, y persistido
+    ahí en la misma transacción que reescribe `oportunidades_summary` (ver
+    `rebuild_oportunidades_for_run`). Antes esta función lo recalculaba desde cero en
+    CADA carga de `/list`, agregando sobre TODO `dimensionamiento_records` del run
+    (medido en prod: ~20s, 82% del tiempo total del endpoint) — algo que no cambia
+    entre una carga y la siguiente, porque `dimensionamiento_records` de un run ya
+    escrito no cambia hasta el próximo run.
+
+    Fallback SOLO para runs de antes de este cambio (columna NULL, sin backfill
+    forzado a propósito): recalcula on-the-fly, igual que hacía siempre.
+    """
+    ref_month = run.oportunidades_ref_month
+    if ref_month is None:
+        anchor = _detectar_ultimo_mes_completo(db, run.id)
+        if not anchor:
+            return {"label": None, "ref_month": None, "window_start": None, "window_end": None}
+        ref_month = anchor["ref_month"]
     window_start = _subtract_months(ref_month, VENTANA_MESES - 1)
     start_label = _mes_label(window_start.strftime("%Y-%m"))
     end_label = _mes_label(ref_month.strftime("%Y-%m"))
@@ -961,7 +976,7 @@ def oportunidades_list(
         "data": {
             "run_id": latest.id,
             "total": len(data_rows),
-            "window": _window_meta(db, latest.id),
+            "window": _window_meta(db, latest),
             "completeness": completeness,
             "crm_modo": modo_actual,
             # Insumos del selector de asignación (iguales para todas las filas).

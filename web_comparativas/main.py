@@ -103,6 +103,7 @@ from web_comparativas.migrations import (
     backfill_comparativa_rows,
     ensure_dimensionamiento_valorizacion_columns,
     ensure_dimensionamiento_entidad_columns,
+    ensure_dimensionamiento_import_runs_oportunidades_ref_month_column,
     ensure_dimensionamiento_composite_constraints,
     ensure_indicadores_schema_v2,
     ensure_users_reporta_a_column,
@@ -240,6 +241,11 @@ def run_startup_migrations_once() -> None:
         ensure_dimensionamiento_entidad_columns()
     except Exception as e:
         print(f"[MIGRATION] Warning dimensionamiento entidad columns: {e}", flush=True)
+
+    try:
+        ensure_dimensionamiento_import_runs_oportunidades_ref_month_column()
+    except Exception as e:
+        print(f"[MIGRATION] Warning oportunidades_ref_month column: {e}", flush=True)
 
     try:
         ensure_dimensionamiento_composite_constraints()
