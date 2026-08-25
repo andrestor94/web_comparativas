@@ -109,6 +109,7 @@ from web_comparativas.migrations import (
     ensure_vendedores_fusion_seed,
     ensure_oportunidad_asignaciones_manuales_table,
     ensure_cartera_tables,
+    ensure_user_reportes_table,
     ensure_users_cartera_columns,
     ensure_users_cartera_fusion_columns,
     ensure_users_perfil_negocio_columns,
@@ -387,6 +388,15 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: cartera_operadores/cartera_vendedores tables checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning cartera tables: {e}", flush=True)
+
+    # Jerarquía comercial M:N (reemplaza a users.reporta_a_id, ago-2026 — ver
+    # UserReporte en models.py). Solo esquema acá; el backfill de los vínculos
+    # existentes corre aparte, a mano, vía backfill_user_reportes.py.
+    try:
+        ensure_user_reportes_table()
+        print("[MIGRATION] SUCCESS: user_reportes table checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning user_reportes table: {e}", flush=True)
 
     try:
         ensure_users_cartera_columns()

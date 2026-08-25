@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User
+from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User, UserReporte
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio, DimensionamientoImportRun, OportunidadAsignacionManual, OportunidadSummary,
 )
@@ -27,7 +27,7 @@ def db():
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine, tables=[
-        User.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
+        User.__table__, UserReporte.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
         DimensionamientoImportRun.__table__, OportunidadSummary.__table__,
         OportunidadAsignacionManual.__table__, CrmEnvio.__table__,
     ])
@@ -38,16 +38,21 @@ def db():
         yield session
 
 
-def make_user(db, *, email, role, reporta_a_id=None, operador_codigos=None, vendedor_codigos=None) -> User:
+def make_user(db, *, email, role, superior_ids=None, operador_codigos=None, vendedor_codigos=None) -> User:
+    """`superior_ids`: 0, 1 o varios (M:N, 2026-08-25) — reemplaza el viejo
+    `reporta_a_id` (congelada), se traduce a filas en `user_reportes`."""
     u = User(
         email=email, name=email.split("@")[0], role=role, password_hash="x",
-        reporta_a_id=reporta_a_id,
         cartera_operador_codigos=operador_codigos or [],
         cartera_vendedor_codigos=vendedor_codigos or [],
     )
     db.add(u)
     db.commit()
     db.refresh(u)
+    for superior_id in (superior_ids or []):
+        db.add(UserReporte(subordinado_id=u.id, superior_id=superior_id))
+    if superior_ids:
+        db.commit()
     return u
 
 
@@ -89,13 +94,13 @@ def escenario_cartera(db):
     Gerente desde 2026-08-25, ya no de Supervisor)."""
     supervisor = make_user(db, email="supervisor@suizo.com", role="supervisor", operador_codigos=["OP-SUP"])
     analista = make_user(
-        db, email="analista@suizo.com", role="analista", reporta_a_id=supervisor.id,
+        db, email="analista@suizo.com", role="analista", superior_ids=[supervisor.id],
         vendedor_codigos=["V-AN"],
     )
     analista2 = make_user(db, email="analista2@suizo.com", role="analista", vendedor_codigos=["V-AN2"])
     admin = make_user(db, email="admin@suizo.com", role="admin")
     auditor = make_user(db, email="auditor@suizo.com", role="auditor")
-    gerente = make_user(db, email="gerente@suizo.com", role="gerente", reporta_a_id=None)
+    gerente = make_user(db, email="gerente@suizo.com", role="gerente")
     # analista2 no reporta a nadie en este escenario (equipo aparte, sin supervisor
     # propio): sirve para probar "cartera ajena" sin acoplarlo a la jerarquía de
     # supervisor/gerente del escenario principal.

@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from web_comparativas.models import Base, User
+from web_comparativas.models import Base, User, UserReporte
 from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.routers import oportunidades_router as router
 
@@ -22,17 +22,22 @@ def db():
         "sqlite:///:memory:", future=True,
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine, tables=[User.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, UserReporte.__table__])
     Session = sessionmaker(bind=engine, future=True)
     with Session() as session:
         yield session
 
 
-def make_user(db, *, email, role, reporta_a_id=None) -> User:
-    u = User(email=email, name=email.split("@")[0], role=role, password_hash="x", reporta_a_id=reporta_a_id)
+def make_user(db, *, email, role, superior_id=None) -> User:
+    """`superior_id`: reemplaza el viejo `reporta_a_id` (congelada) — se traduce
+    a una fila en `user_reportes`."""
+    u = User(email=email, name=email.split("@")[0], role=role, password_hash="x")
     db.add(u)
     db.commit()
     db.refresh(u)
+    if superior_id is not None:
+        db.add(UserReporte(subordinado_id=u.id, superior_id=superior_id))
+        db.commit()
     return u
 
 
@@ -52,12 +57,12 @@ CRM_USUARIOS_FAKE = [
 @pytest.fixture()
 def escenario(db, monkeypatch):
     gerente = make_user(db, email="gerente.test@suizoargentina.com", role="gerente")
-    supervisor = make_user(db, email="daniela.armilio@suizoargentina.com", role="supervisor", reporta_a_id=gerente.id)
+    supervisor = make_user(db, email="daniela.armilio@suizoargentina.com", role="supervisor", superior_id=gerente.id)
     otro_supervisor = make_user(db, email="otro.supervisor@suizoargentina.com", role="supervisor")
-    ayelen = make_user(db, email="ayelen.piluso@suizoargentina.com", role="analista", reporta_a_id=supervisor.id)
-    myriam = make_user(db, email="myriam.fernandez@suizoargentina.com", role="analista", reporta_a_id=supervisor.id)
-    ariel = make_user(db, email="ariel.gurvich@suizoargentina.com", role="analista", reporta_a_id=supervisor.id)
-    otro_analista = make_user(db, email="otro.analista@suizoargentina.com", role="analista", reporta_a_id=otro_supervisor.id)
+    ayelen = make_user(db, email="ayelen.piluso@suizoargentina.com", role="analista", superior_id=supervisor.id)
+    myriam = make_user(db, email="myriam.fernandez@suizoargentina.com", role="analista", superior_id=supervisor.id)
+    ariel = make_user(db, email="ariel.gurvich@suizoargentina.com", role="analista", superior_id=supervisor.id)
+    otro_analista = make_user(db, email="otro.analista@suizoargentina.com", role="analista", superior_id=otro_supervisor.id)
     admin = make_user(db, email="admin@suizo.com", role="admin")
     auditor = make_user(db, email="auditor@suizo.com", role="auditor")
 

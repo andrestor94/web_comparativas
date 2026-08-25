@@ -346,12 +346,13 @@ class User(Base):
     # Forzar cambio de contraseña en próximo login (usado por flujo admin)
     must_change_password = Column(Boolean, default=False, nullable=False)
 
-    # Jerarquía comercial (Oportunidades / Mercado Privado): a quién reporta este
-    # usuario. Un solo padre por persona (analista -> supervisor, supervisor ->
-    # gerente), por eso alcanza con una columna self-FK en vez de una tabla de
-    # relación tipo GroupMember (esa es para N:N; acá cada usuario tiene a lo sumo
-    # un "reporta_a"). El significado de la columna depende del `role` del usuario,
-    # no de la columna en sí: se carga a mano desde el form de usuario de S.I.C.
+    # Jerarquía comercial (Oportunidades / Mercado Privado) — CONGELADA 2026-08-25:
+    # reemplazada por la tabla `user_reportes` (M:N, ver clase UserReporte más abajo)
+    # porque un Analista puede tener más de un Supervisor/Gerente a cargo (caso real:
+    # Daniela y Yanina comparten varios analistas). La columna queda en el esquema
+    # sin que ningún código la lea ni la escriba — es la red de rollback: si hiciera
+    # falta volver atrás, alcanza con volver a leer de acá. org_hierarchy.py,
+    # sic_router.py y oportunidades_router.py leen/escriben `user_reportes`.
     reporta_a_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Relaciones con métricas de uso (EVITAR eager load masivo)
@@ -433,6 +434,37 @@ class User(Base):
 
 # Hacemos accesible la lista desde la clase (lo usa main/users_form)
 User.BUSINESS_UNITS = BUSINESS_UNITS
+
+
+class UserReporte(Base):
+    """Jerarquía comercial (Oportunidades / Mercado Privado), M:N — reemplaza a
+    `User.reporta_a_id` (congelada, ver comentario en esa columna) desde
+    2026-08-25: un Analista puede tener más de un Supervisor/Gerente a cargo
+    (caso real: Daniela y Yanina comparten varios analistas), y lo mismo un
+    Supervisor con más de un Gerente. Mismo patrón que `GroupMember` (esa sí
+    era N:N desde el vamos).
+
+    El significado del vínculo depende del `role` de ambos extremos, igual que
+    antes — se valida en `sic_router.py`, no acá; esta tabla no impone bandas
+    de rol por diseño (no es portable un CHECK contra otra fila en SQLite).
+    """
+    __tablename__ = "user_reportes"
+    __table_args__ = (
+        UniqueConstraint("subordinado_id", "superior_id", name="uq_user_reportes_par"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    subordinado_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    superior_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    asignado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    asignado_en = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+
+    subordinado = relationship("User", foreign_keys=[subordinado_id])
+    superior = relationship("User", foreign_keys=[superior_id])
+    asignado_por = relationship("User", foreign_keys=[asignado_por_id])
+
+    def __repr__(self) -> str:
+        return f"<UserReporte subordinado={self.subordinado_id} superior={self.superior_id}>"
 
 
 # ---------- Forecast overrides persistentes ----------

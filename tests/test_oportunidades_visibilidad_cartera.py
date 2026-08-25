@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User
+from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User, UserReporte
 from web_comparativas.dimensionamiento.models import (
     DimensionamientoImportRun, OportunidadAsignacionManual, OportunidadSummary,
 )
@@ -25,7 +25,7 @@ def db():
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine, tables=[
-        User.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
+        User.__table__, UserReporte.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
         DimensionamientoImportRun.__table__, OportunidadSummary.__table__,
         OportunidadAsignacionManual.__table__,
     ])
@@ -36,16 +36,21 @@ def db():
         yield session
 
 
-def make_user(db, *, email, role, reporta_a_id=None, operador_codigos=None, vendedor_codigos=None) -> User:
+def make_user(db, *, email, role, superior_ids=None, operador_codigos=None, vendedor_codigos=None) -> User:
+    """`superior_ids`: 0, 1 o varios (M:N, 2026-08-25) — reemplaza el viejo
+    `reporta_a_id` (congelada), se traduce a filas en `user_reportes`."""
     u = User(
         email=email, name=email.split("@")[0], role=role, password_hash="x",
-        reporta_a_id=reporta_a_id,
         cartera_operador_codigos=operador_codigos or [],
         cartera_vendedor_codigos=vendedor_codigos or [],
     )
     db.add(u)
     db.commit()
     db.refresh(u)
+    for superior_id in (superior_ids or []):
+        db.add(UserReporte(subordinado_id=u.id, superior_id=superior_id))
+    if superior_ids:
+        db.commit()
     return u
 
 
@@ -73,16 +78,16 @@ def escenario(db):
     # Cartera propia de supervisor1 vía OPERADOR (no se topa con el fail-closed de
     # unineg_scope, que solo aplica al lado vendedor — ver cartera_visibilidad.py).
     supervisor1 = make_user(
-        db, email="supervisor1@suizo.com", role="supervisor", reporta_a_id=gerente1.id,
+        db, email="supervisor1@suizo.com", role="supervisor", superior_ids=[gerente1.id],
         operador_codigos=["OP-S1"],
     )
-    supervisor2 = make_user(db, email="supervisor2@suizo.com", role="supervisor", reporta_a_id=gerente1.id)
+    supervisor2 = make_user(db, email="supervisor2@suizo.com", role="supervisor", superior_ids=[gerente1.id])
     analista1 = make_user(
-        db, email="analista1@suizo.com", role="analista", reporta_a_id=supervisor1.id,
+        db, email="analista1@suizo.com", role="analista", superior_ids=[supervisor1.id],
         vendedor_codigos=["V-A1"],
     )
     analista2 = make_user(
-        db, email="analista2@suizo.com", role="analista", reporta_a_id=supervisor2.id,
+        db, email="analista2@suizo.com", role="analista", superior_ids=[supervisor2.id],
         vendedor_codigos=["V-A2"],
     )
 
@@ -156,7 +161,7 @@ def test_gerente_no_ve_cuentas_de_otro_arbol_que_si_tienen_dueno(db, escenario):
     entra por el buffer."""
     otro_gerente = make_user(db, email="gerente2@suizo.com", role="gerente")
     otro_analista = make_user(
-        db, email="analista3@suizo.com", role="analista", reporta_a_id=otro_gerente.id,
+        db, email="analista3@suizo.com", role="analista", superior_ids=[otro_gerente.id],
         vendedor_codigos=["V-A3"],
     )
     db.add(CarteraVendedor(codigo_cliente="FFF", vendedor_codigo="V-A3", unineg="0"))
@@ -205,3 +210,22 @@ def test_rol_no_canonico_y_no_full_read_es_fail_closed(db, escenario, rol_descon
     user = make_user(db, email="rol-raro@suizo.com", role=rol_desconocido)
     vistas = visibilidad.oportunidades_visibles_para(db, user, escenario["todas"])
     assert vistas == []
+
+
+def test_analista_compartido_por_dos_supervisores_ven_lo_mismo(db, escenario):
+    """Caso Daniela/Yanina: un analista con DOS supervisores a cargo le aporta su
+    cartera de Oportunidades a ambos, sin que ninguno pierda lo propio."""
+    vistas_sup1 = visibilidad.oportunidades_visibles_para(db, escenario["supervisor1"], escenario["todas"])
+    # Vinculamos analista1 TAMBIÉN a supervisor2 (ya reportaba solo a supervisor1).
+    db.add(UserReporte(subordinado_id=escenario["analista1"].id, superior_id=escenario["supervisor2"].id))
+    db.commit()
+
+    vistas_sup1_despues = visibilidad.oportunidades_visibles_para(db, escenario["supervisor1"], escenario["todas"])
+    vistas_sup2_despues = visibilidad.oportunidades_visibles_para(db, escenario["supervisor2"], escenario["todas"])
+
+    # supervisor1 no pierde nada (analista1 sigue siendo suyo también).
+    assert _ids(vistas_sup1_despues) == _ids(vistas_sup1)
+    # supervisor2 ahora ve, ADEMÁS de lo suyo (analista2), lo de analista1.
+    assert _ids(vistas_sup2_despues) == {
+        escenario["opp_analista2"].id, escenario["opp_analista1"].id,
+    }

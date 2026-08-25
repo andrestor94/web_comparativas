@@ -207,6 +207,21 @@ def ensure_cartera_tables():
             print(f"[MIGRATION] Tabla '{label}': advertencia — {e}", flush=True)
 
 
+def ensure_user_reportes_table():
+    """Crea (si falta) `user_reportes` (jerarquía comercial M:N, reemplaza a
+    `users.reporta_a_id` desde 2026-08-25 — ver comentario en `models.UserReporte`).
+    Solo crea esquema, vacía: la migración de los vínculos existentes de
+    `reporta_a_id` corre aparte, a mano, vía `backfill_user_reportes.py` — igual
+    que `ensure_cartera_tables()` no carga datos, solo abre la tabla."""
+    from web_comparativas.models import UserReporte
+
+    try:
+        UserReporte.__table__.create(bind=engine, checkfirst=True)
+        print("[MIGRATION] Tabla 'user_reportes' verificada/creada.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Tabla 'user_reportes': advertencia — {e}", flush=True)
+
+
 def ensure_users_cartera_columns():
     """Agrega a 'users' las tres columnas de cartera de cuentas (ago-2026):
     cartera_operador_codigos, cartera_vendedor_codigos, cartera_unineg_scope.

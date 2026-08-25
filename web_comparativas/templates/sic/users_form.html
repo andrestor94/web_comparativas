@@ -255,41 +255,51 @@
                Complementa —no reemplaza— las listas "a cargo" de más abajo (esas
                asignan desde el padre). Este campo asigna desde el propio usuario:
                sin él, vincular un Analista con su Supervisor requiere entrar a
-               editar al Supervisor y encontrarlo en su lista. Dos <select>, uno
+               editar al Supervisor y encontrarlo en su lista. Dos checklists, una
                por rol hijo posible, para que las opciones respeten la jerarquía
-               real (Analista → Supervisor, Supervisor → Gerente) sin mezclarlas
-               en un mismo combo. El server revalida todo igual que el resto de
-               este form: rol del padre compatible + sin ciclos
+               real (Analista → Supervisor, Supervisor → Gerente) sin mezclarlas.
+               M:N (2026-08-25): puede tildarse MÁS DE UNO — un Analista puede
+               reportar a varios Supervisores a la vez (caso real: Daniela y
+               Yanina comparten analistas). El server revalida todo igual que el
+               resto de este form: rol del superior compatible + sin ciclos
                (_resolve_reporta_a en sic_router.py, misma dureza que
-               _sync_cartera_y_jerarquia). Dejarlo vacío es válido — desvincula. #}
+               _sync_cartera_y_jerarquia). Dejarlo vacío es válido — desvincula
+               de todos. Mismo widget data-chip-checklist que "Equipo a cargo"
+               más abajo, ver ese comentario para el contrato del markup. #}
             <div class="span-12" data-role-blocks="analista" style="display:none">
-                <label class="form-label text-white-50 small" for="reporta_a_supervisor_id">Reporta a (Supervisor)</label>
-                <select class="form-select form-select-sic" id="reporta_a_supervisor_id" name="reporta_a_supervisor_id">
-                    <option value="">— Sin asignar —</option>
-                    {% for s in supervisores_disponibles %}
-                    <option value="{{ s.id }}" {% if form.reporta_a_id and form.reporta_a_id == s.id %}selected{% endif %}>
-                        {{ s.display_name }} ({{ s.email }})
-                    </option>
-                    {% else %}
-                    <option disabled>No hay usuarios con rol Supervisor todavía.</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">De quién depende este Analista. Sin este vínculo, su cartera nunca sube a un Supervisor ni a un Gerente.</div>
+                <label class="form-label text-white-50 small">Reporta a (Supervisor)</label>
+                <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
+                    <div class="chipcheck-raw">
+                        {% for s in supervisores_disponibles %}
+                        <label class="cartera-check-row" data-name="{{ s.display_name }} ({{ s.email }})">
+                            <input type="checkbox" name="reporta_a_supervisor_ids" value="{{ s.id }}"
+                                {% if s.id in reporta_a_checked_ids %}checked{% endif %}>
+                            <span>{{ s.display_name }} ({{ s.email }})</span>
+                        </label>
+                        {% else %}
+                        <div class="text-white-50 small">No hay usuarios con rol Supervisor todavía.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="text-white-50 small mt-1">De quién depende este Analista. Sin este vínculo, su cartera nunca sube a un Supervisor ni a un Gerente. Puede depender de más de uno.</div>
             </div>
 
             <div class="span-12" data-role-blocks="supervisor" style="display:none">
-                <label class="form-label text-white-50 small" for="reporta_a_gerente_id">Reporta a (Gerente)</label>
-                <select class="form-select form-select-sic" id="reporta_a_gerente_id" name="reporta_a_gerente_id">
-                    <option value="">— Sin asignar —</option>
-                    {% for g in gerentes_disponibles %}
-                    <option value="{{ g.id }}" {% if form.reporta_a_id and form.reporta_a_id == g.id %}selected{% endif %}>
-                        {{ g.display_name }} ({{ g.email }})
-                    </option>
-                    {% else %}
-                    <option disabled>No hay usuarios con rol Gerente todavía.</option>
-                    {% endfor %}
-                </select>
-                <div class="text-white-50 small mt-1">De quién depende este Supervisor.</div>
+                <label class="form-label text-white-50 small">Reporta a (Gerente)</label>
+                <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
+                    <div class="chipcheck-raw">
+                        {% for g in gerentes_disponibles %}
+                        <label class="cartera-check-row" data-name="{{ g.display_name }} ({{ g.email }})">
+                            <input type="checkbox" name="reporta_a_gerente_ids" value="{{ g.id }}"
+                                {% if g.id in reporta_a_checked_ids %}checked{% endif %}>
+                            <span>{{ g.display_name }} ({{ g.email }})</span>
+                        </label>
+                        {% else %}
+                        <div class="text-white-50 small">No hay usuarios con rol Gerente todavía.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="text-white-50 small mt-1">De quién depende este Supervisor. Puede depender de más de uno.</div>
             </div>
 
             {# ====== Cartera comercial / jerarquía (Oportunidades, Mercado Privado) ======
@@ -446,9 +456,12 @@
 
             {# --- Supervisor: además de su propia identidad (arriba), qué analistas tiene a cargo ---
                data-chip-checklist: mismo widget de fichas que los <select> de arriba, pero
-               sobre checkboxes reales (name="analista_ids" sin tocar). Cada <label> conserva
-               data-name/data-taken para que el JS arme la fila sin parsear texto; el .taken
-               original queda igual (server-side) por si el JS no corre. #}
+               sobre checkboxes reales (name="analista_ids" sin tocar). M:N (2026-08-25):
+               SIN exclusividad — un analista puede estar tildado acá Y en el form de otro
+               supervisor a la vez (caso real: Daniela y Yanina comparten analistas), así
+               que ningún checkbox se deshabilita. `data-taken`, si está presente, es
+               puramente informativo ("también a cargo de: X") — el JS ya lo muestra como
+               badge sin bloquear nada, no hizo falta tocarlo. #}
             <details class="sic-collapse span-12" data-role-blocks="supervisor" style="display:none">
                 <summary class="sic-collapse-summary">
                     <span class="sic-collapse-title">Equipo a cargo</span>
@@ -458,16 +471,15 @@
                     <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
                         <div class="chipcheck-raw">
                             {% for a in analistas_disponibles %}
-                            {% set tomado_por_otro = a.reporta_a_id and a.reporta_a_id != form.id %}
-                            <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}"
+                            {% set otros = otros_superiores_por_usuario.get(a.id) %}
+                            <label class="cartera-check-row"
                                 data-name="{{ a.display_name }} ({{ a.email }})"
-                                {% if tomado_por_otro %}data-taken="ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}"{% endif %}>
+                                {% if otros %}data-taken="también a cargo de: {{ otros }}"{% endif %}>
                                 <input type="checkbox" name="analista_ids" value="{{ a.id }}"
-                                    {% if a.reporta_a_id and a.reporta_a_id == form.id %}checked{% endif %}
-                                    {% if tomado_por_otro %}disabled{% endif %}>
+                                    {% if a.id in equipo_checked_ids %}checked{% endif %}>
                                 <span>{{ a.display_name }} ({{ a.email }})</span>
-                                {% if tomado_por_otro %}
-                                <span class="taken">— ya a cargo de: {{ a.manager.display_name if a.manager else 'otro supervisor' }}</span>
+                                {% if otros %}
+                                <span class="taken">— también a cargo de: {{ otros }}</span>
                                 {% endif %}
                             </label>
                             {% else %}
@@ -475,7 +487,7 @@
                             {% endfor %}
                         </div>
                     </div>
-                    <div class="text-white-50 small mt-1">Los analistas marcados en gris ya están a cargo de otro supervisor.</div>
+                    <div class="text-white-50 small mt-1">Un analista puede estar a cargo de más de un Supervisor a la vez — "también a cargo de" es solo informativo.</div>
                 </div>
             </details>
 
@@ -483,7 +495,8 @@
                Sin selector de identidad en Fusión por ahora: a confirmar con negocio
                si algún gerente tiene cartera propia (hoy no hay dato del proyecto que
                lo indique). Si se confirma, sumar "gerente" a data-role-blocks del
-               bloque de arriba. #}
+               bloque de arriba. M:N (2026-08-25): mismo criterio sin exclusividad que
+               el checklist de Analistas de arriba. #}
             <details class="sic-collapse span-12" data-role-blocks="gerente" style="display:none">
                 <summary class="sic-collapse-summary">
                     <span class="sic-collapse-title">Equipo a cargo</span>
@@ -493,16 +506,15 @@
                     <div class="chipcheck" data-chip-checklist data-placeholder="Filtrar por nombre o email…">
                         <div class="chipcheck-raw">
                             {% for s in supervisores_disponibles %}
-                            {% set tomado_por_otro = s.reporta_a_id and s.reporta_a_id != form.id %}
-                            <label class="cartera-check-row{% if tomado_por_otro %} disabled{% endif %}"
+                            {% set otros = otros_superiores_por_usuario.get(s.id) %}
+                            <label class="cartera-check-row"
                                 data-name="{{ s.display_name }} ({{ s.email }})"
-                                {% if tomado_por_otro %}data-taken="ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}"{% endif %}>
+                                {% if otros %}data-taken="también a cargo de: {{ otros }}"{% endif %}>
                                 <input type="checkbox" name="supervisor_ids" value="{{ s.id }}"
-                                    {% if s.reporta_a_id and s.reporta_a_id == form.id %}checked{% endif %}
-                                    {% if tomado_por_otro %}disabled{% endif %}>
+                                    {% if s.id in equipo_checked_ids %}checked{% endif %}>
                                 <span>{{ s.display_name }} ({{ s.email }})</span>
-                                {% if tomado_por_otro %}
-                                <span class="taken">— ya a cargo de: {{ s.manager.display_name if s.manager else 'otro gerente' }}</span>
+                                {% if otros %}
+                                <span class="taken">— también a cargo de: {{ otros }}</span>
                                 {% endif %}
                             </label>
                             {% else %}
@@ -510,7 +522,7 @@
                             {% endfor %}
                         </div>
                     </div>
-                    <div class="text-white-50 small mt-1">Los supervisores marcados en gris ya están a cargo de otro gerente. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
+                    <div class="text-white-50 small mt-1">Un supervisor puede estar a cargo de más de un Gerente a la vez — "también a cargo de" es solo informativo. Por transitividad, este gerente también va a ver a los analistas de los supervisores que le asignes acá.</div>
                 </div>
             </details>
 

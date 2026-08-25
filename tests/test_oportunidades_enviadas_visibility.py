@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from web_comparativas.models import Base, User
+from web_comparativas.models import Base, User, UserReporte
 from web_comparativas.dimensionamiento.models import CrmEnvio
 from web_comparativas.routers import oportunidades_router as router
 
@@ -25,19 +25,21 @@ def db():
         "sqlite:///:memory:", future=True,
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine, tables=[User.__table__, CrmEnvio.__table__])
+    Base.metadata.create_all(engine, tables=[User.__table__, UserReporte.__table__, CrmEnvio.__table__])
     Session = sessionmaker(bind=engine, future=True)
     with Session() as session:
         yield session
 
 
 def make_user(db, email, role, *, manager=None):
-    user = User(
-        email=email, name=email.split("@")[0], role=role, password_hash="x",
-        reporta_a_id=manager.id if manager else None,
-    )
+    """`manager`: reemplaza el viejo `reporta_a_id` (congelada) — se traduce a una
+    fila en `user_reportes`."""
+    user = User(email=email, name=email.split("@")[0], role=role, password_hash="x")
     db.add(user)
     db.flush()
+    if manager is not None:
+        db.add(UserReporte(subordinado_id=user.id, superior_id=manager.id))
+        db.flush()
     return user
 
 

@@ -63,6 +63,7 @@ from web_comparativas.dimensionamiento.oportunidades_visibilidad import (
     oportunidades_visibles_para,
     supervisores_a_cargo,
 )
+from web_comparativas.org_hierarchy import superiores_de
 from web_comparativas.dimensionamiento.query_service import _latest_success_import_run
 
 router = APIRouter(prefix="/api/mercado-privado/oportunidades", tags=["oportunidades"])
@@ -1597,7 +1598,10 @@ def oportunidades_asignar_analista(
     analista = db.get(User, analista_id)
     if not analista or not analista.has_role("analista", "analyst"):
         raise HTTPException(status_code=422, detail="El usuario elegido no es un Analista.")
-    if not is_admin(user) and analista.reporta_a_id != getattr(user, "id", None):
+    # M:N (2026-08-25): un analista puede reportar a más de un Supervisor a la vez
+    # (ver org_hierarchy.superiores_de) — cualquiera de sus superiores puede asignarle,
+    # no solo "el" dueño exclusivo de antes.
+    if not is_admin(user) and getattr(user, "id", None) not in superiores_de(db, analista.id):
         raise HTTPException(
             status_code=403,
             detail="Solo podés asignar oportunidades a analistas de tu propio equipo.",

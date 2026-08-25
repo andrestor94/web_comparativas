@@ -7,7 +7,7 @@ from typing import Optional
 import datetime as dt
 from sqlalchemy import func, or_
 
-from web_comparativas.models import User, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion, CarteraOperador, CarteraVendedor
+from web_comparativas.models import User, UserReporte, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion, CarteraOperador, CarteraVendedor
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.forecast_service import (
     get_perfil_comercial_master_options,
@@ -1102,30 +1102,48 @@ class _CarteraConflictError(Exception):
 
 
 def _assert_hierarchy_link_safe(db, parent: User, child: User) -> None:
-    '''Valida que child -> parent no cierre un ciclo, incluso ante datos legados.'''
+    '''Valida que child -> parent no cierre un ciclo, incluso ante datos legados.
+
+    M:N (2026-08-25): `parent` puede tener, a su vez, más de un superior — así que
+    esto es un BFS sobre `user_reportes`, no una caminata de un solo padre. `seen`
+    garantiza que termina siempre: como mucho un pase por cada usuario del sistema,
+    sin importar cuántos vínculos haya ni si los datos vinieran corruptos.
+    '''
     if parent.id == child.id:
         raise _CarteraConflictError('jerarquia_ciclo')
     seen: set[int] = set()
-    cursor = parent
-    while cursor is not None:
-        if cursor.id == child.id or cursor.id in seen:
-            raise _CarteraConflictError('jerarquia_ciclo')
-        seen.add(cursor.id)
-        cursor = db.get(User, cursor.reporta_a_id) if cursor.reporta_a_id else None
+    frontera = [parent.id]
+    while frontera:
+        siguiente: list[int] = []
+        for uid in frontera:
+            if uid == child.id or uid in seen:
+                raise _CarteraConflictError('jerarquia_ciclo')
+            seen.add(uid)
+            siguiente.extend(
+                r[0] for r in
+                db.query(UserReporte.superior_id).filter(UserReporte.subordinado_id == uid).all()
+            )
+        frontera = siguiente
 
 
 def _clear_incompatible_parent(db, user: User, final_role: str) -> None:
-    '''Un cambio de rol nunca conserva un padre de un nivel incompatible.'''
-    if not user.reporta_a_id:
-        return
-    parent = db.get(User, user.reporta_a_id)
-    parent_role = (parent.role or '').strip().lower() if parent else ''
-    compatible = (
-        (final_role in _ROLES_ANALISTA and parent_role in _ROLES_SUPERVISOR)
-        or (final_role in _ROLES_SUPERVISOR and parent_role in _ROLES_GERENTE)
-    )
-    if not compatible:
-        user.reporta_a_id = None
+    '''Un cambio de rol nunca conserva un superior de un nivel incompatible.
+
+    M:N (2026-08-25): `user` puede tener varios vínculos como subordinado a la vez
+    (antes: un solo `reporta_a_id`) — se revisan y se borran todos los que ya no
+    correspondan al rol nuevo, no solo el primero.'''
+    if final_role in _ROLES_ANALISTA:
+        roles_compatibles = _ROLES_SUPERVISOR
+    elif final_role in _ROLES_SUPERVISOR:
+        roles_compatibles = _ROLES_GERENTE
+    else:
+        roles_compatibles = set()
+
+    vinculos = db.query(UserReporte).filter(UserReporte.subordinado_id == user.id).all()
+    for v in vinculos:
+        superior_role = (v.superior.role or '').strip().lower() if v.superior else ''
+        if superior_role not in roles_compatibles:
+            db.delete(v)
 
 
 def _cartera_form_context(db, editing_user_id: int | None) -> dict:
@@ -1157,12 +1175,37 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
         .order_by(User.name.asc(), User.email.asc())
         .all()
     )
-    equipo_analistas_count = 0
-    equipo_supervisores_count = 0
+    # Vínculos de jerarquía (user_reportes, M:N) — reemplaza a `reporta_a_id`
+    # (congelada, ver models.py) desde 2026-08-25: sin exclusividad, un mismo
+    # analista/supervisor puede aparecer tildado en el "equipo a cargo" de más de
+    # un Supervisor/Gerente a la vez (caso real: Daniela y Yanina comparten
+    # analistas). `equipo_checked_ids` = subordinados de editing_user_id (sirve
+    # para el checklist "Equipo a cargo", sea de Supervisor o de Gerente, según
+    # cuál bloque termine renderizando el rol elegido). `reporta_a_checked_ids` =
+    # superiores de editing_user_id (checklist "Reporta a", del lado hijo).
+    vinculos = db.query(UserReporte).all()
+    superiores_por_subordinado: dict[int, list[int]] = {}
+    subordinados_por_superior: dict[int, list[int]] = {}
+    for v in vinculos:
+        superiores_por_subordinado.setdefault(v.subordinado_id, []).append(v.superior_id)
+        subordinados_por_superior.setdefault(v.superior_id, []).append(v.subordinado_id)
+
+    nombres_por_id = {u.id: u.display_name for u in analistas + supervisores + gerentes}
+
+    def _otros_superiores(usuario_id: int) -> str:
+        '''Nombres de los OTROS superiores actuales de `usuario_id` (sin contar a
+        editing_user_id) — badge informativo, ya no bloquea nada.'''
+        ids = [i for i in superiores_por_subordinado.get(usuario_id, []) if i != editing_user_id]
+        return ", ".join(nombres_por_id[i] for i in ids if i in nombres_por_id)
+
+    equipo_checked_ids = set(subordinados_por_superior.get(editing_user_id, [])) if editing_user_id else set()
+    reporta_a_checked_ids = set(superiores_por_subordinado.get(editing_user_id, [])) if editing_user_id else set()
+    otros_superiores_por_usuario = {u.id: _otros_superiores(u.id) for u in analistas + supervisores}
+
+    equipo_analistas_count = sum(1 for a in analistas if a.id in equipo_checked_ids)
+    equipo_supervisores_count = sum(1 for s in supervisores if s.id in equipo_checked_ids)
     tiene_vendedor_propio = False
     if editing_user_id:
-        equipo_analistas_count = sum(1 for a in analistas if a.reporta_a_id == editing_user_id)
-        equipo_supervisores_count = sum(1 for s in supervisores if s.reporta_a_id == editing_user_id)
         tiene_vendedor_propio = any(v.user_id == editing_user_id for v in vendedores)
 
     # --- Cartera de cuentas (padrones operadores_comerciales.csv / Cliente_vendedor.csv,
@@ -1208,6 +1251,9 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
         "gerentes_disponibles": gerentes,
         "equipo_analistas_count": equipo_analistas_count,
         "equipo_supervisores_count": equipo_supervisores_count,
+        "equipo_checked_ids": equipo_checked_ids,
+        "reporta_a_checked_ids": reporta_a_checked_ids,
+        "otros_superiores_por_usuario": otros_superiores_por_usuario,
         "tiene_vendedor_propio": tiene_vendedor_propio,
         "operadores_cartera_opciones": operadores_cartera_opciones,
         "vendedores_cartera_opciones": vendedores_cartera_opciones,
@@ -1217,49 +1263,115 @@ def _cartera_form_context(db, editing_user_id: int | None) -> dict:
     }
 
 
+def _sync_vinculos(
+    db, *, subordinado_id: int | None, superior_id: int | None,
+    elegidos_ids: set[int], role_filter: set[str] | None, actor: User, ahora: dt.datetime,
+) -> None:
+    """Diff genérico contra `user_reportes`, sin exclusividad (M:N): agrega los
+    pares nuevos, borra los que ya no están elegidos. Exactamente uno de
+    `subordinado_id`/`superior_id` es el lado FIJO (el otro es el que varía,
+    `elegidos_ids`) — nunca toca vínculos que no involucren al lado fijo, así que
+    jamás pisa el vínculo de un tercero.
+
+    `role_filter`, si no es None, acota la comparación al rol del lado que varía.
+    Imprescindible del lado padre ("Equipo a cargo"): "Analistas a cargo" y
+    "Supervisores a cargo" cuelgan del MISMO `superior_id` pero son universos de
+    rol separados — sin este filtro, si `u` viene de cambiar de Gerente a
+    Supervisor en el mismo guardado, el bloque de Analistas (elegidos_ids solo
+    con analistas) vería también los supervisores viejos de `u` como "ya no
+    elegidos" y los borraría por error, antes de que le tocara el turno al
+    bloque de Supervisores. Del lado hijo ("Reporta a") no hace falta: ahí SIEMPRE
+    son todos los superiores de un único usuario (`subordinado_id` fijo), sin
+    mezcla de universos."""
+    assert (subordinado_id is None) != (superior_id is None), \
+        "exactamente uno de los dos lados es el fijo"
+
+    def _query_base():
+        q = db.query(UserReporte)
+        if subordinado_id is not None:
+            q = q.filter(UserReporte.subordinado_id == subordinado_id)
+        else:
+            q = q.filter(UserReporte.superior_id == superior_id)
+        return q
+
+    actuales_q = _query_base()
+    if role_filter is not None:
+        otro_lado = UserReporte.superior_id if subordinado_id is not None else UserReporte.subordinado_id
+        actuales_q = actuales_q.join(User, User.id == otro_lado).filter(func.lower(User.role).in_(role_filter))
+    actuales_ids = {
+        (v.superior_id if subordinado_id is not None else v.subordinado_id)
+        for v in actuales_q.all()
+    }
+
+    a_borrar = actuales_ids - elegidos_ids
+    a_agregar = elegidos_ids - actuales_ids
+    if a_borrar:
+        borrar_q = _query_base()
+        if subordinado_id is not None:
+            borrar_q = borrar_q.filter(UserReporte.superior_id.in_(a_borrar))
+        else:
+            borrar_q = borrar_q.filter(UserReporte.subordinado_id.in_(a_borrar))
+        borrar_q.delete(synchronize_session=False)
+    for otro_id in a_agregar:
+        db.add(UserReporte(
+            subordinado_id=subordinado_id if subordinado_id is not None else otro_id,
+            superior_id=superior_id if superior_id is not None else otro_id,
+            asignado_por_id=actor.id,
+            asignado_en=ahora,
+        ))
+
+
 def _resolve_reporta_a(
     db,
     u: User,
     role_ok: str,
-    reporta_a_supervisor_id: str,
-    reporta_a_gerente_id: str,
+    reporta_a_supervisor_ids: list[str],
+    reporta_a_gerente_ids: list[str],
+    actor: User,
+    ahora: dt.datetime,
 ) -> None:
-    """Fija `u.reporta_a_id` desde el campo "Reporta a" del propio form —
+    """Fija los superiores de `u` desde el campo "Reporta a" del propio form —
     dirección hijo→padre, complementaria (no sustituta) de las listas "a cargo"
     que arma `_sync_cartera_y_jerarquia` desde el padre. Dos inputs separados,
-    uno por rol hijo (`reporta_a_supervisor_id` para Analista, `reporta_a_gerente_id`
-    para Supervisor) para que cada combo solo pueda ofrecer padres del rol
-    correcto; acá se revalida igual, nunca se confía en cuál mandó el cliente.
-    Cualquier otro rol final (Gerente/Admin/Auditor) no tiene padre en este
-    esquema — se ignoran ambos campos y se limpia el vínculo, mismo criterio que
-    `_clear_incompatible_parent`. Debe llamarse ANTES de `_sync_cartera_y_jerarquia`
-    (esa función solo toca los HIJOS de `u`, nunca pisa esto)."""
+    uno por rol hijo (`reporta_a_supervisor_ids` para Analista,
+    `reporta_a_gerente_ids` para Supervisor) para que cada checklist solo pueda
+    ofrecer superiores del rol correcto; acá se revalida igual, nunca se confía en
+    lo que mandó el cliente. M:N (2026-08-25): puede ser MÁS DE UNO — sin
+    exclusividad, ya no hay "reporta_a_ocupado". Cualquier otro rol final
+    (Gerente/Admin/Auditor) no tiene superior en este esquema — se ignoran ambas
+    listas y se sueltan todos los vínculos existentes (mismo resultado que
+    `_clear_incompatible_parent`, que igual se sigue llamando por las dudas desde
+    `_sync_cartera_y_jerarquia`). Debe llamarse ANTES de esa función (que solo
+    toca los HIJOS de `u`, nunca esto)."""
     if role_ok in _ROLES_ANALISTA:
-        raw = reporta_a_supervisor_id
+        raw_ids = reporta_a_supervisor_ids
         parent_roles = _ROLES_SUPERVISOR
     elif role_ok in _ROLES_SUPERVISOR:
-        raw = reporta_a_gerente_id
+        raw_ids = reporta_a_gerente_ids
         parent_roles = _ROLES_GERENTE
     else:
-        u.reporta_a_id = None
-        return
+        raw_ids = []
+        parent_roles = set()
 
-    raw = (raw or "").strip()
-    if not raw:
-        u.reporta_a_id = None
-        return
+    elegidos_ids: set[int] = set()
+    for raw in raw_ids:
+        raw = (raw or "").strip()
+        if not raw:
+            continue
+        try:
+            parent_id = int(raw)
+        except ValueError:
+            raise _CarteraConflictError("reporta_a_invalido")
+        parent = db.get(User, parent_id)
+        if parent is None or not parent.has_role(*parent_roles):
+            raise _CarteraConflictError("reporta_a_invalido")
+        _assert_hierarchy_link_safe(db, parent, u)
+        elegidos_ids.add(parent_id)
 
-    try:
-        parent_id = int(raw)
-    except ValueError:
-        raise _CarteraConflictError("reporta_a_invalido")
-
-    parent = db.get(User, parent_id)
-    if parent is None or not parent.has_role(*parent_roles):
-        raise _CarteraConflictError("reporta_a_invalido")
-
-    _assert_hierarchy_link_safe(db, parent, u)
-    u.reporta_a_id = parent.id
+    _sync_vinculos(
+        db, subordinado_id=u.id, superior_id=None,
+        elegidos_ids=elegidos_ids, role_filter=None, actor=actor, ahora=ahora,
+    )
 
 
 def _sync_cartera_y_jerarquia(
@@ -1272,17 +1384,19 @@ def _sync_cartera_y_jerarquia(
     actor: User,
 ) -> None:
     """Aplica identidad en Fusión (vínculo 1 a 1 con la persona real en el ERP, no una
-    asignación de recursos) y jerarquía (reporta_a_id) según el ROL final del usuario.
-    La identidad en Fusión aplica a Analista y Supervisor (ambos pueden tener cartera
-    propia: los 16 de Operadores.xlsx son la fuerza de venta real). El JS del form ya
-    deshabilita las opciones ocupadas, pero acá se revalida todo contra la base —
-    nunca se confía en lo que mandó el cliente (mismo criterio que ya usa
+    asignación de recursos) y jerarquía (`user_reportes`) según el ROL final del
+    usuario. La identidad en Fusión aplica a Analista y Supervisor (ambos pueden
+    tener cartera propia: los 16 de Operadores.xlsx son la fuerza de venta real).
+    El JS del form ya arma los checklists, pero acá se revalida todo contra la
+    base — nunca se confía en lo que mandó el cliente (mismo criterio que ya usa
     `_decidir_asignado` en oportunidades_router.py).
 
-    Libera en silencio los vínculos que el nuevo rol ya no sostiene (ej. pasó de
-    Supervisor a Analista -> sus analistas quedan sin supervisor, a reasignar por el
-    Admin); pero NUNCA pisa en silencio un vínculo de OTRA persona: si algo llega ya
-    tomado, corta con _CarteraConflictError y no guarda nada de esta función.
+    M:N (2026-08-25): a diferencia del mecanismo viejo, agregar un analista al
+    equipo de un Supervisor YA NO le saca ese analista a otro Supervisor — ambos
+    vínculos conviven (caso real: Daniela y Yanina comparten analistas). Sí se
+    sueltan en silencio los vínculos que el nuevo rol de `u` ya no sostiene (ej.
+    pasó de Supervisor a Analista -> sus analistas quedan sin ESTE supervisor,
+    pero conservan cualquier otro que ya tuvieran).
 
     Requiere que `u.id` ya exista (flush antes de llamar, en alta).
     """
@@ -1328,24 +1442,13 @@ def _sync_cartera_y_jerarquia(
         for a in elegidos:
             if not a.has_role(*_ROLES_ANALISTA):
                 raise _CarteraConflictError("analista_invalido")
-            if a.reporta_a_id not in (None, u.id):
-                raise _CarteraConflictError("analista_ocupado")
             _assert_hierarchy_link_safe(db, u, a)
-        actuales = (
-            db.query(User)
-            .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_ANALISTA))
-            .all()
-        )
-        for a in actuales:
-            if a.id not in elegidos_ids:
-                a.reporta_a_id = None
-        for a in elegidos:
-            a.reporta_a_id = u.id
     else:
-        for a in db.query(User).filter(
-            User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_ANALISTA)
-        ).all():
-            a.reporta_a_id = None
+        elegidos_ids = set()
+    _sync_vinculos(
+        db, subordinado_id=None, superior_id=u.id,
+        elegidos_ids=elegidos_ids, role_filter=_ROLES_ANALISTA, actor=actor, ahora=ahora,
+    )
 
     # --- Supervisores a cargo: solo tiene sentido si el rol final es Gerente ---
     if role_ok in _ROLES_GERENTE:
@@ -1356,24 +1459,13 @@ def _sync_cartera_y_jerarquia(
         for s in elegidos:
             if not s.has_role(*_ROLES_SUPERVISOR):
                 raise _CarteraConflictError("supervisor_invalido")
-            if s.reporta_a_id not in (None, u.id):
-                raise _CarteraConflictError("supervisor_ocupado")
             _assert_hierarchy_link_safe(db, u, s)
-        actuales = (
-            db.query(User)
-            .filter(User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR))
-            .all()
-        )
-        for s in actuales:
-            if s.id not in elegidos_ids:
-                s.reporta_a_id = None
-        for s in elegidos:
-            s.reporta_a_id = u.id
     else:
-        for s in db.query(User).filter(
-            User.reporta_a_id == u.id, func.lower(User.role).in_(_ROLES_SUPERVISOR)
-        ).all():
-            s.reporta_a_id = None
+        elegidos_ids = set()
+    _sync_vinculos(
+        db, subordinado_id=None, superior_id=u.id,
+        elegidos_ids=elegidos_ids, role_filter=_ROLES_SUPERVISOR, actor=actor, ahora=ahora,
+    )
 
 
 def _validated_fusion_link(db, name: str, enabled: bool, selected_identity: str) -> tuple[bool, str | None]:
@@ -1545,8 +1637,8 @@ def sic_users_create(
     vendedor_fusion_id: str = Form(""),
     analista_ids: list[str] = Form(default=[]),
     supervisor_ids: list[str] = Form(default=[]),
-    reporta_a_supervisor_id: str = Form(""),
-    reporta_a_gerente_id: str = Form(""),
+    reporta_a_supervisor_ids: list[str] = Form(default=[]),
+    reporta_a_gerente_ids: list[str] = Form(default=[]),
     cartera_fusion_enabled: str | None = Form(default=None),
     cartera_fusion_identidad: str = Form(''),
     cartera_operador_codigos: list[str] = Form(default=[]),
@@ -1611,7 +1703,10 @@ def sic_users_create(
         )
         db_session.add(u)
         db_session.flush()  # necesita u.id para cartera/jerarquía
-        _resolve_reporta_a(db_session, u, role, reporta_a_supervisor_id, reporta_a_gerente_id)
+        _resolve_reporta_a(
+            db_session, u, role, reporta_a_supervisor_ids, reporta_a_gerente_ids,
+            actor=user, ahora=dt.datetime.utcnow(),
+        )
         _sync_cartera_y_jerarquia(
             db_session, u, role, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )
@@ -1681,8 +1776,8 @@ def sic_users_update(
     vendedor_fusion_id: str = Form(""),
     analista_ids: list[str] = Form(default=[]),
     supervisor_ids: list[str] = Form(default=[]),
-    reporta_a_supervisor_id: str = Form(""),
-    reporta_a_gerente_id: str = Form(""),
+    reporta_a_supervisor_ids: list[str] = Form(default=[]),
+    reporta_a_gerente_ids: list[str] = Form(default=[]),
     cartera_fusion_enabled: str | None = Form(default=None),
     cartera_fusion_identidad: str = Form(''),
     cartera_operador_codigos: list[str] = Form(default=[]),
@@ -1725,7 +1820,10 @@ def sic_users_update(
         u.cartera_fusion_identidad = fusion_identity
         u.perfil_comercial_codigos = _normalize_codigos(perfil_comercial_codigos)
         u.negocio_codigos = _normalize_codigos(negocio_codigos)
-        _resolve_reporta_a(db_session, u, role_ok, reporta_a_supervisor_id, reporta_a_gerente_id)
+        _resolve_reporta_a(
+            db_session, u, role_ok, reporta_a_supervisor_ids, reporta_a_gerente_ids,
+            actor=user, ahora=dt.datetime.utcnow(),
+        )
         _sync_cartera_y_jerarquia(
             db_session, u, role_ok, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )

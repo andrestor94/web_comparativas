@@ -9,6 +9,7 @@ from web_comparativas.models import (
     CarteraOperador,
     CarteraVendedor,
     User,
+    UserReporte,
 )
 from web_comparativas.fusion_name_matching import resolve_fusion_identity
 from web_comparativas.cartera_visibilidad import clientes_visibles_para
@@ -24,7 +25,10 @@ def db():
     )
     Base.metadata.create_all(
         engine,
-        tables=[CarteraImportRun.__table__, User.__table__, CarteraOperador.__table__, CarteraVendedor.__table__],
+        tables=[
+            CarteraImportRun.__table__, User.__table__, UserReporte.__table__,
+            CarteraOperador.__table__, CarteraVendedor.__table__,
+        ],
     )
     session = sessionmaker(bind=engine)()
     session.add_all([
