@@ -16,12 +16,13 @@ Contrato — `cartera_unineg_scope` acota SOLO el lado vendedor:
     lado vendedor, nunca al operador). Ver `_cartera_propia()`.
 
 Reusa la jerarquía (`analistas_a_cargo` / `supervisores_a_cargo`, vía `reporta_a_id`)
-del motor ya construido para Oportunidades en `oportunidades_visibilidad.py` — un
-solo lugar donde vive la lógica de "quién reporta a quién" para cartera comercial.
-NO reutiliza su tabla (`VendedorFusion` modela otra relación: identidad 1 a 1 de los
-16 vendedores de Fusión/Mercado Privado, con su propio UniqueConstraint). Este motor
-resuelve contra los padrones nuevos `cartera_operadores` / `cartera_vendedores`
-(22 operadores / 248 vendedores, Mercado Público + Privado).
+de `org_hierarchy.py` — un solo lugar donde vive la lógica de "quién reporta a
+quién" para cartera comercial, compartido con Oportunidades
+(`oportunidades_visibilidad.py`, enganchada a este mismo motor desde 2026-08-25).
+Este motor resuelve contra los padrones `cartera_operadores` / `cartera_vendedores`
+(22 operadores / 248 vendedores, Mercado Público + Privado) — no contra
+`VendedorFusion`, que modela otra relación (identidad 1 a 1 de los 16 vendedores de
+Fusión) y quedó fuera de la visibilidad por cartera.
 
 Identidad del cliente: el código numérico compartido por operadores_comerciales.csv
 (columna `codigo`), Cliente_vendedor.csv (columna `cliente`) y `clientes.csv` de
@@ -38,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from web_comparativas.models import User, CarteraOperador, CarteraVendedor
 from web_comparativas.fusion_name_matching import fusion_codes_for_user
-from web_comparativas.dimensionamiento.oportunidades_visibilidad import (
+from web_comparativas.org_hierarchy import (
     analistas_a_cargo,
     supervisores_a_cargo,
 )

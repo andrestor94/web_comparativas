@@ -5,43 +5,49 @@ Conectado a `oportunidades_router.py` (endpoint `/list`) detrás del kill-switch
 apagado el router ni siquiera llama a `oportunidades_visibles_para` — el listado
 sigue devolviendo las mismas filas a todo el mundo, sin excepción.
 
-Fórmula (confirmada con negocio, ago-2026 — los 16 vendedores de Operadores.xlsx son
-la fuerza de venta real: hay tanto Analistas como Supervisores entre ellos, cada uno
-con cartera propia):
+Motor de visibilidad (desde 2026-08-25): `cartera_visibilidad.clientes_visibles_para`,
+el mismo que ya usan Forecast y Dimensionamiento — reemplaza el mecanismo viejo
+basado en `VendedorFusion` (16 vendedores de Fusión vinculados 1 a 1 a un usuario).
+Motivo del cambio: la medición de cobertura contra prod (ago-2026) mostró que
+`VendedorFusion` dejaba a la gran mayoría de la cartera de cada usuario sin ninguna
+oportunidad visible — el cruce válido es `oportunidades_summary.cuenta_interna`
+contra `cartera_operadores` / `cartera_vendedores.codigo_cliente` (confirmado
+46/58 de match literal contra el padrón vigente en prod, run 68).
 
-  - Analista:    oportunidades cuya cuenta resuelve al vendedor de Fusión vinculado a
-                 ESTE usuario (su identidad) MÁS las asignadas a mano a este analista
+Fórmula:
+  - Analista:    su cartera resuelta por `clientes_visibles_para` (operador propio +
+                 vendedor propio) MÁS las asignadas a mano a este analista
                  (`OportunidadAsignacionManual`, pieza 3) — la asignación manual es
                  ADITIVA: no le saca visibilidad a nadie, solo se la suma al analista
                  asignado, aunque la cuenta sea de otro vendedor.
-  - Supervisor:  su propia cartera (igual que un Analista, si está vinculado a un
-                 vendedor) + la cartera de sus analistas a cargo + el buffer de
-                 oportunidades cuya cuenta no resuelve a NINGÚN vendedor todavía
-                 vinculado a un usuario (ni matchea Operadores.xlsx, ni el vendedor
-                 que matchea está vinculado) — ese buffer es el que el supervisor
-                 reparte a mano entre sus analistas.
-  - Gerente:     la cartera de sus supervisores a cargo + transitivamente la de los
-                 analistas de esos supervisores. Alcance PARCIAL (no ve todo) y NO
-                 incluye el buffer: repartirlo es tarea del Supervisor, no del
-                 Gerente. Hoy los gerentes no tienen cartera propia (no hay currently
-                 ningún dato del proyecto que indique que un gerente sea también
-                 vendedor de Fusión) — si eso cambia, sumar su propia cartera acá
-                 igual que se hace para Supervisor.
-  - Auditor/Admin: todo, sin filtrar.
+  - Supervisor:  su cartera resuelta por `clientes_visibles_para` (propia + la de sus
+                 analistas a cargo, agregada por la jerarquía `reporta_a_id`). SIN
+                 buffer: a diferencia del mecanismo viejo, el Supervisor ya no recibe
+                 las oportunidades sin dueño — ese rol pasa al Gerente (ver abajo).
+  - Gerente:     su cartera resuelta por `clientes_visibles_para` (la de sus
+                 supervisores a cargo y, transitivamente, la de los analistas de esos
+                 supervisores) MÁS el buffer: toda oportunidad cuya cuenta no está en
+                 la cartera de NINGÚN usuario del sistema (huérfana). Decisión de
+                 negocio 2026-08-25: "nada se pierde" — antes ese buffer era turf
+                 exclusivo del Supervisor; ahora, como la cartera ya no tiene un
+                 concepto de "vendedor sin vincular" (es por cuenta, no por persona),
+                 el catch-all se le da a Gerente (y a Admin/Auditor, que ya ven todo).
+  - Auditor/Admin: todo, sin filtrar — incluye el buffer sin que haga falta calcularlo
+                 aparte.
 """
 from __future__ import annotations
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import User, VendedorFusion
+from web_comparativas.models import User
+from web_comparativas.cartera_visibilidad import clientes_visibles_para
+from web_comparativas.org_hierarchy import (  # noqa: F401 (re-exportadas: oportunidades_router.py las importa desde acá)
+    analistas_a_cargo,
+    supervisores_a_cargo,
+)
 from web_comparativas.dimensionamiento.models import (
     OportunidadAsignacionManual,
     OportunidadSummary,
-)
-from web_comparativas.dimensionamiento.account_resolution import (
-    get_master_index,
-    normalize_identifier,
 )
 from web_comparativas.dimensionamiento.oportunidades import opportunity_stable_id
 
@@ -55,46 +61,21 @@ def _rol(user) -> str:
     return (getattr(user, "role", "") or "").strip().lower()
 
 
-def codigo_vendedor_de_cuenta(cuenta_interna: str | None) -> str | None:
-    """Código de vendedor de Fusión (Operadores.xlsx) de una cuenta, o None si la
-    cuenta está vacía o no matchea. Mismo join que ya usa el resolver de cuentas
-    (`account_resolution._load_master_index`): normalize_identifier + operators_by_code,
-    sin llamar al CRM.
-    """
-    codigo_cuenta = normalize_identifier(cuenta_interna)
-    if not codigo_cuenta:
-        return None
-    operator = get_master_index().operators_by_code.get(codigo_cuenta)
-    return operator["vendedor_codigo"] if operator else None
+def _codigos_cartera_de_todos(db: Session) -> frozenset[str]:
+    """Unión de los códigos de cliente cubiertos por LA CARTERA de algún usuario
+    (cualquier rol con scope propio vía `clientes_visibles_para`) — el complemento
+    es el buffer de Gerente: cuentas que no son de nadie. Se excluyen los usuarios
+    `unrestricted` (admin/auditor): ven todo por definición, no aportan códigos
+    concretos a la cobertura.
 
-
-def vendedores_vinculados(db: Session) -> dict[str, int]:
-    """{codigo_vendedor: user_id} de los vendedores de Fusión YA vinculados a un
-    usuario de SIEM. Los códigos sin vincular no aparecen (van al buffer)."""
-    filas = (
-        db.query(VendedorFusion.codigo_vendedor, VendedorFusion.user_id)
-        .filter(VendedorFusion.user_id.isnot(None))
-        .all()
-    )
-    return {codigo: user_id for codigo, user_id in filas}
-
-
-def analistas_a_cargo(db: Session, supervisor_id: int) -> list[int]:
-    filas = (
-        db.query(User.id)
-        .filter(User.reporta_a_id == supervisor_id, func.lower(User.role).in_(_ROLES_ANALISTA))
-        .all()
-    )
-    return [r[0] for r in filas]
-
-
-def supervisores_a_cargo(db: Session, gerente_id: int) -> list[int]:
-    filas = (
-        db.query(User.id)
-        .filter(User.reporta_a_id == gerente_id, func.lower(User.role).in_(_ROLES_SUPERVISOR))
-        .all()
-    )
-    return [r[0] for r in filas]
+    Recorre TODOS los usuarios — cara, pero solo se llama para armar el buffer de
+    Gerente (no en cada request de Analista/Supervisor, que son la mayoría)."""
+    codigos: set[str] = set()
+    for u in db.query(User).all():
+        scope = clientes_visibles_para(db, u)
+        if not scope.unrestricted:
+            codigos |= scope.codigos_cliente
+    return frozenset(codigos)
 
 
 def oportunidades_visibles_para(
@@ -102,19 +83,17 @@ def oportunidades_visibles_para(
 ) -> list[OportunidadSummary]:
     """Subconjunto de `oportunidades` (típicamente el run activo completo) visible
     para este usuario, según su rol. Función pura respecto del kill-switch: quien la
-    llame decide si corresponde (hoy nadie la llama todavía)."""
+    llame decide si corresponde (hoy `oportunidades_router.py`, detrás de
+    `OPORTUNIDADES_CARTERA_ENABLED`)."""
     rol = _rol(user)
     if rol in _ROLES_FULL_READ:
         return list(oportunidades)
 
-    vendedor_por_oportunidad = {
-        o.id: codigo_vendedor_de_cuenta(o.cuenta_interna) for o in oportunidades
-    }
-    vinculados = vendedores_vinculados(db)
+    scope = clientes_visibles_para(db, user)
+    if scope.unrestricted:
+        return list(oportunidades)
 
-    def cartera_de(user_ids: set[int]) -> set[int]:
-        codigos = {c for c, uid in vinculados.items() if uid in user_ids}
-        return {oid for oid, cod in vendedor_por_oportunidad.items() if cod in codigos}
+    visibles_ids = {o.id for o in oportunidades if scope.permite(o.cuenta_interna)}
 
     if rol in _ROLES_ANALISTA:
         asignadas_a_mano = {
@@ -127,24 +106,14 @@ def oportunidades_visibles_para(
             o.id for o in oportunidades
             if opportunity_stable_id(o.cliente_visible, o.codigo_articulo) in asignadas_a_mano
         }
-        visibles_ids = cartera_de({user.id}) | manual_ids
-
-    elif rol in _ROLES_SUPERVISOR:
-        equipo_ids = set(analistas_a_cargo(db, user.id))
-        buffer_ids = {
-            oid for oid, cod in vendedor_por_oportunidad.items() if cod not in vinculados
-        }
-        visibles_ids = cartera_de({user.id}) | cartera_de(equipo_ids) | buffer_ids
+        visibles_ids |= manual_ids
 
     elif rol in _ROLES_GERENTE:
-        supervisores_ids = set(supervisores_a_cargo(db, user.id))
-        analistas_ids: set[int] = set()
-        for sid in supervisores_ids:
-            analistas_ids.update(analistas_a_cargo(db, sid))
-        # Sin cartera propia (ver docstring) y sin buffer: eso es turf del Supervisor.
-        visibles_ids = cartera_de(supervisores_ids) | cartera_de(analistas_ids)
-
-    else:
-        visibles_ids = set()
+        cubiertas = _codigos_cartera_de_todos(db)
+        huerfanas_ids = {
+            o.id for o in oportunidades
+            if (o.cuenta_interna or "").strip() not in cubiertas
+        }
+        visibles_ids |= huerfanas_ids
 
     return [o for o in oportunidades if o.id in visibles_ids]

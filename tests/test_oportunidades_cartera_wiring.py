@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from web_comparativas.models import Base, User, VendedorFusion
+from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio, DimensionamientoImportRun, OportunidadAsignacionManual, OportunidadSummary,
 )
@@ -27,7 +27,7 @@ def db():
         connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
     Base.metadata.create_all(engine, tables=[
-        User.__table__, VendedorFusion.__table__,
+        User.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
         DimensionamientoImportRun.__table__, OportunidadSummary.__table__,
         OportunidadAsignacionManual.__table__, CrmEnvio.__table__,
     ])
@@ -38,19 +38,17 @@ def db():
         yield session
 
 
-def make_user(db, *, email, role, reporta_a_id=None) -> User:
-    u = User(email=email, name=email.split("@")[0], role=role, password_hash="x", reporta_a_id=reporta_a_id)
+def make_user(db, *, email, role, reporta_a_id=None, operador_codigos=None, vendedor_codigos=None) -> User:
+    u = User(
+        email=email, name=email.split("@")[0], role=role, password_hash="x",
+        reporta_a_id=reporta_a_id,
+        cartera_operador_codigos=operador_codigos or [],
+        cartera_vendedor_codigos=vendedor_codigos or [],
+    )
     db.add(u)
     db.commit()
     db.refresh(u)
     return u
-
-
-def make_vendedor(db, *, codigo, user_id=None) -> VendedorFusion:
-    v = VendedorFusion(codigo_vendedor=codigo, nombre_fusion=f"VENDEDOR {codigo}", activo=True, user_id=user_id)
-    db.add(v)
-    db.commit()
-    return v
 
 
 def add_opportunity(db, row_id: int, client: str, code: str, cuenta_interna: str) -> OportunidadSummary:
@@ -83,42 +81,38 @@ def configure_list(monkeypatch, *, cartera_enabled: bool):
     })
 
 
-class _FakeMaster:
-    def __init__(self, operators_by_code):
-        self.operators_by_code = operators_by_code
-
-
 @pytest.fixture()
-def escenario_cartera(db, monkeypatch):
+def escenario_cartera(db):
     """Un run con 5 oportunidades: 2 dentro de carteras vinculadas (analista propia +
-    supervisor propia), 1 del analista2 (otro equipo) y 2 en el buffer (sin vincular)."""
-    supervisor = make_user(db, email="supervisor@suizo.com", role="supervisor")
-    analista = make_user(db, email="analista@suizo.com", role="analista", reporta_a_id=supervisor.id)
-    analista2 = make_user(db, email="analista2@suizo.com", role="analista")
+    supervisor propia, resueltas vía cartera_operadores/cartera_vendedores), 1 del
+    analista2 (otro equipo) y 2 huérfanas (sin dueño en ningún lado — buffer de
+    Gerente desde 2026-08-25, ya no de Supervisor)."""
+    supervisor = make_user(db, email="supervisor@suizo.com", role="supervisor", operador_codigos=["OP-SUP"])
+    analista = make_user(
+        db, email="analista@suizo.com", role="analista", reporta_a_id=supervisor.id,
+        vendedor_codigos=["V-AN"],
+    )
+    analista2 = make_user(db, email="analista2@suizo.com", role="analista", vendedor_codigos=["V-AN2"])
     admin = make_user(db, email="admin@suizo.com", role="admin")
     auditor = make_user(db, email="auditor@suizo.com", role="auditor")
-    gerente = make_user(db, email="gerente@suizo.com", role="gerente")
+    gerente = make_user(db, email="gerente@suizo.com", role="gerente", reporta_a_id=None)
+    # analista2 no reporta a nadie en este escenario (equipo aparte, sin supervisor
+    # propio): sirve para probar "cartera ajena" sin acoplarlo a la jerarquía de
+    # supervisor/gerente del escenario principal.
 
-    make_vendedor(db, codigo="4071", user_id=analista.id)
-    make_vendedor(db, codigo="2731", user_id=supervisor.id)
-    make_vendedor(db, codigo="3162", user_id=analista2.id)
+    db.add_all([
+        CarteraVendedor(codigo_cliente="AAA", vendedor_codigo="V-AN", unineg="0"),
+        CarteraOperador(codigo_cliente="BBB", operador_codigo="OP-SUP"),
+        CarteraVendedor(codigo_cliente="CCC", vendedor_codigo="V-AN2", unineg="0"),
+        # DDD/EEE ausentes a propósito: huérfanas, buffer de Gerente.
+    ])
+    db.commit()
 
     opp_analista = add_opportunity(db, 1, "Cliente A", "ART1", "AAA")
     opp_supervisor = add_opportunity(db, 2, "Cliente B", "ART2", "BBB")
     opp_analista2 = add_opportunity(db, 3, "Cliente C", "ART3", "CCC")
     opp_buffer1 = add_opportunity(db, 4, "Cliente D", "ART4", "DDD")
     opp_buffer2 = add_opportunity(db, 5, "Cliente E", "ART5", "EEE")
-
-    fake_master = _FakeMaster({
-        "AAA": {"vendedor_codigo": "4071"},
-        "BBB": {"vendedor_codigo": "2731"},
-        "CCC": {"vendedor_codigo": "3162"},
-        # DDD/EEE ausentes a propósito: buffer sin match.
-    })
-    monkeypatch.setattr(
-        "web_comparativas.dimensionamiento.oportunidades_visibilidad.get_master_index",
-        lambda: fake_master,
-    )
 
     return {
         "supervisor": supervisor, "analista": analista, "analista2": analista2,
@@ -168,12 +162,23 @@ def test_switch_prendido_filtra_analista_a_su_cartera(db, monkeypatch, escenario
     assert response["data"]["rows"][0]["cliente_visible"] == "Cliente A"
 
 
-def test_switch_prendido_supervisor_ve_propia_mas_equipo_mas_buffer(db, monkeypatch, escenario_cartera):
+def test_switch_prendido_supervisor_ve_propia_mas_equipo_sin_buffer(db, monkeypatch, escenario_cartera):
     configure_list(monkeypatch, cartera_enabled=True)
     response = router.oportunidades_list(request=object(), _user=escenario_cartera["supervisor"], db=db)
     clientes = {row["cliente_visible"] for row in response["data"]["rows"]}
-    assert clientes == {"Cliente A", "Cliente B", "Cliente D", "Cliente E"}
-    assert response["data"]["total"] == 4
+    assert clientes == {"Cliente A", "Cliente B"}
+    assert response["data"]["total"] == 2
+
+
+def test_switch_prendido_gerente_ve_el_buffer_de_huerfanas(db, monkeypatch, escenario_cartera):
+    """Definición de negocio 2026-08-25: nada se pierde — el buffer de cuentas sin
+    dueño ahora cae en la bandeja de Gerente (y Admin/Auditor, que ya ven todo)."""
+    configure_list(monkeypatch, cartera_enabled=True)
+    response = router.oportunidades_list(request=object(), _user=escenario_cartera["gerente"], db=db)
+    clientes = {row["cliente_visible"] for row in response["data"]["rows"]}
+    # El gerente de este escenario no tiene supervisores a cargo (gerente.reporta_a_id
+    # apunta a nadie por debajo): solo debería ver el buffer de huérfanas.
+    assert clientes == {"Cliente D", "Cliente E"}
 
 
 def test_switch_prendido_admin_sigue_viendo_todo(db, monkeypatch, escenario_cartera):
@@ -216,6 +221,8 @@ def test_switch_prendido_via_http_endpoint(db, monkeypatch, escenario_cartera):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pieza 3: asignación manual — endpoint POST /asignar-analista/{summary_id}
+# (No depende de VendedorFusion ni de cartera_operadores/cartera_vendedores: solo
+# de rol y `reporta_a_id`, así que corre igual con o sin cartera cargada.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _asignar_app(db):
