@@ -28,6 +28,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from web_comparativas.policy import require_perm, is_admin
@@ -1277,6 +1278,25 @@ def _msg_ya_enviada(e: CrmEnvio) -> str:
     return f"Esta oportunidad ya fue enviada {entorno} por {e.enviado_por} el {fecha}."
 
 
+def _respuesta_duplicado(existente: CrmEnvio) -> dict[str, Any]:
+    """Misma forma de respuesta para las DOS maneras de detectar un duplicado:
+    el chequeo previo (SELECT al principio de `oportunidades_enviar`) y la
+    carrera perdida contra el UNIQUE(oportunidad_id, crm_modo) al reclamar el
+    envío (ver comentario en `oportunidades_enviar`). Antes la segunda vía caía
+    en un IntegrityError sin capturar -> 500 genérico del middleware; ahora
+    devuelve exactamente esto, igual que la primera."""
+    return {
+        "ok": False,
+        "status": "duplicado",
+        "message": _msg_ya_enviada(existente),
+        "enviado_por": existente.enviado_por,
+        "enviado_at": existente.enviado_at.isoformat() if existente.enviado_at else None,
+        "crm_id": existente.crm_id,
+        "crm_url": crm_client.crm_detail_url(existente.crm_id) if existente.crm_id else None,
+        "crm_modo": existente.crm_modo,
+    }
+
+
 @router.post("/enviar/{summary_id}")
 def oportunidades_enviar(
     summary_id: int,
@@ -1292,9 +1312,12 @@ def oportunidades_enviar(
     ESCRITURA (regla jul-2026): solo admin/analista/supervisor (AllowedWriter);
     Gerente y Auditor ven el módulo pero no envían. Flujo:
       1. Resuelve la oportunidad del run activo (identidad estable = oportunidad_id).
-      2. Si YA fue enviada y NO hay override → NO reenvía; devuelve mensaje claro.
+      2. Cartera (2026-08-25, gateado por OPORTUNIDADES_CARTERA_ENABLED, igual que
+         /list): si el summary_id no está entre lo que `oportunidades_visibles_para`
+         le deja ver a este usuario → 403, sin tocar el CRM ni reclamar nada.
+      3. Si YA fue enviada y NO hay override → NO reenvía; devuelve mensaje claro.
          - override (reenvío) solo Admin.
-      3. Si no existe (o override autorizado) → sella el payload (enviado_por/at/id),
+      4. Si no existe (o override autorizado) → sella el payload (enviado_por/at/id),
          corre el envío al CRM y SOLO ante ACK OK registra en `crm_envios`
          (+ bitácora `crm_envio_eventos`), guardando el id que devolvió el CRM.
     """
@@ -1310,6 +1333,31 @@ def oportunidades_enviar(
     ).scalars().first()
     if o is None:
         raise HTTPException(status_code=404, detail="Oportunidad no encontrada en la corrida activa.")
+
+    # ── Cartera: /enviar tiene que respetar la misma visibilidad que /list ──
+    # (2026-08-25) Antes solo se validaba el ROL (AllowedWriter); un Analista o
+    # Supervisor podía mandar cualquier summary_id de la corrida activa con solo
+    # adivinar el id (es un entero secuencial) — la cartera nunca se revalidaba
+    # acá, aunque /list sí filtre por ella. Se reusa la MISMA función que ya usa
+    # /list (`oportunidades_visibles_para`), no se reimplementa el criterio:
+    # así queda garantizado que "lo que no aparece en el listado" tampoco se
+    # puede enviar por atrás. Se corta ANTES de tocar el CRM y antes de reclamar
+    # el envío (ver más abajo) — un pedido fuera de cartera ni siquiera llega a
+    # competir por el lock de duplicados.
+    #
+    # Gateado por el MISMO switch que /list (OPORTUNIDADES_CARTERA_ENABLED): con
+    # el switch apagado, /enviar no filtra por cartera — apagar el switch sigue
+    # siendo un rollback completo de un solo lugar, no dos mecanismos a
+    # coordinar por separado.
+    #
+    # Admin/auditor no cambian: `oportunidades_visibles_para` ya los deja pasar
+    # sin filtrar (rol de lectura completa) — es la MISMA función, no hace falta
+    # un caso especial acá.
+    if OPORTUNIDADES_CARTERA_ENABLED() and not oportunidades_visibles_para(db, user, [o]):
+        raise HTTPException(
+            status_code=403,
+            detail="No podés enviar esta oportunidad: no está dentro de tu cartera.",
+        )
 
     oportunidad_id = opportunity_stable_id(o.cliente_visible, o.codigo_articulo)
     # Duplicados POR ENTORNO: el bloqueo es (oportunidad_id, crm_modo). Lo enviado a
@@ -1333,16 +1381,7 @@ def oportunidades_enviar(
         )
     if existente is not None and not es_override:
         # Bloqueo permanente: NO reenvía. Mensaje claro con quién y cuándo.
-        return {
-            "ok": False,
-            "status": "duplicado",
-            "message": _msg_ya_enviada(existente),
-            "enviado_por": existente.enviado_por,
-            "enviado_at": existente.enviado_at.isoformat() if existente.enviado_at else None,
-            "crm_id": existente.crm_id,
-            "crm_url": crm_client.crm_detail_url(existente.crm_id) if existente.crm_id else None,
-            "crm_modo": existente.crm_modo,
-        }
+        return _respuesta_duplicado(existente)
 
     # ── Feature 1: sello del usuario (server-side, NUNCA del cliente) ──
     enviado_por = getattr(user, "email", None)
@@ -1448,12 +1487,93 @@ def oportunidades_enviar(
     payload["enviado_at"] = enviado_at.isoformat()
     # Estado de la oportunidad en SIEM -> `status` de la bitácora en el CRM (paso 5).
     payload["estado_siem"] = o.estado_actividad
+    periodo = _periodo_actual()
+
+    # ── Reclamo del envío — CIERRA LA CARRERA (ago-2026) ──
+    # Antes de esto, el chequeo de "existente" de más arriba era un SELECT sin lock:
+    # dos requests con la misma oportunidad podían pasarlo juntas, y las DOS seguían
+    # de largo hasta `_enviar_real_a_crm` — cada una creando su propia Opportunity en
+    # el CRM — antes de que el UNIQUE(oportunidad_id, crm_modo) frenara a la segunda
+    # recién al final, al comitear.
+    #
+    # Ahora se INSERTA (y comitea) la fila de `crm_envios` ACÁ, en estado EN_CURSO,
+    # ANTES de tocar el CRM. El propio UNIQUE hace de lock: la segunda request que
+    # llegue hasta acá con la misma clave choca en ESTE commit — nunca llega a
+    # `_enviar_real_a_crm` — y devuelve la misma respuesta "duplicado" de siempre
+    # (`_respuesta_duplicado`), en vez del IntegrityError sin capturar que antes
+    # burbujeaba hasta el middleware como un 500 genérico.
+    #
+    # Se descartó `SELECT ... FOR UPDATE`: en el PRIMER envío de una oportunidad no
+    # hay ninguna fila que lockear todavía (un FOR UPDATE sobre una clave sin filas
+    # no bloquea nada), así que no cerraba justo el caso que importa acá — dos
+    # personas mandando la MISMA oportunidad por primera vez casi juntas. Un
+    # advisory lock aparte tampoco: no es portable a SQLite (donde corre la suite) y
+    # acá alcanza con reusar el UNIQUE que ya existe — cero cambio de esquema.
+    #
+    # Efecto colateral aceptado, no buscado: apenas se reclama, la oportunidad ya
+    # sale de "pendientes" para todo el mundo (`_oportunidades_pendientes` excluye
+    # por `oportunidad_id` sin mirar `crm_status`) — antes de que el CRM confirme
+    # nada. Si el envío real falla, se borra el reclamo (abajo) y vuelve a aparecer.
+    # Si el proceso se cae entre el reclamo y la confirmación (crash real, no una
+    # falla de negocio), la fila queda pegada en EN_CURSO — la única salida es un
+    # reenvío con `override` de Admin, que ya existe para el caso "reenviar algo que
+    # ya tiene fila" y no distingue si esa fila es EN_CURSO o un envío consumado.
+    placeholder: CrmEnvio | None = None
+    if existente is None:
+        placeholder = CrmEnvio(
+            oportunidad_id=oportunidad_id,
+            periodo_yyyymm=periodo,
+            cliente_visible=o.cliente_visible,
+            cuit=o.cuit,
+            codigo_articulo=o.codigo_articulo,
+            unidad_negocio=o.unidad_negocio,
+            enviado_por=enviado_por,
+            enviado_por_id=enviado_por_id,
+            enviado_at=enviado_at,
+            crm_status="EN_CURSO",
+            # NUNCA None: es parte de la clave única (oportunidad_id, crm_modo) y un
+            # NULL desactivaría el bloqueo de duplicados sin dar ninguna señal.
+            crm_modo=modo_actual,
+        )
+        db.add(placeholder)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            ganador = db.execute(
+                select(CrmEnvio)
+                .where(CrmEnvio.oportunidad_id == oportunidad_id)
+                .where(CrmEnvio.crm_modo == modo_actual)
+            ).scalars().first()
+            logger.info(
+                "[OPORTUNIDADES][API] envío perdió la carrera oportunidad_id=%s modo=%s",
+                oportunidad_id, modo_actual,
+            )
+            if ganador is not None:
+                return _respuesta_duplicado(ganador)
+            # Ventana extremadamente angosta: el otro reclamo ya chocó contra el
+            # nuestro (probamos el IntegrityError) pero se borró (CRM rechazó el
+            # suyo) antes de que llegáramos a releerlo. No hay a quién atribuírselo
+            # todavía — no se inventa un "enviado_por"/fecha falsos.
+            return {
+                "ok": False,
+                "status": "duplicado",
+                "message": "Esta oportunidad se está enviando en este momento por otra persona. Reintentá en unos segundos.",
+                "enviado_por": None,
+                "enviado_at": None,
+                "crm_id": None,
+                "crm_url": None,
+                "crm_modo": modo_actual,
+            }
 
     # ── Envío real. El registro se hace SOLO si el ACK es OK: ante cualquier falla la
     # oportunidad queda SIN registrar, o sea libre de reintentar sin pedir override. ──
     try:
         ack = _enviar_real_a_crm(payload, asignado, selected_account.get("crm_account_id"))
     except CrmError as exc:
+        if placeholder is not None:
+            db.delete(placeholder)
+            db.commit()
         logger.warning(
             "[OPORTUNIDADES][API] envío rechazado oportunidad_id=%s kind=%s paso=%s: %s",
             oportunidad_id, exc.kind, exc.paso, exc.mensaje,
@@ -1463,6 +1583,9 @@ def oportunidades_enviar(
             detail=exc.mensaje,
         ) from exc
     if not ack.get("ok"):
+        if placeholder is not None:
+            db.delete(placeholder)
+            db.commit()
         raise HTTPException(status_code=502, detail="El CRM rechazó el envío. Reintentá más tarde.")
 
     payload["crm_account_id"] = ack.get("crm_account_id")
@@ -1476,34 +1599,20 @@ def oportunidades_enviar(
             "usuario": ack["assigned_user"], "origen": ack.get("usuario_origen", ""),
         })
         payload["assigned_user_id"] = ack.get("assigned_user_id")
-    periodo = _periodo_actual()
     payload_snapshot = json.dumps(payload, ensure_ascii=False)
 
-    if existente is None:
-        # Primer envío: fila canónica + evento ENVIO.
-        db.add(CrmEnvio(
-            oportunidad_id=oportunidad_id,
-            periodo_yyyymm=periodo,
-            cliente_visible=o.cliente_visible,
-            cuit=o.cuit,
-            codigo_articulo=o.codigo_articulo,
-            unidad_negocio=o.unidad_negocio,
-            enviado_por=enviado_por,
-            enviado_por_id=enviado_por_id,
-            enviado_at=enviado_at,
-            crm_status=crm_status,
-            crm_id=crm_id,
-            crm_account_id=ack.get("crm_account_id"),
-            # NUNCA None: es parte de la clave única (oportunidad_id, crm_modo) y un
-            # NULL desactivaría el bloqueo de duplicados sin dar ninguna señal.
-            crm_modo=ack.get("crm_modo") or modo_actual,
-            # Asignación: a quién quedó y cómo se decidió (match | manual). `enviado_por`
-            # de arriba guarda a quien disparó el envío, que puede ser otra persona.
-            crm_assigned_user_id=ack.get("assigned_user_id"),
-            crm_assigned_usuario=ack.get("assigned_user"),
-            crm_assigned_origen=ack.get("usuario_origen"),
-            payload_snapshot=payload_snapshot,
-        ))
+    if placeholder is not None:
+        # Primer envío: se completa la fila reclamada arriba (no se crea una nueva —
+        # ya existe desde el commit del reclamo, con su UNIQUE ya asegurado).
+        placeholder.crm_status = crm_status
+        placeholder.crm_id = crm_id
+        placeholder.crm_account_id = ack.get("crm_account_id")
+        # Asignación: a quién quedó y cómo se decidió (match | manual). `enviado_por`
+        # de arriba guarda a quien disparó el envío, que puede ser otra persona.
+        placeholder.crm_assigned_user_id = ack.get("assigned_user_id")
+        placeholder.crm_assigned_usuario = ack.get("assigned_user")
+        placeholder.crm_assigned_origen = ack.get("usuario_origen")
+        placeholder.payload_snapshot = payload_snapshot
         evento = "ENVIO"
         status = "enviado"
     else:
