@@ -550,6 +550,9 @@ class ForecastManualClient(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     nombre_cliente = Column(String(255), nullable=False)
     grupo = Column(String(255), nullable=True)
+    # Un alta externa puede ser solo un ajuste comercial: debe aparecer en la
+    # curva Ajustada sin alterar Modelo/Base, bandas ni expectativa global.
+    adjustment_only = Column(Boolean, nullable=False, default=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=dt.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow, nullable=False)
@@ -1834,6 +1837,7 @@ def _ensure_manual_client_columns():
                 for col, ddl in [
                     ("deleted_at",  "ALTER TABLE forecast_manual_clients ADD COLUMN deleted_at DATETIME"),
                     ("deleted_by",  "ALTER TABLE forecast_manual_clients ADD COLUMN deleted_by VARCHAR(255)"),
+                    ("adjustment_only", "ALTER TABLE forecast_manual_clients ADD COLUMN adjustment_only BOOLEAN NOT NULL DEFAULT FALSE"),
                 ]:
                     if col not in existing:
                         conn.execute(text(ddl))

@@ -5156,55 +5156,14 @@ def _pg_get_chart_data_inner(
         else:
             _ch_override_ms = (time.perf_counter() - _t_ovr) * 1000
 
-    # ── Inject manual client entries into PG forecast totals ─────────────
+    # Los clientes manuales legacy forman parte de todas las curvas. Los lotes
+    # marcados adjustment_only se agregan exclusivamente a Total_User_Adj.
     _manual_df_pg_chart = (
         _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
         if cartera_branches is None else pd.DataFrame()
     )
-    if not _manual_df_pg_chart.empty and not df_fcst.empty:
-        _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
-        _manual_monthly_pg = (
-            _manual_df_pg_chart.groupby("fecha")[_val_col_m_pg]
-            .sum()
-            .reset_index()
-            .rename(columns={_val_col_m_pg: "_manual_amt"})
-        )
-        print(f"[MANUAL_DASHBOARD] PG chart manual monthly total={_manual_monthly_pg['_manual_amt'].sum():.0f}", flush=True)
-        new_pg_rows = []
-        for _, mr in _manual_monthly_pg.iterrows():
-            mask_m = df_fcst["fecha"] == mr["fecha"]
-            if mask_m.any():
-                for col in ("Total_Forecast", "Total_User_Adj", "Total_Adj", "Total_Li", "Total_Ls"):
-                    if col in df_fcst.columns:
-                        df_fcst.loc[mask_m, col] = df_fcst.loc[mask_m, col] + mr["_manual_amt"]
-            else:
-                new_pg_rows.append({
-                    "fecha": mr["fecha"],
-                    "Total_Forecast": mr["_manual_amt"],
-                    "Total_Li": mr["_manual_amt"],
-                    "Total_Ls": mr["_manual_amt"],
-                    "Total_Adj": mr["_manual_amt"],
-                    "Total_User_Adj": mr["_manual_amt"],
-                })
-        if new_pg_rows:
-            df_fcst = pd.concat([df_fcst, pd.DataFrame(new_pg_rows)], ignore_index=True)
-        df_fcst = df_fcst.sort_values("fecha").reset_index(drop=True)
-    elif not _manual_df_pg_chart.empty and df_fcst.empty:
-        _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
-        _manual_monthly_pg = (
-            _manual_df_pg_chart.groupby("fecha")[_val_col_m_pg]
-            .sum()
-            .reset_index()
-            .rename(columns={_val_col_m_pg: "_manual_amt"})
-        )
-        df_fcst = pd.DataFrame([{
-            "fecha": row["fecha"],
-            "Total_Forecast": row["_manual_amt"],
-            "Total_Li": row["_manual_amt"],
-            "Total_Ls": row["_manual_amt"],
-            "Total_Adj": row["_manual_amt"],
-            "Total_User_Adj": row["_manual_amt"],
-        } for _, row in _manual_monthly_pg.iterrows()])
+    _val_col_m_pg = "monto_yhat" if view_money else "yhat_cliente"
+    df_fcst = _inject_manual_entries_into_chart_totals(df_fcst, _manual_df_pg_chart, _val_col_m_pg)
 
     # Bridge: connect last history point to start of forecast line
     if not df_hist.empty and not df_fcst.empty:
@@ -7151,41 +7110,14 @@ def get_chart_data(
     if "Total_User_Adj" not in df_fcst.columns:
         df_fcst["Total_User_Adj"] = df_fcst["Total_Forecast"] * (1.0 + growth_pct / 100.0)
 
-    # ── Inject manual client entries into forecast totals ─────────────────
+    # Misma semántica que PostgreSQL: adjustment_only afecta solo la curva
+    # comercial ajustada; los manuales legacy conservan su comportamiento.
     _manual_df_chart = (
         _get_manual_entries_df(user_id, start_date, end_date, neg, subneg, is_admin=is_admin, profiles_filter=profiles)
         if cartera_branches is None else pd.DataFrame()
     )
-    if not _manual_df_chart.empty:
-        _val_col_m = "monto_yhat" if view_money else "yhat_cliente"
-        _manual_monthly = (
-            _manual_df_chart.groupby("fecha")[_val_col_m]
-            .sum()
-            .reset_index()
-            .rename(columns={_val_col_m: "_manual_amt"})
-        )
-        print(f"[MANUAL_DASHBOARD] chart manual monthly total={_manual_monthly['_manual_amt'].sum():.0f}", flush=True)
-        new_rows = []
-        for _, mr in _manual_monthly.iterrows():
-            mask_m = df_fcst["fecha"] == mr["fecha"]
-            if mask_m.any():
-                df_fcst.loc[mask_m, "Total_Forecast"] = df_fcst.loc[mask_m, "Total_Forecast"] + mr["_manual_amt"]
-                df_fcst.loc[mask_m, "Total_User_Adj"] = df_fcst.loc[mask_m, "Total_User_Adj"] + mr["_manual_amt"]
-                if "Total_Li" in df_fcst.columns:
-                    df_fcst.loc[mask_m, "Total_Li"] = df_fcst.loc[mask_m, "Total_Li"] + mr["_manual_amt"]
-                if "Total_Ls" in df_fcst.columns:
-                    df_fcst.loc[mask_m, "Total_Ls"] = df_fcst.loc[mask_m, "Total_Ls"] + mr["_manual_amt"]
-            else:
-                new_rows.append({
-                    "fecha": mr["fecha"],
-                    "Total_Forecast": mr["_manual_amt"],
-                    "Total_Li": mr["_manual_amt"],
-                    "Total_Ls": mr["_manual_amt"],
-                    "Total_User_Adj": mr["_manual_amt"],
-                })
-        if new_rows:
-            df_fcst = pd.concat([df_fcst, pd.DataFrame(new_rows)], ignore_index=True)
-        df_fcst = df_fcst.sort_values("fecha").reset_index(drop=True)
+    _val_col_m = "monto_yhat" if view_money else "yhat_cliente"
+    df_fcst = _inject_manual_entries_into_chart_totals(df_fcst, _manual_df_chart, _val_col_m)
 
     # Growth adjustment — flat multiplier matching original app.py
     # Original: Total_Forecast_Adj = Total_Forecast * (1 + growth_pct/100) for all projection months
@@ -8393,6 +8325,7 @@ def _get_manual_entries_df(
             "subneg": str(e.subneg or "").strip(),
             "perfil": _perfil_val,
             "origen_manual": True,
+            "adjustment_only": bool(getattr(mc, "adjustment_only", False)),
             "codigo_serie": str(e.codigo_serie or "").strip(),
             "descripcion": str(e.descripcion or e.codigo_serie or "").strip(),
             "monto_yhat": float(e.monto_total or 0.0),
@@ -8403,6 +8336,67 @@ def _get_manual_entries_df(
     df = pd.DataFrame(rows)
     print(f"[MANUAL_DASHBOARD] manual entries loaded={len(df)} user_id={user_id}", flush=True)
     return df
+
+
+def _inject_manual_entries_into_chart_totals(df_fcst, manual_df, value_col):
+    """Suma clientes manuales a las curvas respetando su semántica.
+
+    Los registros legacy (``adjustment_only=False`` o columna ausente) mantienen
+    el comportamiento histórico y participan de todas las curvas disponibles.
+    Los registros ``adjustment_only=True`` se suman únicamente a
+    ``Total_User_Adj``: así pueden representar altas comerciales externas sin
+    contaminar Modelo/Base, Li/Ls ni la expectativa global.
+    """
+    import pandas as pd
+
+    if manual_df is None or manual_df.empty:
+        return df_fcst
+    if value_col not in manual_df.columns:
+        return df_fcst
+
+    result = df_fcst.copy() if df_fcst is not None else pd.DataFrame()
+    work = manual_df.copy()
+    if "adjustment_only" not in work.columns:
+        work["adjustment_only"] = False
+    work["adjustment_only"] = work["adjustment_only"].fillna(False).astype(bool)
+    monthly = (
+        work.groupby(["fecha", "adjustment_only"], dropna=False)[value_col]
+        .sum()
+        .reset_index()
+        .rename(columns={value_col: "_manual_amt"})
+    )
+
+    core_cols = ["Total_Forecast", "Total_User_Adj", "Total_Li", "Total_Ls"]
+    if "Total_Adj" in result.columns or result.empty:
+        core_cols.append("Total_Adj")
+    for col in core_cols:
+        if col not in result.columns:
+            result[col] = pd.Series(dtype=float)
+    if "fecha" not in result.columns:
+        result["fecha"] = pd.Series(dtype="datetime64[ns]")
+
+    new_rows = []
+    for _, row in monthly.iterrows():
+        amount = float(row["_manual_amt"] or 0.0)
+        adjustment_only = bool(row["adjustment_only"])
+        target_cols = ["Total_User_Adj"] if adjustment_only else core_cols
+        month_mask = result["fecha"] == row["fecha"]
+        if month_mask.any():
+            for col in target_cols:
+                if col in result.columns:
+                    result.loc[month_mask, col] = result.loc[month_mask, col].fillna(0.0) + amount
+            continue
+
+        new_row = {"fecha": row["fecha"]}
+        for col in core_cols:
+            new_row[col] = 0.0
+        for col in target_cols:
+            new_row[col] = amount
+        new_rows.append(new_row)
+
+    if new_rows:
+        result = pd.concat([result, pd.DataFrame(new_rows)], ignore_index=True)
+    return result.sort_values("fecha").reset_index(drop=True)
 
 
 def _inject_manual_client_rows_into_table(
