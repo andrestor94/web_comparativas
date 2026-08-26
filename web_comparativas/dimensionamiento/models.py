@@ -96,6 +96,24 @@ class DimensionamientoImportRun(Base):
     platform_values = Column(JSON, nullable=True)
     cuenta_entidad_map = Column(JSON, nullable=True)
 
+    # global_totals (ago-2026, 2da vuelta de la auditoría de rendimiento):
+    # {"total_rows": int, "platforms": [{"name","rows"},...], "familias": int,
+    # "provincias": int, "valorizacion": float} — SOLO válido para el caso SIN
+    # restricción de cartera (admin/auditor, o cartera apagada). Reemplaza dos
+    # queries medidas en prod para un auditor: get_status (39s, 2 Parallel Seq
+    # Scan sobre 1.4M filas de dimensionamiento_records para total_rows y el
+    # desglose por plataforma) y get_kpis (19s, COUNT(DISTINCT familia) +
+    # COUNT(DISTINCT provincia) en la misma query forzando un sort que spillea
+    # a disco). Para un usuario CON cartera restringida, ninguna de las dos se
+    # puede precalcular acá (el resultado depende de SU cartera) — para esos
+    # casos, get_status/get_kpis siguen calculando en vivo, ya acotados por el
+    # índice de cliente_entidad_id.
+    # Calculado en refresh_default_dashboard_snapshot, mismo mecanismo y mismo
+    # motivo que platform_values/cuenta_entidad_map arriba. NULL para runs de
+    # antes de este cambio -> get_status/get_kpis (query_service.py) caen al
+    # cálculo on-the-fly de siempre para esos.
+    global_totals = Column(JSON, nullable=True)
+
     records = relationship("DimensionamientoRecord", back_populates="import_run")
     summaries = relationship("DimensionamientoFamilyMonthlySummary", back_populates="import_run")
     snapshots = relationship("DimensionamientoDashboardSnapshot", back_populates="import_run")

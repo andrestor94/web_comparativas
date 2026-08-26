@@ -1848,15 +1848,15 @@ def ensure_dimensionamiento_import_runs_oportunidades_ref_month_column():
 
 
 def ensure_dimensionamiento_import_runs_dashboard_precalc_columns():
-    """`dimensionamiento_import_runs.platform_values` / `.cuenta_entidad_map`
-    (ago-2026, auditoría de rendimiento de Dimensionamiento — ver comentario en
-    `models.DimensionamientoImportRun`). Columnas nuevas, nullable: no rompen
-    runs existentes — quedan NULL, `query_service.py` cae al cálculo on-the-fly
-    de siempre para esos (mismo criterio que `oportunidades_ref_month`). Se
-    pueblan solas en runs NUEVOS desde `refresh_default_dashboard_snapshot`,
-    que `ingest_dimensionamiento_csv` llama automáticamente después de cada
-    import — a diferencia de `oportunidades_ref_month`, que depende de un paso
-    manual aparte.
+    """`dimensionamiento_import_runs.platform_values` / `.cuenta_entidad_map` /
+    `.global_totals` (ago-2026, auditoría de rendimiento de Dimensionamiento —
+    ver comentario en `models.DimensionamientoImportRun`). Columnas nuevas,
+    nullable: no rompen runs existentes — quedan NULL, `query_service.py` cae
+    al cálculo on-the-fly de siempre para esos (mismo criterio que
+    `oportunidades_ref_month`). Se pueblan solas en runs NUEVOS desde
+    `refresh_default_dashboard_snapshot`, que `ingest_dimensionamiento_csv`
+    llama automáticamente después de cada import — a diferencia de
+    `oportunidades_ref_month`, que depende de un paso manual aparte.
     """
     with engine.begin() as conn:
         ok = _add_column_safe(
@@ -1869,12 +1869,17 @@ def ensure_dimensionamiento_import_runs_dashboard_precalc_columns():
             "ALTER TABLE dimensionamiento_import_runs ADD COLUMN cuenta_entidad_map JSON",
             "dimensionamiento_import_runs.cuenta_entidad_map",
         )
+        ok &= _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_import_runs ADD COLUMN global_totals JSON",
+            "dimensionamiento_import_runs.global_totals",
+        )
     if ok:
-        print("[MIGRATION] SUCCESS: dimensionamiento_import_runs.platform_values/cuenta_entidad_map "
-              "verificadas/creadas.", flush=True)
+        print("[MIGRATION] SUCCESS: dimensionamiento_import_runs.platform_values/cuenta_entidad_map/"
+              "global_totals verificadas/creadas.", flush=True)
     else:
-        print("[MIGRATION] ATENCION: no se pudo verificar/crear platform_values/cuenta_entidad_map "
-              "(ver traceback arriba).", flush=True)
+        print("[MIGRATION] ATENCION: no se pudo verificar/crear platform_values/cuenta_entidad_map/"
+              "global_totals (ver traceback arriba).", flush=True)
 
 
 def ensure_dimensionamiento_entidad_backfill():

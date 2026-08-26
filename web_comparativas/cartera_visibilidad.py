@@ -32,9 +32,12 @@ informe de auditoría para la cobertura medida de este cruce.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import User, CarteraOperador, CarteraVendedor
@@ -100,15 +103,17 @@ def FORECAST_CARTERA_ENABLED() -> bool:
     todo usuario sin cartera cargada en `users.cartera_*` pasa a ver CERO clientes en
     Forecast (fail-closed) — recién tiene sentido prenderlo después de correr
     push_cartera_data.py Y asignar cartera a cada usuario desde S.I.C."""
-    # Bypass temporal solicitado para que Forecast sea una vista global y todos
-    # los usuarios del módulo puedan validar el mismo dato oficial, aun cuando
-    # no tengan las cuentas asociadas en cartera. Solo afecta Forecast: Mercado
-    # Público, Mercado Privado, Dimensionamiento y Oportunidades conservan sus
-    # reglas. En Render queda activo por defecto; se puede revertir sin tocar
-    # código definiendo FORECAST_CARTERA_BYPASS_ALL=0.
-    bypass_raw = os.getenv("FORECAST_CARTERA_BYPASS_ALL")
-    bypass_all = _flag("RENDER") if bypass_raw is None else _flag("FORECAST_CARTERA_BYPASS_ALL")
-    return (not bypass_all) and _flag("FORECAST_CARTERA_ENABLED")
+    return _flag("FORECAST_CARTERA_ENABLED")
+
+
+def FORECAST_CARTERA_BYPASS_ALL() -> bool:
+    """Bypass temporal del filtro de cuentas solo para las vistas de datos Forecast.
+
+    No altera la matriz de roles ni las reglas de Aprobaciones Forecast. En Render
+    queda activo por defecto y se revierte definiendo el valor explícito en 0.
+    """
+    raw = os.getenv("FORECAST_CARTERA_BYPASS_ALL")
+    return _flag("RENDER") if raw is None else _flag("FORECAST_CARTERA_BYPASS_ALL")
 
 
 def DIMENSIONAMIENTO_CARTERA_ENABLED() -> bool:
@@ -188,9 +193,98 @@ def _cartera_propia(db: Session, u: User, unineg_scope: set[str] | None = None) 
     return codigos_operador | codigos_vendedor
 
 
+def _cartera_de_equipo(db: Session, miembros: list[User]) -> set[str]:
+    """Cartera PROPIA de VARIOS usuarios de una sola vez — 2 queries en TOTAL
+    (operador + vendedor), no 2 por miembro. Arregla el N+1 de
+    `clientes_visibles_para` para Supervisor/Gerente: antes, un Supervisor con
+    N analistas a cargo pagaba ~2N+ queries (una `_cartera_propia` completa por
+    analista) — medido en prod: 76 queries / 15s para un equipo de 14, con el
+    mismo statement repetido 14 veces. `unineg_scope` es SIEMPRE None acá
+    (miembros heredados de un Supervisor/Gerente nunca llevan scope de BU
+    propio — ver `_cartera_propia`)."""
+    if not miembros:
+        return set()
+    operadores: set[str] = set()
+    vendedores: set[str] = set()
+    for m in miembros:
+        # fusion_codes_for_user NO pega la DB salvo que cartera_fusion_enabled
+        # sea True (chequeo en memoria sobre la columna ya cargada) — así que
+        # esto no reintroduce el N+1 para el caso común (fusión apagada).
+        fusion_operadores, fusion_vendedores, _match = fusion_codes_for_user(db, m)
+        operadores |= _codes(m.cartera_operador_codigos) | fusion_operadores
+        vendedores |= _codes(m.cartera_vendedor_codigos) | fusion_vendedores
+    return _clientes_por_operador(db, operadores) | _clientes_por_vendedor(db, vendedores, None)
+
+
+def _usuarios_por_id(db: Session, ids: Iterable[int]) -> dict[int, User]:
+    """Trae varios User por id en UNA query (`IN (...)`) en vez de un `db.get()`
+    por id en un loop — mismo motivo que `_cartera_de_equipo`."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return {}
+    filas = db.execute(select(User).where(User.id.in_(ids))).scalars().all()
+    return {u.id: u for u in filas}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Caché en memoria de clientes_visibles_para, por user.id (ago-2026). Motivo:
+# la resolución de cartera de un Supervisor/Gerente (aunque ya batcheada arriba)
+# sigue costando 2+ queries por carga de pantalla, y hoy se recalcula en CADA
+# carga de Dimensionamiento/Oportunidades/Forecast para el mismo usuario.
+#
+# Invalidación: SIEMPRE completa (invalidate_cartera_scope_cache() sin
+# argumentos), nunca "solo este usuario" — un cambio en la cartera/jerarquía
+# de UN usuario puede repercutir en la cartera AGREGADA de su Supervisor y,
+# transitivamente, de su Gerente. Calcular exactamente a quién afecta cada
+# cambio es exactamente el tipo de lógica que es fácil dejar incompleta (ver
+# el propio bug de Myriam/Daniela documentado arriba en este archivo) — limpiar
+# todo es más caro por request pero CERO riesgo de servir una cartera vieja a
+# alguien que no era el usuario editado. El caché es chico (un objeto liviano
+# por usuario activo), así que recalcular todo de nuevo es barato.
+#
+# El TTL de abajo es un backstop, NO el mecanismo principal: cubre el caso de
+# un cambio que ocurre por un camino que no llama a
+# invalidate_cartera_scope_cache() (hoy conocido: push_cartera_data.py, script
+# externo que reescribe cartera_operadores/cartera_vendedores fuera del
+# proceso web — no hay forma de que un cache en memoria de ESTE proceso se
+# entere de una escritura de OTRO proceso sin un mecanismo aparte). Los 3
+# puntos de escritura del lado de la app (crear/editar/borrar usuario en
+# sic_router.py) SÍ llaman a invalidate_cartera_scope_cache() — para esos, el
+# cambio se ve al instante, sin esperar el TTL.
+_CARTERA_SCOPE_CACHE: dict[int, dict] = {}
+_CARTERA_SCOPE_CACHE_LOCK = threading.Lock()
+_TTL_CARTERA_SCOPE = 900.0  # 15 min — backstop, ver comentario arriba.
+
+
+def invalidate_cartera_scope_cache() -> None:
+    """Limpia TODO el caché de clientes_visibles_para. Llamar después de
+    cualquier cambio que pueda afectar cartera o jerarquía de cualquier
+    usuario (alta/baja/edición en S.I.C.) — ver sic_router.py."""
+    with _CARTERA_SCOPE_CACHE_LOCK:
+        _CARTERA_SCOPE_CACHE.clear()
+
+
 def clientes_visibles_para(db: Session, user: User) -> CarteraScope:
-    """Resuelve la cartera visible para `user`. Función pura: no consulta ningún
-    feature flag — quien la llame decide si corresponde aplicarla en ese módulo."""
+    """Resuelve la cartera visible para `user`, cacheada por user.id (ver
+    _CARTERA_SCOPE_CACHE arriba). El cálculo real vive en
+    `_resolver_cartera_visible` — esta función solo agrega el caché, para que
+    ningún caller tenga que cambiar (todos siguen llamando a
+    `clientes_visibles_para` igual que siempre)."""
+    now = time.perf_counter()
+    cached = _CARTERA_SCOPE_CACHE.get(user.id)
+    if cached is not None and now - cached["ts"] < _TTL_CARTERA_SCOPE:
+        return cached["val"]
+    scope = _resolver_cartera_visible(db, user)
+    with _CARTERA_SCOPE_CACHE_LOCK:
+        _CARTERA_SCOPE_CACHE[user.id] = {"ts": now, "val": scope}
+    return scope
+
+
+def _resolver_cartera_visible(db: Session, user: User) -> CarteraScope:
+    """Cálculo real de la cartera visible para `user` — sin caché (la cachea
+    `clientes_visibles_para`, que es la función pública). Función pura: no
+    consulta ningún feature flag — quien la llame decide si corresponde
+    aplicarla en ese módulo."""
     rol = (user.role or "").strip().lower()
 
     if rol in _ROLES_FULL_READ:
@@ -221,13 +315,10 @@ def clientes_visibles_para(db: Session, user: User) -> CarteraScope:
         # Daniela (scope 5+15) — Daniela no veía nada de Myriam porque su
         # cartera se intersecaba contra un scope que no es el suyo.
         unineg_scope = _codes(user.cartera_unineg_scope)
-        member_ids = {user.id}
         codigos = _cartera_propia(db, user, unineg_scope=unineg_scope)
-        for analista_id in analistas_a_cargo(db, user.id):
-            analista = db.get(User, analista_id)
-            if analista is not None:
-                member_ids.add(analista.id)
-                codigos |= _cartera_propia(db, analista, unineg_scope=None)
+        analistas_map = _usuarios_por_id(db, analistas_a_cargo(db, user.id))
+        member_ids = {user.id} | set(analistas_map.keys())
+        codigos |= _cartera_de_equipo(db, list(analistas_map.values()))
         branch = CarteraBranchScope(
             root_user_id=user.id,
             member_user_ids=frozenset(member_ids),
@@ -248,18 +339,13 @@ def clientes_visibles_para(db: Session, user: User) -> CarteraScope:
         # del supervisor acota SOLO la cartera PROPIA de ESE supervisor — nunca lo
         # que sus analistas aportan a la rama. La jerarquía manda de punta a punta.
         branches: list[CarteraBranchScope] = []
-        for supervisor_id in supervisores_a_cargo(db, user.id):
-            supervisor = db.get(User, supervisor_id)
-            if supervisor is None:
-                continue
+        supervisores_map = _usuarios_por_id(db, supervisores_a_cargo(db, user.id))
+        for supervisor in supervisores_map.values():
             sup_unineg_scope = _codes(supervisor.cartera_unineg_scope)
             branch_codes = _cartera_propia(db, supervisor, unineg_scope=sup_unineg_scope)
-            member_ids = {supervisor.id}
-            for analista_id in analistas_a_cargo(db, supervisor_id):
-                analista = db.get(User, analista_id)
-                if analista is not None:
-                    member_ids.add(analista.id)
-                    branch_codes |= _cartera_propia(db, analista, unineg_scope=None)
+            analistas_map = _usuarios_por_id(db, analistas_a_cargo(db, supervisor.id))
+            member_ids = {supervisor.id} | set(analistas_map.keys())
+            branch_codes |= _cartera_de_equipo(db, list(analistas_map.values()))
             branches.append(CarteraBranchScope(
                 root_user_id=supervisor.id,
                 member_user_ids=frozenset(member_ids),

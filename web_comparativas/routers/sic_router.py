@@ -8,6 +8,7 @@ import datetime as dt
 from sqlalchemy import func, or_
 
 from web_comparativas.models import User, UserReporte, db_session, BUSINESS_UNITS, normalize_unit_business, Ticket, TicketMessage, PasswordResetRequest, PliegoSolicitud, Group, GroupMember, VendedorFusion, CarteraOperador, CarteraVendedor
+from web_comparativas.cartera_visibilidad import invalidate_cartera_scope_cache
 from web_comparativas.auth import user_display, hash_password, verify_password
 from web_comparativas.forecast_service import (
     get_perfil_comercial_master_options,
@@ -1711,6 +1712,9 @@ def sic_users_create(
             db_session, u, role, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )
         db_session.commit()
+        # Alta de usuario: puede sumar cartera/jerarquía nueva que afecte a un
+        # Supervisor/Gerente ya cacheado (ver invalidate_cartera_scope_cache).
+        invalidate_cartera_scope_cache()
         return RedirectResponse("/sic/users?ok=created", status_code=303)
     except _CarteraConflictError as e:
         db_session.rollback()
@@ -1828,6 +1832,10 @@ def sic_users_update(
             db_session, u, role_ok, vendedor_fusion_id, analista_ids, supervisor_ids, actor=user
         )
         db_session.commit()
+        # Este es el caso reportado (agregar/sacar analistas de un Supervisor,
+        # cambiar códigos de cartera): tiene que verse al instante, no esperar
+        # el TTL del caché — ver invalidate_cartera_scope_cache().
+        invalidate_cartera_scope_cache()
         return RedirectResponse("/sic/users?ok=updated", status_code=303)
     except _CarteraConflictError as e:
         db_session.rollback()
@@ -1887,6 +1895,9 @@ def sic_users_delete(
     try:
         db_session.delete(u)
         db_session.commit()
+        # Baja de usuario: si era Analista, su Supervisor/Gerente cacheado
+        # dejaría de reflejar la cartera correcta si no se limpia.
+        invalidate_cartera_scope_cache()
         return RedirectResponse("/sic/users?ok=deleted", status_code=303)
     except Exception:
         db_session.rollback()

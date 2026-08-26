@@ -1358,6 +1358,35 @@ def refresh_default_dashboard_snapshot(
                 cuenta: sorted(entidad_ids) for cuenta, entidad_ids in cuenta_map.items()
             }
 
+            # Totales globales del run — get_status (total_rows + plataformas) y
+            # get_kpis (familias/provincias/valorización), SOLO caso sin
+            # restricción (ver el chequeo que agregamos en cada una de esas dos
+            # funciones). Medido en prod: get_status 39s (2 Parallel Seq Scan
+            # sobre 1.4M filas) + get_kpis 19s (Sort external merge Disk 20MB)
+            # para un auditor — mismo patrón de ancla que arriba, un solo
+            # cálculo acá en vez de en cada carga del dashboard. SAVEPOINT:
+            # get_status/get_kpis corren queries reales, mismo motivo que el
+            # resto de los bloques de acá abajo (un fallo no debe envenenar la
+            # transacción entera).
+            try:
+                with session.begin_nested():
+                    status_ancla = get_status(session, target_run_id)
+                    filtros_kpis_ancla = build_filters()
+                    filtros_kpis_ancla.import_run_id = target_run_id
+                    kpis_ancla = get_kpis(session, filtros_kpis_ancla)
+                    run_obj_anclas.global_totals = {
+                        "total_rows": status_ancla.get("total_rows"),
+                        "platforms": status_ancla.get("platforms"),
+                        "familias": kpis_ancla.get("familias"),
+                        "provincias": kpis_ancla.get("provincias"),
+                        "valorizacion": kpis_ancla.get("valorizacion"),
+                    }
+            except Exception:
+                logger.exception(
+                    "[DIM][SNAPSHOT] No se pudo precalcular global_totals (status+kpis) run_id=%s",
+                    target_run_id,
+                )
+
             # Ancla de Oportunidades (ref_month, ago-2026 — ver comentario en
             # DimensionamientoImportRun.oportunidades_ref_month). Import LOCAL
             # (no al tope del módulo): oportunidades.py ya importa de acá
@@ -1461,6 +1490,40 @@ def get_status(
     if import_run_id is None:
         latest = _latest_success_import_run(session)
         import_run_id = latest.id if latest else None
+
+    # Ancla precalculada (DimensionamientoImportRun.global_totals — ago-2026,
+    # auditoría de rendimiento): SOLO para el caso TOTALMENTE sin restricción
+    # (medido en prod: 2 Parallel Seq Scan sobre 1.4M filas, ~39s para un
+    # auditor). Un desglose restringido por cartera de un usuario puntual NO
+    # se puede precalcular de antemano — depende de la cartera de cada quien,
+    # y esa consulta ya va por el índice de cliente_entidad_id. NULL (runs
+    # viejos, o el propio cálculo corriendo ahora mismo desde
+    # refresh_default_dashboard_snapshot) cae al camino de siempre, más abajo.
+    if (
+        import_run_id is not None
+        and allowed_cliente_ids is None
+        and allowed_cartera_branches is None
+        and allowed_unidades_negocio is None
+    ):
+        run_ancla = session.get(DimensionamientoImportRun, import_run_id)
+        if run_ancla is not None and run_ancla.global_totals is not None:
+            total_rows_ancla = int(run_ancla.global_totals.get("total_rows") or 0)
+            return {
+                "has_data": total_rows_ancla > 0,
+                "cartera_blocked": False,
+                "total_rows": total_rows_ancla,
+                "platforms": run_ancla.global_totals.get("platforms") or [],
+                "last_import": {
+                    "id": run_ancla.id,
+                    "source_path": run_ancla.source_path,
+                    "source_hash": run_ancla.source_hash,
+                    "finished_at": run_ancla.finished_at.isoformat() if run_ancla.finished_at else None,
+                    "rows_processed": run_ancla.rows_processed,
+                    "rows_inserted": run_ancla.rows_inserted,
+                    "rows_updated": run_ancla.rows_updated,
+                    "rows_rejected": run_ancla.rows_rejected,
+                },
+            }
 
     now = time.perf_counter()
     # Cache key incluye la cartera: sin esto, la respuesta restringida de un usuario
@@ -2027,6 +2090,36 @@ def get_kpis(
     *, allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> dict[str, Any]:
     filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
+
+    # Ancla precalculada (DimensionamientoImportRun.global_totals — ago-2026):
+    # SOLO para la vista por default (sin filtros activos, sin restricción de
+    # cartera) — medido en prod: 19s, con un Sort "external merge Disk: 20MB"
+    # en el COUNT(DISTINCT familia)/COUNT(DISTINCT provincia). Cualquier filtro
+    # activo (o cartera restringida) sigue el camino en vivo, más abajo — el
+    # work_mem que se sube ahí es la mitigación para ESE caso.
+    if not _has_active_filters(filters) and filters.import_run_id is not None:
+        run_ancla = session.get(DimensionamientoImportRun, filters.import_run_id)
+        if run_ancla is not None and run_ancla.global_totals is not None:
+            total_entities, clientes_si, clientes_no = _client_entity_counts(session, filters)
+            if filters.is_client is True:
+                total_clients = clientes_si
+            elif filters.is_client is False:
+                total_clients = clientes_no
+            else:
+                total_clients = total_entities
+            g = run_ancla.global_totals
+            return {
+                "total_rows": int(g.get("total_rows") or 0),
+                "clientes": int(total_clients or 0),
+                "clientes_si": int(clientes_si),
+                "clientes_no": int(clientes_no),
+                "renglones": int(g.get("total_rows") or 0),
+                "familias": int(g.get("familias") or 0),
+                "provincias": int(g.get("provincias") or 0),
+                "valorizacion": float(g.get("valorizacion") or 0),
+                "entities_resolved": bool(filters.entities_resolved),
+            }
+
     _ck = _make_cache_key("get_kpis", filters)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
@@ -2036,6 +2129,14 @@ def get_kpis(
     started_at = _log_query_start("get_kpis", filters)
     try:
         _apply_local_statement_timeout(session, 50000)
+        # COUNT(DISTINCT familia) + COUNT(DISTINCT provincia) en la misma query
+        # (abajo) fuerzan un sort que, con el work_mem default del rol, spillea
+        # a disco (medido en prod: "Sort external merge Disk: 20MB", ~19s).
+        # Subirlo acá evita el spill sin cambiar el resultado — mismo criterio
+        # que _apply_local_statement_timeout: SET LOCAL, vigente solo el resto
+        # de esta transacción.
+        if IS_POSTGRES:
+            session.execute(text("SET LOCAL work_mem = '64MB'"))
         model = _resolve_aggregate_model(session, "KPIS", filters.import_run_id)
         applied_conditions: list[str] = []
 
