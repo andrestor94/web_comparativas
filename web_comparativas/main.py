@@ -104,6 +104,7 @@ from web_comparativas.migrations import (
     ensure_dimensionamiento_valorizacion_columns,
     ensure_dimensionamiento_entidad_columns,
     ensure_dimensionamiento_import_runs_oportunidades_ref_month_column,
+    ensure_dimensionamiento_import_runs_dashboard_precalc_columns,
     ensure_dimensionamiento_composite_constraints,
     ensure_indicadores_schema_v2,
     ensure_users_reporta_a_column,
@@ -248,6 +249,11 @@ def run_startup_migrations_once() -> None:
         print(f"[MIGRATION] Warning oportunidades_ref_month column: {e}", flush=True)
 
     try:
+        ensure_dimensionamiento_import_runs_dashboard_precalc_columns()
+    except Exception as e:
+        print(f"[MIGRATION] Warning dashboard precalc columns: {e}", flush=True)
+
+    try:
         ensure_dimensionamiento_composite_constraints()
         print("[MIGRATION] SUCCESS: dimensionamiento composite constraints checked.", flush=True)
     except Exception as e:
@@ -365,6 +371,13 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: crm_envios table/indexes checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning crm_envios table: {e}", flush=True)
+
+    try:
+        from web_comparativas.models import _ensure_dim_performance_indexes
+        _ensure_dim_performance_indexes()
+        print("[MIGRATION] SUCCESS: dimensionamiento/crm_envios performance indexes checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning dimensionamiento performance indexes: {e}", flush=True)
 
     # Cartera comercial y jerarquía de usuarios (Oportunidades / Mercado Privado).
     # Solo carga datos base (vendedores + columna de jerarquía); el filtrado por fila

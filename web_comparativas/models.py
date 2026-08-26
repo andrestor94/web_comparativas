@@ -1695,6 +1695,170 @@ def _ensure_crm_envio_real_columns():
         pass
 
 
+# Índices decididos UNO POR UNO tras la auditoría de rendimiento de ago-2026
+# (audit_missing_indexes_readonly.py sobre las 74 tablas del modelo, comparado
+# contra pg_indexes en producción — encontró 15 índices declarados y faltantes
+# en prod). Formato: (nombre, tabla, columnas_clave, columnas_include).
+# columnas_include va vacía salvo que el índice sea COVERING (ver el de más
+# abajo). Criterio de inclusión: que una query REAL del código filtre/agregue
+# por exactamente esas columnas (grep confirmado, no supuesto) Y que la tabla
+# no reciba tanto volumen de escritura por corrida como para que el costo de
+# mantener el índice en cada INSERT supere el beneficio.
+#
+# De los 15 que encontró la auditoría, quedaron AFUERA a propósito (no crear):
+#   - dimensionamiento_dashboard_snapshots.snapshot_key: la única query real
+#     filtra (snapshot_key, import_run_id) juntos, ya cubierto por el
+#     UniqueConstraint existente sobre ambas. Tabla de un puñado de filas.
+#   - dimensionamiento_family_monthly_summary.is_identified: no hay ningún
+#     campo `is_identified` en DimensionamientoFilters ni ningún WHERE por esa
+#     columna — se lee y se descarta sin usar (ver `_is_identified` con guion
+#     bajo en _aggregate_bootstrap_from_summary_rows, query_service.py).
+#   - dimensionamiento_records.id_registro_unico: redundante. Ya existe
+#     UniqueConstraint(id_registro_unico, import_run_id) — un índice compuesto
+#     sirve perfectamente un WHERE/IN solo por la columna líder (prefijo
+#     izquierdo de un btree), así que un índice plano más no suma nada y sí
+#     suma costo de escritura.
+#   - dimensionamiento_records: índice compuesto (cliente_visible, fecha): no
+#     encontré ninguna query real que filtre esas dos columnas JUNTAS. El único
+#     filtro real y sin envolver de cliente_visible (oportunidades_router.py,
+#     _cuentas_fusion_desde_records) lo combina con import_run_id, no con
+#     fecha; el resto de los usos de cliente_visible en query_service.py van
+#     envueltos en UPPER(TRIM(...)) (_sql_normalized_text), que un índice plano
+#     no puede servir.
+#
+# ⚠️ `dimensionamiento_family_monthly_summary.import_run_id` (índice PLANO)
+# tampoco está en esta lista, a pesar de ser la causa original del Parallel Seq
+# Scan de ~8s: ese índice YA EXISTE en producción (no aparece en el reporte de
+# faltantes) y aun así el planner de Postgres elige Seq Scan paralelo, porque
+# el run activo es ~26% de la tabla (~152k de 575k filas) — a esa selectividad,
+# leer la tabla entera en secuencial (con ayuda de workers paralelos) es más
+# barato que ir fila por fila con el índice haciendo random I/O contra el heap.
+# Es la decisión CORRECTA del planner, no un bug. Por eso la entrada de abajo
+# para esa query NO es un índice plano más (no cambiaría nada) sino uno
+# COVERING con INCLUDE: un Index Only Scan nunca toca el heap, así que puede
+# ganarle al Seq Scan aunque la selectividad sea alta — se decide aparte del
+# resultado de la auditoría de índices faltantes.
+_PERFORMANCE_INDEX_SPECS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        # WHERE crm_modo = :modo (sin oportunidad_id) en _oportunidades_pendientes
+        # (oportunidades_router.py) no podía usar el UNIQUE(oportunidad_id, crm_modo)
+        # existente, con crm_modo en segundo lugar -> Seq Scan sobre TODA crm_envios
+        # (crece para siempre, no solo el run activo). ~550ms medidos sobre 143 filas
+        # de salida. crm_envios crece un registro por envío real, no por corrida del
+        # pipeline -> el costo de escritura del índice es irrelevante acá.
+        "ix_crm_envios_modo_oport", "crm_envios", ("crm_modo", "oportunidad_id"), (),
+    ),
+    (
+        # tickets.modulo_origen + tickets.pliego_solicitud_id: uso real confirmado
+        # en forecast_router.py y sic_router.py (varios call-sites), filtrando por
+        # cada columna. Tabla de tickets de soporte, volumen bajísimo (creado por
+        # personas, no por el pipeline) -> costo de escritura irrelevante.
+        "ix_tickets_modulo_origen", "tickets", ("modulo_origen",), (),
+    ),
+    (
+        "ix_tickets_pliego_solicitud_id", "tickets", ("pliego_solicitud_id",), (),
+    ),
+    (
+        # Filtro "Cliente" canónico (_apply_common_filters, query_service.py):
+        # cliente_entidad_id IN (...) — aplica IGUAL a records y a summary.
+        "ix_dim_summary_cliente_entidad_id", "dimensionamiento_family_monthly_summary",
+        ("cliente_entidad_id",), (),
+    ),
+    (
+        # _apply_common_filters: provincia IN (...) (filtro geográfico del dashboard).
+        "ix_dim_summary_provincia", "dimensionamiento_family_monthly_summary", ("provincia",), (),
+    ),
+    (
+        # _apply_common_filters: es_cliente_entidad IS <bool> — filtro "¿Es cliente?"
+        # a nivel entidad (no fila) sobre el summary.
+        "ix_dim_summary_es_cliente_entidad", "dimensionamiento_family_monthly_summary",
+        ("es_cliente_entidad",), (),
+    ),
+    (
+        # _apply_common_filters: subunidad_negocio IN (...).
+        "ix_dim_summary_subunidad_negocio", "dimensionamiento_family_monthly_summary",
+        ("subunidad_negocio",), (),
+    ),
+    (
+        # _apply_common_filters: plataforma IN (...) + fecha_desde/hasta sobre `month`
+        # -> combo frecuente en el dashboard (filtrar por plataforma y acotar fechas).
+        "ix_dim_summary_platform_month", "dimensionamiento_family_monthly_summary",
+        ("plataforma", "month"), (),
+    ),
+    (
+        # plataforma IN (...) sola (sin filtro de fecha) — mismo call-site que arriba.
+        "ix_dim_summary_plataforma", "dimensionamiento_family_monthly_summary", ("plataforma",), (),
+    ),
+    (
+        # _apply_common_filters: resultado_participacion IN (...) — fuente de
+        # get_results_breakdown (el donut de resultados del dashboard).
+        "ix_dim_summary_resultado_participacion", "dimensionamiento_family_monthly_summary",
+        ("resultado_participacion",), (),
+    ),
+    (
+        # Mismo filtro canónico de Cliente que en el summary, ahora sobre records
+        # (camino "composed_queries" cuando el summary no está disponible/al día).
+        "ix_dim_records_cliente_entidad_id", "dimensionamiento_records", ("cliente_entidad_id",), (),
+    ),
+    (
+        # _cuentas_fusion_desde_records (oportunidades_router.py): WHERE
+        # import_run_id = :run_id AND cliente_visible IN (:clientes) — sin envolver
+        # en funciones. Uso real pero de bajo volumen (fallback de cuenta de fusión,
+        # no apareció entre las queries lentas medidas) — prioridad baja, no urgente.
+        "ix_dim_records_cliente_visible", "dimensionamiento_records", ("cliente_visible",), (),
+    ),
+    (
+        # COVERING (Index Only Scan) para la query de salud del summary
+        # (_summary_health_snapshot: COUNT/MIN/MAX/SUM WHERE import_run_id), que
+        # se llama 3 veces por carga del dashboard. El índice plano en import_run_id
+        # YA EXISTE y el planner lo descarta por selectividad (~26% de la tabla) —
+        # ver nota arriba. INCLUDE evita tocar el heap del todo, así que puede ganar
+        # aunque la selectividad sea alta. Reversible (DROP INDEX) si no mejora.
+        "ix_dim_summary_health_covering", "dimensionamiento_family_monthly_summary",
+        ("import_run_id",), ("month", "total_valorizacion"),
+    ),
+)
+
+
+def _ensure_dim_performance_indexes():
+    """
+    Crea los índices de `_PERFORMANCE_INDEX_SPECS` — declarados en los modelos
+    (`index=True` / `Index(...)`) pero que `create_all()` no pudo agregar
+    retroactivamente porque las tablas ya existían en producción (`create_all`
+    solo crea tablas NUEVAS, nunca altera una tabla existente). Mismo motivo
+    por el que existe `_ensure_crm_envios_table`.
+
+    CREATE INDEX CONCURRENTLY: no bloquea lecturas/escrituras mientras se
+    construye (a costo de tardar más) — imprescindible en tablas de cientos de
+    miles de filas en un sistema en uso. Requiere autocommit (no puede ir
+    dentro de una transacción explícita), por eso NO usa `engine.begin()` como
+    el resto de los `_ensure_*` de este archivo.
+
+    Postgres-only (CONCURRENTLY no existe en SQLite) — en SQLite (tests/dev)
+    esta función no hace nada; esas tablas ahí son chicas y el problema no
+    aplica. NO destructivo, IF NOT EXISTS = repetible sin efecto si ya corrió.
+
+    `apply_dim_performance_indexes.py` (script aparte, para correr manualmente
+    contra prod y medir cuánto tarda cada uno) usa esta MISMA lista — no
+    duplicarla ahí.
+    """
+    if not IS_POSTGRES:
+        return
+    _log = logging.getLogger("wc.models.migrate")
+    for nombre, tabla, columnas, incluye in _PERFORMANCE_INDEX_SPECS:
+        include_sql = f" INCLUDE ({', '.join(incluye)})" if incluye else ""
+        sql = (
+            f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {nombre} "
+            f"ON {tabla} ({', '.join(columnas)}){include_sql}"
+        )
+        try:
+            with engine.connect() as conn:
+                conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                conn.execute(text(sql))
+        except Exception:
+            _log.warning("performance indexes: no se pudo aplicar '%s'", sql[:90])
+
+
 def _ensure_upload_uploader_snapshot_columns():
     """
     Añade uploaded_by_name / uploaded_by_email si faltan (por compatibilidad

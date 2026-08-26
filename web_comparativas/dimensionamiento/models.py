@@ -45,14 +45,56 @@ class DimensionamientoImportRun(Base):
     error_message = Column(Text, nullable=True)
 
     # Ancla de Oportunidades (ago-2026, optimización de /list): "último mes completo"
-    # del run, calculado UNA VEZ por `computar_oportunidades` (oportunidades.py) y
-    # persistido acá en la misma transacción que reescribe `oportunidades_summary`
-    # (`rebuild_oportunidades_for_run`). `_window_meta` (oportunidades_router.py) lo
-    # lee de acá en vez de recalcularlo agregando sobre TODO `dimensionamiento_records`
-    # del run en cada carga de /list (medido: ~20s, 82% del tiempo total del endpoint).
+    # del run. `_window_meta` (oportunidades_router.py) la lee de acá en vez de
+    # recalcularla agregando sobre TODO `dimensionamiento_records` del run en cada
+    # carga de /list (medido: ~20s, 82% del tiempo total del endpoint).
+    #
+    # CORRECCIÓN (ago-2026, 2da vuelta): originalmente esta ancla se calculaba
+    # SOLO dentro de `rebuild_oportunidades_for_run` (oportunidades.py) — pero esa
+    # función NO está enganchada a ningún lado automático del pipeline (su único
+    # caller es `scripts/rebuild_oportunidades.py`, a mano, y los tests). Sin
+    # arreglar esto, CADA import nuevo dejaba `/list` de vuelta en ~20s hasta que
+    # alguien corriera ese script. Ahora se recalcula sola, siempre, desde
+    # `refresh_default_dashboard_snapshot` (query_service.py) — que SÍ corre
+    # automáticamente después de cada import (`ingest_dimensionamiento_csv` la
+    # llama). Esto es liviano (una sola agregación) y no toca `oportunidades_summary`
+    # — el rebuild COMPLETO de las oportunidades en sí sigue detrás de
+    # OPORTUNIDADES_AUTO_REBUILD_ENABLED (default OFF, ver oportunidades.py),
+    # hasta medir cuánto tarda y decidir engancharlo también.
     # NULL para runs de antes de este cambio — `_window_meta` cae al cálculo on-the-fly
     # para esos (sin backfill forzado, ver comentario ahí).
     oportunidades_ref_month = Column(Date, nullable=True)
+
+    # Anclas del DASHBOARD de Dimensionamiento (ago-2026, misma auditoría de
+    # rendimiento que ref_month arriba): valores que no cambian entre una carga
+    # del dashboard y la siguiente, porque dimensionamiento_records/summary de
+    # un run ya escrito no cambia — solo cambian cuando corre el PRÓXIMO import.
+    # Ningún índice los arregla: el planner de Postgres descarta cualquier
+    # índice sobre import_run_id para agregar sobre este run por selectividad
+    # (~26% de la tabla coincide con el run activo — ver auditoría de índices,
+    # ago-2026), y un DISTINCT sobre columnas fuera de un covering index sigue
+    # necesitando tocar el heap igual.
+    #   platform_values    : lista de plataformas distintas del run (antes:
+    #                        _default_platform_values en query_service.py,
+    #                        medido ~8.2s escaneando 152k filas para 3 valores).
+    #   cuenta_entidad_map : {cuenta_interna: [cliente_entidad_id, ...]} de TODA
+    #                        la corrida (antes: _cuenta_to_entidad_map, medido
+    #                        ~18.7s escaneando 364.887 filas para 371 pares).
+    # Calculados UNA VEZ en refresh_default_dashboard_snapshot (query_service.py),
+    # en la MISMA transacción que reescribe el snapshot del dashboard — ESE es
+    # el paso que corre solo, automático, después de CADA import
+    # (ingest_dimensionamiento_csv lo llama). oportunidades_ref_month, en
+    # cambio, se puebla desde rebuild_oportunidades_for_run, que HOY es un paso
+    # MANUAL (scripts/rebuild_oportunidades.py) — no está enganchado al import
+    # automático (confirmado: no hay ningún call site fuera de ese script y de
+    # los tests). Por eso estas dos anclas se calculan en un lugar distinto A
+    # PROPÓSITO, para que de verdad se generen solas en cada corrida nueva y no
+    # dependan de que alguien corra un script aparte.
+    # NULL para runs de antes de este cambio -> _default_platform_values /
+    # cuenta_to_entidad_ids (query_service.py) caen al cálculo on-the-fly de
+    # siempre para esos, igual que con ref_month arriba.
+    platform_values = Column(JSON, nullable=True)
+    cuenta_entidad_map = Column(JSON, nullable=True)
 
     records = relationship("DimensionamientoRecord", back_populates="import_run")
     summaries = relationship("DimensionamientoFamilyMonthlySummary", back_populates="import_run")

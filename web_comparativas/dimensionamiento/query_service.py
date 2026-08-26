@@ -467,6 +467,15 @@ def _default_platform_values(session: Session, import_run_id: int | None = None)
         latest = _latest_success_import_run(session)
         import_run_id = latest.id if latest else None
 
+    # Ancla precalculada (ver DimensionamientoImportRun.platform_values): si el run
+    # ya la tiene, ni siquiera pasa por la cache de 300s de abajo — cero query.
+    # NULL (runs de antes de este cambio, o el propio cálculo corriendo ahora mismo
+    # desde refresh_default_dashboard_snapshot) cae al camino de siempre.
+    if import_run_id is not None:
+        run = session.get(DimensionamientoImportRun, import_run_id)
+        if run is not None and run.platform_values is not None:
+            return list(run.platform_values)
+
     cache_key = f"dimensionamiento.default_platform_values.{import_run_id}"
     cached = _cache_get(cache_key, _TTL_FILTER_OPTIONS_DFLT)
     if cached is not _CACHE_MISS:
@@ -1317,6 +1326,90 @@ def refresh_default_dashboard_snapshot(
     payload["meta"].update(_snapshot_meta_payload(snapshot))
     snapshot.payload = payload
     session.add(snapshot)
+
+    # Anclas del dashboard (ver DimensionamientoImportRun.platform_values /
+    # .cuenta_entidad_map): se calculan UNA vez acá, en la MISMA transacción que
+    # reescribe el snapshot — este es el paso que corre solo después de cada
+    # import. Los caches en memoria ya se limpiaron arriba (invalidate_query_cache),
+    # así que estas dos llamadas SIEMPRE recalculan en vivo (las columnas del run
+    # todavía están en NULL en este punto, recién las vamos a llenar ahora) — no
+    # hay circularidad con el fallback que agregamos en _default_platform_values /
+    # _cuenta_to_entidad_map para lecturas posteriores.
+    if target_run_id is not None:
+        run_obj_anclas = session.get(DimensionamientoImportRun, target_run_id)
+        if run_obj_anclas is not None:
+            run_obj_anclas.platform_values = _default_platform_values(session, target_run_id)
+            cuenta_map = _cuenta_to_entidad_map(session, target_run_id)
+            run_obj_anclas.cuenta_entidad_map = {
+                cuenta: sorted(entidad_ids) for cuenta, entidad_ids in cuenta_map.items()
+            }
+
+            # Ancla de Oportunidades (ref_month, ago-2026 — ver comentario en
+            # DimensionamientoImportRun.oportunidades_ref_month). Import LOCAL
+            # (no al tope del módulo): oportunidades.py ya importa de acá
+            # (_latest_success_import_run) — un import a nivel de módulo en el
+            # otro sentido crearía un ciclo. Se recalcula SIEMPRE, sin chequear
+            # si ya tenía valor (igual que platform_values/cuenta_entidad_map
+            # arriba): es la única forma automática de mantenerla al día, ya que
+            # `rebuild_oportunidades_for_run` NO está enganchado a ningún lado
+            # del pipeline hoy (confirmado: su único caller es
+            # scripts/rebuild_oportunidades.py y los tests).
+            #
+            # SAVEPOINT (begin_nested), no un try/except pelado: en Postgres, UNA
+            # sentencia fallida (incluso un SELECT) aborta TODA la transacción —
+            # atrapar la excepción en Python no la "desenvenena". Sin el SAVEPOINT,
+            # cualquier statement después de un fallo acá (guardar
+            # cuenta_entidad_map más arriba ya corrió, pero el snapshot y el
+            # commit de más abajo vendrían después) fallaría con
+            # InFailedSqlTransaction. Mismo patrón que `_add_column_safe` en
+            # migrations.py.
+            try:
+                with session.begin_nested():
+                    from .oportunidades import _detectar_ultimo_mes_completo
+                    anchor = _detectar_ultimo_mes_completo(session, target_run_id)
+                    if anchor is not None:
+                        run_obj_anclas.oportunidades_ref_month = anchor["ref_month"]
+            except Exception:
+                logger.exception(
+                    "[DIM][SNAPSHOT] No se pudo recalcular oportunidades_ref_month run_id=%s",
+                    target_run_id,
+                )
+
+            # Rebuild COMPLETO de oportunidades_summary (recalcula las oportunidades
+            # en sí, no solo la ancla) — detrás de un kill-switch propio, default
+            # OFF. Ver OPORTUNIDADES_AUTO_REBUILD_ENABLED: hasta medir cuánto tarda
+            # esto en producción, no se engancha solo — el import de Dimensionamiento
+            # es el pipeline crítico de todo el sistema, no solo de Oportunidades.
+            #
+            # SAVEPOINT acá es CRÍTICO, no cosmético: rebuild_oportunidades_for_run
+            # hace DELETE + INSERT sobre oportunidades_summary. Sin begin_nested,
+            # un fallo A MITAD DE CAMINO (p.ej. después del DELETE, durante el
+            # INSERT) dejaría esas sentencias pendientes en la transacción — el
+            # try/except de abajo atraparía la excepción en Python, pero el
+            # `session.commit()` de más abajo (fuera de este bloque) COMMITEARÍA
+            # igual esa transacción a medio terminar, dejando oportunidades_summary
+            # VACÍA o A MEDIAS de forma PERMANENTE — peor que no correr el rebuild.
+            # Con el SAVEPOINT, una excepción hace ROLLBACK TO SAVEPOINT: deshace
+            # SOLO el DELETE/INSERT de este bloque, la transacción exterior sigue
+            # sana y el resto (anclas ya calculadas, snapshot) se commitea normal.
+            try:
+                with session.begin_nested():
+                    from .oportunidades import OPORTUNIDADES_AUTO_REBUILD_ENABLED, rebuild_oportunidades_for_run
+                    if OPORTUNIDADES_AUTO_REBUILD_ENABLED():
+                        # ref_month_precalculado = el que se acaba de calcular arriba
+                        # (o None si ese bloque falló): evita que computar_oportunidades
+                        # recalcule _detectar_ultimo_mes_completo por segunda vez en la
+                        # misma corrida (medido en prod: ~24s de los ~99s del rebuild).
+                        rebuild_oportunidades_for_run(
+                            session, target_run_id, commit=False,
+                            ref_month_precalculado=run_obj_anclas.oportunidades_ref_month,
+                        )
+            except Exception:
+                logger.exception(
+                    "[DIM][SNAPSHOT] No se pudo rehacer oportunidades_summary (auto-rebuild) run_id=%s",
+                    target_run_id,
+                )
+
     if commit:
         session.commit()
         session.refresh(snapshot)
@@ -1772,6 +1865,18 @@ def _cuenta_to_entidad_map(session: Session, import_run_id: int | None) -> dict[
     cached = _CUENTA_ENTIDAD_CACHE.get(import_run_id)
     if cached is not None:
         return cached
+
+    # Ancla precalculada (ver DimensionamientoImportRun.cuenta_entidad_map): si el
+    # run ya la tiene, se usa directo y se puebla la cache en memoria desde ahí —
+    # cero query. NULL (runs viejos, o el cálculo corriendo ahora mismo desde
+    # refresh_default_dashboard_snapshot) cae al camino de siempre, más abajo.
+    if import_run_id is not None:
+        run = session.get(DimensionamientoImportRun, import_run_id)
+        if run is not None and run.cuenta_entidad_map is not None:
+            mapping = {cuenta: set(ids) for cuenta, ids in run.cuenta_entidad_map.items()}
+            _CUENTA_ENTIDAD_CACHE[import_run_id] = mapping
+            return mapping
+
     mapping: dict[str, set[int]] = {}
     if import_run_id is not None:
         rows = session.execute(

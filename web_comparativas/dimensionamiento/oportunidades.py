@@ -51,6 +51,35 @@ def OPORTUNIDADES_ENABLED() -> bool:
     return raw not in {"0", "false", "no", "off", "n"}
 
 
+def OPORTUNIDADES_AUTO_REBUILD_ENABLED() -> bool:
+    """Kill-switch para enganchar `rebuild_oportunidades_for_run` COMPLETO (borra
+    e inserta `oportunidades_summary` del run) al finalize automático del import
+    de Dimensionamiento (`refresh_default_dashboard_snapshot`).
+
+    Default ON (ago-2026, 2da vuelta): hasta este cambio, `rebuild_oportunidades_for_run`
+    no estaba enganchado a NINGÚN lado del pipeline — el único caller era
+    `scripts/rebuild_oportunidades.py` (a mano) y los tests. Confirmado en
+    producción: 3 de 4 runs nunca tuvieron rebuild, y el único que sí lo tuvo
+    tardó 482 horas (Oportunidades vacío ~20 días). Medido el costo real (dry-run
+    contra prod, run 68): 99s de punta a punta, de los cuales <1s es el
+    DELETE+INSERT — el resto son agregaciones de lectura sobre
+    `dimensionamiento_records` (una de ellas, ~24s, duplicada con la del ancla —
+    ver `ref_month_precalculado` en `computar_oportunidades`, ya evitada).
+    Decisión: preferible sumarle 99s al import (en background, no bloquea el
+    upload) a que Oportunidades quede vacío semanas. Protegido con SAVEPOINT
+    (`session.begin_nested()`): un fallo del rebuild no tumba el import ni deja
+    a `oportunidades_summary` a medias (verificado con un fallo simulado).
+
+    Escape manual: `OPORTUNIDADES_AUTO_REBUILD_ENABLED=0` en el entorno lo
+    vuelve a apagar sin tocar código, por si el costo medido deja de ser
+    aceptable (import mucho más pesado, o `computar_oportunidades` empieza a
+    fallar seguido) — en ese caso, `oportunidades_summary` vuelve a depender
+    del script manual, como antes de este cambio.
+    """
+    raw = (os.getenv("OPORTUNIDADES_AUTO_REBUILD_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off", "n"}
+
+
 # Kill-switch del filtrado por cartera comercial (visibilidad por fila en /list).
 # Default OFF: mientras esté apagado, oportunidades_router.py ni siquiera importa
 # el resultado de oportunidades_visibilidad — el listado sigue devolviendo TODAS las
@@ -321,8 +350,21 @@ def _efectividad_por_codigo(session: Session, run_id: int) -> dict[str, dict[str
 # Cálculo principal
 # ──────────────────────────────────────────────────────────────────────────────
 
-def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
+def computar_oportunidades(
+    session: Session, run_id: int, *, ref_month_precalculado: dt.date | None = None,
+) -> dict[str, Any]:
     """Calcula las oportunidades del run (sin escribir en la tabla).
+
+    `ref_month_precalculado`: si se pasa, SALTEA la llamada a
+    `_detectar_ultimo_mes_completo` (medido en prod: ~24s de agregación sobre
+    `dimensionamiento_records` — la misma query que ya corre
+    `refresh_default_dashboard_snapshot` para persistir
+    `DimensionamientoImportRun.oportunidades_ref_month`). Pasado por
+    `rebuild_oportunidades_for_run` cuando el caller (el auto-rebuild del
+    finalize del import) ya tiene ese valor recién calculado a mano — evita
+    recalcular lo mismo dos veces en la misma corrida. `None` (default) = se
+    calcula acá adentro, como siempre (uso manual vía
+    scripts/rebuild_oportunidades.py, que no tiene ese valor de antemano).
 
     Devuelve {
         "rows": [dict por oportunidad calificada],
@@ -342,8 +384,14 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
     if isinstance(max_fecha, dt.datetime):
         max_fecha = max_fecha.date()
 
-    anchor = _detectar_ultimo_mes_completo(session, run_id)
-    ref_month = anchor["ref_month"] if anchor else _month_floor(max_fecha)
+    if ref_month_precalculado is not None:
+        anchor = None
+        ref_month = ref_month_precalculado
+        anchor_mode = "precalculada"
+    else:
+        anchor = _detectar_ultimo_mes_completo(session, run_id)
+        ref_month = anchor["ref_month"] if anchor else _month_floor(max_fecha)
+        anchor_mode = "ultimo_mes_completo" if anchor else "max_fecha_fallback"
     window_start = _subtract_months(ref_month, VENTANA_MESES - 1)
     # Fin de ventana EXCLUSIVO = primer día del mes siguiente a ref_month.
     window_end = _subtract_months(ref_month, -1)
@@ -579,7 +627,7 @@ def computar_oportunidades(session: Session, run_id: int) -> dict[str, Any]:
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat(),  # exclusivo
         "max_fecha": max_fecha.isoformat(),
-        "anchor_mode": "ultimo_mes_completo" if anchor else "max_fecha_fallback",
+        "anchor_mode": anchor_mode,
         "umbral_mes_completo": (anchor["umbral"] if anchor else None),
         "volumen_referencia": (anchor["volumen_referencia"] if anchor else None),
         "meses_clasificacion": (anchor["clasificacion"] if anchor else None),
@@ -600,11 +648,17 @@ def rebuild_oportunidades_for_run(
     run_id: int | None = None,
     *,
     commit: bool = True,
+    ref_month_precalculado: dt.date | None = None,
 ) -> dict[str, Any]:
     """Borra las oportunidades del run e inserta las calculadas. Idempotente.
 
     Si OPORTUNIDADES_ENABLED está off, no toca nada. Respeta el run activo si
     run_id es None.
+
+    `ref_month_precalculado`: pasado directo a `computar_oportunidades` — ver
+    su docstring. Lo usa `refresh_default_dashboard_snapshot` (query_service.py)
+    para no recalcular el ancla dos veces en la misma corrida (medido en prod:
+    ~24s de los ~99s del rebuild completo eran exactamente esa query repetida).
     """
     if not OPORTUNIDADES_ENABLED():
         logger.info("[OPORTUNIDADES] kill-switch OFF (OPORTUNIDADES_ENABLED) — rebuild omitido.")
@@ -616,7 +670,7 @@ def rebuild_oportunidades_for_run(
         return {"status": "no_run", "rows": 0}
 
     logger.info("[OPORTUNIDADES] Rebuild start run_id=%s", target_run_id)
-    result = computar_oportunidades(session, target_run_id)
+    result = computar_oportunidades(session, target_run_id, ref_month_precalculado=ref_month_precalculado)
     rows = result["rows"]
     stats = result["stats"]
     logger.info(

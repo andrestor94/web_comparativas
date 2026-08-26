@@ -1830,7 +1830,10 @@ def ensure_dimensionamiento_import_runs_oportunidades_ref_month_column():
     `models.DimensionamientoImportRun`. Columna nueva, nullable: no rompe runs
     existentes — quedan NULL, `_window_meta` cae al cálculo on-the-fly para esos
     (sin backfill forzado, ver comentario en oportunidades_router.py::_window_meta).
-    Se puebla sola en runs NUEVOS, desde `rebuild_oportunidades_for_run`.
+    Se puebla sola en runs NUEVOS desde `refresh_default_dashboard_snapshot`
+    (query_service.py) — NO desde `rebuild_oportunidades_for_run`, que no está
+    enganchada a ningún lado automático del pipeline (ver comentario en
+    models.DimensionamientoImportRun).
     """
     with engine.begin() as conn:
         ok = _add_column_safe(
@@ -1842,6 +1845,36 @@ def ensure_dimensionamiento_import_runs_oportunidades_ref_month_column():
         print("[MIGRATION] SUCCESS: dimensionamiento_import_runs.oportunidades_ref_month verificada/creada.", flush=True)
     else:
         print("[MIGRATION] ATENCION: no se pudo verificar/crear oportunidades_ref_month (ver traceback arriba).", flush=True)
+
+
+def ensure_dimensionamiento_import_runs_dashboard_precalc_columns():
+    """`dimensionamiento_import_runs.platform_values` / `.cuenta_entidad_map`
+    (ago-2026, auditoría de rendimiento de Dimensionamiento — ver comentario en
+    `models.DimensionamientoImportRun`). Columnas nuevas, nullable: no rompen
+    runs existentes — quedan NULL, `query_service.py` cae al cálculo on-the-fly
+    de siempre para esos (mismo criterio que `oportunidades_ref_month`). Se
+    pueblan solas en runs NUEVOS desde `refresh_default_dashboard_snapshot`,
+    que `ingest_dimensionamiento_csv` llama automáticamente después de cada
+    import — a diferencia de `oportunidades_ref_month`, que depende de un paso
+    manual aparte.
+    """
+    with engine.begin() as conn:
+        ok = _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_import_runs ADD COLUMN platform_values JSON",
+            "dimensionamiento_import_runs.platform_values",
+        )
+        ok &= _add_column_safe(
+            conn,
+            "ALTER TABLE dimensionamiento_import_runs ADD COLUMN cuenta_entidad_map JSON",
+            "dimensionamiento_import_runs.cuenta_entidad_map",
+        )
+    if ok:
+        print("[MIGRATION] SUCCESS: dimensionamiento_import_runs.platform_values/cuenta_entidad_map "
+              "verificadas/creadas.", flush=True)
+    else:
+        print("[MIGRATION] ATENCION: no se pudo verificar/crear platform_values/cuenta_entidad_map "
+              "(ver traceback arriba).", flush=True)
 
 
 def ensure_dimensionamiento_entidad_backfill():

@@ -26,6 +26,8 @@ import datetime as dt
 import logging
 import os
 import tempfile
+import threading
+import time
 from typing import Any
 
 import requests
@@ -427,6 +429,83 @@ def _headers(token: str) -> dict[str, str]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Caché de la VISTA PREVIA (contexto_asignacion) — ago-2026.
+#
+# Alcance deliberadamente ACOTADO: solo cachea lo que usa `contexto_asignacion`
+# (la vista previa que corre en CADA carga de `/list`). El ENVÍO real
+# (`consultar_cuentas`, `enviar_oportunidad_real` vía `obtener_token` directo)
+# sigue pidiendo un token nuevo cada vez — esa decisión ya estaba tomada a
+# propósito (ver docstring del módulo) y no hay motivo para tocarla: el volumen
+# de envíos reales es bajísimo comparado con el de cargas de `/list`.
+#
+# Token: dura 1h del lado del CRM: se cachea 50 min (margen de 10 min). Lista de
+# usuarios_rendidores: dato organizacional, cambia por altas/bajas de personal,
+# no por request — se cachea 5 min (mismo orden que _TTL_FILTER_OPTIONS_DFLT en
+# query_service.py para datos igual de estables).
+#
+# Invalidación: por TTL, más un reintento defensivo — si una llamada con el
+# token cacheado devuelve 401/403 (el CRM lo revocó antes de la hora, o alguien
+# rotó las credenciales), se descarta el cache y se pide uno nuevo UNA sola vez
+# (nunca en bucle: si el reintento también falla, el error sube igual que hoy).
+#
+# En memoria del proceso (mismo patrón que _STATUS_CACHE de query_service.py):
+# Render corre un solo proceso uvicorn acá, así que no hay problema de cachés
+# desincronizados entre workers.
+# ──────────────────────────────────────────────────────────────────────────────
+_TTL_TOKEN = 50 * 60.0
+_TTL_USUARIOS = 5 * 60.0
+
+_token_cache_lock = threading.Lock()
+_token_cache: dict[str, dict[str, Any]] = {}
+
+_usuarios_cache_lock = threading.Lock()
+_usuarios_cache: dict[str, dict[str, Any]] = {}
+
+
+def _obtener_token_cacheado(sesion: requests.Session, cfg: dict[str, str]) -> str:
+    key = cfg["client_id"]
+    now = time.perf_counter()
+    with _token_cache_lock:
+        cached = _token_cache.get(key)
+        if cached is not None and now - cached["ts"] < _TTL_TOKEN:
+            return cached["token"]
+    token = obtener_token(sesion, cfg)
+    with _token_cache_lock:
+        _token_cache[key] = {"token": token, "ts": now}
+    return token
+
+
+def _invalidar_token_cacheado(cfg: dict[str, str]) -> None:
+    with _token_cache_lock:
+        _token_cache.pop(cfg["client_id"], None)
+
+
+def _listar_usuarios_cacheado(
+    sesion: requests.Session, cfg: dict[str, str], token: str,
+) -> list[dict[str, str]]:
+    key = cfg["base_url"]
+    now = time.perf_counter()
+    with _usuarios_cache_lock:
+        cached = _usuarios_cache.get(key)
+        if cached is not None and now - cached["ts"] < _TTL_USUARIOS:
+            return cached["usuarios"]
+    usuarios = normalizar_usuarios(listar_usuarios(sesion, cfg, token))
+    with _usuarios_cache_lock:
+        _usuarios_cache[key] = {"usuarios": usuarios, "ts": now}
+    return usuarios
+
+
+def invalidate_crm_context_cache() -> None:
+    """Limpia el caché de token + usuarios de la vista previa. No hace falta
+    llamarla en operación normal (el TTL alcanza); existe como escape manual
+    (p.ej. si el CRM avisa una rotación de credenciales fuera de horario)."""
+    with _token_cache_lock:
+        _token_cache.clear()
+    with _usuarios_cache_lock:
+        _usuarios_cache.clear()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Paso 2 — usuario asignado
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -495,11 +574,24 @@ def contexto_asignacion(email_siem: str | None) -> dict[str, Any]:
     `sugerido_id` sale de CRM_USUARIO_FALLBACK_ID y sirve SOLO para pre-seleccionar una
     opción en el selector: nunca se aplica solo. Un envío asignado a alguien que quien
     envía no eligió es exactamente lo que esto evita.
+
+    Token y usuarios salen del caché de vista previa (ver bloque más arriba) — el
+    caller (`_contexto_asignacion_seguro`) ya envuelve esta función en un try/except
+    CrmError, así que un CRM caído sigue sin romper la pantalla: acá solo agregamos
+    el reintento-una-vez si el token cacheado quedó inválido (401/403).
     """
     cfg = crm_config()
     with _nueva_sesion(cfg) as sesion:
-        token = obtener_token(sesion, cfg)
-        usuarios = normalizar_usuarios(listar_usuarios(sesion, cfg, token))
+        token = _obtener_token_cacheado(sesion, cfg)
+        try:
+            usuarios = _listar_usuarios_cacheado(sesion, cfg, token)
+        except CrmError as exc:
+            if exc.kind != "auth":
+                raise
+            logger.info("[CRM] token cacheado rechazado (401/403) — se descarta y se reintenta una vez.")
+            _invalidar_token_cacheado(cfg)
+            token = _obtener_token_cacheado(sesion, cfg)
+            usuarios = _listar_usuarios_cacheado(sesion, cfg, token)
     sugerido = (cfg.get("usuario_fallback_id") or "").strip() or None
     if sugerido and not any(u["id"] == sugerido for u in usuarios):
         logger.warning("[CRM] CRM_USUARIO_FALLBACK_ID=%s no está en usuarios_rendidores.", sugerido)
