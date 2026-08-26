@@ -25,5 +25,7 @@ services:
         sync: false
       - key: RENDER
         value: "true"
+      - key: FORECAST_CARTERA_BYPASS_ALL
+        value: "true"
       - key: PYTHON_VERSION
         value: "3.10"

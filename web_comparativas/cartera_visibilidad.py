@@ -100,7 +100,15 @@ def FORECAST_CARTERA_ENABLED() -> bool:
     todo usuario sin cartera cargada en `users.cartera_*` pasa a ver CERO clientes en
     Forecast (fail-closed) — recién tiene sentido prenderlo después de correr
     push_cartera_data.py Y asignar cartera a cada usuario desde S.I.C."""
-    return _flag("FORECAST_CARTERA_ENABLED")
+    # Bypass temporal solicitado para que Forecast sea una vista global y todos
+    # los usuarios del módulo puedan validar el mismo dato oficial, aun cuando
+    # no tengan las cuentas asociadas en cartera. Solo afecta Forecast: Mercado
+    # Público, Mercado Privado, Dimensionamiento y Oportunidades conservan sus
+    # reglas. En Render queda activo por defecto; se puede revertir sin tocar
+    # código definiendo FORECAST_CARTERA_BYPASS_ALL=0.
+    bypass_raw = os.getenv("FORECAST_CARTERA_BYPASS_ALL")
+    bypass_all = _flag("RENDER") if bypass_raw is None else _flag("FORECAST_CARTERA_BYPASS_ALL")
+    return (not bypass_all) and _flag("FORECAST_CARTERA_ENABLED")
 
 
 def DIMENSIONAMIENTO_CARTERA_ENABLED() -> bool:

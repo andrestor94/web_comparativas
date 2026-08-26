@@ -252,6 +252,13 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
     }
 
 
+def _forecast_data_is_global(user: User, access: _ForecastAccess) -> bool:
+    """Al deshabilitar cartera, todos leen el mismo Forecast oficial global."""
+    if not FORECAST_CARTERA_ENABLED():
+        return True
+    return access.unrestricted
+
+
 # ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
@@ -342,7 +349,7 @@ def api_chart_data(
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         access = _forecast_access(_user)
         preview_pending = _forecast_preview_requested(_user, scenario)
-        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        can_view_global = _forecast_data_is_global(_user, access)
         logger.info(
             "[FORECAST API] chart-data user_id=%s role=%r role_key=%s global_overrides=%s",
             getattr(_user, "id", None),
@@ -437,7 +444,7 @@ def api_client_table(
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         access = _forecast_access(_user)
         preview_pending = _forecast_preview_requested(_user, scenario)
-        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        can_view_global = _forecast_data_is_global(_user, access)
         with _forecast_override_context(_user, access, preview_pending=preview_pending):
             result = svc.get_client_table(
                 user_id=_user.id,
@@ -487,7 +494,7 @@ def api_treemap_data(
         resolved_products = svc.get_lab_product_codes(lab_name) if lab_name else products
         access = _forecast_access(_user)
         preview_pending = _forecast_preview_requested(_user, scenario)
-        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        can_view_global = _forecast_data_is_global(_user, access)
         with _forecast_override_context(_user, access, preview_pending=preview_pending):
             result = svc.get_treemap_data(
                 user_id=_user.id,
@@ -533,7 +540,7 @@ def api_client_detail(
     try:
         access = _forecast_access(_user)
         preview_pending = _forecast_preview_requested(_user, scenario)
-        can_view_global = access.unrestricted if FORECAST_CARTERA_ENABLED() else _can_view_global_forecast_adjustments(_user)
+        can_view_global = _forecast_data_is_global(_user, access)
         with _forecast_override_context(_user, access, preview_pending=preview_pending):
             result = svc.get_client_detail(
                 user_id=_user.id,

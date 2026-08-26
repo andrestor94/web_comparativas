@@ -7968,7 +7968,7 @@ def get_client_detail(
     import pandas as pd
 
     # Check if this is a manually-added client first (both SQLite and PG paths)
-    _manual = _manual_client_by_name(client_id, user_id) if cartera_branches is None else None
+    _manual = _manual_client_by_name(client_id, user_id, is_admin=is_admin) if cartera_branches is None else None
     _manual_to_merge = None  # Set when a base client has manual additions to merge
 
     if _manual is not None:
@@ -8295,17 +8295,19 @@ def _query_manual_entries(client_ids):
         session.close()
 
 
-def _manual_client_by_name(client_id_str, user_id):
-    """Return ForecastManualClient if client_id_str matches an active manual client."""
+def _manual_client_by_name(client_id_str, user_id, *, is_admin=False):
+    """Return a visible active manual client matching the displayed name."""
     if SessionLocal is None or ForecastManualClient is None:
         return None
     session = SessionLocal()
     try:
-        return session.query(ForecastManualClient).filter(
+        q = session.query(ForecastManualClient).filter(
             ForecastManualClient.nombre_cliente == client_id_str,
-            ForecastManualClient.user_id == user_id,
             ForecastManualClient.is_active == True,
-        ).first()
+        )
+        if not is_admin and user_id is not None:
+            q = q.filter(ForecastManualClient.user_id == user_id)
+        return q.order_by(ForecastManualClient.id.asc()).first()
     except Exception as exc:
         logger.warning("[FORECAST manual] _manual_client_by_name error: %s", exc)
         return None
@@ -8639,8 +8641,17 @@ def get_manual_client_detail(
 
     session = SessionLocal()
     try:
+        manual_client_ids = [manual_client.id]
+        if is_admin and ForecastManualClient is not None:
+            manual_client_ids = [
+                row[0]
+                for row in session.query(ForecastManualClient.id).filter(
+                    ForecastManualClient.nombre_cliente == manual_client.nombre_cliente,
+                    ForecastManualClient.is_active == True,
+                ).all()
+            ] or manual_client_ids
         q = session.query(ForecastManualEntry).filter(
-            ForecastManualEntry.client_id == manual_client.id
+            ForecastManualEntry.client_id.in_(manual_client_ids)
         )
         try:
             q = q.filter(ForecastManualEntry.is_active == True)
