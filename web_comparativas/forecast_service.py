@@ -578,6 +578,43 @@ def _annual_growth_from_monthly_pct(monthly_pct: float) -> float:
     return (((1.0 + monthly_pct / 100.0) ** 12) - 1.0) * 100.0
 
 
+def _closed_month_forecast_accuracy(
+    actual_df: pd.DataFrame,
+    forecast_df: pd.DataFrame,
+    forecast_col: str,
+    *,
+    actual_col: str = "Total_Venta",
+    year: int = 2026,
+) -> float:
+    """Average monthly coincidence, excluding the most recent open month."""
+    if (
+        actual_df is None or actual_df.empty
+        or forecast_df is None or forecast_df.empty
+        or "fecha" not in actual_df.columns
+        or actual_col not in actual_df.columns
+        or "fecha" not in forecast_df.columns
+        or forecast_col not in forecast_df.columns
+    ):
+        return 0.0
+    try:
+        months = sorted(
+            month for month in actual_df["fecha"].dropna().unique()
+            if pd.Timestamp(month).year == int(year)
+        )
+        closed = months[:-1] if len(months) > 1 else months
+        scores = []
+        for month in closed:
+            actual = float(actual_df.loc[actual_df["fecha"] == month, actual_col].sum())
+            projected = float(
+                forecast_df.loc[forecast_df["fecha"] == month, forecast_col].sum()
+            )
+            if actual > 0:
+                scores.append(max(0.0, (1.0 - abs(actual - projected) / actual) * 100.0))
+        return float(np.mean(scores)) if scores else 0.0
+    except Exception:
+        return 0.0
+
+
 def get_forecast_effective_month(today: dt.date | None = None, cutoff_day: int = 20) -> str:
     """Return the first month ("YYYY-MM") from which a forecast change takes effect.
 
@@ -5275,6 +5312,10 @@ def _pg_get_chart_data_inner(
         except Exception:
             pass
 
+    expectation_accuracy_val = (
+        _closed_month_forecast_accuracy(df_fact_raw, df_fcst, "Total_Adj")
+        if growth_pct != 0 else 0.0
+    )
     def _fmt(dfs: "pd.DataFrame", cols: list) -> list:
         out = []
         for _, row in dfs.sort_values("fecha").iterrows():
@@ -5320,7 +5361,7 @@ def _pg_get_chart_data_inner(
             "inflation_mo_pct":         INFLATION_MO_PCT,
             "var_real_2025":            round(var_real, 2) if var_real is not None else None,
             "accuracy_val":             round(accuracy_val, 1),
-            "expectation_accuracy_val": 0.0,
+            "expectation_accuracy_val": round(expectation_accuracy_val, 1),
             "fact_2026":                round(fact_2026_sum, 0),
             "meta_completeness":        round(meta_completeness, 1),
             "total_historia":           round(total_hist, 0) if historical_2025_available else None,

@@ -1946,6 +1946,12 @@
   }
   .appr-matrix-title { font-size: .74rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .03em; }
   .appr-matrix-note { font-size: .68rem; color: var(--text-muted); font-style: italic; white-space: nowrap; }
+  .appr-preview-legend {
+    display: grid; gap: 3px; padding: 7px 14px 9px;
+    border-top: 1px solid var(--border-color); background: var(--bg-primary);
+    color: var(--text-muted); font-size: .66rem; line-height: 1.35;
+  }
+  .appr-preview-legend strong { color: var(--text-secondary); }
   table.appr-matrix { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .83rem; margin: 0; }
   table.appr-matrix thead th {
     font-size: .63rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; color: var(--text-muted);
@@ -2689,6 +2695,11 @@
                   </tr>
                 </tbody>
               </table>
+              <div class="appr-preview-legend" aria-label="Definiciones del preview pendiente">
+                <span><strong>Efectiva:</strong> modifica el Forecast valorizado y participa del impacto pendiente.</span>
+                <span><strong>Sin efecto:</strong> no encuentra monto valorizado vigente en su alcance.</span>
+                <span><strong>Conflicto:</strong> el valor inicial ya no coincide con el oficial; no puede aprobarse.</span>
+              </div>
             </div>
           </div>
 
@@ -7285,6 +7296,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         + ` / ${noEffect} sin efecto / ${conflicts} conflictos`
         + (excluded > noEffect + conflicts ? ` / ${excluded-noEffect-conflicts} otras no efectivas` : '')
         + (sinTot ? ` / ${sinTot} sin base` : '');
+      noteEl.title = 'Efectivas: modifican el Forecast valorizado. Sin efecto: no tienen monto vigente en su alcance. '
+        + 'Conflictos: el valor inicial ya no coincide con el oficial y su aprobaci?n est? bloqueada.';
+      noteEl.setAttribute('aria-label', noteEl.textContent + '. ' + noteEl.title);
       noteEl.style.color = (excluded || sinTot) ? '#b06000' : '';
     }
   }
@@ -8014,6 +8028,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const r = _apprById[id];
     if (!r) return;
     const conflict = r.preview_category === 'conflicto' || r.approval_blocked === true;
+    const previewLabels = {
+      efectiva: 'Efectiva',
+      sin_efecto: 'Sin efecto',
+      supersedida: 'Supersedida',
+      redundante: 'Redundante',
+      conflicto: 'Conflicto',
+      incompleta: 'Incompleta',
+    };
     const row = (label, val) => `<div class="appr-dt-row"><span class="appr-dt-k">${label}</span><span class="appr-dt-v">${val}</span></div>`;
     const body = document.getElementById('appr-detail-body');
     if (body) body.innerHTML = [
@@ -8034,6 +8056,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       row('Período', esc(r.periodo)),
       row('Alcance', esc(r.scope_type)),
       row('Estado', statusBadge(r.status)),
+      (r.preview_category && !conflict ? row('Resultado del preview',
+        `<strong>${esc(previewLabels[r.preview_category] || r.preview_category)}</strong>` +
+        `<div class="appr-cell-sub">${esc(r.preview_explanation || '')}</div>`) : ''),
       (conflict ? row('Validacion', '<span class="appr-badge appr-badge--conflict">Conflicto</span><div class="appr-cell-sub">El valor inicial ya no coincide con el oficial.</div>') : ''),
       (r.status !== 'pendiente' ? row('Revisado por', esc(r.revisado_por) + ' — ' + esc(r.revisado_el)) : ''),
       (r.motivo ? row('Observación / Motivo', esc(r.motivo)) : ''),

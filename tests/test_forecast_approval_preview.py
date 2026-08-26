@@ -428,6 +428,21 @@ def test_conflict_payload_marks_blocked_and_account_excludes_from_approval():
     assert account["approvable_count"] == 1
 
 
+def test_non_effective_preview_has_a_user_facing_explanation():
+    records = [{
+        "id": 12,
+        "status": "pendiente",
+        "impacto_estimado": 100.0,
+    }]
+    router._annotate_pending_preview(records, {
+        12: {"category": "sin_efecto", "effective_delta": 0.0},
+    })
+
+    assert records[0]["approval_blocked"] is False
+    assert records[0]["impacto_estimado"] is None
+    assert "monto valorizado vigente" in records[0]["preview_explanation"]
+
+
 def test_individual_conflict_keeps_backend_409_and_does_not_stamp(monkeypatch):
     request = SimpleNamespace(
         id=77, status="pendiente", created_by_user_id=2,

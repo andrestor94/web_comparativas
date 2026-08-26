@@ -3397,6 +3397,14 @@ def _annotate_pending_preview(
     records: list[dict], preview_by_request: dict
 ) -> None:
     """Reemplaza solo el impacto visual pendiente por el delta efectivo."""
+    explanations = {
+        "efectiva": "Modifica el Forecast valorizado vigente y participa del impacto pendiente.",
+        "sin_efecto": "No encuentra monto valorizado vigente dentro de su alcance, o el impacto es menor a $0,50.",
+        "supersedida": "Otra solicitud pendiente posterior reemplaza este mismo alcance.",
+        "redundante": "El valor solicitado ya coincide con el Forecast oficial vigente.",
+        "conflicto": "El valor inicial de la solicitud ya no coincide con el Forecast oficial vigente.",
+        "incompleta": "Faltan datos de cuenta, alcance, periodo o valor para calcular el preview.",
+    }
     for record in records:
         if record.get("status") != "pendiente":
             continue
@@ -3404,20 +3412,20 @@ def _annotate_pending_preview(
         record["impacto_estimado_original"] = record.get("impacto_estimado")
         if info is None:
             record["preview_category"] = "incompleta"
+            record["preview_explanation"] = explanations["incompleta"]
+            record["approval_blocked"] = False
             record["impacto_estimado"] = None
             continue
-        record["preview_category"] = info.get("category")
+        category = info.get("category") or "incompleta"
+        record["preview_category"] = category
         record["preview_official_before"] = info.get("official_before")
         record["preview_official_after"] = info.get("official_after")
-        is_conflict = info.get("category") == "conflicto"
+        is_conflict = category == "conflicto"
         record["approval_blocked"] = is_conflict
-        record["preview_explanation"] = (
-            "El valor inicial de la solicitud ya no coincide con el Forecast oficial vigente."
-            if is_conflict else None
-        )
+        record["preview_explanation"] = explanations.get(category)
         record["impacto_estimado"] = (
             float(info.get("effective_delta") or 0.0)
-            if info.get("category") == "efectiva"
+            if category == "efectiva"
             else None
         )
 
