@@ -1335,6 +1335,20 @@ def refresh_default_dashboard_snapshot(
     # todavía están en NULL en este punto, recién las vamos a llenar ahora) — no
     # hay circularidad con el fallback que agregamos en _default_platform_values /
     # _cuenta_to_entidad_map para lecturas posteriores.
+    #
+    # statement_timeout: `get_dashboard_bootstrap` (arriba, misma sesión/transacción)
+    # YA subió esto a 50s con `_apply_local_statement_timeout` — Postgres aplica
+    # statement_timeout POR STATEMENT, no acumulado por transacción, así que ese
+    # override sigue vigente para lo que sigue acá. Igual lo pedimos DE NUEVO,
+    # explícito, con más margen: no queremos que la protección de este bloque
+    # dependa de un efecto lateral de otra función — si mañana alguien cambia
+    # get_dashboard_bootstrap y dejar de llamarlo ahí, esto no debe quedar
+    # descubierto en silencio. cuenta_entidad_map midió 17-19s, ref_month ~24s,
+    # y el rebuild completo (computar_oportunidades) ~75s repartidos en varias
+    # queries — todo por debajo de 120s con margen, incluso si crece con el
+    # tiempo a medida que se acumulan más runs en las tablas.
+    _apply_local_statement_timeout(session, 120_000)
+
     if target_run_id is not None:
         run_obj_anclas = session.get(DimensionamientoImportRun, target_run_id)
         if run_obj_anclas is not None:
