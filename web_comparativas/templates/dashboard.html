@@ -848,7 +848,7 @@
 {% endblock %}
 
 {% block page_skin %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=dashboard-height-fix-v1">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.v2.css') }}?v=sticky-head-opaque-v2">
 {% endblock %}
 
 {% block toolbar_actions %}
@@ -1843,6 +1843,13 @@
       return Math.min(1, vw / natW, (vh - 12) / natH);
     }
 
+    // Recalcula los offsets del encabezado sticky tras cambios de zoom/densidad
+    // (las alturas de las filas del thead pueden variar).
+    function refreshHeadOffsetsSoon() {
+      if (typeof updateHeadOffsets !== 'function') return;
+      requestAnimationFrame(() => requestAnimationFrame(updateHeadOffsets));
+    }
+
     function applyView() {
       if (!fitContainer) return;
       if (VIEW_MODE === 'fit') {
@@ -1858,12 +1865,14 @@
         fitContainer.style.zoom = '';
         fitContainer.style.height = '';
       }
+      refreshHeadOffsetsSoon();
     }
 
     function applyDensity() {
       if (!fitContainer) return;
       fitContainer.classList.toggle('compact', DENSITY === 'compact');
       if (VIEW_MODE === 'fit') applyView();
+      refreshHeadOffsetsSoon();
     }
 
     if (viewToggle) {
@@ -2390,13 +2399,20 @@
       });
     }
 
-    // Altura sticky para fila 1 del thead
+    // Alturas sticky de cada fila del thead (grupo, títulos, filtros).
+    // Se usan como offsets acumulados (top) para apilar las 3 filas sin solaparse.
     function updateHeadOffsets() {
       if (!elHead) return;
-      const topRow = elHead.querySelector('tr:nth-child(1)');
-      if (!topRow) return;
-      const h = Math.ceil(topRow.getBoundingClientRect().height || 40);
-      document.documentElement.style.setProperty('--head-row1-h', `${h}px`);
+      const rows = elHead.querySelectorAll('tr');
+      const row1 = rows[0];
+      const row2 = rows[1];
+      if (!row1) return;
+      // Math.round (no ceil): junto con el `- 1px` de los offsets en CSS
+      // garantiza que las filas fijas se solapen ~1px en vez de dejar hueco.
+      const h1 = Math.round(row1.getBoundingClientRect().height || 40);
+      const h2 = row2 ? Math.round(row2.getBoundingClientRect().height || 34) : 0;
+      document.documentElement.style.setProperty('--head-row1-h', `${h1}px`);
+      document.documentElement.style.setProperty('--head-row2-h', `${h2}px`);
     }
 
     /* ========= ENCABEZADO DE TABLA ========= */
@@ -2653,6 +2669,28 @@
         }
         refreshTreemapFromData(TREEMAP_PROV_DATA || []);
       }
+    }
+
+    /* ================= KPIs DATOS GENERALES (respetan filtro de rubro) ================= */
+    // "Renglones" y "Cantidad de competidores" se calculan sobre el mismo
+    // subconjunto de filas que alimenta al resto del panel (filteredRows),
+    // por lo que respetan el selector de rubro y coinciden con el contador
+    // de la tabla. Sin rubro seleccionado equivalen al total del proceso.
+    function refreshGeneralKPIs() {
+      const rows = filteredRows();
+
+      const elReng = document.getElementById('dg_renglones');
+      if (elReng) elReng.textContent = rows.length.toLocaleString('es-AR');
+
+      const provs = new Set();
+      rows.forEach(r => {
+        (r.positions || []).forEach(p => {
+          const name = (p && p.proveedor != null) ? String(p.proveedor).trim().toLowerCase() : '';
+          if (name && name !== 'nan') provs.add(name);
+        });
+      });
+      const elComp = document.getElementById('dg_competidores');
+      if (elComp) elComp.textContent = provs.size.toLocaleString('es-AR');
     }
 
     /* ================= KPIs SUIZO ================= */
@@ -2964,6 +3002,7 @@
     /* ================= RENDER GLOBAL ================= */
     function renderAll() {
       renderTable();
+      refreshGeneralKPIs();
       refreshSuizoKPIs();
       refreshCharts();
     }

@@ -39,8 +39,9 @@
   --w-asig: 90px;
   --w-prov: 200px;
 
-  /* Head sticky fila 2 (JS la ajusta) */
+  /* Alturas de las filas del encabezado sticky (JS las ajusta) */
   --head-row1-h: 44px;
+  --head-row2-h: 34px;
 
   /* Tarjetas planas */
   --sa-card-bg: #f3f6fb;
@@ -535,6 +536,11 @@ h4 {
   /* crece hacia adentro del scroller */
   min-width: 100% !important;
   /* base = ancho contenedor */
+  /* border-collapse: separate es imprescindible para que el fondo de las
+     celdas sticky del thead sea 100% opaco. Con `collapse` (default de
+     Bootstrap Reboot) Chrome deja ver las filas a través del encabezado. */
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
 }
 
 /* Evita desbordes horizontales del layout externo */
@@ -564,11 +570,34 @@ body,
   overflow-y: clip;
 }
 
-/* Cabezal doble sticky */
+/* ===== Encabezado sticky: 3 filas apiladas (grupo / títulos / filtros) =====
+   z-index layers dentro del scroller (.table-responsive crea stacking context):
+     - celdas de body que scrollean .......... auto (0)
+     - columnas congeladas del body .......... 2 / 3 (hover)
+     - encabezado (celdas que scrollean) ..... 20
+     - encabezado ∩ columnas congeladas ...... 21  (por encima de todo)
+   El fondo se aplica SIEMPRE a cada <th> (nunca al <tr>) con color sólido
+   opaco, no gradiente, para que ninguna fila se vea a través. */
 .table thead th {
   position: sticky;
-  background: linear-gradient(180deg, #f6f9fc 0%, #ffffff 85%);
-  z-index: 6
+  z-index: 20;
+  background-color: #fff;
+}
+
+/* Fondo sólido opaco en las 3 filas del thead (grupo, títulos y filtros).
+   Alta especificidad para ganarle a Bootstrap y a cualquier regla de <td>. */
+#rankTable thead th,
+#rankTable thead tr:nth-child(1) th,
+#rankTable thead tr:nth-child(2) th {
+  background-color: #f4f7fb;
+  background-image: none;
+  background-clip: padding-box;
+}
+
+#rankTable thead .filters-row th {
+  background-color: var(--sa-gris-100);
+  background-image: none;
+  background-clip: padding-box;
 }
 
 .table thead tr:nth-child(1) th {
@@ -579,23 +608,27 @@ body,
   text-align: center
 }
 
+/* -1px: absorbe el redondeo de las alturas medidas por JS y evita
+   franjas de 1px por las que se cuela el contenido de las filas. */
 .table thead tr:nth-child(2) th {
-  top: var(--head-row1-h);
+  top: calc(var(--head-row1-h) - 1px);
   font-weight: 700;
   color: var(--sa-azul)
 }
 
 .filters-row {
   display: table-row;
-  background: var(--sa-gris-100)
 }
 
-.filters-row th {
-  background: var(--sa-gris-100);
-  position: static
+/* La fila de filtros también queda fija, apilada bajo las otras dos */
+#rankTable .filters-row th {
+  position: sticky;
+  top: calc(var(--head-row1-h) + var(--head-row2-h) - 1px);
+  z-index: 20;
 }
 
-/* Columnas fijas */
+/* Columnas fijas (congeladas en horizontal). Las celdas de body se quedan
+   por debajo del encabezado pero por encima de las columnas que scrollean. */
 #rankTable th.col-nro,
 #rankTable td.col-nro {
   width: var(--col-nro-w);
@@ -603,8 +636,9 @@ body,
   max-width: var(--col-nro-w);
   position: sticky;
   left: 0;
-  background: var(--sa-blanco);
-  z-index: 8;
+  background-color: var(--sa-blanco);
+  background-clip: padding-box;
+  z-index: 2;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
@@ -614,8 +648,9 @@ body,
   max-width: var(--desc-col-w);
   position: sticky;
   left: var(--col-nro-w);
-  background: var(--sa-blanco);
-  z-index: 8;
+  background-color: var(--sa-blanco);
+  background-clip: padding-box;
+  z-index: 2;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
@@ -626,13 +661,32 @@ body,
   max-width: var(--cant-col-w);
   position: sticky;
   left: calc(var(--col-nro-w) + var(--desc-col-w));
-  background: var(--sa-blanco);
-  z-index: 8;
+  background-color: var(--sa-blanco);
+  background-clip: padding-box;
+  z-index: 2;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
 #rankTable td.col-desc:hover {
-  z-index: 30
+  z-index: 3
+}
+
+/* Intersección encabezado + columnas congeladas: fondo sólido y por encima
+   de todo lo demás (headers que scrollean y filas congeladas). */
+#rankTable thead th.col-nro,
+#rankTable thead th.col-desc,
+#rankTable thead th.col-cant {
+  z-index: 21;
+  background-color: #f4f7fb;
+  background-image: none;
+}
+
+#rankTable thead .filters-row th.col-nro,
+#rankTable thead .filters-row th.col-desc,
+#rankTable thead .filters-row th.col-cant {
+  z-index: 21;
+  background-color: var(--sa-gris-100);
+  background-image: none;
 }
 
 /* Subcolumnas */
@@ -669,7 +723,9 @@ body,
 }
 
 #rankTable th.pos-group-head {
-  background: linear-gradient(180deg, #f6f9fc 0%, #ffffff 85%)
+  background-color: #f4f7fb;
+  background-image: none;
+  background-clip: padding-box;
 }
 
 /* Filtros compactos */
@@ -945,28 +1001,32 @@ body,
   color: #fff !important
 }
 
-/* ======= FIX: filtros de las 3 primeras columnas pegados a la izquierda ======= */
+/* ======= FIX: filtros de las 3 primeras columnas pegados a la izquierda =======
+   Doble sticky (top + left): intersección encabezado/columna congelada → z-index 21. */
 #rankTable .filters-row th.col-nro {
   position: sticky;
   left: 0;
-  z-index: 9;
-  background: var(--sa-gris-100);
+  z-index: 21;
+  background-color: var(--sa-gris-100);
+  background-clip: padding-box;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
 #rankTable .filters-row th.col-desc {
   position: sticky;
   left: var(--col-nro-w);
-  z-index: 9;
-  background: var(--sa-gris-100);
+  z-index: 21;
+  background-color: var(--sa-gris-100);
+  background-clip: padding-box;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
 #rankTable .filters-row th.col-cant {
   position: sticky;
   left: calc(var(--col-nro-w) + var(--desc-col-w));
-  z-index: 9;
-  background: var(--sa-gris-100);
+  z-index: 21;
+  background-color: var(--sa-gris-100);
+  background-clip: padding-box;
   box-shadow: 1px 0 0 var(--sa-gris-200);
 }
 
