@@ -36,7 +36,11 @@ from web_comparativas.policy import (
     puede_ver_aprobaciones_forecast,
     puede_editar_aprobaciones_forecast,
 )
-from web_comparativas.cartera_visibilidad import clientes_visibles_para, FORECAST_CARTERA_ENABLED
+from web_comparativas.cartera_visibilidad import (
+    clientes_visibles_para,
+    FORECAST_CARTERA_ENABLED,
+    FORECAST_CARTERA_BYPASS_ALL,
+)
 
 logger = logging.getLogger("wc.forecast.router")
 logger.setLevel(logging.INFO)
@@ -75,7 +79,9 @@ def _central_forecast_access(user: User) -> _ForecastAccess:
 
 
 def _forecast_access(user: User) -> _ForecastAccess:
-    """Scope del dashboard: el flag apagado conserva el comportamiento anterior."""
+    """Scope de datos: el bypass elimina solo el filtro de cuentas del dashboard."""
+    if FORECAST_CARTERA_BYPASS_ALL():
+        return _ForecastAccess(None, None, None, True, "account-bypass")
     if not FORECAST_CARTERA_ENABLED():
         return _ForecastAccess(None, None, None, True, "disabled")
     return _central_forecast_access(user)
@@ -253,10 +259,12 @@ def _can_view_global_forecast_adjustments(user: User) -> bool:
 
 
 def _forecast_data_is_global(user: User, access: _ForecastAccess) -> bool:
-    """Al deshabilitar cartera, todos leen el mismo Forecast oficial global."""
-    if not FORECAST_CARTERA_ENABLED():
+    """Al bypassear cuentas, todos leen el mismo Forecast oficial global."""
+    if FORECAST_CARTERA_BYPASS_ALL():
         return True
-    return access.unrestricted
+    if FORECAST_CARTERA_ENABLED():
+        return access.unrestricted
+    return _can_view_global_forecast_adjustments(user)
 
 
 # ---------------------------------------------------------------------------
