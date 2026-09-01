@@ -747,6 +747,7 @@ def crear_oportunidad(
     description: str,
     id_sistema_origen: str,
     date_closed: str | None = None,
+    campos_extra: dict[str, str] | None = None,
 ) -> str:
     atributos: dict[str, Any] = {
         "name": nombre,
@@ -764,6 +765,11 @@ def crear_oportunidad(
     # date_closed es opcional en el contrato: se omite si no hay fecha tentativa.
     if date_closed:
         atributos["date_closed"] = date_closed
+    # Campos booleanos de Negocio/Subnegocio del artículo (ver crm_negocio_map.py): ya
+    # vienen filtrados a los que aplican, cada uno con valor "1" (string). Los que no
+    # aplican no están en el dict — nunca se manda "0".
+    if campos_extra:
+        atributos.update(campos_extra)
     return _crear_registro(
         sesion, cfg, token,
         tipo=MODULE_OPPORTUNITIES, atributos=atributos, paso="alta de la oportunidad",
@@ -855,6 +861,7 @@ def enviar_oportunidad(
     id_sistema_origen: str,
     estado_siem: str | None,
     crm_account_id_validado: str | None = None,
+    campos_extra: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Corre el circuito completo (pasos 1..5) y devuelve el resultado del envío.
 
@@ -906,6 +913,7 @@ def enviar_oportunidad(
             description=description,
             id_sistema_origen=id_sistema_origen,
             date_closed=fecha_cierre_tentativa(),
+            campos_extra=campos_extra,
         )
 
         bitacora_id: str | None = None

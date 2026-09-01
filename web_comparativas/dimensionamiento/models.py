@@ -284,6 +284,12 @@ class OportunidadSummary(Base):
     producto_nombre = Column(Text, nullable=True)
     familia = Column(Text, nullable=True)
     unidad_negocio = Column(Text, nullable=True)
+    # Subnegocio del artículo (dataset: `subunidad_negocio`). Se arrastra desde el
+    # renglón más reciente del par, igual que `unidad_negocio` — `codigo_articulo` ->
+    # (`unidad_negocio`, `subunidad_negocio`) es determinístico en el dataset (0 de
+    # ~3.5k códigos con más de un valor). Lo consume `_build_crm_payload` para encender
+    # los campos booleanos de Negocio/Subnegocio del CRM (ver crm_negocio_map.py).
+    subunidad_negocio = Column(Text, nullable=True)
     plataforma = Column(String(40), nullable=True)
 
     # Clasificación

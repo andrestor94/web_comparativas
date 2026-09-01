@@ -1659,7 +1659,15 @@ def _ensure_crm_envio_real_columns():
                 ("crm_assigned_origen", "VARCHAR(16)"),
             ],
             "crm_envio_eventos": [("crm_id", "VARCHAR(64)")],
-            "oportunidades_summary": [("cuenta_interna", "VARCHAR(120)")],
+            # cuenta_interna: Nº de cuenta de FUSION del cliente (clave con la que el CRM
+            #   resuelve la cuenta). subunidad_negocio: Subnegocio del artículo, para
+            #   encender los campos booleanos Negocio/Subnegocio del CRM (crm_negocio_map.py).
+            #   Las filas viejas quedan con NULL a propósito — se completan al reconstruir
+            #   oportunidades_summary; el envío tiene fallback y no exige rebuild inmediato.
+            "oportunidades_summary": [
+                ("cuenta_interna", "VARCHAR(120)"),
+                ("subunidad_negocio", "TEXT"),
+            ],
         }
         ddls: list[str] = []
         for tabla, columnas in faltantes.items():

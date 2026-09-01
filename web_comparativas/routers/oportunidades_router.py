@@ -40,6 +40,7 @@ from web_comparativas.dimensionamiento.account_resolution import (
 )
 from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.crm_client import CrmError
+from web_comparativas.dimensionamiento.crm_negocio_map import resolver_negocio_subnegocio
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     CrmEnvioEvento,
@@ -339,6 +340,25 @@ def _build_crm_payload(
         "update_text": update_text,
     }
 
+    # ── Negocio / Subnegocio del artículo -> campos booleanos del CRM ──
+    # Derivados del artículo (pedido de Hugo, spec de Matías). Son campos booleanos
+    # independientes: SÓLO se agregan al payload los que aplican, con valor "1" (string);
+    # los que no aplican se omiten (nunca "0"). Ver crm_negocio_map.py. El modal los
+    # muestra para revisión (override manual, no carga obligatoria). Si la etiqueta del
+    # dataset no matchea el mapa, el envío NO se bloquea: viaja sin estos campos y queda
+    # registrado (`no_mapeado` acá + logs en el rebuild del motor y en `/enviar`).
+    negocio_crm = resolver_negocio_subnegocio(
+        getattr(o, "unidad_negocio", None),
+        getattr(o, "subunidad_negocio", None),
+    )
+    payload.update(negocio_crm["campos"])
+    # Nombres de los campos de negocio/subnegocio que se agregaron: lo lee
+    # `_enviar_real_a_crm` para reenviarlos al CRM sin tener que adivinar cuáles de
+    # los `*_c` del payload son de negocio (hay otros: tipooportunidad_c, etc.).
+    # Queda además en el payload_snapshot como traza de qué se mandó.
+    if negocio_crm["campos"]:
+        payload["_campos_negocio_crm"] = list(negocio_crm["campos"].keys())
+
     # Sin pendientes: currency_id va en duro ("-99") y assigned_user llega resuelto.
     pendientes: list[str] = []
     # Campos que dependen del dataset y quedaron vacíos (faltantes reales).
@@ -396,6 +416,15 @@ def _build_crm_payload(
         "bitacora_datos_siem": datos_complementarios,
         # La UI solo dibuja el selector si esto es True; el backend lo revalida igual.
         "puede_elegir": puede_elegir,
+        # Negocio/Subnegocio que se van a enviar (para mostrarlo en el modal).
+        "negocio_crm": {
+            "negocio_label": negocio_crm["negocio_label"],
+            "subnegocio_label": negocio_crm["subnegocio_label"],
+            "negocio_field": negocio_crm["negocio_field"],
+            "subnegocio_field": negocio_crm["subnegocio_field"],
+            "campos": negocio_crm["campos"],
+            "no_mapeado": negocio_crm["no_mapeado"],
+        },
     }
 
 
@@ -619,6 +648,7 @@ def _row_to_dict(
         "codigo_articulo": o.codigo_articulo,
         "familia": o.familia,
         "unidad_negocio": o.unidad_negocio,
+        "subunidad_negocio": o.subunidad_negocio,
         "plataforma": o.plataforma,
         "consumo_tipico_mensual": o.consumo_tipico_mensual,
         "consumo_min_mensual": o.consumo_min_mensual,
@@ -1170,6 +1200,12 @@ def _enviar_real_a_crm(
             "usuario_origen": asignado.get("origen"),
         }
 
+    # Campos booleanos de Negocio/Subnegocio: los agregó `_build_crm_payload` al
+    # payload y dejó sus nombres en `_campos_negocio_crm`. Se reenvían tal cual al CRM
+    # (ya vienen con "1"; los que no aplican no están).
+    campos_negocio = {
+        k: payload[k] for k in payload.get("_campos_negocio_crm", []) if k in payload
+    }
     resultado = crm_client.enviar_oportunidad(
         nombre=payload["name"],
         email_usuario=payload.get("enviado_por"),
@@ -1181,6 +1217,7 @@ def _enviar_real_a_crm(
         id_sistema_origen=payload.get("id_sistema_origen_c") or "",
         estado_siem=payload.get("estado_siem"),
         crm_account_id_validado=crm_account_id,
+        campos_extra=campos_negocio or None,
     )
     modo = resultado["modo"]
     return {
@@ -1580,6 +1617,17 @@ def oportunidades_enviar(
                 "crm_url": None,
                 "crm_modo": modo_actual,
             }
+
+    # Negocio/Subnegocio del artículo -> campos booleanos del CRM (crm_negocio_map.py).
+    # `_build_crm_payload` ya los mergeó al `payload` (y `_enviar_real_a_crm` los
+    # reenvía desde ahí). Si la etiqueta del dataset no matcheó el mapa, se envía IGUAL
+    # (sin esos campos) y queda registrado acá para poder detectarlo.
+    if (crm.get("negocio_crm") or {}).get("no_mapeado"):
+        logger.warning(
+            "[OPORTUNIDADES][API] envío SIN negocio/subnegocio (etiqueta no mapeada) "
+            "oportunidad_id=%s unidad=%r subunidad=%r",
+            oportunidad_id, o.unidad_negocio, o.subunidad_negocio,
+        )
 
     # ── Envío real. El registro se hace SOLO si el ACK es OK: ante cualquier falla la
     # oportunidad queda SIN registrar, o sea libre de reintentar sin pedir override. ──

@@ -60,7 +60,7 @@ ESTADO_PATH = "/api/mercado-privado/oportunidades/admin/estado"
 # created_at, que los pone el servidor).
 _CAMPOS = [
     "codigo_articulo", "cliente_visible", "cuit", "cuenta_interna", "provincia",
-    "producto_nombre", "familia", "unidad_negocio", "plataforma",
+    "producto_nombre", "familia", "unidad_negocio", "subunidad_negocio", "plataforma",
     "tipo_oportunidad", "estado_actividad",
     "meses_demanda_cliente_12m", "meses_no_participo_12m", "ventana_meses",
     "consumo_tipico_mensual", "consumo_min_mensual", "consumo_max_mensual",

@@ -444,6 +444,7 @@ def computar_oportunidades(
                 "producto_nombre": None,
                 "familia": None,
                 "unidad_negocio": None,
+                "subunidad_negocio": None,     # Subnegocio del artículo (campos CRM)
                 "plataforma": None,
                 "is_identified": False,
             }
@@ -469,6 +470,7 @@ def computar_oportunidades(
             R.descripcion_articulo,
             R.familia,
             R.unidad_negocio,
+            R.subunidad_negocio,
             R.plataforma,
             R.is_identified,
         )
@@ -484,7 +486,7 @@ def computar_oportunidades(
         (
             cliente, codigo, fecha, cantidad,
             cuit, cuenta_interna, provincia, prod_orig, desc_art, familia, unidad,
-            plataforma, is_identified,
+            subunidad, plataforma, is_identified,
         ) = row
         key = (cliente, codigo)
         par = pares.get(key)
@@ -506,6 +508,7 @@ def computar_oportunidades(
             par["producto_nombre"] = prod_orig or desc_art
             par["familia"] = familia
             par["unidad_negocio"] = unidad
+            par["subunidad_negocio"] = subunidad
             par["plataforma"] = plataforma
             par["is_identified"] = bool(is_identified)
 
@@ -598,6 +601,7 @@ def computar_oportunidades(
             "producto_nombre": par["producto_nombre"],
             "familia": par["familia"],
             "unidad_negocio": par["unidad_negocio"],
+            "subunidad_negocio": par["subunidad_negocio"],
             "plataforma": par["plataforma"],
             "tipo_oportunidad": tipo,
             "estado_actividad": estado_act,
@@ -680,6 +684,28 @@ def rebuild_oportunidades_for_run(
         stats.get("window_start"), stats.get("window_end"),
         stats.get("umbral_mes_completo"), stats.get("max_fecha"),
     )
+
+    # Negocio/Subnegocio del CRM: dejar registrado qué etiquetas del dataset NO tienen
+    # equivalencia en el mapa (crm_negocio_map.py). No bloquea nada — esas oportunidades
+    # se envían igual, sin los campos de negocio/subnegocio; esto es sólo para detectar
+    # a tiempo una etiqueta nueva y agregarla al mapa.
+    try:
+        from .crm_negocio_map import resolver_negocio_subnegocio
+
+        sin_mapa: dict[str, int] = {}
+        for r in rows:
+            res = resolver_negocio_subnegocio(r.get("unidad_negocio"), r.get("subunidad_negocio"))
+            for nivel, etiqueta in res["sin_mapear"]:
+                sin_mapa[f"{nivel}:{etiqueta}"] = sin_mapa.get(f"{nivel}:{etiqueta}", 0) + 1
+        stats["negocio_sin_mapear"] = sin_mapa
+        if sin_mapa:
+            logger.warning(
+                "[OPORTUNIDADES] run_id=%s: %s oportunidad(es) con negocio/subnegocio "
+                "SIN equivalencia en el CRM (se enviarán sin esos campos): %s",
+                target_run_id, sum(sin_mapa.values()), sin_mapa,
+            )
+    except Exception:
+        logger.exception("[OPORTUNIDADES] no se pudo auditar el mapa de negocio/subnegocio (no bloquea)")
 
     # Borrado run-scoped + inserción.
     session.execute(

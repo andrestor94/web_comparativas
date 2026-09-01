@@ -373,6 +373,12 @@
           <select id="crmAsignadoSel" class="form-select form-select-sm"></select>
           <div class="mt-1 text-muted" id="crmAsignacionNota"></div>
         </div>
+        <!-- Negocio / Subnegocio del artículo que se van a enviar al CRM. Derivados del
+             artículo; se muestran para revisión antes de confirmar (ver renderNegocio). -->
+        <div id="crmNegocioBox" class="alert py-2 small mb-3 alert-secondary" style="display:none;">
+          <div class="fw-semibold mb-1"><i class="bi bi-diagram-2 me-1"></i>Negocio / Subnegocio</div>
+          <div id="crmNegocioDetails"></div>
+        </div>
         <div id="crmTextPreview" class="row g-3" style="display:none;">
           <div class="col-12">
             <div class="fw-semibold mb-1">Descripción</div>
@@ -396,5 +402,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v18-crm-modal"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v19-negocio-crm"></script>
 {% endblock %}

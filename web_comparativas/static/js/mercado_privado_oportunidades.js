@@ -210,6 +210,7 @@
       `</div>` +
       section("Producto",
         row("Negocio", esc(o.unidad_negocio || "—")) +
+        row("Subnegocio", esc(o.subunidad_negocio || "—")) +
         row("Familia", esc(o.familia || "—")) +
         row("Código de artículo", esc(o.codigo_articulo || "—")) +
         row("Provincia", esc(o.provincia || "—"))
@@ -269,6 +270,33 @@
     description.textContent = (payload && payload.description) || "";
     bitacora.textContent = (payload && payload.update_text) || "";
     box.style.display = description.textContent || bitacora.textContent ? "" : "none";
+  }
+
+  // Negocio / Subnegocio del artículo que van a viajar al CRM. Sólo presentación
+  // (definición 5 del pedido): se derivan del artículo en el backend
+  // (_build_crm_payload); acá se muestran para que quien envía los vea antes de
+  // confirmar. Si no hay equivalencia en el CRM se avisa y el envío sale igual, sin
+  // esos campos — no bloquea.
+  function renderNegocio(crm) {
+    const box = $("crmNegocioBox"), details = $("crmNegocioDetails");
+    if (!box || !details) return;
+    const n = (crm && crm.negocio_crm) || null;
+    if (!n || (!n.negocio_label && !n.subnegocio_label)) { box.style.display = "none"; return; }
+    const linea = (etiqueta, campo) =>
+      `<div><strong>${esc(etiqueta)}</strong> ` +
+      (campo
+        ? `<span class="text-muted">→ ${esc(campo)}</span>`
+        : `<span class="text-danger">sin equivalencia en el CRM</span>`) +
+      `</div>`;
+    details.innerHTML =
+      linea(n.negocio_label || "Negocio no informado", n.negocio_field) +
+      linea(n.subnegocio_label || "Subnegocio no informado", n.subnegocio_field) +
+      (n.no_mapeado
+        ? `<div class="text-muted mt-1"><i class="bi bi-info-circle me-1"></i>` +
+          `Se enviará sin los campos que no tienen equivalencia.</div>`
+        : "");
+    box.className = `alert py-2 small mb-3 alert-${n.no_mapeado ? "warning" : "secondary"}`;
+    box.style.display = "block";
   }
 
   // Banner de estado del envío (warning=duplicado, success=ok, danger=error).
@@ -705,6 +733,7 @@
     o._cuentaResolucionEstado = "loading";
     o._cuentaResolucion = null;
     renderCrmFields(payload, crm.pendientes_crm, crm.faltantes_dataset);
+    renderNegocio(crm);
     reflectSent(o);
     if (!(o.envio && o.envio.enviado)) reflectAsignacion(o);
     else $("crmAsignacionBox").style.display = "none";
