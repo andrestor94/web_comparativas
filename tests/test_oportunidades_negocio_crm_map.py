@@ -164,3 +164,41 @@ def test_payload_sin_mapa_no_agrega_campos_pero_no_bloquea():
     assert crm["negocio_crm"]["no_mapeado"] is True
     assert crm["negocio_crm"]["campos"] == {}
     assert not crm["bloqueos"]  # el envío sale igual
+
+
+# ───────── 4. el subnegocio del summary llega al payload y al modal ─────────
+
+def test_row_to_dict_lleva_el_subnegocio_del_summary_al_payload():
+    """Fila de summary con subunidad_negocio cargada -> el campo del CRM aparece en
+    el payload y en negocio_crm (lo que consume el modal)."""
+    o = _fila_summary(
+        unidad_negocio="TRATAMIENTOS ESPECIALES", subunidad_negocio="Trat.esp. alto costo",
+    )
+    row = router._row_to_dict(o, "AAA", {})
+    assert row["subunidad_negocio"] == "Trat.esp. alto costo"
+    negocio = row["crm"]["negocio_crm"]
+    assert negocio["subnegocio_label"] == "Trat.esp. alto costo"
+    assert negocio["subnegocio_field"] == "alto_costo_c"
+    assert row["crm"]["payload"]["alto_costo_c"] == "1"
+    assert row["crm"]["payload"]["tratamientos_especiales_c"] == "1"
+
+
+def test_contrato_para_el_modal_distingue_vacio_de_sin_mapa():
+    """La redacción del modal (tres estados) depende de este contrato del backend:
+      - subnegocio VACÍO       -> subnegocio_label None, no_mapeado False  ('no informado')
+      - etiqueta desconocida   -> subnegocio_label presente, field None, no_mapeado True
+                                  ('sin equivalencia en el CRM')
+    """
+    vacio = router._build_crm_payload(
+        _fila_summary(unidad_negocio="TRATAMIENTOS ESPECIALES", subunidad_negocio=None),
+        cuenta_fusion="AAA",
+    )["negocio_crm"]
+    assert vacio["subnegocio_label"] is None and vacio["no_mapeado"] is False
+
+    desconocido = router._build_crm_payload(
+        _fila_summary(unidad_negocio="TRATAMIENTOS ESPECIALES", subunidad_negocio="Etiqueta Nueva 2027"),
+        cuenta_fusion="AAA",
+    )["negocio_crm"]
+    assert desconocido["subnegocio_label"] == "Etiqueta Nueva 2027"
+    assert desconocido["subnegocio_field"] is None
+    assert desconocido["no_mapeado"] is True

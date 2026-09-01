@@ -282,18 +282,27 @@
     if (!box || !details) return;
     const n = (crm && crm.negocio_crm) || null;
     if (!n || (!n.negocio_label && !n.subnegocio_label)) { box.style.display = "none"; return; }
-    const linea = (etiqueta, campo) =>
-      `<div><strong>${esc(etiqueta)}</strong> ` +
-      (campo
-        ? `<span class="text-muted">→ ${esc(campo)}</span>`
-        : `<span class="text-danger">sin equivalencia en el CRM</span>`) +
-      `</div>`;
+    // Tres estados por nivel, distintos a propósito:
+    //  - con etiqueta y con campo  -> "ETIQUETA -> campo_c"
+    //  - con etiqueta y sin campo  -> la etiqueta existe pero no matchea el mapa del CRM
+    //  - sin etiqueta              -> el dato no está en el dataset (NO es una falla de mapeo)
+    const linea = (nivel, etiqueta, campo) => {
+      if (!etiqueta) {
+        return `<div><strong>${esc(nivel)}:</strong> ` +
+          `<span class="text-muted">no informado en el dataset</span></div>`;
+      }
+      return `<div><strong>${esc(etiqueta)}</strong> ` +
+        (campo
+          ? `<span class="text-muted">→ ${esc(campo)}</span>`
+          : `<span class="text-warning">sin equivalencia en el CRM</span>`) +
+        `</div>`;
+    };
     details.innerHTML =
-      linea(n.negocio_label || "Negocio no informado", n.negocio_field) +
-      linea(n.subnegocio_label || "Subnegocio no informado", n.subnegocio_field) +
+      linea("Negocio", n.negocio_label, n.negocio_field) +
+      linea("Subnegocio", n.subnegocio_label, n.subnegocio_field) +
       (n.no_mapeado
         ? `<div class="text-muted mt-1"><i class="bi bi-info-circle me-1"></i>` +
-          `Se enviará sin los campos que no tienen equivalencia.</div>`
+          `Se enviará sin los campos que no tienen equivalencia en el CRM.</div>`
         : "");
     box.className = `alert py-2 small mb-3 alert-${n.no_mapeado ? "warning" : "secondary"}`;
     box.style.display = "block";
