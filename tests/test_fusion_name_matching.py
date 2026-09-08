@@ -11,7 +11,7 @@ from web_comparativas.models import (
     User,
     UserReporte,
 )
-from web_comparativas.fusion_name_matching import resolve_fusion_identity
+from web_comparativas.fusion_name_matching import fusion_account_codes, resolve_fusion_identity
 from web_comparativas.cartera_visibilidad import clientes_visibles_para
 from web_comparativas.routers.sic_router import _CarteraConflictError, _validated_fusion_link
 
@@ -33,6 +33,8 @@ def db():
     session = sessionmaker(bind=engine)()
     session.add_all([
         CarteraOperador(codigo_cliente='A1', operador_codigo='4071', operador_nombre='AYELEN PILUSO'),
+        CarteraOperador(codigo_cliente='Y1', operador_codigo='2731', operador_nombre='YANINA SASSONE'),
+        CarteraOperador(codigo_cliente='Y2', operador_codigo='2731', operador_nombre='YANINA SASSONE'),
         CarteraOperador(codigo_cliente='D1', operador_codigo='3162', operador_nombre='DANIELA ARMILLO'),
         CarteraVendedor(codigo_cliente='D2', vendedor_codigo='30300', vendedor_nombre='DANIELA ARMILLIO', unineg='6'),
         CarteraVendedor(codigo_cliente='J1', vendedor_codigo='21103', vendedor_nombre='JUAN PEREZ', unineg='6'),
@@ -147,6 +149,16 @@ def test_runtime_link_manual_exception_supervisor_and_admin(db):
     # no trae unidad de negocio, así que ese lado nunca se filtra por esto — fix 2026-08-24).
     assert clientes_visibles_para(db, supervisor).codigos_cliente == frozenset({'D1', 'D2'})
     assert clientes_visibles_para(db, admin).unrestricted is True
+
+
+def test_fusion_preview_unit_scope_never_removes_yanina_operator_accounts(db):
+    identity = resolve_fusion_identity(db, 'Yanina Sassone')['match']
+
+    # El padron de operadores no tiene una UN contra la cual filtrar. Incluso un
+    # scope de Supervisor vacio debe conservar la cartera del operador 2731.
+    assert identity.operator_codes == {'2731'}
+    assert fusion_account_codes(db, identity, allowed_units={'6'}) == {'Y1', 'Y2'}
+    assert fusion_account_codes(db, identity, allowed_units=set()) == {'Y1', 'Y2'}
 
 
 def test_confirmed_merge_keeps_accounts_dynamic_after_reload(db):

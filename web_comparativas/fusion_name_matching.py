@@ -264,6 +264,15 @@ def fusion_account_codes(
     identity: FusionIdentity,
     allowed_units: set[str] | None = None,
 ) -> set[str]:
+    """Devuelve las cuentas de una identidad respetando el contrato de cartera.
+
+    ``allowed_units`` acota exclusivamente las cuentas obtenidas por vendedor.
+    El padron de operadores no tiene unidad de negocio, por lo que intersectar la
+    union completa contra ``CarteraVendedor`` borraba cuentas validas (incluida
+    toda la cartera de Yanina Sassone, operador 2731) en la vista previa del SIC.
+    Esta funcion debe conservar la misma semantica que
+    ``cartera_visibilidad._cartera_propia``.
+    """
     operator_accounts = {
         row[0]
         for row in db.query(CarteraOperador.codigo_cliente)
@@ -271,23 +280,12 @@ def fusion_account_codes(
         .distinct()
         .all()
     } if identity.operator_codes else set()
+    seller_query = db.query(CarteraVendedor.codigo_cliente).filter(
+        CarteraVendedor.vendedor_codigo.in_(identity.seller_codes)
+    ) if identity.seller_codes else None
+    if seller_query is not None and allowed_units is not None:
+        seller_query = seller_query.filter(CarteraVendedor.unineg.in_(allowed_units))
     seller_accounts = {
-        row[0]
-        for row in db.query(CarteraVendedor.codigo_cliente)
-        .filter(CarteraVendedor.vendedor_codigo.in_(identity.seller_codes))
-        .distinct()
-        .all()
-    } if identity.seller_codes else set()
-    accounts = operator_accounts | seller_accounts
-    if allowed_units is not None:
-        if not allowed_units:
-            return set()
-        in_units = {
-            row[0]
-            for row in db.query(CarteraVendedor.codigo_cliente)
-            .filter(CarteraVendedor.unineg.in_(allowed_units))
-            .distinct()
-            .all()
-        }
-        accounts &= in_units
-    return accounts
+        row[0] for row in seller_query.distinct().all()
+    } if seller_query is not None else set()
+    return operator_accounts | seller_accounts
