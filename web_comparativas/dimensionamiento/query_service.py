@@ -28,13 +28,15 @@ from .models import (
 logger = logging.getLogger("wc.dimensionamiento.query")
 _NO_FILTER_TOKENS = frozenset({"__all__", "__todos__", "todos", "todas", "all", "*"})
 DEFAULT_DASHBOARD_SNAPSHOT_KEY = "default_dashboard_bootstrap"
-DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v10"
+DEFAULT_DASHBOARD_SNAPSHOT_VERSION = "v11"
 _SUMMARY_REQUIRED_COLUMNS = frozenset(
     {
         "month",
         "plataforma",
         "cliente_nombre_homologado",
         "cliente_visible",
+        "cliente_entidad_id",
+        "es_cliente_entidad",
         "provincia",
         "familia",
         "unidad_negocio",
@@ -1189,7 +1191,7 @@ def _build_dashboard_bootstrap_payload(session: Session) -> dict[str, Any]:
         "results": get_results_breakdown(session, base_filters),
         "top_families": get_top_families(session, base_filters),
         "geo": get_geography_distribution(session, base_filters),
-        "clients_by_result": get_clients_by_result(session, base_filters, limit=10),
+        "clients_by_result": get_clients_by_result(session, base_filters, limit=None),
         "family_consumption": get_family_consumption_table(session, base_filters),
     }
 
@@ -2449,18 +2451,22 @@ def get_geography_distribution(
 def get_clients_by_result(
     session: Session,
     filters: DimensionamientoFilters,
-    limit: int = 10,
+    limit: int | None = 10,
+    metric: str = "renglones",
     *,
     allowed_cliente_ids: "frozenset[str] | None" = None,
 ) -> list[dict[str, Any]]:
     filters = _normalize_dashboard_filters(session, filters, allowed_cliente_ids=allowed_cliente_ids)
-    _ck = _make_cache_key("get_clients_by_result", filters, limit=limit)
+    ranking_metric = "valorizacion" if metric == "valorizacion" else "renglones"
+    _ck = _make_cache_key("get_clients_by_result", filters, limit=limit, metric=ranking_metric)
     _hit = _cache_get(_ck, _TTL_QUERY_RESULT)
     if _hit is not _CACHE_MISS:
         logger.debug("[DIM][CACHE] get_clients_by_result hit key=%s", _ck)
         return _hit
 
-    started_at = _log_query_start("get_clients_by_result", filters, limit=limit)
+    started_at = _log_query_start(
+        "get_clients_by_result", filters, limit=limit, metric=ranking_metric
+    )
     try:
         _apply_local_statement_timeout(session, 50000)
         model = _resolve_aggregate_model(
@@ -2470,91 +2476,88 @@ def get_clients_by_result(
             summary_message="using summary path",
             base_message="using base path",
         )
-        subquery_conditions: list[str] = []
+        applied_conditions: list[str] = []
 
         if model is DimensionamientoRecord:
-            # Tabla de detalle
-            _visible_raw = model.cliente_visible
+            visible_expr = model.cliente_visible
+            entity_id_expr = model.cliente_entidad_id
+            is_client_expr = model.is_client
             total_expr = func.count(model.id)
-            val_sub_expr = func.coalesce(func.sum(model.valorizacion_estimada), 0)
-            subquery = _apply_common_filters(
-                select(
-                    _visible_raw.label("cliente"),
-                    model.resultado_participacion.label("resultado"),
-                    total_expr.label("total"),
-                    val_sub_expr.label("val_total"),
-                )
-                .where(_visible_raw.isnot(None))
-                .where(func.coalesce(_visible_raw, "") != "")
-                .group_by(_visible_raw, model.resultado_participacion),
-                model,
-                filters,
-                subquery_conditions,
-            ).subquery()
+            val_expr = func.coalesce(func.sum(model.valorizacion_estimada), 0)
         else:
+            visible_expr = model.cliente_visible
+            entity_id_expr = model.cliente_entidad_id
+            is_client_expr = model.es_cliente_entidad if filters.entities_resolved else model.is_client
             total_expr = func.coalesce(func.sum(model.total_registros), 0)
-            val_sub_expr = func.coalesce(func.sum(model.total_valorizacion), 0)
-            visible_client = model.cliente_visible
-            summary_stmt = (
-                select(
-                    visible_client.label("cliente"),
-                    model.resultado_participacion.label("resultado"),
-                    total_expr.label("total"),
-                    val_sub_expr.label("val_total"),
-                )
-                .where(visible_client.isnot(None))
-                .where(visible_client != "")
-                .group_by(visible_client, model.resultado_participacion)
+            val_expr = func.coalesce(func.sum(model.total_valorizacion), 0)
+
+        # Primero agregamos TODO el universo filtrado. El límite se aplica recién
+        # después de sumar los resultados de cada entidad y ordenar por la métrica.
+        stmt = _apply_common_filters(
+            select(
+                visible_expr.label("cliente"),
+                entity_id_expr.label("cliente_entidad_id"),
+                is_client_expr.label("is_client"),
+                model.resultado_participacion.label("resultado"),
+                total_expr.label("total"),
+                val_expr.label("val_total"),
             )
-            if filters.is_client is None:
-                summary_stmt = summary_stmt.where(model.is_client == True)  # noqa: E712
-            subquery = _apply_common_filters(
-                summary_stmt,
-                model,
-                filters,
-                subquery_conditions,
-            ).subquery()
-        _log_query_statement(session, "get_clients_by_result.subquery", model, select(subquery), filters, subquery_conditions)
-
-        top_clients_stmt = select(
-            subquery.c.cliente,
-            func.sum(subquery.c.total).label("grand_total"),
-        ).group_by(subquery.c.cliente).order_by(func.sum(subquery.c.total).desc()).limit(limit)
-        _log_query_statement(session, "get_clients_by_result.top_clients", model, top_clients_stmt, filters, subquery_conditions)
-        top_clients = [row[0] for row in session.execute(top_clients_stmt).all()]
-        if not top_clients:
-            _log_query_success("get_clients_by_result", started_at, rows=0)
-            return []
-
-        detail_stmt = (
-            select(subquery.c.cliente, subquery.c.resultado, subquery.c.total, subquery.c.val_total)
-            .where(subquery.c.cliente.in_(top_clients))
-            .order_by(subquery.c.cliente.asc(), subquery.c.resultado.asc())
+            .where(visible_expr.isnot(None))
+            .where(func.coalesce(visible_expr, "") != "")
+            .group_by(visible_expr, entity_id_expr, is_client_expr, model.resultado_participacion),
+            model,
+            filters,
+            applied_conditions,
         )
-        detail_conditions = list(subquery_conditions)
-        detail_conditions.append(f"cliente IN {top_clients}")
-        _log_query_statement(session, "get_clients_by_result.detail", model, detail_stmt, filters, detail_conditions)
+        _log_query_statement(session, "get_clients_by_result", model, stmt, filters, applied_conditions)
 
-        client_map: dict[str, dict[str, float]] = {}
-        client_val_map: dict[str, dict[str, float]] = {}
-        for cliente, resultado, total, val_total in session.execute(detail_stmt).all():
+        registry = _entity_registry(session, filters.import_run_id) if filters.entities_resolved else {"by_key": {}}
+        clients: dict[tuple[str, Any], dict[str, Any]] = {}
+        for cliente, entity_id, row_is_client, resultado, total, val_total in session.execute(stmt).all():
+            registry_item = registry["by_key"].get(entity_id) if entity_id is not None else None
+            client_name = (registry_item or {}).get("label") or cliente
+            client_key = (
+                ("entity", entity_id)
+                if entity_id is not None
+                else ("name", client_name, bool(row_is_client))
+            )
             result_key = resultado or "Sin resultado"
-            client_map.setdefault(cliente, {})[result_key] = float(total or 0)
-            client_val_map.setdefault(cliente, {})[result_key] = float(val_total or 0)
+            item = clients.setdefault(
+                client_key,
+                {
+                    "cliente": client_name,
+                    "cliente_entidad_id": entity_id,
+                    "is_client": bool((registry_item or {}).get("es_cliente", row_is_client)),
+                    "resultados": {},
+                    "resultados_val": {},
+                    "total_renglones": 0.0,
+                    "total_valorizacion": 0.0,
+                },
+            )
+            rows_value = float(total or 0)
+            val_value = float(val_total or 0)
+            item["resultados"][result_key] = item["resultados"].get(result_key, 0.0) + rows_value
+            item["resultados_val"][result_key] = item["resultados_val"].get(result_key, 0.0) + val_value
+            item["total_renglones"] += rows_value
+            item["total_valorizacion"] += val_value
 
-        payload = [
-            {
-                "cliente": cliente,
-                "resultados": client_map.get(cliente, {}),
-                "resultados_val": client_val_map.get(cliente, {}),
-            }
-            for cliente in top_clients
-        ]
+        order_key = "total_valorizacion" if ranking_metric == "valorizacion" else "total_renglones"
+        payload = sorted(
+            clients.values(),
+            key=lambda item: (-item[order_key], str(item["cliente"]).upper()),
+        )
+        if limit is not None:
+            payload = payload[:max(0, int(limit))]
         _log_query_success("get_clients_by_result", started_at, rows=len(payload))
         _cache_set(_ck, payload)
         return payload
     except Exception:
-        logger.exception("[DIM][QUERY] get_clients_by_result failed filters=%s limit=%s", _filters_debug_dict(filters), limit)
+        logger.exception(
+            "[DIM][QUERY] get_clients_by_result failed filters=%s limit=%s metric=%s",
+            _filters_debug_dict(filters),
+            limit,
+            ranking_metric,
+        )
         raise
 
 
@@ -3033,6 +3036,14 @@ def _get_aggregated_dashboard_bootstrap(
 
     rows = _fetch_summary_rows_for_bootstrap(session, filters)
     payload = _aggregate_bootstrap_from_summary_rows(rows, series_rows=series_rows)
+    # El ranking usa identidad y condición Cliente/No cliente, y conserva el
+    # universo completo para que el front aplique el top tras ordenar la métrica.
+    payload["clients_by_result"] = get_clients_by_result(
+        session,
+        filters,
+        limit=None,
+        allowed_cliente_ids=allowed_cliente_ids,
+    )
 
     # La agregación single-pass contaba clientes por cliente_visible (374). El conteo
     # canónico es por ENTIDAD resuelta: sobreescribimos card + desglose + desplegable
@@ -3152,7 +3163,7 @@ def get_dashboard_bootstrap(
                 "results": get_results_breakdown(session, filters, allowed_cliente_ids=allowed_cliente_ids),
                 "top_families": get_top_families(session, filters, allowed_cliente_ids=allowed_cliente_ids),
                 "geo": get_geography_distribution(session, filters, allowed_cliente_ids=allowed_cliente_ids),
-                "clients_by_result": get_clients_by_result(session, filters, limit=10, allowed_cliente_ids=allowed_cliente_ids),
+                "clients_by_result": get_clients_by_result(session, filters, limit=None, allowed_cliente_ids=allowed_cliente_ids),
                 "family_consumption": get_family_consumption_table(session, filters, allowed_cliente_ids=allowed_cliente_ids),
                 "meta": {
                     "source": "live",

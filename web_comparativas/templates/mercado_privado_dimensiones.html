@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v23">
+<link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.tech.css') }}?v=dimensiones-db-v24">
 <style>
 #dimensionamientoApp .dim-filter-vista-row{width:100%;display:flex;justify-content:flex-end;align-items:flex-start;padding-top:0.2rem;}
 #dimensionamientoApp .dim-filter-vista{width:fit-content;display:flex;flex-direction:column;align-items:flex-end;}
@@ -19,6 +19,64 @@
 #dimensionamientoApp .dim-filter-vista .dim-metric-btn:hover:not(.active){background:rgba(30,92,138,.08);}
 #dimensionamientoApp .kpi-subbreak{margin-top:2px;font-size:.7rem;font-weight:600;line-height:1.1;color:var(--tech-text-muted,#6b7280);white-space:nowrap;}
 #dimensionamientoApp .kpi-subbreak:empty{display:none;}
+#dimensionamientoApp .dim-client-filter-label{display:flex;align-items:center;justify-content:space-between;gap:.4rem;}
+#dimensionamientoApp .dim-active-filter-chip{display:none;align-items:center;gap:.3rem;max-width:100%;margin-top:.35rem;padding:.2rem .45rem;border:1px solid rgba(30,92,138,.22);border-radius:999px;background:#eef6fb;color:var(--tech-blue-dark,#064066);font-size:.68rem;font-weight:700;line-height:1.2;cursor:pointer;}
+#dimensionamientoApp .dim-active-filter-chip.visible{display:inline-flex;}
+#dimensionamientoApp .dim-active-filter-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#dimensionamientoApp .dim-local-switch{display:inline-flex;align-items:center;padding:2px;border:1px solid var(--tech-border,#d1d5db);border-radius:9px;background:#fff;}
+#dimensionamientoApp .dim-local-sort-btn{border:0;border-radius:7px;background:transparent;color:#64748b;padding:.2rem .45rem;font-size:.65rem;font-weight:700;cursor:pointer;}
+#dimensionamientoApp .dim-local-sort-btn.active{background:#e7f1f8;color:var(--tech-blue-dark,#064066);}
+#dimensionamientoApp .dim-family-sort-active{color:var(--tech-blue-dark,#064066)!important;background:#edf5fa!important;}
+#dimensionamientoApp .dim-client-result-legend{display:flex;gap:.35rem .7rem;flex-wrap:wrap;margin:-.15rem 0 .25rem;font-size:.64rem;color:#64748b;}
+#dimensionamientoApp .dim-result-legend-item{display:inline-flex;align-items:center;gap:.25rem;}
+#dimensionamientoApp .dim-result-swatch{width:.55rem;height:.55rem;border-radius:2px;border:1px solid rgba(15,23,42,.12);flex:0 0 auto;}
+#dimensionamientoApp .dim-map-legend{background:rgba(255,255,255,.96);border:1px solid rgba(100,116,139,.2);border-radius:9px;padding:.45rem .55rem;box-shadow:0 2px 8px rgba(15,23,42,.1);font:600 .62rem/1.3 'Outfit',sans-serif;color:#475569;}
+#dimensionamientoApp .dim-map-legend-title{display:block;margin-bottom:.3rem;color:#0f3f60;font-weight:800;}
+#dimensionamientoApp .dim-map-legend-row{display:flex;align-items:center;gap:.32rem;margin-top:.18rem;}
+#dimensionamientoApp .dim-map-legend-swatch{width:.75rem;height:.6rem;border:1px solid rgba(71,85,105,.25);border-radius:2px;}
+#dimensionamientoApp .dim-map-legend-gradient{width:2.4rem;}
+#dimensionamientoApp .dim-map-legend-nodata{background:repeating-linear-gradient(135deg,#e5e7eb,#e5e7eb 3px,#f8fafc 3px,#f8fafc 6px);}
+#dimensionamientoApp #mapContainer{background:#f8fafc;}
+#dimensionamientoApp .dim-card-title-actions{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;flex-wrap:wrap;}
+#dimensionamientoApp .dim-see-all-btn{border:1px solid rgba(30,92,138,.25);border-radius:8px;background:#fff;color:var(--tech-blue-dark,#064066);padding:.2rem .48rem;font-size:.66rem;font-weight:800;white-space:nowrap;}
+#dimensionamientoApp .dim-see-all-btn:hover{background:#edf5fa;}
+#dimensionamientoApp .dim-sort-button{display:inline-flex;align-items:center;gap:.2rem;width:100%;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;padding:0;text-align:inherit;cursor:pointer;}
+#dimensionamientoApp .text-end .dim-sort-button{justify-content:flex-end;}
+#dimensionamientoApp .dim-sort-arrow{display:inline-block;min-width:.7rem;color:var(--tech-blue-mid,#1e5c8a);font-weight:900;}
+#dimensionamientoApp .dim-client-sort-head{display:grid;grid-template-columns:minmax(0,1fr) 8.4rem;gap:.35rem;margin:.1rem .15rem .2rem;padding:.34rem .45rem;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:#f8fafc;color:#64748b;font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.02em;}
+#dimensionamientoApp .dim-client-sort-head button{border:0;background:transparent;color:inherit;font:inherit;text-align:left;padding:0;cursor:pointer;}
+#dimensionamientoApp .dim-client-sort-head button:last-child{text-align:right;}
+#dimensionamientoApp .dim-client-sort-head button.active{color:var(--tech-blue-dark,#064066);}
+.dim-full-modal .dim-sort-button{display:inline-flex;align-items:center;gap:.2rem;width:100%;border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;padding:0;text-align:inherit;cursor:pointer;}
+.dim-full-modal .text-end .dim-sort-button{justify-content:flex-end;}
+.dim-full-modal .text-center .dim-sort-button{justify-content:center;}
+.dim-full-modal .dim-sort-arrow{display:inline-block;min-width:.7rem;color:var(--tech-blue-mid,#1e5c8a);font-weight:900;}
+.dim-full-modal .modal-dialog{max-width:min(96vw,1400px);margin:2vh auto;}
+.dim-full-modal .modal-content{max-height:96vh;border:0;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.24);overflow:hidden;}
+.dim-full-modal .modal-header{border-bottom:1px solid #e2e8f0;padding:.8rem 1rem;}
+.dim-full-modal .modal-body{display:flex;min-height:0;flex-direction:column;gap:.65rem;padding:.8rem 1rem;overflow:hidden;}
+.dim-modal-context{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;padding:.45rem .55rem;border-radius:10px;background:#f1f5f9;color:#475569;font-size:.72rem;}
+.dim-modal-context-label{font-weight:800;color:#0f3f60;}
+.dim-modal-context-chip{display:inline-flex;padding:.14rem .4rem;border:1px solid #cbd5e1;border-radius:999px;background:#fff;font-weight:650;}
+.dim-modal-toolbar{display:grid;grid-template-columns:minmax(13rem,1fr) repeat(3,minmax(9rem,auto)) auto;gap:.5rem;align-items:end;}
+.dim-modal-toolbar.dim-family-modal-toolbar{grid-template-columns:minmax(13rem,1fr) auto;}
+.dim-modal-control label{display:block;margin-bottom:.18rem;color:#64748b;font-size:.67rem;font-weight:800;text-transform:uppercase;}
+.dim-modal-control .form-control,.dim-modal-control .form-select{min-height:34px;font-size:.78rem;}
+.dim-modal-clear{min-height:34px;white-space:nowrap;}
+.dim-modal-table-wrap{min-height:12rem;max-height:54vh;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;}
+.dim-modal-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.76rem;}
+.dim-modal-table th{position:sticky;top:0;z-index:2;padding:.58rem .65rem;border-bottom:1px solid #cbd5e1;background:#f8fafc;color:#315b79;font-weight:800;white-space:nowrap;}
+.dim-modal-table td{padding:.5rem .65rem;border-bottom:1px solid #edf2f7;vertical-align:middle;}
+.dim-modal-table tbody tr:hover{background:#f8fbfd;}
+.dim-modal-table .dim-modal-client-name,.dim-modal-table .dim-modal-family-name{min-width:16rem;max-width:30rem;white-space:normal;overflow-wrap:anywhere;font-weight:700;color:#0f5078;}
+.dim-condition-badge{display:inline-flex;border:1px solid #cbd5e1;border-radius:999px;padding:.14rem .42rem;background:#fff;color:#334155;font-size:.68rem;font-weight:800;white-space:nowrap;}
+.dim-result-head{border-top:3px solid var(--result-color,#64748b)!important;}
+.dim-select-client-btn{border:1px solid rgba(30,92,138,.3);border-radius:7px;background:#fff;color:#0f5078;padding:.23rem .45rem;font-size:.68rem;font-weight:800;white-space:nowrap;}
+.dim-select-client-btn:disabled{opacity:.5;cursor:not-allowed;}
+.dim-modal-footerbar{display:flex;justify-content:space-between;align-items:center;gap:.7rem;color:#64748b;font-size:.75rem;}
+.dim-modal-pagination{display:flex;align-items:center;gap:.35rem;}
+.dim-modal-pagination button{min-width:34px;}
+@media (max-width:900px){.dim-modal-toolbar{grid-template-columns:1fr 1fr;}.dim-modal-toolbar.dim-family-modal-toolbar{grid-template-columns:1fr auto;}.dim-full-modal .modal-dialog{max-width:98vw;margin:1vh auto;}.dim-full-modal .modal-content{max-height:98vh;}}
 </style>
 
 <div class="tech-dashboard-grid animate-enter" id="dimensionamientoApp">
@@ -104,7 +162,7 @@
 
                 <!-- CLIENTE (multi-select) -->
                 <div class="filter-group">
-                    <label>Cliente</label>
+                    <div class="dim-client-filter-label"><label>Cliente</label></div>
                     <div class="dim-multiselect" id="msClientWrap">
                         <button class="dim-ms-trigger" type="button">
                             <span class="dim-ms-label">Todos</span>
@@ -120,6 +178,9 @@
                             </div>
                         </div>
                     </div>
+                    <button type="button" id="clearClientSelection" class="dim-active-filter-chip" title="Quitar filtro de cliente" aria-label="Quitar filtro de cliente">
+                        <span id="activeClientSelectionLabel"></span><i class="bi bi-x-lg" aria-hidden="true"></i>
+                    </button>
                 </div>
 
                 <!-- PROVINCIA (multi-select) -->
@@ -334,8 +395,15 @@
         </div>
 
         <div class="tech-card area-third dim-card-table-list">
-            <div class="tech-card-title">
+            <div class="tech-card-title d-flex align-items-center justify-content-between gap-2">
                 <span><i class="bi bi-list-ol me-2"></i>Top familias</span>
+                <div class="dim-card-title-actions">
+                    <div class="dim-local-switch" id="familySortSwitch" role="group" aria-label="Ordenar Top familias por">
+                        <button type="button" class="dim-local-sort-btn active" data-family-sort="renglones" aria-pressed="true">Renglones</button>
+                        <button type="button" class="dim-local-sort-btn" data-family-sort="cantidad" aria-pressed="false">Cantidades</button>
+                    </div>
+                    <button type="button" id="openAllFamiliesBtn" class="dim-see-all-btn"><i class="bi bi-arrows-angle-expand me-1"></i>Ver todos</button>
+                </div>
             </div>
             <div id="familyListContainer" class="dim-scroll-body"></div>
         </div>
@@ -345,15 +413,21 @@
                 <span><i class="bi bi-geo-alt me-2"></i>Distribución geográfica</span>
             </div>
             <div class="chart-container dim-map-shell">
-                <div id="mapContainer" style="width:100%;height:100%;"></div>
+                <div id="mapContainer" data-geojson-url="{{ url_for('static', path='data/provincias_argentina.geojson') }}" style="width:100%;height:100%;"></div>
             </div>
         </div>
 
         <!-- ── Clientes por resultado ── -->
         <div class="tech-card area-third dim-card-chart dim-card-chart-compact dim-card-clients">
-            <div class="tech-card-title">
+            <div class="tech-card-title d-flex align-items-center justify-content-between gap-2">
                 <span><i class="bi bi-bar-chart me-2"></i>Clientes por resultado</span>
+                <button type="button" id="openAllClientsBtn" class="dim-see-all-btn"><i class="bi bi-arrows-angle-expand me-1"></i>Ver todos</button>
             </div>
+            <div id="clientSortHeaders" class="dim-client-sort-head" aria-label="Orden del ranking de clientes">
+                <button type="button" data-client-sort="cliente">Cliente <span class="dim-sort-arrow" aria-hidden="true"></span></button>
+                <button type="button" data-client-sort="total" class="active"><span id="clientTotalHeaderLabel">Total renglones</span> <span class="dim-sort-arrow" aria-hidden="true">↓</span></button>
+            </div>
+            <div id="clientResultLegend" class="dim-client-result-legend" aria-label="Leyenda de resultados"></div>
             <div class="dim-chart-client-scroll">
                 <div class="chart-container">
                     <canvas id="barClientChart"></canvas>
@@ -384,8 +458,55 @@
 
     </div><!-- /dashboardContent -->
 </div><!-- /tech-dashboard-grid -->
+
+<div class="modal fade dim-full-modal" id="familyFullModal" tabindex="-1" aria-labelledby="familyFullModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl"><div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title" id="familyFullModalTitle"><i class="bi bi-list-ol me-2"></i>Todas las familias</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+            <div id="familyModalContext" class="dim-modal-context"></div>
+            <div class="dim-modal-toolbar dim-family-modal-toolbar">
+                <div class="dim-modal-control"><label for="familyModalSearch">Buscar familia</label><input id="familyModalSearch" class="form-control" type="search" placeholder="Nombre completo de familia..." autocomplete="off"></div>
+                <button id="familyModalClear" type="button" class="btn btn-outline-secondary btn-sm dim-modal-clear"><i class="bi bi-eraser me-1"></i>Limpiar</button>
+            </div>
+            <div class="dim-modal-table-wrap">
+                <table class="dim-modal-table"><thead><tr>
+                    <th><button type="button" class="dim-sort-button" data-family-modal-sort="familia">Familia <span class="dim-sort-arrow"></span></button></th>
+                    <th class="text-end"><button type="button" class="dim-sort-button" data-family-modal-sort="renglones">Renglones <span class="dim-sort-arrow"></span></button></th>
+                    <th class="text-end"><button type="button" class="dim-sort-button" data-family-modal-sort="cantidad">Cantidad <span class="dim-sort-arrow"></span></button></th>
+                </tr></thead><tbody id="familyModalBody"></tbody></table>
+            </div>
+            <div class="dim-modal-footerbar"><span id="familyModalCounter">Mostrando 0–0 de 0</span><div class="dim-modal-pagination"><button id="familyModalPrev" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página anterior"><i class="bi bi-chevron-left"></i></button><span id="familyModalPage">Página 1 de 1</span><button id="familyModalNext" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página siguiente"><i class="bi bi-chevron-right"></i></button></div></div>
+        </div>
+    </div></div>
+</div>
+
+<div class="modal fade dim-full-modal" id="clientFullModal" tabindex="-1" aria-labelledby="clientFullModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl"><div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title" id="clientFullModalTitle"><i class="bi bi-bar-chart me-2"></i>Todos los clientes por resultado</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+            <div id="clientModalContext" class="dim-modal-context"></div>
+            <div class="dim-modal-toolbar">
+                <div class="dim-modal-control"><label for="clientModalSearch">Buscar cliente</label><input id="clientModalSearch" class="form-control" type="search" placeholder="Nombre completo de cliente..." autocomplete="off"></div>
+                <div class="dim-modal-control"><label for="clientModalCondition">Condición</label><select id="clientModalCondition" class="form-select"><option value="">Cliente y No cliente</option><option value="true">Cliente</option><option value="false">No cliente</option></select></div>
+                <div class="dim-modal-control"><label for="clientModalResult">Resultado</label><select id="clientModalResult" class="form-select"><option value="">Todos los resultados</option></select></div>
+                <div class="dim-modal-control"><label for="clientModalMetric">Vista</label><select id="clientModalMetric" class="form-select"><option value="renglones">Renglones</option><option value="valorizacion">Valorización</option></select></div>
+                <button id="clientModalClear" type="button" class="btn btn-outline-secondary btn-sm dim-modal-clear"><i class="bi bi-eraser me-1"></i>Limpiar</button>
+            </div>
+            <div class="dim-modal-table-wrap">
+                <table class="dim-modal-table"><thead><tr id="clientModalHead"></tr></thead><tbody id="clientModalBody"></tbody></table>
+            </div>
+            <div class="dim-modal-footerbar"><span id="clientModalCounter">Mostrando 0–0 de 0</span><div class="dim-modal-pagination"><button id="clientModalPrev" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página anterior"><i class="bi bi-chevron-left"></i></button><span id="clientModalPage">Página 1 de 1</span><button id="clientModalNext" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página siguiente"><i class="bi bi-chevron-right"></i></button></div></div>
+        </div>
+    </div></div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v30"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v32"></script>
 {% endblock %}

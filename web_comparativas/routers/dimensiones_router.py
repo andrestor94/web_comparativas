@@ -635,6 +635,26 @@ def dimensionamiento_top_families(
     )
 
 
+@router.api_route("/families-complete", methods=["GET", "POST"])
+def dimensionamiento_families_complete(
+    request: Request,
+    user: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
+    filters=Depends(_filters_from_query),
+    db: Session = Depends(get_db),
+):
+    """Conjunto completo para el modal, siempre limitado por el alcance del usuario."""
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
+    return _safe_dashboard_response(
+        request,
+        "families_complete",
+        lambda: get_top_families(
+            db, filters, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)
+        ),
+        [],
+    )
+
+
 @router.api_route("/geo", methods=["GET", "POST"])
 def dimensionamiento_geo(
     request: Request,
@@ -668,6 +688,26 @@ def dimensionamiento_clients_by_result(
         "clients_by_result",
         lambda: get_clients_by_result(
             db, filters, limit=limit, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)
+        ),
+        [],
+    )
+
+
+@router.api_route("/clients-complete", methods=["GET", "POST"])
+def dimensionamiento_clients_complete(
+    request: Request,
+    user: AllowedUser,
+    payload: dict[str, Any] | None = Body(default=None),
+    filters=Depends(_filters_from_query),
+    db: Session = Depends(get_db),
+):
+    """Ranking completo; el modal ordena, filtra y pagina luego de recibirlo."""
+    filters = _scoped_filters_for_request(request, filters, payload, db, user)
+    return _safe_dashboard_response(
+        request,
+        "clients_complete",
+        lambda: get_clients_by_result(
+            db, filters, limit=None, allowed_cliente_ids=_dimensionamiento_allowed_cliente_ids(db, user)
         ),
         [],
     )

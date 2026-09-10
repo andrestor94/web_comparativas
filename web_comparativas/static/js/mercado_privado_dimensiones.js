@@ -18,7 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
         pieChart: null,
         barClientChart: null,
         mapInstance: null,
-        mapMarkers: [],
+        mapGeoJsonLayer: null,
+        mapLegendControl: null,
+        mapGeoJsonData: null,
+        mapGeoJsonPromise: null,
+        mapRows: [],
         currentDateRange: { min: null, max: null },
         bootstrapCache: new Map(),
         bootstrapCacheTs: new Map(),
@@ -44,11 +48,21 @@ document.addEventListener('DOMContentLoaded', () => {
         activeResultados: new Set(),
         // 'renglones' | 'valorizacion'
         activeMetric: 'renglones',
+        familySortKey: 'renglones',
+        familySortDirection: 'desc',
+        clientSortKey: 'total',
+        clientSortDirection: 'desc',
+        barClientRows: [],
+        familyModal: { rows: [], search: '', sortKey: 'renglones', sortDirection: 'desc', page: 1, initial: null },
+        clientModal: { rows: [], resultKeys: [], search: '', condition: '', result: '', metric: 'renglones', sortKey: 'total', sortDirection: 'desc', page: 1, initial: null },
         lastBootstrap: null,
     };
 
     const FAMILY_LIST_ROW_HEIGHT = 42;
     const FAMILY_LIST_OVERSCAN = 8;
+    const FAMILY_CARD_LIMIT = 10;
+    const CLIENT_CARD_LIMIT = 10;
+    const MODAL_PAGE_SIZE = 25;
     const PIVOT_ROW_HEIGHT = 42;
     const PIVOT_OVERSCAN = 10;
     const NO_FILTER_TOKENS = new Set(['__ALL__', '__all__', 'ALL', 'all', 'Todos', 'TODOS', 'todos', '__TODOS__', '__todos__', 'Todas', 'TODAS', 'todas', '*']);
@@ -215,6 +229,10 @@ document.addEventListener('DOMContentLoaded', () => {
             },
             getUniverseValues() {
                 return Array.from(universe);
+            },
+            getLabelForValue(value) {
+                const option = allOptions.find(o => String(o.value) === String(value));
+                return option ? option.label : String(value || '');
             },
             setApplied(values) {
                 const vals = Array.isArray(values) ? values : [values];
@@ -452,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Instancias de los controles de filtro
     // (se crean antes de bindEvents para que estén disponibles en buildQueryParams)
     // ─────────────────────────────────────────────────────────────────────────
-    const msClient  = createMultiSelect('msClientWrap',  triggerLoad);
+    const msClient  = createMultiSelect('msClientWrap',  onClientFilterApply);
     const msProvince = createMultiSelect('msProvinceWrap', triggerLoad);
     const msFamily  = createMultiSelect('msFamilyWrap',  triggerLoad);
     const msUnit    = createMultiSelect('msUnitWrap',    triggerLoad);
@@ -464,6 +482,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function triggerLoad() {
         clearTimeout(_filterDebounceTimer);
         _filterDebounceTimer = setTimeout(loadDashboardData, 350);
+    }
+
+    function onClientFilterApply() {
+        updateActiveClientSelection();
+        triggerLoad();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -493,6 +516,36 @@ document.addEventListener('DOMContentLoaded', () => {
         kpiValorizacion: document.getElementById('kpiValorizacion'),
         kpiValorizacionCard: document.querySelector('.dim-kpi-valorizacion'),
         swMetric: document.getElementById('swMetric'),
+        familySortSwitch: document.getElementById('familySortSwitch'),
+        clearClientSelection: document.getElementById('clearClientSelection'),
+        activeClientSelectionLabel: document.getElementById('activeClientSelectionLabel'),
+        clientResultLegend: document.getElementById('clientResultLegend'),
+        clientSortHeaders: document.getElementById('clientSortHeaders'),
+        clientTotalHeaderLabel: document.getElementById('clientTotalHeaderLabel'),
+        openAllFamiliesBtn: document.getElementById('openAllFamiliesBtn'),
+        openAllClientsBtn: document.getElementById('openAllClientsBtn'),
+        familyFullModal: document.getElementById('familyFullModal'),
+        familyModalContext: document.getElementById('familyModalContext'),
+        familyModalSearch: document.getElementById('familyModalSearch'),
+        familyModalClear: document.getElementById('familyModalClear'),
+        familyModalBody: document.getElementById('familyModalBody'),
+        familyModalCounter: document.getElementById('familyModalCounter'),
+        familyModalPrev: document.getElementById('familyModalPrev'),
+        familyModalNext: document.getElementById('familyModalNext'),
+        familyModalPage: document.getElementById('familyModalPage'),
+        clientFullModal: document.getElementById('clientFullModal'),
+        clientModalContext: document.getElementById('clientModalContext'),
+        clientModalSearch: document.getElementById('clientModalSearch'),
+        clientModalCondition: document.getElementById('clientModalCondition'),
+        clientModalResult: document.getElementById('clientModalResult'),
+        clientModalMetric: document.getElementById('clientModalMetric'),
+        clientModalClear: document.getElementById('clientModalClear'),
+        clientModalHead: document.getElementById('clientModalHead'),
+        clientModalBody: document.getElementById('clientModalBody'),
+        clientModalCounter: document.getElementById('clientModalCounter'),
+        clientModalPrev: document.getElementById('clientModalPrev'),
+        clientModalNext: document.getElementById('clientModalNext'),
+        clientModalPage: document.getElementById('clientModalPage'),
         familyListContainer:  document.getElementById('familyListContainer'),
         pivotTableWrap:       document.getElementById('pivotTableWrap'),
         pivotHeader:          document.getElementById('pivotHeader'),
@@ -505,25 +558,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const reloadBtnDefaultHtml = elements.reloadBtn ? elements.reloadBtn.innerHTML : '';
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Coordenadas provinciales
-    // ─────────────────────────────────────────────────────────────────────────
-    const provinceCoords = {
-        'Buenos Aires': [-36.6769, -60.5588], 'CABA': [-34.6037, -58.3816],
-        'Catamarca': [-28.4696, -65.7852],    'Chaco': [-26.3366, -60.7663],
-        'Chubut': [-43.7886, -68.8892],       'Cordoba': [-32.1429, -63.8017],
-        'Corrientes': [-28.7743, -57.7568],   'Entre Rios': [-32.0588, -59.2014],
-        'Formosa': [-24.8949, -59.5679],      'Jujuy': [-23.3200, -65.7643],
-        'La Pampa': [-37.1315, -65.4466],     'La Rioja': [-29.6857, -67.1817],
-        'Mendoza': [-34.3667, -68.9167],      'Misiones': [-26.8753, -54.6518],
-        'Neuquen': [-38.9525, -68.9126],      'Rio Negro': [-40.0388, -65.5525],
-        'Salta': [-24.2991, -64.8144],        'San Juan': [-30.8653, -68.8892],
-        'San Luis': [-33.7577, -66.0281],     'Santa Cruz': [-48.8154, -69.2542],
-        'Santa Fe': [-30.7069, -60.9498],     'Santiago Del Estero': [-27.7824, -63.2523],
-        'Tierra Del Fuego': [-53.4862, -68.3039], 'Tucuman': [-26.8241, -65.2226],
-    };
-
+    const MAP_POSITIVE_COLORS = ['#dbeafe', '#93c5fd', '#60a5fa', '#2563eb', '#123f66'];
+    const MAP_ZERO_COLOR = '#eff6ff';
+    const MAP_NO_DATA_COLOR = '#e5e7eb';
+    const RESULT_FALLBACK_PALETTE = ['#2563eb', '#7c3aed', '#c2410c', '#0891b2', '#b45309', '#be185d'];
     const seriesPalette  = ['#064066','#1e5c8a','#5274ce','#38bdf8','#10b981','#64748b'];
-    const resultPalette  = ['#064066','#1e5c8a','#5274ce','#38bdf8','#10b981','#94a3b8'];
+
+    function normalizeKey(value) {
+        return String(value || '')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    }
+
+    function resultColor(result) {
+        const key = normalizeKey(result);
+        if (key === 'GANADO' || key === 'GANADA') return '#169b62';
+        if (key === 'NO_COTIZADO' || key === 'NO_COTIZADA') return '#6b7280';
+        if (key === 'NO_PARTICIPO') return '#064066';
+        let hash = 0;
+        for (let i = 0; i < key.length; i += 1) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+        return RESULT_FALLBACK_PALETTE[Math.abs(hash) % RESULT_FALLBACK_PALETTE.length];
+    }
 
     bindEvents();
     initDashboard();
@@ -551,6 +606,37 @@ document.addEventListener('DOMContentLoaded', () => {
         // Filtro ¿Cliente?
         if (elements.filterIsClient) {
             elements.filterIsClient.addEventListener('change', triggerLoad);
+        }
+
+        if (elements.familySortSwitch) {
+            elements.familySortSwitch.addEventListener('click', event => {
+                const button = event.target.closest('[data-family-sort]');
+                if (!button) return;
+                setFamilyCardSort(button.dataset.familySort);
+            });
+        }
+        if (elements.familyListContainer) {
+            elements.familyListContainer.addEventListener('click', event => {
+                const button = event.target.closest('[data-family-card-sort]');
+                if (button) setFamilyCardSort(button.dataset.familyCardSort);
+            });
+        }
+        if (elements.clientSortHeaders) {
+            elements.clientSortHeaders.addEventListener('click', event => {
+                const button = event.target.closest('[data-client-sort]');
+                if (button) setClientCardSort(button.dataset.clientSort);
+            });
+        }
+        if (elements.openAllFamiliesBtn) elements.openAllFamiliesBtn.addEventListener('click', openAllFamiliesModal);
+        if (elements.openAllClientsBtn) elements.openAllClientsBtn.addEventListener('click', openAllClientsModal);
+        bindFullModalEvents();
+
+        if (elements.clearClientSelection) {
+            elements.clearClientSelection.addEventListener('click', () => {
+                msClient.clearApplied();
+                updateActiveClientSelection();
+                triggerLoad();
+            });
         }
 
         // ── Plataformas ────────────────────────────────────────────────────
@@ -626,6 +712,386 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    function updateActiveClientSelection() {
+        if (!elements.clearClientSelection || !elements.activeClientSelectionLabel || !msClient) return;
+        const selected = msClient.getApplied();
+        if (!selected.length) {
+            elements.clearClientSelection.classList.remove('visible');
+            elements.activeClientSelectionLabel.textContent = '';
+            return;
+        }
+        const label = selected.length === 1
+            ? msClient.getLabelForValue(selected[0])
+            : `${selected.length} clientes`;
+        elements.activeClientSelectionLabel.textContent = `Cliente: ${label}`;
+        elements.clearClientSelection.classList.add('visible');
+        elements.clearClientSelection.title = `Quitar filtro Cliente: ${label}`;
+        elements.clearClientSelection.setAttribute('aria-label', `Quitar filtro Cliente: ${label}`);
+    }
+
+    function selectClientFromRanking(row) {
+        if (!row || row.cliente_entidad_id === null || row.cliente_entidad_id === undefined) return;
+        msClient.setApplied([String(row.cliente_entidad_id)]);
+        updateActiveClientSelection();
+        clearTimeout(_filterDebounceTimer);
+        loadDashboardData();
+    }
+
+    function modalInstance(element) {
+        return element && window.bootstrap?.Modal
+            ? window.bootstrap.Modal.getOrCreateInstance(element)
+            : null;
+    }
+
+    function setModalLoading(body, colspan, message = 'Cargando el conjunto completo...') {
+        if (!body) return;
+        body.innerHTML = '';
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = colspan;
+        td.className = 'text-center text-muted py-4';
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner-border spinner-border-sm me-2';
+        spinner.setAttribute('aria-hidden', 'true');
+        td.append(spinner, document.createTextNode(message));
+        tr.appendChild(td);
+        body.appendChild(tr);
+    }
+
+    function appendContextChip(container, label, value) {
+        if (!container || !value) return;
+        const chip = document.createElement('span');
+        chip.className = 'dim-modal-context-chip';
+        chip.textContent = `${label}: ${value}`;
+        container.appendChild(chip);
+    }
+
+    function summarizeValues(values, control = null, max = 3) {
+        const list = (Array.isArray(values) ? values : []).map(value => control ? control.getLabelForValue(value) : String(value));
+        if (!list.length) return '';
+        return list.length > max ? `${list.slice(0, max).join(', ')} +${list.length - max}` : list.join(', ');
+    }
+
+    function renderModalGlobalContext(container) {
+        if (!container) return;
+        container.replaceChildren();
+        const label = document.createElement('span');
+        label.className = 'dim-modal-context-label';
+        label.textContent = 'Contexto global heredado:';
+        container.appendChild(label);
+        appendContextChip(container, 'Alcance', 'cartera y jerarquía del usuario');
+        const params = buildQueryParams();
+        appendContextChip(container, 'Cliente', summarizeValues(params.cliente_entidad_id, msClient));
+        appendContextChip(container, 'Provincia', summarizeValues(params.provincia, msProvince));
+        appendContextChip(container, 'Familia', summarizeValues(params.familia, msFamily));
+        appendContextChip(container, 'Unidad', summarizeValues(params.unidad_negocio, msUnit));
+        appendContextChip(container, 'Subunidad', summarizeValues(params.subunidad_negocio, msSubunit));
+        appendContextChip(container, 'Plataforma', summarizeValues(params.plataforma));
+        appendContextChip(container, 'Resultado', summarizeValues(params.resultado));
+        appendContextChip(container, 'Negocios excluidos', summarizeValues(params.unidad_negocio_excluir, msUnit));
+        if (params.fecha_desde || params.fecha_hasta) appendContextChip(container, 'Fechas', `${params.fecha_desde || 'inicio'} – ${params.fecha_hasta || 'fin'}`);
+        if (params.is_client === 'true' || params.is_client === true) appendContextChip(container, '¿Cliente?', 'Cliente');
+        if (params.is_client === 'false' || params.is_client === false) appendContextChip(container, '¿Cliente?', 'No cliente');
+        if (container.children.length === 2) appendContextChip(container, 'Filtros', 'sin filtros adicionales');
+    }
+
+    function bindFullModalEvents() {
+        if (elements.familyModalSearch) elements.familyModalSearch.addEventListener('input', () => {
+            state.familyModal.search = elements.familyModalSearch.value;
+            state.familyModal.page = 1;
+            renderFamilyModal();
+        });
+        document.querySelectorAll('[data-family-modal-sort]').forEach(button => button.addEventListener('click', () => {
+            const key = button.dataset.familyModalSort;
+            state.familyModal.sortDirection = state.familyModal.sortKey === key
+                ? (state.familyModal.sortDirection === 'asc' ? 'desc' : 'asc')
+                : (key === 'familia' ? 'asc' : 'desc');
+            state.familyModal.sortKey = key;
+            state.familyModal.page = 1;
+            renderFamilyModal();
+        }));
+        if (elements.familyModalClear) elements.familyModalClear.addEventListener('click', resetFamilyModalFilters);
+        if (elements.familyModalPrev) elements.familyModalPrev.addEventListener('click', () => {
+            state.familyModal.page = Math.max(1, state.familyModal.page - 1);
+            renderFamilyModal();
+        });
+        if (elements.familyModalNext) elements.familyModalNext.addEventListener('click', () => {
+            state.familyModal.page += 1;
+            renderFamilyModal();
+        });
+
+        if (elements.clientModalSearch) elements.clientModalSearch.addEventListener('input', () => {
+            state.clientModal.search = elements.clientModalSearch.value;
+            state.clientModal.page = 1;
+            renderClientModal();
+        });
+        [elements.clientModalCondition, elements.clientModalResult, elements.clientModalMetric].forEach(control => {
+            if (!control) return;
+            control.addEventListener('change', () => {
+                state.clientModal.condition = elements.clientModalCondition.value;
+                state.clientModal.result = elements.clientModalResult.value;
+                state.clientModal.metric = elements.clientModalMetric.value === 'valorizacion' ? 'valorizacion' : 'renglones';
+                state.clientModal.page = 1;
+                renderClientModal();
+            });
+        });
+        if (elements.clientModalClear) elements.clientModalClear.addEventListener('click', resetClientModalFilters);
+        if (elements.clientModalHead) elements.clientModalHead.addEventListener('click', event => {
+            const button = event.target.closest('[data-client-modal-sort]');
+            if (!button) return;
+            const key = button.dataset.clientModalSort;
+            state.clientModal.sortDirection = state.clientModal.sortKey === key
+                ? (state.clientModal.sortDirection === 'asc' ? 'desc' : 'asc')
+                : (key === 'cliente' || key === 'condition' ? 'asc' : 'desc');
+            state.clientModal.sortKey = key;
+            state.clientModal.page = 1;
+            renderClientModal();
+        });
+        if (elements.clientModalBody) elements.clientModalBody.addEventListener('click', event => {
+            const button = event.target.closest('[data-select-client-id]');
+            if (!button) return;
+            const row = state.clientModal.rows.find(item => String(item.cliente_entidad_id) === button.dataset.selectClientId);
+            if (!row) return;
+            modalInstance(elements.clientFullModal)?.hide();
+            selectClientFromRanking(row);
+        });
+        if (elements.clientModalPrev) elements.clientModalPrev.addEventListener('click', () => {
+            state.clientModal.page = Math.max(1, state.clientModal.page - 1);
+            renderClientModal();
+        });
+        if (elements.clientModalNext) elements.clientModalNext.addEventListener('click', () => {
+            state.clientModal.page += 1;
+            renderClientModal();
+        });
+    }
+
+    async function openAllFamiliesModal() {
+        state.familyModal.initial = { sortKey: state.familySortKey, sortDirection: state.familySortDirection };
+        state.familyModal.rows = [];
+        resetFamilyModalFilters();
+        renderModalGlobalContext(elements.familyModalContext);
+        setModalLoading(elements.familyModalBody, 3);
+        modalInstance(elements.familyFullModal)?.show();
+        try {
+            const response = await apiGet('/families-complete', buildQueryParams());
+            state.familyModal.rows = Array.isArray(response.data) ? response.data : [];
+            renderFamilyModal();
+        } catch (error) {
+            showModalError(elements.familyModalBody, 3, error.message);
+        }
+    }
+
+    function resetFamilyModalFilters() {
+        const initial = state.familyModal.initial || { sortKey: state.familySortKey, sortDirection: state.familySortDirection };
+        state.familyModal.search = '';
+        state.familyModal.sortKey = initial.sortKey;
+        state.familyModal.sortDirection = initial.sortDirection;
+        state.familyModal.page = 1;
+        if (elements.familyModalSearch) elements.familyModalSearch.value = '';
+        renderFamilyModal();
+    }
+
+    function renderFamilyModal() {
+        if (!elements.familyModalBody) return;
+        const term = normalizePivotSearch(state.familyModal.search);
+        const filtered = state.familyModal.rows.filter(row => !term || normalizePivotSearch(row.familia).includes(term));
+        const sorted = sortFamilyRows(filtered, state.familyModal.sortKey, state.familyModal.sortDirection);
+        const totalPages = Math.max(1, Math.ceil(sorted.length / MODAL_PAGE_SIZE));
+        state.familyModal.page = Math.min(Math.max(1, state.familyModal.page), totalPages);
+        const start = (state.familyModal.page - 1) * MODAL_PAGE_SIZE;
+        const pageRows = sorted.slice(start, start + MODAL_PAGE_SIZE);
+        elements.familyModalBody.replaceChildren();
+        if (!pageRows.length) appendEmptyModalRow(elements.familyModalBody, 3);
+        pageRows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.append(
+                modalTextCell(row.familia || 'Sin familia', 'dim-modal-family-name'),
+                modalTextCell(formatInteger(row.renglones), 'text-end'),
+                modalTextCell(formatDecimal(row.cantidad), 'text-end fw-bold')
+            );
+            elements.familyModalBody.appendChild(tr);
+        });
+        updateModalSortArrows('[data-family-modal-sort]', state.familyModal.sortKey, state.familyModal.sortDirection);
+        updatePagination(elements.familyModalCounter, elements.familyModalPage, elements.familyModalPrev, elements.familyModalNext, start, pageRows.length, sorted.length, state.familyModal.page, totalPages);
+    }
+
+    async function openAllClientsModal() {
+        state.clientModal.initial = {
+            search: '', condition: '', result: '', metric: state.activeMetric,
+            sortKey: state.clientSortKey, sortDirection: state.clientSortDirection,
+        };
+        state.clientModal.rows = [];
+        state.clientModal.resultKeys = [];
+        resetClientModalFilters();
+        renderModalGlobalContext(elements.clientModalContext);
+        setModalLoading(elements.clientModalBody, 5);
+        modalInstance(elements.clientFullModal)?.show();
+        try {
+            const response = await apiGet('/clients-complete', buildQueryParams());
+            state.clientModal.rows = Array.isArray(response.data) ? response.data : [];
+            state.clientModal.resultKeys = Array.from(new Set(state.clientModal.rows.flatMap(row => [
+                ...Object.keys(row.resultados || {}), ...Object.keys(row.resultados_val || {}),
+            ]))).sort((left, right) => normalizeKey(left).localeCompare(normalizeKey(right)));
+            populateClientModalResults();
+            renderClientModal();
+        } catch (error) {
+            showModalError(elements.clientModalBody, 5, error.message);
+        }
+    }
+
+    function populateClientModalResults() {
+        if (!elements.clientModalResult) return;
+        const current = state.clientModal.result;
+        elements.clientModalResult.innerHTML = '<option value="">Todos los resultados</option>';
+        state.clientModal.resultKeys.forEach(result => {
+            const option = document.createElement('option');
+            option.value = result;
+            option.textContent = result;
+            elements.clientModalResult.appendChild(option);
+        });
+        elements.clientModalResult.value = state.clientModal.resultKeys.includes(current) ? current : '';
+        state.clientModal.result = elements.clientModalResult.value;
+    }
+
+    function resetClientModalFilters() {
+        const initial = state.clientModal.initial || {
+            search: '', condition: '', result: '', metric: state.activeMetric,
+            sortKey: state.clientSortKey, sortDirection: state.clientSortDirection,
+        };
+        Object.assign(state.clientModal, initial, { page: 1 });
+        if (elements.clientModalSearch) elements.clientModalSearch.value = state.clientModal.search;
+        if (elements.clientModalCondition) elements.clientModalCondition.value = state.clientModal.condition;
+        if (elements.clientModalMetric) elements.clientModalMetric.value = state.clientModal.metric;
+        if (elements.clientModalResult) elements.clientModalResult.value = state.clientModal.result;
+        renderClientModal();
+    }
+
+    function clientHasResult(row, result) {
+        if (!result) return true;
+        return Object.prototype.hasOwnProperty.call(row.resultados || {}, result)
+            || Object.prototype.hasOwnProperty.call(row.resultados_val || {}, result);
+    }
+
+    function renderClientModal() {
+        if (!elements.clientModalBody || !elements.clientModalHead) return;
+        const term = normalizePivotSearch(state.clientModal.search);
+        const filtered = state.clientModal.rows.filter(row => {
+            if (term && !normalizePivotSearch(row.cliente).includes(term)) return false;
+            if (state.clientModal.condition === 'true' && !row.is_client) return false;
+            if (state.clientModal.condition === 'false' && row.is_client) return false;
+            return clientHasResult(row, state.clientModal.result);
+        });
+        const sorted = sortClientRows(filtered, state.clientModal.sortKey, state.clientModal.sortDirection, state.clientModal.metric);
+        const totalPages = Math.max(1, Math.ceil(sorted.length / MODAL_PAGE_SIZE));
+        state.clientModal.page = Math.min(Math.max(1, state.clientModal.page), totalPages);
+        const start = (state.clientModal.page - 1) * MODAL_PAGE_SIZE;
+        const pageRows = sorted.slice(start, start + MODAL_PAGE_SIZE);
+        renderClientModalHeader();
+        elements.clientModalBody.replaceChildren();
+        if (!pageRows.length) appendEmptyModalRow(elements.clientModalBody, state.clientModal.resultKeys.length + 4);
+        pageRows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.appendChild(modalTextCell(row.cliente || 'Sin cliente', 'dim-modal-client-name'));
+            const condition = modalTextCell('', 'text-center');
+            const badge = document.createElement('span');
+            badge.className = 'dim-condition-badge';
+            badge.textContent = row.is_client ? 'Cliente' : 'No cliente';
+            condition.appendChild(badge);
+            tr.appendChild(condition);
+            state.clientModal.resultKeys.forEach(result => {
+                tr.appendChild(modalTextCell(formatClientMetric(clientMetricTotal(row, state.clientModal.metric, result), state.clientModal.metric), 'text-end'));
+            });
+            tr.appendChild(modalTextCell(formatClientMetric(clientMetricTotal(row, state.clientModal.metric), state.clientModal.metric), 'text-end fw-bold'));
+            const action = modalTextCell('', 'text-center');
+            const select = document.createElement('button');
+            select.type = 'button';
+            select.className = 'dim-select-client-btn';
+            select.dataset.selectClientId = row.cliente_entidad_id;
+            select.textContent = 'Seleccionar';
+            select.title = `Aplicar ${row.cliente || 'cliente'} al filtro global Cliente`;
+            if (row.cliente_entidad_id === null || row.cliente_entidad_id === undefined) select.disabled = true;
+            action.appendChild(select);
+            tr.appendChild(action);
+            elements.clientModalBody.appendChild(tr);
+        });
+        updatePagination(elements.clientModalCounter, elements.clientModalPage, elements.clientModalPrev, elements.clientModalNext, start, pageRows.length, sorted.length, state.clientModal.page, totalPages);
+    }
+
+    function renderClientModalHeader() {
+        elements.clientModalHead.replaceChildren();
+        elements.clientModalHead.appendChild(modalSortHeader('Cliente', 'cliente'));
+        elements.clientModalHead.appendChild(modalSortHeader('Condición', 'condition', 'text-center'));
+        state.clientModal.resultKeys.forEach(result => {
+            const th = modalSortHeader(result, `result:${result}`, 'text-end dim-result-head');
+            th.style.setProperty('--result-color', resultColor(result));
+            elements.clientModalHead.appendChild(th);
+        });
+        elements.clientModalHead.appendChild(modalSortHeader(state.clientModal.metric === 'valorizacion' ? 'Total valorización' : 'Total renglones', 'total', 'text-end'));
+        const action = document.createElement('th');
+        action.className = 'text-center';
+        action.textContent = 'Acción';
+        elements.clientModalHead.appendChild(action);
+    }
+
+    function modalSortHeader(label, key, className = '') {
+        const th = document.createElement('th');
+        th.className = className;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'dim-sort-button';
+        button.dataset.clientModalSort = key;
+        button.append(document.createTextNode(`${label} `));
+        const arrow = document.createElement('span');
+        arrow.className = 'dim-sort-arrow';
+        arrow.textContent = sortArrow(key, state.clientModal.sortKey, state.clientModal.sortDirection);
+        button.appendChild(arrow);
+        th.appendChild(button);
+        return th;
+    }
+
+    function formatClientMetric(value, metric) {
+        return metric === 'valorizacion' ? `$ ${formatDecimal(value)}` : formatInteger(value);
+    }
+
+    function modalTextCell(value, className = '') {
+        const td = document.createElement('td');
+        td.className = className;
+        td.textContent = value;
+        return td;
+    }
+
+    function appendEmptyModalRow(body, colspan) {
+        const tr = document.createElement('tr');
+        const td = modalTextCell('No hay registros que coincidan con la búsqueda y los filtros.', 'text-center text-muted py-4');
+        td.colSpan = colspan;
+        tr.appendChild(td);
+        body.appendChild(tr);
+    }
+
+    function showModalError(body, colspan, message) {
+        if (!body) return;
+        body.replaceChildren();
+        const tr = document.createElement('tr');
+        const td = modalTextCell(`No se pudo cargar el conjunto completo: ${message || 'error desconocido'}`, 'text-center text-danger py-4');
+        td.colSpan = colspan;
+        tr.appendChild(td);
+        body.appendChild(tr);
+    }
+
+    function updateModalSortArrows(selector, activeKey, direction) {
+        document.querySelectorAll(selector).forEach(button => {
+            const active = button.dataset.familyModalSort === activeKey;
+            const arrow = button.querySelector('.dim-sort-arrow');
+            if (arrow) arrow.textContent = active ? sortArrow(activeKey, activeKey, direction) : '';
+        });
+    }
+
+    function updatePagination(counter, pageLabel, prev, next, start, pageLength, total, page, totalPages) {
+        if (counter) counter.textContent = `Mostrando ${total ? start + 1 : 0}–${start + pageLength} de ${total}`;
+        if (pageLabel) pageLabel.textContent = `Página ${page} de ${totalPages}`;
+        if (prev) prev.disabled = page <= 1;
+        if (next) next.disabled = page >= totalPages;
+    }
     // Lógica de plataformas
     // 0 seleccionadas = Todas (sin filtro enviado al backend)
     // ─────────────────────────────────────────────────────────────────────────
@@ -756,6 +1222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─────────────────────────────────────────────────────────────────────────
     function applyFilterOptions(data) {
         if (msClient) msClient.setOptions(data.clientes || []);
+        updateActiveClientSelection();
         if (msProvince) msProvince.setOptions(data.provincias || []);
         if (msFamily) msFamily.setOptions(data.familias || []);
 
@@ -1325,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const labels = results.map(item => item.resultado);
         const data = results.map(item => useVal ? (item.valorizacion || 0) : (item.renglones || 0));
         const backgroundColor = results.map((item, i) => {
-            const base = resultPalette[i % resultPalette.length];
+            const base = resultColor(item.resultado);
             return (hasFilter && !state.activeResultados.has(item.resultado)) ? base + '38' : base;
         });
         const offset = results.map(item =>
@@ -1387,11 +1854,54 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function sortArrow(key, activeKey, direction) {
+        return key === activeKey ? (direction === 'asc' ? '↑' : '↓') : '';
+    }
+
+    function compareText(left, right) {
+        return String(left || '').localeCompare(String(right || ''), 'es', { sensitivity: 'base' });
+    }
+
+    function sortFamilyRows(rows, key, direction) {
+        const sortKey = ['familia', 'cantidad', 'renglones'].includes(key) ? key : 'renglones';
+        const factor = direction === 'asc' ? 1 : -1;
+        return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => {
+            const diff = sortKey === 'familia'
+                ? compareText(left.familia, right.familia)
+                : Number(left[sortKey] || 0) - Number(right[sortKey] || 0);
+            return (diff * factor) || compareText(left.familia, right.familia);
+        });
+    }
+
+    function updateFamilySortSwitch() {
+        if (!elements.familySortSwitch) return;
+        elements.familySortSwitch.querySelectorAll('[data-family-sort]').forEach(item => {
+            const active = item.dataset.familySort === state.familySortKey;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-pressed', String(active));
+            const label = item.dataset.familySort === 'cantidad' ? 'Cantidades' : 'Renglones';
+            item.textContent = active ? `${label} ${sortArrow(item.dataset.familySort, state.familySortKey, state.familySortDirection)}` : label;
+        });
+    }
+
+    function setFamilyCardSort(key) {
+        const nextKey = ['familia', 'cantidad', 'renglones'].includes(key) ? key : 'renglones';
+        state.familySortDirection = state.familySortKey === nextKey
+            ? (state.familySortDirection === 'asc' ? 'desc' : 'asc')
+            : (nextKey === 'familia' ? 'asc' : 'desc');
+        state.familySortKey = nextKey;
+        updateFamilySortSwitch();
+        renderFamilyList((state.lastBootstrap || {}).top_families || []);
+    }
+
     function renderFamilyList(families) {
-        state.familyListData = Array.isArray(families) ? families : [];
+        const fullySorted = sortFamilyRows(families, state.familySortKey, state.familySortDirection);
+        state.familyListData = fullySorted.slice(0, FAMILY_CARD_LIMIT);
         state.familyListLastRenderKey = '';
+        updateFamilySortSwitch();
 
         if (!elements.familyListContainer) return;
+        elements.familyListContainer.scrollTop = 0;
         if (!state.familyListData.length) {
             state.familyListBody = null;
             elements.familyListContainer.innerHTML = '<div class="text-center text-muted py-4 small">No hay datos para mostrar.</div>';
@@ -1408,9 +1918,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </colgroup>
             <thead>
                 <tr>
-                    <th class="dim-family-head dim-family-head-name">Familia</th>
-                    <th class="dim-family-head dim-family-head-count text-end">Renglones</th>
-                    <th class="dim-family-head dim-family-head-qty text-end">${state.activeMetric === 'valorizacion' ? 'Valorización' : 'Cantidad'}</th>
+                    <th class="dim-family-head dim-family-head-name ${state.familySortKey === 'familia' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="familia">Familia <span class="dim-sort-arrow">${sortArrow('familia', state.familySortKey, state.familySortDirection)}</span></button></th>
+                    <th class="dim-family-head dim-family-head-count text-end ${state.familySortKey === 'renglones' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="renglones">Renglones <span class="dim-sort-arrow">${sortArrow('renglones', state.familySortKey, state.familySortDirection)}</span></button></th>
+                    <th class="dim-family-head dim-family-head-qty text-end ${state.familySortKey === 'cantidad' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="cantidad">Cantidad <span class="dim-sort-arrow">${sortArrow('cantidad', state.familySortKey, state.familySortDirection)}</span></button></th>
                 </tr>
             </thead>
         `;
@@ -1421,7 +1931,6 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.familyListContainer.appendChild(table);
         scheduleFamilyListRender(true);
     }
-
     function scheduleFamilyListRender(force = false) {
         if (!state.familyListBody) return;
 
@@ -1456,7 +1965,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const scrollTop = elements.familyListContainer.scrollTop || 0;
         const start = Math.max(0, Math.floor(scrollTop / FAMILY_LIST_ROW_HEIGHT) - FAMILY_LIST_OVERSCAN);
         const end = Math.min(rows.length, start + visibleCount + (FAMILY_LIST_OVERSCAN * 2));
-        const renderKey = `${start}:${end}:${rows.length}`;
+        const renderKey = `${start}:${end}:${rows.length}:${state.familySortKey}:${state.familySortDirection}`;
 
         if (renderKey === state.familyListLastRenderKey) return;
         state.familyListLastRenderKey = renderKey;
@@ -1469,13 +1978,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fragment.appendChild(createFamilyListSpacerRow(topSpacerHeight));
         }
 
-        const useVal = state.activeMetric === 'valorizacion';
         rows.slice(start, end).forEach(item => {
             const tr = document.createElement('tr');
             tr.className = 'dim-family-row';
-            const qtyDisplay = useVal
-                ? formatAbbreviated(item.valorizacion || 0)
-                : formatDecimal(item.cantidad || 0);
+            const qtyDisplay = formatDecimal(item.cantidad || 0);
             tr.innerHTML = `
                 <td class="dim-family-name-cell" title="${item.familia || ''}">
                     <div class="dim-family-name-text">${item.familia || 'Sin familia'}</div>
@@ -1504,26 +2010,101 @@ document.addEventListener('DOMContentLoaded', () => {
         return tr;
     }
 
+    function renderClientResultLegend(resultKeys) {
+        if (!elements.clientResultLegend) return;
+        elements.clientResultLegend.replaceChildren();
+        resultKeys.forEach(result => {
+            const item = document.createElement('span');
+            item.className = 'dim-result-legend-item';
+            const swatch = document.createElement('span');
+            swatch.className = 'dim-result-swatch';
+            swatch.style.backgroundColor = resultColor(result);
+            swatch.setAttribute('aria-hidden', 'true');
+            const label = document.createElement('span');
+            label.textContent = result;
+            item.append(swatch, label);
+            elements.clientResultLegend.appendChild(item);
+        });
+    }
+
+    function clientMetricTotal(row, metric, resultKey = '') {
+        const useVal = metric === 'valorizacion';
+        const source = row?.[useVal ? 'resultados_val' : 'resultados'] || {};
+        if (resultKey) return Number(source[resultKey] || 0);
+        const backendTotal = row?.[useVal ? 'total_valorizacion' : 'total_renglones'];
+        return Number(backendTotal ?? Object.values(source).reduce((sum, value) => sum + Number(value || 0), 0));
+    }
+
+    function sortClientRows(rows, key, direction, metric) {
+        const factor = direction === 'asc' ? 1 : -1;
+        return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => {
+            let diff;
+            if (key === 'cliente') diff = compareText(left.cliente, right.cliente);
+            else if (key === 'condition') diff = compareText(left.is_client ? 'Cliente' : 'No cliente', right.is_client ? 'Cliente' : 'No cliente');
+            else if (String(key).startsWith('result:')) diff = clientMetricTotal(left, metric, String(key).slice(7)) - clientMetricTotal(right, metric, String(key).slice(7));
+            else diff = clientMetricTotal(left, metric) - clientMetricTotal(right, metric);
+            return (diff * factor) || compareText(left.cliente, right.cliente);
+        });
+    }
+
+    function updateClientSortHeaders() {
+        if (!elements.clientSortHeaders) return;
+        if (elements.clientTotalHeaderLabel) {
+            elements.clientTotalHeaderLabel.textContent = state.activeMetric === 'valorizacion' ? 'Total valorización' : 'Total renglones';
+        }
+        elements.clientSortHeaders.querySelectorAll('[data-client-sort]').forEach(button => {
+            const active = button.dataset.clientSort === state.clientSortKey;
+            button.classList.toggle('active', active);
+            const arrow = button.querySelector('.dim-sort-arrow');
+            if (arrow) arrow.textContent = active ? sortArrow(button.dataset.clientSort, state.clientSortKey, state.clientSortDirection) : '';
+        });
+    }
+
+    function setClientCardSort(key) {
+        const nextKey = key === 'cliente' ? 'cliente' : 'total';
+        state.clientSortDirection = state.clientSortKey === nextKey
+            ? (state.clientSortDirection === 'asc' ? 'desc' : 'asc')
+            : (nextKey === 'cliente' ? 'asc' : 'desc');
+        state.clientSortKey = nextKey;
+        renderBarClientChart((state.lastBootstrap || {}).clients_by_result || []);
+    }
+
     function renderBarClientChart(rows) {
         const useVal = state.activeMetric === 'valorizacion';
-        const labels = rows.map(row => row.cliente);
-        const resultKeySource = useVal ? 'resultados_val' : 'resultados';
-        const resultKeys = Array.from(new Set(rows.flatMap(row => Object.keys(row[resultKeySource] || row.resultados || {}))));
-        const datasets = resultKeys.map((key, index) => ({
+        const sourceKey = useVal ? 'resultados_val' : 'resultados';
+        const fullySorted = sortClientRows(rows, state.clientSortKey, state.clientSortDirection, state.activeMetric);
+        const rankedRows = fullySorted.slice(0, CLIENT_CARD_LIMIT).map(row => ({
+            ...row,
+            _rankingTotal: clientMetricTotal(row, state.activeMetric),
+        }));
+
+        updateClientSortHeaders();
+        state.barClientRows = rankedRows;
+        const labels = rankedRows.map(row => `${row.is_client ? '[Cliente]' : '[No cliente]'} ${row.cliente || 'Sin cliente'}`);
+        const resultKeys = Array.from(new Set(
+            rankedRows.flatMap(row => Object.keys(row[sourceKey] || {}))
+        )).sort((left, right) => normalizeKey(left).localeCompare(normalizeKey(right)));
+        const datasets = resultKeys.map(key => ({
             label: key,
-            data: rows.map(row => (row[resultKeySource] || row.resultados)?.[key] || 0),
-            backgroundColor: resultPalette[index % resultPalette.length],
+            data: rankedRows.map(row => Number((row[sourceKey] || {})[key] || 0)),
+            backgroundColor: resultColor(key),
             borderRadius: 4,
             barPercentage: 0.7,
             stack: 'resultados',
         }));
-        const dynamicH = Math.max(200, rows.length * 32 + 28);
+        renderClientResultLegend(resultKeys);
+
+        const dynamicH = Math.max(200, rankedRows.length * 36 + 46);
+        const axisTitle = useVal ? 'Valorización' : 'Renglones';
+        const tickFormatter = value => useVal ? formatAbbreviated(value) : formatCompactInteger(value);
 
         if (state.barClientChart) {
             const container = state.barClientChart.canvas.closest('.chart-container');
             if (container) container.style.height = dynamicH + 'px';
             state.barClientChart.data.labels = labels;
             state.barClientChart.data.datasets = datasets;
+            state.barClientChart.options.scales.x.title.text = axisTitle;
+            state.barClientChart.options.scales.x.ticks.callback = tickFormatter;
             state.barClientChart.update('none');
             return;
         }
@@ -1538,18 +2119,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
+                onHover(event, activeElements) {
+                    if (event.native?.target) event.native.target.style.cursor = activeElements.length ? 'pointer' : 'default';
+                },
+                onClick(_event, activeElements) {
+                    if (!activeElements.length) return;
+                    selectClientFromRanking(state.barClientRows[activeElements[0].index]);
+                },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
                         callbacks: {
+                            title: items => {
+                                const row = state.barClientRows[items[0]?.dataIndex];
+                                return row ? row.cliente : '';
+                            },
+                            beforeLabel: ctx => {
+                                const row = state.barClientRows[ctx.dataIndex];
+                                return `Condición: ${row?.is_client ? 'Cliente' : 'No cliente'}`;
+                            },
                             label: ctx => state.activeMetric === 'valorizacion'
-                                ? `${ctx.dataset.label}: ${formatAbbreviated(ctx.parsed.x)}`
+                                ? `${ctx.dataset.label}: $ ${formatAbbreviated(ctx.parsed.x)}`
                                 : `${ctx.dataset.label}: ${formatInteger(ctx.parsed.x)} renglones`,
+                            afterBody: items => {
+                                const row = state.barClientRows[items[0]?.dataIndex];
+                                if (!row) return '';
+                                return state.activeMetric === 'valorizacion'
+                                    ? `Total: $ ${formatAbbreviated(row._rankingTotal)}`
+                                    : `Total: ${formatInteger(row._rankingTotal)} renglones`;
+                            },
                         },
                     },
                 },
                 scales: {
-                    x: { stacked: true, grid: { display: false }, ticks: { display: false } },
+                    x: {
+                        stacked: true,
+                        beginAtZero: true,
+                        grid: { display: false },
+                        title: { display: true, text: axisTitle, color: '#64748b', font: { size: 10, weight: '600' } },
+                        ticks: { display: true, callback: tickFormatter, font: { size: 9 } },
+                    },
                     y: {
                         stacked: true,
                         grid: { display: false },
@@ -1557,7 +2166,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             font: { size: 9 },
                             callback(value) {
                                 const label = this.getLabelForValue(value);
-                                return label.length > 16 ? `${label.slice(0, 16)}..` : label;
+                                return label.length > 24 ? `${label.slice(0, 24)}…` : label;
                             },
                         },
                     },
@@ -1734,33 +2343,135 @@ document.addEventListener('DOMContentLoaded', () => {
         return tr;
     }
 
+    function canonicalProvinceName(value) {
+        let key = normalizeKey(value)
+            .replace(/^PROVINCIA_DE_/, '')
+            .replace(/^PROVINCIA_DEL_/, '');
+        const aliases = {
+            CAPITAL_FEDERAL: 'CABA',
+            CIUDAD_AUTONOMA_DE_BUENOS_AIRES: 'CABA',
+            TIERRA_DEL_FUEGO_ANTARTIDA_E_ISLAS_DEL_ATLANTICO_SUR: 'TIERRA_DEL_FUEGO',
+        };
+        return aliases[key] || key;
+    }
+
+    function mapIntensityColor(value, maxPositive) {
+        if (value === 0) return MAP_ZERO_COLOR;
+        if (value < 0 || maxPositive <= 0) return MAP_NO_DATA_COLOR;
+        const ratio = Math.log1p(value) / Math.log1p(maxPositive);
+        const index = Math.min(MAP_POSITIVE_COLORS.length - 1, Math.max(0, Math.ceil(ratio * MAP_POSITIVE_COLORS.length) - 1));
+        return MAP_POSITIVE_COLORS[index];
+    }
+
+    function updateMapLegend(maxPositive, useVal) {
+        if (state.mapLegendControl && state.mapInstance) {
+            state.mapInstance.removeControl(state.mapLegendControl);
+        }
+        const control = L.control({ position: 'bottomright' });
+        control.onAdd = () => {
+            const div = L.DomUtil.create('div', 'dim-map-legend');
+            const metricLabel = useVal ? 'Valorización' : 'Renglones';
+            const maxLabel = useVal ? `$ ${formatAbbreviated(maxPositive)}` : formatInteger(maxPositive);
+            div.innerHTML = `
+                <span class="dim-map-legend-title">${metricLabel}</span>
+                <div class="dim-map-legend-row"><span class="dim-map-legend-swatch dim-map-legend-nodata"></span>Sin datos</div>
+                <div class="dim-map-legend-row"><span class="dim-map-legend-swatch" style="background:${MAP_ZERO_COLOR}"></span>Valor cero</div>
+                <div class="dim-map-legend-row"><span class="dim-map-legend-swatch dim-map-legend-gradient" style="background:linear-gradient(90deg,${MAP_POSITIVE_COLORS.join(',')})"></span>Menor → mayor</div>
+                <div class="dim-map-legend-row">Máximo: ${maxLabel}</div>
+            `;
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        control.addTo(state.mapInstance);
+        state.mapLegendControl = control;
+    }
+
     function renderMapChart(rows) {
         const container = document.getElementById('mapContainer');
+        if (!container) return;
+        state.mapRows = Array.isArray(rows) ? rows : [];
+
         if (!state.mapInstance) {
-            state.mapInstance = L.map(container, { attributionControl: false }).setView([-38.4161, -63.6167], 3);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-                subdomains: 'abcd', maxZoom: 19,
-            }).addTo(state.mapInstance);
+            state.mapInstance = L.map(container, {
+                attributionControl: false,
+                zoomControl: false,
+                minZoom: 2,
+                maxZoom: 8,
+            });
+            L.control.zoom({ position: 'topright' }).addTo(state.mapInstance);
+            state.mapInstance.fitBounds([[-55.2, -73.8], [-21.5, -53.5]], { padding: [4, 4] });
         }
-        state.mapMarkers.forEach(m => state.mapInstance.removeLayer(m));
-        state.mapMarkers = [];
+
+        if (!state.mapGeoJsonData) {
+            if (!state.mapGeoJsonPromise) {
+                const geoJsonUrl = container.dataset.geojsonUrl;
+                state.mapGeoJsonPromise = fetch(geoJsonUrl, { credentials: 'same-origin' })
+                    .then(response => {
+                        if (!response.ok) throw new Error(`GeoJSON no disponible (${response.status})`);
+                        return response.json();
+                    })
+                    .then(data => { state.mapGeoJsonData = data; return data; });
+            }
+            state.mapGeoJsonPromise
+                .then(() => renderMapChart(state.mapRows))
+                .catch(error => {
+                    console.error('[DIM] No se pudo cargar el mapa provincial:', error);
+                    container.innerHTML = '<div class="text-center text-muted small p-3">Mapa provincial no disponible.</div>';
+                });
+            return;
+        }
+
+        if (state.mapGeoJsonLayer) {
+            state.mapInstance.removeLayer(state.mapGeoJsonLayer);
+            state.mapGeoJsonLayer = null;
+        }
+
         const useVal = state.activeMetric === 'valorizacion';
-        rows.forEach(item => {
-            const key = Object.keys(provinceCoords).find(p => p.toLowerCase() === String(item.provincia).toLowerCase());
-            if (!key) return;
-            const metricValue = useVal ? (item.valorizacion || 0) : (item.renglones || 0);
-            const marker = L.circle(provinceCoords[key], {
-                color: '#5274ce', fillColor: '#5274ce', fillOpacity: 0.45,
-                radius: Math.min(Math.max(Math.log(metricValue + 1) * 22000, 30000), 300000),
-                weight: 1,
-            }).addTo(state.mapInstance);
-            const tooltip = useVal
-                ? `<b>${item.provincia}</b><br>Valorización: ${formatAbbreviated(item.valorizacion || 0)}`
-                : `<b>${item.provincia}</b><br>Renglones: ${formatInteger(item.renglones || 0)}`;
-            marker.bindTooltip(tooltip);
-            state.mapMarkers.push(marker);
+        const dataByProvince = new Map();
+        state.mapRows.forEach(item => {
+            const key = canonicalProvinceName(item.provincia);
+            if (!key || key === 'SIN_PROVINCIA') return;
+            const value = Number(useVal ? item.valorizacion : item.renglones) || 0;
+            const previous = dataByProvince.get(key);
+            dataByProvince.set(key, {
+                name: item.provincia,
+                value: (previous?.value || 0) + value,
+            });
         });
+        const positives = Array.from(dataByProvince.values()).map(item => item.value).filter(value => value > 0);
+        const maxPositive = positives.length ? Math.max(...positives) : 0;
+
+        state.mapGeoJsonLayer = L.geoJSON(state.mapGeoJsonData, {
+            style(feature) {
+                const key = canonicalProvinceName(feature?.properties?.nombre);
+                const datum = dataByProvince.get(key);
+                const hasData = dataByProvince.has(key);
+                return {
+                    color: hasData ? '#ffffff' : '#94a3b8',
+                    dashArray: hasData ? null : '3 3',
+                    fillColor: hasData ? mapIntensityColor(datum.value, maxPositive) : MAP_NO_DATA_COLOR,
+                    fillOpacity: hasData ? 0.9 : 0.58,
+                    weight: hasData ? 1.2 : 1,
+                };
+            },
+            onEachFeature(feature, layer) {
+                const provinceName = feature?.properties?.nombre || 'Provincia';
+                const datum = dataByProvince.get(canonicalProvinceName(provinceName));
+                const valueLine = !datum
+                    ? 'Sin datos para los filtros activos'
+                    : useVal
+                        ? `Valorización: $ ${formatAbbreviated(datum.value)}`
+                        : `Renglones: ${formatInteger(datum.value)}`;
+                layer.bindTooltip(`<b>${provinceName}</b><br>${valueLine}`, { sticky: true });
+                layer.on({
+                    mouseover(event) { event.target.setStyle({ weight: 2.5, color: '#0f3f60' }); },
+                    mouseout(event) { state.mapGeoJsonLayer.resetStyle(event.target); },
+                });
+            },
+        }).addTo(state.mapInstance);
+
+        container.setAttribute('aria-label', `Mapa de Argentina por provincia según ${useVal ? 'Valorización' : 'Renglones'}`);
+        updateMapLegend(maxPositive, useVal);
         window.setTimeout(() => state.mapInstance.invalidateSize(), 150);
     }
 
