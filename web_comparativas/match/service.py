@@ -32,6 +32,11 @@ from web_comparativas.match.models import (
     MatchNegocioMap,
     MatchPropuesta,
 )
+from web_comparativas.papelera import (
+    PAPELERA_VENTANA_HORAS,
+    papelera_corte,
+    papelera_horas_restantes,
+)
 
 
 _PUNCT_RE = re.compile(r"[^a-z0-9]+")
@@ -449,9 +454,6 @@ def exportar_reporte_bytes(
     return bio, rid, filas
 
 
-PAPELERA_VENTANA_HORAS = 24
-
-
 def match_papelera(db: Session, run_id: int | None = None) -> dict[str, Any]:
     """Papelera de descartados: filas `decision='descartado'` con updated_at en las
     últimas 24h y SIN un evento 'papelera_eliminado' posterior. Calculada (sin esquema
@@ -462,7 +464,7 @@ def match_papelera(db: Session, run_id: int | None = None) -> dict[str, Any]:
         return out
 
     now = dt.datetime.utcnow()
-    corte = now - dt.timedelta(hours=PAPELERA_VENTANA_HORAS)
+    corte = papelera_corte(now)
     H = MatchHomologacion
     P = MatchPropuesta
     EV = MatchHomologacionEvento
@@ -490,8 +492,7 @@ def match_papelera(db: Session, run_id: int | None = None) -> dict[str, Any]:
         ).scalar_one() or 0
         if elim:
             continue
-        horas_rest = PAPELERA_VENTANA_HORAS - (now - h.updated_at).total_seconds() / 3600.0
-        horas_rest = round(max(0.0, horas_rest), 1)
+        horas_rest = papelera_horas_restantes(h.updated_at, now)
         items.append({
             "producto_plataforma": h.producto_plataforma,
             "candidato_codigo": h.codigo_elegido,

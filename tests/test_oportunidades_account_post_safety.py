@@ -19,7 +19,8 @@ from web_comparativas.models import Base, User, VendedorFusion
 from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.account_resolution import AccountSelectionError
 from web_comparativas.dimensionamiento.models import (
-    CrmEnvio, CrmEnvioEvento, DimensionamientoImportRun, OportunidadSummary,
+    CrmEnvio, CrmEnvioEvento, DimensionamientoImportRun, OportunidadRechazo,
+    OportunidadSummary,
 )
 from web_comparativas.routers import oportunidades_router as router
 
@@ -32,7 +33,7 @@ def db():
     )
     Base.metadata.create_all(engine, tables=[
         DimensionamientoImportRun.__table__, OportunidadSummary.__table__,
-        CrmEnvio.__table__, CrmEnvioEvento.__table__,
+        CrmEnvio.__table__, CrmEnvioEvento.__table__, OportunidadRechazo.__table__,
         User.__table__, VendedorFusion.__table__,
     ])
     Session = sessionmaker(bind=engine, future=True)

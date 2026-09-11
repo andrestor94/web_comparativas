@@ -27,7 +27,7 @@ import unicodedata
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -47,7 +47,12 @@ from web_comparativas.dimensionamiento.models import (
     DimensionamientoImportRun,
     DimensionamientoRecord,
     OportunidadAsignacionManual,
+    OportunidadRechazo,
+    OportunidadRechazoEvento,
     OportunidadSummary,
+    OPORTUNIDAD_DECISION_RECHAZADA,
+    OPORTUNIDAD_DECISION_RECUPERADA,
+    OPORTUNIDAD_EVENTO_PAPELERA_ELIMINADA,
 )
 from web_comparativas.dimensionamiento.oportunidades import (
     CRM_ENVIO_PLACEHOLDER,
@@ -67,6 +72,12 @@ from web_comparativas.dimensionamiento.oportunidades_visibilidad import (
 )
 from web_comparativas.org_hierarchy import superiores_de
 from web_comparativas.dimensionamiento.query_service import _latest_success_import_run
+from web_comparativas.papelera import (
+    PAPELERA_VENTANA_HORAS,
+    papelera_corte,
+    papelera_horas_restantes,
+    papelera_recuperable,
+)
 
 router = APIRouter(prefix="/api/mercado-privado/oportunidades", tags=["oportunidades"])
 logger = logging.getLogger("wc.oportunidades.api")
@@ -716,6 +727,9 @@ def _oportunidades_pendientes(db: Session, run_id: int, crm_modo: str):
             select(CrmEnvio.oportunidad_id).where(CrmEnvio.crm_modo == crm_modo)
         ).scalars()
     )
+    rechazadas = set(
+        db.execute(select(OportunidadRechazo.oportunidad_id)).scalars()
+    )
     rows = db.execute(
         select(OportunidadSummary)
         .where(OportunidadSummary.import_run_id == run_id)
@@ -724,7 +738,75 @@ def _oportunidades_pendientes(db: Session, run_id: int, crm_modo: str):
     return [
         row for row in rows
         if opportunity_stable_id(row.cliente_visible, row.codigo_articulo) not in enviados
+        and opportunity_stable_id(row.cliente_visible, row.codigo_articulo) not in rechazadas
     ]
+
+
+def _oportunidad_visible_para(db: Session, user, opportunity: OportunidadSummary) -> bool:
+    if not OPORTUNIDADES_CARTERA_ENABLED():
+        return True
+    return bool(oportunidades_visibles_para(db, user, [opportunity]))
+
+
+def _usuario_sello(user) -> tuple[str, int | None]:
+    email = (getattr(user, "email", None) or "").strip()
+    if not email:
+        raise HTTPException(status_code=401, detail="Usuario sin email en la sesion.")
+    return email, getattr(user, "id", None)
+
+
+def _active_opportunity_by_stable_id(
+    db: Session,
+    run_id: int,
+    oportunidad_id: str,
+    codigo_articulo: str | None = None,
+) -> OportunidadSummary | None:
+    stmt = select(OportunidadSummary).where(OportunidadSummary.import_run_id == run_id)
+    if codigo_articulo:
+        stmt = stmt.where(OportunidadSummary.codigo_articulo == codigo_articulo)
+    for row in db.execute(stmt).scalars():
+        if opportunity_stable_id(row.cliente_visible, row.codigo_articulo) == oportunidad_id:
+            return row
+    return None
+
+
+def _ultimo_evento_papelera_eliminada(db: Session) -> dict[str, dt.datetime]:
+    rows = db.execute(
+        select(
+            OportunidadRechazoEvento.oportunidad_id,
+            func.max(OportunidadRechazoEvento.created_at),
+        )
+        .where(
+            OportunidadRechazoEvento.decision
+            == OPORTUNIDAD_EVENTO_PAPELERA_ELIMINADA
+        )
+        .group_by(OportunidadRechazoEvento.oportunidad_id)
+    ).all()
+    return {oportunidad_id: created_at for oportunidad_id, created_at in rows}
+
+
+def _rechazo_en_papelera(
+    db: Session,
+    rechazo: OportunidadRechazo,
+    now: dt.datetime | None = None,
+) -> bool:
+    if not papelera_recuperable(rechazo.updated_at, now):
+        return False
+    eliminado_at = _ultimo_evento_papelera_eliminada(db).get(rechazo.oportunidad_id)
+    return not eliminado_at or eliminado_at < rechazo.updated_at
+
+
+def _raise_if_rejected(db: Session, oportunidad_id: str) -> None:
+    rechazo = db.execute(
+        select(OportunidadRechazo.id).where(
+            OportunidadRechazo.oportunidad_id == oportunidad_id
+        )
+    ).scalar_one_or_none()
+    if rechazo is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="La oportunidad fue rechazada y no esta disponible para enviar al CRM.",
+        )
 
 
 def _resolve_account_for_opportunity(
@@ -1025,6 +1107,319 @@ def oportunidades_list(
     }
 
 
+def _oportunidades_papelera_data(db: Session, user) -> dict[str, Any]:
+    latest = _latest_success_import_run(db)
+    if latest is None:
+        return {
+            "run_id": None,
+            "ventana_horas": PAPELERA_VENTANA_HORAS,
+            "total": 0,
+            "items": [],
+        }
+
+    now = dt.datetime.utcnow()
+    eliminadas = _ultimo_evento_papelera_eliminada(db)
+    rechazos = db.execute(
+        select(OportunidadRechazo)
+        .where(OportunidadRechazo.updated_at >= papelera_corte(now))
+        .order_by(OportunidadRechazo.updated_at.asc())
+    ).scalars().all()
+    rechazos = [
+        rechazo for rechazo in rechazos
+        if not eliminadas.get(rechazo.oportunidad_id)
+        or eliminadas[rechazo.oportunidad_id] < rechazo.updated_at
+    ]
+
+    summaries = _active_summaries_by_opportunity_id(db)
+    pairs = [
+        (rechazo, summaries.get(rechazo.oportunidad_id))
+        for rechazo in rechazos
+    ]
+    pairs = [(rechazo, row) for rechazo, row in pairs if row is not None]
+    visibles = {row.id for _, row in pairs}
+    if OPORTUNIDADES_CARTERA_ENABLED():
+        visibles = {
+            row.id
+            for row in oportunidades_visibles_para(db, user, [row for _, row in pairs])
+        }
+
+    enviados = set(
+        db.execute(
+            select(CrmEnvio.oportunidad_id).where(
+                CrmEnvio.crm_modo == _modo_envio_actual()
+            )
+        ).scalars()
+    )
+    items = []
+    for rechazo, row in pairs:
+        if row.id not in visibles or rechazo.oportunidad_id in enviados:
+            continue
+        item = _row_to_dict(
+            row,
+            normalizar_cuenta_fusion(getattr(row, "cuenta_interna", None)),
+        )
+        item.pop("crm", None)
+        item.update({
+            "import_run_id": latest.id,
+            "rechazado_at": rechazo.updated_at.isoformat(),
+            "horas_restantes": papelera_horas_restantes(rechazo.updated_at, now),
+            "rechazado_por": rechazo.usuario,
+        })
+        items.append(item)
+    return {
+        "run_id": latest.id,
+        "ventana_horas": PAPELERA_VENTANA_HORAS,
+        "total": len(items),
+        "items": items,
+    }
+
+
+@router.get("/papelera")
+def oportunidades_papelera(
+    user=AllowedUser,
+    db: Session = Depends(get_db),
+):
+    _require_enabled()
+    return {"ok": True, "data": _oportunidades_papelera_data(db, user)}
+
+
+@router.post("/rechazar/{summary_id}")
+def oportunidades_rechazar(
+    summary_id: int,
+    user=AllowedWriter,
+    db: Session = Depends(get_db),
+):
+    _require_enabled()
+    latest, opportunity = _active_opportunity(db, summary_id)
+    if not _oportunidad_visible_para(db, user, opportunity):
+        raise HTTPException(
+            status_code=403,
+            detail="No podes rechazar esta oportunidad: no esta dentro de tu cartera.",
+        )
+
+    oportunidad_id = opportunity_stable_id(
+        opportunity.cliente_visible,
+        opportunity.codigo_articulo,
+    )
+    enviado = db.execute(
+        select(CrmEnvio.id)
+        .where(CrmEnvio.oportunidad_id == oportunidad_id)
+        .where(CrmEnvio.crm_modo == _modo_envio_actual())
+    ).scalar_one_or_none()
+    if enviado is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="La oportunidad ya fue enviada al CRM y no se puede rechazar.",
+        )
+
+    existente = db.execute(
+        select(OportunidadRechazo)
+        .where(OportunidadRechazo.oportunidad_id == oportunidad_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if existente is not None:
+        return {
+            "ok": True,
+            "rechazada": False,
+            "ya_rechazada": True,
+            "oportunidad_id": oportunidad_id,
+            "rechazado_at": existente.updated_at.isoformat(),
+        }
+
+    usuario, usuario_id = _usuario_sello(user)
+    now = dt.datetime.utcnow()
+    rechazo = OportunidadRechazo(
+        oportunidad_id=oportunidad_id,
+        cliente_visible=opportunity.cliente_visible,
+        codigo_articulo=opportunity.codigo_articulo,
+        import_run_id=latest.id,
+        usuario=usuario,
+        usuario_id=usuario_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(rechazo)
+    db.add(OportunidadRechazoEvento(
+        oportunidad_id=oportunidad_id,
+        decision=OPORTUNIDAD_DECISION_RECHAZADA,
+        cliente_visible=opportunity.cliente_visible,
+        codigo_articulo=opportunity.codigo_articulo,
+        import_run_id=latest.id,
+        usuario=usuario,
+        usuario_id=usuario_id,
+        created_at=now,
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        ganador = db.execute(
+            select(OportunidadRechazo).where(
+                OportunidadRechazo.oportunidad_id == oportunidad_id
+            )
+        ).scalar_one_or_none()
+        if ganador is None:
+            raise
+        return {
+            "ok": True,
+            "rechazada": False,
+            "ya_rechazada": True,
+            "oportunidad_id": oportunidad_id,
+            "rechazado_at": ganador.updated_at.isoformat(),
+        }
+
+    logger.info(
+        "[OPORTUNIDADES][API] rechazar oportunidad_id=%s por=%s run_id=%s",
+        oportunidad_id, usuario, latest.id,
+    )
+    return {
+        "ok": True,
+        "rechazada": True,
+        "ya_rechazada": False,
+        "oportunidad_id": oportunidad_id,
+        "rechazado_at": now.isoformat(),
+    }
+
+
+@router.post("/papelera/recuperar/{oportunidad_id}")
+def oportunidades_recuperar(
+    oportunidad_id: str,
+    user=AllowedWriter,
+    db: Session = Depends(get_db),
+):
+    _require_enabled()
+    rechazo = db.execute(
+        select(OportunidadRechazo)
+        .where(OportunidadRechazo.oportunidad_id == oportunidad_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if rechazo is None:
+        return {"ok": True, "recuperada": False, "oportunidad_id": oportunidad_id}
+
+    latest = _latest_success_import_run(db)
+    opportunity = (
+        _active_opportunity_by_stable_id(
+            db, latest.id, oportunidad_id, rechazo.codigo_articulo,
+        )
+        if latest is not None
+        else None
+    )
+    if opportunity is None:
+        raise HTTPException(
+            status_code=404,
+            detail="La oportunidad ya no esta disponible en la corrida activa.",
+        )
+    if not _oportunidad_visible_para(db, user, opportunity):
+        raise HTTPException(
+            status_code=403,
+            detail="No podes recuperar esta oportunidad: no esta dentro de tu cartera.",
+        )
+    if not _rechazo_en_papelera(db, rechazo):
+        raise HTTPException(
+            status_code=409,
+            detail="Vencio el plazo de 24 horas para recuperar esta oportunidad.",
+        )
+
+    usuario, usuario_id = _usuario_sello(user)
+    now = dt.datetime.utcnow()
+    db.add(OportunidadRechazoEvento(
+        oportunidad_id=oportunidad_id,
+        decision=OPORTUNIDAD_DECISION_RECUPERADA,
+        cliente_visible=rechazo.cliente_visible,
+        codigo_articulo=rechazo.codigo_articulo,
+        import_run_id=latest.id,
+        usuario=usuario,
+        usuario_id=usuario_id,
+        created_at=now,
+    ))
+    db.execute(
+        delete(OportunidadRechazo).where(
+            OportunidadRechazo.oportunidad_id == oportunidad_id
+        )
+    )
+    db.commit()
+    logger.info(
+        "[OPORTUNIDADES][API] recuperar oportunidad_id=%s por=%s",
+        oportunidad_id, usuario,
+    )
+    return {"ok": True, "recuperada": True, "oportunidad_id": oportunidad_id}
+
+
+@router.post("/papelera/eliminar/{oportunidad_id}")
+def oportunidades_papelera_eliminar(
+    oportunidad_id: str,
+    user=AllowedWriter,
+    db: Session = Depends(get_db),
+):
+    _require_enabled()
+    rechazo = db.execute(
+        select(OportunidadRechazo)
+        .where(OportunidadRechazo.oportunidad_id == oportunidad_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if rechazo is None:
+        return {"ok": True, "eliminada": False, "oportunidad_id": oportunidad_id}
+
+    latest = _latest_success_import_run(db)
+    opportunity = (
+        _active_opportunity_by_stable_id(
+            db, latest.id, oportunidad_id, rechazo.codigo_articulo,
+        )
+        if latest is not None
+        else None
+    )
+    if opportunity is None or not _oportunidad_visible_para(db, user, opportunity):
+        raise HTTPException(status_code=403, detail="Oportunidad no autorizada.")
+    if not _rechazo_en_papelera(db, rechazo):
+        return {"ok": True, "eliminada": False, "oportunidad_id": oportunidad_id}
+
+    usuario, usuario_id = _usuario_sello(user)
+    db.add(OportunidadRechazoEvento(
+        oportunidad_id=oportunidad_id,
+        decision=OPORTUNIDAD_EVENTO_PAPELERA_ELIMINADA,
+        cliente_visible=rechazo.cliente_visible,
+        codigo_articulo=rechazo.codigo_articulo,
+        import_run_id=latest.id,
+        usuario=usuario,
+        usuario_id=usuario_id,
+        created_at=dt.datetime.utcnow(),
+    ))
+    db.commit()
+    logger.info(
+        "[OPORTUNIDADES][API] papelera/eliminar oportunidad_id=%s por=%s",
+        oportunidad_id, usuario,
+    )
+    return {"ok": True, "eliminada": True, "oportunidad_id": oportunidad_id}
+
+
+@router.post("/papelera/vaciar")
+def oportunidades_papelera_vaciar(
+    user=AllowedWriter,
+    db: Session = Depends(get_db),
+):
+    _require_enabled()
+    items = _oportunidades_papelera_data(db, user)["items"]
+    usuario, usuario_id = _usuario_sello(user)
+    now = dt.datetime.utcnow()
+    for item in items:
+        db.add(OportunidadRechazoEvento(
+            oportunidad_id=item["oportunidad_id"],
+            decision=OPORTUNIDAD_EVENTO_PAPELERA_ELIMINADA,
+            cliente_visible=item.get("cliente_visible"),
+            codigo_articulo=item.get("codigo_articulo"),
+            import_run_id=item.get("import_run_id"),
+            usuario=usuario,
+            usuario_id=usuario_id,
+            created_at=now,
+        ))
+    db.commit()
+    logger.info(
+        "[OPORTUNIDADES][API] papelera/vaciar por=%s eliminadas=%s",
+        usuario, len(items),
+    )
+    return {"ok": True, "eliminadas": len(items)}
+
+
 @router.get("/cuentas/{summary_id}")
 def oportunidad_cuentas(
     summary_id: int,
@@ -1035,6 +1430,12 @@ def oportunidad_cuentas(
     """Preview read-only de cuentas candidatas y existentes en el CRM activo."""
     _require_enabled()
     latest, opportunity = _active_opportunity(db, summary_id)
+    if not _oportunidad_visible_para(db, _user, opportunity):
+        raise HTTPException(status_code=403, detail="Oportunidad no autorizada.")
+    _raise_if_rejected(
+        db,
+        opportunity_stable_id(opportunity.cliente_visible, opportunity.codigo_articulo),
+    )
     try:
         resolution = _resolve_account_for_opportunity(db, latest.id, opportunity)
     except (FileNotFoundError, ValueError) as exc:
@@ -1412,6 +1813,7 @@ def oportunidades_enviar(
         )
 
     oportunidad_id = opportunity_stable_id(o.cliente_visible, o.codigo_articulo)
+    _raise_if_rejected(db, oportunidad_id)
     # Duplicados POR ENTORNO: el bloqueo es (oportunidad_id, crm_modo). Lo enviado a
     # TEST no bloquea PROD (ni al revés), y lo simulado no bloquea nada real.
     modo_actual = _modo_envio_actual()
@@ -1570,6 +1972,7 @@ def oportunidades_enviar(
     # falla de negocio), la fila queda pegada en EN_CURSO — la única salida es un
     # reenvío con `override` de Admin, que ya existe para el caso "reenviar algo que
     # ya tiene fila" y no distingue si esa fila es EN_CURSO o un envío consumado.
+    _raise_if_rejected(db, oportunidad_id)
     placeholder: CrmEnvio | None = None
     if existente is None:
         placeholder = CrmEnvio(

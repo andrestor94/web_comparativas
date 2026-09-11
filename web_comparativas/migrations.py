@@ -188,6 +188,24 @@ def ensure_oportunidad_asignaciones_manuales_table():
         print(f"[MIGRATION] Tabla 'oportunidad_asignaciones_manuales': advertencia — {e}", flush=True)
 
 
+def ensure_oportunidad_rechazos_tables():
+    """Crea las tablas persistentes de rechazo y auditoria de Oportunidades."""
+    from web_comparativas.dimensionamiento.models import (
+        OportunidadRechazo,
+        OportunidadRechazoEvento,
+    )
+
+    for model, label in (
+        (OportunidadRechazo, "oportunidad_rechazos"),
+        (OportunidadRechazoEvento, "oportunidad_rechazo_eventos"),
+    ):
+        try:
+            model.__table__.create(bind=engine, checkfirst=True)
+            print(f"[MIGRATION] Tabla '{label}' verificada/creada.", flush=True)
+        except Exception as exc:
+            print(f"[MIGRATION] Tabla '{label}': advertencia - {exc}", flush=True)
+
+
 def ensure_cartera_tables():
     """Crea (si faltan) `cartera_import_runs`, `cartera_operadores` y
     `cartera_vendedores` (visibilidad por cartera de cuentas, ago-2026). Solo crea

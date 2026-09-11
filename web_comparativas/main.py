@@ -110,6 +110,7 @@ from web_comparativas.migrations import (
     ensure_users_reporta_a_column,
     ensure_vendedores_fusion_seed,
     ensure_oportunidad_asignaciones_manuales_table,
+    ensure_oportunidad_rechazos_tables,
     ensure_cartera_tables,
     ensure_user_reportes_table,
     ensure_users_cartera_columns,
@@ -399,6 +400,12 @@ def run_startup_migrations_once() -> None:
         print("[MIGRATION] SUCCESS: oportunidad_asignaciones_manuales table checked.", flush=True)
     except Exception as e:
         print(f"[MIGRATION] Warning oportunidad_asignaciones_manuales table: {e}", flush=True)
+
+    try:
+        ensure_oportunidad_rechazos_tables()
+        print("[MIGRATION] SUCCESS: oportunidad_rechazos tables checked.", flush=True)
+    except Exception as e:
+        print(f"[MIGRATION] Warning oportunidad_rechazos tables: {e}", flush=True)
 
     # Cartera de cuentas por operador/vendedor (Forecast + Dimensionamiento, ago-2026).
     # Solo esquema acá; los datos se cargan aparte con push_cartera_data.py.

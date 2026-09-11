@@ -20,6 +20,7 @@ from web_comparativas.dimensionamiento import crm_client
 from web_comparativas.dimensionamiento.models import (
     CrmEnvio,
     DimensionamientoImportRun,
+    OportunidadRechazo,
     OportunidadSummary,
 )
 from web_comparativas.dimensionamiento.oportunidades import opportunity_stable_id
@@ -36,6 +37,7 @@ def db():
         DimensionamientoImportRun.__table__,
         OportunidadSummary.__table__,
         CrmEnvio.__table__,
+        OportunidadRechazo.__table__,
     ])
     Session = sessionmaker(bind=engine, future=True)
     with Session() as session:

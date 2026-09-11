@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from web_comparativas.models import Base, CarteraOperador, CarteraVendedor, User, UserReporte
 from web_comparativas.dimensionamiento.models import (
-    CrmEnvio, DimensionamientoImportRun, OportunidadAsignacionManual, OportunidadSummary,
+    CrmEnvio, DimensionamientoImportRun, OportunidadAsignacionManual,
+    OportunidadRechazo, OportunidadSummary,
 )
 from web_comparativas.dimensionamiento.oportunidades import opportunity_stable_id
 from web_comparativas.routers import oportunidades_router as router
@@ -29,7 +30,8 @@ def db():
     Base.metadata.create_all(engine, tables=[
         User.__table__, UserReporte.__table__, CarteraOperador.__table__, CarteraVendedor.__table__,
         DimensionamientoImportRun.__table__, OportunidadSummary.__table__,
-        OportunidadAsignacionManual.__table__, CrmEnvio.__table__,
+        OportunidadAsignacionManual.__table__, OportunidadRechazo.__table__,
+        CrmEnvio.__table__,
     ])
     Session = sessionmaker(bind=engine, future=True)
     with Session() as session:

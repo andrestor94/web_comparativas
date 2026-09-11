@@ -10,8 +10,13 @@
   const API = "/api/mercado-privado/oportunidades/list";
   const SEND_API = (id) => `/api/mercado-privado/oportunidades/enviar/${id}`;
   const ACCOUNT_API = (id) => `/api/mercado-privado/oportunidades/cuentas/${id}`;
+  const REJECT_API = (id) => "/api/mercado-privado/oportunidades/rechazar/" + encodeURIComponent(id);
+  const TRASH_API = "/api/mercado-privado/oportunidades/papelera";
+  const RESTORE_API = (id) => TRASH_API + "/recuperar/" + encodeURIComponent(id);
+  const TRASH_DELETE_API = (id) => TRASH_API + "/eliminar/" + encodeURIComponent(id);
   let ALL = [];
   let WINDOW = {};
+  let deepLinkHandled = false;
   let CRM_MODO = null;   // 'simulado' | 'test' | 'prod' — entorno al que se enviaría ahora
   let CRM_ASIGNACION = { match: null, usuarios: [], sugerido_id: null, error: null,
                          bitacora_por_usuario: {} };
@@ -188,7 +193,9 @@
   }
 
   // ── Panel de detalle (listado agrupado por secciones) ──
-  let detailModal = null, crmModal = null;
+  let detailModal = null, crmModal = null, trashModal = null, rejectConfirmModal = null;
+  let rejectCandidate = null;
+  let toastTimer = null;
   const row = (k, v, opts) =>
     `<div class="od-row${opts && opts.hero ? " od-hero" : ""}"><span class="od-label">${esc(k)}</span><span class="od-value">${v}</span></div>`;
   const section = (title, rowsHtml) =>
@@ -235,6 +242,12 @@
     // Ya enviada y con id de CRM -> el botón lleva directo al registro del CRM.
     const crmUrl = (o.envio && o.envio.crm_url) || null;
     const detailBtn = $("detailCrmBtn");
+    const rejectBtn = $("detailRejectBtn");
+    const alreadySent = Boolean(o.envio && o.envio.enviado);
+    rejectBtn.hidden = alreadySent;
+    rejectBtn.disabled = false;
+    rejectBtn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Rechazar';
+    rejectBtn.onclick = alreadySent ? null : () => openRejectConfirmation(o);
     if (crmUrl) {
       detailBtn.innerHTML = `<i class="bi bi-box-arrow-up-right me-1"></i>Ver en CRM`;
       detailBtn.setAttribute("aria-label", "Ver la oportunidad en el CRM");
@@ -249,6 +262,76 @@
     }
     if (!detailModal) detailModal = new bootstrap.Modal($("detailModal"));
     detailModal.show();
+  }
+
+  function showToast(message, isError) {
+    const toast = $("oppToast");
+    toast.textContent = message;
+    toast.className = "opp-toast show" + (isError ? " error" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = "opp-toast"; }, 2800);
+  }
+
+  async function responseJson(response) {
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((json && (json.detail || json.error)) || "No se pudo completar la operacion.");
+    }
+    return json;
+  }
+
+  function getRejectConfirmModal() {
+    if (rejectConfirmModal) return rejectConfirmModal;
+    const modalElement = $("rejectConfirmModal");
+    rejectConfirmModal = new bootstrap.Modal(modalElement);
+    modalElement.addEventListener("hidden.bs.modal", () => {
+      const cancelled = Boolean(rejectCandidate);
+      rejectCandidate = null;
+      if (cancelled && detailModal) detailModal.show();
+    });
+    return rejectConfirmModal;
+  }
+
+  function openRejectConfirmation(o) {
+    if (rejectCandidate) return;
+    rejectCandidate = o;
+    $("rejectConfirmSummary").textContent =
+      (o.cliente_visible || "Cliente") + " · " +
+      (o.producto_nombre || o.codigo_articulo || "Oportunidad");
+    const showConfirmation = () => getRejectConfirmModal().show();
+    const detailElement = $("detailModal");
+    if (detailElement.classList.contains("show")) {
+      detailElement.addEventListener("hidden.bs.modal", showConfirmation, { once: true });
+      detailModal.hide();
+    } else {
+      showConfirmation();
+    }
+  }
+
+  async function rejectOpportunity() {
+    const o = rejectCandidate;
+    if (!o) return;
+    const button = $("confirmRejectBtn");
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rechazando...';
+    try {
+      const response = await fetch(REJECT_API(o.id), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      await responseJson(response);
+      ALL = ALL.filter((row) => row.oportunidad_id !== o.oportunidad_id);
+      rejectCandidate = null;
+      if (rejectConfirmModal) rejectConfirmModal.hide();
+      applyFilters();
+      await refreshTrashBadge();
+      showToast("Oportunidad rechazada. Podés recuperarla durante 24 h.");
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.innerHTML = '<i class="bi bi-trash3 me-1"></i>Rechazar';
+    }
   }
 
   // ── Modal payload CRM ──
@@ -753,6 +836,155 @@
     crmModal.show();
     if (!(o.envio && o.envio.enviado)) loadAccountResolution(o);
   }
+  function fmtTrashDate(iso) {
+    if (!iso) return "-";
+    const date = new Date(iso + (String(iso).endsWith("Z") ? "" : "Z"));
+    if (Number.isNaN(date.getTime())) return "-";
+    return date.toLocaleString("es-AR", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    });
+  }
+
+  function fmtRemaining(hours) {
+    const value = Number(hours || 0);
+    return value >= 1 ? Math.round(value) + " h" : "<1 h";
+  }
+
+  function setTrashBadge(total) {
+    const badge = $("oppTrashBadge");
+    const count = Number(total || 0);
+    badge.textContent = count;
+    badge.hidden = count < 1;
+  }
+
+  function renderTrash(data) {
+    const items = (data && data.items) || [];
+    const body = $("oppTrashBody");
+    $("oppTrashCount").textContent = items.length + (items.length === 1 ? " oportunidad" : " oportunidades") + " en papelera";
+    $("oppTrashEmptyBtn").style.display = items.length ? "" : "none";
+    setTrashBadge(items.length);
+    if (!items.length) {
+      body.innerHTML = '<div class="opp-trash-empty"><i class="bi bi-trash3"></i>La papelera está vacía.</div>';
+      return;
+    }
+    body.innerHTML = items.map((item) => {
+      const soon = Number(item.horas_restantes || 0) < 3;
+      return '<div class="opp-trash-row">' +
+        '<div>' +
+          '<div class="opp-trash-client">' + esc(item.cliente_visible || "-") + '</div>' +
+          '<div class="opp-trash-product">' + esc(item.producto_nombre || "-") +
+            ' <span class="text-muted">· cód. ' + esc(item.codigo_articulo || "-") + '</span></div>' +
+          '<div class="opp-trash-amount">' + fmtMoney(item.monto_oportunidad) + ' / mes</div>' +
+          '<div class="opp-trash-meta">Rechazada ' + esc(fmtTrashDate(item.rechazado_at)) +
+            ' · <span class="' + (soon ? "expires-soon" : "") + '">expira en ' +
+            esc(fmtRemaining(item.horas_restantes)) + '</span></div>' +
+        '</div>' +
+        '<div class="opp-trash-actions">' +
+          '<button type="button" class="opp-trash-restore" data-restore="' + esc(item.oportunidad_id) + '">' +
+            '<i class="bi bi-arrow-counterclockwise me-1"></i>Recuperar</button>' +
+          '<button type="button" class="opp-trash-delete" data-trash-delete="' + esc(item.oportunidad_id) + '" ' +
+            'title="Eliminar definitivamente de la papelera" aria-label="Eliminar de la papelera">' +
+            '<i class="bi bi-trash3"></i></button>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    body.querySelectorAll("[data-restore]").forEach((button) => {
+      button.addEventListener("click", () => restoreOpportunity(button.dataset.restore, button));
+    });
+    body.querySelectorAll("[data-trash-delete]").forEach((button) => {
+      button.addEventListener("click", () => deleteTrashOpportunity(button.dataset.trashDelete, button));
+    });
+  }
+
+  async function fetchTrash() {
+    const response = await fetch(TRASH_API, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const json = await responseJson(response);
+    return (json && json.data) || { items: [], total: 0 };
+  }
+
+  async function refreshTrashBadge() {
+    try {
+      const data = await fetchTrash();
+      setTrashBadge(data.total);
+      return data;
+    } catch (error) {
+      console.error("[oportunidades] papelera:", error);
+      return null;
+    }
+  }
+
+  async function loadTrash(openModal) {
+    const body = $("oppTrashBody");
+    body.innerHTML = '<div class="opp-trash-empty"><span class="spinner-border spinner-border-sm me-2"></span>Cargando...</div>';
+    try {
+      const data = await fetchTrash();
+      renderTrash(data);
+      if (openModal) {
+        if (!trashModal) trashModal = new bootstrap.Modal($("oppTrashModal"));
+        trashModal.show();
+      }
+    } catch (error) {
+      body.innerHTML = '<div class="opp-trash-empty text-danger">' + esc(error.message) + '</div>';
+      showToast(error.message, true);
+    }
+  }
+
+  async function restoreOpportunity(opportunityId, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch(RESTORE_API(opportunityId), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      await responseJson(response);
+      await load();
+      await loadTrash(false);
+      showToast("Oportunidad recuperada y devuelta al listado.");
+    } catch (error) {
+      button.disabled = false;
+      showToast(error.message, true);
+      await loadTrash(false);
+    }
+  }
+
+  async function deleteTrashOpportunity(opportunityId, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch(TRASH_DELETE_API(opportunityId), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      await responseJson(response);
+      await loadTrash(false);
+      showToast("Oportunidad eliminada de la papelera.");
+    } catch (error) {
+      button.disabled = false;
+      showToast(error.message, true);
+    }
+  }
+
+  async function emptyTrash() {
+    const button = $("oppTrashEmptyBtn");
+    button.disabled = true;
+    try {
+      const response = await fetch(TRASH_API + "/vaciar", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      await responseJson(response);
+      await loadTrash(false);
+      showToast("Papelera vaciada.");
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function fillSelect(id, values) {
     const sel = $(id), cur = sel.value;
     sel.innerHTML = `<option value="">Todas</option>` +
@@ -776,6 +1008,7 @@
       fillSelect("fFamilia", [...new Set(ALL.map((o) => o.familia).filter(Boolean))].sort());
       fillSelect("fUnidad", [...new Set(ALL.map((o) => o.unidad_negocio).filter(Boolean))].sort());
       applyFilters();
+      refreshTrashBadge();
       abrirDesdeDeepLink();
     } catch (e) {
       $("oppWindowLabel").textContent = "Error al cargar";
@@ -791,6 +1024,8 @@
   // más. Se resuelve del lado del cliente contra las filas ya cargadas: no hace falta
   // endpoint nuevo ni una segunda consulta.
   function abrirDesdeDeepLink() {
+    if (deepLinkHandled) return;
+    deepLinkHandled = true;
     let pedido;
     try {
       pedido = new URLSearchParams(window.location.search).get("oportunidad_id");
@@ -820,6 +1055,9 @@
       $("fSearch").value = ""; $("fSort").value = "score"; applyFilters();
     });
     $("oppReloadBtn").addEventListener("click", load);
+    $("oppTrashBtn").addEventListener("click", () => loadTrash(true));
+    $("oppTrashEmptyBtn").addEventListener("click", emptyTrash);
+    $("confirmRejectBtn").addEventListener("click", rejectOpportunity);
     load();
   }
 

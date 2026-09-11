@@ -440,6 +440,43 @@ class CrmEnvioEvento(Base):
     nota = Column(Text, nullable=True)
 
 
+OPORTUNIDAD_DECISION_RECHAZADA = "rechazada"
+OPORTUNIDAD_DECISION_RECUPERADA = "recuperada"
+OPORTUNIDAD_EVENTO_PAPELERA_ELIMINADA = "papelera_eliminada"
+
+
+class OportunidadRechazo(Base):
+    """Estado vigente de rechazo, independiente de las corridas del summary."""
+
+    __tablename__ = "oportunidad_rechazos"
+
+    id = Column(Integer, primary_key=True)
+    oportunidad_id = Column(String(40), nullable=False, unique=True, index=True)
+    cliente_visible = Column(Text, nullable=True)
+    codigo_articulo = Column(String(120), nullable=True)
+    import_run_id = Column(Integer, nullable=True, index=True)
+    usuario = Column(String(255), nullable=False)
+    usuario_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+
+
+class OportunidadRechazoEvento(Base):
+    """Bitacora append-only de rechazo, recuperacion y salida de papelera."""
+
+    __tablename__ = "oportunidad_rechazo_eventos"
+
+    id = Column(Integer, primary_key=True)
+    oportunidad_id = Column(String(40), nullable=False, index=True)
+    decision = Column(String(30), nullable=False)
+    cliente_visible = Column(Text, nullable=True)
+    codigo_articulo = Column(String(120), nullable=True)
+    import_run_id = Column(Integer, nullable=True, index=True)
+    usuario = Column(String(255), nullable=False)
+    usuario_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=dt.datetime.utcnow, index=True)
+
+
 class OportunidadAsignacionManual(Base):
     """Asignación manual de una oportunidad a un Analista, hecha por su Supervisor.
 
