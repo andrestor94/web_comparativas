@@ -21,6 +21,20 @@
   let CRM_ASIGNACION = { match: null, usuarios: [], sugerido_id: null, error: null,
                          bitacora_por_usuario: {} };
 
+  // "Ver como usuario" (admin-only, sep-2026) — ver mercado_privado_ver_como.js.
+  // Sin selección, no agrega query params: el backend se comporta igual que hoy.
+  function verComoQueryString() {
+    if (!window.MPVerComo) return "";
+    var ids = window.MPVerComo.getSelectedIds();
+    if (!ids.length) return "";
+    return (ids.map(function (id) { return "ver_como_usuarios=" + encodeURIComponent(id); }).join("&"));
+  }
+  function withVerComo(url) {
+    var qs = verComoQueryString();
+    if (!qs) return url;
+    return url + (url.indexOf("?") === -1 ? "?" : "&") + qs;
+  }
+
   // Cómo se nombra cada entorno en el modal. El bloqueo de duplicados es por entorno,
   // así que el usuario tiene que ver SIEMPRE contra cuál está operando.
   // Completa la frase "…se crea la oportunidad ___" del encabezado del modal.
@@ -898,7 +912,7 @@
   }
 
   async function fetchTrash() {
-    const response = await fetch(TRASH_API, {
+    const response = await fetch(withVerComo(TRASH_API), {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
@@ -995,7 +1009,7 @@
   async function load() {
     $("oppWindowLabel").textContent = "Cargando…";
     try {
-      const resp = await fetch(API, { headers: { Accept: "application/json" } });
+      const resp = await fetch(withVerComo(API), { headers: { Accept: "application/json" } });
       if (!resp.ok) throw new Error(mensajeDeError(resp.status, null));
       const json = await resp.json();
       const data = (json && json.data) || {};
@@ -1058,7 +1072,15 @@
     $("oppTrashBtn").addEventListener("click", () => loadTrash(true));
     $("oppTrashEmptyBtn").addEventListener("click", emptyTrash);
     $("confirmRejectBtn").addEventListener("click", rejectOpportunity);
+    initVerComoUsuario();
     load();
+  }
+
+  function initVerComoUsuario() {
+    const mount = document.getElementById("mpVerComoMount");
+    if (!mount || !window.MPVerComo) return;
+    window.MPVerComo.init(mount);
+    window.MPVerComo.onChange(() => { load(); });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

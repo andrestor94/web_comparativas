@@ -35,8 +35,14 @@
 #oportunidadesApp .opp-trash-btn{position:relative;display:inline-flex;align-items:center;gap:.35rem;}
 #oportunidadesApp .opp-trash-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--match-lvl-D,#dc2626);color:#fff;font-size:.68rem;font-weight:700;font-variant-numeric:tabular-nums;}
 
-/* ── Filtros como fila de chips (dropdown-chips con chevron) ── */
-#oportunidadesApp .opp-toolbar{display:flex;flex-wrap:wrap;gap:.6rem .7rem;align-items:flex-end;width:100%;}
+/* ── Filtros como fila de chips (dropdown-chips con chevron) ──
+   .tech-toolbar (dashboard.tech.css) tiene backdrop-filter, así que arma su propio
+   stacking context; sin position+z-index acá, un hermano posterior sin filter/transform
+   (.opp-statstrip, las tarjetas KPI) lo tapa igual aunque el desplegable interno
+   (.mpvc-panel) tenga z-index alto — ese z-index solo compite DENTRO del contexto del
+   toolbar. Mismo fix ya aplicado en Dimensionamiento (#dimensionamientoApp .dim-filter-panel). */
+#oportunidadesApp .tech-toolbar{position:relative;z-index:100;overflow:visible;}
+#oportunidadesApp .opp-toolbar{display:flex;flex-wrap:wrap;gap:.6rem .7rem;align-items:flex-end;width:100%;position:relative;}
 #oportunidadesApp .opp-toolbar .filter-group{display:flex;flex-direction:column;gap:.22rem;}
 #oportunidadesApp .opp-toolbar .filter-group.opp-grow{flex:1 1 220px;}
 #oportunidadesApp .opp-toolbar label{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--opp-meta);margin:0;}
@@ -272,6 +278,11 @@
     <!-- ── Toolbar de filtros ── -->
     <div class="tech-toolbar">
         <div class="opp-toolbar">
+            {% if user.is_admin() %}
+            <div class="filter-group">
+                <div id="mpVerComoMount"></div>
+            </div>
+            {% endif %}
             <div class="filter-group">
                 <label>Tipo</label>
                 <select id="fTipo" class="tech-select">
@@ -491,5 +502,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v22-papelera-fix"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_ver_como.js') }}?v=1"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_oportunidades.js') }}?v=oportunidades-v23-ver-como"></script>
 {% endblock %}

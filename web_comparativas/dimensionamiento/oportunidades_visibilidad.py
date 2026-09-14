@@ -37,10 +37,12 @@ Fórmula:
 """
 from __future__ import annotations
 
+from typing import Iterable
+
 from sqlalchemy.orm import Session
 
 from web_comparativas.models import User
-from web_comparativas.cartera_visibilidad import clientes_visibles_para
+from web_comparativas.cartera_visibilidad import clientes_visibles_para, resolve_effective_scope
 from web_comparativas.org_hierarchy import (  # noqa: F401 (re-exportadas: oportunidades_router.py las importa desde acá)
     analistas_a_cargo,
     supervisores_a_cargo,
@@ -79,14 +81,31 @@ def _codigos_cartera_de_todos(db: Session) -> frozenset[str]:
 
 
 def oportunidades_visibles_para(
-    db: Session, user: User, oportunidades: list[OportunidadSummary]
+    db: Session,
+    user: User,
+    oportunidades: list[OportunidadSummary],
+    ver_como_user_ids: Iterable[int] | None = None,
 ) -> list[OportunidadSummary]:
     """Subconjunto de `oportunidades` (típicamente el run activo completo) visible
     para este usuario, según su rol. Función pura respecto del kill-switch: quien la
     llame decide si corresponde (hoy `oportunidades_router.py`, detrás de
-    `OPORTUNIDADES_CARTERA_ENABLED`)."""
+    `OPORTUNIDADES_CARTERA_ENABLED`).
+
+    `ver_como_user_ids` ("Ver como usuario", Mercado Privado, admin-only, sep-2026):
+    con selección activa, un usuario con lectura total (`_ROLES_FULL_READ`) deja de
+    ver todo y pasa a ver la UNIÓN de la cartera de los usuarios seleccionados —
+    acotando SOLO por cuenta (`scope.permite`), sin las extras propias de un rol
+    específico (asignación manual del Analista, buffer huérfano del Gerente): esas
+    son del usuario REAL logueado, no del usuario simulado. `resolve_effective_scope`
+    hace el chequeo real de admin-only y ES QUIEN IGNORA esta selección server-side
+    si `user` no es admin — acá no se repite esa validación."""
     rol = _rol(user)
     if rol in _ROLES_FULL_READ:
+        if ver_como_user_ids:
+            scope = resolve_effective_scope(db, user, ver_como_user_ids)
+            if scope.unrestricted:
+                return list(oportunidades)
+            return [o for o in oportunidades if scope.permite(o.cuenta_interna)]
         return list(oportunidades)
 
     scope = clientes_visibles_para(db, user)

@@ -280,6 +280,87 @@ def clientes_visibles_para(db: Session, user: User) -> CarteraScope:
     return scope
 
 
+def _is_admin_para_ver_como(user: User) -> bool:
+    """Import perezoso (evita ciclo de import a nivel de módulo): `policy.py`
+    importa `visibility_service`/`nav`, ninguno de los cuales importa este
+    archivo, pero se mantiene local para no acoplar el orden de import de todo
+    el paquete a este único uso."""
+    from web_comparativas.policy import is_admin
+    return is_admin(user)
+
+
+def _coerce_ver_como_ids(value) -> "set[int]":
+    """Normaliza `ver_como_user_ids` a un set[int] vacío ante CUALQUIER valor que no
+    sea una lista/tupla/set de ids reales — en particular, el propio objeto
+    `fastapi.Depends(...)`/`Query(...)` que Python asigna como default cuando una
+    ruta con ese parámetro se llama directo (fuera del ciclo de request de FastAPI,
+    p.ej. en tests que invocan la función del router a mano) en vez de `None`. Sin
+    esto, ese objeto se cuela hasta acá y `resolve_effective_scope` explota al
+    intentar iterarlo — con esto, simplemente se trata como "sin selección"."""
+    if not value or not isinstance(value, (list, tuple, set, frozenset)):
+        return set()
+    out: set[int] = set()
+    for item in value:
+        try:
+            out.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def clientes_visibles_para_usuarios(db: Session, users: Iterable[User]) -> CarteraScope:
+    """Unión de `clientes_visibles_para` para VARIOS usuarios — motor de "Ver como
+    usuario" (Mercado Privado, admin-only, sep-2026). Cada usuario resuelve su
+    propia cartera exactamente como hoy (su propia jerarquía, su propio
+    `cartera_unineg_scope`) — esta función SOLO agrega los resultados ya resueltos,
+    no toca `clientes_visibles_para`/`_resolver_cartera_visible` para un usuario
+    solo. `unrestricted=True` si CUALQUIERA de los usuarios seleccionados ya es
+    unrestricted por sí mismo (admin/auditor) — mismo criterio que si ese usuario
+    mirara el módulo por su cuenta."""
+    users = list(users)
+    if not users:
+        return NONE_
+    scopes = [clientes_visibles_para(db, u) for u in users]
+    if any(s.unrestricted for s in scopes):
+        return ALL
+    codigos = frozenset(codigo for s in scopes for codigo in s.codigos_cliente)
+    branches = tuple(branch for s in scopes for branch in s.branches)
+    return CarteraScope(unrestricted=False, codigos_cliente=codigos, branches=branches)
+
+
+def resolve_effective_scope(
+    db: Session, user: User, ver_como_user_ids: Iterable[int] | None = None
+) -> CarteraScope:
+    """Punto de entrada único de "Ver como usuario" (Mercado Privado, admin-only,
+    sep-2026) — los módulos deben resolver su scope a través de ESTA función, no
+    llamando a `clientes_visibles_para(db, user)` directo, para que la selección
+    admin se aplique de forma consistente en todos lados.
+
+    Seguridad — SIEMPRE server-side: si `user` no es admin, `ver_como_user_ids` se
+    IGNORA por completo (sin error visible) y el resultado es IDÉNTICO a
+    `clientes_visibles_para(db, user)` de siempre. Nunca confiar en el front.
+
+    Sin selección (lista vacía/None), o admin sin ids resueltos: comportamiento
+    IDÉNTICO al de hoy (Admin ve todo vía `clientes_visibles_para` → ALL).
+
+    Con selección Y admin: la cartera efectiva es la UNIÓN de la cartera visible de
+    cada usuario seleccionado — ver `clientes_visibles_para_usuarios`.
+
+    El chequeo de admin usa `policy.is_admin` (ADMIN_ROLES: admin/administrator/
+    administrador) — el mismo criterio que gatea el resto de las pantallas
+    admin-only de la app — y no el rol canónico único ("admin") que reconoce el
+    resto de este motor (ver docstring del módulo): así el control de "Ver como
+    usuario" queda visible/activo para exactamente los mismos usuarios que ya ven
+    hoy cualquier otra función admin-only."""
+    ids = _coerce_ver_como_ids(ver_como_user_ids)
+    if not ids or not _is_admin_para_ver_como(user):
+        return clientes_visibles_para(db, user)
+    usuarios = _usuarios_por_id(db, ids)
+    if not usuarios:
+        return clientes_visibles_para(db, user)
+    return clientes_visibles_para_usuarios(db, usuarios.values())
+
+
 def _resolver_cartera_visible(db: Session, user: User) -> CarteraScope:
     """Cálculo real de la cartera visible para `user` — sin caché (la cachea
     `clientes_visibles_para`, que es la función pública). Función pura: no

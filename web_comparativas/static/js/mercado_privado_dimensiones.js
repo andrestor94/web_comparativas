@@ -582,6 +582,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bindEvents();
     initDashboard();
+    initVerComoUsuario();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // "Ver como usuario" (admin-only, sep-2026) — ver mercado_privado_ver_como.js.
+    // El mount solo existe en el DOM si el template lo renderizó (user.is_admin()).
+    // ─────────────────────────────────────────────────────────────────────────
+    function initVerComoUsuario() {
+        const mount = document.getElementById('mpVerComoMount');
+        if (!mount || !window.MPVerComo) return;
+        window.MPVerComo.init(mount);
+        window.MPVerComo.onChange(() => {
+            loadDashboardData({ blocking: true, bypassSnapshot: true, force: true });
+        });
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // bindEvents
@@ -1267,6 +1281,10 @@ document.addEventListener('DOMContentLoaded', () => {
             fecha_desde:            rawFechaDesde,
             fecha_hasta:            rawFechaHasta,
             is_client:  elements.filterIsClient ? (elements.filterIsClient.value || null) : null,
+            // "Ver como usuario" (admin-only, sep-2026): sin selección, [] no viaja
+            // como query param (mismo criterio que el resto de los filtros vacíos) y
+            // el backend se comporta exactamente igual que hoy. Ver mercado_privado_ver_como.js.
+            ver_como_usuarios: (window.MPVerComo ? window.MPVerComo.getSelectedIds() : []),
         };
     }
 

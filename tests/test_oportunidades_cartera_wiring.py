@@ -227,6 +227,78 @@ def test_switch_prendido_via_http_endpoint(db, monkeypatch, escenario_cartera):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# "Ver como usuario" (Mercado Privado, admin-only, sep-2026) — vía HTTP real,
+# confirma el wiring completo (query param -> resolve_effective_scope -> /list).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _client_as(escenario_cartera, db, role_key):
+    app = FastAPI()
+    app.include_router(router.router)
+    app.dependency_overrides[router._perm_oportunidades] = lambda: escenario_cartera[role_key]
+    app.dependency_overrides[router.get_db] = lambda: db
+    return TestClient(app)
+
+
+def test_ver_como_admin_selecciona_analista_ve_solo_su_cartera(db, monkeypatch, escenario_cartera):
+    configure_list(monkeypatch, cartera_enabled=True)
+    with _client_as(escenario_cartera, db, "admin") as client:
+        response = client.get(
+            "/api/mercado-privado/oportunidades/list",
+            params={"ver_como_usuarios": escenario_cartera["analista"].id},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["total"] == 1
+    assert body["data"]["rows"][0]["cliente_visible"] == "Cliente A"
+
+
+def test_ver_como_admin_selecciona_supervisor_ve_su_cartera_de_operador(db, monkeypatch, escenario_cartera):
+    """Supervisor de este escenario tiene cartera propia por OPERADOR (Mercado
+    Público, cuenta BBB) — caso de prueba (b)."""
+    configure_list(monkeypatch, cartera_enabled=True)
+    with _client_as(escenario_cartera, db, "admin") as client:
+        response = client.get(
+            "/api/mercado-privado/oportunidades/list",
+            params={"ver_como_usuarios": escenario_cartera["supervisor"].id},
+        )
+    body = response.json()
+    clientes = {row["cliente_visible"] for row in body["data"]["rows"]}
+    assert clientes == {"Cliente A", "Cliente B"}
+
+
+def test_ver_como_admin_selecciona_dos_usuarios_ve_la_union(db, monkeypatch, escenario_cartera):
+    configure_list(monkeypatch, cartera_enabled=True)
+    with _client_as(escenario_cartera, db, "admin") as client:
+        response = client.get(
+            "/api/mercado-privado/oportunidades/list",
+            params=[
+                ("ver_como_usuarios", escenario_cartera["analista"].id),
+                ("ver_como_usuarios", escenario_cartera["analista2"].id),
+            ],
+        )
+    body = response.json()
+    clientes = {row["cliente_visible"] for row in body["data"]["rows"]}
+    assert clientes == {"Cliente A", "Cliente C"}
+
+
+def test_ver_como_ignorado_para_usuario_no_admin(db, monkeypatch, escenario_cartera):
+    """Seguridad: un no-admin (acá, el propio Supervisor) que mande
+    ver_como_usuarios en la URL a mano NO gana visibilidad ajena — el parámetro se
+    ignora por completo, server-side."""
+    configure_list(monkeypatch, cartera_enabled=True)
+    with _client_as(escenario_cartera, db, "supervisor") as client:
+        response = client.get(
+            "/api/mercado-privado/oportunidades/list",
+            params={"ver_como_usuarios": escenario_cartera["gerente"].id},
+        )
+    body = response.json()
+    clientes = {row["cliente_visible"] for row in body["data"]["rows"]}
+    # Sigue viendo exactamente lo de siempre (propia + equipo), NO el buffer de
+    # huérfanas que vería el Gerente.
+    assert clientes == {"Cliente A", "Cliente B"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Pieza 3: asignación manual — endpoint POST /asignar-analista/{summary_id}
 # (No depende de VendedorFusion ni de cartera_operadores/cartera_vendedores: solo
 # de rol y `reporta_a_id`, así que corre igual con o sin cartera cargada.)

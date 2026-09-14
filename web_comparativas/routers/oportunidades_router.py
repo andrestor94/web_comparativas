@@ -86,6 +86,20 @@ logger = logging.getLogger("wc.oportunidades.api")
 _perm_oportunidades = require_perm("mercado_privado.oportunidades")
 AllowedUser = Depends(_perm_oportunidades)
 
+
+def _ver_como_usuarios_query(
+    ver_como_usuarios: list[int] | None = Query(default=None),
+) -> list[int] | None:
+    """Selección de "Ver como usuario" (Mercado Privado, admin-only, sep-2026) para
+    endpoints de LECTURA (`/list`, `/papelera`). La autorización real (admin-only,
+    server-side, ignorando el parámetro por completo si `user` no es admin) vive en
+    `resolve_effective_scope`/`oportunidades_visibles_para` — acá solo se extrae el
+    valor crudo del query string. No se aplica a endpoints de escritura (enviar,
+    asignar-analista, rechazar, papelera recuperar/eliminar): esos siguen
+    autorizando contra el usuario REAL logueado — "Ver como usuario" es una
+    conveniencia de visualización, no una forma de actuar en nombre de otro."""
+    return ver_como_usuarios
+
 # Gate de ESCRITURA (regla vigente del proyecto, jul-2026): en visualización Gerente
 # se iguala a Auditor, pero en escritura queda AFUERA. Enviar a CRM es escritura →
 # admin/analista/supervisor. (El diseño de junio permitía override Admin/Gerente;
@@ -1023,6 +1037,7 @@ def _envio_to_dict(
 def oportunidades_list(
     request: Request,
     _user=AllowedUser,
+    ver_como_usuarios: list[int] | None = Depends(_ver_como_usuarios_query),
     db: Session = Depends(get_db),
 ):
     """Lista las oportunidades del run activo desde la tabla precalculada."""
@@ -1038,7 +1053,7 @@ def oportunidades_list(
     # default OFF: mientras esté apagado esta línea ni se ejecuta, `rows` sigue
     # siendo exactamente lo que ya era (mismas filas para todo el mundo, como hoy).
     if OPORTUNIDADES_CARTERA_ENABLED():
-        rows = oportunidades_visibles_para(db, _user, rows)
+        rows = oportunidades_visibles_para(db, _user, rows, ver_como_usuarios)
 
     # Cuenta de fusión: la del summary; para las filas viejas (summary anterior a la
     # columna) se resuelve en UNA query contra records, no por fila.
@@ -1107,7 +1122,9 @@ def oportunidades_list(
     }
 
 
-def _oportunidades_papelera_data(db: Session, user) -> dict[str, Any]:
+def _oportunidades_papelera_data(
+    db: Session, user, ver_como_usuarios: list[int] | None = None
+) -> dict[str, Any]:
     latest = _latest_success_import_run(db)
     if latest is None:
         return {
@@ -1140,7 +1157,9 @@ def _oportunidades_papelera_data(db: Session, user) -> dict[str, Any]:
     if OPORTUNIDADES_CARTERA_ENABLED():
         visibles = {
             row.id
-            for row in oportunidades_visibles_para(db, user, [row for _, row in pairs])
+            for row in oportunidades_visibles_para(
+                db, user, [row for _, row in pairs], ver_como_usuarios
+            )
         }
 
     enviados = set(
@@ -1177,10 +1196,11 @@ def _oportunidades_papelera_data(db: Session, user) -> dict[str, Any]:
 @router.get("/papelera")
 def oportunidades_papelera(
     user=AllowedUser,
+    ver_como_usuarios: list[int] | None = Depends(_ver_como_usuarios_query),
     db: Session = Depends(get_db),
 ):
     _require_enabled()
-    return {"ok": True, "data": _oportunidades_papelera_data(db, user)}
+    return {"ok": True, "data": _oportunidades_papelera_data(db, user, ver_como_usuarios)}
 
 
 @router.post("/rechazar/{summary_id}")

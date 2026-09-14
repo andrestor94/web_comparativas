@@ -127,6 +127,13 @@
         <div class="tech-toolbar dim-filter-panel">
             <div class="dim-filter-grid">
 
+                {% if user.is_admin() %}
+                <!-- VER COMO USUARIO (admin-only, sep-2026) -->
+                <div class="filter-group">
+                    <div id="mpVerComoMount"></div>
+                </div>
+                {% endif %}
+
                 <!-- PLATAFORMAS -->
                 <div class="filter-group dim-filter-platforms">
                     <label>Plataformas</label>
@@ -508,5 +515,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v32"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_ver_como.js') }}?v=1"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v33"></script>
 {% endblock %}

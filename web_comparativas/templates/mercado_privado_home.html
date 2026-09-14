@@ -50,6 +50,7 @@
 
 
 
+<script src="{{ url_for('static', path='js/mercado_privado_ver_como.js') }}?v=1"></script>
 <script>
     document.addEventListener('DOMContentLoaded', async () => {
         const clientEl = document.getElementById('kpiClientsHome');
@@ -61,7 +62,15 @@
 
         try {
             // Usar la sesion actual; localStorage puede pertenecer a otro usuario.
-            const response = await fetch('/api/mercado-privado/dimensiones/kpis', {
+            // "Ver como usuario" (admin-only, sep-2026): si hay selección persistida
+            // (mercado_privado_ver_como.js), se manda igual que en Dimensionamiento/
+            // Oportunidades — el backend la ignora por completo si este usuario no es
+            // admin, así que no hace falta chequear el rol acá.
+            const verComoIds = (window.MPVerComo ? window.MPVerComo.getSelectedIds() : []);
+            const qs = verComoIds.length
+                ? '?' + verComoIds.map((id) => 'ver_como_usuarios=' + encodeURIComponent(id)).join('&')
+                : '';
+            const response = await fetch('/api/mercado-privado/dimensiones/kpis' + qs, {
                 credentials: 'same-origin',
                 headers: { 'Accept': 'application/json' },
             });
