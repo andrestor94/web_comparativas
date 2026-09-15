@@ -289,30 +289,34 @@
   }
 
   /* ── campos bloqueados (readonly) ────────────────────────────────── */
+  function bloquearCampo(el) {
+    if (!el) return;
+    el.disabled = false;
+    el.removeAttribute('disabled');
+    el.readOnly = true;
+    el.setAttribute('readonly', 'readonly');
+    el.setAttribute('aria-readonly', 'true');
+    el.setAttribute('tabindex', '-1');
+    el.classList.add('is-readonly');
+  }
+
+  function habilitarCampo(el) {
+    if (!el) return;
+    el.disabled = false;
+    el.removeAttribute('disabled');
+    el.readOnly = false;
+    el.removeAttribute('readonly');
+    el.setAttribute('aria-readonly', 'false');
+    el.removeAttribute('tabindex');
+    el.classList.remove('is-readonly');
+  }
+
   function bloquearAutocompletados() {
-    [inpComprador, inpProvincia].forEach(function(el) {
-      if (!el) return;
-      el.disabled = false;
-      el.removeAttribute('disabled');
-      el.readOnly = true;
-      el.setAttribute('readonly', 'readonly');
-      el.setAttribute('aria-readonly', 'true');
-      el.setAttribute('tabindex', '-1');
-      el.classList.add('is-readonly');
-    });
+    [inpComprador, inpProvincia].forEach(bloquearCampo);
   }
 
   function habilitarCargaManual() {
-    [inpComprador, inpProvincia].forEach(function(el) {
-      if (!el) return;
-      el.disabled = false;
-      el.removeAttribute('disabled');
-      el.readOnly = false;
-      el.removeAttribute('readonly');
-      el.setAttribute('aria-readonly', 'false');
-      el.removeAttribute('tabindex');
-      el.classList.remove('is-readonly');
-    });
+    [inpComprador, inpProvincia].forEach(habilitarCampo);
   }
 
   function mostrarCuentaManualInfo(mostrar) {
@@ -551,18 +555,40 @@
 
     function rellenarAutocompletados(data) {
       if (!data) return;
-      modoCuentaManual = false;
-      mostrarCuentaManualInfo(false);
       restaurarPlaceholdersAutocompletar();
-      if (inpComprador && data.comprador) {
+
+      var tieneComprador = !!(inpComprador && data.comprador);
+      var tieneProvincia = !!(inpProvincia && data.provincia);
+
+      if (tieneComprador) {
         inpComprador.value = data.comprador;
         limpiarError('err_comprador');
+        bloquearCampo(inpComprador);
+      } else if (inpComprador) {
+        inpComprador.value = '';
+        inpComprador.placeholder = 'Complete comprador manualmente';
+        habilitarCampo(inpComprador);
       }
-      if (inpProvincia && data.provincia) {
+
+      if (tieneProvincia) {
         inpProvincia.value = data.provincia;
         limpiarError('err_provincia');
+        bloquearCampo(inpProvincia);
+      } else if (inpProvincia) {
+        inpProvincia.value = '';
+        inpProvincia.placeholder = 'Complete provincia/municipio manualmente';
+        habilitarCampo(inpProvincia);
       }
-      bloquearAutocompletados();
+
+      /* Falta habilitar carga manual: la cuenta existe pero algún dato no está en la base. */
+      modoCuentaManual = !(tieneComprador && tieneProvincia);
+      if (modoCuentaManual) {
+        setCuentaManualMensaje('Encontramos la cuenta, pero falta el dato de ' +
+          (!tieneComprador && !tieneProvincia ? 'comprador y provincia/municipio' :
+           !tieneComprador ? 'comprador' : 'provincia/municipio') +
+          '. Complételo manualmente.');
+      }
+      mostrarCuentaManualInfo(modoCuentaManual);
       sincronizarHints();
     }
 
