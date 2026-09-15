@@ -772,7 +772,10 @@ def match_desempeno(
         ).scalar_one() or 0)
 
     # ── Agregados por nivel (derivados, sin tablas nuevas) ───────────────
-    LV = ["A", "B", "C", "D"]
+    # Reusa NIVELES (única fuente de verdad, A-E): un LV local propio quedó
+    # hardcoded a A-D acá y se desincronizó de NIVELES sin que nadie lo notara
+    # hasta que el nivel E tuvo datos reales (set-2026).
+    LV = NIVELES
 
     def _por_nivel(rows):
         d = {k: 0 for k in LV}
