@@ -2390,10 +2390,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = L.DomUtil.create('div', 'dim-map-legend');
             const metricLabel = useVal ? 'Valorización' : 'Renglones';
             const maxLabel = useVal ? `$ ${formatAbbreviated(maxPositive)}` : formatInteger(maxPositive);
+            // "Valor cero" es un balde estructuralmente vacío en Renglones (una provincia
+            // solo entra al resultado si tiene >=1 fila, así que su conteo nunca es 0 —
+            // garantía del GROUP BY, no del dataset) y solo legítimo en Valorización
+            // (renglones sin precio / SIN DATO). El criterio para mostrar la fila es la
+            // métrica activa (`useVal`), NO cuántas provincias caen hoy en ese balde: en
+            // Valorización la fila se mantiene aunque, con los filtros actuales, ninguna
+            // provincia sume exactamente $0.
+            const zeroRow = useVal
+                ? `<div class="dim-map-legend-row"><span class="dim-map-legend-swatch" style="background:${MAP_ZERO_COLOR}"></span>Valor cero</div>`
+                : '';
             div.innerHTML = `
                 <span class="dim-map-legend-title">${metricLabel}</span>
                 <div class="dim-map-legend-row"><span class="dim-map-legend-swatch dim-map-legend-nodata"></span>Sin datos</div>
-                <div class="dim-map-legend-row"><span class="dim-map-legend-swatch" style="background:${MAP_ZERO_COLOR}"></span>Valor cero</div>
+                ${zeroRow}
                 <div class="dim-map-legend-row"><span class="dim-map-legend-swatch dim-map-legend-gradient" style="background:linear-gradient(90deg,${MAP_POSITIVE_COLORS.join(',')})"></span>Menor → mayor</div>
                 <div class="dim-map-legend-row">Máximo: ${maxLabel}</div>
             `;

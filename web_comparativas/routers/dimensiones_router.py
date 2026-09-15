@@ -37,6 +37,7 @@ from web_comparativas.dimensionamiento.query_service import (
 from web_comparativas.models import User, IS_SQLITE, IS_POSTGRES
 from web_comparativas.cartera_visibilidad import (
     resolve_effective_scope,
+    usuarios_con_cartera,
     DIMENSIONAMIENTO_CARTERA_ENABLED,
 )
 from web_comparativas.dimensionamiento.models import (
@@ -555,9 +556,18 @@ def dimensionamiento_ver_como_usuarios(
     (Mercado Privado, sep-2026) — alimenta el selector de fichas de la barra de
     filtros. El filtrado real de admin-only para APLICAR la selección vive en
     `cartera_visibilidad.resolve_effective_scope`; este endpoint solo expone el
-    padrón (ya gateado por AdminUser) para que el front arme la lista."""
+    padrón (ya gateado por AdminUser) para que el front arme la lista.
+
+    Acotado a usuarios con cartera real: solo entran aquellos para los que
+    `clientes_visibles_para` devolvería al menos una cuenta (`usuarios_con_cartera`,
+    resuelto en un puñado fijo de queries — nunca una por usuario, ver su
+    docstring). "Ver como" un admin/auditor (ya ven todo) o alguien sin cartera
+    asignada (fail-closed, cero cuentas) no aporta nada distinto de no seleccionar
+    a nadie, así que no tiene sentido ofrecerlos en la lista."""
+    con_cartera = usuarios_con_cartera(db)
     usuarios = (
         db.query(User.id, User.email, User.name, User.full_name, User.role)
+        .filter(User.id.in_(con_cartera))
         .order_by(User.full_name, User.name, User.email)
         .all()
     )

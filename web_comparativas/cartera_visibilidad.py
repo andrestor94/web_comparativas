@@ -40,7 +40,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from web_comparativas.models import User, CarteraOperador, CarteraVendedor
+from web_comparativas.models import User, UserReporte, CarteraOperador, CarteraVendedor
 from web_comparativas.fusion_name_matching import fusion_codes_for_user
 from web_comparativas.org_hierarchy import (
     analistas_a_cargo,
@@ -444,3 +444,106 @@ def _resolver_cartera_visible(db: Session, user: User) -> CarteraScope:
 
     # Cualquier otro rol: fail-closed.
     return NONE_
+
+
+def usuarios_con_cartera(db: Session) -> "frozenset[int]":
+    """IDs de usuarios para los que `clientes_visibles_para` devolvería AL MENOS UNA
+    cuenta — usado para acotar el padrón de "Ver como usuario" (sep-2026, Mercado
+    Privado) a usuarios con cartera real, en vez de listar a todo el mundo.
+
+    Resuelve el conjunto ENTERO en un número FIJO de queries (no una por usuario):
+    2 para traer usuarios y jerarquía completos, 2 para los padrones de cartera
+    (operadores/vendedores), y como mucho una tanda acotada al puñado de usuarios
+    con `cartera_fusion_enabled=True` (bandera rara, opt-in por usuario — ver
+    `fusion_name_matching.fusion_codes_for_user`, que ya sale gratis cuando está
+    apagada). Todo lo demás se resuelve en memoria con sets de Python. Deliberado:
+    llamar a `clientes_visibles_para` en un loop por usuario reproduciría el mismo
+    problema de performance ya visto en Aprobaciones Forecast (recorre la jerarquía
+    y pega la DB por cada Supervisor/Gerente, en vez de una sola vez para todos).
+
+    admin/auditor quedan AFUERA (unrestricted=True -> codigos_cliente vacío por
+    construcción, ver `ALL` arriba): "ver como" alguien que ya ve todo no aporta
+    nada distinto de no seleccionar a nadie."""
+    usuarios = db.query(User).all()
+    usuarios_por_id = {u.id: u for u in usuarios}
+
+    operador_codes_con_cuenta = {
+        row[0] for row in db.query(CarteraOperador.operador_codigo).distinct().all()
+    }
+    vendedor_unineg_por_codigo: dict[str, set[str]] = {}
+    for codigo, unineg in db.query(CarteraVendedor.vendedor_codigo, CarteraVendedor.unineg).distinct().all():
+        vendedor_unineg_por_codigo.setdefault(codigo, set()).add(unineg)
+
+    analistas_de: dict[int, list[User]] = {}
+    supervisores_de: dict[int, list[User]] = {}
+    for superior_id, subordinado_id in db.query(UserReporte.superior_id, UserReporte.subordinado_id).all():
+        hijo = usuarios_por_id.get(subordinado_id)
+        if hijo is None:
+            continue
+        rol_hijo = (hijo.role or "").strip().lower()
+        if rol_hijo in _ROLES_ANALISTA:
+            analistas_de.setdefault(superior_id, []).append(hijo)
+        elif rol_hijo in _ROLES_SUPERVISOR:
+            supervisores_de.setdefault(superior_id, []).append(hijo)
+
+    # Fusión: opt-in por usuario (columna, no flag global) y ya sale gratis (early
+    # return sin pegar la DB) para quien la tiene apagada — ver fusion_codes_for_user.
+    # Se resuelve UNA vez por usuario fusion-enabled (nunca dentro de un loop por
+    # cada Supervisor/Gerente que lo tenga en su equipo).
+    fusion_por_usuario: dict[int, tuple[set[str], set[str]]] = {}
+    for u in usuarios:
+        if getattr(u, "cartera_fusion_enabled", False):
+            fop, fven, _match = fusion_codes_for_user(db, u)
+            if fop or fven:
+                fusion_por_usuario[u.id] = (fop, fven)
+
+    def _tiene_cartera_propia(u: User, unineg_scope: "set[str] | None") -> bool:
+        """Mismo criterio que `_cartera_propia`, pero solo pregunta "¿hay algo?"
+        en vez de traer el set completo de cuentas — evita el `IN (...)` contra
+        cartera_operadores/cartera_vendedores por usuario."""
+        fop, fven = fusion_por_usuario.get(u.id, (set(), set()))
+        operadores = _codes(u.cartera_operador_codigos) | fop
+        if operadores & operador_codes_con_cuenta:
+            return True
+        vendedores = _codes(u.cartera_vendedor_codigos) | fven
+        if not vendedores:
+            return False
+        if unineg_scope is not None and not unineg_scope:
+            return False  # fail-closed: sin BU asignada, lado vendedor (ver _cartera_propia)
+        for codigo in vendedores:
+            disponibles = vendedor_unineg_por_codigo.get(codigo)
+            if not disponibles:
+                continue
+            if unineg_scope is None or (disponibles & unineg_scope):
+                return True
+        return False
+
+    def _equipo_tiene_cartera(miembros: list[User]) -> bool:
+        # Miembros heredados de un Supervisor/Gerente: unineg_scope=None, igual
+        # criterio que _cartera_de_equipo (nunca el UN del jefe, ver su docstring).
+        return any(_tiene_cartera_propia(m, None) for m in miembros)
+
+    resultado: set[int] = set()
+    for u in usuarios:
+        rol = (u.role or "").strip().lower()
+        if rol in _ROLES_FULL_READ:
+            continue
+        if rol in _ROLES_ANALISTA:
+            if _tiene_cartera_propia(u, None):
+                resultado.add(u.id)
+        elif rol in _ROLES_SUPERVISOR:
+            unineg_scope = _codes(u.cartera_unineg_scope)
+            if _tiene_cartera_propia(u, unineg_scope) or _equipo_tiene_cartera(analistas_de.get(u.id, [])):
+                resultado.add(u.id)
+        elif rol in _ROLES_GERENTE:
+            for supervisor in supervisores_de.get(u.id, []):
+                sup_unineg_scope = _codes(supervisor.cartera_unineg_scope)
+                if (
+                    _tiene_cartera_propia(supervisor, sup_unineg_scope)
+                    or _equipo_tiene_cartera(analistas_de.get(supervisor.id, []))
+                ):
+                    resultado.add(u.id)
+                    break
+        # cualquier otro rol: fail-closed, nunca entra (igual que _resolver_cartera_visible)
+
+    return frozenset(resultado)
