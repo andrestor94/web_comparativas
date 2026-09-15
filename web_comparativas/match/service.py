@@ -319,7 +319,7 @@ def detalle_articulo(
     run_id: int | None = None,
 ) -> dict[str, Any]:
     """Propuestas (descripciones de portal) de un artículo, ordenadas por score_mejor
-    DESC, cada una con su estado de homologación (join por producto_plataforma)."""
+    DESC, cada una con su estado de homologación (join por producto + candidato)."""
     rid = _resolve_run_id(db, run_id)
     base = {
         "run_id": rid,
@@ -334,7 +334,13 @@ def detalle_articulo(
     H = MatchHomologacion
     rows = db.execute(
         select(P, H)
-        .outerjoin(H, H.producto_plataforma == P.producto_plataforma)
+        .outerjoin(
+            H,
+            and_(
+                H.producto_plataforma == P.producto_plataforma,
+                H.codigo_elegido == P.candidato_codigo,
+            ),
+        )
         .where(P.import_run_id == rid, P.candidato_codigo == candidato_codigo)
         .order_by(P.score_mejor.desc(), P.id.asc())
     ).all()
@@ -415,8 +421,8 @@ def exportar_reporte_bytes(
     suma 2 columnas: 'homologado' y 'descartado' ('Sí'/vacío según la decisión vigente).
 
     SOLO LECTURA: no escribe en app.db (se puede correr con el server vivo). Una sola
-    consulta — LEFT JOIN propuestas↔homologaciones por `producto_plataforma` (único en la
-    corrida → no multiplica filas), sin N+1. Writer openpyxl `write_only` (memoria acotada
+    consulta — LEFT JOIN propuestas↔homologaciones por producto + candidato (único en
+    la corrida → no multiplica filas), sin N+1. Writer openpyxl `write_only` (memoria acotada
     para ~64k filas). Devuelve (buffer, run_id, filas_escritas)."""
     from openpyxl import Workbook
 
@@ -433,7 +439,13 @@ def exportar_reporte_bytes(
         cols = [getattr(P, attr) for _, attr in REPORTE_COLS]
         stmt = (
             select(*cols, H.decision)
-            .outerjoin(H, H.producto_plataforma == P.producto_plataforma)
+            .outerjoin(
+                H,
+                and_(
+                    H.producto_plataforma == P.producto_plataforma,
+                    H.codigo_elegido == P.candidato_codigo,
+                ),
+            )
             .where(P.import_run_id == rid)
             .order_by(P.id.asc())
             .execution_options(yield_per=2000)
@@ -471,7 +483,7 @@ def match_papelera(db: Session, run_id: int | None = None) -> dict[str, Any]:
 
     rows = db.execute(
         select(H, P.candidato_descripcion.label("art_desc"), P.nivel_confianza.label("nivel"))
-        .outerjoin(P, and_(
+        .join(P, and_(
             P.import_run_id == rid,
             P.producto_plataforma == H.producto_plataforma,
             P.candidato_codigo == H.codigo_elegido,
@@ -515,7 +527,7 @@ def match_resumen(db: Session, run_id: int | None = None) -> dict[str, Any]:
       - run_id
       - total_propuestas  : filas de la corrida (descripciones de portal con candidato).
       - total_articulos   : candidato_codigo distintos de la corrida.
-      - total_homologadas : filas en match_homologaciones con decision='homologado'.
+      - total_homologadas : decisiones homologadas cuya propuesta existe en la corrida.
       - pct_homologadas   : % de homologadas sobre total_propuestas (0..100, 1 decimal).
       - conteo_por_nivel  : {A,B,C,D,...} contados sobre la corrida vigente.
     """
@@ -561,9 +573,17 @@ def match_resumen(db: Session, run_id: int | None = None) -> dict[str, Any]:
     resumen["conteo_por_nivel"] = {k: conteo[k] for k in NIVELES if k in conteo}
 
     H = MatchHomologacion
+    active_proposal = select(P.id).where(
+        P.import_run_id == rid,
+        P.producto_plataforma == H.producto_plataforma,
+        P.candidato_codigo == H.codigo_elegido,
+    ).exists()
     resumen["total_homologadas"] = int(
         db.execute(
-            select(func.count(H.id)).where(H.decision == DECISION_HOMOLOGADO)
+            select(func.count(H.id)).where(
+                H.decision == DECISION_HOMOLOGADO,
+                active_proposal,
+            )
         ).scalar_one() or 0
     )
 
@@ -639,6 +659,11 @@ def match_desempeno(
 
     H = MatchHomologacion
     P = MatchPropuesta
+    active_proposal = select(P.id).where(
+        P.import_run_id == rid,
+        P.producto_plataforma == H.producto_plataforma,
+        P.candidato_codigo == H.codigo_elegido,
+    ).exists()
     es_hoy = case((func.date(H.updated_at) == hoy_str, 1), else_=0)
 
     rows = db.execute(
@@ -650,7 +675,7 @@ def match_desempeno(
             func.max(User.name).label("name"),
         )
         .outerjoin(User, User.email == H.usuario)
-        .where(H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO)
+        .where(H.decision == DECISION_HOMOLOGADO, active_proposal)
         .group_by(H.usuario)
     ).all()
 
@@ -684,6 +709,7 @@ def match_desempeno(
             select(func.count(H.id)).where(
                 H.usuario == usuario,
                 H.decision == DECISION_HOMOLOGADO,
+                active_proposal,
                 func.date(H.updated_at) >= lunes_str,
             )
         ).scalar_one() or 0)
@@ -719,7 +745,7 @@ def match_desempeno(
 
     # Avance del equipo: homologadas_total / propuestas accionables de la corrida.
     homol_equipo = int(db.execute(
-        select(func.count(H.id)).where(H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO)
+        select(func.count(H.id)).where(H.decision == DECISION_HOMOLOGADO, active_proposal)
     ).scalar_one() or 0)
     total_prop = int(db.execute(
         select(func.count(P.id)).where(
@@ -733,13 +759,16 @@ def match_desempeno(
 
     # Descartadas (equipo y usuario) de la corrida vigente — no afectan el avance.
     descartadas_equipo = int(db.execute(
-        select(func.count(H.id)).where(H.import_run_id == rid, H.decision == DECISION_DESCARTADO)
+        select(func.count(H.id)).where(H.decision == DECISION_DESCARTADO, active_proposal)
     ).scalar_one() or 0)
     descartadas_usuario = 0
     if usuario:
         descartadas_usuario = int(db.execute(
             select(func.count(H.id)).where(
-                H.import_run_id == rid, H.decision == DECISION_DESCARTADO, H.usuario == usuario)
+                H.decision == DECISION_DESCARTADO,
+                H.usuario == usuario,
+                active_proposal,
+            )
         ).scalar_one() or 0)
 
     # ── Agregados por nivel (derivados, sin tablas nuevas) ───────────────
@@ -774,7 +803,7 @@ def match_desempeno(
     homol_equipo_por_nivel = _por_nivel(db.execute(
         select(P.nivel_confianza, func.count(H.id))
         .select_from(H).join(P, join_cond)
-        .where(H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO)
+        .where(H.decision == DECISION_HOMOLOGADO)
         .group_by(P.nivel_confianza)
     ).all())
 
@@ -783,7 +812,7 @@ def match_desempeno(
         tu_por_nivel = _por_nivel(db.execute(
             select(P.nivel_confianza, func.count(H.id))
             .select_from(H).join(P, join_cond)
-            .where(H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO, H.usuario == usuario)
+            .where(H.decision == DECISION_HOMOLOGADO, H.usuario == usuario)
             .group_by(P.nivel_confianza)
         ).all())
 
@@ -804,17 +833,17 @@ def match_desempeno(
     hace7 = (hoy - dt.timedelta(days=6)).isoformat()
     hoy_equipo = int(db.execute(
         select(func.count(H.id)).where(
-            H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO,
+            H.decision == DECISION_HOMOLOGADO, active_proposal,
             func.date(H.updated_at) == hoy.isoformat())
     ).scalar_one() or 0)
     semana_equipo = int(db.execute(
         select(func.count(H.id)).where(
-            H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO,
+            H.decision == DECISION_HOMOLOGADO, active_proposal,
             func.date(H.updated_at) >= lunes_str)
     ).scalar_one() or 0)
     recientes_7d = int(db.execute(
         select(func.count(H.id)).where(
-            H.import_run_id == rid, H.decision == DECISION_HOMOLOGADO,
+            H.decision == DECISION_HOMOLOGADO, active_proposal,
             func.date(H.updated_at) >= hace7)
     ).scalar_one() or 0)
     ritmo_diario_7d = round(recientes_7d / 7.0, 2)
