@@ -4,7 +4,9 @@
 Uso (desde la raíz, con el venv activado):
     python scripts/rebuild_match_negocio_map.py
 
-Lee SOLO `dimensionamiento_records` (no toca sus índices ni datos). Vacía y repuebla
+Lee `dimensionamiento_records` (no toca sus índices ni datos) y, como respaldo para los
+códigos de la corrida vigente de Match sin demanda, el maestro de artículos de Forecast
+(`data/forecast_data/Articulos 1.csv` + `Negocios.csv`). Vacía y repuebla
 `match_negocio_map`. No toca match_propuestas ni match_import_runs.
 """
 from __future__ import annotations
@@ -34,7 +36,7 @@ def main() -> None:
         total = int(db.execute(select(func.count(MatchNegocioMap.codigo))).scalar_one() or 0)
         negs = db.execute(select(func.count(func.distinct(MatchNegocioMap.negocio)))).scalar_one()
         print(f"[REBUILD] match_negocio_map: antes={antes} -> ahora={total} (negocios distintos={negs})")
-        print(f"[REBUILD] filled={res['filled']}")
+        print(f"[REBUILD] filled={res['filled']} (desde maestro de artículos={res['desde_maestro']})")
         print("[REBUILD] OK")
     finally:
         db.close()

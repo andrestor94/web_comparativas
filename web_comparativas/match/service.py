@@ -10,8 +10,11 @@ La "corrida vigente" es la última `match_import_runs` en estado `approved`
 """
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import io
+import logging
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import and_, case, func, or_, select, text
@@ -38,6 +41,8 @@ from web_comparativas.papelera import (
     papelera_horas_restantes,
 )
 
+
+logger = logging.getLogger("wc.match.service")
 
 _PUNCT_RE = re.compile(r"[^a-z0-9]+")
 
@@ -104,11 +109,62 @@ def ensure_match_demanda_desc(db: Session | None = None) -> dict[str, int]:
 # Categoría para los códigos de Match sin entrada en el mapa de negocio.
 SIN_CLASIFICAR = "Sin clasificar"
 
+# Respaldo para códigos de Match sin demanda en Dimensionamiento: maestro de artículos
+# Suizo (unineg/sunineg) + tabla de nombres. Son los MISMOS archivos que usa Forecast
+# (forecast_service.MASTER_FILE / NEGOCIOS_FILE), con el mismo vocabulario de nombres
+# que `dimensionamiento_records` (verificado: coincide en el 100% de los códigos
+# clasificados por ambas fuentes).
+_FORECAST_DIR = Path(__file__).resolve().parent.parent / "data" / "forecast_data"
+_MAESTRO_ARTICULOS_FILE = _FORECAST_DIR / "Articulos 1.csv"
+_NEGOCIOS_NOMBRES_FILE = _FORECAST_DIR / "Negocios.csv"
+
+
+def _negocios_desde_maestro(codigos: set[str]) -> dict[str, tuple[str, str | None]]:
+    """(negocio, subnegocio) por código desde el maestro de artículos, SOLO para
+    `codigos`. El nombre del negocio es la fila (unidad, 0) de Negocios.csv y el del
+    subnegocio la fila (unidad, subunidad). Sin archivos o sin nombre → se omite (el
+    código queda 'Sin clasificar', como antes)."""
+    if not codigos:
+        return {}
+    if not (_MAESTRO_ARTICULOS_FILE.exists() and _NEGOCIOS_NOMBRES_FILE.exists()):
+        logger.warning("[MATCH] Maestro de artículos o Negocios.csv no encontrado en %s", _FORECAST_DIR)
+        return {}
+    nombres: dict[tuple[int, int], str] = {}
+    with _NEGOCIOS_NOMBRES_FILE.open("r", encoding="utf-8-sig", newline="") as fh:
+        for r in csv.DictReader(fh):
+            try:
+                nombres[(int(r["unidad"]), int(r["subunidad"]))] = (r["descrip"] or "").strip()
+            except (KeyError, TypeError, ValueError):
+                continue
+    out: dict[str, tuple[str, str | None]] = {}
+    # latin-1: mismo encoding con el que lo lee Forecast.
+    with _MAESTRO_ARTICULOS_FILE.open("r", encoding="latin-1", newline="") as fh:
+        for r in csv.DictReader(fh):
+            cod = (r.get("codigo") or "").strip()
+            if cod not in codigos or cod in out:
+                continue
+            try:
+                uni, sub = int(r["unineg"]), int(r["sunineg"] or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            negocio = nombres.get((uni, 0))
+            if negocio:
+                out[cod] = (negocio, nombres.get((uni, sub)) if sub else None)
+    return out
+
 
 def ensure_negocio_map(db: Session | None = None) -> dict[str, int]:
-    """Crea (si falta) y PUEBLA (si está vacía) `match_negocio_map` con un DISTINCT de
-    `dimensionamiento_records` (código → negocio/subnegocio). Idempotente; pensada para
-    correr al boot. No toca índices ni datos de dimensionamiento_records (solo lectura)."""
+    """Crea (si falta) y PUEBLA (si está vacía) `match_negocio_map`:
+
+    1. DISTINCT de `dimensionamiento_records` (código → negocio/subnegocio): fuente
+       principal, sin cambios.
+    2. Respaldo: los códigos de la corrida vigente de Match que no quedaron en el paso 1
+       se completan desde el maestro de artículos (`_negocios_desde_maestro`). Solo
+       códigos que usa Match, no el maestro entero (si no, el filtro mostraría negocios
+       sin artículos).
+
+    Idempotente; pensada para correr al boot. No toca índices ni datos de
+    dimensionamiento_records (solo lectura)."""
     from web_comparativas.models import SessionLocal, engine
 
     MatchNegocioMap.__table__.create(bind=engine, checkfirst=True)
@@ -118,6 +174,7 @@ def ensure_negocio_map(db: Session | None = None) -> dict[str, int]:
     try:
         total = int(db.execute(select(func.count(MatchNegocioMap.codigo))).scalar_one() or 0)
         filled = 0
+        desde_maestro = 0
         if total == 0:
             rows = db.execute(text(
                 "SELECT codigo_articulo, MAX(unidad_negocio), MAX(subunidad_negocio) "
@@ -129,12 +186,34 @@ def ensure_negocio_map(db: Session | None = None) -> dict[str, int]:
                 {"codigo": str(c).strip(), "negocio": n, "subnegocio": s}
                 for c, n, s in rows if c is not None and str(c).strip()
             ]
+            # Respaldo: códigos de la corrida vigente de Match sin demanda en Dimensionamiento.
+            run = latest_approved_run(db)
+            if run is not None:
+                ya = {b["codigo"] for b in batch}
+                faltan = {
+                    str(c).strip()
+                    for c in db.execute(
+                        select(MatchPropuesta.candidato_codigo)
+                        .where(
+                            MatchPropuesta.import_run_id == run.id,
+                            MatchPropuesta.candidato_codigo.isnot(None),
+                        )
+                        .distinct()
+                    ).scalars()
+                    if str(c).strip()
+                } - ya
+                extra = [
+                    {"codigo": c, "negocio": n, "subnegocio": s}
+                    for c, (n, s) in sorted(_negocios_desde_maestro(faltan).items())
+                ]
+                batch.extend(extra)
+                desde_maestro = len(extra)
             if batch:
                 db.bulk_insert_mappings(MatchNegocioMap, batch)
                 db.commit()
                 filled = len(batch)
             total = filled
-        return {"total": total, "filled": filled}
+        return {"total": total, "filled": filled, "desde_maestro": desde_maestro}
     finally:
         if own:
             db.close()

@@ -147,9 +147,10 @@ class MatchHomologacionEvento(Base):
 
 class MatchNegocioMap(Base):
     """Mapa compacto código de artículo → (negocio, subnegocio), precalculado UNA vez
-    desde `dimensionamiento_records` (~3.238 códigos). Permite filtrar el listado de
-    Match por negocio/subnegocio con un lookup chico, SIN joinear la tabla grande en
-    caliente. Regenerable con scripts/rebuild_match_negocio_map.py."""
+    desde `dimensionamiento_records`, completado con el maestro de artículos de Forecast
+    para los códigos de Match sin demanda (ver `ensure_negocio_map`). Permite filtrar el
+    listado de Match por negocio/subnegocio con un lookup chico, SIN joinear la tabla
+    grande en caliente. Regenerable con scripts/rebuild_match_negocio_map.py."""
 
     __tablename__ = "match_negocio_map"
 
