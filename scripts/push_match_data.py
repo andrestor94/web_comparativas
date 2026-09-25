@@ -13,6 +13,7 @@ Opcionales:
     --local-run 1      corrida local de Match a subir (default: última approved local)
     --resume-run 3     corrida REMOTA ya creada, para reanudar un push cortado
     --dry-run          mostrar conteos locales sin enviar nada
+    --solo-negocio-map subir SOLO match_negocio_map (sin propuestas, corrida ni demanda_desc)
     --batch 2000       filas por lote
     --timeout 180      timeout por lote, en segundos
 
@@ -78,9 +79,14 @@ def main() -> int:
     ap.add_argument("--solo-precalc", action="store_true",
                     help="subir SOLO match_negocio_map y match_demanda_desc (sin propuestas ni corrida nueva); "
                          "para cuando cambian los datos de Dimensionamiento pero no el Excel de propuestas")
+    ap.add_argument("--solo-negocio-map", action="store_true",
+                    help="como --solo-precalc pero SOLO match_negocio_map (no toca demanda_desc, "
+                         "propuestas ni homologaciones)")
     ap.add_argument("--batch", type=int, default=2000, help="filas por lote")
     ap.add_argument("--timeout", type=int, default=180, help="timeout por lote, en segundos")
     args = ap.parse_args()
+    if args.solo_negocio_map:
+        args.solo_precalc = True
 
     token = args.token or os.getenv("DIMENSIONAMIENTO_IMPORT_TOKEN")
     base = args.url.rstrip("/")
@@ -180,7 +186,7 @@ def main() -> int:
         for i, b in enumerate(nlotes, 1):
             d = chunk(kind="negocio-map", rows=b, reset=(reset and i == 1))
             print(f"   negocio-map lote {i}/{len(nlotes)}: total remoto {d.get('total')}", flush=True)
-        dlotes = list(_batches(demanda_rows, nb))
+        dlotes = [] if args.solo_negocio_map else list(_batches(demanda_rows, nb))
         for i, b in enumerate(dlotes, 1):
             d = chunk(kind="demanda-desc", rows=b, reset=(reset and i == 1))
             print(f"   demanda-desc lote {i}/{len(dlotes)}: total remoto {d.get('total')}", flush=True)
@@ -195,8 +201,9 @@ def main() -> int:
             print("✅ ========================================================")
         else:
             print("✅ ========================================================")
+            demanda_msg = "sin tocar" if args.solo_negocio_map else f"{len(demanda_rows)} filas"
             print(f"✅ PRECALC ACTUALIZADO: negocio_map={len(negocio_rows)} filas, "
-                  f"demanda_desc={len(demanda_rows)} filas (sin tocar propuestas).")
+                  f"demanda_desc={demanda_msg} (sin tocar propuestas).")
             print("✅ ========================================================")
     except (requests.exceptions.RequestException, RuntimeError) as e:
         print(f"\n❌ Cortó un lote: {e}")

@@ -220,17 +220,40 @@ def ensure_negocio_map(db: Session | None = None) -> dict[str, int]:
 
 
 def match_negocios(db: Session) -> dict[str, Any]:
-    """Árbol {negocio: [subnegocios...]} desde match_negocio_map + 'Sin clasificar'."""
-    rows = db.execute(
-        select(MatchNegocioMap.negocio, MatchNegocioMap.subnegocio).distinct()
-    ).all()
+    """Árbol {negocio: [subnegocios...]} de los artículos de la corrida vigente (el
+    mapa también trae códigos de Dimensionamiento que Match no usa: esos negocios no se
+    ofrecen) + 'Sin clasificar' (solo si la corrida tiene artículos sin mapear)."""
+    run = latest_approved_run(db)
     tree: dict[str, set] = {}
-    for neg, sub in rows:
-        neg = (neg or SIN_CLASIFICAR).strip() or SIN_CLASIFICAR
-        sub = (sub or SIN_CLASIFICAR).strip() or SIN_CLASIFICAR
-        tree.setdefault(neg, set()).add(sub)
-    # 'Sin clasificar' siempre disponible (códigos de Match sin mapear).
-    tree.setdefault(SIN_CLASIFICAR, set()).add(SIN_CLASIFICAR)
+    if run is not None:
+        P = MatchPropuesta
+        rows = db.execute(
+            select(MatchNegocioMap.negocio, MatchNegocioMap.subnegocio)
+            .where(
+                MatchNegocioMap.codigo.in_(
+                    select(P.candidato_codigo).where(P.import_run_id == run.id)
+                )
+            )
+            .distinct()
+        ).all()
+        for neg, sub in rows:
+            neg = (neg or SIN_CLASIFICAR).strip() or SIN_CLASIFICAR
+            sub = (sub or SIN_CLASIFICAR).strip() or SIN_CLASIFICAR
+            tree.setdefault(neg, set()).add(sub)
+        # 'Sin clasificar' = códigos de la corrida vigente sin entrada en el mapa (mismo
+        # criterio que el filtro de listar_articulos). Si no hay ninguno, no se ofrece.
+        hay_sin_mapear = db.execute(
+            select(P.id)
+            .where(
+                P.import_run_id == run.id,
+                P.candidato_codigo.isnot(None),
+                func.coalesce(P.candidato_codigo, "") != "",
+                P.candidato_codigo.notin_(select(MatchNegocioMap.codigo)),
+            )
+            .limit(1)
+        ).first()
+        if hay_sin_mapear is not None:
+            tree.setdefault(SIN_CLASIFICAR, set()).add(SIN_CLASIFICAR)
     out = {neg: sorted(subs) for neg, subs in sorted(tree.items())}
     return {"negocios": out}
 from web_comparativas.models import User
