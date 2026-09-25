@@ -9,7 +9,9 @@ from web_comparativas.match.models import (
     MATCH_RUN_APPROVED,
     MatchDemandaDesc,
     MatchHomologacion,
+    MatchHomologacionEvento,
     MatchImportRun,
+    MatchMonodrogaMap,
     MatchPropuesta,
 )
 from web_comparativas.match.service import detalle_articulo, match_desempeno, match_resumen
@@ -30,7 +32,9 @@ def db():
             MatchImportRun.__table__,
             MatchPropuesta.__table__,
             MatchHomologacion.__table__,
+            MatchHomologacionEvento.__table__,
             MatchDemandaDesc.__table__,
+            MatchMonodrogaMap.__table__,
         ],
     )
     session = sessionmaker(bind=engine)()

@@ -141,3 +141,41 @@ Nota: la app lee `APP_SECRET` del environment (verificado en `main.py::_get_app_
 | Push de Match corta | `--resume-run <n>`; la corrida nunca se aprueba incompleta |
 | Match no debería verse | `MATCH_ENABLED=0` en Environment (redeploy) |
 | Sesiones invalidadas molestan | Esperado tras APP_SECRET; avisar a los usuarios que re-logueen |
+
+---
+
+## Después de cada import de Match — monodroga (desde sep-2026)
+
+La monodroga que se ve debajo de cada artículo sale de Fusion (`dbo.vsl_art_alfabeta_full.monodroga`, catálogo Alfabeta). Render no llega a Fusion, así que el mapa `match_monodroga_map` se arma en local y se sube aparte. **El push completo de Match no lo toca.** Si no se regenera, la monodroga de los artículos nuevos no aparece. No hay error: simplemente no se ve.
+
+Después de cada import aprobado en local y de su push a prod (propuestas y `--solo-negocio-map`):
+
+1. **Regenerar el mapa local** (con VPN o red interna para llegar a Fusion; solo hace SELECT sobre Fusion):
+
+   ```powershell
+   .\.venv\Scripts\python.exe scripts/rebuild_match_monodroga_map.py
+   ```
+
+   La salida es `con monodroga: N de M (x%)` y `match_monodroga_map: antes=… -> ahora=N. OK`. Referencia del 25/09/2026: 2.637 de 10.018 (26,3%).
+
+2. **Subirlo a prod:**
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m scripts.push_match_data --url <URL> --solo-monodroga --dry-run
+   .\.venv\Scripts\python.exe -m scripts.push_match_data --url <URL> --solo-monodroga
+   ```
+
+   - El `--dry-run` tiene que decir que todos los códigos del mapa están en la corrida local vigente. Si avisa que hay códigos fuera, el mapa es de un import anterior: volver al paso 1.
+   - El primer lote vacía la tabla en prod y los siguientes insertan (2 lotes de 2.000). Si corta, se reejecuta el mismo comando.
+   - Con el mapa local vacío el script aborta y no envía nada, para no vaciar prod.
+   - Salida esperada: `✅ MONODROGA ACTUALIZADA: N filas`.
+
+3. **Verificar:**
+
+   ```powershell
+   curl.exe -s "<URL>/api/mercado-privado/match/admin/estado" -H "X-Import-Token: <TOKEN>"
+   ```
+
+   `"match_monodroga_map"` tiene que ser igual al N local.
+
+**Rollback:** borrar la monodroga no afecta nada más, porque la pantalla solo la muestra cuando existe. Para volver a un estado conocido, regenerar y subir de nuevo.

@@ -14,6 +14,8 @@ Opcionales:
     --resume-run 3     corrida REMOTA ya creada, para reanudar un push cortado
     --dry-run          mostrar conteos locales sin enviar nada
     --solo-negocio-map subir SOLO match_negocio_map (sin propuestas, corrida ni demanda_desc)
+    --solo-monodroga   subir SOLO match_monodroga_map (generarla antes con
+                       scripts/rebuild_match_monodroga_map.py). El push completo NO la toca.
     --batch 2000       filas por lote
     --timeout 180      timeout por lote, en segundos
 
@@ -48,6 +50,7 @@ from web_comparativas.match.models import (
     MATCH_RUN_APPROVED,
     MatchDemandaDesc,
     MatchImportRun,
+    MatchMonodrogaMap,
     MatchNegocioMap,
     MatchPropuesta,
 )
@@ -82,6 +85,10 @@ def main() -> int:
     ap.add_argument("--solo-negocio-map", action="store_true",
                     help="como --solo-precalc pero SOLO match_negocio_map (no toca demanda_desc, "
                          "propuestas ni homologaciones)")
+    ap.add_argument("--solo-monodroga", action="store_true",
+                    help="subir SOLO match_monodroga_map (reemplaza la de prod; no toca propuestas, "
+                         "homologaciones ni los otros mapas). Generarla antes con "
+                         "scripts/rebuild_match_monodroga_map.py")
     ap.add_argument("--batch", type=int, default=2000, help="filas por lote")
     ap.add_argument("--timeout", type=int, default=180, help="timeout por lote, en segundos")
     args = ap.parse_args()
@@ -90,6 +97,8 @@ def main() -> int:
 
     token = args.token or os.getenv("DIMENSIONAMIENTO_IMPORT_TOKEN")
     base = args.url.rstrip("/")
+    if args.solo_monodroga:
+        return _push_solo_monodroga(args, base, token)
 
     # 1) Leer LOCAL (y precalcular las tablas chicas si faltan — SOLO local).
     session = SessionLocal()
@@ -211,6 +220,70 @@ def main() -> int:
         print("   (no vigente). Reanudá con el MISMO comando agregando: --resume-run <run_remoto>")
         return 3
 
+    print(f"\n   Estado: curl.exe -s \"{base}{ESTADO_PATH}\" -H \"X-Import-Token: <TOKEN>\"")
+    return 0
+
+
+def _push_solo_monodroga(args, base, token) -> int:
+    """Sube SOLO match_monodroga_map: reset en el 1er lote + inserts idempotentes.
+    Con el mapa local vacío aborta (subirlo dejaría prod sin monodroga)."""
+    session = SessionLocal()
+    try:
+        MatchMonodrogaMap.__table__.create(bind=session.get_bind(), checkfirst=True)
+        rows = [
+            [m.codigo, m.monodroga]
+            for m in session.execute(select(MatchMonodrogaMap).order_by(MatchMonodrogaMap.codigo)).scalars()
+        ]
+        run = session.execute(
+            select(MatchImportRun)
+            .where(MatchImportRun.status == MATCH_RUN_APPROVED)
+            .order_by(MatchImportRun.finished_at.desc(), MatchImportRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        codigos_run = set()
+        if run is not None:
+            codigos_run = {
+                str(c).strip()
+                for c in session.execute(
+                    select(MatchPropuesta.candidato_codigo)
+                    .where(MatchPropuesta.import_run_id == run.id)
+                    .distinct()
+                ).scalars()
+                if c
+            }
+    finally:
+        session.close()
+
+    if not rows:
+        print("❌ match_monodroga_map local está vacía: correr antes "
+              "scripts/rebuild_match_monodroga_map.py (no se envía nada para no vaciar prod).")
+        return 2
+    en_run = sum(1 for c, _ in rows if c in codigos_run)
+    print(f"🔎 monodroga_map local: {len(rows)} filas; {en_run} de sus códigos están en la corrida "
+          f"local vigente {run.id if run else '—'} ({len(codigos_run)} artículos).", flush=True)
+    if en_run < len(rows):
+        print("⚠️  Hay códigos que no están en la corrida local vigente: ¿el mapa es de un import "
+              "anterior? Regenerarlo con scripts/rebuild_match_monodroga_map.py.", flush=True)
+    if args.dry_run:
+        print("🟡 --dry-run: no se envió nada.")
+        return 0
+    if not token:
+        print("❌ Falta el token. Pasá --token o definí DIMENSIONAMIENTO_IMPORT_TOKEN en el .env (KEY=valor).")
+        return 2
+
+    headers = {"X-Import-Token": token, "Content-Type": "application/json"}
+    lotes = list(_batches(rows, args.batch))
+    try:
+        for i, b in enumerate(lotes, 1):
+            d = _post_chunk(base, headers, {"kind": "monodroga-map", "rows": b, "reset": i == 1}, args.timeout)
+            print(f"   monodroga-map lote {i}/{len(lotes)}: total remoto {d.get('total')}", flush=True)
+    except (requests.exceptions.RequestException, RuntimeError) as e:
+        print(f"\n❌ Cortó un lote: {e}")
+        print("   Reejecutar el MISMO comando: el 1er lote vacía la tabla remota y se sube entera de nuevo.")
+        return 3
+    print("✅ ========================================================")
+    print(f"✅ MONODROGA ACTUALIZADA: {len(rows)} filas (sin tocar propuestas ni otros mapas).")
+    print("✅ ========================================================")
     print(f"\n   Estado: curl.exe -s \"{base}{ESTADO_PATH}\" -H \"X-Import-Token: <TOKEN>\"")
     return 0
 

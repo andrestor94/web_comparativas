@@ -489,6 +489,7 @@ from web_comparativas.match.models import (  # noqa: E402
     MATCH_RUN_PENDING,
     MatchDemandaDesc,
     MatchImportRun,
+    MatchMonodrogaMap,
     MatchNegocioMap,
     MatchPropuesta,
 )
@@ -525,6 +526,7 @@ def match_admin_estado(
         ).scalar_one() or 0)
     negocio_map = int(db.execute(select(func.count(MatchNegocioMap.codigo))).scalar_one() or 0)
     demanda_desc = int(db.execute(select(func.count(MatchDemandaDesc.desc_norm))).scalar_one() or 0)
+    monodroga_map = int(db.execute(select(func.count(MatchMonodrogaMap.codigo))).scalar_one() or 0)
     return {
         "ok": True,
         "match_enabled": MATCH_ENABLED(),
@@ -533,6 +535,7 @@ def match_admin_estado(
         "runs_pendientes": [{"id": r.id, "status": r.status, "rows": r.rows_inserted} for r in pendientes],
         "match_negocio_map": negocio_map,
         "match_demanda_desc": demanda_desc,
+        "match_monodroga_map": monodroga_map,
     }
 
 
@@ -550,6 +553,8 @@ def match_admin_apply_data_chunk(
       - 'negocio-map'  : payload.rows [[codigo, negocio, subnegocio],...]. payload.reset
                          (solo en el 1er lote) vacía la tabla antes (es chica).
       - 'demanda-desc' : payload.rows [[desc_norm, renglones, clientes],...]. Ídem reset.
+      - 'monodroga-map': payload.rows [[codigo, monodroga],...]. Ídem reset (la tabla se
+                         arma en local desde Fusion, que Render no alcanza).
       - 'finalize'     : payload.run_id + counts -> cierra la corrida y la APRUEBA
                          (pasa a vigente). Devuelve el estado.
     """
@@ -622,6 +627,20 @@ def match_admin_apply_data_chunk(
                 db.execute(_insert_ignore(MatchDemandaDesc), mappings)
             db.commit()
             total = int(db.execute(select(func.count(MatchDemandaDesc.desc_norm))).scalar_one() or 0)
+            return {"ok": True, "kind": kind, "insertadas": len(mappings), "total": total}
+
+        elif kind == "monodroga-map":
+            rows = payload.get("rows") or []
+            if payload.get("reset"):
+                borrados = db.execute(text("DELETE FROM match_monodroga_map")).rowcount
+                logger.info("[MATCH][PUSH] monodroga-map reset (borrados=%s)", borrados)
+            mappings = [{"codigo": str(c).strip(), "monodroga": str(m).strip()}
+                        for c, m in rows
+                        if c is not None and str(c).strip() and m and str(m).strip()]
+            if mappings:
+                db.execute(_insert_ignore(MatchMonodrogaMap), mappings)
+            db.commit()
+            total = int(db.execute(select(func.count(MatchMonodrogaMap.codigo))).scalar_one() or 0)
             return {"ok": True, "kind": kind, "insertadas": len(mappings), "total": total}
 
         elif kind == "finalize":

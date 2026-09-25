@@ -32,6 +32,7 @@ from web_comparativas.match.models import (
     MatchHomologacion,
     MatchHomologacionEvento,
     MatchImportRun,
+    MatchMonodrogaMap,
     MatchNegocioMap,
     MatchPropuesta,
 )
@@ -303,6 +304,18 @@ def _like_term(q: str | None) -> str | None:
     return f"%{s}%"
 
 
+def monodrogas_por_codigo(db: Session, codigos) -> dict[str, str]:
+    """{código: monodroga} desde el mapa chico (lookup por PK). Códigos sin fila no
+    vienen: el artículo no tiene monodroga cargada en la fuente."""
+    cods = {str(c).strip() for c in codigos if c and str(c).strip()}
+    if not cods:
+        return {}
+    return dict(db.execute(
+        select(MatchMonodrogaMap.codigo, MatchMonodrogaMap.monodroga)
+        .where(MatchMonodrogaMap.codigo.in_(cods))
+    ).all())
+
+
 def listar_articulos(
     db: Session,
     page: int = 1,
@@ -315,7 +328,13 @@ def listar_articulos(
 ) -> dict[str, Any]:
     """Maestro de artículos Suizo: agrupa `match_propuestas` de la corrida vigente por
     `candidato_codigo`. Devuelve por artículo: candidato_codigo, candidato_descripcion,
-    n_descripciones (COUNT), mejor_score (MAX) y mejor_nivel (MIN alfabético: A es mejor).
+    n_descripciones (COUNT), n_pendientes, mejor_score (MAX), mejor_nivel (MIN
+    alfabético: A es mejor) y monodroga (None si no está cargada).
+
+    Solo lista artículos con al menos una propuesta PENDIENTE (sin decisión vigente para
+    ese par producto + código, mismo join que el tablero): los ya resueltos salen de la
+    cola. Los agregados de score/nivel/descripciones son sobre TODAS sus propuestas, así
+    el orden no se mueve mientras se trabaja un artículo.
 
     SIEMPRE con LIMIT/OFFSET. Soporta búsqueda `q` (sobre descripción o código) y filtro
     por `nivel`.
@@ -368,9 +387,21 @@ def listar_articulos(
                 mq = mq.where(M.subnegocio == sub)
             conds.append(P.candidato_codigo.in_(mq))
 
-    # Total de artículos distintos (para la paginación), con los MISMOS filtros.
+    # Decisión vigente del par (producto + código). producto_plataforma es UNIQUE en
+    # match_homologaciones → el LEFT JOIN no multiplica filas.
+    H = MatchHomologacion
+    join_h = and_(
+        H.producto_plataforma == P.producto_plataforma,
+        H.codigo_elegido == P.candidato_codigo,
+    )
+    con_pendientes = P.candidato_codigo.in_(
+        select(P.candidato_codigo).select_from(P).outerjoin(H, join_h)
+        .where(*conds, H.id.is_(None))
+    )
+
+    # Total de artículos con pendientes (para la paginación), con los MISMOS filtros.
     total = db.execute(
-        select(func.count(func.distinct(P.candidato_codigo))).where(*conds)
+        select(func.count(func.distinct(P.candidato_codigo))).where(*conds, con_pendientes)
     ).scalar_one() or 0
 
     rows = db.execute(
@@ -378,21 +409,27 @@ def listar_articulos(
             P.candidato_codigo.label("candidato_codigo"),
             func.max(P.candidato_descripcion).label("candidato_descripcion"),
             func.count(P.id).label("n_descripciones"),
+            func.sum(case((H.id.is_(None), 1), else_=0)).label("n_pendientes"),
             func.max(P.score_mejor).label("mejor_score"),
             func.min(P.nivel_confianza).label("mejor_nivel"),
         )
-        .where(*conds)
+        .select_from(P)
+        .outerjoin(H, join_h)
+        .where(*conds, con_pendientes)
         .group_by(P.candidato_codigo)
         .order_by(func.max(P.score_mejor).desc(), P.candidato_codigo.asc())
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
 
+    monodrogas = monodrogas_por_codigo(db, (r.candidato_codigo for r in rows))
     articulos = [
         {
             "candidato_codigo": r.candidato_codigo,
             "candidato_descripcion": r.candidato_descripcion,
+            "monodroga": monodrogas.get(str(r.candidato_codigo).strip()),
             "n_descripciones": int(r.n_descripciones or 0),
+            "n_pendientes": int(r.n_pendientes or 0),
             "mejor_score": float(r.mejor_score) if r.mejor_score is not None else None,
             "mejor_nivel": r.mejor_nivel,
             # Fase 2 (vienen del 1,5M): aún no existen → placeholder explícito.
@@ -421,12 +458,17 @@ def detalle_articulo(
     run_id: int | None = None,
 ) -> dict[str, Any]:
     """Propuestas (descripciones de portal) de un artículo, ordenadas por score_mejor
-    DESC, cada una con su estado de homologación (join por producto + candidato)."""
+    DESC, cada una con su estado de homologación (join por producto + candidato).
+
+    Trae pendientes Y decididas (homologadas y descartadas): la vista separa las
+    pendientes de "Ver decididas". Una descartada lleva `recuperable` = sigue en la
+    papelera (misma regla que `match_papelera`): solo esas se pueden deshacer desde acá."""
     rid = _resolve_run_id(db, run_id)
     base = {
         "run_id": rid,
         "candidato_codigo": candidato_codigo,
         "candidato_descripcion": None,
+        "monodroga": None,
         "propuestas": [],
     }
     if rid is None or not candidato_codigo:
@@ -447,15 +489,24 @@ def detalle_articulo(
         .order_by(P.score_mejor.desc(), P.id.asc())
     ).all()
 
+    corte = papelera_corte(dt.datetime.utcnow())
+    EV = MatchHomologacionEvento
     propuestas = []
     descripcion = None
     for p, h in rows:
         if descripcion is None:
             descripcion = p.candidato_descripcion
-        # Las descartadas SALEN del listado (van a la papelera / quedan permanentes).
-        # Las homologadas se mantienen marcadas.
+        recuperable = None
         if h is not None and h.decision == DECISION_DESCARTADO:
-            continue
+            recuperable = bool(h.updated_at and h.updated_at >= corte) and not (
+                db.execute(
+                    select(func.count(EV.id)).where(
+                        EV.producto_plataforma == h.producto_plataforma,
+                        EV.decision == EVENTO_PAPELERA_ELIMINADO,
+                        EV.created_at >= h.updated_at,
+                    )
+                ).scalar_one() or 0
+            )
         propuestas.append({
             "producto_plataforma": p.producto_plataforma,
             "nivel_confianza": p.nivel_confianza,
@@ -472,6 +523,7 @@ def detalle_articulo(
                     "descripcion_elegida": h.descripcion_elegida,
                     "usuario": h.usuario,
                     "updated_at": h.updated_at.isoformat() if h.updated_at else None,
+                    "recuperable": recuperable,
                 }
                 if h is not None
                 else None
@@ -494,6 +546,7 @@ def detalle_articulo(
             pp["demanda"] = dmap.get(norms.get(pp["producto_plataforma"], ""))
 
     base["candidato_descripcion"] = descripcion
+    base["monodroga"] = monodrogas_por_codigo(db, [candidato_codigo]).get(candidato_codigo.strip())
     base["propuestas"] = propuestas
     return base
 

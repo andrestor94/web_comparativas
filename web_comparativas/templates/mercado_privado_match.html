@@ -253,6 +253,20 @@
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .art-code{ font-size:.74rem; color:var(--ink-500); margin-top:.15rem;
   font-variant-numeric:tabular-nums; }
+/* Monodroga (Alfabeta): guía para matchear, debajo del nombre. Solo si está cargada. */
+.art-mono, .ch-mono{ display:flex; align-items:center; gap:.3rem; min-width:0;
+  color:var(--m-steel); font-weight:500; }
+.art-mono{ font-size:.76rem; margin-top:.12rem; }
+.ch-mono{ font-size:.8rem; margin-top:.12rem; }
+.art-mono i, .ch-mono i{ flex:0 0 auto; font-size:.78rem; opacity:.85; }
+.art-mono span, .ch-mono span{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Fila/tarjeta que sale de la lista (colapsa alto para que lo de abajo suba). */
+.art-row.leaving, .cand.leaving{ opacity:0; overflow:hidden; pointer-events:none; }
+.cand.leaving{ transform:translateX(14px); }
+@media (prefers-reduced-motion: no-preference){
+  .art-row.leaving, .cand.leaving{ transition:opacity .22s ease, transform .22s ease, max-height .3s ease .1s,
+    min-height .3s ease .1s, margin .3s ease .1s, padding .3s ease .1s, border-width .3s ease .1s; }
+}
 .art-meta{ text-align:right; flex:0 0 auto; }
 /* Score discreto: el nivel ya lo comunica el anillo de color. Secundario/muted. */
 .art-score{ font-size:12px; font-weight:500; color:var(--ink-500);
@@ -269,6 +283,15 @@
   line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cand-head .ch-sub{ font-size:.76rem; color:var(--ink-500); margin-top:.15rem;
   font-variant-numeric:tabular-nums; }
+/* "Ver decididas (N)" / "Ver pendientes (N)": alterna la vista del panel derecho. */
+.dec-toggle{ flex:0 0 auto; display:inline-flex; align-items:center; gap:.35rem; background:#fff;
+  border:1px solid var(--m-hair); border-radius:var(--radius-pill); padding:.3rem .75rem;
+  font-family:inherit; font-size:.76rem; font-weight:600; color:var(--brand-azul); cursor:pointer;
+  white-space:nowrap; transition:border-color .15s, background .15s; }
+.dec-toggle:hover{ border-color:var(--m-secondary); background:var(--ink-050); }
+.dec-toggle.on{ background:var(--m-sel); border-color:var(--brand-azul); }
+.dec-toggle b{ font-variant-numeric:tabular-nums; }
+.dec-note{ margin:.75rem .9rem 0; font-size:.74rem; color:var(--ink-500); }
 
 /* ── Tarjeta de candidata (premium, barra de confianza) ─────────────── */
 .cand{ position:relative; overflow:hidden; background:#fff; border:1px solid var(--ink-200);
@@ -375,6 +398,11 @@
   transition:opacity .2s, transform .2s; z-index:1080; }
 .match-toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px); }
 .match-toast.err{ background:var(--match-lvl-D); }
+/* Aviso con acción ("Deshacer"): clickeable mientras está visible. */
+.match-toast.has-action.show{ pointer-events:auto; }
+.match-toast .toast-act{ background:none; border:none; margin-left:.85rem; padding:0; cursor:pointer;
+  font-family:inherit; font-size:.85rem; font-weight:700; color:#7fd8c4; }
+.match-toast .toast-act:hover{ text-decoration:underline; }
 
 /* ── Micro-interacciones (solo si el usuario no pidió reducir) ──────── */
 @media (prefers-reduced-motion: no-preference){
@@ -584,10 +612,33 @@
   function pct100(v){ return Number(v||0).toLocaleString("es-AR",{minimumFractionDigits:1,maximumFractionDigits:1})+"%"; }
   function w(v){ const n=(v==null||isNaN(v))?0:Math.max(0,Math.min(100, v*100)); return n.toFixed(2)+"%"; }
 
-  let toastT=null;
-  function toast(msg, isErr){
-    const t=$("matchToast"); t.textContent=msg; t.className="match-toast show"+(isErr?" err":"");
-    clearTimeout(toastT); toastT=setTimeout(()=>{ t.className="match-toast"; }, 2600);
+  let toastT=null, toastFn=null;
+  // action (opcional) = {label, fn}: botón en el aviso (p.ej. "Deshacer"), visible 6 s.
+  function toast(msg, isErr, action){
+    const t=$("matchToast");
+    toastFn = action ? action.fn : null;
+    t.innerHTML = esc(msg) + (action ? '<button class="toast-act" type="button">'+esc(action.label)+'</button>' : '');
+    t.className="match-toast show"+(isErr?" err":"")+(action?" has-action":"");
+    clearTimeout(toastT); toastT=setTimeout(hideToast, action ? 6000 : 2600);
+  }
+  function hideToast(){ $("matchToast").className="match-toast"; toastFn=null; }
+  $("matchToast").addEventListener("click", (e)=>{
+    if(!e.target.closest(".toast-act") || !toastFn) return;
+    const fn=toastFn; clearTimeout(toastT); hideToast(); fn();
+  });
+  // Saca un elemento de la lista colapsando su alto (lo de abajo sube). Resuelve al terminar.
+  function collapseOut(el){
+    return new Promise(res=>{
+      if(!el || !el.isConnected){ res(); return; }
+      if(REDUCE){ el.remove(); res(); return; }
+      el.style.maxHeight=el.offsetHeight+"px";
+      void el.offsetHeight;
+      el.classList.add("leaving");
+      el.style.maxHeight="0px"; el.style.minHeight="0px";
+      el.style.marginTop="0px"; el.style.marginBottom="0px";
+      el.style.paddingTop="0px"; el.style.paddingBottom="0px"; el.style.borderWidth="0px";
+      setTimeout(()=>{ el.remove(); res(); }, 420);
+    });
   }
   async function getJSON(url, opts){
     const r=await fetch(url, opts);
@@ -735,48 +786,80 @@
   }
 
   // ── Maestro de artículos ──────────────────────────────────────────────
-  async function loadArticulos(){
-    artList.innerHTML='<div class="match-empty">Cargando…</div>';
+  // Contador de la fila: "N desc." si no hay nada decidido; si no, "P de N pend.".
+  function countText(pend, total){
+    return pend>=total ? nint(total)+' desc.' : nint(pend)+' de '+nint(total)+' pend.';
+  }
+  function monoHTML(cls, mono){
+    return mono ? '<div class="'+cls+'" title="Monodroga (Alfabeta): '+esc(mono)+'"><i class="bi bi-capsule"></i><span>'+esc(mono)+'</span></div>' : '';
+  }
+  function rowByCode(code){
+    return Array.from(artList.querySelectorAll(".art-row")).find(r=>r.dataset.code===code) || null;
+  }
+  // Lleva la fila a la vista SOLO dentro de la lista (scrollIntoView movería la página).
+  function scrollRowIntoList(row){
+    const top=row.offsetTop, bot=top+row.offsetHeight;
+    if(top<artList.scrollTop) artList.scrollTop=top;
+    else if(bot>artList.scrollTop+artList.clientHeight) artList.scrollTop=bot-artList.clientHeight;
+  }
+
+  // La lista solo trae artículos con candidatas PENDIENTES (los resueltos salen).
+  // silent: re-consulta sin el "Cargando…" (tras una decisión), conservando la fila activa.
+  let _artReq=0;
+  async function loadArticulos(opts){
+    const silent=!!(opts&&opts.silent);
+    const my=++_artReq;
+    if(!silent) artList.innerHTML='<div class="match-empty">Cargando…</div>';
     const p=new URLSearchParams({ page:state.page, page_size:state.page_size });
     if(state.q) p.set("q", state.q);
     if(state.nivel) p.set("nivel", state.nivel);
     if(state.negocio) p.set("negocio", state.negocio);
     if(state.subnegocio) p.set("subnegocio", state.subnegocio);
     let data;
-    try{ data=(await getJSON(API+"/articulos?"+p.toString())).data; }
-    catch(e){ artList.innerHTML='<div class="match-empty">Error: '+esc(e.message)+'</div>'; return; }
+    try{ data=(await getJSON(API+"/articulos?"+p.toString(), {cache:"no-store"})).data; }
+    catch(e){ if(my===_artReq) artList.innerHTML='<div class="match-empty">Error: '+esc(e.message)+'</div>'; return; }
+    if(my!==_artReq) return;   // llegó una consulta más nueva
+
+    // Si la página quedó vacía porque se resolvió su último artículo, volver una.
+    if(!data.articulos.length && state.page>1 && data.total>0){
+      state.page=Math.max(1, data.total_pages); return loadArticulos(opts);
+    }
 
     renderFiltroInfo(data.total);
     state.total_pages=data.total_pages;
     if(!data.articulos.length){
       artList.innerHTML='<div class="match-empty"><i class="bi bi-inbox"></i>'+
-        (data.run_id ? "No hay artículos para este filtro." : "No hay una corrida aprobada. Importá propuestas y aprobá la corrida.")+'</div>';
+        (data.run_id ? "No quedan artículos con candidatas pendientes para este filtro." : "No hay una corrida aprobada. Importá propuestas y aprobá la corrida.")+'</div>';
       pager.style.display="none"; return;
     }
 
+    const scroll=artList.scrollTop;
     artList.innerHTML=data.articulos.map(a=>{
       const k=lv(a.mejor_nivel);
-      return '<div class="art-row" data-code="'+esc(a.candidato_codigo)+'">'+
+      return '<div class="art-row'+(a.candidato_codigo===state.selected?" active":"")+'" data-code="'+esc(a.candidato_codigo)+'">'+
         '<div class="ring lv-'+k+'">'+esc(a.mejor_nivel||"–")+'</div>'+
         '<div class="art-main">'+
           '<div class="art-desc" title="'+esc(a.candidato_descripcion||"")+'">'+esc(a.candidato_descripcion||"(sin descripción)")+'</div>'+
+          monoHTML("art-mono", a.monodroga)+
           '<div class="art-code">cód. '+esc(a.candidato_codigo)+'</div>'+
         '</div>'+
         '<div class="art-meta">'+
           '<div class="art-score">'+pct(a.mejor_score)+'</div>'+
-          '<div class="art-count">'+nint(a.n_descripciones)+' desc.</div>'+
+          '<div class="art-count">'+countText(a.n_pendientes, a.n_descripciones)+'</div>'+
         '</div></div>';
     }).join("");
-
-    artList.querySelectorAll(".art-row").forEach(row=>{
-      row.addEventListener("click", ()=>selectArticulo(row.dataset.code, row));
-    });
+    if(silent) artList.scrollTop=scroll;
 
     pager.style.display=(state.total_pages>1)?"flex":"none";
     $("pagerInfo").innerHTML='Página <b class="mono">'+data.page+'</b> de <b class="mono">'+state.total_pages+'</b>';
     $("pagerPrev").disabled=data.page<=1;
     $("pagerNext").disabled=data.page>=state.total_pages;
   }
+  // Delegación estable: las filas se re-renderizan en cada recarga.
+  artList.addEventListener("click", (e)=>{
+    const row=e.target.closest(".art-row");
+    if(row && !row.classList.contains("leaving")) selectArticulo(row.dataset.code, row);
+  });
 
   // ── Filtros Negocio / Subnegocio (cascada, mapa chico) ────────────────
   async function loadNegocios(){
@@ -800,7 +883,7 @@
     const info=$("filtroInfo");
     if(state.negocio || state.subnegocio){
       info.hidden=false;
-      info.innerHTML='<span><b>'+nint(total)+'</b> artículo'+(total===1?"":"s")+'</span>'+
+      info.innerHTML='<span><b>'+nint(total)+'</b> artículo'+(total===1?"":"s")+' con pendientes</span>'+
         '<button class="limpiar" id="filtroLimpiar">Limpiar</button>';
     }else{ info.hidden=true; info.innerHTML=""; }
   }
@@ -813,28 +896,33 @@
   }
 
   // ── Detalle / candidatas ──────────────────────────────────────────────
+  // CUR = artículo abierto: {head, monodroga, pend:[...], dec:[...]}. Las decididas
+  // (homologadas o descartadas) salen de la lista y se ven con "Ver decididas (N)".
+  let CUR=null, showDec=false, _selReq=0;
+
   async function selectArticulo(code, row){
-    state.selected=code;
+    const my=++_selReq;
+    state.selected=code; showDec=false;
     artList.querySelectorAll(".art-row.active").forEach(r=>r.classList.remove("active"));
-    if(row) row.classList.add("active");
+    row = row || rowByCode(code);
+    if(row){ row.classList.add("active"); scrollRowIntoList(row); }
 
     candList.innerHTML='<div class="scan"><div class="scan-bar"></div>Analizando coincidencias…</div>';
     let data;
     try{ data=(await getJSON(API+"/articulo?codigo="+encodeURIComponent(code), {cache:"no-store"})).data; }
-    catch(e){ candList.innerHTML='<div class="match-empty">Error: '+esc(e.message)+'</div>'; return; }
+    catch(e){ if(my===_selReq) candList.innerHTML='<div class="match-empty">Error: '+esc(e.message)+'</div>'; return; }
 
-    const paint=()=>renderCandidatas(data);
+    const paint=()=>{ if(my===_selReq) renderCandidatas(data); };
     if(REDUCE) paint(); else setTimeout(paint, 520);
   }
 
   function candCard(p, i, head){
     const k=lv(p.nivel_confianza);
     const h=p.homologacion;
-    const mark = (i===0)
+    const mark = (i===0 && !h)
       ? '<i class="bi bi-star-fill"></i> Mejor candidata'
       : '';
-    const decided = !!h;
-    const controls = decided ? estadoHTML(h) : actionsHTML();
+    const controls = h ? estadoHTML(h) : actionsHTML();
 
     const minis = SUB.map(s=>
       '<div class="mini">'+
@@ -874,34 +962,71 @@
     '</div>';
   }
 
+  // Estado de una decidida. Una descartada que ya salió de la papelera (vencida o
+  // eliminada definitivamente) no se puede deshacer desde acá: misma regla que la papelera.
   function estadoHTML(h){
     const homol=h.decision==="homologado";
+    const undo = (homol || h.recuperable)
+      ? '<button class="btn-undo" data-undo="1">Deshacer</button>'
+      : '<span class="estado-sello">· fuera de la papelera</span>';
     return '<span class="estado-badge '+(homol?"estado-homologado":"estado-descartado")+'">'+
       '<i class="bi '+(homol?"bi-check2-circle":"bi-x-circle")+'"></i>'+(homol?"Homologado":"Descartado")+'</span>'+
-      '<span class="estado-sello">por '+esc(h.usuario)+'</span>'+
-      '<button class="btn-undo" data-undo="1">Deshacer</button>';
+      '<span class="estado-sello">por '+esc(h.usuario)+'</span>'+undo;
   }
 
-  function renderCandidatas(data){
-    const k=lv(data.propuestas.length ? data.propuestas[0].nivel_confianza : "E");
-    const head={ codigo:data.candidato_codigo, desc:data.candidato_descripcion||"" };
-    const n=data.propuestas.length;
-    let html='<div class="cand-head">'+
-        '<div class="ring lg lv-'+k+'">'+esc(n?data.propuestas[0].nivel_confianza:"–")+'</div>'+
+  function renderCandidatas(data, animate){
+    const props=data.propuestas||[];
+    CUR={
+      head:{ codigo:data.candidato_codigo, desc:data.candidato_descripcion||"" },
+      monodroga:data.monodroga||null,
+      pend:props.filter(p=>!p.homologacion),
+      dec:props.filter(p=>!!p.homologacion),
+    };
+    if(showDec && !CUR.dec.length) showDec=false;
+    paintCandidatas(animate!==false);
+  }
+
+  function headHTML(){
+    const head=CUR.head, nP=CUR.pend.length, nD=CUR.dec.length, n=nP+nD;
+    const best=(CUR.pend[0]||CUR.dec[0]||{}).nivel_confianza;
+    const toggle = showDec
+      ? '<button class="dec-toggle on" data-dectoggle="1" type="button"><i class="bi bi-arrow-left"></i><span>Ver pendientes (<b>'+nint(nP)+'</b>)</span></button>'
+      : (nD ? '<button class="dec-toggle" data-dectoggle="1" type="button"><i class="bi bi-check2-all"></i><span>Ver decididas (<b>'+nint(nD)+'</b>)</span></button>' : '');
+    return '<div class="cand-head">'+
+        '<div class="ring lg lv-'+lv(best)+'">'+esc(best||"–")+'</div>'+
         '<div class="ch-main">'+
           '<div class="ch-desc" title="'+esc(head.desc)+'">'+esc(head.desc||"(sin descripción)")+'</div>'+
-          '<div class="ch-sub">cód. '+esc(head.codigo)+' · '+nint(n)+' '+(n===1?"descripción":"descripciones")+' de portal candidata'+(n===1?"":"s")+'</div>'+
-        '</div>'+
-        '<span class="live ch-live"><span class="dot"></span> '+nint(n)+' evaluadas</span>'+
+          monoHTML("ch-mono", CUR.monodroga)+
+          '<div class="ch-sub">cód. '+esc(head.codigo)+' · '+nint(nP)+' pendiente'+(nP===1?"":"s")+' de '+
+            nint(n)+' '+(n===1?"descripción":"descripciones")+' de portal</div>'+
+        '</div>'+toggle+
       '</div>';
+  }
 
-    if(!n){ candList.innerHTML=html+'<div class="match-empty">Sin candidatas.</div>'; return; }
-    html += data.propuestas.map((p,i)=>candCard(p, i, head)).join("");
+  // animate=false → repinta sin la cascada de entrada (tras deshacer desde "decididas").
+  function paintCandidatas(animate){
+    if(!CUR) return;
+    const list = showDec ? CUR.dec : CUR.pend;
+    let html=headHTML();
+    if(showDec){
+      html+='<div class="dec-note">Decididas de este artículo. "Deshacer" la devuelve a pendientes.</div>';
+    }
+    if(!CUR.pend.length && !CUR.dec.length){ html+='<div class="match-empty">Sin candidatas.</div>'; }
+    else if(!list.length){ html+='<div class="match-empty"><i class="bi bi-check2-all"></i>No quedan descripciones pendientes para este artículo.</div>'; }
+    else html+=list.map((p,i)=>candCard(p, i, CUR.head)).join("");
     candList.innerHTML=html;
+    if(!animate) candList.querySelectorAll(".cand").forEach(c=>{ c.style.animation="none"; });
+    candList.querySelectorAll(".hero-fill").forEach(el=>animate ? animateFill(el, el.dataset.w) : (el.style.width=el.dataset.w));
+  }
 
-    // Cascada: cada barra de confianza anima su ancho (transition-delay --d escalonado).
-    candList.querySelectorAll(".hero-fill").forEach(el=>animateFill(el, el.dataset.w));
-    // El wiring NO se re-cablea por tarjeta: lo maneja la delegación en candList.
+  // Tras sacar una tarjeta sin repintar todo: cabecera, estrella y contador de la fila.
+  function refreshHeadAndRow(){
+    const h=candList.querySelector(".cand-head");
+    if(h){ const tmp=document.createElement("div"); tmp.innerHTML=headHTML(); h.replaceWith(tmp.firstChild); }
+    const first=candList.querySelector(".cand:not(.leaving) .cand-mark");
+    if(first && !showDec) first.innerHTML='<i class="bi bi-star-fill"></i> Mejor candidata';
+    const row=rowByCode(CUR.head.codigo);
+    if(row){ const c=row.querySelector(".art-count"); if(c) c.textContent=countText(CUR.pend.length, CUR.pend.length+CUR.dec.length); }
   }
 
   // Botones de acción (sin XP). El botón Homologar dice solo "Homologar".
@@ -914,8 +1039,9 @@
   // pierde al re-renderizar candidatas ni al reemplazar los botones de una tarjeta.
   function wireCandListOnce(){
     candList.addEventListener("click", (e)=>{
+      if(e.target.closest("[data-dectoggle]")){ showDec=!showDec; paintCandidatas(true); candList.scrollTop=0; return; }
       const card = e.target.closest(".cand");
-      if(!card) return;
+      if(!card || card.classList.contains("leaving")) return;
       const tg = e.target.closest("[data-toggle]");
       if(tg){
         const br=card.querySelector(".cand-break"); if(!br) return;
@@ -932,6 +1058,9 @@
     });
   }
 
+  // Homologar / Descartar: la candidata SALE de la lista (las pendientes suben), aviso
+  // con "Deshacer" unos segundos y queda en "Ver decididas". Si era la última pendiente
+  // del artículo, el artículo sale de la lista izquierda y se abre el siguiente.
   async function decidir(accion, producto, codigo, descripcion, card){
     const box=card.querySelector(".cand-actions");
     const homBtn=box.querySelector('[data-act="homologar"]');
@@ -939,62 +1068,114 @@
     const body= accion==="homologar"
       ? { producto_plataforma:producto, codigo_elegido:codigo, descripcion_elegida:descripcion }
       : { producto_plataforma:producto, codigo_elegido:codigo };
+    let j;
     try{
-      const j=await getJSON(API+"/"+accion, {
+      j=await getJSON(API+"/"+accion, {
         method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
-      if(accion==="homologar"){
-        // Homologar: la candidata QUEDA marcada (badge + "Deshacer" vía delegación).
-        const showEstado=()=>{ box.innerHTML=estadoHTML({ decision:j.decision, usuario:j.usuario }); };
-        if(j.decision==="homologado" && homBtn && !REDUCE){
-          homBtn.innerHTML='<i class="bi bi-check2-circle"></i> ✓ Homologada';
-          setTimeout(showEstado, 700);
-        }else{ showEstado(); }
-        toast("Homologada ✓");
-        await loadDesempeno();
-      }else{
-        // Descartar: la candidata SALE de la lista y entra a la papelera.
-        toast("Descartada — a la papelera (recuperable 24 h)");
-        if(!REDUCE){
-          card.style.transition="opacity .25s, transform .25s";
-          card.style.opacity="0"; card.style.transform="translateY(-6px)";
-          await new Promise(r=>setTimeout(r, 240));
-        }
-        await reloadCandidatas();      // re-render del listado excluyendo descartados
-        await loadDesempeno();         // descartadas +1 con realce
-        await refreshPapelera();       // badge de papelera al día
-      }
     }catch(e){
       box.querySelectorAll("button").forEach(b=>b.disabled=false);
       console.error("[match] decidir error:", e);
       toast("Error: "+e.message, true);
+      return;
+    }
+    const homol=accion==="homologar";
+    toast(homol ? "Homologada ✓" : "Descartada — a la papelera (recuperable 24 h)", false,
+          { label:"Deshacer", fn:()=>deshacerDecision(producto, codigo) });
+
+    // Pasar la propuesta de pendientes a decididas (si el artículo sigue abierto).
+    const esteArt = CUR && CUR.head.codigo===codigo;
+    if(esteArt){
+      const idx=CUR.pend.findIndex(p=>p.producto_plataforma===producto);
+      if(idx>=0){
+        const p=CUR.pend.splice(idx,1)[0];
+        p.homologacion={ decision:j.decision, usuario:j.usuario, recuperable:!homol };
+        CUR.dec.unshift(p);
+      }
+    }
+    if(homol && homBtn && !REDUCE){
+      homBtn.innerHTML='<i class="bi bi-check2-circle"></i> ✓ Homologada';
+      await new Promise(r=>setTimeout(r, 350));
+    }
+    await collapseOut(card);
+    if(esteArt && CUR && CUR.head.codigo===codigo){
+      refreshHeadAndRow();
+      if(!CUR.pend.length && !CUR.resuelto){ CUR.resuelto=true; articuloResuelto(codigo); }
+    }
+
+    loadDesempeno();                 // tablero (homologadas/descartadas/ranking) con realce
+    if(!homol) refreshPapelera();    // badge de papelera al día
+  }
+
+  // Artículo sin pendientes: sale de la lista izquierda y se abre el siguiente
+  // (el de abajo; si era el último de la página, el de arriba).
+  async function articuloResuelto(codigo){
+    const row=rowByCode(codigo);
+    let sig=null;
+    if(row){
+      let n=row.nextElementSibling; while(n && !n.matches(".art-row:not(.leaving)")) n=n.nextElementSibling;
+      let p=row.previousElementSibling; while(p && !p.matches(".art-row:not(.leaving)")) p=p.previousElementSibling;
+      sig=(n||p) ? (n||p).dataset.code : null;
+      await collapseOut(row);
+    }
+    if(state.selected!==codigo) return;   // el usuario ya eligió otro artículo
+    await loadArticulos({ silent:true });  // verdad del server (paginación sin huecos)
+    if(state.selected!==codigo) return;
+    const next=(sig && rowByCode(sig)) || artList.querySelector(".art-row");
+    if(next){ selectArticulo(next.dataset.code, next); }
+    else{
+      state.selected=null; CUR=null;
+      candList.innerHTML='<div class="match-empty"><i class="bi bi-check2-all"></i>No quedan artículos con candidatas pendientes para este filtro.</div>';
     }
   }
 
-  // Re-fetch del artículo seleccionado y re-render de candidatas (excluye descartados).
-  async function reloadCandidatas(){
+  // "Deshacer" del aviso: revierte y vuelve a abrir ese artículo (reaparece en la lista
+  // si había salido).
+  async function deshacerDecision(producto, codigo){
+    try{
+      const r=await getJSON(API+"/revertir", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ producto_plataforma:producto }) });
+      toast("Decisión revertida");
+      loadDesempeno();
+      if(r.decision_previa==="descartado") refreshPapelera();
+    }catch(e){ console.error("[match] deshacer error:", e); toast("Error: "+e.message, true); return; }
+    await loadArticulos({ silent:true });
+    selectArticulo(codigo);
+  }
+
+  // Re-fetch del artículo seleccionado y re-render (conserva la vista pendientes/decididas).
+  async function reloadCandidatas(animate){
     if(!state.selected) return;
+    const my=++_selReq;
     try{
       const data=(await getJSON(API+"/articulo?codigo="+encodeURIComponent(state.selected), {cache:"no-store"})).data;
-      renderCandidatas(data);
+      if(my!==_selReq) return;
+      renderCandidatas(data, !!animate);
+      refreshHeadAndRow();
     }catch(e){ console.error("[match] reloadCandidatas error:", e); }
   }
 
-  // "Deshacer" REVIERTE de verdad: borra la fila vigente en la base y refresca el tablero.
+  // "Deshacer" desde "Ver decididas": borra la decisión vigente y la candidata vuelve a
+  // pendientes.
   async function revertir(card){
     const box=card.querySelector(".cand-actions");
     if(box) box.querySelectorAll("button").forEach(b=>b.disabled=true);
+    let r;
     try{
-      await getJSON(API+"/revertir", {
+      r=await getJSON(API+"/revertir", {
         method:"POST", headers:{ "Content-Type":"application/json" },
         body:JSON.stringify({ producto_plataforma:card.dataset.prod }) });
-      if(box) box.innerHTML=actionsHTML();   // la candidata vuelve a "sin decidir"
-      toast("Decisión revertida");
-      await loadDesempeno();                 // tablero coherente (homologadas/descartadas/avance)
     }catch(e){
       if(box) box.querySelectorAll("button").forEach(b=>b.disabled=false);
       console.error("[match] revertir error:", e);
       toast("Error: "+e.message, true);
+      return;
     }
+    toast("Decisión revertida — vuelve a pendientes");
+    await collapseOut(card);
+    await reloadCandidatas(false);
+    loadDesempeno();                 // tablero coherente (homologadas/descartadas/avance)
+    if(r.decision_previa==="descartado") refreshPapelera();
   }
 
   // ── Papelera de descartados (recuperable 24h) ─────────────────────────
@@ -1055,7 +1236,8 @@
         body:JSON.stringify({ producto_plataforma:prod }) });
       toast("Restaurada a la lista");
     }catch(e){ console.error("[match] restaurar error:", e); toast("Error: "+e.message, true); return; }
-    await refreshPapelera(); await loadDesempeno(); await reloadCandidatas();
+    // El artículo puede volver a la lista izquierda (vuelve a tener una pendiente).
+    await refreshPapelera(); await loadDesempeno(); await loadArticulos({ silent:true }); await reloadCandidatas();
   }
   async function eliminarPap(prod){
     try{

@@ -159,6 +159,20 @@ class MatchNegocioMap(Base):
     subnegocio = Column(Text, nullable=True, index=True)
 
 
+class MatchMonodrogaMap(Base):
+    """Mapa compacto código de artículo → monodroga, guía visual para matchear.
+
+    Snapshot de Fusion (`dbo.vsl_art_alfabeta_full.monodroga`, catálogo Alfabeta) SOLO
+    para los códigos de la corrida vigente de Match y SOLO los que la tienen cargada
+    (sin fila = sin monodroga; no se completa con otra fuente). Fusion no es accesible
+    desde Render: se genera local con scripts/rebuild_match_monodroga_map.py."""
+
+    __tablename__ = "match_monodroga_map"
+
+    codigo = Column(String(120), primary_key=True)
+    monodroga = Column(Text, nullable=False)
+
+
 class MatchDemandaDesc(Base):
     """Resumen compacto por DESCRIPCIÓN de portal normalizada → demanda agregada,
     precalculado UNA vez desde `dimensionamiento_records`. `desc_norm` es la misma
