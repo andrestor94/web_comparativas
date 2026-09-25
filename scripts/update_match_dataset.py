@@ -131,7 +131,11 @@ def _decided_pairs_local(db) -> tuple[list[dict], int]:
 
 def _decided_pairs_prod() -> tuple[list[dict], int]:
     """Igual que _decided_pairs_local pero contra PRODUCCIÓN, en sesión de SOLO
-    LECTURA (default_transaction_read_only). Solo SELECT."""
+    LECTURA (default_transaction_read_only). Solo SELECT.
+
+    Si el par decidido no está en la corrida vigente de prod (p. ej. se decidió sobre
+    la corrida anterior mientras corría el push de la nueva), se toman nivel y scores
+    de la corrida aprobada más reciente de prod que lo tenga."""
     import os
 
     import psycopg2
@@ -148,24 +152,32 @@ def _decided_pairs_prod() -> tuple[list[dict], int]:
         cur = con.cursor()
         cur.execute(
             "SELECT id FROM match_import_runs WHERE status = %s "
-            "ORDER BY finished_at DESC, id DESC LIMIT 1",
+            "ORDER BY finished_at DESC, id DESC",
             (MATCH_RUN_APPROVED,),
         )
-        source_run = cur.fetchone()[0]
-        cur.execute(
-            "SELECT h.decision, " + ", ".join(f"p.{c}" for c in _PROPUESTA_COLS) + " "
-            "FROM match_homologaciones h "
-            "LEFT JOIN match_propuestas p ON p.import_run_id = %s "
-            " AND p.producto_plataforma = h.producto_plataforma "
-            " AND p.candidato_codigo = h.codigo_elegido",
-            (source_run,),
-        )
-        rows = cur.fetchall()
+        approved_runs = [r[0] for r in cur.fetchall()]  # vigente primero
+        cur.execute("SELECT id FROM match_homologaciones")
+        pending = {r[0] for r in cur.fetchall()}
+        found: list[dict] = []
+        for source_run in approved_runs:
+            if not pending:
+                break
+            cur.execute(
+                "SELECT h.id, h.decision, " + ", ".join(f"p.{c}" for c in _PROPUESTA_COLS) + " "
+                "FROM match_homologaciones h "
+                "JOIN match_propuestas p ON p.import_run_id = %s "
+                " AND p.producto_plataforma = h.producto_plataforma "
+                " AND p.candidato_codigo = h.codigo_elegido",
+                (source_run,),
+            )
+            for hid, *row in cur.fetchall():
+                if hid in pending:
+                    pending.discard(hid)
+                    found.append(dict(zip(("decision", *_PROPUESTA_COLS), row)))
         con.rollback()
     finally:
         con.close()
-    found = [dict(zip(("decision", *_PROPUESTA_COLS), r)) for r in rows if r[1] is not None]
-    return found, len(rows) - len(found)
+    return found, len(pending)
 
 
 def _carry_decided_pairs(db, run_id: int, source: str) -> dict:
