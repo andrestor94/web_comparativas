@@ -1936,26 +1936,18 @@ def _entity_registry(session: Session, import_run_id: int | None) -> dict[str, A
     return result
 
 
-def _cuenta_to_entidad_map(session: Session, import_run_id: int | None) -> dict[str, set[int]]:
-    """{cuenta_interna: {cliente_entidad_id, ...}} de TODA la corrida — sin filtrar por
-    cartera (sería circular). Cacheado por run_id, igual que _entity_registry: sin esto,
-    cada resolución de cartera sería un full scan de dimensionamiento_records (no hay
-    índice sobre cuenta_interna — medido: ~330ms sobre 365k filas locales)."""
-    cached = _CUENTA_ENTIDAD_CACHE.get(import_run_id)
-    if cached is not None:
-        return cached
-
-    # Ancla precalculada (ver DimensionamientoImportRun.cuenta_entidad_map): si el
-    # run ya la tiene, se usa directo y se puebla la cache en memoria desde ahí —
-    # cero query. NULL (runs viejos, o el cálculo corriendo ahora mismo desde
-    # refresh_default_dashboard_snapshot) cae al camino de siempre, más abajo.
-    if import_run_id is not None:
-        run = session.get(DimensionamientoImportRun, import_run_id)
-        if run is not None and run.cuenta_entidad_map is not None:
-            mapping = {cuenta: set(ids) for cuenta, ids in run.cuenta_entidad_map.items()}
-            _CUENTA_ENTIDAD_CACHE[import_run_id] = mapping
-            return mapping
-
+def _cuenta_to_entidad_map_from_records(session: Session, import_run_id: int | None) -> dict[str, set[int]]:
+    """{cuenta_interna: {cliente_entidad_id, ...}} recalculado SIEMPRE contra
+    dimensionamiento_records — ignora a propósito el ancla precalculada
+    (DimensionamientoImportRun.cuenta_entidad_map) Y el caché en memoria
+    (_CUENTA_ENTIDAD_CACHE). Es el único camino confiable para RECALCULAR el
+    ancla (backfill_dimensionamiento_dashboard_anchors.py la usa para eso):
+    _cuenta_to_entidad_map() de abajo lee el ancla primero, así que si se la
+    llamara para recomputar el propio ancla se mordería la cola — leería el
+    valor viejo guardado (aunque esté vacío) y lo devolvería como si fuera el
+    recálculo, sin tocar la base (bug real detectado set-2026: el backfill
+    "calculó" cuenta_entidad_map en 0.1ms, el mismo tiempo que platform_values,
+    porque en los hechos solo estaba releyendo el {} ya persistido)."""
     mapping: dict[str, set[int]] = {}
     if import_run_id is not None:
         rows = session.execute(
@@ -1967,6 +1959,36 @@ def _cuenta_to_entidad_map(session: Session, import_run_id: int | None) -> dict[
         ).all()
         for cuenta, entidad_id in rows:
             mapping.setdefault(str(cuenta).strip(), set()).add(entidad_id)
+    return mapping
+
+
+def _cuenta_to_entidad_map(session: Session, import_run_id: int | None) -> dict[str, set[int]]:
+    """{cuenta_interna: {cliente_entidad_id, ...}} de TODA la corrida — sin filtrar por
+    cartera (sería circular). Cacheado por run_id, igual que _entity_registry: sin esto,
+    cada resolución de cartera sería un full scan de dimensionamiento_records (no hay
+    índice sobre cuenta_interna — medido: ~330ms sobre 365k filas locales).
+
+    LECTURA, no recálculo: usa el ancla precalculada si existe. Para forzar un
+    recálculo real contra dimensionamiento_records (p.ej. desde un backfill que
+    recalcula esa misma ancla), usar `_cuenta_to_entidad_map_from_records`
+    directo — llamar a ESTA función para eso se muerde la cola (lee el ancla
+    vieja y la devuelve como si fuera el recálculo)."""
+    cached = _CUENTA_ENTIDAD_CACHE.get(import_run_id)
+    if cached is not None:
+        return cached
+
+    # Ancla precalculada (ver DimensionamientoImportRun.cuenta_entidad_map): si el
+    # run ya la tiene, se usa directo y se puebla la cache en memoria desde ahí —
+    # cero query. NULL (runs viejos, o el cálculo corriendo ahora mismo desde
+    # refresh_default_dashboard_snapshot) cae al camino de siempre, más abajo.
+    if import_run_id is not None:
+        run = session.get(DimensionamientoImportRun, import_run_id)
+        if run is not None and run.cuenta_entidad_map:
+            mapping = {cuenta: set(ids) for cuenta, ids in run.cuenta_entidad_map.items()}
+            _CUENTA_ENTIDAD_CACHE[import_run_id] = mapping
+            return mapping
+
+    mapping = _cuenta_to_entidad_map_from_records(session, import_run_id)
     _CUENTA_ENTIDAD_CACHE[import_run_id] = mapping
     return mapping
 
