@@ -6,6 +6,8 @@ import datetime as dt
 from typing import Iterable, List
 import re  # <-- para normalizar procesos
 import logging
+import contextvars
+import threading
 
 try:
     from dotenv import load_dotenv
@@ -185,7 +187,89 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
 
 # Session factory + scoped_session
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=True, future=True)
-db_session = scoped_session(SessionLocal)
+
+
+# ----------------------------------------------------------------------
+# db_session con scope de REQUEST (una sola sesión/conexión por request)
+# ----------------------------------------------------------------------
+# Antes db_session era thread-local. Los endpoints sync corren en el threadpool de
+# anyio, pero el middleware limpiaba db_session desde el thread del event loop: la
+# sesión de cada worker thread quedaba con su transacción abierta y su conexión
+# TOMADA del pool hasta que ese thread atendiera otro request. Con 40 workers y un
+# pool de 15+10, el pool se agotaba solo ("QueuePool limit ... timed out").
+#
+# Ahora, dentro de un request, db_session devuelve la MISMA sesión que
+# request.state.db (el ContextVar se propaga del middleware a los threads del
+# threadpool), y el middleware la cierra al final. Fuera de un request (scripts,
+# threads de background, tareas posteriores a la respuesta) sigue siendo thread-local.
+class _RequestDbScope:
+    __slots__ = ("session", "active", "token")
+
+    def __init__(self, session):
+        self.session = session
+        self.active = True
+        self.token = None
+
+
+_request_db_scope: contextvars.ContextVar = contextvars.ContextVar("wc_request_db_scope", default=None)
+
+
+class _RequestOrThreadRegistry:
+    """Registry para scoped_session: sesión del request activo o, si no hay, thread-local."""
+
+    def __init__(self, createfunc):
+        self.createfunc = createfunc
+        self._local = threading.local()
+
+    def _holder(self):
+        scope = _request_db_scope.get()
+        if scope is not None and scope.active:
+            return scope
+        return self._local
+
+    def __call__(self):
+        holder = self._holder()
+        session = getattr(holder, "session", None)
+        if session is None:
+            session = holder.session = self.createfunc()
+        return session
+
+    def has(self) -> bool:
+        return getattr(self._holder(), "session", None) is not None
+
+    def set(self, obj) -> None:
+        self._holder().session = obj
+
+    def clear(self) -> None:
+        self._holder().session = None
+
+
+class _RequestScopedSession(scoped_session):
+    def __init__(self, session_factory):
+        super().__init__(session_factory)
+        self.registry = _RequestOrThreadRegistry(session_factory)
+
+
+db_session = _RequestScopedSession(SessionLocal)
+
+
+def begin_request_db_scope(session) -> _RequestDbScope:
+    """Liga `session` (request.state.db) como db_session del request en curso."""
+    scope = _RequestDbScope(session)
+    scope.token = _request_db_scope.set(scope)
+    return scope
+
+
+def end_request_db_scope(scope: _RequestDbScope) -> None:
+    """Cierra la sesión del request y desactiva el scope. Siempre en el finally del middleware."""
+    scope.active = False
+    session, scope.session = scope.session, None
+    try:
+        _request_db_scope.reset(scope.token)
+    except ValueError:
+        pass
+    if session is not None:
+        session.close()
 
 Base = declarative_base()
 

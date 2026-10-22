@@ -19,14 +19,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse,
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
+import anyio
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 # === PROYECTO ===
 from web_comparativas.models import (
     SessionLocal, db_session, User, init_db,
+    begin_request_db_scope, end_request_db_scope,
 )
 # Servicios / Middleware
 from web_comparativas.middleware.tracking import TrackingMiddleware
@@ -556,40 +559,30 @@ def get_current_user(request: Request) -> Optional[User]:
     print(f"[AUTH] Session UID: {uid}", flush=True)
     if not uid: return None
 
-    # Try using request.state.db if available
-    db = getattr(request.state, "db", None)
+    # Dentro de un request, db_session ES request.state.db (ver begin_request_db_scope).
+    db = getattr(request.state, "db", None) or db_session
 
     try:
-        if db:
-            print(f"[AUTH] Using request.state.db to fetch User({uid})...", flush=True)
-            u = db.get(User, uid)
-            print(f"[AUTH] DB Fetch result: {u}", flush=True)
-            return u
-        else:
-            print(f"[AUTH] FALLBACK global db_session fetch...", flush=True)
-            return db_session.get(User, uid)
+        u = db.get(User, uid)
+        print(f"[AUTH] DB Fetch result: {u}", flush=True)
+        return u
+    except PoolTimeoutError as e:
+        # Pool agotado: reintentar solo suma otros pool_timeout segundos de espera.
+        # attach_user_to_state lo convierte en 503.
+        print(f"[AUTH] ERROR Fetching User: {e}", flush=True)
+        raise
     except Exception as e:
         print(f"[AUTH] ERROR Fetching User: {e}", flush=True)
-        # Retry with a fresh session — handles stale/dropped SSL connections in Render.
-        # The pool_pre_ping validates connections but psycopg2 can still get an SSL
-        # close on the very first use if the pool was idle. A single retry with a new
-        # session is enough to recover without user-visible impact.
-        retry_db = None
+        # Conexión SSL caída en Render (pool_pre_ping no cubre el primer uso tras idle):
+        # el rollback descarta la conexión inválida y el reintento sobre la MISMA sesión
+        # toma otra del pool, sin abrir una segunda sesión para el request.
         try:
-            retry_db = SessionLocal()
-            u = retry_db.get(User, uid)
+            db.rollback()
+            u = db.get(User, uid)
             print(f"[AUTH] RETRY OK: {u}", flush=True)
-            # Transfer the fresh session to request.state so the rest of the request uses it
-            if db:
-                try: db.close()
-                except Exception: pass
-            request.state.db = retry_db
             return u
         except Exception as e2:
             print(f"[AUTH] RETRY FAILED: {e2}", flush=True)
-            if retry_db:
-                try: retry_db.close()
-                except Exception: pass
             return None
 
 def user_display(u: Optional[User]) -> str:
@@ -604,16 +597,26 @@ def user_display(u: Optional[User]) -> str:
 
 templates.env.globals["user_display"] = user_display
 
+_AUTH_DB_LIMITER: Optional[anyio.CapacityLimiter] = None
+
+
 # 1. AUTH MIDDLEWARE (Defined FIRST, so it runs INNER)
 @app.middleware("http")
 async def attach_user_to_state(request: Request, call_next):
+    global _AUTH_DB_LIMITER
     if request.url.path == "/healthz":
         request.state.user = None
         return await call_next(request)
 
     print(f"[MW] Auth Start (Inner)", flush=True)
+    if _AUTH_DB_LIMITER is None:
+        _AUTH_DB_LIMITER = anyio.CapacityLimiter(10)
     try:
-        u = get_current_user(request)
+        # Fuera del event loop: con el pool lleno, la espera de get_current_user (hasta
+        # pool_timeout) congelaba el loop, y con él el commit/close que devuelve las
+        # conexiones al pool → deadlock total. Limiter propio para que estas esperas no
+        # ocupen los workers que necesitan los requests que YA tienen conexión.
+        u = await anyio.to_thread.run_sync(get_current_user, request, limiter=_AUTH_DB_LIMITER)
         print(f"[MW] User Loaded: {u.email if u else 'None'}", flush=True)
         request.state.user = u
         request.state.user_display = user_display(u) if u else ""
@@ -621,6 +624,15 @@ async def attach_user_to_state(request: Request, call_next):
         # Inject Market Context from Session
         request.state.market_context = request.session.get("market_context", "public")
 
+    except PoolTimeoutError:
+        # No tratarlo como "sin usuario": el front lo leería como sesión vencida.
+        request.state.user = None
+        if "/api/" in request.url.path or request.url.path.startswith("/api"):
+            return JSONResponse(
+                {"error": "Servidor saturado. Reintentá en unos segundos.", "status": 503},
+                status_code=503,
+            )
+        return PlainTextResponse("Servicio temporalmente saturado (DB)", status_code=503)
     except Exception as e:
          print(f"[MW] Auth Error: {e}", flush=True)
          request.state.user = None
@@ -640,8 +652,11 @@ async def db_session_lifecycle(request: Request, call_next):
     _reset_session()
 
     # --- Create DB session (may fail when DB is in recovery/maintenance) ---
+    db_scope = None
     try:
         request.state.db = SessionLocal()
+        # Una sola sesión por request: db_session (legacy/SIC/services) usa esta misma.
+        db_scope = begin_request_db_scope(request.state.db)
         print(f"[MW] Session Created", flush=True)
     except Exception as e:
         print(f"[MW] DB session creation failed: {e}", flush=True)
@@ -693,12 +708,13 @@ async def db_session_lifecycle(request: Request, call_next):
             )
         raise
     finally:
+        # commit/close quedan en el event loop a propósito: nunca esperan al pool y así
+        # la devolución de conexiones no depende de que haya workers libres.
+        if db_scope is not None:
+            end_request_db_scope(db_scope)
         if hasattr(request.state, "db") and request.state.db is not None:
             request.state.db.close()
-        # Clean up scoped session for THIS thread — prevents connection leaks when
-        # db_session is used directly (notifications, comments, dimensiones, etc.)
-        # The scoped_session is thread-local; without this, threads in the pool
-        # retain their session (and DB connection) until the next request on that thread.
+        # Limpia la sesión thread-local del event loop (código async fuera del scope).
         _reset_session()
         print(f"[MW] DB Closed", flush=True)
 
