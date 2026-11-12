@@ -409,6 +409,19 @@ def _fact_2026_closed_month_cap(today: "dt.date | None" = None) -> "dt.date":
     return d.replace(day=1)
 
 
+def _accuracy_closed_months(months, today: "dt.date | None" = None) -> list:
+    """Meses que entran en las tarjetas de Coincidencia: solo los CERRADOS por calendario.
+
+    Mismo tope que el gráfico y el KPI fact_2026 (_fact_2026_closed_month_cap): entra
+    todo mes con fecha < primer día del mes en curso. Antes se descartaba siempre el
+    último mes presente en forecast_fact_2026 ("meses[:-1]"), pero esa tabla solo se
+    carga con meses ya cerrados, así que la regla dejaba afuera un mes cerrado real
+    (ej.: con octubre cargado el 12/11, promediaba ene–sep).
+    """
+    cap = pd.Timestamp(_fact_2026_closed_month_cap(today))
+    return [m for m in months if pd.Timestamp(m) < cap]
+
+
 def _get_fact_2026_df_cached() -> "pd.DataFrame":
     """Return the parsed facturacion_real_2026 DataFrame, cached in memory for 1 h.
 
@@ -585,8 +598,9 @@ def _closed_month_forecast_accuracy(
     *,
     actual_col: str = "Total_Venta",
     year: int = 2026,
+    today: "dt.date | None" = None,
 ) -> float:
-    """Average monthly coincidence, excluding the most recent open month."""
+    """Average monthly coincidence over calendar-closed months (_accuracy_closed_months)."""
     if (
         actual_df is None or actual_df.empty
         or forecast_df is None or forecast_df.empty
@@ -601,7 +615,7 @@ def _closed_month_forecast_accuracy(
             month for month in actual_df["fecha"].dropna().unique()
             if pd.Timestamp(month).year == int(year)
         )
-        closed = months[:-1] if len(months) > 1 else months
+        closed = _accuracy_closed_months(months, today)
         scores = []
         for month in closed:
             actual = float(actual_df.loc[actual_df["fecha"] == month, actual_col].sum())
@@ -5220,8 +5234,8 @@ def _pg_get_chart_data_inner(
     # Sin filtro de series canónicas: en vista Todos se devuelve el total real completo.
     # El filtro por Perfil/Neg/Subneg/Producto se aplica solo cuando el usuario los activa.
     # La query NO capa el mes superior (trae desde 2026-01-01 en adelante) porque df_fact_raw
-    # alimenta también el cálculo de accuracy más abajo (que tiene su propia lógica de "mes
-    # abierto"). El recorte a meses CERRADOS (tope dinámico) se aplica al graficar y al KPI.
+    # alimenta también el cálculo de accuracy más abajo (que aplica el mismo tope vía
+    # _accuracy_closed_months). El recorte a meses CERRADOS se aplica al graficar y al KPI.
     _fact_parts = ["fecha >= '2026-01-01'"]
     if profiles:
         # Filter directly by tipocli (commercial profile enriched at load time from clientes.csv).
@@ -5253,7 +5267,7 @@ def _pg_get_chart_data_inner(
     fact_2026_sum = 0.0
     if not df_fact_raw.empty:
         # Solo meses CERRADOS (tope dinámico = primer día del mes en curso; _fact_2026_closed_month_cap).
-        # df_fact_raw queda completo (alimenta accuracy abajo, con su propia lógica de mes abierto);
+        # df_fact_raw queda completo (accuracy abajo aplica el mismo tope con _accuracy_closed_months);
         # acá se capa lo que se grafica (val_2026) y el KPI fact_2026.
         _fact_cap_ts = pd.Timestamp(_fact_2026_closed_month_cap())
         df_fact_closed = df_fact_raw[df_fact_raw["fecha"] < _fact_cap_ts]
@@ -5301,7 +5315,7 @@ def _pg_get_chart_data_inner(
         try:
             val_months = sorted(m for m in df_fact_raw["fecha"].dropna().unique()
                                 if pd.Timestamp(m).year == 2026)
-            closed = val_months[:-1] if len(val_months) > 1 else val_months
+            closed = _accuracy_closed_months(val_months)
             scores = []
             for m in closed:
                 actual = float(df_fact_raw[df_fact_raw["fecha"] == m]["Total_Venta"].sum())
@@ -7296,7 +7310,7 @@ def get_chart_data(
         df_v2026_all = df_f2.groupby("fecha").agg(Total_Venta=("imp_hist", "sum")).reset_index()
 
         # Solo meses CERRADOS (tope dinámico = primer día del mes en curso; _fact_2026_closed_month_cap).
-        # df_v2026_all queda completo para el cálculo de accuracy (usa su propia lógica de mes abierto [:-1]).
+        # df_v2026_all queda completo; accuracy aplica el mismo tope con _accuracy_closed_months.
         _fact_cap_ts = pd.Timestamp(_fact_2026_closed_month_cap())
         fact_2026_sum = float(df_f2.loc[df_f2["fecha"] < _fact_cap_ts, "imp_hist"].sum())
         meta_completeness = (fact_2026_sum / total_proyectado_2026_annual * 100) if total_proyectado_2026_annual > 0 else 0.0
@@ -7312,16 +7326,14 @@ def get_chart_data(
 
         val_2026_records = to_records_safe(df_v2026_chart.sort_values("fecha"), ["Total_Venta"])
 
-        # Accuracy: use ALL 2026 months as the universe (Jan+Feb+Mar).
-        # "closed" = all except the last (most recent open) month.
-        # Original: val_months_2026[:-1] → with Mar present, closed = [Jan, Feb] → accuracy = mean([Jan,Feb])
+        # Accuracy: meses 2026 CERRADOS por calendario (_accuracy_closed_months), igual que prod.
         if not df_fcst.empty:
             try:
                 val_months_2026 = sorted(
                     m for m in df_v2026_all["fecha"].dropna().unique()
                     if pd.Timestamp(m).year == 2026
                 )
-                closed = val_months_2026[:-1] if len(val_months_2026) > 1 else val_months_2026
+                closed = _accuracy_closed_months(val_months_2026)
                 model_scores, exp_scores = [], []
                 for m in closed:
                     actual = float(df_v2026_all[df_v2026_all["fecha"] == m]["Total_Venta"].sum())
