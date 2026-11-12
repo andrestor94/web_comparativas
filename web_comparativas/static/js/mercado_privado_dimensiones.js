@@ -921,9 +921,12 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.append(
                 modalTextCell(row.familia || 'Sin familia', 'dim-modal-family-name'),
                 modalTextCell(formatInteger(row.renglones), 'text-end'),
-                modalTextCell(formatDecimal(row.cantidad), 'text-end fw-bold')
+                modalTextCell(formatFamilyAmount(row), 'text-end fw-bold')
             );
             elements.familyModalBody.appendChild(tr);
+        });
+        document.querySelectorAll('[data-family-modal-sort="cantidad"] .dim-family-amount-label').forEach(label => {
+            label.textContent = familyAmountLabel();
         });
         updateModalSortArrows('[data-family-modal-sort]', state.familyModal.sortKey, state.familyModal.sortDirection);
         updatePagination(elements.familyModalCounter, elements.familyModalPage, elements.familyModalPrev, elements.familyModalNext, start, pageRows.length, sorted.length, state.familyModal.page, totalPages);
@@ -1758,7 +1761,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.kpiProvinces.textContent = formatInteger(kpis.provincias || 0);
         }
         if (elements.kpiValorizacion) {
-            elements.kpiValorizacion.textContent = formatAbbreviated(kpis.valorizacion || 0);
+            elements.kpiValorizacion.textContent = formatMoney(kpis.valorizacion || 0);
         }
         if (elements.kpiValorizacionCard) {
             elements.kpiValorizacionCard.style.display = state.activeMetric === 'valorizacion' ? '' : 'none';
@@ -1842,7 +1845,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     tooltip: {
                         callbacks: {
                             label: ctx => state.activeMetric === 'valorizacion'
-                                ? `${ctx.label}: ${formatAbbreviated(ctx.parsed)}`
+                                ? `${ctx.label}: ${formatMoney(ctx.parsed)}`
                                 : `${ctx.label}: ${formatInteger(ctx.parsed)} renglones`,
                         },
                     },
@@ -1880,13 +1883,28 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(left || '').localeCompare(String(right || ''), 'es', { sensitivity: 'base' });
     }
 
+    // La columna 'cantidad' de Top familias (card y modal) muestra unidades en Renglones
+    // y el monto valorizado en Valorización; el orden sigue a lo que se ve.
+    function familyAmountField() {
+        return state.activeMetric === 'valorizacion' ? 'valorizacion' : 'cantidad';
+    }
+    function familyAmountLabel() {
+        return state.activeMetric === 'valorizacion' ? 'Monto ($)' : 'Cantidad';
+    }
+    function formatFamilyAmount(item) {
+        return state.activeMetric === 'valorizacion'
+            ? formatMoneyFull(item.valorizacion || 0)
+            : formatDecimal(item.cantidad || 0);
+    }
+
     function sortFamilyRows(rows, key, direction) {
         const sortKey = ['familia', 'cantidad', 'renglones'].includes(key) ? key : 'renglones';
+        const field = sortKey === 'cantidad' ? familyAmountField() : sortKey;
         const factor = direction === 'asc' ? 1 : -1;
         return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => {
             const diff = sortKey === 'familia'
                 ? compareText(left.familia, right.familia)
-                : Number(left[sortKey] || 0) - Number(right[sortKey] || 0);
+                : Number(left[field] || 0) - Number(right[field] || 0);
             return (diff * factor) || compareText(left.familia, right.familia);
         });
     }
@@ -1897,7 +1915,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const active = item.dataset.familySort === state.familySortKey;
             item.classList.toggle('active', active);
             item.setAttribute('aria-pressed', String(active));
-            const label = item.dataset.familySort === 'cantidad' ? 'Cantidades' : 'Renglones';
+            const label = item.dataset.familySort === 'cantidad'
+                ? (state.activeMetric === 'valorizacion' ? 'Monto ($)' : 'Cantidades')
+                : 'Renglones';
             item.textContent = active ? `${label} ${sortArrow(item.dataset.familySort, state.familySortKey, state.familySortDirection)}` : label;
         });
     }
@@ -1938,7 +1958,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr>
                     <th class="dim-family-head dim-family-head-name ${state.familySortKey === 'familia' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="familia">Familia <span class="dim-sort-arrow">${sortArrow('familia', state.familySortKey, state.familySortDirection)}</span></button></th>
                     <th class="dim-family-head dim-family-head-count text-end ${state.familySortKey === 'renglones' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="renglones">Renglones <span class="dim-sort-arrow">${sortArrow('renglones', state.familySortKey, state.familySortDirection)}</span></button></th>
-                    <th class="dim-family-head dim-family-head-qty text-end ${state.familySortKey === 'cantidad' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="cantidad">Cantidad <span class="dim-sort-arrow">${sortArrow('cantidad', state.familySortKey, state.familySortDirection)}</span></button></th>
+                    <th class="dim-family-head dim-family-head-qty text-end ${state.familySortKey === 'cantidad' ? 'dim-family-sort-active' : ''}"><button type="button" class="dim-sort-button" data-family-card-sort="cantidad">${familyAmountLabel()} <span class="dim-sort-arrow">${sortArrow('cantidad', state.familySortKey, state.familySortDirection)}</span></button></th>
                 </tr>
             </thead>
         `;
@@ -1999,7 +2019,7 @@ document.addEventListener('DOMContentLoaded', () => {
         rows.slice(start, end).forEach(item => {
             const tr = document.createElement('tr');
             tr.className = 'dim-family-row';
-            const qtyDisplay = formatDecimal(item.cantidad || 0);
+            const qtyDisplay = formatFamilyAmount(item);
             tr.innerHTML = `
                 <td class="dim-family-name-cell" title="${item.familia || ''}">
                     <div class="dim-family-name-text">${item.familia || 'Sin familia'}</div>
@@ -2113,8 +2133,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderClientResultLegend(resultKeys);
 
         const dynamicH = Math.max(200, rankedRows.length * 36 + 46);
-        const axisTitle = useVal ? 'Valorización' : 'Renglones';
-        const tickFormatter = value => useVal ? formatAbbreviated(value) : formatCompactInteger(value);
+        const axisTitle = useVal ? 'Valorización ($)' : 'Renglones';
+        const tickFormatter = value => useVal ? formatMoney(value) : formatCompactInteger(value);
 
         if (state.barClientChart) {
             const container = state.barClientChart.canvas.closest('.chart-container');
@@ -2336,7 +2356,7 @@ document.addEventListener('DOMContentLoaded', () => {
             valArr.forEach(value => {
                 const td = document.createElement('td');
                 td.className = 'text-end text-muted dim-pivot-value-cell';
-                td.textContent = value > 0 ? (useVal ? formatAbbreviated(value) : formatDecimal(value)) : '-';
+                td.textContent = value > 0 ? (useVal ? formatMoney(value) : formatDecimal(value)) : '-';
                 tr.appendChild(td);
             });
 
@@ -2388,8 +2408,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const control = L.control({ position: 'bottomright' });
         control.onAdd = () => {
             const div = L.DomUtil.create('div', 'dim-map-legend');
-            const metricLabel = useVal ? 'Valorización' : 'Renglones';
-            const maxLabel = useVal ? `$ ${formatAbbreviated(maxPositive)}` : formatInteger(maxPositive);
+            const metricLabel = useVal ? 'Valorización ($)' : 'Renglones';
+            const maxLabel = useVal ? formatMoney(maxPositive) : formatInteger(maxPositive);
             // "Valor cero" es un balde estructuralmente vacío en Renglones (una provincia
             // solo entra al resultado si tiene >=1 fila, así que su conteo nunca es 0 —
             // garantía del GROUP BY, no del dataset) y solo legítimo en Valorización
@@ -2538,12 +2558,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 tooltip: {
                     callbacks: {
                         label: ctx => state.activeMetric === 'valorizacion'
-                            ? `${ctx.dataset.label}: ${formatAbbreviated(ctx.parsed.y)}`
+                            ? `${ctx.dataset.label}: ${formatMoney(ctx.parsed.y)}`
                             : `${ctx.dataset.label}: ${formatInteger(ctx.parsed.y)} renglones`,
                         footer: items => {
                             const total = items.reduce((sum, it) => sum + (it.parsed.y || 0), 0);
                             return state.activeMetric === 'valorizacion'
-                                ? `Total: ${formatAbbreviated(total)}`
+                                ? `Total: ${formatMoney(total)}`
                                 : `Total: ${formatInteger(total)} renglones`;
                         },
                     },
@@ -2589,7 +2609,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     stacked: true,
                     beginAtZero: true,
                     grid: { borderDash: [4, 4], color: '#e2e8f0' },
-                    ticks: { callback: v => state.activeMetric === 'valorizacion' ? formatAbbreviated(v) : formatCompactInteger(v) },
+                    ticks: { callback: v => state.activeMetric === 'valorizacion' ? formatMoney(v) : formatCompactInteger(v) },
                 },
             },
         };
@@ -2614,6 +2634,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Math.abs(n) >= 1e6) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e6)}M`;
         if (Math.abs(n) >= 1e3) return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n / 1e3)}K`;
         return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);
+    }
+    function formatMoney(value) {
+        return `$ ${formatAbbreviated(value)}`;
+    }
+    function formatMoneyFull(value) {
+        return `$ ${formatInteger(value)}`;
     }
     function formatMonthLabel(monthIso) {
         if (!monthIso) return '-';

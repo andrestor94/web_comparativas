@@ -482,7 +482,7 @@
                 <table class="dim-modal-table"><thead><tr>
                     <th><button type="button" class="dim-sort-button" data-family-modal-sort="familia">Familia <span class="dim-sort-arrow"></span></button></th>
                     <th class="text-end"><button type="button" class="dim-sort-button" data-family-modal-sort="renglones">Renglones <span class="dim-sort-arrow"></span></button></th>
-                    <th class="text-end"><button type="button" class="dim-sort-button" data-family-modal-sort="cantidad">Cantidad <span class="dim-sort-arrow"></span></button></th>
+                    <th class="text-end"><button type="button" class="dim-sort-button" data-family-modal-sort="cantidad"><span class="dim-family-amount-label">Cantidad</span> <span class="dim-sort-arrow"></span></button></th>
                 </tr></thead><tbody id="familyModalBody"></tbody></table>
             </div>
             <div class="dim-modal-footerbar"><span id="familyModalCounter">Mostrando 0–0 de 0</span><div class="dim-modal-pagination"><button id="familyModalPrev" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página anterior"><i class="bi bi-chevron-left"></i></button><span id="familyModalPage">Página 1 de 1</span><button id="familyModalNext" type="button" class="btn btn-outline-secondary btn-sm" aria-label="Página siguiente"><i class="bi bi-chevron-right"></i></button></div></div>
@@ -516,5 +516,5 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', path='js/mercado_privado_ver_como.js') }}?v=1"></script>
-<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v34"></script>
+<script src="{{ url_for('static', path='js/mercado_privado_dimensiones.js') }}?v=dimensiones-db-v35"></script>
 {% endblock %}
